@@ -1,0 +1,2 @@
+-- Initial schema placeholder.
+-- Domain tables will be added by later migrations as MVP requirements are finalized.
