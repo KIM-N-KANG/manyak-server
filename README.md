@@ -28,6 +28,15 @@ docker compose up -d
 
 `docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. IntelliJ 실행 설정에 입력한 환경변수는 IntelliJ로 실행할 때만 적용됩니다.
 
+터미널에서 서버를 실행할 때는 `.env` 값을 셸 환경변수로 먼저 로드합니다.
+
+```bash
+set -a
+source .env
+set +a
+./gradlew bootRun
+```
+
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
 ## 엔드포인트
