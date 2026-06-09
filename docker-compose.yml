@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     container_name: manyak-postgres
     environment:
-      POSTGRES_DB: manyak
-      POSTGRES_USER: manyak
-      POSTGRES_PASSWORD: manyak
+      POSTGRES_DB: ${MANYAK_DB_NAME:?MANYAK_DB_NAME is required}
+      POSTGRES_USER: ${MANYAK_DB_USERNAME:?MANYAK_DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${MANYAK_DB_PASSWORD:?MANYAK_DB_PASSWORD is required}
     ports:
-      - "5432:5432"
+      - "${MANYAK_DB_PORT:?MANYAK_DB_PORT is required}:5432"
     volumes:
       - manyak-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U manyak -d manyak"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
