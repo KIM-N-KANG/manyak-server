@@ -3,11 +3,11 @@ services:
     image: postgres:16-alpine
     container_name: manyak-postgres
     environment:
-      POSTGRES_DB: ${MANYAK_DB_NAME:?MANYAK_DB_NAME is required}
-      POSTGRES_USER: ${MANYAK_DB_USERNAME:?MANYAK_DB_USERNAME is required}
-      POSTGRES_PASSWORD: ${MANYAK_DB_PASSWORD:?MANYAK_DB_PASSWORD is required}
+      POSTGRES_DB: ${MANYAK_DB_NAME:?MANYAK_DB_NAME 값이 필요합니다}
+      POSTGRES_USER: ${MANYAK_DB_USERNAME:?MANYAK_DB_USERNAME 값이 필요합니다}
+      POSTGRES_PASSWORD: ${MANYAK_DB_PASSWORD:?MANYAK_DB_PASSWORD 값이 필요합니다}
     ports:
-      - "${MANYAK_DB_PORT:?MANYAK_DB_PORT is required}:5432"
+      - "${MANYAK_DB_PORT:?MANYAK_DB_PORT 값이 필요합니다}:5432"
     volumes:
       - manyak-postgres-data:/var/lib/postgresql/data
     healthcheck:
