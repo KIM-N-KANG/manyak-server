@@ -1,52 +1,57 @@
 # manyak-server
 
-Manyak backend server built with Kotlin, Spring Boot, Java 21, Gradle, JPA, Flyway, Security, and PostgreSQL.
+Manyak 백엔드 서버입니다. Kotlin, Spring Boot, Java 21, Gradle, JPA, Flyway, Security, PostgreSQL을 사용합니다.
 
-## Local Setup
+## 로컬 실행
 
-Start PostgreSQL:
+PostgreSQL을 실행합니다.
 
 ```bash
 docker compose up -d
 ```
 
-Run the server:
+서버를 실행합니다.
 
 ```bash
 ./gradlew bootRun
 ```
 
-Run tests:
+테스트를 실행합니다.
 
 ```bash
 ./gradlew test
 ```
 
-## Environment
+## 환경변수
 
-Local defaults are defined in `application-local.yml`. Override them with environment variables when needed:
+로컬 실행에도 DB 접속 환경변수가 필요합니다. `.env.example`에 필요한 변수 목록이 정리되어 있습니다.
+
+`docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. IntelliJ 실행 설정에 입력한 환경변수는 IntelliJ로 실행할 때만 적용됩니다.
+
+터미널에서 서버를 실행할 때는 `.env` 값을 셸 환경변수로 먼저 로드합니다.
 
 ```bash
-MANYAK_DB_URL=jdbc:postgresql://localhost:5432/manyak
-MANYAK_DB_USERNAME=manyak
-MANYAK_DB_PASSWORD=manyak
+set -a
+source .env
+set +a
+./gradlew bootRun
 ```
 
-Use `.env.example` as a template. Do not commit real secrets.
+실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
-## Endpoints
+## 엔드포인트
 
-- Actuator health: `GET /actuator/health`
-- Actuator liveness: `GET /actuator/health/liveness`
-- Actuator readiness: `GET /actuator/health/readiness`
+- Actuator 상태 확인: `GET /actuator/health`
+- Actuator 활성 상태: `GET /actuator/health/liveness`
+- Actuator 준비 상태: `GET /actuator/health/readiness`
 - OpenAPI JSON: `GET /v3/api-docs`
 - Swagger UI: `GET /swagger-ui.html`
 
-Business APIs should use the `/api/v1` prefix.
+비즈니스 API는 `/api/v1` prefix를 사용합니다.
 
-## Team Wiki
+## 팀 위키
 
-The team LLM wiki is cloned locally into `wiki/` and ignored by this repository.
+팀 LLM 위키는 로컬 `wiki/` 디렉터리에 복제해서 사용합니다. 이 디렉터리는 manyak-server 저장소에서 무시됩니다.
 
 ```bash
 git clone https://github.com/KIM-N-KANG/llm-wiki.git wiki
