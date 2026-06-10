@@ -9,8 +9,6 @@ import org.springframework.stereotype.Service
 class AuthService {
 
     fun loginWithGoogle(request: GoogleLoginRequest): LoginResponse {
-        check(request.idToken.isNotBlank())
-
         return LoginResponse(
             accessToken = "mock-access-token",
             refreshToken = "mock-refresh-token",
