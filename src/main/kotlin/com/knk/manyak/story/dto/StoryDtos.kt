@@ -61,7 +61,7 @@ data class GenerateSimpleStorylinesRequest(
         schema = Schema(description = "사전 정의 태그 ID", example = "101"),
         minItems = 1,
         maxItems = 20,
-        arraySchema = Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록"),
+        arraySchema = Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록", example = "[101, 205, 309]"),
     )
     val selectedTagIds: List<Long>,
 )
@@ -71,17 +71,34 @@ data class GenerateSimpleStorylinesResponse(
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
     val simpleCreationId: Long,
 
-    @field:Schema(description = "저장된 선택 태그")
+    @field:ArraySchema(
+        schema = Schema(implementation = SimpleStoryTagResponse::class),
+        arraySchema = Schema(
+            description = "저장된 선택 태그",
+            example = """[{"tagId":101,"name":"게임","category":"GENRE"},{"tagId":205,"name":"소심한","category":"PROTAGONIST"},{"tagId":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
+        ),
+    )
     val selectedTags: List<SimpleStoryTagResponse>,
 
     @field:Size(min = 3, max = 3)
-    @field:Schema(description = "AI가 생성한 예시 스토리라인 3개")
+    @field:ArraySchema(
+        schema = Schema(implementation = SimpleStorylineResponse::class),
+        minItems = 3,
+        maxItems = 3,
+        arraySchema = Schema(
+            description = "AI가 생성한 예시 스토리라인 3개",
+            example = """[{"id":1,"title":"달빛 아래의 계약","summary":"기억을 잃은 주인공이 금지된 숲에서 자신의 과거를 추적합니다."},{"id":2,"title":"왕국의 마지막 편지","summary":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가갑니다."},{"id":3,"title":"깨어난 별의 문","summary":"닫혀 있던 별의 문이 열리며 주인공은 세계를 바꿀 선택 앞에 섭니다."}]""",
+        ),
+    )
     val storylines: List<SimpleStorylineResponse>,
 
     @field:ArraySchema(
         schema = Schema(implementation = SimpleStoryHelpQuestionResponse::class),
         minItems = 1,
-        arraySchema = Schema(description = "일반 제작 필드 자동 생성을 돕는 추가 질문 목록"),
+        arraySchema = Schema(
+            description = "일반 제작 필드 자동 생성을 돕는 추가 질문 목록",
+            example = """[{"id":1,"question":"주인공이 반드시 이루고 싶은 목표는 무엇인가요?"},{"id":2,"question":"주인공을 방해하는 가장 큰 갈등은 무엇인가요?"},{"id":3,"question":"첫 장면은 어떤 분위기에서 시작되면 좋을까요?"}]""",
+        ),
     )
     val helpQuestions: List<SimpleStoryHelpQuestionResponse>,
 )
@@ -134,7 +151,10 @@ data class GenerateGeneralStoryDraftRequest(
             maxLength = 100,
         ),
         maxItems = 3,
-        arraySchema = Schema(description = "선택한 스토리라인을 보완하는 자유 추가 정보 목록"),
+        arraySchema = Schema(
+            description = "선택한 스토리라인을 보완하는 자유 추가 정보 목록",
+            example = """["주인공의 목표는 회귀 전 막지 못했던 세계의 멸망을 막는 것임","결말은 주인공의 희생으로 세계가 구원되는 여운 있는 해피엔딩","정체를 숨긴 인물은 적이자 조력자가 될 수 있음"]""",
+        ),
     )
     @field:Size(max = 3)
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
@@ -173,12 +193,16 @@ data class CreateGeneralStoryRequest(
         schema = Schema(implementation = StoryGenre::class),
         minItems = 1,
         maxItems = 5,
-        arraySchema = Schema(description = "장르 목록"),
+        arraySchema = Schema(description = "장르 목록", example = """["FANTASY","MYSTERY","THRILLER"]"""),
     )
     val genres: List<StoryGenre>,
 
     @field:Size(max = 6)
-    @field:Schema(description = "해시태그", example = "[\"마법\", \"계약\", \"기억상실\"]")
+    @field:ArraySchema(
+        schema = Schema(description = "해시태그", example = "마법"),
+        maxItems = 6,
+        arraySchema = Schema(description = "해시태그", example = """["마법","계약","기억상실"]"""),
+    )
     val hashtags: List<String> = emptyList(),
 
     @field:NotBlank
@@ -212,7 +236,11 @@ data class CreateGeneralStoryRequest(
     val conversationPrologue: String,
 
     @field:Size(max = 3)
-    @field:Schema(description = "추천 입력", example = "[\"편지를 열어본다\", \"창밖의 인기척을 확인한다\"]")
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "편지를 열어본다", maxLength = 200),
+        maxItems = 3,
+        arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
+    )
     val recommendedInputs: List<@Size(max = 200) String> = emptyList(),
 
     @field:Size(max = 1000)
@@ -260,7 +288,7 @@ data class StorySummaryResponse(
 
     @field:ArraySchema(
         schema = Schema(implementation = StoryGenre::class),
-        arraySchema = Schema(description = "장르 목록"),
+        arraySchema = Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]"""),
     )
     val genres: List<StoryGenre>,
 
@@ -299,11 +327,14 @@ data class StoryDetailResponse(
 
     @field:ArraySchema(
         schema = Schema(implementation = StoryGenre::class),
-        arraySchema = Schema(description = "장르 목록"),
+        arraySchema = Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]"""),
     )
     val genres: List<StoryGenre>,
 
-    @field:Schema(description = "해시태그", example = "[\"마법\", \"계약\", \"기억상실\"]")
+    @field:ArraySchema(
+        schema = Schema(description = "해시태그", example = "마법"),
+        arraySchema = Schema(description = "해시태그", example = """["마법","계약","기억상실"]"""),
+    )
     val hashtags: List<String>,
 
     @field:Schema(description = "작성자 정보")
@@ -321,7 +352,10 @@ data class StoryDetailResponse(
     @field:Schema(description = "대화 프롤로그", example = "비가 내리는 밤, 당신은 여관 2층 방에서 봉인된 편지를 발견합니다.")
     val conversationPrologue: String,
 
-    @field:Schema(description = "추천 입력", example = "[\"편지를 열어본다\", \"창밖의 인기척을 확인한다\"]")
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
+        arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
+    )
     val recommendedInputs: List<String>,
 
     @field:Schema(description = "스토리 공개 여부", example = "PUBLIC")
