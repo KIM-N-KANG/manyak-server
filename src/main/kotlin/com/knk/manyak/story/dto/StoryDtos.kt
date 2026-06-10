@@ -64,25 +64,6 @@ data class GenerateSimpleStorylinesRequest(
         arraySchema = Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록"),
     )
     val selectedTagIds: List<Long>,
-
-    @field:Size(max = 20)
-    @field:ArraySchema(
-        schema = Schema(implementation = CustomSimpleStoryTagRequest::class),
-        maxItems = 20,
-        arraySchema = Schema(description = "사용자가 직접 추가한 태그 목록"),
-    )
-    val customTags: List<CustomSimpleStoryTagRequest> = emptyList(),
-)
-
-@Schema(description = "간편 제작 직접 추가 태그")
-data class CustomSimpleStoryTagRequest(
-    @field:NotBlank
-    @field:Size(max = 50)
-    @field:Schema(description = "직접 추가 태그 이름", example = "보호본능을 자극하는")
-    val name: String,
-
-    @field:Schema(description = "태그 분류", example = "PROTAGONIST")
-    val category: SimpleStoryTagCategory,
 )
 
 @Schema(description = "간편 제작 스토리라인 생성 응답")

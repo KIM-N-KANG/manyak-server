@@ -26,24 +26,17 @@ import java.time.Instant
 class StoryService {
 
     fun generateSimpleStorylines(request: GenerateSimpleStorylinesRequest): GenerateSimpleStorylinesResponse {
-        val predefinedTags = request.selectedTagIds.map { tagId ->
+        val selectedTags = request.selectedTagIds.map { tagId ->
             SimpleStoryTagResponse(
                 tagId = tagId,
                 name = "선택 태그 $tagId",
                 category = SimpleStoryTagCategory.OTHER,
             )
         }
-        val customTags = request.customTags.mapIndexed { index, tag ->
-            SimpleStoryTagResponse(
-                tagId = 10_000L + index,
-                name = tag.name,
-                category = tag.category,
-            )
-        }
 
         return GenerateSimpleStorylinesResponse(
             simpleCreationId = 1L,
-            selectedTags = predefinedTags + customTags,
+            selectedTags = selectedTags,
             storylines = listOf(
                 SimpleStorylineResponse(
                     id = 1L,
