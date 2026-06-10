@@ -4,6 +4,8 @@ import com.knk.manyak.auth.dto.GoogleLoginRequest
 import com.knk.manyak.auth.dto.LoginResponse
 import com.knk.manyak.auth.service.AuthService
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -23,6 +25,13 @@ class AuthController(
     @Operation(
         summary = "Google 로그인",
         description = "Google OAuth 인증 결과로 받은 ID 토큰을 검증하고 서비스 토큰을 발급합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", description = "로그인 성공"),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음"),
+            ApiResponse(responseCode = "401", description = "Google ID 토큰이 유효하지 않음"),
+        ],
     )
     @ResponseStatus(HttpStatus.OK)
     @PostMapping("/google")

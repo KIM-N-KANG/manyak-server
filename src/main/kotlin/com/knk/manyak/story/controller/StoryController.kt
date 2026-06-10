@@ -15,6 +15,8 @@ import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
@@ -41,6 +43,13 @@ class StoryController(
         summary = "간편 제작 스토리라인 생성",
         description = "사용자가 선택한 태그를 저장하고 AI 서버에 전달해 예시 스토리라인 3개와 도움 질문을 생성합니다.",
     )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "201", description = "스토리라인 생성 성공"),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음"),
+            ApiResponse(responseCode = "401", description = "인증 토큰이 없거나 유효하지 않음"),
+        ],
+    )
     @SecurityRequirement(name = "bearerAuth")
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/stories/simple/storylines")
@@ -51,6 +60,14 @@ class StoryController(
     @Operation(
         summary = "간편 제작 일반 모드 초안 생성",
         description = "선택한 스토리라인과 추가 정보를 바탕으로 일반 모드 입력 필드 초안을 생성합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "201", description = "일반 모드 초안 생성 성공"),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음"),
+            ApiResponse(responseCode = "401", description = "인증 토큰이 없거나 유효하지 않음"),
+            ApiResponse(responseCode = "404", description = "간편 제작 진행 정보 또는 스토리라인을 찾을 수 없음"),
+        ],
     )
     @SecurityRequirement(name = "bearerAuth")
     @ResponseStatus(HttpStatus.CREATED)
@@ -63,6 +80,13 @@ class StoryController(
         summary = "일반 모드 이야기 생성",
         description = "커버 이미지, 제목, 소개, 장르, 프롬프트, 스토리/인물 정보, 시작 상황, 등록 정보를 입력해 이야기를 임시 저장하거나 등록합니다.",
     )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "201", description = "이야기 생성 성공"),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음"),
+            ApiResponse(responseCode = "401", description = "인증 토큰이 없거나 유효하지 않음"),
+        ],
+    )
     @SecurityRequirement(name = "bearerAuth")
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/stories/general")
@@ -73,6 +97,12 @@ class StoryController(
     @Operation(
         summary = "이야기 목록 조회",
         description = "공개된 이야기 목록을 장르와 정렬 조건으로 조회합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", description = "조회 성공"),
+            ApiResponse(responseCode = "400", description = "쿼리 파라미터가 올바르지 않음"),
+        ],
     )
     @GetMapping("/stories")
     fun getStories(
@@ -101,6 +131,12 @@ class StoryController(
         summary = "이야기 상세 조회",
         description = "목록에서 선택한 이야기의 상세 정보와 플레이 시작에 필요한 정보를 조회합니다.",
     )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", description = "조회 성공"),
+            ApiResponse(responseCode = "404", description = "이야기를 찾을 수 없음"),
+        ],
+    )
     @GetMapping("/stories/{storyId}")
     fun getStoryDetail(
         @Parameter(description = "스토리 ID")
@@ -110,6 +146,13 @@ class StoryController(
     @Operation(
         summary = "내가 만든 이야기 목록 조회",
         description = "현재 로그인한 사용자가 만든 이야기 목록을 조회합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", description = "조회 성공"),
+            ApiResponse(responseCode = "400", description = "쿼리 파라미터가 올바르지 않음"),
+            ApiResponse(responseCode = "401", description = "인증 토큰이 없거나 유효하지 않음"),
+        ],
     )
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/me/stories")
