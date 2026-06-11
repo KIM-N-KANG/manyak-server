@@ -7,13 +7,19 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicReference
 
 @Service
-class ChatService {
+class ChatService(
+    @Qualifier("chatSseExecutor")
+    private val chatSseExecutor: Executor,
+) {
 
     fun createChat(request: CreateChatRequest): CreateChatResponse =
         CreateChatResponse(
@@ -66,17 +72,32 @@ class ChatService {
         chatId: Long,
         request: ContinueChatRequest,
     ): SseEmitter {
-        val emitter = SseEmitter(0L)
+        val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
+        val futureRef = AtomicReference<CompletableFuture<Void>>()
         val output = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. ${request.userInput.take(24)} 그 장면은 모두의 기억에 깊게 새겨졌다."
 
-        CompletableFuture.runAsync {
+        emitter.onTimeout {
+            futureRef.get()?.cancel(true)
+            emitter.complete()
+        }
+        emitter.onCompletion {
+            futureRef.get()?.cancel(true)
+        }
+        emitter.onError {
+            futureRef.get()?.cancel(true)
+        }
+
+        val future = CompletableFuture.runAsync({
             try {
                 emitter.send(
                     SseEmitter.event()
                         .name("started")
                         .data(mapOf("chatId" to chatId)),
                 )
-                output.forEach { char ->
+                for (char in output) {
+                    if (Thread.currentThread().isInterrupted) {
+                        return@runAsync
+                    }
                     emitter.send(
                         SseEmitter.event()
                             .name("token")
@@ -97,8 +118,13 @@ class ChatService {
                 )
                 emitter.completeWithError(exception)
             }
-        }
+        }, chatSseExecutor)
+        futureRef.set(future)
 
         return emitter
+    }
+
+    private companion object {
+        const val SSE_TIMEOUT_MILLIS = 60_000L
     }
 }
