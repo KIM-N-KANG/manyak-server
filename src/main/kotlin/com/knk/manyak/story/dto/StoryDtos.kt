@@ -2,6 +2,7 @@ package com.knk.manyak.story.dto
 
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
 import java.time.Instant
@@ -131,9 +132,11 @@ data class SimpleStoryHelpQuestionResponse(
 
 @Schema(description = "간편 제작 이야기 생성 요청")
 data class CreateSimpleStoryRequest(
+    @field:Min(1)
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
     val simpleCreationId: Long,
 
+    @field:Min(1)
     @field:Schema(description = "사용자가 선택한 스토리라인 ID", example = "2")
     val storylineId: Long,
 
@@ -177,7 +180,7 @@ data class BatchStoryRequest(
             example = "[1, 2, 3]",
         ),
     )
-    val storyIds: List<Long>,
+    val storyIds: List<@Min(1) Long>,
 )
 
 @Schema(description = "스토리 목록 항목")
