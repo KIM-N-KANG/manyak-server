@@ -28,6 +28,7 @@ class SecurityConfig {
                         "/swagger-ui/**",
                         "/swagger-ui.html",
                         "/api/v1/auth/**",
+                        "/api/v1/chats/**",
                     ).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId:\\d+}")).permitAll()
