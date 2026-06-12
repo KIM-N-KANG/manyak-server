@@ -37,6 +37,14 @@ jobs:
       - name: Run tests
         run: ./gradlew test --no-daemon
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Set image tags
         id: image-tags
         run: |
@@ -60,5 +68,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           tags: ${{ steps.image-tags.outputs.tags }}
