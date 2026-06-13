@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 
 enum class StoryCreationTagSource {
@@ -17,7 +18,15 @@ enum class StoryCreationTagSource {
 }
 
 @Entity
-@Table(name = "story_creation_tags")
+@Table(
+    name = "story_creation_tags",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uq_story_creation_tags_source_type_name",
+            columnNames = ["tag_source", "tag_type", "name"],
+        ),
+    ],
+)
 class StoryCreationTag(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

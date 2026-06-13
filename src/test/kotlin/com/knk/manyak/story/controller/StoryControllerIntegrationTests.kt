@@ -14,12 +14,14 @@ import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -185,6 +187,27 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.selectedTags[0].name").isEqualTo("마법 학교")
 
         check(tagRepository.count() == 1L)
+    }
+
+    @Test
+    fun `같은 출처와 분류와 이름의 태그는 중복 저장할 수 없다`() {
+        tagRepository.saveAndFlush(
+            StoryCreationTag(
+                tagType = SimpleStoryTagCategory.GENRE,
+                name = "마법 학교",
+                tagSource = StoryCreationTagSource.CUSTOM,
+            ),
+        )
+
+        assertThrows<DataIntegrityViolationException> {
+            tagRepository.saveAndFlush(
+                StoryCreationTag(
+                    tagType = SimpleStoryTagCategory.GENRE,
+                    name = "마법 학교",
+                    tagSource = StoryCreationTagSource.CUSTOM,
+                ),
+            )
+        }
     }
 
     @Test
