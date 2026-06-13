@@ -90,28 +90,32 @@ class SimpleStoryCreationService(
                 },
             )
 
-            val storylines = aiResponse.stories.mapIndexed { index, story ->
-                val example = storyCreationExampleRepository.save(
+            val examples = storyCreationExampleRepository.saveAll(
+                aiResponse.stories.mapIndexed { index, story ->
                     StoryCreationExample(
                         creationSession = creationSession,
                         exampleText = story.story,
                         exampleOrder = (index + 1).toShort(),
-                    ),
-                )
-                val questions = storyCreationExampleQuestionRepository.saveAll(
+                    )
+                },
+            )
+            val questions = storyCreationExampleQuestionRepository.saveAll(
+                examples.zip(aiResponse.stories).flatMap { (example, story) ->
                     story.questions.mapIndexed { questionIndex, question ->
                         StoryCreationExampleQuestion(
                             example = example,
                             question = question,
                             questionOrder = (questionIndex + 1).toShort(),
                         )
-                    },
-                )
+                    }
+                }
+            ).groupBy { question -> question.example.id }
 
+            val storylines = examples.map { example ->
                 SimpleStorylineResponse(
                     id = example.id,
                     story = example.exampleText,
-                    helpQuestions = questions.map { question ->
+                    helpQuestions = questions.getValue(example.id).map { question ->
                         SimpleStoryHelpQuestionResponse(
                             id = question.id,
                             question = question.question,
