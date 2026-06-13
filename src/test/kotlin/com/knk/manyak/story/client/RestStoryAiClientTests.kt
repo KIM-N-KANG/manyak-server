@@ -2,10 +2,14 @@ package com.knk.manyak.story.client
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import org.springframework.web.client.RestClientException
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.time.Duration
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class RestStoryAiClientTests {
@@ -59,6 +63,35 @@ class RestStoryAiClientTests {
         assertTrue(requireNotNull(capturedBody).contains(""""protagonist_tags":["기억상실"]"""))
         assertTrue(requireNotNull(capturedBody).contains(""""supporting_tags":["비밀스러운 조력자"]"""))
         assertEquals("생성 스토리", response.stories.single().story)
+    }
+
+    @Test
+    fun `AI 서버 응답이 지연되면 read timeout으로 실패한다`() {
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/storylines") { exchange ->
+                exchange.requestBody.close()
+                Thread.sleep(500)
+                exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, -1)
+            }
+            start()
+        }
+
+        val port = requireNotNull(server).address.port
+        val client = RestStoryAiClient(
+            aiBaseUrl = "http://localhost:$port",
+            connectTimeout = Duration.ofMillis(100),
+            readTimeout = Duration.ofMillis(100),
+        )
+
+        assertFailsWith<RestClientException> {
+            client.createStorylines(
+                AiStorylinesRequest(
+                    genre_tags = listOf("판타지"),
+                    protagonist_tags = emptyList(),
+                    supporting_tags = emptyList(),
+                ),
+            )
+        }
     }
 
     private fun HttpExchange.respondJson(body: String) {

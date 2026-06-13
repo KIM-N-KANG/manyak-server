@@ -6,6 +6,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import java.net.URI
+import java.time.Duration
 
 interface StoryAiClient {
     fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse
@@ -32,12 +33,19 @@ data class AiStoryItem(
 @Component
 class RestStoryAiClient(
     @Value("\${manyak.ai.base-url}") aiBaseUrl: String,
+    connectTimeout: Duration = Duration.ofSeconds(5),
+    readTimeout: Duration = Duration.ofSeconds(15),
 ) : StoryAiClient {
     private val validatedAiBaseUrl = validateAiBaseUrl(aiBaseUrl)
     private val restClient = RestClient
         .builder()
         .baseUrl(validatedAiBaseUrl.toString())
-        .requestFactory(SimpleClientHttpRequestFactory())
+        .requestFactory(
+            SimpleClientHttpRequestFactory().apply {
+                setConnectTimeout(connectTimeout)
+                setReadTimeout(readTimeout)
+            },
+        )
         .build()
 
     override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
