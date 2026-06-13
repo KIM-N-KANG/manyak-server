@@ -23,6 +23,7 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -115,6 +116,7 @@ class StoryControllerIntegrationTests {
 
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
+        check(storyAiClient.transactionActiveDuringCall == false)
         check(aiRequest.genre_tags == listOf("판타지"))
         check(aiRequest.protagonist_tags == listOf("기억상실"))
         check(aiRequest.supporting_tags.isEmpty())
@@ -225,9 +227,12 @@ class StoryControllerIntegrationTests {
         var lastRequest: AiStorylinesRequest? = null
             private set
         var fail: Boolean = false
+        var transactionActiveDuringCall: Boolean? = null
+            private set
 
         override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse {
             lastRequest = request
+            transactionActiveDuringCall = TransactionSynchronizationManager.isActualTransactionActive()
             if (fail) {
                 throw IllegalStateException("AI failure")
             }
@@ -246,6 +251,7 @@ class StoryControllerIntegrationTests {
         fun reset() {
             lastRequest = null
             fail = false
+            transactionActiveDuringCall = null
         }
     }
 }
