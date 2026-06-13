@@ -54,11 +54,13 @@ set +a
 팀 LLM 위키와 공통 하네스는 manyak-server와 같은 상위 디렉터리에 둡니다.
 
 ```bash
-cd ..
-git clone https://github.com/KIM-N-KANG/llm-wiki.git
-git clone https://github.com/KIM-N-KANG/knk-harness.git
-git -C llm-wiki pull
-git -C knk-harness pull
+(
+  cd ..
+  git clone https://github.com/KIM-N-KANG/llm-wiki.git
+  git clone https://github.com/KIM-N-KANG/knk-harness.git
+  git -C llm-wiki pull
+  git -C knk-harness pull
+)
 ```
 
 - 팀 위키: `../llm-wiki`
