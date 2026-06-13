@@ -17,3 +17,7 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+manyak:
+  ai:
+    base-url: ${MANYAK_AI_BASE_URL}
