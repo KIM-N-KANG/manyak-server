@@ -22,6 +22,7 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
         val status = HttpStatus.valueOf(exception.statusCode.value())
+        logResponseStatusException(exception, request, status)
         return ResponseEntity
             .status(status)
             .body(
@@ -32,6 +33,20 @@ class GlobalExceptionHandler {
                     path = request.requestURI,
                 ),
             )
+    }
+
+    private fun logResponseStatusException(
+        exception: ResponseStatusException,
+        request: HttpServletRequest,
+        status: HttpStatus,
+    ) {
+        val message = "ResponseStatusException occurred: status={}, path={}, reason={}"
+        val reason = exception.reason ?: status.reasonPhrase
+        when {
+            status.is5xxServerError -> log.error(message, status.value(), request.requestURI, reason, exception)
+            exception.cause != null -> log.warn(message, status.value(), request.requestURI, reason, exception)
+            else -> log.debug(message, status.value(), request.requestURI, reason)
+        }
     }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
