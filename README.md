@@ -51,9 +51,18 @@ set +a
 
 ## 팀 위키
 
-팀 LLM 위키는 로컬 `wiki/` 디렉터리에 복제해서 사용합니다. 이 디렉터리는 manyak-server 저장소에서 무시됩니다.
+팀 LLM 위키와 공통 하네스는 manyak-server와 같은 상위 디렉터리에 둡니다.
 
 ```bash
-git clone https://github.com/KIM-N-KANG/llm-wiki.git wiki
-git -C wiki pull
+(
+  cd ..
+  git clone https://github.com/KIM-N-KANG/llm-wiki.git
+  git clone https://github.com/KIM-N-KANG/knk-harness.git
+  git -C llm-wiki pull
+  git -C knk-harness pull
+)
 ```
+
+- 팀 위키: `../llm-wiki`
+- 팀 LLM 하네스: `../knk-harness`
+- 서버 레포 LLM 지침: `AGENTS.md`

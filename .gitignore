@@ -1,7 +1,6 @@
 HELP.md
 .gradle
 build/
-wiki/
 .env
 .env.*
 !.env.example
