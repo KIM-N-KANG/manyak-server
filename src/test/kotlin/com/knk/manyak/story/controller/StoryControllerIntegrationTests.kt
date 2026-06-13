@@ -154,6 +154,40 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `이미 저장된 직접 추가 태그는 재사용한다`() {
+        tagRepository.save(
+            StoryCreationTag(
+                tagType = SimpleStoryTagCategory.GENRE,
+                name = "마법 학교",
+                tagSource = StoryCreationTagSource.CUSTOM,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "customTags": [
+                    {
+                      "name": "마법 학교",
+                      "category": "GENRE"
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags[0].name").isEqualTo("마법 학교")
+
+        check(tagRepository.count() == 1L)
+    }
+
+    @Test
     fun `태그가 없으면 스토리라인 생성 요청을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")

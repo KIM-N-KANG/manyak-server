@@ -61,7 +61,7 @@ class SimpleStoryCreationService(
                 tagType = tag.category,
                 name = tag.name.trim(),
             )
-        }
+        }.distinctBy { it.key }
         val aiRequestTags = predefinedTags.map { tag ->
             StoryCreationTagDraft(
                 tagType = tag.tagType,
@@ -76,17 +76,7 @@ class SimpleStoryCreationService(
         }
 
         return transactionTemplate.execute {
-            val customTags = storyCreationTagRepository.saveAll(
-                customTagDrafts.map { tag ->
-                    StoryCreationTag(
-                        tagType = tag.tagType,
-                        name = tag.name,
-                        tagSource = StoryCreationTagSource.CUSTOM,
-                        sortOrder = 0,
-                        isActive = true,
-                    )
-                },
-            )
+            val customTags = findOrCreateCustomTags(customTagDrafts)
             val tags = predefinedTags + customTags
             val creationSession = storyCreationSessionRepository.save(
                 StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
@@ -178,5 +168,41 @@ class SimpleStoryCreationService(
     private data class StoryCreationTagDraft(
         val tagType: SimpleStoryTagCategory,
         val name: String,
-    )
+    ) {
+        val key: Pair<SimpleStoryTagCategory, String>
+            get() = tagType to name
+    }
+
+    private fun findOrCreateCustomTags(customTagDrafts: List<StoryCreationTagDraft>): List<StoryCreationTag> {
+        if (customTagDrafts.isEmpty()) {
+            return emptyList()
+        }
+
+        val existingTags = customTagDrafts
+            .groupBy { it.tagType }
+            .flatMap { (tagType, drafts) ->
+                storyCreationTagRepository.findByTagSourceAndTagTypeAndNameIn(
+                    tagSource = StoryCreationTagSource.CUSTOM,
+                    tagType = tagType,
+                    names = drafts.map { it.name },
+                )
+            }
+        val tagsByKey = existingTags.associateBy { it.tagType to it.name }.toMutableMap()
+        val newTags = customTagDrafts
+            .filterNot { tagsByKey.containsKey(it.key) }
+            .map { tag ->
+                StoryCreationTag(
+                    tagType = tag.tagType,
+                    name = tag.name,
+                    tagSource = StoryCreationTagSource.CUSTOM,
+                    sortOrder = 0,
+                    isActive = true,
+                )
+            }
+
+        storyCreationTagRepository.saveAll(newTags)
+            .forEach { tag -> tagsByKey[tag.tagType to tag.name] = tag }
+
+        return customTagDrafts.map { tag -> tagsByKey.getValue(tag.key) }
+    }
 }
