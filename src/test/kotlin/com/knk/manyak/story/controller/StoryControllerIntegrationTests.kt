@@ -236,6 +236,17 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.path").isEqualTo("/api/v1/stories/simple/storylines")
     }
 
+    @Test
+    fun `스토리라인 생성 API는 Bad Gateway 응답을 문서화한다`() {
+        restTestClient.get()
+            .uri("/v3/api-docs")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.paths['/api/v1/stories/simple/storylines'].post.responses['502'].description")
+            .isEqualTo("AI 서버 요청 실패")
+    }
+
     private fun seedTag(
         category: SimpleStoryTagCategory,
         name: String,

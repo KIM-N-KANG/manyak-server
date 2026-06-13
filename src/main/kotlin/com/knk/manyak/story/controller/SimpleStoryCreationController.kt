@@ -1,5 +1,6 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
@@ -71,6 +72,11 @@ class SimpleStoryCreationController(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
                 content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "502",
+                description = "AI 서버 요청 실패",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
