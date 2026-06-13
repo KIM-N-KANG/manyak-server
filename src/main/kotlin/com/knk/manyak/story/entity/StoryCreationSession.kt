@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
+import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
 
@@ -36,5 +37,10 @@ class StoryCreationSession(
     val createdAt: Instant = Instant.now(),
 
     @Column(name = "updated_at", nullable = false)
-    val updatedAt: Instant = Instant.now(),
-)
+    var updatedAt: Instant = Instant.now(),
+) {
+    @PreUpdate
+    fun updateTimestamp() {
+        updatedAt = Instant.now()
+    }
+}

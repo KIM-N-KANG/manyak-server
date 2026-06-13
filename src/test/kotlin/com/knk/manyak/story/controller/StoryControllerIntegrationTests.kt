@@ -5,6 +5,8 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
+import com.knk.manyak.story.entity.StoryCreationSession
+import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationExampleQuestionRepository
@@ -208,6 +210,20 @@ class StoryControllerIntegrationTests {
                 ),
             )
         }
+    }
+
+    @Test
+    fun `간편 제작 진행 정보가 수정되면 updatedAt이 갱신된다`() {
+        val session = sessionRepository.saveAndFlush(
+            StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val beforeUpdatedAt = session.updatedAt
+
+        Thread.sleep(5)
+        session.status = StoryCreationSessionStatus.STORY_CREATED
+        val updatedSession = sessionRepository.saveAndFlush(session)
+
+        check(updatedSession.updatedAt.isAfter(beforeUpdatedAt))
     }
 
     @Test
