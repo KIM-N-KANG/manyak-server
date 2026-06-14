@@ -26,16 +26,18 @@ docker compose up -d
 
 로컬 실행에도 DB 접속 환경변수가 필요합니다. `.env.example`에 필요한 변수 목록이 정리되어 있습니다.
 
-`docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. IntelliJ 실행 설정에 입력한 환경변수는 IntelliJ로 실행할 때만 적용됩니다.
+`docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. Spring Boot를 IntelliJ에서 실행할 때는 Run Configuration의 Environment variables에 값을 직접 넣습니다.
 
-터미널에서 서버를 실행할 때는 `.env` 값을 셸 환경변수로 먼저 로드합니다.
+필요한 환경변수는 다음과 같습니다.
 
 ```bash
-set -a
-source .env
-set +a
-./gradlew bootRun
+MANYAK_DB_URL=jdbc:postgresql://localhost:<MANYAK_DB_PORT>/<MANYAK_DB_NAME>
+MANYAK_DB_USERNAME=<DB 사용자>
+MANYAK_DB_PASSWORD=<DB 비밀번호>
+MANYAK_AI_BASE_URL=http://localhost:8000
 ```
+
+`MANYAK_AI_BASE_URL`에는 반드시 `http://` 또는 `https://` scheme까지 포함합니다.
 
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
