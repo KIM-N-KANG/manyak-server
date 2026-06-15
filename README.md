@@ -35,9 +35,11 @@ MANYAK_DB_URL=jdbc:postgresql://localhost:<MANYAK_DB_PORT>/<MANYAK_DB_NAME>
 MANYAK_DB_USERNAME=<DB 사용자>
 MANYAK_DB_PASSWORD=<DB 비밀번호>
 MANYAK_AI_BASE_URL=http://localhost:8000
+MANYAK_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.0.12:3000
 ```
 
 `MANYAK_AI_BASE_URL`에는 반드시 `http://` 또는 `https://` scheme까지 포함합니다.
+`MANYAK_CORS_ALLOWED_ORIGINS`는 쉼표로 구분하며, 각 origin에는 scheme과 port를 포함합니다.
 
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
