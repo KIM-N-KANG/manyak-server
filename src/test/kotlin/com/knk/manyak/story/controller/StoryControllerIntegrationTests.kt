@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -90,6 +91,22 @@ class StoryControllerIntegrationTests {
             .jsonPath("$[1].category").isEqualTo("PROTAGONIST")
             .jsonPath("$[2].name").isEqualTo("비밀스러운 조력자")
             .jsonPath("$[2].category").isEqualTo("SUPPORTING_CHARACTER")
+    }
+
+    @Test
+    fun `로컬 프론트 개발 서버의 CORS preflight를 허용한다`() {
+        listOf(
+            "http://localhost:3000",
+            "http://192.168.0.12:3000",
+        ).forEach { origin ->
+            restTestClient.options()
+                .uri("/api/v1/stories/simple/tags")
+                .header(HttpHeaders.ORIGIN, origin)
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .exchange()
+                .expectStatus().isOk
+                .expectHeader().valueEquals(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, origin)
+        }
     }
 
     @Test

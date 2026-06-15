@@ -1,13 +1,17 @@
 package com.knk.manyak.global.config
 
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
-import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
+import org.springframework.web.cors.CorsConfiguration
+import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
 @Configuration
 @EnableWebSecurity
@@ -16,6 +20,7 @@ class SecurityConfig {
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain =
         http
+            .cors { }
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
@@ -41,4 +46,20 @@ class SecurityConfig {
                     .anyRequest().authenticated()
             }
             .build()
+
+    @Bean
+    fun corsConfigurationSource(
+        @Value("\${manyak.cors.allowed-origins}")
+        allowedOrigins: String,
+    ): CorsConfigurationSource {
+        val configuration = CorsConfiguration().apply {
+            this.allowedOrigins = allowedOrigins.split(",").map { it.trim() }
+            allowedMethods = listOf("GET", "POST", "OPTIONS")
+            allowedHeaders = listOf("*")
+        }
+
+        return UrlBasedCorsConfigurationSource().apply {
+            registerCorsConfiguration("/**", configuration)
+        }
+    }
 }
