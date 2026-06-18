@@ -89,7 +89,8 @@ class SimpleStoryCreationController(
 
     @Operation(
         summary = "간편 제작 이야기 생성",
-        description = "선택한 스토리라인과 추가 정보를 바탕으로 이야기를 바로 저장합니다. 응답으로 받은 storyId는 클라이언트 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.",
+        description = "선택한 스토리라인과 추가 정보를 AI 서버에 전달해 최종 스토리를 생성하고 저장합니다. " +
+            "응답으로 받은 storyId는 클라이언트 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.",
     )
     @ApiResponses(
         value = [
@@ -109,6 +110,16 @@ class SimpleStoryCreationController(
                 responseCode = "404",
                 description = "간편 제작 진행 정보 또는 스토리라인을 찾을 수 없음",
                 content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "409",
+                description = "이미 이야기가 생성된 간편 제작 진행",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "502",
+                description = "AI 서버 요청 실패",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )

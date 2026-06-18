@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
@@ -7,10 +8,13 @@ import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryHelpQuestionResponse
+import com.knk.manyak.story.dto.SimpleStorySettingsResponse
+import com.knk.manyak.story.dto.SimpleStoryStartSettingResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
+import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationExample
 import com.knk.manyak.story.entity.StoryCreationExampleQuestion
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -18,11 +22,18 @@ import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.StorySetting
+import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.repository.StoryCreationExampleQuestionRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StorySettingRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
@@ -37,6 +48,10 @@ class SimpleStoryCreationService(
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
     private val storyCreationExampleRepository: StoryCreationExampleRepository,
     private val storyCreationExampleQuestionRepository: StoryCreationExampleQuestionRepository,
+    private val storyRepository: StoryRepository,
+    private val storySettingRepository: StorySettingRepository,
+    private val storyStartSettingRepository: StoryStartSettingRepository,
+    private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyAiClient: StoryAiClient,
     transactionManager: PlatformTransactionManager,
 ) {
@@ -132,8 +147,104 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Storyline creation transaction result is empty")
     }
 
-    fun createSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse =
-        SimpleStoryCreateResponse(storyId = request.storylineId + 100L)
+    fun createSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
+        val session = storyCreationSessionRepository.findById(request.simpleCreationId)
+            .orElseThrow {
+                ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
+            }
+        if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+        }
+
+        val selectedStoryline = storyCreationExampleRepository
+            .findByIdAndCreationSessionId(request.storylineId, request.simpleCreationId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "선택한 스토리라인을 찾을 수 없습니다.")
+
+        val sessionTags = storyCreationSessionTagRepository
+            .findAllWithTagByCreationSessionId(request.simpleCreationId)
+            .map { it.tag }
+        val genreTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.GENRE }
+        val aiRequest = AiStoryCompileRequest(
+            genre_tags = genreTags.map { it.name },
+            protagonist_tags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supporting_tags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            selected_storyline = selectedStoryline.exampleText,
+            extra_info = request.additionalInfos.joinToString(separator = "\n"),
+        )
+
+        val aiResponse = try {
+            storyAiClient.compileStory(aiRequest)
+        } catch (exception: Exception) {
+            throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리 생성 요청에 실패했습니다.", exception)
+        }
+
+        val genre = genreTags.joinToString(separator = ", ") { it.name }.ifEmpty { null }
+
+        return transactionTemplate.execute {
+            selectedStoryline.isSelected = true
+            storyCreationExampleRepository.save(selectedStoryline)
+
+            val story = storyRepository.save(
+                Story(
+                    userId = session.userId,
+                    title = aiResponse.stories.title,
+                    oneLineIntro = aiResponse.stories.one_line_intro,
+                    description = aiResponse.stories.description,
+                    genre = genre,
+                ),
+            )
+            storySettingRepository.save(
+                StorySetting(
+                    story = story,
+                    worldSetting = aiResponse.story_settings.world_setting,
+                    characterSetting = aiResponse.story_settings.character_setting,
+                    userRoleSetting = aiResponse.story_settings.user_role_setting,
+                    ruleSetting = aiResponse.story_settings.rule_setting,
+                ),
+            )
+            val startSetting = storyStartSettingRepository.save(
+                StoryStartSetting(
+                    story = story,
+                    name = aiResponse.story_start_settings.name,
+                    prologue = aiResponse.story_start_settings.prologue,
+                    startSituation = aiResponse.story_start_settings.start_situation,
+                ),
+            )
+            storySuggestedInputRepository.saveAll(
+                aiResponse.story_suggested_inputs.mapIndexed { index, inputText ->
+                    StorySuggestedInput(
+                        startSetting = startSetting,
+                        inputText = inputText,
+                        inputOrder = (index + 1).toShort(),
+                    )
+                },
+            )
+
+            session.status = StoryCreationSessionStatus.STORY_CREATED
+            session.storyId = story.id
+            storyCreationSessionRepository.save(session)
+
+            SimpleStoryCreateResponse(
+                storyId = story.id,
+                title = story.title,
+                oneLineIntro = story.oneLineIntro,
+                description = story.description,
+                genre = story.genre,
+                settings = SimpleStorySettingsResponse(
+                    worldSetting = aiResponse.story_settings.world_setting,
+                    characterSetting = aiResponse.story_settings.character_setting,
+                    userRoleSetting = aiResponse.story_settings.user_role_setting,
+                    ruleSetting = aiResponse.story_settings.rule_setting,
+                ),
+                startSetting = SimpleStoryStartSettingResponse(
+                    name = aiResponse.story_start_settings.name,
+                    prologue = aiResponse.story_start_settings.prologue,
+                    startSituation = aiResponse.story_start_settings.start_situation,
+                ),
+                suggestedInputs = aiResponse.story_suggested_inputs,
+            )
+        } ?: throw IllegalStateException("Story creation transaction result is empty")
+    }
 
     private fun findSelectedPredefinedTags(selectedTagIds: List<Long>): List<StoryCreationTag> {
         val distinctTagIds = selectedTagIds.distinct()
