@@ -12,24 +12,21 @@ import jakarta.persistence.Table
 import java.time.Instant
 
 @Entity
-@Table(name = "story_creation_examples")
-class StoryCreationExample(
+@Table(name = "story_suggested_inputs")
+class StorySuggestedInput(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "creation_session_id", nullable = false)
-    val creationSession: StoryCreationSession,
+    @JoinColumn(name = "start_setting_id", nullable = false)
+    val startSetting: StoryStartSetting,
 
-    @Column(name = "example_text", nullable = false, columnDefinition = "TEXT")
-    val exampleText: String,
+    @Column(name = "input_text", nullable = false, columnDefinition = "TEXT")
+    val inputText: String,
 
-    @Column(name = "example_order", nullable = false)
-    val exampleOrder: Short,
-
-    @Column(name = "is_selected", nullable = false)
-    var isSelected: Boolean = false,
+    @Column(name = "input_order", nullable = false)
+    val inputOrder: Short,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

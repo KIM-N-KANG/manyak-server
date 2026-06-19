@@ -10,6 +10,8 @@ import java.time.Duration
 
 interface StoryAiClient {
     fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse
+
+    fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse
 }
 
 data class AiStorylinesRequest(
@@ -28,6 +30,47 @@ data class AiStoryItem(
     val id: Int,
     val story: String,
     val questions: List<String>,
+)
+
+data class AiStoryCompileRequest(
+    val genre_tags: List<String>,
+
+    val protagonist_tags: List<String>,
+
+    val supporting_tags: List<String>,
+
+    val selected_storyline: String,
+
+    val extra_info: String,
+)
+
+data class AiStoryCompileResponse(
+    val stories: AiStoryMeta,
+
+    val story_settings: AiStorySettings,
+
+    val story_start_settings: AiStoryStartSettings,
+
+    val story_suggested_inputs: List<String>,
+)
+
+data class AiStoryMeta(
+    val title: String,
+    val one_line_intro: String,
+    val description: String,
+)
+
+data class AiStorySettings(
+    val world_setting: String,
+    val character_setting: String,
+    val user_role_setting: String,
+    val rule_setting: String,
+)
+
+data class AiStoryStartSettings(
+    val name: String,
+    val start_situation: String,
+    val prologue: String,
 )
 
 @Component
@@ -58,6 +101,17 @@ class RestStoryAiClient(
             .retrieve()
             .body(AiStorylinesResponse::class.java)
             ?: throw IllegalStateException("AI storylines response body is empty")
+
+    override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse =
+        restClient
+            .post()
+            .uri("/api/v1/story/compile")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .body(request)
+            .retrieve()
+            .body(AiStoryCompileResponse::class.java)
+            ?: throw IllegalStateException("AI story compile response body is empty")
 
     private fun validateAiBaseUrl(aiBaseUrl: String): URI {
         val uri = URI.create(aiBaseUrl.trim())

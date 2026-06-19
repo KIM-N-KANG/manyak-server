@@ -177,4 +177,58 @@ data class CreateSimpleStoryRequest(
 data class SimpleStoryCreateResponse(
     @field:Schema(description = "생성된 스토리 ID. 클라이언트는 이 값을 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.", example = "10")
     val storyId: Long,
+
+    @field:Schema(description = "스토리 제목", example = "잿빛 왕관")
+    val title: String,
+
+    @field:Schema(description = "한 줄 소개", example = "무너진 왕국에서, 견습 기사인 당신이 옥좌의 진실을 좇는다.")
+    val oneLineIntro: String?,
+
+    @field:Schema(description = "스토리 설명", example = "역병과 반란으로 무너진 아르덴 왕국. 선왕은 의문의 죽음을 맞았고...")
+    val description: String?,
+
+    @field:Schema(description = "장르. 사용자가 선택한 장르 태그명을 결합한 표시용 문자열입니다.", example = "다크 판타지, 정치극")
+    val genre: String?,
+
+    @field:Schema(description = "AI 프롬프트 구성용 스토리 설정")
+    val settings: SimpleStorySettingsResponse,
+
+    @field:Schema(description = "스토리 시작 설정")
+    val startSetting: SimpleStoryStartSettingResponse,
+
+    @field:ArraySchema(
+        schema = Schema(description = "사용자 첫 입력 추천 문구", example = "레이에게 문을 열어준다"),
+        arraySchema = Schema(
+            description = "사용자 첫 입력 추천 문구 목록",
+            example = """["레이에게 문을 열어준다","*검을 가까이 둔 채 경계하며* 누구냐고 묻는다","못 들은 척 침묵한다"]""",
+        ),
+    )
+    val suggestedInputs: List<String>,
+)
+
+@Schema(description = "간편 제작 스토리 설정")
+data class SimpleStorySettingsResponse(
+    @field:Schema(description = "세계관/전제/갈등 등 스토리 정보")
+    val worldSetting: String,
+
+    @field:Schema(description = "등장인물 정보")
+    val characterSetting: String,
+
+    @field:Schema(description = "주인공(유저 역할) 정보")
+    val userRoleSetting: String?,
+
+    @field:Schema(description = "전개 규칙/문체 등 출력 형식")
+    val ruleSetting: String?,
+)
+
+@Schema(description = "간편 제작 스토리 시작 설정")
+data class SimpleStoryStartSettingResponse(
+    @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
+    val name: String,
+
+    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...")
+    val prologue: String?,
+
+    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
+    val startSituation: String?,
 )
