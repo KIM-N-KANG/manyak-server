@@ -1,7 +1,18 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.client.ChatHistoryMessage
+import com.knk.manyak.chat.client.ChatMessageRole
+import com.knk.manyak.chat.client.ChatTurnAiClient
+import com.knk.manyak.chat.client.ChatTurnAiException
+import com.knk.manyak.chat.client.ChatTurnAiRequest
+import com.knk.manyak.chat.client.ChatTurnStartSettings
+import com.knk.manyak.chat.client.ChatTurnStorySettings
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
+import com.knk.manyak.chat.dto.ChatStreamErrorEvent
+import com.knk.manyak.chat.dto.ChatStreamStartedEvent
+import com.knk.manyak.chat.dto.ChatStreamTokenEvent
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
@@ -14,8 +25,11 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
@@ -31,10 +45,15 @@ class ChatService(
     @Qualifier("chatSseExecutor")
     private val chatSseExecutor: Executor,
     private val storyRepository: StoryRepository,
+    private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storyPlaySessionRepository: StoryPlaySessionRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
+    private val chatTurnAiClient: ChatTurnAiClient,
+    private val chatTurnPersister: ChatTurnPersister,
+    @Value("\${manyak.chat.history-turns:10}")
+    private val historyTurns: Int,
 ) {
 
     @Transactional
@@ -162,13 +181,22 @@ class ChatService(
         val createdAt: Instant,
     )
 
+    /**
+     * 채팅 턴을 SSE로 스트리밍한다.
+     *
+     * 세션 검증과 AI 요청 재료 조립은 동기로 끝내 잘못된 요청은 즉시 404/400으로 응답하고,
+     * 실제 토큰 스트리밍과 저장은 [chatSseExecutor] 위에서 비동기로 처리한다.
+     * 스트리밍 동안에는 트랜잭션을 점유하지 않고, 저장은 completed 시점에 [ChatTurnPersister]가
+     * 단일 트랜잭션으로 원자적으로 수행한다.
+     */
     fun streamChatTurn(
         chatId: Long,
         request: ContinueChatRequest,
     ): SseEmitter {
+        val aiRequest = assembleAiRequest(chatId, request.userInput)
+
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
-        val output = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. ${request.userInput.take(24)} 그 장면은 모두의 기억에 깊게 새겨졌다."
 
         emitter.onTimeout {
             futureRef.get()?.cancel(true)
@@ -186,36 +214,116 @@ class ChatService(
                 emitter.send(
                     SseEmitter.event()
                         .name("started")
-                        .data(mapOf("chatId" to chatId)),
+                        .data(ChatStreamStartedEvent(chatId)),
                 )
-                for (char in output) {
+                val result = chatTurnAiClient.streamTurn(aiRequest) { token ->
                     if (Thread.currentThread().isInterrupted) {
-                        return@runAsync
+                        return@streamTurn
                     }
                     emitter.send(
                         SseEmitter.event()
                             .name("token")
-                            .data(mapOf("text" to char.toString())),
+                            .data(ChatStreamTokenEvent(token)),
                     )
                 }
+                val turnId = chatTurnPersister.persistTurn(
+                    playSessionId = chatId,
+                    userInput = request.userInput,
+                    aiOutput = result.aiOutput,
+                    choices = result.choices,
+                )
                 emitter.send(
                     SseEmitter.event()
                         .name("completed")
-                        .data(mapOf("chatId" to chatId, "turnId" to 3L, "aiOutput" to output)),
+                        .data(
+                            ChatStreamCompletedEvent(
+                                chatId = chatId,
+                                turnId = turnId,
+                                aiOutput = result.aiOutput,
+                                choices = result.choices,
+                            ),
+                        ),
                 )
                 emitter.complete()
+            } catch (exception: ChatTurnAiException) {
+                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다.
+                sendErrorQuietly(emitter, exception.code, exception.message)
+                emitter.complete()
             } catch (exception: Exception) {
-                emitter.send(
-                    SseEmitter.event()
-                        .name("error")
-                        .data(mapOf("code" to "AI_STREAM_FAILED", "message" to "AI 응답 생성 중 오류가 발생했습니다.")),
-                )
-                emitter.completeWithError(exception)
+                // 백엔드 자체 오류는 자체 코드로 응답한다.
+                sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
+                emitter.complete()
             }
         }, chatSseExecutor)
         futureRef.set(future)
 
         return emitter
+    }
+
+    /**
+     * 세션을 검증하고(없으면 404) AI 채팅 턴 요청 재료를 조립한다.
+     * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
+     * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
+     */
+    private fun assembleAiRequest(chatId: Long, userInput: String): ChatTurnAiRequest {
+        val session = storyPlaySessionRepository.findById(chatId)
+            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
+
+        val genre = storyRepository.findById(session.storyId)
+            .map { it.genre }
+            .orElse(null)
+            .orEmpty()
+        val setting = storySettingRepository.findByStoryId(session.storyId)
+        val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
+
+        return ChatTurnAiRequest(
+            genre = genre,
+            storySettings = ChatTurnStorySettings(
+                worldSetting = setting?.worldSetting.orEmpty(),
+                characterSetting = setting?.characterSetting.orEmpty(),
+                userRoleSetting = setting?.userRoleSetting.orEmpty(),
+                ruleSetting = setting?.ruleSetting.orEmpty(),
+            ),
+            startSettings = ChatTurnStartSettings(
+                name = startSetting?.name.orEmpty(),
+                prologue = startSetting?.prologue.orEmpty(),
+                startSituation = startSetting?.startSituation.orEmpty(),
+            ),
+            history = assembleHistory(chatId),
+            userInput = userInput,
+            summary = "",
+        )
+    }
+
+    /**
+     * 최근 [historyTurns]턴(USER+ASSISTANT)을 시간순으로 조립한다.
+     * 한 턴은 메시지 2건이므로 마지막 `historyTurns * 2`건만 조회해 메모리 로드를 제한하고,
+     * SYSTEM 메시지는 AI history에서 제외한다.
+     */
+    private fun assembleHistory(chatId: Long): List<ChatHistoryMessage> {
+        val recent = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderDesc(
+            chatId,
+            PageRequest.of(0, historyTurns * 2),
+        )
+        return recent.asReversed().mapNotNull { message ->
+            when (message.role) {
+                MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)
+                MessageRole.ASSISTANT -> ChatHistoryMessage(ChatMessageRole.ASSISTANT, message.content)
+                MessageRole.SYSTEM -> null
+            }
+        }
+    }
+
+    private fun sendErrorQuietly(emitter: SseEmitter, code: String, message: String) {
+        try {
+            emitter.send(
+                SseEmitter.event()
+                    .name("error")
+                    .data(ChatStreamErrorEvent(code, message)),
+            )
+        } catch (ignored: Exception) {
+            // 이미 끊긴 연결로의 추가 전송 실패는 무시한다.
+        }
     }
 
     private companion object {

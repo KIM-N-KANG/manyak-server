@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.servlet.http.HttpServletResponse
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -160,5 +161,14 @@ class ChatController(
         @Parameter(description = "채팅 ID")
         @PathVariable chatId: Long,
         @Valid @RequestBody request: ContinueChatRequest,
-    ): SseEmitter = chatService.streamChatTurn(chatId = chatId, request = request)
+        response: HttpServletResponse,
+    ): SseEmitter {
+        // SSE 본문은 UTF-8 한글을 포함한다. SseEmitter는 Content-Type을 charset 없는
+        // text/event-stream으로 고정해 produces의 charset이 무시되므로, 여기서 직접
+        // charset=UTF-8을 지정한다. 없으면 일부 클라이언트가 text/* 기본값 ISO-8859-1로
+        // 디코딩해 한글이 깨진다. (세션 404는 아래 호출에서 동기로 던져지며, 에러 응답은
+        // 메시지 컨버터가 application/json으로 Content-Type을 다시 덮어쓴다.)
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return chatService.streamChatTurn(chatId = chatId, request = request)
+    }
 }

@@ -191,3 +191,98 @@ Accept: application/json
 # 위 준비 흐름 없이 실제 DB에 있는 chatId만 빠르게 확인하고 싶을 때 사용합니다.
 GET {{baseUrl}}/api/v1/chats/1
 Accept: application/json
+
+### 11. 채팅 이어쓰기 스트리밍 (핵심 검증, SSE)
+# 3번을 먼저 실행해야 chatId 변수가 설정됩니다.
+# 세션 404 검증 → 재료 조립(genre·story_settings·start_settings·history·summary) →
+#   started → token… → completed 순서로 SSE 전송. completed 시점에만 USER+ASSISTANT+choices를
+#   원자적으로 저장하고 current_turn을 1 올립니다. (AI는 manyak.ai.chat.stub=true 스텁 사용)
+#
+# ▶ IntelliJ HTTP Client는 응답 패널에 SSE 이벤트를 순서대로 펼쳐 보여줍니다.
+#   다음을 눈으로 확인하세요:
+#     - event: started   data: {"chatId":<chatId>}
+#     - event: token      data: {"text":"검"} … (여러 청크)
+#     - event: completed data: {"chatId":<chatId>,"turnId":<n>,"aiOutput":"…","choices":[…]}
+#   저장 결과(턴 1건 추가, choices, current_turn 증가)는 11번 실행 후 7번을 다시 실행해 확인합니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "다들 평범하게 속성을 발현한다. 나는 마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."
+}
+
+> {%
+    client.test("스트리밍이 200으로 시작한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 12. 스트리밍 저장 결과 확인 — 11번 직후 상세 재조회
+# 11번이 completed까지 끝나면 새 턴 1건이 저장됩니다. turns가 1건 이상이고
+# 각 턴이 userInput/aiOutput/choices를 갖는지 확인합니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("이어쓰기로 저장된 턴이 있다", () => {
+        client.assert(Array.isArray(b.turns) && b.turns.length >= 1,
+            `turns가 1건 이상이어야 합니다. actual=${JSON.stringify(b.turns)}`);
+    });
+    client.test("마지막 턴은 userInput·aiOutput·choices를 갖는다", () => {
+        const last = b.turns[b.turns.length - 1];
+        client.assert(typeof last.userInput === "string" && last.userInput.length > 0,
+            `userInput이 비었습니다. actual=${JSON.stringify(last)}`);
+        client.assert(typeof last.aiOutput === "string" && last.aiOutput.length > 0,
+            `aiOutput이 비었습니다. actual=${JSON.stringify(last)}`);
+        client.assert(Array.isArray(last.choices),
+            `choices가 배열이 아닙니다. actual=${JSON.stringify(last.choices)}`);
+    });
+%}
+
+### 13. 존재하지 않는 채팅으로 이어쓰기 → 404
+# 동기 단계의 세션 검증에서 막혀 SSE가 시작되기 전에 JSON 404가 옵니다.
+POST {{baseUrl}}/api/v1/chats/999999999/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "손을 올린다."
+}
+
+> {%
+    client.test("없는 채팅은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 14. 빈 입력으로 이어쓰기 → 400
+# userInput이 공백뿐이면 @NotBlank 검증에 걸려 400입니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "   "
+}
+
+> {%
+    client.test("빈 입력은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 15. (선택) 이미 알고 있는 chatId로 직접 이어쓰기 스트리밍
+# 위 준비 흐름 없이 실제 DB에 있는 chatId만 빠르게 스트리밍 확인하고 싶을 때 사용합니다.
+POST {{baseUrl}}/api/v1/chats/1/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "조용히 주변을 살핀다."
+}
