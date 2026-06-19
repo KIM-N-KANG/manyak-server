@@ -187,38 +187,17 @@ data class SimpleStoryCreateResponse(
     @field:Schema(description = "스토리 설명", example = "역병과 반란으로 무너진 아르덴 왕국. 선왕은 의문의 죽음을 맞았고...")
     val description: String?,
 
-    @field:Schema(description = "장르. 사용자가 선택한 장르 태그명을 결합한 표시용 문자열입니다.", example = "다크 판타지, 정치극")
-    val genre: String?,
-
-    @field:Schema(description = "AI 프롬프트 구성용 스토리 설정")
-    val settings: SimpleStorySettingsResponse,
+    @field:ArraySchema(
+        schema = Schema(description = "장르명", example = "다크 판타지"),
+        arraySchema = Schema(
+            description = "장르명 목록. 사용자가 선택한 장르 태그명입니다.",
+            example = """["다크 판타지","정치극"]""",
+        ),
+    )
+    val genres: List<String>,
 
     @field:Schema(description = "스토리 시작 설정")
     val startSetting: SimpleStoryStartSettingResponse,
-
-    @field:ArraySchema(
-        schema = Schema(description = "사용자 첫 입력 추천 문구", example = "레이에게 문을 열어준다"),
-        arraySchema = Schema(
-            description = "사용자 첫 입력 추천 문구 목록",
-            example = """["레이에게 문을 열어준다","*검을 가까이 둔 채 경계하며* 누구냐고 묻는다","못 들은 척 침묵한다"]""",
-        ),
-    )
-    val suggestedInputs: List<String>,
-)
-
-@Schema(description = "간편 제작 스토리 설정")
-data class SimpleStorySettingsResponse(
-    @field:Schema(description = "세계관/전제/갈등 등 스토리 정보")
-    val worldSetting: String,
-
-    @field:Schema(description = "등장인물 정보")
-    val characterSetting: String,
-
-    @field:Schema(description = "주인공(유저 역할) 정보")
-    val userRoleSetting: String?,
-
-    @field:Schema(description = "전개 규칙/문체 등 출력 형식")
-    val ruleSetting: String?,
 )
 
 @Schema(description = "간편 제작 스토리 시작 설정")

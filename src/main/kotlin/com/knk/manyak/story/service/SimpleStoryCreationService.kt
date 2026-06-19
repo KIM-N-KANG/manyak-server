@@ -8,7 +8,6 @@ import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryHelpQuestionResponse
-import com.knk.manyak.story.dto.SimpleStorySettingsResponse
 import com.knk.manyak.story.dto.SimpleStoryStartSettingResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
@@ -241,19 +240,12 @@ class SimpleStoryCreationService(
                 title = story.title,
                 oneLineIntro = story.oneLineIntro,
                 description = story.description,
-                genre = story.genre,
-                settings = SimpleStorySettingsResponse(
-                    worldSetting = aiResponse.story_settings.world_setting,
-                    characterSetting = aiResponse.story_settings.character_setting,
-                    userRoleSetting = aiResponse.story_settings.user_role_setting,
-                    ruleSetting = aiResponse.story_settings.rule_setting,
-                ),
+                genres = genreTags.map { it.name },
                 startSetting = SimpleStoryStartSettingResponse(
                     name = aiResponse.story_start_settings.name,
                     prologue = aiResponse.story_start_settings.prologue,
                     startSituation = aiResponse.story_start_settings.start_situation,
                 ),
-                suggestedInputs = aiResponse.story_suggested_inputs,
             )
         } ?: throw IllegalStateException("Story creation transaction result is empty")
     }
