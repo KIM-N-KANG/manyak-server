@@ -351,11 +351,12 @@ class StoryControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.storyId").isNumber
             .jsonPath("$.title").isEqualTo("잿빛 왕관")
-            .jsonPath("$.genre").isEqualTo("다크 판타지, 정치극")
-            .jsonPath("$.settings.worldSetting").isEqualTo("# 세계관\n아르덴 왕국...")
+            .jsonPath("$.genres.length()").isEqualTo(2)
+            .jsonPath("$.genres[0]").isEqualTo("다크 판타지")
+            .jsonPath("$.genres[1]").isEqualTo("정치극")
             .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
-            .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
-            .jsonPath("$.suggestedInputs[0]").isEqualTo("레이에게 문을 열어준다")
+            .jsonPath("$.settings").doesNotExist()
+            .jsonPath("$.suggestedInputs").doesNotExist()
 
         val compileRequest = storyAiClient.lastCompileRequest
         requireNotNull(compileRequest)
