@@ -24,8 +24,9 @@ class StoryService(
 
     @Transactional(readOnly = true)
     fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
-        val storiesById = storyRepository.findAllById(request.storyIds).associateBy { it.id }
-        return request.storyIds.distinct()
+        val distinctIds = request.storyIds.distinct()
+        val storiesById = storyRepository.findAllById(distinctIds).associateBy { it.id }
+        return distinctIds
             .mapNotNull { storiesById[it] }
             .map { it.toSummaryResponse() }
     }
