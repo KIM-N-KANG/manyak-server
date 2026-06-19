@@ -4,7 +4,7 @@ CREATE TABLE stories (
     title VARCHAR(100) NOT NULL,
     one_line_intro VARCHAR(255),
     description TEXT,
-    genre VARCHAR(100),
+    genre VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

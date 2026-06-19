@@ -424,6 +424,24 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `AI 응답 제목과 한 줄 소개가 컬럼 길이를 초과하면 잘라서 저장한다`() {
+        val seeded = seedGeneratedSession()
+        storyAiClient.compileTitle = "가".repeat(150)
+        storyAiClient.compileOneLineIntro = "나".repeat(300)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.exampleIds[0]}}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        check(story.title.length == 100)
+        check(story.oneLineIntro?.length == 255)
+    }
+
+    @Test
     fun `최종 이야기 생성 AI 오류는 Bad Gateway로 응답한다`() {
         val seeded = seedGeneratedSession()
         storyAiClient.compileFail = true
@@ -512,6 +530,8 @@ class StoryControllerIntegrationTests {
             private set
         var fail: Boolean = false
         var compileFail: Boolean = false
+        var compileTitle: String = "잿빛 왕관"
+        var compileOneLineIntro: String = "무너진 왕국에서 진실을 좇는다."
         var transactionActiveDuringCall: Boolean? = null
             private set
         var compileTransactionActive: Boolean? = null
@@ -544,8 +564,8 @@ class StoryControllerIntegrationTests {
 
             return AiStoryCompileResponse(
                 stories = AiStoryMeta(
-                    title = "잿빛 왕관",
-                    one_line_intro = "무너진 왕국에서 진실을 좇는다.",
+                    title = compileTitle,
+                    one_line_intro = compileOneLineIntro,
                     description = "역병과 반란으로 무너진 왕국 이야기.",
                 ),
                 story_settings = AiStorySettings(
@@ -572,6 +592,8 @@ class StoryControllerIntegrationTests {
             lastCompileRequest = null
             fail = false
             compileFail = false
+            compileTitle = "잿빛 왕관"
+            compileOneLineIntro = "무너진 왕국에서 진실을 좇는다."
             transactionActiveDuringCall = null
             compileTransactionActive = null
         }

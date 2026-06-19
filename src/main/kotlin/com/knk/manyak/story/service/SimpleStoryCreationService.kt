@@ -57,6 +57,12 @@ class SimpleStoryCreationService(
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
 
+    private companion object {
+        // AI 응답이 컬럼 길이를 초과해도 트랜잭션이 실패하지 않도록 방어적으로 자른다. (stories 컬럼 정의와 일치)
+        const val STORY_TITLE_MAX_LENGTH = 100
+        const val STORY_ONE_LINE_INTRO_MAX_LENGTH = 255
+    }
+
     @Transactional(readOnly = true)
     fun getSimpleStoryTags(): List<SimpleStoryTagListItemResponse> =
         storyCreationTagRepository
@@ -181,14 +187,20 @@ class SimpleStoryCreationService(
         val genre = genreTags.joinToString(separator = ", ") { it.name }.ifEmpty { null }
 
         return transactionTemplate.execute {
+            val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
+            if (lockedSession.status == StoryCreationSessionStatus.STORY_CREATED) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+            }
+
             selectedStoryline.isSelected = true
             storyCreationExampleRepository.save(selectedStoryline)
 
             val story = storyRepository.save(
                 Story(
-                    userId = session.userId,
-                    title = aiResponse.stories.title,
-                    oneLineIntro = aiResponse.stories.one_line_intro,
+                    userId = lockedSession.userId,
+                    title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
+                    oneLineIntro = aiResponse.stories.one_line_intro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,
                     genre = genre,
                 ),
@@ -220,9 +232,9 @@ class SimpleStoryCreationService(
                 },
             )
 
-            session.status = StoryCreationSessionStatus.STORY_CREATED
-            session.storyId = story.id
-            storyCreationSessionRepository.save(session)
+            lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
+            lockedSession.storyId = story.id
+            storyCreationSessionRepository.save(lockedSession)
 
             SimpleStoryCreateResponse(
                 storyId = story.id,

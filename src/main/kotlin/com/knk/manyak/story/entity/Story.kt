@@ -28,7 +28,7 @@ class Story(
     @Column(columnDefinition = "TEXT")
     val description: String? = null,
 
-    @Column(length = 100)
+    @Column(length = 255)
     val genre: String? = null,
 
     @Column(name = "created_at", nullable = false)
