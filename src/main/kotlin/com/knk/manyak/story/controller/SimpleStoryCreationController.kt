@@ -57,7 +57,7 @@ class SimpleStoryCreationController(
 
     @Operation(
         summary = "간편 제작 스토리라인 생성",
-        description = "사용자가 선택한 태그를 저장하고 AI 서버에 전달해 예시 스토리라인 3개와 도움 질문을 생성합니다.",
+        description = "사용자가 선택한 태그를 저장하고 AI 서버에 전달해 예시 스토리라인 3개와 추천 추가 정보를 생성합니다.",
     )
     @ApiResponses(
         value = [

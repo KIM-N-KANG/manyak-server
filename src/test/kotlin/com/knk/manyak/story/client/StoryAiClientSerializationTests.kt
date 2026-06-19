@@ -37,7 +37,7 @@ class StoryAiClientSerializationTests {
                 {
                   "id": 1,
                   "story": "기억을 잃은 주인공의 이야기",
-                  "questions": ["첫 질문", "두 번째 질문", "세 번째 질문"]
+                  "recommended_infos": ["첫 추가 정보", "두 번째 추가 정보", "세 번째 추가 정보"]
                 }
               ]
             }
@@ -47,6 +47,6 @@ class StoryAiClientSerializationTests {
 
         assertEquals(1, response.stories.single().id)
         assertEquals("기억을 잃은 주인공의 이야기", response.stories.single().story)
-        assertEquals(listOf("첫 질문", "두 번째 질문", "세 번째 질문"), response.stories.single().questions)
+        assertEquals(listOf("첫 추가 정보", "두 번째 추가 정보", "세 번째 추가 정보"), response.stories.single().recommendedInfos)
     }
 }

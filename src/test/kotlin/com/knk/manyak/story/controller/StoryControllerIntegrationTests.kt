@@ -16,7 +16,7 @@ import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
-import com.knk.manyak.story.repository.StoryCreationExampleQuestionRepository
+import com.knk.manyak.story.repository.StoryCreationExampleRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
@@ -62,7 +62,7 @@ class StoryControllerIntegrationTests {
     private lateinit var exampleRepository: StoryCreationExampleRepository
 
     @Autowired
-    private lateinit var questionRepository: StoryCreationExampleQuestionRepository
+    private lateinit var recommendedInfoRepository: StoryCreationExampleRecommendedInfoRepository
 
     @Autowired
     private lateinit var storyRepository: StoryRepository
@@ -85,7 +85,7 @@ class StoryControllerIntegrationTests {
         storyStartSettingRepository.deleteAll()
         storySettingRepository.deleteAll()
         storyRepository.deleteAll()
-        questionRepository.deleteAll()
+        recommendedInfoRepository.deleteAll()
         exampleRepository.deleteAll()
         sessionTagRepository.deleteAll()
         sessionRepository.deleteAll()
@@ -159,8 +159,8 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.selectedTags[0].name").isEqualTo("판타지")
             .jsonPath("$.storylines.length()").isEqualTo(3)
             .jsonPath("$.storylines[0].story").isEqualTo("생성 스토리 1")
-            .jsonPath("$.storylines[0].helpQuestions.length()").isEqualTo(3)
-            .jsonPath("$.storylines[0].helpQuestions[0].question").isEqualTo("질문 1-1")
+            .jsonPath("$.storylines[0].recommendedInfos.length()").isEqualTo(3)
+            .jsonPath("$.storylines[0].recommendedInfos[0].text").isEqualTo("추가 정보 1-1")
 
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
@@ -169,7 +169,7 @@ class StoryControllerIntegrationTests {
         check(aiRequest.protagonistTags == listOf("기억상실"))
         check(aiRequest.supportingTags.isEmpty())
         check(exampleRepository.count() == 3L)
-        check(questionRepository.count() == 9L)
+        check(recommendedInfoRepository.count() == 9L)
     }
 
     @Test
@@ -551,7 +551,7 @@ class StoryControllerIntegrationTests {
                     AiStoryItem(
                         id = index,
                         story = "생성 스토리 $index",
-                        questions = (1..3).map { questionIndex -> "질문 $index-$questionIndex" },
+                        recommendedInfos = (1..3).map { infoIndex -> "추가 정보 $index-$infoIndex" },
                     )
                 },
             )

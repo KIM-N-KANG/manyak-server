@@ -55,17 +55,17 @@ CREATE TABLE story_creation_examples (
         CHECK (example_order > 0)
 );
 
-CREATE TABLE story_creation_example_questions (
+CREATE TABLE story_creation_example_recommended_infos (
     id BIGSERIAL PRIMARY KEY,
     example_id BIGINT NOT NULL REFERENCES story_creation_examples(id) ON DELETE CASCADE,
-    question TEXT NOT NULL,
-    question_order SMALLINT NOT NULL,
+    info_text TEXT NOT NULL,
+    info_order SMALLINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_story_creation_example_questions_order
-        UNIQUE (example_id, question_order),
-    CONSTRAINT ck_story_creation_example_questions_order
-        CHECK (question_order > 0)
+    CONSTRAINT uq_story_creation_example_recommended_infos_order
+        UNIQUE (example_id, info_order),
+    CONSTRAINT ck_story_creation_example_recommended_infos_order
+        CHECK (info_order > 0)
 );
 
 INSERT INTO story_creation_tags (tag_type, name, tag_source, sort_order)

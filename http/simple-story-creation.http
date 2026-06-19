@@ -91,8 +91,8 @@ Accept: application/json
         client.assert(Array.isArray(response.body.storylines), "storylines 배열이 없습니다.");
         client.assert(response.body.storylines.length === 3, "스토리라인은 3개여야 합니다.");
         client.assert(Boolean(response.body.storylines[0].story), "story 본문이 없습니다.");
-        client.assert(Array.isArray(response.body.storylines[0].helpQuestions), "helpQuestions 배열이 없습니다.");
-        client.assert(response.body.storylines[0].helpQuestions.length === 3, "도움 질문은 3개여야 합니다.");
+        client.assert(Array.isArray(response.body.storylines[0].recommendedInfos), "recommendedInfos 배열이 없습니다.");
+        client.assert(response.body.storylines[0].recommendedInfos.length === 3, "추천 추가 정보는 3개여야 합니다.");
     });
 
     if (response.status === 201 && response.body.storylines && response.body.storylines[0]) {

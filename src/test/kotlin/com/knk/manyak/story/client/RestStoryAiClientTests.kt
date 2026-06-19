@@ -38,7 +38,7 @@ class RestStoryAiClientTests {
                         {
                           "id": 1,
                           "story": "생성 스토리",
-                          "questions": ["질문 1", "질문 2", "질문 3"]
+                          "recommended_infos": ["추가 정보 1", "추가 정보 2", "추가 정보 3"]
                         }
                       ]
                     }
