@@ -41,10 +41,10 @@ class StubChatTurnAiClientTests {
         ChatTurnAiRequest(
             genre = "판타지",
             storySettings = ChatTurnStorySettings(
-                world = "마법 아카데미",
-                character = "강진우",
-                userRole = "신입생",
-                rule = "마법은 속성 발현으로만 사용한다.",
+                worldSetting = "마법 아카데미",
+                characterSetting = "강진우",
+                userRoleSetting = "신입생",
+                ruleSetting = "마법은 속성 발현으로만 사용한다.",
             ),
             startSettings = ChatTurnStartSettings(
                 name = "강진우",

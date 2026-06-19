@@ -16,7 +16,10 @@ class ChatTurnAiClientSerializationTests {
 
         assertTrue(json.contains(""""genre":"판타지""""))
         assertTrue(json.contains(""""story_settings""""))
-        assertTrue(json.contains(""""user_role":"무속성 신입생""""))
+        assertTrue(json.contains(""""world_setting":"마법 아카데미가 존재하는 세계""""))
+        assertTrue(json.contains(""""character_setting":"강진우, 무속성 판정을 받은 1학년""""))
+        assertTrue(json.contains(""""user_role_setting":"무속성 신입생""""))
+        assertTrue(json.contains(""""rule_setting":"마법은 속성 발현으로만 사용할 수 있다.""""))
         assertTrue(json.contains(""""start_settings""""))
         assertTrue(json.contains(""""start_situation":"적성 검사가 시작된다.""""))
         assertTrue(json.contains(""""user_input":"마법수정에 손을 올린다.""""))
@@ -58,10 +61,10 @@ class ChatTurnAiClientSerializationTests {
         ChatTurnAiRequest(
             genre = "판타지",
             storySettings = ChatTurnStorySettings(
-                world = "마법 아카데미가 존재하는 세계",
-                character = "강진우, 무속성 판정을 받은 1학년",
-                userRole = "무속성 신입생",
-                rule = "마법은 속성 발현으로만 사용할 수 있다.",
+                worldSetting = "마법 아카데미가 존재하는 세계",
+                characterSetting = "강진우, 무속성 판정을 받은 1학년",
+                userRoleSetting = "무속성 신입생",
+                ruleSetting = "마법은 속성 발현으로만 사용할 수 있다.",
             ),
             startSettings = ChatTurnStartSettings(
                 name = "강진우",

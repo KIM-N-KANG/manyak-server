@@ -39,11 +39,14 @@ data class ChatTurnAiRequest(
 )
 
 data class ChatTurnStorySettings(
-    val world: String,
-    val character: String,
-    @JsonProperty("user_role")
-    val userRole: String,
-    val rule: String,
+    @JsonProperty("world_setting")
+    val worldSetting: String,
+    @JsonProperty("character_setting")
+    val characterSetting: String,
+    @JsonProperty("user_role_setting")
+    val userRoleSetting: String,
+    @JsonProperty("rule_setting")
+    val ruleSetting: String,
 )
 
 data class ChatTurnStartSettings(
