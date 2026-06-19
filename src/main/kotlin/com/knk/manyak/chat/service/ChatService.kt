@@ -33,11 +33,13 @@ class ChatService(
 
     @Transactional
     fun createChat(request: CreateChatRequest): CreateChatResponse {
-        if (!storyRepository.existsById(request.storyId)) {
+        // 시작 설정은 stories에 FK가 걸려 있어 존재하면 스토리도 반드시 존재한다.
+        // 따라서 시작 설정을 먼저 조회하고, 없을 때만 스토리 존재 여부를 확인해 불필요한 조회를 줄인다.
+        val startSetting = storyStartSettingRepository.findByStoryId(request.storyId)
+        if (startSetting == null && !storyRepository.existsById(request.storyId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         }
 
-        val startSetting = storyStartSettingRepository.findByStoryId(request.storyId)
         val session = storyPlaySessionRepository.save(
             StoryPlaySession(
                 storyId = request.storyId,
