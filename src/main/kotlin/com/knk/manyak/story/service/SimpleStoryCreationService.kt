@@ -168,7 +168,9 @@ class SimpleStoryCreationService(
         val sessionTags = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
             .map { it.tag }
-        val genreTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.GENRE }
+        val genreTags = sessionTags
+            .filter { it.tagType == SimpleStoryTagCategory.GENRE }
+            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val aiRequest = AiStoryCompileRequest(
             genre_tags = genreTags.map { it.name },
             protagonist_tags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
