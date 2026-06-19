@@ -58,7 +58,7 @@ class StoryService(
             startSituationName = startSetting?.name.orEmpty(),
             conversationPrologue = startSetting?.prologue.orEmpty(),
             recommendedInputs = recommendedInputs,
-            visibility = StoryVisibility.PUBLIC,
+            visibility = StoryVisibility.PRIVATE,
             status = StoryStatus.PUBLISHED,
             createdAt = story.createdAt,
         )

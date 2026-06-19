@@ -131,7 +131,7 @@ data class StoryDetailResponse(
     )
     val recommendedInputs: List<String>,
 
-    @field:Schema(description = "스토리 공개 여부", example = "PUBLIC")
+    @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,
 
     @field:Schema(description = "등록 상태", example = "PUBLISHED")
