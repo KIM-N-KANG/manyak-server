@@ -74,11 +74,10 @@ class ChatService(
         val titlesByStoryId = storyRepository.findAllById(sessions.map { it.storyId })
             .associate { it.id to it.title }
 
-        // 세션별 마지막 ASSISTANT 메시지를 한 번의 쿼리로 모아 프리뷰로 사용한다.
+        // 세션별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
         val lastPreviewBySessionId = storyMessageRepository
-            .findByPlaySessionIdInAndRoleOrderByMessageOrderAsc(sessions.map { it.id }, MessageRole.ASSISTANT)
-            .groupBy { it.playSessionId }
-            .mapValues { (_, messages) -> messages.last().content }
+            .findLatestMessagesByPlaySessionIdsAndRole(sessions.map { it.id }, MessageRole.ASSISTANT)
+            .associate { it.playSessionId to it.content }
 
         return sessions.map { session ->
             ChatSummaryResponse(
