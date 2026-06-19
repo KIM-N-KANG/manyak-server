@@ -107,6 +107,12 @@ data class ChatTurnResponse(
     @field:Schema(description = "사용자 입력을 바탕으로 AI가 이어쓴 이야기", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
     val aiOutput: String,
 
+    @field:ArraySchema(
+        schema = Schema(description = "다음 행동 선택지", example = "주변을 살핀다."),
+        arraySchema = Schema(description = "이 턴에서 AI가 제안한 다음 행동 선택지 목록"),
+    )
+    val choices: List<String>,
+
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:10:00Z")
     val createdAt: Instant,
 )
