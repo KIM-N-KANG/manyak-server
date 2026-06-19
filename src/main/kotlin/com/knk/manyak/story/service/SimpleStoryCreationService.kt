@@ -8,11 +8,11 @@ import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryHelpQuestionResponse
-import com.knk.manyak.story.dto.SimpleStoryStartSettingResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
+import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationExample
 import com.knk.manyak.story.entity.StoryCreationExampleQuestion
@@ -68,7 +68,7 @@ class SimpleStoryCreationService(
             .findByTagSourceAndIsActiveTrueOrderByTagTypeAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
             .map { tag ->
                 SimpleStoryTagListItemResponse(
-                    tagId = tag.id,
+                    id = tag.id,
                     name = tag.name,
                     category = tag.tagType,
                 )
@@ -238,12 +238,12 @@ class SimpleStoryCreationService(
             storyCreationSessionRepository.save(lockedSession)
 
             SimpleStoryCreateResponse(
-                storyId = story.id,
+                id = story.id,
                 title = story.title,
                 oneLineIntro = story.oneLineIntro,
                 description = story.description,
                 genres = genreTags.map { it.name },
-                startSetting = SimpleStoryStartSettingResponse(
+                startSetting = StoryStartSettingResponse(
                     name = aiResponse.storyStartSettings.name,
                     prologue = aiResponse.storyStartSettings.prologue,
                     startSituation = aiResponse.storyStartSettings.startSituation,
@@ -281,7 +281,7 @@ class SimpleStoryCreationService(
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
         SimpleStoryTagResponse(
-            tagId = id,
+            id = id,
             name = name,
             category = tagType,
         )

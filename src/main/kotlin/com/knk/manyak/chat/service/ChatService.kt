@@ -23,7 +23,7 @@ class ChatService(
 
     fun createChat(request: CreateChatRequest): CreateChatResponse =
         CreateChatResponse(
-            chatId = 10L,
+            id = 10L,
             storyId = request.storyId,
             prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
             guideMessage = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요. 이후 입력은 이야기 전개에 반영됩니다.",
@@ -33,7 +33,7 @@ class ChatService(
     fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> =
         request.chatIds.mapIndexed { index, chatId ->
             ChatSummaryResponse(
-                chatId = chatId,
+                id = chatId,
                 storyId = index + 1L,
                 storyTitle = if (index % 2 == 0) "호아킨 아카데미의 무속성 신입생" else "왕국의 마지막 편지",
                 lastStoryPreview = if (index % 2 == 0) {
@@ -47,20 +47,20 @@ class ChatService(
 
     fun getChatDetail(chatId: Long): ChatDetailResponse =
         ChatDetailResponse(
-            chatId = chatId,
+            id = chatId,
             storyId = 1L,
             storyTitle = "호아킨 아카데미의 무속성 신입생",
             prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
             guideMessage = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요.",
             turns = listOf(
                 ChatTurnResponse(
-                    turnId = 1L,
+                    id = 1L,
                     userInput = "이름은 강진우고 무속성 판정을 받은 호아킨 아카데미 1학년이야.",
                     aiOutput = "강진우라는 이름이 검사장 한쪽 기록판에 새겨졌다. 무속성이라는 판정은 조용한 웅성거림을 불러왔다.",
                     createdAt = Instant.now(),
                 ),
                 ChatTurnResponse(
-                    turnId = 2L,
+                    id = 2L,
                     userInput = "마법수정에서 아무 빛도 나오지 않았지만, 내려가는 순간 수정이 금 가더니 깨져버렸다.",
                     aiOutput = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. 깨질 리 없는 수정의 파편이 단상 위에서 차갑게 빛났다.",
                     createdAt = Instant.now(),

@@ -43,7 +43,7 @@ class StoryController(
                         array = ArraySchema(
                             schema = Schema(implementation = StorySummaryResponse::class),
                             arraySchema = Schema(
-                                example = """[{"id":1,"title":"달빛 아래의 계약","summary":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"authorNickname":null,"chatCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":2,"title":"왕국의 마지막 편지","summary":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"authorNickname":null,"chatCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
+                                example = """[{"id":1,"title":"달빛 아래의 계약","oneLineIntro":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"author":null,"chatCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":2,"title":"왕국의 마지막 편지","oneLineIntro":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"author":null,"chatCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
                             ),
                         ),
                     ),

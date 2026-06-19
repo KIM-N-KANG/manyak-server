@@ -45,7 +45,7 @@ data class StorySummaryResponse(
     val title: String,
 
     @field:Schema(description = "한 줄 소개", example = "기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기")
-    val summary: String,
+    val oneLineIntro: String,
 
     @field:ArraySchema(
         schema = Schema(description = "장르명", example = "판타지"),
@@ -53,8 +53,8 @@ data class StorySummaryResponse(
     )
     val genres: List<String>,
 
-    @field:Schema(description = "작성자 닉네임. 작성자가 없는 스토리는 비어 있을 수 있습니다.", example = "manyak_writer", nullable = true)
-    val authorNickname: String?,
+    @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
+    val author: StoryAuthorResponse?,
 
     @field:Schema(description = "채팅 수", example = "128")
     val chatCount: Long,
@@ -81,10 +81,10 @@ data class StoryDetailResponse(
     val title: String,
 
     @field:Schema(description = "한 줄 소개", example = "기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기")
-    val shortDescription: String,
+    val oneLineIntro: String,
 
-    @field:Schema(description = "상세 소개", example = "계약 마법이 지배하는 왕국에서 잃어버린 기억과 사라진 가족의 비밀을 추적하는 인터랙티브 판타지입니다.")
-    val detailedIntroduction: String?,
+    @field:Schema(description = "스토리 설명", example = "계약 마법이 지배하는 왕국에서 잃어버린 기억과 사라진 가족의 비밀을 추적하는 인터랙티브 판타지입니다.")
+    val description: String?,
 
     @field:ArraySchema(
         schema = Schema(description = "장르명", example = "다크 판타지"),
@@ -107,11 +107,8 @@ data class StoryDetailResponse(
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
 
-    @field:Schema(description = "시작 상황 이름", example = "비 내리는 여관의 편지")
-    val startSituationName: String,
-
-    @field:Schema(description = "대화 프롤로그", example = "비가 내리는 밤, 당신은 여관 2층 방에서 봉인된 편지를 발견합니다.")
-    val conversationPrologue: String,
+    @field:Schema(description = "스토리 시작 설정. 시작 설정이 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
+    val startSetting: StoryStartSettingResponse?,
 
     @field:ArraySchema(
         schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
@@ -139,4 +136,16 @@ data class StoryAuthorResponse(
 
     @field:Schema(description = "작성자 프로필 이미지 URL", example = "https://example.com/profile.png")
     val profileImageUrl: String?,
+)
+
+@Schema(description = "스토리 시작 설정")
+data class StoryStartSettingResponse(
+    @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
+    val name: String,
+
+    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...")
+    val prologue: String?,
+
+    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
+    val startSituation: String?,
 )

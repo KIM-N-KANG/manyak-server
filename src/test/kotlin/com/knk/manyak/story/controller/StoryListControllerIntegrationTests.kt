@@ -47,10 +47,10 @@ class StoryListControllerIntegrationTests {
             .jsonPath("$.length()").isEqualTo(2)
             .jsonPath("$[0].id").isEqualTo(second.id)
             .jsonPath("$[0].title").isEqualTo("달빛 아래의 계약")
-            .jsonPath("$[0].summary").isEqualTo("기억을 잃은 마법사")
+            .jsonPath("$[0].oneLineIntro").isEqualTo("기억을 잃은 마법사")
             .jsonPath("$[0].genres.length()").isEqualTo(1)
             .jsonPath("$[0].genres[0]").isEqualTo("로맨스")
-            .jsonPath("$[0].authorNickname").isEmpty
+            .jsonPath("$[0].author").isEmpty
             .jsonPath("$[0].chatCount").isEqualTo(0)
             .jsonPath("$[0].likeCount").isEqualTo(0)
             .jsonPath("$[0].status").isEqualTo("PUBLISHED")

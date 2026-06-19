@@ -90,7 +90,7 @@ class SimpleStoryCreationController(
     @Operation(
         summary = "간편 제작 이야기 생성",
         description = "선택한 스토리라인과 추가 정보를 AI 서버에 전달해 최종 스토리를 생성하고 저장합니다. " +
-            "응답으로 받은 storyId는 클라이언트 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.",
+            "응답으로 받은 id는 클라이언트 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.",
     )
     @ApiResponses(
         value = [

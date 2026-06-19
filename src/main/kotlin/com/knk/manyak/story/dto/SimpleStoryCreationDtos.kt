@@ -65,13 +65,13 @@ data class GenerateSimpleStorylinesResponse(
 
     @field:Schema(
         description = "저장된 선택 태그",
-        example = """[{"tagId":101,"name":"게임","category":"GENRE"},{"tagId":205,"name":"소심한","category":"PROTAGONIST"},{"tagId":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
+        example = """[{"id":101,"name":"게임","category":"GENRE"},{"id":205,"name":"소심한","category":"PROTAGONIST"},{"id":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
     )
     @field:ArraySchema(
         schema = Schema(implementation = SimpleStoryTagResponse::class),
         arraySchema = Schema(
             description = "저장된 선택 태그",
-            example = """[{"tagId":101,"name":"게임","category":"GENRE"},{"tagId":205,"name":"소심한","category":"PROTAGONIST"},{"tagId":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
+            example = """[{"id":101,"name":"게임","category":"GENRE"},{"id":205,"name":"소심한","category":"PROTAGONIST"},{"id":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
         ),
     )
     val selectedTags: List<SimpleStoryTagResponse>,
@@ -92,7 +92,7 @@ data class GenerateSimpleStorylinesResponse(
 @Schema(description = "간편 제작 태그 목록 항목")
 data class SimpleStoryTagListItemResponse(
     @field:Schema(description = "태그 ID", example = "101")
-    val tagId: Long,
+    val id: Long,
 
     @field:Schema(description = "태그 이름", example = "판타지")
     val name: String,
@@ -104,7 +104,7 @@ data class SimpleStoryTagListItemResponse(
 @Schema(description = "간편 제작 저장 태그")
 data class SimpleStoryTagResponse(
     @field:Schema(description = "태그 ID", example = "101")
-    val tagId: Long,
+    val id: Long,
 
     @field:Schema(description = "태그 이름", example = "기억을 잃은 주인공")
     val name: String,
@@ -176,7 +176,7 @@ data class CreateSimpleStoryRequest(
 @Schema(description = "간편 제작 이야기 생성 응답")
 data class SimpleStoryCreateResponse(
     @field:Schema(description = "생성된 스토리 ID. 클라이언트는 이 값을 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.", example = "10")
-    val storyId: Long,
+    val id: Long,
 
     @field:Schema(description = "스토리 제목", example = "잿빛 왕관")
     val title: String,
@@ -197,17 +197,5 @@ data class SimpleStoryCreateResponse(
     val genres: List<String>,
 
     @field:Schema(description = "스토리 시작 설정")
-    val startSetting: SimpleStoryStartSettingResponse,
-)
-
-@Schema(description = "간편 제작 스토리 시작 설정")
-data class SimpleStoryStartSettingResponse(
-    @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
-    val name: String,
-
-    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...")
-    val prologue: String?,
-
-    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
-    val startSituation: String?,
+    val startSetting: StoryStartSettingResponse,
 )

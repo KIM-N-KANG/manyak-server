@@ -2,6 +2,7 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.StoryVisibility
@@ -46,15 +47,20 @@ class StoryService(
             id = story.id,
             coverImageUrl = null,
             title = story.title,
-            shortDescription = story.oneLineIntro.orEmpty(),
-            detailedIntroduction = story.description,
+            oneLineIntro = story.oneLineIntro.orEmpty(),
+            description = story.description,
             genres = story.toGenreNames(),
             hashtags = emptyList(),
             author = null,
             chatCount = 0,
             likeCount = 0,
-            startSituationName = startSetting?.name.orEmpty(),
-            conversationPrologue = startSetting?.prologue.orEmpty(),
+            startSetting = startSetting?.let {
+                StoryStartSettingResponse(
+                    name = it.name,
+                    prologue = it.prologue,
+                    startSituation = it.startSituation,
+                )
+            },
             recommendedInputs = recommendedInputs,
             visibility = StoryVisibility.PRIVATE,
             status = StoryStatus.PUBLISHED,
@@ -73,9 +79,9 @@ class StoryService(
         StorySummaryResponse(
             id = id,
             title = title,
-            summary = oneLineIntro.orEmpty(),
+            oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),
-            authorNickname = null,
+            author = null,
             chatCount = 0,
             likeCount = 0,
             status = StoryStatus.PUBLISHED,
