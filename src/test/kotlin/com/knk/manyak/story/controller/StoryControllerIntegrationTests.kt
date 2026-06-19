@@ -165,9 +165,9 @@ class StoryControllerIntegrationTests {
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
         check(storyAiClient.transactionActiveDuringCall == false)
-        check(aiRequest.genre_tags == listOf("판타지"))
-        check(aiRequest.protagonist_tags == listOf("기억상실"))
-        check(aiRequest.supporting_tags.isEmpty())
+        check(aiRequest.genreTags == listOf("판타지"))
+        check(aiRequest.protagonistTags == listOf("기억상실"))
+        check(aiRequest.supportingTags.isEmpty())
         check(exampleRepository.count() == 3L)
         check(questionRepository.count() == 9L)
     }
@@ -198,7 +198,7 @@ class StoryControllerIntegrationTests {
 
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
-        check(aiRequest.supporting_tags == listOf("비밀스러운 조력자"))
+        check(aiRequest.supportingTags == listOf("비밀스러운 조력자"))
     }
 
     @Test
@@ -361,10 +361,10 @@ class StoryControllerIntegrationTests {
         val compileRequest = storyAiClient.lastCompileRequest
         requireNotNull(compileRequest)
         check(storyAiClient.compileTransactionActive == false)
-        check(compileRequest.genre_tags == listOf("다크 판타지", "정치극"))
-        check(compileRequest.protagonist_tags == listOf("신중한"))
-        check(compileRequest.selected_storyline == "스토리라인 2")
-        check(compileRequest.extra_info == "주인공은 신중하다\n결말은 여운 있게")
+        check(compileRequest.genreTags == listOf("다크 판타지", "정치극"))
+        check(compileRequest.protagonistTags == listOf("신중한"))
+        check(compileRequest.selectedStoryline == "스토리라인 2")
+        check(compileRequest.extraInfo == "주인공은 신중하다\n결말은 여운 있게")
 
         check(storyRepository.count() == 1L)
         check(storySettingRepository.count() == 1L)
@@ -566,21 +566,21 @@ class StoryControllerIntegrationTests {
             return AiStoryCompileResponse(
                 stories = AiStoryMeta(
                     title = compileTitle,
-                    one_line_intro = compileOneLineIntro,
+                    oneLineIntro = compileOneLineIntro,
                     description = "역병과 반란으로 무너진 왕국 이야기.",
                 ),
-                story_settings = AiStorySettings(
-                    world_setting = "# 세계관\n아르덴 왕국...",
-                    character_setting = "# 등장인물\n레이...",
-                    user_role_setting = "# 주인공\n견습 기사...",
-                    rule_setting = "# 전개 규칙\n정치 음모...",
+                storySettings = AiStorySettings(
+                    worldSetting = "# 세계관\n아르덴 왕국...",
+                    characterSetting = "# 등장인물\n레이...",
+                    userRoleSetting = "# 주인공\n견습 기사...",
+                    ruleSetting = "# 전개 규칙\n정치 음모...",
                 ),
-                story_start_settings = AiStoryStartSettings(
+                storyStartSettings = AiStoryStartSettings(
                     name = "선왕의 장례식 날",
-                    start_situation = "장례식이 끝난 늦은 밤...",
+                    startSituation = "장례식이 끝난 늦은 밤...",
                     prologue = "잿빛 비가 사흘째...",
                 ),
-                story_suggested_inputs = listOf(
+                storySuggestedInputs = listOf(
                     "레이에게 문을 열어준다",
                     "경계하며 누구냐고 묻는다",
                     "침묵한다",

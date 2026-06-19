@@ -14,9 +14,9 @@ class StoryAiClientSerializationTests {
     fun `AI 스토리라인 요청은 snake case 필드명으로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(
             AiStorylinesRequest(
-                genre_tags = listOf("판타지"),
-                protagonist_tags = listOf("기억상실"),
-                supporting_tags = listOf("비밀스러운 조력자"),
+                genreTags = listOf("판타지"),
+                protagonistTags = listOf("기억상실"),
+                supportingTags = listOf("비밀스러운 조력자"),
             ),
         )
 

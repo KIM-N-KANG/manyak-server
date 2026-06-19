@@ -14,5 +14,7 @@ spring:
 manyak:
   ai:
     base-url: http://localhost:8000
+    chat:
+      stub: true
   cors:
     allowed-origins: http://localhost:3000,http://192.168.0.12:3000
