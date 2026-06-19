@@ -7,7 +7,11 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.repository.StoryChoiceRepository
+import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -29,6 +33,8 @@ class ChatService(
     private val storyRepository: StoryRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storyPlaySessionRepository: StoryPlaySessionRepository,
+    private val storyMessageRepository: StoryMessageRepository,
+    private val storyChoiceRepository: StoryChoiceRepository,
 ) {
 
     @Transactional
@@ -55,42 +61,107 @@ class ChatService(
         )
     }
 
-    fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> =
-        request.chatIds.mapIndexed { index, chatId ->
-            ChatSummaryResponse(
-                id = chatId,
-                storyId = index + 1L,
-                storyTitle = if (index % 2 == 0) "호아킨 아카데미의 무속성 신입생" else "왕국의 마지막 편지",
-                lastStoryPreview = if (index % 2 == 0) {
-                    "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다."
-                } else {
-                    "봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다."
-                },
-                updatedAt = Instant.now(),
-            )
+    @Transactional(readOnly = true)
+    fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> {
+        val sessionsById = storyPlaySessionRepository.findAllById(request.chatIds)
+            .associateBy { it.id }
+        // 요청 순서를 보존하고, 존재하지 않는 채팅 ID는 응답에서 제외한다.
+        val sessions = request.chatIds.mapNotNull { sessionsById[it] }
+        if (sessions.isEmpty()) {
+            return emptyList()
         }
 
-    fun getChatDetail(chatId: Long): ChatDetailResponse =
-        ChatDetailResponse(
-            id = chatId,
-            storyId = 1L,
-            storyTitle = "호아킨 아카데미의 무속성 신입생",
-            prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
-            turns = listOf(
+        val titlesByStoryId = storyRepository.findAllById(sessions.map { it.storyId })
+            .associate { it.id to it.title }
+
+        // 세션별 마지막 ASSISTANT 메시지를 한 번의 쿼리로 모아 프리뷰로 사용한다.
+        val lastPreviewBySessionId = storyMessageRepository
+            .findByPlaySessionIdInAndRoleOrderByMessageOrderAsc(sessions.map { it.id }, MessageRole.ASSISTANT)
+            .groupBy { it.playSessionId }
+            .mapValues { (_, messages) -> messages.last().content }
+
+        return sessions.map { session ->
+            ChatSummaryResponse(
+                id = session.id,
+                storyId = session.storyId,
+                storyTitle = titlesByStoryId[session.storyId].orEmpty(),
+                lastStoryPreview = lastPreviewBySessionId[session.id].orEmpty(),
+                updatedAt = session.updatedAt,
+            )
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun getChatDetail(chatId: Long): ChatDetailResponse {
+        val session = storyPlaySessionRepository.findById(chatId)
+            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
+
+        val storyTitle = storyRepository.findById(session.storyId)
+            .map { it.title }
+            .orElse("")
+        val prologue = storyStartSettingRepository.findByStoryId(session.storyId)?.prologue.orEmpty()
+
+        val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
+        val turns = pairTurns(messages)
+
+        val choicesByMessageId = if (turns.isEmpty()) {
+            emptyMap()
+        } else {
+            storyChoiceRepository.findByMessageIdInOrderByChoiceOrderAsc(turns.map { it.id })
+                .groupBy { it.messageId }
+                .mapValues { (_, choices) -> choices.map { it.choiceText } }
+        }
+
+        return ChatDetailResponse(
+            id = session.id,
+            storyId = session.storyId,
+            storyTitle = storyTitle,
+            prologue = prologue,
+            turns = turns.map { assistant ->
                 ChatTurnResponse(
-                    id = 1L,
-                    userInput = "이름은 강진우고 무속성 판정을 받은 호아킨 아카데미 1학년이야.",
-                    aiOutput = "강진우라는 이름이 검사장 한쪽 기록판에 새겨졌다. 무속성이라는 판정은 조용한 웅성거림을 불러왔다.",
-                    createdAt = Instant.now(),
-                ),
-                ChatTurnResponse(
-                    id = 2L,
-                    userInput = "마법수정에서 아무 빛도 나오지 않았지만, 내려가는 순간 수정이 금 가더니 깨져버렸다.",
-                    aiOutput = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. 깨질 리 없는 수정의 파편이 단상 위에서 차갑게 빛났다.",
-                    createdAt = Instant.now(),
-                ),
-            ),
+                    id = assistant.id,
+                    userInput = assistant.userInput,
+                    aiOutput = assistant.content,
+                    choices = choicesByMessageId[assistant.id].orEmpty(),
+                    createdAt = assistant.createdAt,
+                )
+            },
         )
+    }
+
+    /**
+     * 메시지를 messageOrder 순으로 훑으며 USER 입력 직후의 ASSISTANT 응답을 한 턴으로 묶는다.
+     * 짝을 이루지 못한 USER나 SYSTEM 메시지는 턴에서 제외한다. turnId는 ASSISTANT 메시지 id다.
+     */
+    private fun pairTurns(messages: List<StoryMessage>): List<PairedTurn> {
+        val turns = mutableListOf<PairedTurn>()
+        var pendingUser: StoryMessage? = null
+        for (message in messages) {
+            when (message.role) {
+                MessageRole.USER -> pendingUser = message
+                MessageRole.ASSISTANT -> {
+                    pendingUser?.let { user ->
+                        turns += PairedTurn(
+                            id = message.id,
+                            userInput = user.content,
+                            content = message.content,
+                            createdAt = message.createdAt,
+                        )
+                    }
+                    pendingUser = null
+                }
+                MessageRole.SYSTEM -> Unit
+            }
+        }
+        return turns
+    }
+
+    private data class PairedTurn(
+        val id: Long,
+        val userInput: String,
+        val content: String,
+        val createdAt: Instant,
+    )
 
     fun streamChatTurn(
         chatId: Long,
