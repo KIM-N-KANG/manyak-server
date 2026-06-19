@@ -135,7 +135,7 @@ class SimpleStoryCreationService(
                 SimpleStorylineResponse(
                     id = example.id,
                     story = example.exampleText,
-                    recommendedInfos = recommendedInfos.getValue(example.id).map { info ->
+                    recommendedInfos = recommendedInfos[example.id].orEmpty().map { info ->
                         SimpleStoryRecommendedInfoResponse(
                             id = info.id,
                             text = info.infoText,

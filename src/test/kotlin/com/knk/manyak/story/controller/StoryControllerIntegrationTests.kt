@@ -173,6 +173,30 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `AI가 추천 추가 정보를 비워 응답해도 빈 목록으로 스토리라인을 생성한다`() {
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        storyAiClient.emptyRecommendedInfos = true
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "selectedTagIds": [${genre.id}]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.storylines.length()").isEqualTo(3)
+            .jsonPath("$.storylines[0].recommendedInfos.length()").isEqualTo(0)
+
+        check(recommendedInfoRepository.count() == 0L)
+    }
+
+    @Test
     fun `직접 추가 태그만으로 스토리라인을 생성한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
@@ -531,6 +555,7 @@ class StoryControllerIntegrationTests {
         var lastCompileRequest: AiStoryCompileRequest? = null
             private set
         var fail: Boolean = false
+        var emptyRecommendedInfos: Boolean = false
         var compileFail: Boolean = false
         var compileTitle: String = "잿빛 왕관"
         var compileOneLineIntro: String = "무너진 왕국에서 진실을 좇는다."
@@ -551,7 +576,11 @@ class StoryControllerIntegrationTests {
                     AiStoryItem(
                         id = index,
                         story = "생성 스토리 $index",
-                        recommendedInfos = (1..3).map { infoIndex -> "추가 정보 $index-$infoIndex" },
+                        recommendedInfos = if (emptyRecommendedInfos) {
+                            emptyList()
+                        } else {
+                            (1..3).map { infoIndex -> "추가 정보 $index-$infoIndex" }
+                        },
                     )
                 },
             )
@@ -593,6 +622,7 @@ class StoryControllerIntegrationTests {
             lastRequest = null
             lastCompileRequest = null
             fail = false
+            emptyRecommendedInfos = false
             compileFail = false
             compileTitle = "잿빛 왕관"
             compileOneLineIntro = "무너진 왕국에서 진실을 좇는다."
