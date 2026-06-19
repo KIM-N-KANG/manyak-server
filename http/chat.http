@@ -5,6 +5,13 @@
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
+###
+### 채팅 이어쓰기(11~15)의 AI 연동 모드:
+###   - 스텁(기본 local 프로필): manyak.ai.chat.stub=true — AI 없이 고정 응답을 스트리밍.
+###   - 실연동(RestChatTurnAiClient): manyak.ai.chat.stub=false + MANYAK_AI_BASE_URL=<manyak-ai 주소>
+###     로 띄우면 manyak-ai의 POST /api/v1/chat/turns(SSE)를 호출해 실제 token을 1:1 중계합니다.
+###     실행 예: MANYAK_AI_BASE_URL=http://localhost:8000 manyak_ai_chat_stub=false ./gradlew bootRun
+###     (백엔드→클라이언트 SSE 계약은 두 모드가 동일합니다. 토큰의 출처만 다릅니다.)
 
 @baseUrl = http://localhost:8080
 
@@ -196,7 +203,7 @@ Accept: application/json
 # 3번을 먼저 실행해야 chatId 변수가 설정됩니다.
 # 세션 404 검증 → 재료 조립(genre·story_settings·start_settings·history·summary) →
 #   started → token… → completed 순서로 SSE 전송. completed 시점에만 USER+ASSISTANT+choices를
-#   원자적으로 저장하고 current_turn을 1 올립니다. (AI는 manyak.ai.chat.stub=true 스텁 사용)
+#   원자적으로 저장하고 current_turn을 1 올립니다. (AI 연동 모드는 파일 상단 안내 참고)
 #
 # ▶ IntelliJ HTTP Client는 응답 패널에 SSE 이벤트를 순서대로 펼쳐 보여줍니다.
 #   다음을 눈으로 확인하세요:
@@ -204,6 +211,11 @@ Accept: application/json
 #     - event: token      data: {"text":"검"} … (여러 청크)
 #     - event: completed data: {"chatId":<chatId>,"turnId":<n>,"aiOutput":"…","choices":[…]}
 #   저장 결과(턴 1건 추가, choices, current_turn 증가)는 11번 실행 후 7번을 다시 실행해 확인합니다.
+#
+#   ▶ 실연동(stub=false) 추가 확인:
+#     - token이 manyak-ai가 실제로 생성한 본문 청크인지(스텁 고정 문구가 아님).
+#     - AI가 오류를 내면 백엔드가 가공 없이 relay: event: error data: {"code":"<AI코드>","message":"<AI메시지>"}
+#       (백엔드 자체 오류는 code가 AI_STREAM_FAILED로 나옵니다.)
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
 Content-Type: application/json
 Accept: text/event-stream, application/json
