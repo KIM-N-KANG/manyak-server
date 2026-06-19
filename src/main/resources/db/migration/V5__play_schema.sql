@@ -45,3 +45,4 @@ CREATE TABLE story_choices (
 );
 
 CREATE INDEX idx_story_choices_message ON story_choices(message_id);
+CREATE INDEX idx_story_choices_play_session ON story_choices(play_session_id);

@@ -45,6 +45,19 @@ class PlayDomainRepositoryTests {
     }
 
     @Test
+    fun `세션 수정 시 updatedAt이 자동으로 갱신된다`() {
+        val session = newSession()
+        val originalUpdatedAt = session.updatedAt
+
+        Thread.sleep(10)
+        session.title = "갱신된 제목"
+        playSessionRepository.saveAndFlush(session)
+
+        val found = playSessionRepository.findById(session.id).orElseThrow()
+        assertTrue(found.updatedAt.isAfter(originalUpdatedAt))
+    }
+
+    @Test
     fun `세션 메시지를 message_order 오름차순으로 조회한다`() {
         val session = newSession()
         messageRepository.save(message(session.id, MessageRole.ASSISTANT, "둘째", order = 2))
