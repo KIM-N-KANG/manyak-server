@@ -38,7 +38,7 @@ class ChatController(
 
     @Operation(
         summary = "채팅 생성",
-        description = "스토리에서 채팅을 시작하고 첫 프롤로그와 캐릭터 설정 안내 문구를 반환합니다.",
+        description = "스토리에서 채팅을 시작하고 시작 프롤로그를 반환합니다.",
     )
     @ApiResponses(
         value = [
@@ -99,7 +99,7 @@ class ChatController(
 
     @Operation(
         summary = "채팅 상세 조회",
-        description = "프롤로그, 캐릭터 설정 안내, 지금까지의 사용자 입력과 AI 이어쓰기 결과를 조회합니다.",
+        description = "프롤로그와 지금까지의 사용자 입력, AI 이어쓰기 결과를 조회합니다.",
     )
     @ApiResponses(
         value = [

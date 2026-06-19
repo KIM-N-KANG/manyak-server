@@ -4,11 +4,13 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
 @Schema(description = "채팅 생성 요청")
 data class CreateChatRequest(
+    @field:Positive
     @field:Schema(description = "채팅을 시작할 스토리 ID", example = "1")
     val storyId: Long,
 )
@@ -26,12 +28,6 @@ data class CreateChatResponse(
         example = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
     )
     val prologue: String,
-
-    @field:Schema(
-        description = "첫 입력 안내 문구",
-        example = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요. 이후 입력은 이야기 전개에 반영됩니다.",
-    )
-    val guideMessage: String,
 
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:00:00Z")
     val createdAt: Instant,
@@ -85,9 +81,6 @@ data class ChatDetailResponse(
         example = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
     )
     val prologue: String,
-
-    @field:Schema(description = "첫 입력 안내 문구", example = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요.")
-    val guideMessage: String,
 
     @field:Schema(
         description = "채팅 진행 턴 목록",

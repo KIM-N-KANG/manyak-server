@@ -7,8 +7,15 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.server.ResponseStatusException
+import org.springframework.http.HttpStatus
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
@@ -19,16 +26,34 @@ import java.util.concurrent.atomic.AtomicReference
 class ChatService(
     @Qualifier("chatSseExecutor")
     private val chatSseExecutor: Executor,
+    private val storyRepository: StoryRepository,
+    private val storyStartSettingRepository: StoryStartSettingRepository,
+    private val storyPlaySessionRepository: StoryPlaySessionRepository,
 ) {
 
-    fun createChat(request: CreateChatRequest): CreateChatResponse =
-        CreateChatResponse(
-            id = 10L,
-            storyId = request.storyId,
-            prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
-            guideMessage = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요. 이후 입력은 이야기 전개에 반영됩니다.",
-            createdAt = Instant.now(),
+    @Transactional
+    fun createChat(request: CreateChatRequest): CreateChatResponse {
+        // 시작 설정은 stories에 FK가 걸려 있어 존재하면 스토리도 반드시 존재한다.
+        // 따라서 시작 설정을 먼저 조회하고, 없을 때만 스토리 존재 여부를 확인해 불필요한 조회를 줄인다.
+        val startSetting = storyStartSettingRepository.findByStoryId(request.storyId)
+        if (startSetting == null && !storyRepository.existsById(request.storyId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
+
+        val session = storyPlaySessionRepository.save(
+            StoryPlaySession(
+                storyId = request.storyId,
+                startSettingId = startSetting?.id,
+            ),
         )
+
+        return CreateChatResponse(
+            id = session.id,
+            storyId = session.storyId,
+            prologue = startSetting?.prologue.orEmpty(),
+            createdAt = session.createdAt,
+        )
+    }
 
     fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> =
         request.chatIds.mapIndexed { index, chatId ->
@@ -51,7 +76,6 @@ class ChatService(
             storyId = 1L,
             storyTitle = "호아킨 아카데미의 무속성 신입생",
             prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
-            guideMessage = "이름, 성향, 능력치, 배경 등 캐릭터 설정을 자유롭게 입력해주세요.",
             turns = listOf(
                 ChatTurnResponse(
                     id = 1L,
