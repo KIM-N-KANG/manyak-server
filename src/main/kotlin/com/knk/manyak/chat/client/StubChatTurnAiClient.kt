@@ -26,7 +26,7 @@ class StubChatTurnAiClient : ChatTurnAiClient {
     }
 
     private fun buildAiOutput(request: ChatTurnAiRequest): String {
-        val echoed = request.user_input.trim().take(USER_INPUT_PREVIEW_LENGTH)
+        val echoed = request.userInput.trim().take(USER_INPUT_PREVIEW_LENGTH)
         return "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. " +
             "\"$echoed\" 그 한마디가 공기를 가르자 모두의 시선이 한곳으로 모였다. " +
             "이야기는 멈추지 않고 다음 장면으로 이어졌다."

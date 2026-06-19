@@ -1,5 +1,7 @@
 package com.knk.manyak.chat.client
 
+import com.fasterxml.jackson.annotation.JsonProperty
+
 /**
  * 백엔드 → AI 서비스 채팅 턴 생성 계약.
  *
@@ -19,30 +21,36 @@ interface ChatTurnAiClient {
 }
 
 /**
- * 채팅 턴 생성 요청. AI 계약에 맞춰 snake_case로 직렬화한다.
+ * 채팅 턴 생성 요청. 프로퍼티명은 camelCase로 두고, AI 계약에 맞춰
+ * JSON 필드명만 [JsonProperty]로 snake_case에 매핑한다.
  *
- * 오프닝은 [start_settings]로만 전달하며 [history]에는 포함하지 않는다.
+ * 오프닝은 [startSettings]로만 전달하며 [history]에는 포함하지 않는다.
  */
 data class ChatTurnAiRequest(
     val genre: String,
-    val story_settings: ChatTurnStorySettings,
-    val start_settings: ChatTurnStartSettings,
+    @JsonProperty("story_settings")
+    val storySettings: ChatTurnStorySettings,
+    @JsonProperty("start_settings")
+    val startSettings: ChatTurnStartSettings,
     val history: List<ChatHistoryMessage>,
-    val user_input: String,
+    @JsonProperty("user_input")
+    val userInput: String,
     val summary: String,
 )
 
 data class ChatTurnStorySettings(
     val world: String,
     val character: String,
-    val user_role: String,
+    @JsonProperty("user_role")
+    val userRole: String,
     val rule: String,
 )
 
 data class ChatTurnStartSettings(
     val name: String,
     val prologue: String,
-    val start_situation: String,
+    @JsonProperty("start_situation")
+    val startSituation: String,
 )
 
 /** 과거 대화 한 턴. role은 대문자(USER/ASSISTANT)로 직렬화한다. */

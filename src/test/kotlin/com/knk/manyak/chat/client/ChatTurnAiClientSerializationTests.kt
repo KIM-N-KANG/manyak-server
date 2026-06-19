@@ -57,22 +57,22 @@ class ChatTurnAiClientSerializationTests {
     private fun sampleRequest() =
         ChatTurnAiRequest(
             genre = "판타지",
-            story_settings = ChatTurnStorySettings(
+            storySettings = ChatTurnStorySettings(
                 world = "마법 아카데미가 존재하는 세계",
                 character = "강진우, 무속성 판정을 받은 1학년",
-                user_role = "무속성 신입생",
+                userRole = "무속성 신입생",
                 rule = "마법은 속성 발현으로만 사용할 수 있다.",
             ),
-            start_settings = ChatTurnStartSettings(
+            startSettings = ChatTurnStartSettings(
                 name = "강진우",
                 prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.",
-                start_situation = "적성 검사가 시작된다.",
+                startSituation = "적성 검사가 시작된다.",
             ),
             history = listOf(
                 ChatHistoryMessage(ChatMessageRole.USER, "이름은 강진우야."),
                 ChatHistoryMessage(ChatMessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다."),
             ),
-            user_input = "마법수정에 손을 올린다.",
+            userInput = "마법수정에 손을 올린다.",
             summary = "",
         )
 }

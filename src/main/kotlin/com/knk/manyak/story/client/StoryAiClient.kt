@@ -1,5 +1,6 @@
 package com.knk.manyak.story.client
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
@@ -15,11 +16,14 @@ interface StoryAiClient {
 }
 
 data class AiStorylinesRequest(
-    val genre_tags: List<String>,
+    @JsonProperty("genre_tags")
+    val genreTags: List<String>,
 
-    val protagonist_tags: List<String>,
+    @JsonProperty("protagonist_tags")
+    val protagonistTags: List<String>,
 
-    val supporting_tags: List<String>,
+    @JsonProperty("supporting_tags")
+    val supportingTags: List<String>,
 )
 
 data class AiStorylinesResponse(
@@ -33,43 +37,57 @@ data class AiStoryItem(
 )
 
 data class AiStoryCompileRequest(
-    val genre_tags: List<String>,
+    @JsonProperty("genre_tags")
+    val genreTags: List<String>,
 
-    val protagonist_tags: List<String>,
+    @JsonProperty("protagonist_tags")
+    val protagonistTags: List<String>,
 
-    val supporting_tags: List<String>,
+    @JsonProperty("supporting_tags")
+    val supportingTags: List<String>,
 
-    val selected_storyline: String,
+    @JsonProperty("selected_storyline")
+    val selectedStoryline: String,
 
-    val extra_info: String,
+    @JsonProperty("extra_info")
+    val extraInfo: String,
 )
 
 data class AiStoryCompileResponse(
     val stories: AiStoryMeta,
 
-    val story_settings: AiStorySettings,
+    @JsonProperty("story_settings")
+    val storySettings: AiStorySettings,
 
-    val story_start_settings: AiStoryStartSettings,
+    @JsonProperty("story_start_settings")
+    val storyStartSettings: AiStoryStartSettings,
 
-    val story_suggested_inputs: List<String>,
+    @JsonProperty("story_suggested_inputs")
+    val storySuggestedInputs: List<String>,
 )
 
 data class AiStoryMeta(
     val title: String,
-    val one_line_intro: String,
+    @JsonProperty("one_line_intro")
+    val oneLineIntro: String,
     val description: String,
 )
 
 data class AiStorySettings(
-    val world_setting: String,
-    val character_setting: String,
-    val user_role_setting: String,
-    val rule_setting: String,
+    @JsonProperty("world_setting")
+    val worldSetting: String,
+    @JsonProperty("character_setting")
+    val characterSetting: String,
+    @JsonProperty("user_role_setting")
+    val userRoleSetting: String,
+    @JsonProperty("rule_setting")
+    val ruleSetting: String,
 )
 
 data class AiStoryStartSettings(
     val name: String,
-    val start_situation: String,
+    @JsonProperty("start_situation")
+    val startSituation: String,
     val prologue: String,
 )
 

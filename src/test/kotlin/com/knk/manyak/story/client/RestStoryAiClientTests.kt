@@ -51,9 +51,9 @@ class RestStoryAiClientTests {
         val port = requireNotNull(server).address.port
         val response = RestStoryAiClient("http://localhost:$port").createStorylines(
             AiStorylinesRequest(
-                genre_tags = listOf("판타지"),
-                protagonist_tags = listOf("기억상실"),
-                supporting_tags = listOf("비밀스러운 조력자"),
+                genreTags = listOf("판타지"),
+                protagonistTags = listOf("기억상실"),
+                supportingTags = listOf("비밀스러운 조력자"),
             ),
         )
 
@@ -86,9 +86,9 @@ class RestStoryAiClientTests {
         assertFailsWith<RestClientException> {
             client.createStorylines(
                 AiStorylinesRequest(
-                    genre_tags = listOf("판타지"),
-                    protagonist_tags = emptyList(),
-                    supporting_tags = emptyList(),
+                    genreTags = listOf("판타지"),
+                    protagonistTags = emptyList(),
+                    supportingTags = emptyList(),
                 ),
             )
         }

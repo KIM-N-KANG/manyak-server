@@ -40,19 +40,19 @@ class StubChatTurnAiClientTests {
     private fun request(userInput: String) =
         ChatTurnAiRequest(
             genre = "판타지",
-            story_settings = ChatTurnStorySettings(
+            storySettings = ChatTurnStorySettings(
                 world = "마법 아카데미",
                 character = "강진우",
-                user_role = "신입생",
+                userRole = "신입생",
                 rule = "마법은 속성 발현으로만 사용한다.",
             ),
-            start_settings = ChatTurnStartSettings(
+            startSettings = ChatTurnStartSettings(
                 name = "강진우",
                 prologue = "입학식 전 적성 검사.",
-                start_situation = "검사가 시작된다.",
+                startSituation = "검사가 시작된다.",
             ),
             history = emptyList(),
-            user_input = userInput,
+            userInput = userInput,
             summary = "",
         )
 }

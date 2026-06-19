@@ -172,11 +172,11 @@ class SimpleStoryCreationService(
             .filter { it.tagType == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val aiRequest = AiStoryCompileRequest(
-            genre_tags = genreTags.map { it.name },
-            protagonist_tags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supporting_tags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
-            selected_storyline = selectedStoryline.exampleText,
-            extra_info = request.additionalInfos.joinToString(separator = "\n"),
+            genreTags = genreTags.map { it.name },
+            protagonistTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            selectedStoryline = selectedStoryline.exampleText,
+            extraInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
         val aiResponse = try {
@@ -201,7 +201,7 @@ class SimpleStoryCreationService(
                 Story(
                     userId = lockedSession.userId,
                     title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
-                    oneLineIntro = aiResponse.stories.one_line_intro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
+                    oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,
                     genre = genre,
                 ),
@@ -209,22 +209,22 @@ class SimpleStoryCreationService(
             storySettingRepository.save(
                 StorySetting(
                     story = story,
-                    worldSetting = aiResponse.story_settings.world_setting,
-                    characterSetting = aiResponse.story_settings.character_setting,
-                    userRoleSetting = aiResponse.story_settings.user_role_setting,
-                    ruleSetting = aiResponse.story_settings.rule_setting,
+                    worldSetting = aiResponse.storySettings.worldSetting,
+                    characterSetting = aiResponse.storySettings.characterSetting,
+                    userRoleSetting = aiResponse.storySettings.userRoleSetting,
+                    ruleSetting = aiResponse.storySettings.ruleSetting,
                 ),
             )
             val startSetting = storyStartSettingRepository.save(
                 StoryStartSetting(
                     story = story,
-                    name = aiResponse.story_start_settings.name,
-                    prologue = aiResponse.story_start_settings.prologue,
-                    startSituation = aiResponse.story_start_settings.start_situation,
+                    name = aiResponse.storyStartSettings.name,
+                    prologue = aiResponse.storyStartSettings.prologue,
+                    startSituation = aiResponse.storyStartSettings.startSituation,
                 ),
             )
             storySuggestedInputRepository.saveAll(
-                aiResponse.story_suggested_inputs.mapIndexed { index, inputText ->
+                aiResponse.storySuggestedInputs.mapIndexed { index, inputText ->
                     StorySuggestedInput(
                         startSetting = startSetting,
                         inputText = inputText,
@@ -244,9 +244,9 @@ class SimpleStoryCreationService(
                 description = story.description,
                 genres = genreTags.map { it.name },
                 startSetting = SimpleStoryStartSettingResponse(
-                    name = aiResponse.story_start_settings.name,
-                    prologue = aiResponse.story_start_settings.prologue,
-                    startSituation = aiResponse.story_start_settings.start_situation,
+                    name = aiResponse.storyStartSettings.name,
+                    prologue = aiResponse.storyStartSettings.prologue,
+                    startSituation = aiResponse.storyStartSettings.startSituation,
                 ),
             )
         } ?: throw IllegalStateException("Story creation transaction result is empty")
@@ -274,9 +274,9 @@ class SimpleStoryCreationService(
 
     private fun List<StoryCreationTagDraft>.toAiStorylinesRequest(): AiStorylinesRequest =
         AiStorylinesRequest(
-            genre_tags = filter { it.tagType == SimpleStoryTagCategory.GENRE }.map { it.name },
-            protagonist_tags = filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supporting_tags = filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            genreTags = filter { it.tagType == SimpleStoryTagCategory.GENRE }.map { it.name },
+            protagonistTags = filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
         )
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
