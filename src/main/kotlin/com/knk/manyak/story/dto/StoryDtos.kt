@@ -98,12 +98,11 @@ data class StoryDetailResponse(
     @field:Schema(description = "상세 소개", example = "계약 마법이 지배하는 왕국에서 잃어버린 기억과 사라진 가족의 비밀을 추적하는 인터랙티브 판타지입니다.")
     val detailedIntroduction: String?,
 
-    @field:Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]""")
     @field:ArraySchema(
-        schema = Schema(implementation = StoryGenre::class),
-        arraySchema = Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]"""),
+        schema = Schema(description = "장르명", example = "다크 판타지"),
+        arraySchema = Schema(description = "장르명 목록. 제작 시 선택한 장르 태그명입니다.", example = """["다크 판타지","정치극"]"""),
     )
-    val genres: List<StoryGenre>,
+    val genres: List<String>,
 
     @field:ArraySchema(
         schema = Schema(description = "해시태그", example = "마법"),
