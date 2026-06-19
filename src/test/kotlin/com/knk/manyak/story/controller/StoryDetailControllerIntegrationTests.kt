@@ -33,9 +33,9 @@ class StoryDetailControllerIntegrationTests {
 
     @BeforeEach
     fun setUp() {
-        storySuggestedInputRepository.deleteAll()
-        storyStartSettingRepository.deleteAll()
-        storyRepository.deleteAll()
+        storySuggestedInputRepository.deleteAllInBatch()
+        storyStartSettingRepository.deleteAllInBatch()
+        storyRepository.deleteAllInBatch()
     }
 
     @Test

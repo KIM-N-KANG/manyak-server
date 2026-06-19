@@ -10,6 +10,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -35,8 +36,8 @@ class StoryService(
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: Long): StoryDetailResponse {
-        val story = storyRepository.findById(storyId)
-            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.") }
+        val story = storyRepository.findByIdOrNull(storyId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
 
         val startSetting = storyStartSettingRepository.findByStoryId(storyId)
         val recommendedInputs = startSetting
