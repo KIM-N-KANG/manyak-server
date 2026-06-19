@@ -71,13 +71,14 @@ class StoryDetailControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.id").isEqualTo(story.id)
             .jsonPath("$.title").isEqualTo("잿빛 왕관")
-            .jsonPath("$.shortDescription").isEqualTo("무너진 왕국에서 진실을 좇는다.")
-            .jsonPath("$.detailedIntroduction").isEqualTo("역병과 반란으로 무너진 아르덴 왕국 이야기.")
+            .jsonPath("$.oneLineIntro").isEqualTo("무너진 왕국에서 진실을 좇는다.")
+            .jsonPath("$.description").isEqualTo("역병과 반란으로 무너진 아르덴 왕국 이야기.")
             .jsonPath("$.genres.length()").isEqualTo(2)
             .jsonPath("$.genres[0]").isEqualTo("다크 판타지")
             .jsonPath("$.genres[1]").isEqualTo("정치극")
-            .jsonPath("$.startSituationName").isEqualTo("선왕의 장례식 날")
-            .jsonPath("$.conversationPrologue").isEqualTo("잿빛 비가 사흘째 왕성을 적신다.")
+            .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
+            .jsonPath("$.startSetting.prologue").isEqualTo("잿빛 비가 사흘째 왕성을 적신다.")
+            .jsonPath("$.startSetting.startSituation").isEqualTo("장례식이 끝난 늦은 밤, 기사단 숙소.")
             .jsonPath("$.recommendedInputs.length()").isEqualTo(3)
             .jsonPath("$.recommendedInputs[0]").isEqualTo("레이에게 문을 열어준다")
             .jsonPath("$.recommendedInputs[2]").isEqualTo("침묵한다")
@@ -120,8 +121,7 @@ class StoryDetailControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.title").isEqualTo("설정 미완 스토리")
             .jsonPath("$.genres.length()").isEqualTo(0)
-            .jsonPath("$.startSituationName").isEqualTo("")
-            .jsonPath("$.conversationPrologue").isEqualTo("")
+            .jsonPath("$.startSetting").isEmpty
             .jsonPath("$.recommendedInputs.length()").isEqualTo(0)
     }
 }

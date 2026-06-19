@@ -58,9 +58,9 @@ Accept: application/json
     });
 
     if (genre && protagonist && supportingCharacter) {
-        client.global.set("genreTagId", genre.tagId);
-        client.global.set("protagonistTagId", protagonist.tagId);
-        client.global.set("supportingCharacterTagId", supportingCharacter.tagId);
+        client.global.set("genreTagId", genre.id);
+        client.global.set("protagonistTagId", protagonist.id);
+        client.global.set("supportingCharacterTagId", supportingCharacter.id);
     }
 %}
 
@@ -220,7 +220,8 @@ Accept: application/json
 > {%
     client.test("최종 스토리 생성 응답이 정상이다", () => {
         client.assert(response.status === 201, `201 Created가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
-        client.assert(Boolean(response.body.storyId), "storyId가 없습니다.");
+        client.assert(Boolean(response.body.id), "id가 없습니다.");
+        client.assert(response.body.storyId === undefined, "storyId는 id로 통일되어 제거되어야 합니다.");
         client.assert(Boolean(response.body.title), "title이 없습니다.");
         client.assert(Array.isArray(response.body.genres), "genres 배열이 없습니다.");
         client.assert(Boolean(response.body.startSetting && response.body.startSetting.name), "startSetting.name이 없습니다.");

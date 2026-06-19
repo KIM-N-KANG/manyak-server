@@ -16,7 +16,7 @@ data class CreateChatRequest(
 @Schema(description = "채팅 생성 응답")
 data class CreateChatResponse(
     @field:Schema(description = "채팅 ID. 클라이언트는 이 값을 로컬스토리지에 저장해 이전 채팅 목록 구성에 사용합니다.", example = "10")
-    val chatId: Long,
+    val id: Long,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -54,7 +54,7 @@ data class BatchChatRequest(
 @Schema(description = "채팅 목록 항목")
 data class ChatSummaryResponse(
     @field:Schema(description = "채팅 ID", example = "10")
-    val chatId: Long,
+    val id: Long,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -72,7 +72,7 @@ data class ChatSummaryResponse(
 @Schema(description = "채팅 상세 응답")
 data class ChatDetailResponse(
     @field:Schema(description = "채팅 ID", example = "10")
-    val chatId: Long,
+    val id: Long,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -91,7 +91,7 @@ data class ChatDetailResponse(
 
     @field:Schema(
         description = "채팅 진행 턴 목록",
-        example = """[{"turnId":1,"userInput":"이름은 강진우고 무속성 판정을 받은 호아킨 아카데미 1학년이야.","aiOutput":"강진우라는 이름이 검사장 한쪽 기록판에 새겨졌다. 무속성이라는 판정은 조용한 웅성거림을 불러왔다.","createdAt":"2026-06-12T12:05:00Z"},{"turnId":2,"userInput":"마법수정에서 아무 빛도 나오지 않았지만, 내려가는 순간 수정이 금 가더니 깨져버렸다.","aiOutput":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. 깨질 리 없는 수정의 파편이 단상 위에서 차갑게 빛났다.","createdAt":"2026-06-12T12:10:00Z"}]""",
+        example = """[{"id":1,"userInput":"이름은 강진우고 무속성 판정을 받은 호아킨 아카데미 1학년이야.","aiOutput":"강진우라는 이름이 검사장 한쪽 기록판에 새겨졌다. 무속성이라는 판정은 조용한 웅성거림을 불러왔다.","createdAt":"2026-06-12T12:05:00Z"},{"id":2,"userInput":"마법수정에서 아무 빛도 나오지 않았지만, 내려가는 순간 수정이 금 가더니 깨져버렸다.","aiOutput":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. 깨질 리 없는 수정의 파편이 단상 위에서 차갑게 빛났다.","createdAt":"2026-06-12T12:10:00Z"}]""",
     )
     @field:ArraySchema(
         schema = Schema(implementation = ChatTurnResponse::class),
@@ -103,7 +103,7 @@ data class ChatDetailResponse(
 @Schema(description = "채팅 진행 턴")
 data class ChatTurnResponse(
     @field:Schema(description = "턴 ID", example = "1")
-    val turnId: Long,
+    val id: Long,
 
     @field:Schema(
         description = "사용자 입력. 캐릭터 프로필 설정, 다음 행동, 대사, 분위기, 감정, 연출 방향 등을 자연어로 입력할 수 있습니다.",

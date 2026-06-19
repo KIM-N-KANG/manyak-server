@@ -51,9 +51,9 @@ Accept: application/json
 > {%
     client.test("최종 스토리 생성이 성공한다", () => {
         client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
-        client.assert(Boolean(response.body.storyId), "storyId가 없습니다.");
+        client.assert(Boolean(response.body.id), "id가 없습니다.");
     });
-    client.global.set("storyId", response.body.storyId);
+    client.global.set("storyId", response.body.id);
 %}
 
 ### 3. 스토리 상세 조회 (핵심 검증)
@@ -68,7 +68,7 @@ Accept: application/json
     client.test("표시 메타가 채워져 있다", () => {
         client.assert(b.id !== undefined, "id가 없습니다.");
         client.assert(Boolean(b.title), "title이 없습니다.");
-        client.assert(typeof b.shortDescription === "string", "shortDescription이 없습니다.");
+        client.assert(typeof b.oneLineIntro === "string", "oneLineIntro가 없습니다.");
     });
     client.test("genres가 한글 문자열 배열이다", () => {
         client.assert(Array.isArray(b.genres), "genres가 배열이 아닙니다.");
@@ -76,7 +76,7 @@ Accept: application/json
         client.assert(b.genres.indexOf("정치극") >= 0, `genres에 '정치극'이 없습니다. actual=${JSON.stringify(b.genres)}`);
     });
     client.test("시작 정보와 추천 입력이 있다", () => {
-        client.assert(Boolean(b.startSituationName), "startSituationName이 없습니다.");
+        client.assert(b.startSetting && Boolean(b.startSetting.name), "startSetting.name이 없습니다.");
         client.assert(Array.isArray(b.recommendedInputs) && b.recommendedInputs.length > 0, "recommendedInputs가 비어 있습니다.");
     });
     client.test("MVP 기본값이 계약대로다", () => {

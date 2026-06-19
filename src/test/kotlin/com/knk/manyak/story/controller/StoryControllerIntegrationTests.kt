@@ -349,7 +349,8 @@ class StoryControllerIntegrationTests {
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.storyId").isNumber
+            .jsonPath("$.id").isNumber
+            .jsonPath("$.storyId").doesNotExist()
             .jsonPath("$.title").isEqualTo("잿빛 왕관")
             .jsonPath("$.genres.length()").isEqualTo(2)
             .jsonPath("$.genres[0]").isEqualTo("다크 판타지")
