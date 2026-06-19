@@ -14,7 +14,6 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
-import java.time.Instant
 
 @Service
 class StoryService(
@@ -23,15 +22,13 @@ class StoryService(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
 ) {
 
-    fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> =
-        request.storyIds.mapIndexed { index, storyId ->
-            sampleStory(
-                id = storyId,
-                genre = if (index % 2 == 0) "판타지" else "미스터리",
-                status = StoryStatus.PUBLISHED,
-                title = if (index % 2 == 0) "달빛 아래의 계약" else "왕국의 마지막 편지",
-            )
-        }
+    @Transactional(readOnly = true)
+    fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
+        val storiesById = storyRepository.findAllById(request.storyIds).associateBy { it.id }
+        return request.storyIds.distinct()
+            .mapNotNull { storiesById[it] }
+            .map { it.toSummaryResponse() }
+    }
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: Long): StoryDetailResponse {
@@ -71,21 +68,16 @@ class StoryService(
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    private fun sampleStory(
-        id: Long,
-        genre: String,
-        status: StoryStatus,
-        title: String = "달빛 아래의 계약",
-    ): StorySummaryResponse =
+    private fun Story.toSummaryResponse(): StorySummaryResponse =
         StorySummaryResponse(
             id = id,
             title = title,
-            summary = "기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기",
-            genres = listOf(genre),
+            summary = oneLineIntro.orEmpty(),
+            genres = toGenreNames(),
             authorNickname = null,
-            chatCount = 128,
-            likeCount = 32,
-            status = status,
-            createdAt = Instant.now(),
+            chatCount = 0,
+            likeCount = 0,
+            status = StoryStatus.PUBLISHED,
+            createdAt = createdAt,
         )
 }
