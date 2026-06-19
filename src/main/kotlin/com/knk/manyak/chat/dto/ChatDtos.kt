@@ -150,6 +150,12 @@ data class ChatStreamCompletedEvent(
 
     @field:Schema(description = "이번 턴에서 최종 저장된 AI 출력 전체", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
     val aiOutput: String,
+
+    @field:ArraySchema(
+        schema = Schema(description = "다음 행동 선택지", example = "주변을 살핀다."),
+        arraySchema = Schema(description = "이번 턴에서 AI가 제안한 다음 행동 선택지 목록"),
+    )
+    val choices: List<String>,
 )
 
 @Schema(description = "SSE 오류 이벤트 예시")
