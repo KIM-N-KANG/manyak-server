@@ -7,17 +7,6 @@ import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
-@Schema(description = "스토리 장르")
-enum class StoryGenre {
-    FANTASY,
-    ROMANCE,
-    THRILLER,
-    MYSTERY,
-    SF,
-    DAILY,
-    OTHER,
-}
-
 @Schema(description = "스토리 공개 상태")
 enum class StoryVisibility {
     PUBLIC,
@@ -58,12 +47,11 @@ data class StorySummaryResponse(
     @field:Schema(description = "한 줄 소개", example = "기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기")
     val summary: String,
 
-    @field:Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]""")
     @field:ArraySchema(
-        schema = Schema(implementation = StoryGenre::class),
-        arraySchema = Schema(description = "장르 목록", example = """["FANTASY","MYSTERY"]"""),
+        schema = Schema(description = "장르명", example = "판타지"),
+        arraySchema = Schema(description = "장르명 목록", example = """["판타지","미스터리"]"""),
     )
-    val genres: List<StoryGenre>,
+    val genres: List<String>,
 
     @field:Schema(description = "작성자 닉네임. 작성자가 없는 스토리는 비어 있을 수 있습니다.", example = "manyak_writer", nullable = true)
     val authorNickname: String?,

@@ -2,7 +2,6 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.StoryDetailResponse
-import com.knk.manyak.story.dto.StoryGenre
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.StoryVisibility
@@ -28,7 +27,7 @@ class StoryService(
         request.storyIds.mapIndexed { index, storyId ->
             sampleStory(
                 id = storyId,
-                genre = if (index % 2 == 0) StoryGenre.FANTASY else StoryGenre.MYSTERY,
+                genre = if (index % 2 == 0) "판타지" else "미스터리",
                 status = StoryStatus.PUBLISHED,
                 title = if (index % 2 == 0) "달빛 아래의 계약" else "왕국의 마지막 편지",
             )
@@ -74,7 +73,7 @@ class StoryService(
 
     private fun sampleStory(
         id: Long,
-        genre: StoryGenre,
+        genre: String,
         status: StoryStatus,
         title: String = "달빛 아래의 계약",
     ): StorySummaryResponse =
