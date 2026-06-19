@@ -58,6 +58,22 @@ class RestChatTurnAiClientTests {
     }
 
     @Test
+    fun `completed에 choices가 없으면 빈 목록으로 처리한다`() {
+        server.enqueue(sseResponse(
+            """
+            event: completed
+            data: {"aiOutput":"choices 없는 응답"}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val result = client().streamTurn(sampleRequest(), onToken = {})
+
+        assertEquals("choices 없는 응답", result.aiOutput)
+        assertEquals(emptyList(), result.choices)
+    }
+
+    @Test
     fun `error 이벤트를 ChatTurnAiException으로 변환한다`() {
         server.enqueue(sseResponse(
             """

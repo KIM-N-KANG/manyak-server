@@ -56,7 +56,10 @@ class RestChatTurnAiClient(
                         EVENT_TOKEN -> onToken(read(event.data(), TokenData::class.java).text)
                         EVENT_COMPLETED -> {
                             val data = read(event.data(), CompletedData::class.java)
-                            result = ChatTurnAiResult(aiOutput = data.aiOutput, choices = data.choices)
+                            result = ChatTurnAiResult(
+                                aiOutput = data.aiOutput,
+                                choices = data.choices ?: emptyList(),
+                            )
                         }
                         EVENT_ERROR -> {
                             val data = read(event.data(), ErrorData::class.java)
@@ -79,8 +82,12 @@ class RestChatTurnAiClient(
     /** SSE `token` 이벤트 페이로드. */
     private data class TokenData(val text: String)
 
-    /** SSE `completed` 이벤트 페이로드. 와이어 키는 camelCase(aiOutput)다. */
-    private data class CompletedData(val aiOutput: String, val choices: List<String>)
+    /**
+     * SSE `completed` 이벤트 페이로드. 와이어 키는 camelCase(aiOutput)다.
+     * choices가 누락돼도 이미 중계된 토큰·저장이 통째로 실패하지 않도록 nullable로 받아
+     * 매핑 시 빈 목록으로 보정한다(Jackson은 누락 필드를 기본값이 아닌 null로 전달한다).
+     */
+    private data class CompletedData(val aiOutput: String, val choices: List<String>? = null)
 
     /** SSE `error` 이벤트 페이로드. */
     private data class ErrorData(val code: String, val message: String)
