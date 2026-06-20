@@ -63,7 +63,7 @@ class ChatStreamControllerIntegrationTests {
         val story = seedStory()
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
-        val body = stream(session.id, "마법수정에 손을 올린다.")
+        val body = stream(session.publicId.toString(), "마법수정에 손을 올린다.")
 
         // 이벤트 순서: started → token → completed
         val startedAt = body.indexOf("started")
@@ -110,7 +110,7 @@ class ChatStreamControllerIntegrationTests {
         storyMessageRepository.save(StoryMessage(playSessionId = session.id, role = MessageRole.USER, content = "이름은 강진우야.", messageOrder = 1))
         storyMessageRepository.save(StoryMessage(playSessionId = session.id, role = MessageRole.ASSISTANT, content = "기록판에 새겨졌다.", messageOrder = 2))
 
-        stream(session.id, "앞으로 나선다.")
+        stream(session.publicId.toString(), "앞으로 나선다.")
 
         val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
         assertThat(messages).hasSize(4)
@@ -128,21 +128,23 @@ class ChatStreamControllerIntegrationTests {
     fun `채팅 목록의 chatCount는 실제 이어쓰기를 거치며 누적된다`() {
         val story = seedStory()
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val publicId = session.publicId.toString()
 
         // 막 생성한 채팅: 진행 이력 없음 → chatCount 0
-        assertChatCount(session.id, 0)
+        assertChatCount(publicId, 0)
 
         // 1턴 이어쓰기 → persistTurn이 current_turn을 1로 증가 → 목록에 1로 반영
-        stream(session.id, "마법수정에 손을 올린다.")
-        assertChatCount(session.id, 1)
+        stream(publicId, "마법수정에 손을 올린다.")
+        assertChatCount(publicId, 1)
 
         // 2턴 이어쓰기 → 2로 누적
-        stream(session.id, "앞으로 나선다.")
-        assertChatCount(session.id, 2)
+        stream(publicId, "앞으로 나선다.")
+        assertChatCount(publicId, 2)
     }
 
     @Test
-    fun `존재하지 않는 채팅으로 이어쓰면 404로 응답하고 아무것도 저장하지 않는다`() {
+    fun `순차 정수 ID로 이어쓰면 404로 응답하고 아무것도 저장하지 않는다`() {
+        // IDOR 방지: 순차 정수는 공개 식별자가 아니므로 타인의 채팅에 이어쓸 수 없다.
         restTestClient.post()
             .uri("/api/v1/chats/999999/turns/stream")
             .contentType(MediaType.APPLICATION_JSON)
@@ -164,7 +166,7 @@ class ChatStreamControllerIntegrationTests {
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
         restTestClient.post()
-            .uri("/api/v1/chats/${session.id}/turns/stream")
+            .uri("/api/v1/chats/${session.publicId}/turns/stream")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
             .body("""{"userInput":"   "}""")
@@ -204,7 +206,7 @@ class ChatStreamControllerIntegrationTests {
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
         val contentType = restTestClient.post()
-            .uri("/api/v1/chats/${session.id}/turns/stream")
+            .uri("/api/v1/chats/${session.publicId}/turns/stream")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"userInput":"손을 올린다."}""")
@@ -218,11 +220,11 @@ class ChatStreamControllerIntegrationTests {
         assertThat(contentType!!.charset).isEqualTo(Charsets.UTF_8)
     }
 
-    private fun assertChatCount(chatId: Long, expected: Int) {
+    private fun assertChatCount(chatId: String, expected: Int) {
         restTestClient.post()
             .uri("/api/v1/chats/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"chatIds":[$chatId]}""")
+            .body("""{"chatIds":["$chatId"]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
@@ -230,7 +232,7 @@ class ChatStreamControllerIntegrationTests {
             .jsonPath("$[0].chatCount").isEqualTo(expected)
     }
 
-    private fun stream(chatId: Long, userInput: String): String =
+    private fun stream(chatId: String, userInput: String): String =
         restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")
             .contentType(MediaType.APPLICATION_JSON)

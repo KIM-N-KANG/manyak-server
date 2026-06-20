@@ -17,8 +17,11 @@ data class CreateChatRequest(
 
 @Schema(description = "채팅 생성 응답")
 data class CreateChatResponse(
-    @field:Schema(description = "채팅 ID. 클라이언트는 이 값을 로컬스토리지에 저장해 이전 채팅 목록 구성에 사용합니다.", example = "10")
-    val id: Long,
+    @field:Schema(
+        description = "채팅 ID(추측 불가능한 공개 식별자). 클라이언트는 이 값을 로컬스토리지에 저장해 이전 채팅 목록 구성에 사용합니다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    )
+    val id: String,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -37,20 +40,26 @@ data class CreateChatResponse(
 data class BatchChatRequest(
     @field:NotEmpty
     @field:Size(max = 100)
-    @field:Schema(description = "클라이언트가 로컬스토리지에 보관 중인 채팅 ID 목록", example = "[10, 11, 12]")
+    @field:Schema(
+        description = "클라이언트가 로컬스토리지에 보관 중인 채팅 ID(공개 식별자) 목록",
+        example = """["3f2504e0-4f89-41d3-9a0c-0305e82c3301","9c5b94b1-35ad-49bb-b118-8e8fc24abf80"]""",
+    )
     @field:ArraySchema(
-        schema = Schema(description = "채팅 ID", example = "10"),
+        schema = Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"),
         minItems = 1,
         maxItems = 100,
-        arraySchema = Schema(description = "클라이언트가 로컬스토리지에 보관 중인 채팅 ID 목록", example = "[10, 11, 12]"),
+        arraySchema = Schema(
+            description = "클라이언트가 로컬스토리지에 보관 중인 채팅 ID(공개 식별자) 목록",
+            example = """["3f2504e0-4f89-41d3-9a0c-0305e82c3301","9c5b94b1-35ad-49bb-b118-8e8fc24abf80"]""",
+        ),
     )
-    val chatIds: List<Long>,
+    val chatIds: List<String>,
 )
 
 @Schema(description = "채팅 목록 항목")
 data class ChatSummaryResponse(
-    @field:Schema(description = "채팅 ID", example = "10")
-    val id: Long,
+    @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val id: String,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -70,8 +79,8 @@ data class ChatSummaryResponse(
 
 @Schema(description = "채팅 상세 응답")
 data class ChatDetailResponse(
-    @field:Schema(description = "채팅 ID", example = "10")
-    val id: Long,
+    @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val id: String,
 
     @field:Schema(description = "스토리 ID", example = "1")
     val storyId: Long,
@@ -133,8 +142,8 @@ data class ContinueChatRequest(
 
 @Schema(description = "SSE 스트리밍 시작 이벤트 예시")
 data class ChatStreamStartedEvent(
-    @field:Schema(description = "채팅 ID", example = "10")
-    val chatId: Long,
+    @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val chatId: String,
 )
 
 @Schema(description = "SSE 토큰 이벤트 예시")
@@ -145,8 +154,8 @@ data class ChatStreamTokenEvent(
 
 @Schema(description = "SSE 완료 이벤트 예시")
 data class ChatStreamCompletedEvent(
-    @field:Schema(description = "채팅 ID", example = "10")
-    val chatId: Long,
+    @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val chatId: String,
 
     @field:Schema(description = "저장된 턴 ID", example = "3")
     val turnId: Long,

@@ -10,6 +10,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
+import java.util.UUID
 
 enum class PlaySessionStatus {
     ACTIVE,
@@ -22,6 +23,11 @@ class StoryPlaySession(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
+
+    // 외부에 노출하는 추측 불가능한 식별자. 순차 PK 열거(IDOR)를 막기 위해 API는 이 값만 입출력한다.
+    // 내부 PK(id)는 FK·조인·성능용으로만 사용한다.
+    @Column(name = "public_id", nullable = false, unique = true, updatable = false)
+    val publicId: UUID = UUID.randomUUID(),
 
     @Column(name = "user_id")
     val userId: Long? = null,
