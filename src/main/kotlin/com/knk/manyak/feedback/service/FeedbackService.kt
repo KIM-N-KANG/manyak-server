@@ -16,10 +16,11 @@ class FeedbackService(
         feedbackRepository.save(
             Feedback(
                 body = request.body,
-                email = request.email,
+                // 공백뿐인 선택 입력은 null 로 정규화해 데이터 일관성을 유지한다.
+                email = request.email?.takeIf { it.isNotBlank() },
                 // @Pattern 으로 이미 검증된 값이므로 안전하게 enum 으로 변환한다.
                 platform = request.platform?.let { Platform.valueOf(it) },
-                appVersion = request.appVersion,
+                appVersion = request.appVersion?.takeIf { it.isNotBlank() },
             ),
         )
     }

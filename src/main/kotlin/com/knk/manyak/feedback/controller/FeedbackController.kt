@@ -7,11 +7,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
 @Tag(name = "Feedbacks", description = "피드백 API")
@@ -28,9 +28,12 @@ class FeedbackController(
     )
     @ApiResponse(responseCode = "201", description = "등록 성공")
     @ApiResponse(responseCode = "400", description = "본문 누락·길이 초과, 잘못된 이메일/플랫폼 형식")
-    @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/feedbacks")
     fun createFeedback(
         @Valid @RequestBody request: CreateFeedbackRequest,
-    ) = feedbackService.createFeedback(request)
+    ): ResponseEntity<Void> {
+        feedbackService.createFeedback(request)
+        // Unit 반환은 Jackson 이 빈 객체 {} 로 직렬화할 수 있어, 본문 없는 201 을 명시한다.
+        return ResponseEntity.status(HttpStatus.CREATED).build()
+    }
 }

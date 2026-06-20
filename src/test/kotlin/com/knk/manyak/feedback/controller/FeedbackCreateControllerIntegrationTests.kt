@@ -36,6 +36,8 @@ class FeedbackCreateControllerIntegrationTests {
             .body("""{"body":"진행 중 버그가 있어요.","email":"user@example.com","platform":"IOS","appVersion":"1.2.0"}""")
             .exchange()
             .expectStatus().isCreated
+            // 성공 응답은 본문이 비어 있어야 한다(Unit 직렬화로 인한 {} 가 아님).
+            .expectBody().isEmpty
 
         val feedback = feedbackRepository.findAll().first()
         assertThat(feedback.body).isEqualTo("진행 중 버그가 있어요.")
@@ -59,6 +61,21 @@ class FeedbackCreateControllerIntegrationTests {
         assertThat(feedback.body).isEqualTo("그냥 잘 쓰고 있어요!")
         assertThat(feedback.email).isNull()
         assertThat(feedback.platform).isNull()
+        assertThat(feedback.appVersion).isNull()
+    }
+
+    @Test
+    fun `이메일과 앱버전이 공백 문자열이면 null로 정규화해 저장한다`() {
+        restTestClient.post()
+            .uri("/api/v1/feedbacks")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"body":"내용은 있어요.","email":"","appVersion":"   "}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        val feedback = feedbackRepository.findAll().first()
+        assertThat(feedback.body).isEqualTo("내용은 있어요.")
+        assertThat(feedback.email).isNull()
         assertThat(feedback.appVersion).isNull()
     }
 
