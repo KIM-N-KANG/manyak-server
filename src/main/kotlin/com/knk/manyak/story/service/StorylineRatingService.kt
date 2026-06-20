@@ -19,12 +19,17 @@ class StorylineRatingService(
     // 스토리라인 평가는 대상당 1개다. 같은 스토리라인을 다시 평가하면 값만 갱신한다(upsert).
     @Transactional
     fun rate(storylineId: Long, rating: StorylineRating): StorylineRatingResponse {
-        requireStorylineExists(storylineId)
-
         val existing = storyCreationExampleRatingRepository.findByExampleId(storylineId)
-        val entity = existing?.apply { this.rating = rating }
-            ?: StoryCreationExampleRating(exampleId = storylineId, rating = rating)
-        storyCreationExampleRatingRepository.save(entity)
+        if (existing != null) {
+            // 영속 상태 엔티티이므로 변경 감지(dirty checking)로 커밋 시 자동 반영된다. save() 불필요.
+            // 평가가 존재한다는 것은 FK 제약상 부모 스토리라인 존재가 보장되므로 별도 검사도 생략한다.
+            existing.rating = rating
+        } else {
+            requireStorylineExists(storylineId)
+            storyCreationExampleRatingRepository.save(
+                StoryCreationExampleRating(exampleId = storylineId, rating = rating),
+            )
+        }
 
         return StorylineRatingResponse(id = storylineId, rating = rating)
     }

@@ -81,13 +81,39 @@ class SimpleStorylineRatingControllerIntegrationTests {
         val storyline = persistStoryline()
 
         rate(storyline.id, "GOOD").expectStatus().isOk
+        val first = ratingRepository.findByExampleId(storyline.id)!!
+        val firstCreatedAt = first.createdAt
+        val firstUpdatedAt = first.updatedAt
+
+        // updatedAt 비교가 동일 시각 충돌로 흔들리지 않도록 최소 간격을 둔다.
+        Thread.sleep(10)
+
         rate(storyline.id, "BAD")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.rating").isEqualTo("BAD")
 
         assertThat(ratingRepository.count()).isEqualTo(1)
-        assertThat(ratingRepository.findByExampleId(storyline.id)!!.rating).isEqualTo(StorylineRating.BAD)
+        val second = ratingRepository.findByExampleId(storyline.id)!!
+        assertThat(second.rating).isEqualTo(StorylineRating.BAD)
+        // @PreUpdate로 updatedAt은 갱신되고 createdAt은 보존된다.
+        assertThat(second.updatedAt).isAfter(firstUpdatedAt)
+        assertThat(second.createdAt).isEqualTo(firstCreatedAt)
+    }
+
+    @Test
+    fun `같은 값으로 다시 평가해도 200이고 행은 하나만 유지된다`() {
+        val storyline = persistStoryline()
+
+        rate(storyline.id, "GOOD").expectStatus().isOk
+        rate(storyline.id, "GOOD")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.id").isEqualTo(storyline.id)
+            .jsonPath("$.rating").isEqualTo("GOOD")
+
+        assertThat(ratingRepository.count()).isEqualTo(1)
+        assertThat(ratingRepository.findByExampleId(storyline.id)!!.rating).isEqualTo(StorylineRating.GOOD)
     }
 
     @Test
@@ -137,6 +163,29 @@ class SimpleStorylineRatingControllerIntegrationTests {
 
         rate(storyline.id, "AWESOME")
             .expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `깨진 JSON 본문은 400으로 응답한다`() {
+        val storyline = persistStoryline()
+
+        restTestClient.put()
+            .uri("/api/v1/stories/simple/storylines/${storyline.id}/rating")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"rating":""")
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `숫자가 아닌 스토리라인 ID 경로는 보안 매처에 막혀 403을 반환한다`() {
+        // SecurityConfig가 {storylineId:\d+}로만 permitAll 하므로, 비숫자 경로는 인증 대상으로 떨어진다.
+        restTestClient.put()
+            .uri("/api/v1/stories/simple/storylines/abc/rating")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"rating":"GOOD"}""")
+            .exchange()
+            .expectStatus().isForbidden
     }
 
     @Test
