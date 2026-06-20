@@ -6,6 +6,7 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 
 @Schema(description = "간편 제작 태그 분류")
@@ -141,6 +142,28 @@ data class SimpleStoryRecommendedInfoResponse(
 
     @field:Schema(description = "추천 추가 정보 내용", example = "주인공은 반드시 되찾고 싶은 기억이 하나 있다.")
     val text: String,
+)
+
+@Schema(description = "스토리라인 평가 값")
+enum class StorylineRating {
+    GOOD,
+    BAD,
+}
+
+@Schema(description = "스토리라인 평가 요청")
+data class StorylineRatingRequest(
+    @field:NotNull
+    @field:Schema(description = "평가 값", example = "GOOD", requiredMode = Schema.RequiredMode.REQUIRED)
+    val rating: StorylineRating?,
+)
+
+@Schema(description = "스토리라인 평가 응답")
+data class StorylineRatingResponse(
+    @field:Schema(description = "평가한 스토리라인 ID", example = "1")
+    val id: Long,
+
+    @field:Schema(description = "현재 평가 값", example = "GOOD")
+    val rating: StorylineRating,
 )
 
 @Schema(description = "간편 제작 이야기 생성 요청")
