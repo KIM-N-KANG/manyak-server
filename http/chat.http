@@ -192,6 +192,13 @@ Accept: application/json
         client.assert(typeof b[0].lastStoryPreview === "string", `lastStoryPreview가 문자열이 아닙니다. actual=${JSON.stringify(b[0].lastStoryPreview)}`);
         client.assert(Boolean(b[0].updatedAt), "updatedAt이 없습니다.");
     });
+    client.test("chatCount는 사용자 턴 수(0 이상 정수)다", () => {
+        client.assert(Number.isInteger(b[0].chatCount) && b[0].chatCount >= 0,
+            `chatCount가 0 이상 정수가 아닙니다. actual=${JSON.stringify(b[0].chatCount)}`);
+    });
+    client.test("새로 만든 채팅은 진행 이력이 없어 chatCount가 0이다", () => {
+        client.assert(b[0].chatCount === 0, `갓 생성한 채팅의 chatCount가 0이 아닙니다. actual=${JSON.stringify(b[0].chatCount)}`);
+    });
 %}
 
 ### 10. (선택) 이미 알고 있는 chatId로 직접 상세 조회

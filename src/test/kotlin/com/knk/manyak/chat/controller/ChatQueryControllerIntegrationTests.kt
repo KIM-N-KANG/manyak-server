@@ -128,11 +128,15 @@ class ChatQueryControllerIntegrationTests {
     fun `채팅 목록은 요청한 ID 순서를 보존하고 마지막 AI 출력으로 프리뷰를 만든다`() {
         val storyA = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
         val storyB = storyRepository.save(Story(title = "왕국의 마지막 편지"))
-        val sessionA = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyA.id))
-        val sessionB = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyB.id))
+        // chatCount는 세션의 비정규화 카운터(currentTurn)를 그대로 노출한다. persistTurn을 우회해
+        // 직접 시드하므로 currentTurn을 명시한다. (A: 2턴, B: 1턴)
+        val sessionA = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyA.id, currentTurn = 2))
+        val sessionB = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyB.id, currentTurn = 1))
 
         message(sessionA.id, MessageRole.USER, "이름은 강진우야.", 1)
-        message(sessionA.id, MessageRole.ASSISTANT, "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.", 2)
+        message(sessionA.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
+        message(sessionA.id, MessageRole.USER, "마법수정에 손을 올린다.", 3)
+        message(sessionA.id, MessageRole.ASSISTANT, "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.", 4)
         message(sessionB.id, MessageRole.USER, "편지를 연다.", 1)
         message(sessionB.id, MessageRole.ASSISTANT, "봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.", 2)
 
@@ -149,10 +153,29 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$[0].storyId").isEqualTo(storyB.id)
             .jsonPath("$[0].storyTitle").isEqualTo("왕국의 마지막 편지")
             .jsonPath("$[0].lastStoryPreview").isEqualTo("봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.")
+            .jsonPath("$[0].chatCount").isEqualTo(1)
             .jsonPath("$[1].id").isEqualTo(sessionA.id)
             .jsonPath("$[1].storyId").isEqualTo(storyA.id)
             .jsonPath("$[1].storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
             .jsonPath("$[1].lastStoryPreview").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
+            .jsonPath("$[1].chatCount").isEqualTo(2)
+    }
+
+    @Test
+    fun `진행 이력이 없는 채팅 목록 항목의 chatCount는 0이다`() {
+        val story = storyRepository.save(Story(title = "아직 시작 안 한 스토리"))
+        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":[${session.id}]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(session.id)
+            .jsonPath("$[0].chatCount").isEqualTo(0)
     }
 
     private fun message(playSessionId: Long, role: MessageRole, content: String, order: Int): StoryMessage =

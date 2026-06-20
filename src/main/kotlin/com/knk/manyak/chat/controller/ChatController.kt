@@ -80,7 +80,7 @@ class ChatController(
                         array = ArraySchema(
                             schema = Schema(implementation = ChatSummaryResponse::class),
                             arraySchema = Schema(
-                                example = """[{"id":10,"storyId":1,"storyTitle":"호아킨 아카데미의 무속성 신입생","lastStoryPreview":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.","updatedAt":"2026-06-12T12:10:00Z"},{"id":11,"storyId":2,"storyTitle":"왕국의 마지막 편지","lastStoryPreview":"봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.","updatedAt":"2026-06-12T12:20:00Z"}]""",
+                                example = """[{"id":10,"storyId":1,"storyTitle":"호아킨 아카데미의 무속성 신입생","lastStoryPreview":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.","chatCount":2,"updatedAt":"2026-06-12T12:10:00Z"},{"id":11,"storyId":2,"storyTitle":"왕국의 마지막 편지","lastStoryPreview":"봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.","chatCount":1,"updatedAt":"2026-06-12T12:20:00Z"}]""",
                             ),
                         ),
                     ),
