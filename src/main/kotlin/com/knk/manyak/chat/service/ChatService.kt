@@ -89,7 +89,7 @@ class ChatService(
         if (requestedPublicIds.isEmpty()) {
             return emptyList()
         }
-        val sessionsByPublicId = storyPlaySessionRepository.findAllByPublicIdIn(requestedPublicIds)
+        val sessionsByPublicId = storyPlaySessionRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
             .associateBy { it.publicId }
         // 요청 순서를 보존하고, 존재하지 않거나 형식이 잘못된 채팅 ID는 응답에서 제외한다.
         val sessions = request.chatIds.mapNotNull { raw ->
@@ -155,6 +155,17 @@ class ChatService(
                 )
             },
         )
+    }
+
+    /**
+     * 채팅을 소프트 삭제한다. 행을 물리 삭제하지 않고 deletedAt만 기록해 자식 데이터(메시지·선택지)를 보존한다.
+     * 이미 삭제됐거나 존재하지 않으면(순차 정수·임의 값 포함) 404로 통일한다.
+     */
+    @Transactional
+    fun deleteChat(chatId: String) {
+        // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
+        val session = resolveSession(chatId)
+        session.deletedAt = Instant.now()
     }
 
     /**
@@ -313,7 +324,7 @@ class ChatService(
     private fun resolveSession(publicId: String): StoryPlaySession {
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
-        return storyPlaySessionRepository.findByPublicId(parsed)
+        return storyPlaySessionRepository.findByPublicIdAndDeletedAtIsNull(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
     }
 

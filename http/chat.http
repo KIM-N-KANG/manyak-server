@@ -3,9 +3,12 @@
 ### 위에서부터 순서대로 실행하면 스토리를 하나 생성한 뒤 그 storyId로 채팅을 시작합니다.
 ###
 ### [KNK-178] 채팅 ID는 순차 정수가 아니라 추측 불가능한 공개 식별자(UUID, public_id)입니다.
-###   - 채팅 생성/목록/상세/이어쓰기 응답·요청·경로의 채팅 id는 모두 UUID 문자열입니다.
-###   - 순차 정수나 임의 값으로 상세·이어쓰기를 시도하면 일관되게 404가 납니다(IDOR 방지).
+###   - 채팅 생성/목록/상세/이어쓰기/삭제 응답·요청·경로의 채팅 id는 모두 UUID 문자열입니다.
+###   - 순차 정수나 임의 값으로 상세·이어쓰기·삭제를 시도하면 일관되게 404가 납니다(IDOR 방지).
 ###   - storyId는 공개 카탈로그라 그대로 정수입니다.
+###
+### [KNK-181] 채팅 삭제(16~20)는 소프트 삭제입니다. deleted_at만 기록하고 행은 보존하며,
+###   삭제된 채팅은 목록·상세에서 제외됩니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
@@ -332,3 +335,65 @@ Accept: text/event-stream, application/json
 {
   "userInput": "조용히 주변을 살핀다."
 }
+
+### 16. 삭제 검증용 채팅 생성 (삭제 준비)
+# 2번을 먼저 실행해야 storyId 변수가 설정됩니다. 메인 흐름(3~15)의 chatId와 섞이지 않도록
+# 삭제 전용 채팅을 따로 만들어 deleteChatId 변수에 저장합니다.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": {{storyId}}
+}
+
+> {%
+    client.test("삭제 검증용 채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("deleteChatId", response.body.id);
+%}
+
+### 17. 채팅 삭제 (핵심 검증) → 204
+# 16번을 먼저 실행해야 deleteChatId 변수가 설정됩니다.
+# 소프트 삭제: 행을 물리 삭제하지 않고 deleted_at만 기록합니다(자식 메시지·선택지 보존).
+DELETE {{baseUrl}}/api/v1/chats/{{deleteChatId}}
+
+> {%
+    client.test("삭제는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 18. 삭제한 채팅 상세 조회 → 404
+# 소프트 삭제된 채팅은 조회에서 제외되어 404가 됩니다.
+GET {{baseUrl}}/api/v1/chats/{{deleteChatId}}
+Accept: application/json
+
+> {%
+    client.test("삭제된 채팅 상세는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 19. 이미 삭제된 채팅 재삭제 → 404
+DELETE {{baseUrl}}/api/v1/chats/{{deleteChatId}}
+
+> {%
+    client.test("이미 삭제된 채팅 재삭제는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 20. 순차 정수 ID로 삭제 → 404 (IDOR 방지)
+# 채팅 id는 공개 UUID이므로 순차 정수로는 타인의 채팅을 삭제할 수 없습니다.
+DELETE {{baseUrl}}/api/v1/chats/999999999
+
+> {%
+    client.test("순차 정수 삭제는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
