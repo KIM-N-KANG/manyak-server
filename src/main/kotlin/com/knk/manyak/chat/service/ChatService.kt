@@ -163,9 +163,9 @@ class ChatService(
      */
     @Transactional
     fun deleteChat(chatId: String) {
+        // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
         val session = resolveSession(chatId)
         session.deletedAt = Instant.now()
-        storyPlaySessionRepository.save(session)
     }
 
     /**
