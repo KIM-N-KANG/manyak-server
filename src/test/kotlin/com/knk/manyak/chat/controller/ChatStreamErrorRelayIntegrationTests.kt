@@ -96,7 +96,7 @@ class ChatStreamErrorRelayIntegrationTests {
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
         val body = restTestClient.post()
-            .uri("/api/v1/chats/${session.id}/turns/stream")
+            .uri("/api/v1/chats/${session.publicId}/turns/stream")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"userInput":"손을 올린다."}""")

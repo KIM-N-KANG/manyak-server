@@ -80,7 +80,7 @@ class ChatController(
                         array = ArraySchema(
                             schema = Schema(implementation = ChatSummaryResponse::class),
                             arraySchema = Schema(
-                                example = """[{"id":10,"storyId":1,"storyTitle":"호아킨 아카데미의 무속성 신입생","lastStoryPreview":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.","chatCount":2,"updatedAt":"2026-06-12T12:10:00Z"},{"id":11,"storyId":2,"storyTitle":"왕국의 마지막 편지","lastStoryPreview":"봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.","chatCount":1,"updatedAt":"2026-06-12T12:20:00Z"}]""",
+                                example = """[{"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","storyId":1,"storyTitle":"호아킨 아카데미의 무속성 신입생","lastStoryPreview":"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.","chatCount":2,"updatedAt":"2026-06-12T12:10:00Z"},{"id":"9c5b94b1-35ad-49bb-b118-8e8fc24abf80","storyId":2,"storyTitle":"왕국의 마지막 편지","lastStoryPreview":"봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.","chatCount":1,"updatedAt":"2026-06-12T12:20:00Z"}]""",
                             ),
                         ),
                     ),
@@ -118,8 +118,8 @@ class ChatController(
     )
     @GetMapping("/chats/{chatId}")
     fun getChatDetail(
-        @Parameter(description = "채팅 ID")
-        @PathVariable chatId: Long,
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
     ): ChatDetailResponse = chatService.getChatDetail(chatId)
 
     @Operation(
@@ -136,7 +136,7 @@ class ChatController(
                         mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
                         schema = Schema(
                             type = "string",
-                            example = "event: started\ndata: {\"chatId\":10}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: token\ndata: {\"text\":\"사\"}\n\nevent: completed\ndata: {\"chatId\":10,\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\"}\n\nevent: error\ndata: {\"code\":\"AI_STREAM_FAILED\",\"message\":\"AI 응답 생성 중 오류가 발생했습니다.\"}\n\n",
+                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: token\ndata: {\"text\":\"사\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\"}\n\nevent: error\ndata: {\"code\":\"AI_STREAM_FAILED\",\"message\":\"AI 응답 생성 중 오류가 발생했습니다.\"}\n\n",
                         ),
                     ),
                 ],
@@ -158,8 +158,8 @@ class ChatController(
         produces = [MediaType.TEXT_EVENT_STREAM_VALUE],
     )
     fun streamChatTurn(
-        @Parameter(description = "채팅 ID")
-        @PathVariable chatId: Long,
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
         @Valid @RequestBody request: ContinueChatRequest,
         response: HttpServletResponse,
     ): SseEmitter {

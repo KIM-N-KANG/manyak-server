@@ -36,6 +36,7 @@ import org.springframework.web.server.ResponseStatusException
 import org.springframework.http.HttpStatus
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicReference
@@ -73,7 +74,7 @@ class ChatService(
         )
 
         return CreateChatResponse(
-            id = session.id,
+            id = session.publicId.toString(),
             storyId = session.storyId,
             prologue = startSetting?.prologue.orEmpty(),
             createdAt = session.createdAt,
@@ -82,10 +83,18 @@ class ChatService(
 
     @Transactional(readOnly = true)
     fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> {
-        val sessionsById = storyPlaySessionRepository.findAllById(request.chatIds)
-            .associateBy { it.id }
-        // 요청 순서를 보존하고, 존재하지 않는 채팅 ID는 응답에서 제외한다.
-        val sessions = request.chatIds.mapNotNull { sessionsById[it] }
+        // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
+        val requestedPublicIds = request.chatIds.mapNotNull { parsePublicIdOrNull(it) }
+        // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
+        if (requestedPublicIds.isEmpty()) {
+            return emptyList()
+        }
+        val sessionsByPublicId = storyPlaySessionRepository.findAllByPublicIdIn(requestedPublicIds)
+            .associateBy { it.publicId }
+        // 요청 순서를 보존하고, 존재하지 않거나 형식이 잘못된 채팅 ID는 응답에서 제외한다.
+        val sessions = request.chatIds.mapNotNull { raw ->
+            parsePublicIdOrNull(raw)?.let { sessionsByPublicId[it] }
+        }
         if (sessions.isEmpty()) {
             return emptyList()
         }
@@ -100,7 +109,7 @@ class ChatService(
 
         return sessions.map { session ->
             ChatSummaryResponse(
-                id = session.id,
+                id = session.publicId.toString(),
                 storyId = session.storyId,
                 storyTitle = titlesByStoryId[session.storyId].orEmpty(),
                 lastStoryPreview = lastPreviewBySessionId[session.id].orEmpty(),
@@ -112,9 +121,8 @@ class ChatService(
     }
 
     @Transactional(readOnly = true)
-    fun getChatDetail(chatId: Long): ChatDetailResponse {
-        val session = storyPlaySessionRepository.findById(chatId)
-            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
+    fun getChatDetail(chatId: String): ChatDetailResponse {
+        val session = resolveSession(chatId)
 
         val storyTitle = storyRepository.findById(session.storyId)
             .map { it.title }
@@ -133,7 +141,7 @@ class ChatService(
         }
 
         return ChatDetailResponse(
-            id = session.id,
+            id = session.publicId.toString(),
             storyId = session.storyId,
             storyTitle = storyTitle,
             prologue = prologue,
@@ -192,10 +200,14 @@ class ChatService(
      * 단일 트랜잭션으로 원자적으로 수행한다.
      */
     fun streamChatTurn(
-        chatId: Long,
+        chatId: String,
         request: ContinueChatRequest,
     ): SseEmitter {
-        val aiRequest = assembleAiRequest(chatId, request.userInput)
+        // 세션을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
+        // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
+        val session = resolveSession(chatId)
+        val sessionId = session.id
+        val aiRequest = assembleAiRequest(session, request.userInput)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -229,7 +241,7 @@ class ChatService(
                     )
                 }
                 val turnId = chatTurnPersister.persistTurn(
-                    playSessionId = chatId,
+                    playSessionId = sessionId,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
@@ -263,14 +275,11 @@ class ChatService(
     }
 
     /**
-     * 세션을 검증하고(없으면 404) AI 채팅 턴 요청 재료를 조립한다.
+     * 이미 검증된 세션으로 AI 채팅 턴 요청 재료를 조립한다.
      * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
      * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
      */
-    private fun assembleAiRequest(chatId: Long, userInput: String): ChatTurnAiRequest {
-        val session = storyPlaySessionRepository.findById(chatId)
-            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
-
+    private fun assembleAiRequest(session: StoryPlaySession, userInput: String): ChatTurnAiRequest {
         val genre = storyRepository.findById(session.storyId)
             .map { it.genre }
             .orElse(null)
@@ -291,11 +300,29 @@ class ChatService(
                 prologue = startSetting?.prologue.orEmpty(),
                 startSituation = startSetting?.startSituation.orEmpty(),
             ),
-            history = assembleHistory(chatId),
+            history = assembleHistory(session.id),
             userInput = userInput,
             summary = "",
         )
     }
+
+    /**
+     * 공개 식별자(UUID 문자열)로 세션을 조회한다. 형식이 잘못됐거나 존재하지 않으면 404로 통일한다.
+     * 순차 정수든 임의 문자열이든 동일하게 404를 반환해 존재 여부를 노출하지 않는다.
+     */
+    private fun resolveSession(publicId: String): StoryPlaySession {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+        return storyPlaySessionRepository.findByPublicId(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+    }
+
+    private fun parsePublicIdOrNull(raw: String): UUID? =
+        try {
+            UUID.fromString(raw)
+        } catch (ignored: IllegalArgumentException) {
+            null
+        }
 
     /**
      * 최근 [historyTurns]턴(USER+ASSISTANT)을 시간순으로 조립한다.

@@ -75,11 +75,11 @@ class ChatQueryControllerIntegrationTests {
         choice(session.id, assistant2.id, "자리를 벗어난다.", 1)
 
         restTestClient.get()
-            .uri("/api/v1/chats/${session.id}")
+            .uri("/api/v1/chats/${session.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.id").isEqualTo(session.id)
+            .jsonPath("$.id").isEqualTo(session.publicId.toString())
             .jsonPath("$.storyId").isEqualTo(story.id)
             .jsonPath("$.storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
             .jsonPath("$.prologue").isEqualTo("마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.")
@@ -103,7 +103,7 @@ class ChatQueryControllerIntegrationTests {
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
         restTestClient.get()
-            .uri("/api/v1/chats/${session.id}")
+            .uri("/api/v1/chats/${session.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()
@@ -113,7 +113,8 @@ class ChatQueryControllerIntegrationTests {
     }
 
     @Test
-    fun `존재하지 않는 채팅 상세는 404로 응답한다`() {
+    fun `순차 정수 ID로 채팅 상세를 조회하면 404로 응답한다`() {
+        // IDOR 방지: 외부 식별자는 공개 UUID이므로 순차 정수를 추측해도 열람할 수 없다.
         restTestClient.get()
             .uri("/api/v1/chats/999999")
             .exchange()
@@ -122,6 +123,19 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$.status").isEqualTo(404)
             .jsonPath("$.message").isEqualTo("채팅을 찾을 수 없습니다.")
             .jsonPath("$.path").isEqualTo("/api/v1/chats/999999")
+    }
+
+    @Test
+    fun `존재하지 않는 임의 UUID로 채팅 상세를 조회하면 404로 응답한다`() {
+        // 형식이 올바른 UUID라도 존재하지 않으면 동일하게 404. 존재 여부를 노출하지 않는다.
+        val missing = java.util.UUID.randomUUID()
+        restTestClient.get()
+            .uri("/api/v1/chats/$missing")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(404)
+            .jsonPath("$.message").isEqualTo("채팅을 찾을 수 없습니다.")
     }
 
     @Test
@@ -141,20 +155,21 @@ class ChatQueryControllerIntegrationTests {
         message(sessionB.id, MessageRole.ASSISTANT, "봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.", 2)
 
         // 요청 순서: B, 없는 ID, A → 응답은 B, A 순서로 보존되고 없는 ID는 제외된다
+        val missing = java.util.UUID.randomUUID()
         restTestClient.post()
             .uri("/api/v1/chats/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"chatIds":[${sessionB.id},999999,${sessionA.id}]}""")
+            .body("""{"chatIds":["${sessionB.publicId}","$missing","${sessionA.publicId}"]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(2)
-            .jsonPath("$[0].id").isEqualTo(sessionB.id)
+            .jsonPath("$[0].id").isEqualTo(sessionB.publicId.toString())
             .jsonPath("$[0].storyId").isEqualTo(storyB.id)
             .jsonPath("$[0].storyTitle").isEqualTo("왕국의 마지막 편지")
             .jsonPath("$[0].lastStoryPreview").isEqualTo("봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.")
             .jsonPath("$[0].chatCount").isEqualTo(1)
-            .jsonPath("$[1].id").isEqualTo(sessionA.id)
+            .jsonPath("$[1].id").isEqualTo(sessionA.publicId.toString())
             .jsonPath("$[1].storyId").isEqualTo(storyA.id)
             .jsonPath("$[1].storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
             .jsonPath("$[1].lastStoryPreview").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
@@ -169,12 +184,12 @@ class ChatQueryControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/chats/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"chatIds":[${session.id}]}""")
+            .body("""{"chatIds":["${session.publicId}"]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(1)
-            .jsonPath("$[0].id").isEqualTo(session.id)
+            .jsonPath("$[0].id").isEqualTo(session.publicId.toString())
             .jsonPath("$[0].chatCount").isEqualTo(0)
     }
 

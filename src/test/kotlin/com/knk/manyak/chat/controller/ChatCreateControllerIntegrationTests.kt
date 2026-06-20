@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.entity.PlaySessionStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
@@ -64,22 +65,26 @@ class ChatCreateControllerIntegrationTests {
             ),
         )
 
-        restTestClient.post()
+        val response = restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"storyId":${story.id}}""")
             .exchange()
             .expectStatus().isCreated
-            .expectBody()
-            .jsonPath("$.id").isNumber
-            .jsonPath("$.storyId").isEqualTo(story.id)
-            .jsonPath("$.prologue").isEqualTo("마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.")
-            .jsonPath("$.createdAt").exists()
-            .jsonPath("$.guideMessage").doesNotExist()
+            .expectBody(CreateChatResponse::class.java)
+            .returnResult()
+            .responseBody!!
+
+        assertThat(response.storyId).isEqualTo(story.id)
+        assertThat(response.prologue).isEqualTo("마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.")
+        assertThat(response.createdAt).isNotNull()
 
         val sessions = storyPlaySessionRepository.findAll()
         assertThat(sessions).hasSize(1)
         val session = sessions.first()
+        // 응답 id는 순차 PK가 아니라 추측 불가능한 공개 식별자(publicId)다 (IDOR 방지)
+        assertThat(response.id).isEqualTo(session.publicId.toString())
+        assertThat(response.id).isNotEqualTo(session.id.toString())
         assertThat(session.storyId).isEqualTo(story.id)
         assertThat(session.startSettingId).isEqualTo(startSetting.id)
         assertThat(session.status).isEqualTo(PlaySessionStatus.ACTIVE)
