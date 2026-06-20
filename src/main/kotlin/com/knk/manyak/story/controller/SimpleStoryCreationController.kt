@@ -6,7 +6,10 @@ import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
+import com.knk.manyak.story.dto.StorylineRatingRequest
+import com.knk.manyak.story.dto.StorylineRatingResponse
 import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.StorylineRatingService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Content
@@ -17,8 +20,11 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.validation.annotation.Validated
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -30,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/stories/simple")
 class SimpleStoryCreationController(
     private val simpleStoryCreationService: SimpleStoryCreationService,
+    private val storylineRatingService: StorylineRatingService,
 ) {
 
     @Operation(
@@ -129,4 +136,55 @@ class SimpleStoryCreationController(
         @Valid @RequestBody request: CreateSimpleStoryRequest,
     ): SimpleStoryCreateResponse =
         simpleStoryCreationService.createSimpleStory(request)
+
+    @Operation(
+        summary = "스토리라인 평가 설정/변경",
+        description = "간편 제작으로 생성된 예시 스토리라인에 좋아요/나빠요 평가를 남깁니다. " +
+            "같은 스토리라인을 다시 평가하면 값이 갱신됩니다(대상당 1개). 취소는 DELETE를 사용합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "평가 성공",
+                content = [Content(schema = Schema(implementation = StorylineRatingResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "스토리라인을 찾을 수 없음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @PutMapping("/storylines/{storylineId}/rating")
+    fun rateStoryline(
+        @PathVariable storylineId: Long,
+        @Valid @RequestBody request: StorylineRatingRequest,
+    ): StorylineRatingResponse =
+        storylineRatingService.rate(storylineId, request.rating!!)
+
+    @Operation(
+        summary = "스토리라인 평가 취소",
+        description = "스토리라인 평가를 제거합니다. 평가가 없어도 멱등하게 204를 반환합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "204", description = "취소 성공"),
+            ApiResponse(
+                responseCode = "404",
+                description = "스토리라인을 찾을 수 없음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @DeleteMapping("/storylines/{storylineId}/rating")
+    fun cancelStorylineRating(
+        @PathVariable storylineId: Long,
+    ) = storylineRatingService.cancel(storylineId)
 }
