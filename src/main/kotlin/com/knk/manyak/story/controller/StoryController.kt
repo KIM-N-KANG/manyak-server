@@ -13,12 +13,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.http.HttpStatus
 import org.springframework.validation.annotation.Validated
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
 @Tag(name = "Stories", description = "이야기 API")
@@ -86,4 +89,30 @@ class StoryController(
         @Parameter(description = "스토리 ID")
         @PathVariable storyId: Long,
     ): StoryDetailResponse = storyService.getStoryDetail(storyId)
+
+    @Operation(
+        summary = "이야기 삭제 (소프트 삭제)",
+        description = "스토리를 소프트 삭제합니다. 행을 물리 삭제하지 않고 삭제 시각만 기록하며, 이후 목록·상세 조회에서 제외됩니다. " +
+            "존재하지 않거나 이미 삭제된 스토리는 404로 응답합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "204",
+                description = "삭제 성공",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "이야기를 찾을 수 없음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @DeleteMapping("/{storyId}")
+    fun deleteStory(
+        @Parameter(description = "스토리 ID")
+        @PathVariable storyId: Long,
+    ) = storyService.deleteStory(storyId)
 }
