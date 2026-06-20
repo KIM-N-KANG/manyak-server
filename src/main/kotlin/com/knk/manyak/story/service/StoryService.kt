@@ -76,8 +76,8 @@ class StoryService(
     fun deleteStory(storyId: Long) {
         val story = storyRepository.findByIdAndDeletedAtIsNull(storyId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
+        // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
-        storyRepository.save(story)
     }
 
     private fun Story.toGenreNames(): List<String> =
