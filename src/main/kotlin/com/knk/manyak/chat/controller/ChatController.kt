@@ -20,6 +20,7 @@ import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.validation.annotation.Validated
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -121,6 +122,27 @@ class ChatController(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
     ): ChatDetailResponse = chatService.getChatDetail(chatId)
+
+    @Operation(
+        summary = "채팅 삭제",
+        description = "채팅을 소프트 삭제합니다. 삭제된 채팅은 목록·상세 조회에서 제외됩니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "204", description = "삭제 성공"),
+            ApiResponse(
+                responseCode = "404",
+                description = "채팅을 찾을 수 없음(이미 삭제됨 포함)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @DeleteMapping("/chats/{chatId}")
+    fun deleteChat(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+    ) = chatService.deleteChat(chatId)
 
     @Operation(
         summary = "채팅 이어쓰기 스트리밍",
