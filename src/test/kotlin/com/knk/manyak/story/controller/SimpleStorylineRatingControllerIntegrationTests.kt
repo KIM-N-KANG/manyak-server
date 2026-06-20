@@ -68,7 +68,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
         rate(storyline.id, "GOOD")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.storylineId").isEqualTo(storyline.id)
+            .jsonPath("$.id").isEqualTo(storyline.id)
             .jsonPath("$.rating").isEqualTo("GOOD")
 
         val saved = ratingRepository.findByExampleId(storyline.id)

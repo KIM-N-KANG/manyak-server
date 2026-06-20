@@ -26,7 +26,7 @@ class StorylineRatingService(
             ?: StoryCreationExampleRating(exampleId = storylineId, rating = rating)
         storyCreationExampleRatingRepository.save(entity)
 
-        return StorylineRatingResponse(storylineId = storylineId, rating = rating)
+        return StorylineRatingResponse(id = storylineId, rating = rating)
     }
 
     // 취소는 행을 물리 삭제한다. 평가가 없는 스토리라인이면 멱등하게 통과한다.

@@ -160,7 +160,7 @@ data class StorylineRatingRequest(
 @Schema(description = "스토리라인 평가 응답")
 data class StorylineRatingResponse(
     @field:Schema(description = "평가한 스토리라인 ID", example = "1")
-    val storylineId: Long,
+    val id: Long,
 
     @field:Schema(description = "현재 평가 값", example = "GOOD")
     val rating: StorylineRating,

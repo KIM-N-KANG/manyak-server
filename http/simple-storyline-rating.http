@@ -54,9 +54,9 @@ Accept: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     const b = response.body;
-    client.test("응답에 storylineId와 rating이 담긴다", () => {
-        client.assert(String(b.storylineId) === String(client.global.get("storylineId")),
-            `storylineId가 다릅니다. actual=${b.storylineId}`);
+    client.test("응답에 id와 rating이 담긴다", () => {
+        client.assert(String(b.id) === String(client.global.get("storylineId")),
+            `id가 다릅니다. actual=${b.id}`);
         client.assert(b.rating === "GOOD", `rating이 GOOD이 아닙니다. actual=${b.rating}`);
     });
 %}
