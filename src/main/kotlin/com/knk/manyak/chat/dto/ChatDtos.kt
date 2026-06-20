@@ -61,6 +61,9 @@ data class ChatSummaryResponse(
     @field:Schema(description = "마지막으로 생성된 이야기 일부", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
     val lastStoryPreview: String,
 
+    @field:Schema(description = "이 채팅에서 사용자가 이어쓴 횟수(완료된 턴 수)", example = "2")
+    val chatCount: Int,
+
     @field:Schema(description = "마지막 진행 시각", example = "2026-06-12T12:10:00Z")
     val updatedAt: Instant,
 )

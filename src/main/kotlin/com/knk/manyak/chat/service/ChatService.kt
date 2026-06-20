@@ -104,6 +104,8 @@ class ChatService(
                 storyId = session.storyId,
                 storyTitle = titlesByStoryId[session.storyId].orEmpty(),
                 lastStoryPreview = lastPreviewBySessionId[session.id].orEmpty(),
+                // 채팅 횟수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
+                chatCount = session.currentTurn,
                 updatedAt = session.updatedAt,
             )
         }

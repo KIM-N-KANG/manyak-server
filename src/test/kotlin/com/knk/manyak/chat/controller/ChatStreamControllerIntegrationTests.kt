@@ -125,6 +125,23 @@ class ChatStreamControllerIntegrationTests {
     }
 
     @Test
+    fun `채팅 목록의 chatCount는 실제 이어쓰기를 거치며 누적된다`() {
+        val story = seedStory()
+        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+
+        // 막 생성한 채팅: 진행 이력 없음 → chatCount 0
+        assertChatCount(session.id, 0)
+
+        // 1턴 이어쓰기 → persistTurn이 current_turn을 1로 증가 → 목록에 1로 반영
+        stream(session.id, "마법수정에 손을 올린다.")
+        assertChatCount(session.id, 1)
+
+        // 2턴 이어쓰기 → 2로 누적
+        stream(session.id, "앞으로 나선다.")
+        assertChatCount(session.id, 2)
+    }
+
+    @Test
     fun `존재하지 않는 채팅으로 이어쓰면 404로 응답하고 아무것도 저장하지 않는다`() {
         restTestClient.post()
             .uri("/api/v1/chats/999999/turns/stream")
@@ -199,6 +216,18 @@ class ChatStreamControllerIntegrationTests {
 
         assertThat(contentType).isNotNull()
         assertThat(contentType!!.charset).isEqualTo(Charsets.UTF_8)
+    }
+
+    private fun assertChatCount(chatId: Long, expected: Int) {
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":[$chatId]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].id").isEqualTo(chatId)
+            .jsonPath("$[0].chatCount").isEqualTo(expected)
     }
 
     private fun stream(chatId: Long, userInput: String): String =
