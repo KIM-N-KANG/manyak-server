@@ -12,8 +12,8 @@ import jakarta.persistence.Table
 import java.time.Instant
 
 @Entity
-@Table(name = "story_creation_example_questions")
-class StoryCreationExampleQuestion(
+@Table(name = "story_creation_example_recommended_infos")
+class StoryCreationExampleRecommendedInfo(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
@@ -22,11 +22,11 @@ class StoryCreationExampleQuestion(
     @JoinColumn(name = "example_id", nullable = false)
     val example: StoryCreationExample,
 
-    @Column(nullable = false, columnDefinition = "TEXT")
-    val question: String,
+    @Column(name = "info_text", nullable = false, columnDefinition = "TEXT")
+    val infoText: String,
 
-    @Column(name = "question_order", nullable = false)
-    val questionOrder: Short,
+    @Column(name = "info_order", nullable = false)
+    val infoOrder: Short,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

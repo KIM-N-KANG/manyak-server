@@ -33,7 +33,8 @@ data class AiStorylinesResponse(
 data class AiStoryItem(
     val id: Int,
     val story: String,
-    val questions: List<String>,
+    @JsonProperty("recommended_infos")
+    val recommendedInfos: List<String>,
 )
 
 data class AiStoryCompileRequest(

@@ -82,8 +82,8 @@ data class GenerateSimpleStorylinesResponse(
         minItems = 3,
         maxItems = 3,
         arraySchema = Schema(
-            description = "AI가 생성한 예시 스토리라인 3개. 각 스토리라인은 추가 입력을 돕는 도움 질문 3개를 포함합니다.",
-            example = """[{"id":1,"story":"기억을 잃은 주인공이 금지된 숲에서 자신의 과거와 계약의 비밀을 추적합니다.","helpQuestions":[{"id":1,"question":"주인공이 반드시 되찾고 싶은 것은 무엇인가요?"},{"id":2,"question":"계약의 대가는 무엇이면 좋을까요?"},{"id":3,"question":"첫 장면은 어디에서 시작되면 좋을까요?"}]},{"id":2,"story":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가갑니다.","helpQuestions":[{"id":4,"question":"편지를 남긴 인물은 누구인가요?"},{"id":5,"question":"왕국이 사라진 이유는 무엇인가요?"},{"id":6,"question":"주인공은 진실을 공개할까요, 숨길까요?"}]},{"id":3,"story":"닫혀 있던 별의 문이 열리며 주인공은 세계를 바꿀 선택 앞에 섭니다.","helpQuestions":[{"id":7,"question":"별의 문 너머에는 무엇이 있나요?"},{"id":8,"question":"주인공과 함께할 동료는 어떤 인물인가요?"},{"id":9,"question":"마지막 선택은 어떤 희생을 요구하나요?"}]}]""",
+            description = "AI가 생성한 예시 스토리라인 3개. 각 스토리라인은 추가 입력을 돕는 추천 추가 정보 3개를 포함합니다.",
+            example = """[{"id":1,"story":"기억을 잃은 주인공이 금지된 숲에서 자신의 과거와 계약의 비밀을 추적합니다.","recommendedInfos":[{"id":1,"text":"주인공은 반드시 되찾고 싶은 기억이 하나 있다."},{"id":2,"text":"계약의 대가로 수명을 내어주어야 한다."},{"id":3,"text":"첫 장면은 비 내리는 폐허에서 시작된다."}]},{"id":2,"story":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가갑니다.","recommendedInfos":[{"id":4,"text":"편지를 남긴 인물은 주인공의 옛 스승이다."},{"id":5,"text":"왕국은 금기를 어긴 대가로 하루아침에 사라졌다."},{"id":6,"text":"주인공은 결국 진실을 세상에 공개한다."}]},{"id":3,"story":"닫혀 있던 별의 문이 열리며 주인공은 세계를 바꿀 선택 앞에 섭니다.","recommendedInfos":[{"id":7,"text":"별의 문 너머에는 또 다른 세계가 존재한다."},{"id":8,"text":"주인공과 함께할 동료는 냉소적인 마법사다."},{"id":9,"text":"마지막 선택은 동료 중 한 명의 희생을 요구한다."}]}]""",
         ),
     )
     val storylines: List<SimpleStorylineResponse>,
@@ -123,24 +123,24 @@ data class SimpleStorylineResponse(
 
     @field:Size(min = 3, max = 3)
     @field:ArraySchema(
-        schema = Schema(implementation = SimpleStoryHelpQuestionResponse::class),
+        schema = Schema(implementation = SimpleStoryRecommendedInfoResponse::class),
         minItems = 3,
         maxItems = 3,
         arraySchema = Schema(
-            description = "해당 스토리라인의 추가 입력을 돕는 도움 질문 3개",
-            example = """[{"id":1,"question":"주인공이 반드시 되찾고 싶은 것은 무엇인가요?"},{"id":2,"question":"계약의 대가는 무엇이면 좋을까요?"},{"id":3,"question":"첫 장면은 어디에서 시작되면 좋을까요?"}]""",
+            description = "해당 스토리라인의 추가 입력을 돕는 추천 추가 정보 3개",
+            example = """[{"id":1,"text":"주인공은 반드시 되찾고 싶은 기억이 하나 있다."},{"id":2,"text":"계약의 대가로 수명을 내어주어야 한다."},{"id":3,"text":"첫 장면은 비 내리는 폐허에서 시작된다."}]""",
         ),
     )
-    val helpQuestions: List<SimpleStoryHelpQuestionResponse>,
+    val recommendedInfos: List<SimpleStoryRecommendedInfoResponse>,
 )
 
-@Schema(description = "간편 제작 도움 질문")
-data class SimpleStoryHelpQuestionResponse(
-    @field:Schema(description = "질문 ID", example = "1")
+@Schema(description = "간편 제작 추천 추가 정보")
+data class SimpleStoryRecommendedInfoResponse(
+    @field:Schema(description = "추천 추가 정보 ID", example = "1")
     val id: Long,
 
-    @field:Schema(description = "질문 내용", example = "주인공이 반드시 되찾고 싶은 것은 무엇인가요?")
-    val question: String,
+    @field:Schema(description = "추천 추가 정보 내용", example = "주인공은 반드시 되찾고 싶은 기억이 하나 있다.")
+    val text: String,
 )
 
 @Schema(description = "간편 제작 이야기 생성 요청")

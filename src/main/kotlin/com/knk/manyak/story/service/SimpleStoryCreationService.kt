@@ -7,7 +7,7 @@ import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
-import com.knk.manyak.story.dto.SimpleStoryHelpQuestionResponse
+import com.knk.manyak.story.dto.SimpleStoryRecommendedInfoResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
@@ -15,7 +15,7 @@ import com.knk.manyak.story.dto.SimpleStorylineResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationExample
-import com.knk.manyak.story.entity.StoryCreationExampleQuestion
+import com.knk.manyak.story.entity.StoryCreationExampleRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
@@ -24,7 +24,7 @@ import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.repository.StoryCreationExampleQuestionRepository
+import com.knk.manyak.story.repository.StoryCreationExampleRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
@@ -46,7 +46,7 @@ class SimpleStoryCreationService(
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
     private val storyCreationExampleRepository: StoryCreationExampleRepository,
-    private val storyCreationExampleQuestionRepository: StoryCreationExampleQuestionRepository,
+    private val storyCreationExampleRecommendedInfoRepository: StoryCreationExampleRecommendedInfoRepository,
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
@@ -119,26 +119,26 @@ class SimpleStoryCreationService(
                     )
                 },
             )
-            val questions = storyCreationExampleQuestionRepository.saveAll(
+            val recommendedInfos = storyCreationExampleRecommendedInfoRepository.saveAll(
                 examples.zip(aiResponse.stories).flatMap { (example, story) ->
-                    story.questions.mapIndexed { questionIndex, question ->
-                        StoryCreationExampleQuestion(
+                    story.recommendedInfos.mapIndexed { infoIndex, info ->
+                        StoryCreationExampleRecommendedInfo(
                             example = example,
-                            question = question,
-                            questionOrder = (questionIndex + 1).toShort(),
+                            infoText = info,
+                            infoOrder = (infoIndex + 1).toShort(),
                         )
                     }
                 }
-            ).groupBy { question -> question.example.id }
+            ).groupBy { info -> info.example.id }
 
             val storylines = examples.map { example ->
                 SimpleStorylineResponse(
                     id = example.id,
                     story = example.exampleText,
-                    helpQuestions = questions.getValue(example.id).map { question ->
-                        SimpleStoryHelpQuestionResponse(
-                            id = question.id,
-                            question = question.question,
+                    recommendedInfos = recommendedInfos[example.id].orEmpty().map { info ->
+                        SimpleStoryRecommendedInfoResponse(
+                            id = info.id,
+                            text = info.infoText,
                         )
                     },
                 )
