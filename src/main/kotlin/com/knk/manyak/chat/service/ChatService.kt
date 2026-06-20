@@ -85,6 +85,10 @@ class ChatService(
     fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.chatIds.mapNotNull { parsePublicIdOrNull(it) }
+        // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
+        if (requestedPublicIds.isEmpty()) {
+            return emptyList()
+        }
         val sessionsByPublicId = storyPlaySessionRepository.findAllByPublicIdIn(requestedPublicIds)
             .associateBy { it.publicId }
         // 요청 순서를 보존하고, 존재하지 않거나 형식이 잘못된 채팅 ID는 응답에서 제외한다.
