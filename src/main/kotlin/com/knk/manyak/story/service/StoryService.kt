@@ -10,11 +10,11 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 
 @Service
 class StoryService(
@@ -26,7 +26,7 @@ class StoryService(
     @Transactional(readOnly = true)
     fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
         val distinctIds = request.storyIds.distinct()
-        val storiesById = storyRepository.findAllById(distinctIds).associateBy { it.id }
+        val storiesById = storyRepository.findAllByIdInAndDeletedAtIsNull(distinctIds).associateBy { it.id }
         return distinctIds
             .mapNotNull { storiesById[it] }
             .map { it.toSummaryResponse() }
@@ -34,7 +34,7 @@ class StoryService(
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: Long): StoryDetailResponse {
-        val story = storyRepository.findByIdOrNull(storyId)
+        val story = storyRepository.findByIdAndDeletedAtIsNull(storyId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
 
         val startSetting = storyStartSettingRepository.findByStoryId(storyId)
@@ -66,6 +66,18 @@ class StoryService(
             status = StoryStatus.PUBLISHED,
             createdAt = story.createdAt,
         )
+    }
+
+    /**
+     * 스토리를 소프트 삭제한다. 행을 물리 삭제하지 않고 deletedAt만 기록해 자식 데이터(설정·시작 설정·추천 입력)를 보존한다.
+     * 이미 삭제됐거나 존재하지 않으면 404로 통일한다.
+     */
+    @Transactional
+    fun deleteStory(storyId: Long) {
+        val story = storyRepository.findByIdAndDeletedAtIsNull(storyId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
+        story.deletedAt = Instant.now()
+        storyRepository.save(story)
     }
 
     private fun Story.toGenreNames(): List<String> =
