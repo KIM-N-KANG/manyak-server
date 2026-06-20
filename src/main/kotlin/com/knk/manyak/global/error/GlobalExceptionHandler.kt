@@ -5,6 +5,7 @@ import jakarta.validation.ConstraintViolationException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.validation.BindException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -83,6 +84,15 @@ class GlobalExceptionHandler {
                 )
             },
         )
+
+    @ExceptionHandler(HttpMessageNotReadableException::class)
+    fun handleHttpMessageNotReadableException(
+        exception: HttpMessageNotReadableException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("Malformed request body: path={}, message={}", request.requestURI, exception.message)
+        return badRequest(request = request, details = emptyList())
+    }
 
     @ExceptionHandler(ConstraintViolationException::class)
     fun handleConstraintViolationException(
