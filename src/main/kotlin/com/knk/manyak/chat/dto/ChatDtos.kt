@@ -32,6 +32,15 @@ data class CreateChatResponse(
     )
     val prologue: String,
 
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "검사장을 둘러본다."),
+        arraySchema = Schema(
+            description = "시작 화면에 노출할 추천 입력 목록. 시작 설정이나 등록된 추천 입력이 없으면 빈 배열입니다.",
+            example = """["검사장을 둘러본다.","마법수정에 손을 올린다.","주변 학생들에게 말을 건다."]""",
+        ),
+    )
+    val suggestedInputs: List<String>,
+
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:00:00Z")
     val createdAt: Instant,
 )

@@ -27,6 +27,7 @@ import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
@@ -48,6 +49,7 @@ class ChatService(
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
+    private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyPlaySessionRepository: StoryPlaySessionRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -73,10 +75,17 @@ class ChatService(
             ),
         )
 
+        // 추천 입력은 시작 설정에 종속된다. 시작 설정이 없으면 조회 없이 빈 목록을 반환한다.
+        val suggestedInputs = startSetting
+            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
+            ?.map { it.inputText }
+            ?: emptyList()
+
         return CreateChatResponse(
             id = session.publicId.toString(),
             storyId = session.storyId,
             prologue = startSetting?.prologue.orEmpty(),
+            suggestedInputs = suggestedInputs,
             createdAt = session.createdAt,
         )
     }
