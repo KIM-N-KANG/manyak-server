@@ -109,4 +109,19 @@ class SlackFeedbackNotifierTests {
         assertThat(appender.list).isNotEmpty()
         assertThat(logged).doesNotContain("SUPERSECRETTOKEN")
     }
+
+    @Test
+    fun `body의 Slack 제어문자를 이스케이프해 전송한다`() {
+        // POST /feedbacks 는 public 이라 신뢰할 수 없는 입력(mrkdwn 제어문자)이 들어올 수 있다.
+        server.enqueue(MockResponse().setResponseCode(200))
+        val event = sampleEvent().copy(body = "<!channel> & <https://evil|x>")
+
+        SlackFeedbackNotifier(server.url("/hook").toString()).notifyCreated(event)
+
+        val sent = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        assertThat(sent).contains("&lt;!channel&gt;")
+        assertThat(sent).contains("&amp;")
+        // 원문 제어문자가 그대로 전송되어 멘션/링크로 파싱되면 안 된다.
+        assertThat(sent).doesNotContain("<!channel>")
+    }
 }

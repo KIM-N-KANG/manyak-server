@@ -59,19 +59,29 @@ class SlackFeedbackNotifier(
 
     private fun buildMessage(event: FeedbackCreatedEvent): String {
         val meta = buildList {
+            // platform 은 enum 이라 안전하지만, 사용자 입력 메타는 이스케이프한다.
             event.platform?.let { add("platform: $it") }
-            event.appVersion?.let { add("appVersion: $it") }
-            event.email?.let { add("email: $it") }
+            event.appVersion?.let { add("appVersion: ${escapeSlack(it)}") }
+            event.email?.let { add("email: ${escapeSlack(it)}") }
         }.joinToString(" · ")
+
+        // public API 입력이 Slack mrkdwn(멘션/링크)으로 파싱되지 않도록 본문을 이스케이프한다.
+        // 줄바꿈은 이스케이프 이후에 인용 블록으로 이어지도록 처리한다.
+        val body = escapeSlack(event.body).replace("\n", "\n> ")
 
         return buildString {
             append(":speech_balloon: *새 피드백 #${event.id}*\n")
-            // 본문은 인용 블록으로 표시하고, 줄바꿈도 인용이 이어지도록 한다.
-            append("> ${event.body.replace("\n", "\n> ")}")
+            append("> ").append(body)
             if (meta.isNotEmpty()) {
                 append("\n").append(meta)
             }
             append("\n_").append(event.createdAt).append("_")
         }
     }
+
+    // Slack mrkdwn 제어문자 이스케이프. 순서 중요: & 를 먼저 치환해 이중 이스케이프를 막는다.
+    private fun escapeSlack(text: String): String =
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
 }
