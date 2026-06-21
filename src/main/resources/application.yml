@@ -25,3 +25,6 @@ manyak:
     history-turns: 10
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
+  slack:
+    # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
+    feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
