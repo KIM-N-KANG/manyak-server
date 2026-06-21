@@ -94,12 +94,11 @@ class ChatService(
         if (requestedPublicIds.isEmpty()) {
             return emptyList()
         }
-        val sessionsByPublicId = storyPlaySessionRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
-            .associateBy { it.publicId }
-        // 요청 순서를 보존하고, 존재하지 않거나 형식이 잘못된 채팅 ID는 응답에서 제외한다.
-        val sessions = request.chatIds.mapNotNull { raw ->
-            parsePublicIdOrNull(raw)?.let { sessionsByPublicId[it] }
-        }
+        // 존재하고 삭제되지 않은 채팅만 마지막 진행 시각(updatedAt) 내림차순으로 노출한다.
+        // updatedAt이 같으면 id 내림차순으로 결정적 순서를 보장한다. 존재하지 않거나 형식이
+        // 잘못된 채팅 ID는 조회되지 않으므로 자연히 제외된다.
+        val sessions = storyPlaySessionRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
+            .sortedWith(compareByDescending<StoryPlaySession> { it.updatedAt }.thenByDescending { it.id })
         if (sessions.isEmpty()) {
             return emptyList()
         }

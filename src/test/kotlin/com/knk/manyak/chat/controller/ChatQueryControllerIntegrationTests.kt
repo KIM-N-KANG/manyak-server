@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -209,13 +210,26 @@ class ChatQueryControllerIntegrationTests {
     }
 
     @Test
-    fun `채팅 목록은 요청한 ID 순서를 보존하고 마지막 AI 출력으로 프리뷰를 만든다`() {
+    fun `채팅 목록은 요청 순서와 무관하게 updatedAt 내림차순으로 정렬하고 마지막 AI 출력으로 프리뷰를 만든다`() {
         val storyA = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
         val storyB = storyRepository.save(Story(title = "왕국의 마지막 편지"))
         // chatCount는 세션의 비정규화 카운터(currentTurn)를 그대로 노출한다. persistTurn을 우회해
         // 직접 시드하므로 currentTurn을 명시한다. (A: 2턴, B: 1턴)
-        val sessionA = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyA.id, currentTurn = 2))
-        val sessionB = storyPlaySessionRepository.save(StoryPlaySession(storyId = storyB.id, currentTurn = 1))
+        // updatedAt(마지막 진행 시각)을 명시해 정렬 기준을 고정한다. A가 B보다 최근이다.
+        val sessionA = storyPlaySessionRepository.save(
+            StoryPlaySession(
+                storyId = storyA.id,
+                currentTurn = 2,
+                updatedAt = Instant.parse("2026-06-20T10:00:00Z"),
+            ),
+        )
+        val sessionB = storyPlaySessionRepository.save(
+            StoryPlaySession(
+                storyId = storyB.id,
+                currentTurn = 1,
+                updatedAt = Instant.parse("2026-06-19T10:00:00Z"),
+            ),
+        )
 
         message(sessionA.id, MessageRole.USER, "이름은 강진우야.", 1)
         message(sessionA.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
@@ -224,7 +238,7 @@ class ChatQueryControllerIntegrationTests {
         message(sessionB.id, MessageRole.USER, "편지를 연다.", 1)
         message(sessionB.id, MessageRole.ASSISTANT, "봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.", 2)
 
-        // 요청 순서: B, 없는 ID, A → 응답은 B, A 순서로 보존되고 없는 ID는 제외된다
+        // 요청 순서: B, 없는 ID, A → 응답은 updatedAt 최신순(A, B)으로 정렬되고 없는 ID는 제외된다
         val missing = java.util.UUID.randomUUID()
         restTestClient.post()
             .uri("/api/v1/chats/batch")
@@ -234,16 +248,50 @@ class ChatQueryControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(2)
-            .jsonPath("$[0].id").isEqualTo(sessionB.publicId.toString())
-            .jsonPath("$[0].storyId").isEqualTo(storyB.id)
-            .jsonPath("$[0].storyTitle").isEqualTo("왕국의 마지막 편지")
-            .jsonPath("$[0].lastStoryPreview").isEqualTo("봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.")
-            .jsonPath("$[0].chatCount").isEqualTo(1)
-            .jsonPath("$[1].id").isEqualTo(sessionA.publicId.toString())
-            .jsonPath("$[1].storyId").isEqualTo(storyA.id)
-            .jsonPath("$[1].storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
-            .jsonPath("$[1].lastStoryPreview").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
-            .jsonPath("$[1].chatCount").isEqualTo(2)
+            .jsonPath("$[0].id").isEqualTo(sessionA.publicId.toString())
+            .jsonPath("$[0].storyId").isEqualTo(storyA.id)
+            .jsonPath("$[0].storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
+            .jsonPath("$[0].lastStoryPreview").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
+            .jsonPath("$[0].chatCount").isEqualTo(2)
+            .jsonPath("$[1].id").isEqualTo(sessionB.publicId.toString())
+            .jsonPath("$[1].storyId").isEqualTo(storyB.id)
+            .jsonPath("$[1].storyTitle").isEqualTo("왕국의 마지막 편지")
+            .jsonPath("$[1].lastStoryPreview").isEqualTo("봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.")
+            .jsonPath("$[1].chatCount").isEqualTo(1)
+    }
+
+    @Test
+    fun `채팅 목록은 소프트 삭제된 채팅을 제외한다`() {
+        val story = storyRepository.save(Story(title = "왕국의 마지막 편지"))
+        val active = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val deleted = storyPlaySessionRepository.save(
+            StoryPlaySession(storyId = story.id, deletedAt = Instant.parse("2026-06-20T10:00:00Z")),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${deleted.publicId}","${active.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(active.publicId.toString())
+    }
+
+    @Test
+    fun `존재하지 않는 채팅 ID만 요청하면 빈 목록을 반환한다`() {
+        val missing1 = java.util.UUID.randomUUID()
+        val missing2 = java.util.UUID.randomUUID()
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["$missing1","$missing2"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(0)
     }
 
     @Test
