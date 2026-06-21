@@ -112,6 +112,17 @@ data class ChatDetailResponse(
         arraySchema = Schema(description = "채팅 진행 턴 목록"),
     )
     val turns: List<ChatTurnResponse>,
+
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "검사장을 둘러본다."),
+        arraySchema = Schema(
+            description = "아직 한 번도 이어쓰지 않아 turns가 비어 있을 때, 시작 화면에 노출할 기본 추천 입력 목록입니다. " +
+                "진행 턴이 있으면(turns가 비어 있지 않으면) 다음 행동은 마지막 턴의 choices로 안내하므로 빈 배열입니다. " +
+                "시작 설정이나 등록된 추천 입력이 없어도 빈 배열입니다.",
+            example = """["검사장을 둘러본다.","마법수정에 손을 올린다.","주변 학생들에게 말을 건다."]""",
+        ),
+    )
+    val suggestedInputs: List<String>,
 )
 
 @Schema(description = "채팅 진행 턴")

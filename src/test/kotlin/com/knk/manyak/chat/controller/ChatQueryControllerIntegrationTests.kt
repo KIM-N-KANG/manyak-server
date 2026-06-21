@@ -9,8 +9,10 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,6 +37,9 @@ class ChatQueryControllerIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
+    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
+
+    @Autowired
     private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
 
     @Autowired
@@ -48,6 +53,7 @@ class ChatQueryControllerIntegrationTests {
         storyChoiceRepository.deleteAllInBatch()
         storyMessageRepository.deleteAllInBatch()
         storyPlaySessionRepository.deleteAllInBatch()
+        storySuggestedInputRepository.deleteAllInBatch()
         storyStartSettingRepository.deleteAllInBatch()
         storyRepository.deleteAllInBatch()
     }
@@ -98,7 +104,7 @@ class ChatQueryControllerIntegrationTests {
     }
 
     @Test
-    fun `시작 설정이 없는 채팅 상세는 빈 프롤로그로 조회된다`() {
+    fun `시작 설정이 없는 채팅 상세는 빈 프롤로그와 빈 추천 입력으로 조회된다`() {
         val story = storyRepository.save(Story(title = "설정 미완 스토리"))
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
@@ -110,6 +116,70 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$.storyTitle").isEqualTo("설정 미완 스토리")
             .jsonPath("$.prologue").isEqualTo("")
             .jsonPath("$.turns.length()").isEqualTo(0)
+            .jsonPath("$.suggestedInputs").isArray()
+            .jsonPath("$.suggestedInputs").isEmpty()
+    }
+
+    @Test
+    fun `진행 턴이 없는 채팅 상세는 시작 추천 입력을 input_order 순으로 함께 반환한다`() {
+        // 채팅만 만들고 한 번도 이어쓰지 않은 채 다시 들어온 경우: 시작 화면에 띄울 기본 추천 입력을
+        // POST /chats 와 동일하게 내려준다.
+        val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
+        val startSetting = storyStartSettingRepository.save(
+            StoryStartSetting(
+                story = story,
+                name = "입학 적성 검사",
+                prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.",
+                startSituation = "적성 검사 직전의 검사장.",
+            ),
+        )
+        // input_order 역순으로 저장해도 응답은 오름차순으로 정렬되어야 한다.
+        storySuggestedInputRepository.save(
+            StorySuggestedInput(startSetting = startSetting, inputText = "마법수정에 손을 올린다.", inputOrder = 2),
+        )
+        storySuggestedInputRepository.save(
+            StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
+        )
+        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${session.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(0)
+            .jsonPath("$.suggestedInputs.length()").isEqualTo(2)
+            .jsonPath("$.suggestedInputs[0]").isEqualTo("검사장을 둘러본다.")
+            .jsonPath("$.suggestedInputs[1]").isEqualTo("마법수정에 손을 올린다.")
+    }
+
+    @Test
+    fun `진행 턴이 있는 채팅 상세는 추천 입력을 빈 배열로 반환한다`() {
+        // 이미 이어쓰기를 시작했다면 다음 행동은 마지막 턴의 choices로 안내하므로 시작 추천 입력은 비운다.
+        val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
+        val startSetting = storyStartSettingRepository.save(
+            StoryStartSetting(
+                story = story,
+                name = "입학 적성 검사",
+                prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.",
+                startSituation = "적성 검사 직전의 검사장.",
+            ),
+        )
+        storySuggestedInputRepository.save(
+            StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
+        )
+        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
+        message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${session.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(1)
+            .jsonPath("$.suggestedInputs").isArray()
+            .jsonPath("$.suggestedInputs").isEmpty()
     }
 
     @Test

@@ -75,11 +75,7 @@ class ChatService(
             ),
         )
 
-        // 추천 입력은 시작 설정에 종속된다. 시작 설정이 없으면 조회 없이 빈 목록을 반환한다.
-        val suggestedInputs = startSetting
-            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
-            ?.map { it.inputText }
-            ?: emptyList()
+        val suggestedInputs = loadSuggestedInputs(startSetting?.id)
 
         return CreateChatResponse(
             id = session.publicId.toString(),
@@ -136,7 +132,8 @@ class ChatService(
         val storyTitle = storyRepository.findById(session.storyId)
             .map { it.title }
             .orElse("")
-        val prologue = storyStartSettingRepository.findByStoryId(session.storyId)?.prologue.orEmpty()
+        // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
+        val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
 
         val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
         val turns = pairTurns(messages)
@@ -149,11 +146,15 @@ class ChatService(
                 .mapValues { (_, choices) -> choices.map { it.choiceText } }
         }
 
+        // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
+        // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
+        val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
+
         return ChatDetailResponse(
             id = session.publicId.toString(),
             storyId = session.storyId,
             storyTitle = storyTitle,
-            prologue = prologue,
+            prologue = startSetting?.prologue.orEmpty(),
             turns = turns.map { assistant ->
                 ChatTurnResponse(
                     id = assistant.id,
@@ -163,6 +164,7 @@ class ChatService(
                     createdAt = assistant.createdAt,
                 )
             },
+            suggestedInputs = suggestedInputs,
         )
     }
 
@@ -325,6 +327,16 @@ class ChatService(
             summary = "",
         )
     }
+
+    /**
+     * 시작 설정에 연결된 추천 입력을 input_order 오름차순으로 조회한다.
+     * 시작 설정이 없으면(startSettingId == null) 조회 없이 빈 목록을 반환한다.
+     */
+    private fun loadSuggestedInputs(startSettingId: Long?): List<String> =
+        startSettingId
+            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it) }
+            ?.map { it.inputText }
+            ?: emptyList()
 
     /**
      * 공개 식별자(UUID 문자열)로 세션을 조회한다. 형식이 잘못됐거나 존재하지 않으면 404로 통일한다.
