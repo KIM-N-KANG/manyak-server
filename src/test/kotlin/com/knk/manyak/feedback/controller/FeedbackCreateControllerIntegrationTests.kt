@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.core.env.Environment
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 @ActiveProfiles("test")
@@ -17,11 +20,23 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class FeedbackCreateControllerIntegrationTests {
 
+    companion object {
+        @JvmStatic
+        @DynamicPropertySource
+        fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
+            // 환경변수(MANYAK_SLACK_FEEDBACK_WEBHOOK_URL)가 export 돼 있어도 빈 값을 강제해 외부 발송을 막는다.
+            registry.add("manyak.slack.feedback-webhook-url") { "" }
+        }
+    }
+
     @Autowired
     private lateinit var restTestClient: RestTestClient
 
     @Autowired
     private lateinit var feedbackRepository: FeedbackRepository
+
+    @Autowired
+    private lateinit var environment: Environment
 
     @BeforeEach
     fun setUp() {
@@ -128,5 +143,12 @@ class FeedbackCreateControllerIntegrationTests {
             .expectStatus().isBadRequest
 
         assertThat(feedbackRepository.count()).isZero()
+    }
+
+    @Test
+    fun `test 컨텍스트에서 Slack webhook은 비활성(빈 값)이라 실제로 발송하지 않는다`() {
+        // MANYAK_SLACK_FEEDBACK_WEBHOOK_URL 환경변수가 export 된 셸에서 테스트를 돌려도
+        // 이 컨텍스트에서는 webhook 이 비어 있어야 한다(실 채널로 fixture 발송 방지).
+        assertThat(environment.getProperty("manyak.slack.feedback-webhook-url").orEmpty()).isEmpty()
     }
 }
