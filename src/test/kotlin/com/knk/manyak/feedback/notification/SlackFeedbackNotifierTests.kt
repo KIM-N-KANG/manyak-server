@@ -1,5 +1,8 @@
 package com.knk.manyak.feedback.notification
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.feedback.entity.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import okhttp3.mockwebserver.MockResponse
@@ -8,6 +11,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
+import java.net.ServerSocket
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.TimeUnit
@@ -76,5 +81,32 @@ class SlackFeedbackNotifierTests {
 
         // 발송 시도 자체는 일어나야 한다.
         assertThat(server.takeRequest(2, TimeUnit.SECONDS)).isNotNull()
+    }
+
+    @Test
+    fun `발송 실패 로그에 webhook URL(secret)이 남지 않는다`() {
+        // 닫힌 포트로 연결 실패를 유발하면, 예외 메시지에 요청 URL(secret 토큰 포함)이 섞일 수 있다.
+        val deadPort = ServerSocket(0).use { it.localPort }
+        val secretUrl = "http://localhost:$deadPort/services/T000/B000/SUPERSECRETTOKEN"
+
+        val logger = LoggerFactory.getLogger(SlackFeedbackNotifier::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            SlackFeedbackNotifier(
+                webhookUrl = secretUrl,
+                connectTimeout = Duration.ofMillis(500),
+                readTimeout = Duration.ofMillis(500),
+            ).notifyCreated(sampleEvent())
+        } finally {
+            logger.detachAppender(appender)
+        }
+
+        // 실패가 로깅되더라도 메시지·스택 어디에도 webhook secret 이 남아선 안 된다.
+        val logged = appender.list.joinToString("\n") { event ->
+            event.formattedMessage + " " + (event.throwableProxy?.let { "${it.className}: ${it.message}" } ?: "")
+        }
+        assertThat(appender.list).isNotEmpty()
+        assertThat(logged).doesNotContain("SUPERSECRETTOKEN")
     }
 }

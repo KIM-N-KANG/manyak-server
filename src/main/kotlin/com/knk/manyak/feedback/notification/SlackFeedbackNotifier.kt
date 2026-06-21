@@ -48,7 +48,12 @@ class SlackFeedbackNotifier(
                 .toBodilessEntity()
         } catch (ex: RuntimeException) {
             // 알림은 부가 기능이므로 실패해도 피드백 등록 흐름에 영향을 주지 않는다.
-            log.warn("피드백 Slack 알림 발송에 실패했습니다. (feedbackId={})", event.id, ex)
+            // 예외 메시지/스택에는 webhook URL(secret 토큰 포함)이 섞일 수 있어, 예외 타입만 남긴다.
+            log.warn(
+                "피드백 Slack 알림 발송에 실패했습니다. (feedbackId={}, error={})",
+                event.id,
+                ex.javaClass.simpleName,
+            )
         }
     }
 
