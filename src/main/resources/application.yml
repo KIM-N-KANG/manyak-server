@@ -21,8 +21,6 @@ springdoc:
 manyak:
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
-  chat:
-    history-turns: 10
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   slack:

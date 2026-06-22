@@ -29,8 +29,6 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
@@ -55,8 +53,6 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
-    @Value("\${manyak.chat.history-turns:10}")
-    private val historyTurns: Int,
 ) {
 
     @Transactional
@@ -356,16 +352,12 @@ class ChatService(
         }
 
     /**
-     * 최근 [historyTurns]턴(USER+ASSISTANT)을 시간순으로 조립한다.
-     * 한 턴은 메시지 2건이므로 마지막 `historyTurns * 2`건만 조회해 메모리 로드를 제한하고,
+     * 세션의 전체 대화 내역(USER+ASSISTANT)을 시간순으로 조립한다.
      * SYSTEM 메시지는 AI history에서 제외한다.
      */
     private fun assembleHistory(chatId: Long): List<ChatHistoryMessage> {
-        val recent = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderDesc(
-            chatId,
-            PageRequest.of(0, historyTurns * 2),
-        )
-        return recent.asReversed().mapNotNull { message ->
+        val all = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(chatId)
+        return all.mapNotNull { message ->
             when (message.role) {
                 MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)
                 MessageRole.ASSISTANT -> ChatHistoryMessage(ChatMessageRole.ASSISTANT, message.content)
