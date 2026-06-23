@@ -261,13 +261,12 @@ class ChatService(
                 )
                 // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
                 // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
-                // turn_index는 persistTurn이 증가시킬 값(currentTurn + 1)과 같다.
+                // turn_index는 persistTurn이 DB에서 확정한 뒤 attachTurnIndex로 채운다(동시 요청 정합성).
                 val recorded = aiCallRecorder.record(
                     AiCallContext(
                         feature = AiCallFeature.CHAT_RESPONSE,
                         storyId = session.storyId,
                         chatId = session.publicId,
-                        turnIndex = session.currentTurn + 1,
                     ),
                     errorCode = { throwable ->
                         if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
@@ -291,6 +290,8 @@ class ChatService(
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
+                // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
+                aiCallRecorder.attachTurnIndex(recorded.aiCallLogId, persisted.turnIndex)
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,

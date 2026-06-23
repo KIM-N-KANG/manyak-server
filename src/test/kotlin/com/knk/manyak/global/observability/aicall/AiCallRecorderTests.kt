@@ -131,4 +131,32 @@ class AiCallRecorderTests {
         assertEquals(128, log.requestId.length)
         assertEquals(longRequestId.take(128), log.requestId)
     }
+
+    @Test
+    fun `컬럼 길이를 넘는 error_code는 잘라서 적재해 원래 예외를 보존한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        val longCode = "E".repeat(200)
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            recorder.record(
+                AiCallContext(feature = AiCallFeature.CHAT_RESPONSE),
+                errorCode = { longCode },
+            ) { throw IllegalStateException("boom") }
+        }
+
+        assertEquals("boom", thrown.message)
+        val log = repository.findAll().single()
+        assertEquals(100, log.errorCode!!.length)
+    }
+
+    @Test
+    fun `attachTurnIndex는 적재 후 turn_index를 채운다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }
+        assertNull(repository.findById(recorded.aiCallLogId).orElseThrow().turnIndex)
+
+        recorder.attachTurnIndex(recorded.aiCallLogId, 3)
+
+        assertEquals(3, repository.findById(recorded.aiCallLogId).orElseThrow().turnIndex)
+    }
 }

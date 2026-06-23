@@ -41,9 +41,27 @@ class AiCallRecorder(
             repository.save(log)
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
-            log.markFailed(latencyMs = elapsedMs(startNanos), errorCode = errorCode(throwable))
+            // error_code도 컬럼 길이로 자른다. 자르지 않으면 긴 코드(예: 긴 ChatTurnAiException.code)에서
+            // save가 length 위반을 던져 원래 AI 예외를 가리고 구조화 에러 relay가 깨진다.
+            log.markFailed(
+                latencyMs = elapsedMs(startNanos),
+                errorCode = errorCode(throwable)?.take(ERROR_CODE_MAX_LENGTH),
+            )
             repository.save(log)
             throw throwable
+        }
+    }
+
+    /**
+     * 적재된 호출의 turn_index를 사후에 채운다.
+     *
+     * chat_response의 실제 turn 번호는 persistTurn이 DB에서 확정하므로, 그 뒤에 호출해야
+     * 같은 채팅에 동시 요청이 겹쳐도 ai_call_logs.turn_index가 저장된 턴과 어긋나지 않는다.
+     */
+    fun attachTurnIndex(aiCallLogId: Long, turnIndex: Int) {
+        repository.findById(aiCallLogId).ifPresent { log ->
+            log.turnIndex = turnIndex
+            repository.save(log)
         }
     }
 
@@ -58,7 +76,7 @@ class AiCallRecorder(
         sessionId = cleanMdc(MdcKeys.SESSION_ID),
         storyId = context.storyId,
         chatId = context.chatId,
-        turnIndex = context.turnIndex,
+        // turn_index는 적재 시점엔 비워 두고, persistTurn이 실제 턴을 확정한 뒤 attachTurnIndex로 채운다.
     )
 
     private fun cleanMdc(key: String): String? =
@@ -69,8 +87,9 @@ class AiCallRecorder(
     companion object {
         private const val UNKNOWN = "unknown"
 
-        // request_id·session_id 컬럼 길이(VARCHAR(128))와 일치. 초과 입력은 잘라 적재 실패를 막는다.
-        private const val IDENTIFIER_MAX_LENGTH = 128
+        // 컬럼 길이와 일치시켜, 초과 입력이 적재 실패로 비즈니스 호출을 막지 않도록 자른다.
+        private const val IDENTIFIER_MAX_LENGTH = 128 // request_id·session_id VARCHAR(128)
+        private const val ERROR_CODE_MAX_LENGTH = 100 // error_code VARCHAR(100)
     }
 }
 
@@ -82,7 +101,6 @@ data class AiCallContext(
     val feature: AiCallFeature,
     val storyId: Long? = null,
     val chatId: UUID? = null,
-    val turnIndex: Int? = null,
 )
 
 /** 적재된 호출의 결과와 ai_call_log_id(상관관계 연결용). */
