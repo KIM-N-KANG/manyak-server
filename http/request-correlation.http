@@ -1,0 +1,87 @@
+### 요청 식별자 수신·MDC 로그 전파(Request Correlation) 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### KNK-216: 모든 요청에서 X-Manyak-* 식별자 헤더를 받아 MDC에 적재하고,
+###          request_id를 응답 헤더 X-Manyak-Request-Id로 echo하는 전역 필터를 검증합니다.
+###
+### 이 필터는 특정 엔드포인트가 아니라 모든 요청에 적용됩니다. 아래에서는 부수효과(DB 쓰기)가 없는
+### GET 엔드포인트로 동작만 확인합니다.
+###
+### 검증 포인트:
+###   - 응답 헤더 X-Manyak-Request-Id: 보낸 값은 그대로 echo, 없으면 서버가 req_ 접두로 생성 (HTTP로 관찰 가능)
+###   - MDC(request_id/session_id/anonymous_id_hash): 서버 로그 필드로만 드러남.
+###     구조화 로그 출력은 KNK-217에서 들어오므로, 지금은 (1) echo 헤더와 (2) 누락 시 WARN 로그로 확인합니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동(docker compose up -d) — 태그 목록 조회가 실 DB를 읽습니다.
+###     (DB 없이 동작만 보려면 /actuator/health 로도 동일한 echo 동작을 확인할 수 있습니다.)
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인 (+ actuator 응답에도 request_id가 echo되는지)
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+X-Manyak-Request-Id: req_health_check
+
+> {%
+    client.test("헬스 체크가 200이고 보낸 request_id를 echo한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        const echoed = response.headers.valueOf("X-Manyak-Request-Id");
+        client.assert(echoed === "req_health_check", `echo 불일치. actual=${echoed}`);
+    });
+%}
+
+### 1. 세 헤더를 모두 보내면 보낸 request_id가 그대로 응답에 echo된다 → 200
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Anonymous-Id: anon-manual-1
+X-Manyak-Session-Id: sess-manual-1
+X-Manyak-Request-Id: req_manual_check_1
+
+> {%
+    client.test("보낸 X-Manyak-Request-Id가 응답에 그대로 echo된다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        const echoed = response.headers.valueOf("X-Manyak-Request-Id");
+        client.assert(echoed === "req_manual_check_1", `echo 불일치. actual=${echoed}`);
+    });
+%}
+
+### 2. X-Manyak-Request-Id를 생략하면 서버가 req_ 접두 ID를 생성해 응답에 담는다 → 200
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Anonymous-Id: anon-manual-2
+X-Manyak-Session-Id: sess-manual-2
+
+> {%
+    client.test("request_id 미전달 시 서버가 req_ 접두 ID를 생성한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        const generated = response.headers.valueOf("X-Manyak-Request-Id");
+        client.assert(Boolean(generated) && generated.indexOf("req_") === 0,
+            `생성된 request_id가 req_로 시작하지 않습니다. actual=${generated}`);
+    });
+%}
+
+### 3. 필수 헤더(anonymous·session)가 없어도 4xx로 막지 않고 200을 반환한다 (관대 처리)
+# 수동 확인: 이 요청을 보낸 뒤 서버 콘솔 로그에
+#   WARN ... 필수 추적 헤더 누락: missing=[X-Manyak-Anonymous-Id, X-Manyak-Session-Id], method=GET, path=/api/v1/stories/simple/tags
+# 가 한 줄 찍히는지 눈으로 확인하세요. (분석 신호 누락이 제품 가용성을 깨지 않는다는 정책)
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Request-Id: req_manual_check_3
+
+> {%
+    client.test("필수 헤더가 없어도 200을 반환한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        const echoed = response.headers.valueOf("X-Manyak-Request-Id");
+        client.assert(echoed === "req_manual_check_3", `echo 불일치. actual=${echoed}`);
+    });
+%}
+
+### 4. (자유 조회) 임의 헤더로 직접 호출해 echo와 서버 로그를 눈으로 확인
+# 어서션 없이, 원하는 식별자를 넣어 응답 헤더 X-Manyak-Request-Id가 보낸 값과 같은지,
+# 서버 로그에 같은 request_id로 요청이 묶이는지(=KNK-217 구조화 로그 적용 후 더 명확) 확인합니다.
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Anonymous-Id: anon-자유입력
+X-Manyak-Session-Id: sess-자유입력
+X-Manyak-Request-Id: req_자유입력
