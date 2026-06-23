@@ -37,11 +37,13 @@ MANYAK_DB_PASSWORD=<DB 비밀번호>
 MANYAK_AI_BASE_URL=http://localhost:8000
 MANYAK_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.0.12:3000
 MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
+MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER=optional-random-pepper
 ```
 
 `MANYAK_AI_BASE_URL`에는 반드시 `http://` 또는 `https://` scheme까지 포함합니다.
 `MANYAK_CORS_ALLOWED_ORIGINS`는 쉼표로 구분하며, 각 origin에는 scheme과 port를 포함합니다.
 `MANYAK_SLACK_FEEDBACK_WEBHOOK_URL`은 선택값입니다. 설정하면 피드백 등록 시 해당 Slack Incoming Webhook으로 알림을 보내고, 비워 두면 알림을 건너뜁니다(등록은 정상 동작).
+`MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER`은 선택값입니다. 익명 ID 해시에 섞는 pepper로, 설정하면 ID 추측 공격을 완화하고 비워 두면 무염 해시를 사용합니다.
 
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
