@@ -96,22 +96,17 @@ data class AiStoryStartSettings(
 class RestStoryAiClient(
     @Value("\${manyak.ai.base-url}") aiBaseUrl: String,
     connectTimeout: Duration = Duration.ofSeconds(5),
-    readTimeout: Duration = Duration.ofSeconds(15),
+    storylineReadTimeout: Duration = Duration.ofSeconds(30),
+    compileReadTimeout: Duration = Duration.ofSeconds(120),
 ) : StoryAiClient {
     private val validatedAiBaseUrl = validateAiBaseUrl(aiBaseUrl)
-    private val restClient = RestClient
-        .builder()
-        .baseUrl(validatedAiBaseUrl.toString())
-        .requestFactory(
-            SimpleClientHttpRequestFactory().apply {
-                setConnectTimeout(connectTimeout)
-                setReadTimeout(readTimeout)
-            },
-        )
-        .build()
+
+    // storyline 생성과 compile은 응답 시간 특성이 달라 read timeout을 분리한다.
+    private val storylineRestClient = buildRestClient(connectTimeout, storylineReadTimeout)
+    private val compileRestClient = buildRestClient(connectTimeout, compileReadTimeout)
 
     override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
-        restClient
+        storylineRestClient
             .post()
             .uri("/api/v1/story/storylines")
             .contentType(MediaType.APPLICATION_JSON)
@@ -122,7 +117,7 @@ class RestStoryAiClient(
             ?: throw IllegalStateException("AI storylines response body is empty")
 
     override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse =
-        restClient
+        compileRestClient
             .post()
             .uri("/api/v1/story/compile")
             .contentType(MediaType.APPLICATION_JSON)
@@ -131,6 +126,18 @@ class RestStoryAiClient(
             .retrieve()
             .body(AiStoryCompileResponse::class.java)
             ?: throw IllegalStateException("AI story compile response body is empty")
+
+    private fun buildRestClient(connectTimeout: Duration, readTimeout: Duration): RestClient =
+        RestClient
+            .builder()
+            .baseUrl(validatedAiBaseUrl.toString())
+            .requestFactory(
+                SimpleClientHttpRequestFactory().apply {
+                    setConnectTimeout(connectTimeout)
+                    setReadTimeout(readTimeout)
+                },
+            )
+            .build()
 
     private fun validateAiBaseUrl(aiBaseUrl: String): URI {
         val uri = URI.create(aiBaseUrl.trim())
