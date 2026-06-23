@@ -1,6 +1,7 @@
 package com.knk.manyak.global.observability.aicall
 
 import com.knk.manyak.global.observability.MdcKeys
+import io.sentry.Sentry
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -31,14 +32,17 @@ class AiCallRecorder(
     fun <T> record(
         context: AiCallContext,
         errorCode: (Throwable) -> String? = { it::class.simpleName },
+        onFailure: (aiCallLogId: Long, throwable: Throwable) -> Unit = { _, _ -> },
         block: () -> T,
     ): RecordedAiCall<T> {
         val log = repository.save(started(context))
+        Sentry.addBreadcrumb("ai_call started: ${context.feature.value}", "ai")
         val startNanos = System.nanoTime()
         try {
             val result = block()
             log.markSucceeded(latencyMs = elapsedMs(startNanos))
             repository.save(log)
+            Sentry.addBreadcrumb("ai_call succeeded: ${context.feature.value}", "ai")
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
             // error_code도 컬럼 길이로 자른다. 자르지 않으면 긴 코드(예: 긴 ChatTurnAiException.code)에서
@@ -48,6 +52,10 @@ class AiCallRecorder(
                 errorCode = errorCode(throwable)?.take(ERROR_CODE_MAX_LENGTH),
             )
             repository.save(log)
+            Sentry.addBreadcrumb("ai_call failed: ${context.feature.value}", "ai")
+            // 적재된 호출 id로 후처리(예: Sentry 캡처 후 sentry_event_id 연결)할 기회를 준다.
+            // 후처리(관측) 실패가 원래 예외를 가리지 않도록 격리한 뒤 전파한다.
+            runCatching { onFailure(log.id, throwable) }
             throw throwable
         }
     }
@@ -61,6 +69,17 @@ class AiCallRecorder(
     fun attachTurnIndex(aiCallLogId: Long, turnIndex: Int) {
         repository.findById(aiCallLogId).ifPresent { log ->
             log.turnIndex = turnIndex
+            repository.save(log)
+        }
+    }
+
+    /**
+     * 적재된 호출에 Sentry 이벤트 id를 연결한다. 실패한 AI 호출을 캡처한 뒤 호출해
+     * ai_call_logs와 Sentry 이벤트를 상호 참조할 수 있게 한다.
+     */
+    fun attachSentryEventId(aiCallLogId: Long, sentryEventId: String) {
+        repository.findById(aiCallLogId).ifPresent { log ->
+            log.sentryEventId = sentryEventId
             repository.save(log)
         }
     }

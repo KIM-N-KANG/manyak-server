@@ -159,4 +159,48 @@ class AiCallRecorderTests {
 
         assertEquals(3, repository.findById(recorded.aiCallLogId).orElseThrow().turnIndex)
     }
+
+    @Test
+    fun `실패 시 onFailure에 적재 id와 원래 예외를 전달한 뒤 전파한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        var capturedId: Long? = null
+        var capturedMessage: String? = null
+
+        assertFailsWith<IllegalStateException> {
+            recorder.record(
+                AiCallContext(feature = AiCallFeature.CHAT_RESPONSE),
+                onFailure = { id, throwable ->
+                    capturedId = id
+                    capturedMessage = throwable.message
+                },
+            ) { throw IllegalStateException("boom") }
+        }
+
+        val log = repository.findAll().single()
+        assertEquals(log.id, capturedId)
+        assertEquals("boom", capturedMessage)
+    }
+
+    @Test
+    fun `성공 시에는 onFailure를 호출하지 않는다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        var called = false
+
+        recorder.record(
+            AiCallContext(feature = AiCallFeature.CHAT_RESPONSE),
+            onFailure = { _, _ -> called = true },
+        ) { 1 }
+
+        assertEquals(false, called)
+    }
+
+    @Test
+    fun `attachSentryEventId는 sentry_event_id를 채운다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }
+
+        recorder.attachSentryEventId(recorded.aiCallLogId, "0123456789abcdef")
+
+        assertEquals("0123456789abcdef", repository.findById(recorded.aiCallLogId).orElseThrow().sentryEventId)
+    }
 }

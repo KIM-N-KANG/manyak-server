@@ -33,6 +33,7 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
+    implementation("io.sentry:sentry-spring-boot-4:8.43.1")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
     testRuntimeOnly("com.h2database:h2")

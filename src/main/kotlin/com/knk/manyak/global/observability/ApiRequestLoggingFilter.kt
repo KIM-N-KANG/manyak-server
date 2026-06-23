@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability
 
+import io.sentry.Sentry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -29,6 +30,9 @@ class ApiRequestLoggingFilter(
         filterChain: FilterChain,
     ) {
         val startNanos = System.nanoTime()
+        // GlobalExceptionHandler가 예외 캡처 시 duration_ms를 계산할 수 있도록 요청 시작 시각을 노출한다.
+        request.setAttribute(REQUEST_START_NANOS_ATTRIBUTE, startNanos)
+        Sentry.addBreadcrumb("request: ${request.method} ${request.requestURI}", "http")
         // 예외가 상태 설정 없이 필터 밖으로 전파되면(필터 단계 오류·Error 등) response.status가 기본 200으로 남는다.
         // 이를 잡아 5xx 실패로 분류하고 다시 던진다. (컨트롤러 예외는 GlobalExceptionHandler가 5xx로 만들어 이미 실패로 기록된다.)
         var thrown: Throwable? = null
@@ -69,7 +73,9 @@ class ApiRequestLoggingFilter(
         return EXCLUDED_PREFIXES.any { path.startsWith(it) } || path == "/swagger-ui.html" || path == "/error"
     }
 
-    private companion object {
-        val EXCLUDED_PREFIXES = listOf("/actuator", "/swagger-ui", "/v3/api-docs")
+    companion object {
+        // 요청 시작 시각(nanoTime)을 담는 request attribute 키. GlobalExceptionHandler가 duration_ms 계산에 쓴다.
+        const val REQUEST_START_NANOS_ATTRIBUTE = "manyak.request.start-nanos"
+        private val EXCLUDED_PREFIXES = listOf("/actuator", "/swagger-ui", "/v3/api-docs")
     }
 }
