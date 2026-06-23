@@ -5,6 +5,7 @@ import com.knk.manyak.feedback.entity.Feedback
 import com.knk.manyak.feedback.entity.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import com.knk.manyak.feedback.repository.FeedbackRepository
+import com.knk.manyak.global.observability.StructuredLogger
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional
 class FeedbackService(
     private val feedbackRepository: FeedbackRepository,
     private val eventPublisher: ApplicationEventPublisher,
+    private val structuredLogger: StructuredLogger,
 ) {
     @Transactional
     fun createFeedback(request: CreateFeedbackRequest) {
@@ -36,6 +38,11 @@ class FeedbackService(
                 appVersion = feedback.appVersion,
                 createdAt = feedback.createdAt,
             ),
+        )
+        structuredLogger.event(
+            "feedback_submitted",
+            "content_length" to feedback.body.length,
+            "has_email" to (feedback.email != null),
         )
     }
 }

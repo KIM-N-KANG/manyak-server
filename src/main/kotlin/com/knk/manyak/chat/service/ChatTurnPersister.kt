@@ -29,7 +29,7 @@ class ChatTurnPersister(
      * 한 턴(USER 입력 + AI 출력 + 선택지)을 원자적으로 저장하고 current_turn을 1 증가시킨다.
      * 메시지 순서는 직전 마지막 순서 n에 이어 USER=n+1, ASSISTANT=n+2로 매긴다.
      *
-     * @return 저장된 ASSISTANT 메시지 id (completed 이벤트의 turnId)
+     * @return 저장된 ASSISTANT 메시지 id(turnId)와 증가된 턴 번호(turnIndex)
      */
     @Transactional
     fun persistTurn(
@@ -37,7 +37,7 @@ class ChatTurnPersister(
         userInput: String,
         aiOutput: String,
         choices: List<String>,
-    ): Long {
+    ): PersistedTurn {
         val session = storyPlaySessionRepository.findById(playSessionId)
             .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
 
@@ -79,6 +79,8 @@ class ChatTurnPersister(
         session.currentTurn += 1
         storyPlaySessionRepository.save(session)
 
-        return assistant.id
+        return PersistedTurn(turnId = assistant.id, turnIndex = session.currentTurn)
     }
+
+    data class PersistedTurn(val turnId: Long, val turnIndex: Int)
 }
