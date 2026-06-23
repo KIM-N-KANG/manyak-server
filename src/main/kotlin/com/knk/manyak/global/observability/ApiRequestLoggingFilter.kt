@@ -29,19 +29,34 @@ class ApiRequestLoggingFilter(
         filterChain: FilterChain,
     ) {
         val startNanos = System.nanoTime()
+        // 예외가 상태 설정 없이 필터 밖으로 전파되면(필터 단계 오류·Error 등) response.status가 기본 200으로 남는다.
+        // 이를 잡아 5xx 실패로 분류하고 다시 던진다. (컨트롤러 예외는 GlobalExceptionHandler가 5xx로 만들어 이미 실패로 기록된다.)
+        var thrown: Throwable? = null
         try {
             filterChain.doFilter(request, response)
+        } catch (throwable: Throwable) {
+            thrown = throwable
+            throw throwable
         } finally {
             val durationMs = (System.nanoTime() - startNanos) / 1_000_000
-            val status = response.status
+            val statusCode = if (thrown != null && response.status < HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+                HttpStatus.INTERNAL_SERVER_ERROR.value()
+            } else {
+                response.status
+            }
             val fields = linkedMapOf<String, Any?>(
                 "endpoint" to request.requestURI,
                 "http_method" to request.method,
-                "status_code" to status,
+                "status_code" to statusCode,
                 "duration_ms" to durationMs,
             )
-            if (status >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
-                fields["error_code"] = HttpStatus.resolve(status)?.name ?: "UNKNOWN"
+            val failure = thrown
+            if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+                fields["error_code"] = if (failure != null) {
+                    failure::class.simpleName ?: "UNKNOWN"
+                } else {
+                    HttpStatus.resolve(statusCode)?.name ?: "UNKNOWN"
+                }
                 structuredLogger.event("api_request_failed", fields)
             } else {
                 structuredLogger.event("api_request_completed", fields)

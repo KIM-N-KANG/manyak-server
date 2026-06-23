@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -78,5 +79,20 @@ class ApiRequestLoggingFilterTests {
         filter.doFilter(request, response, FilterChain { _, _ -> })
 
         assertThat(appender.list).isEmpty()
+    }
+
+    @Test
+    fun `체인이 예외를 던지면 status가 미설정이어도 api_request_failed로 기록한다`() {
+        val request = MockHttpServletRequest("POST", "/api/v1/stories")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, _ -> throw RuntimeException("boom") }
+
+        assertThatThrownBy { filter.doFilter(request, response, chain) }
+            .isInstanceOf(RuntimeException::class.java)
+
+        val msg = appender.list.last().formattedMessage
+        assertThat(msg).contains("event_name=api_request_failed")
+        assertThat(msg).contains("status_code=500")
+        assertThat(msg).contains("error_code=RuntimeException")
     }
 }
