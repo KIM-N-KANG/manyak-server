@@ -1,8 +1,12 @@
 package com.knk.manyak.global.error
 
+import com.knk.manyak.global.observability.ApiRequestLoggingFilter
+import io.sentry.Sentry
+import io.sentry.protocol.SentryId
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.ConstraintViolationException
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
@@ -24,6 +28,10 @@ class GlobalExceptionHandler {
     ): ResponseEntity<ApiErrorResponse> {
         val status = HttpStatus.valueOf(exception.statusCode.value())
         logResponseStatusException(exception, request, status)
+        // 예상하지 못한 5xx만 Sentry로 보낸다. 예상 가능한 4xx(BAD_REQUEST/NOT_FOUND/CONFLICT 등)는 제외한다.
+        if (status.is5xxServerError) {
+            captureToSentry(exception, request, status, status.name)
+        }
         return ResponseEntity
             .status(status)
             .body(
@@ -115,6 +123,7 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
         log.error("Unhandled exception occurred", exception)
+        captureToSentry(exception, request, HttpStatus.INTERNAL_SERVER_ERROR, exception::class.simpleName)
         return ResponseEntity
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(
@@ -126,6 +135,34 @@ class GlobalExceptionHandler {
                 ),
             )
     }
+
+    /**
+     * 예상하지 못한 5xx 오류만 Sentry로 보낸다(4xx 핸들러에서는 호출하지 않는다).
+     * endpoint/http_method/status_code/error_code를 scope tag로 싣고, request_id 등 MDC는 EventProcessor가 채운다.
+     */
+    private fun captureToSentry(
+        exception: Throwable,
+        request: HttpServletRequest,
+        status: HttpStatus,
+        errorCode: String?,
+    ): SentryId {
+        var sentryId = SentryId.EMPTY_ID
+        Sentry.withScope { scope ->
+            scope.setTag("endpoint", request.requestURI)
+            scope.setTag("http_method", request.method)
+            scope.setTag("status_code", status.value().toString())
+            errorCode?.let { scope.setTag("error_code", it) }
+            durationMs(request)?.let { scope.setContexts("timing", mapOf("duration_ms" to it)) }
+            sentryId = Sentry.captureException(exception)
+        }
+        // 후속 api_request_failed 로그가 같은 요청의 sentry_event_id를 싣도록 MDC에 남긴다.
+        MDC.put(SENTRY_EVENT_ID_MDC, sentryId.toString())
+        return sentryId
+    }
+
+    private fun durationMs(request: HttpServletRequest): Long? =
+        (request.getAttribute(ApiRequestLoggingFilter.REQUEST_START_NANOS_ATTRIBUTE) as? Long)
+            ?.let { (System.nanoTime() - it) / 1_000_000 }
 
     private fun badRequest(
         request: HttpServletRequest,
@@ -142,4 +179,8 @@ class GlobalExceptionHandler {
                     details = details,
                 ),
             )
+
+    private companion object {
+        const val SENTRY_EVENT_ID_MDC = "sentry_event_id"
+    }
 }

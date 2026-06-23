@@ -33,6 +33,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import io.sentry.Sentry
+import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -271,6 +273,9 @@ class ChatService(
                     errorCode = { throwable ->
                         if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
                     },
+                    onFailure = { aiCallLogId, throwable ->
+                        captureChatFailure(aiCallLogId, throwable, session, chatId)
+                    },
                 ) {
                     chatTurnAiClient.streamTurn(aiRequest) { token ->
                         if (Thread.currentThread().isInterrupted) {
@@ -290,6 +295,7 @@ class ChatService(
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
+                Sentry.addBreadcrumb("chat turn persisted: turn=${persisted.turnIndex}", "db")
                 // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnIndex(recorded.aiCallLogId, persisted.turnIndex)
                 structuredLogger.event(
@@ -324,7 +330,8 @@ class ChatService(
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 emitter.complete()
             } catch (exception: Exception) {
-                // 백엔드 자체 오류는 자체 코드로 응답한다.
+                // Sentry 캡처·sentry_event_id 연결은 record의 onFailure(captureChatFailure)에서 처리한다.
+                // 여기선 클라이언트에 SSE 오류만 내려보낸다.
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
                 emitter.complete()
             }
@@ -407,6 +414,43 @@ class ChatService(
                 MessageRole.SYSTEM -> null
             }
         }
+    }
+
+    /**
+     * chat_response AI 호출 실패를 Sentry로 보내고 sentry_event_id를 ai_call_logs·로그에 연결한다.
+     * SSE는 HTTP 200이라 5xx 필터에 안 잡히므로 여기서 직접 캡처한다.
+     * ChatTurnAiException(AI가 의도적으로 내려준 구조화 오류)은 전송 대상이 아니므로 제외한다.
+     */
+    private fun captureChatFailure(
+        aiCallLogId: Long,
+        throwable: Throwable,
+        session: StoryPlaySession,
+        chatId: String,
+    ) {
+        if (throwable is ChatTurnAiException) {
+            return
+        }
+        var sentryId = SentryId.EMPTY_ID
+        Sentry.withScope { scope ->
+            scope.setTag("story_id", session.storyId.toString())
+            scope.setTag("chat_id", chatId)
+            scope.setContexts(
+                "ai",
+                mapOf(
+                    "feature" to AiCallFeature.CHAT_RESPONSE.value,
+                    "ai_call_log_id" to aiCallLogId,
+                ),
+            )
+            sentryId = Sentry.captureException(throwable)
+        }
+        aiCallRecorder.attachSentryEventId(aiCallLogId, sentryId.toString())
+        structuredLogger.event(
+            "ai_stream_failed",
+            "chat_id" to chatId,
+            "story_id" to session.storyId,
+            "ai_call_log_id" to aiCallLogId,
+            "sentry_event_id" to sentryId.toString(),
+        )
     }
 
     private fun sendErrorQuietly(emitter: SseEmitter, code: String, message: String) {

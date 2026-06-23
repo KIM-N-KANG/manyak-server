@@ -1,6 +1,8 @@
 package com.knk.manyak.feedback.notification
 
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
+import io.sentry.Sentry
+import io.sentry.SentryLevel
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
@@ -54,6 +56,9 @@ class SlackFeedbackNotifier(
                 event.id,
                 ex.javaClass.simpleName,
             )
+            // 삼켜지는 실패라 자동 감지가 안 되므로 Sentry로도 보낸다.
+            // 예외 객체(메시지·스택에 webhook URL secret 포함 가능)는 보내지 않고 타입만 메시지로 남긴다.
+            Sentry.captureMessage("Slack feedback webhook failed: ${ex.javaClass.simpleName}", SentryLevel.WARNING)
         }
     }
 
