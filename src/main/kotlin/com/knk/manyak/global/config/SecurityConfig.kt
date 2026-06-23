@@ -1,5 +1,6 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.global.observability.RequestCorrelationFilter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -64,6 +65,9 @@ class SecurityConfig {
             this.allowedOrigins = allowedOrigins.split(",").map { it.trim() }
             allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
             allowedHeaders = listOf("*")
+            // 응답에 echo한 request_id를 브라우저 JS가 읽을 수 있게 노출한다.
+            // (커스텀 헤더는 CORS-safelisted가 아니라 exposedHeaders 없이는 cross-origin에서 읽히지 않는다.)
+            exposedHeaders = listOf(RequestCorrelationFilter.HEADER_REQUEST_ID)
         }
 
         return UrlBasedCorsConfigurationSource().apply {

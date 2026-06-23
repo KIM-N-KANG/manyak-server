@@ -40,4 +40,14 @@ class RequestCorrelationFilterWiringIntegrationTests {
             .expectStatus().isOk
             .expectHeader().value("X-Manyak-Request-Id") { assertThat(it).startsWith("req_") }
     }
+
+    @Test
+    fun `CORS 요청 응답에 X-Manyak-Request-Id가 노출 헤더로 포함된다`() {
+        restTestClient.get()
+            .uri("/actuator/health")
+            .header("Origin", "http://localhost:3000")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().value("Access-Control-Expose-Headers") { assertThat(it).contains("X-Manyak-Request-Id") }
+    }
 }
