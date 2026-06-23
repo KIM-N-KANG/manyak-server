@@ -26,3 +26,6 @@ manyak:
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
+  analytics:
+    # 익명 ID 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
+    anonymous-id-pepper: ${MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER:}
