@@ -1,6 +1,9 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.global.observability.aicall.AiCallContext
+import com.knk.manyak.global.observability.aicall.AiCallFeature
+import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.StoryAiClient
@@ -54,6 +57,7 @@ class SimpleStoryCreationService(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
+    private val aiCallRecorder: AiCallRecorder,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -92,7 +96,11 @@ class SimpleStoryCreationService(
         } + customTagDrafts
 
         val aiResponse = try {
-            storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest())
+            aiCallRecorder.record(
+                AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
+            ) {
+                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest())
+            }.result
         } catch (exception: Exception) {
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리라인 생성 요청에 실패했습니다.", exception)
         }
@@ -158,13 +166,14 @@ class SimpleStoryCreationService(
         val startNanos = System.nanoTime()
         structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
         try {
-            val response = doCreateSimpleStory(request)
+            val outcome = doCreateSimpleStory(request)
             structuredLogger.event(
                 "story_created",
-                "story_id" to response.id,
+                "story_id" to outcome.response.id,
+                "ai_call_log_id" to outcome.aiCallLogId,
                 "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
             )
-            return response
+            return outcome.response
         } catch (exception: Exception) {
             structuredLogger.event(
                 "story_create_failed",
@@ -181,7 +190,7 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
+    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -208,11 +217,16 @@ class SimpleStoryCreationService(
             extraInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
-        val aiResponse = try {
-            storyAiClient.compileStory(aiRequest)
+        val recorded = try {
+            aiCallRecorder.record(
+                AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+            ) {
+                storyAiClient.compileStory(aiRequest)
+            }
         } catch (exception: Exception) {
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리 생성 요청에 실패했습니다.", exception)
         }
+        val aiResponse = recorded.result
 
         val genre = genreTags.joinToString(separator = ", ") { it.name }.ifEmpty { null }
 
@@ -266,17 +280,20 @@ class SimpleStoryCreationService(
             lockedSession.storyId = story.id
             storyCreationSessionRepository.save(lockedSession)
 
-            SimpleStoryCreateResponse(
-                id = story.id,
-                title = story.title,
-                oneLineIntro = story.oneLineIntro,
-                description = story.description,
-                genres = genreTags.map { it.name },
-                startSetting = StoryStartSettingResponse(
-                    name = aiResponse.storyStartSettings.name,
-                    prologue = aiResponse.storyStartSettings.prologue,
-                    startSituation = aiResponse.storyStartSettings.startSituation,
+            StoryCreationOutcome(
+                response = SimpleStoryCreateResponse(
+                    id = story.id,
+                    title = story.title,
+                    oneLineIntro = story.oneLineIntro,
+                    description = story.description,
+                    genres = genreTags.map { it.name },
+                    startSetting = StoryStartSettingResponse(
+                        name = aiResponse.storyStartSettings.name,
+                        prologue = aiResponse.storyStartSettings.prologue,
+                        startSituation = aiResponse.storyStartSettings.startSituation,
+                    ),
                 ),
+                aiCallLogId = recorded.aiCallLogId,
             )
         } ?: throw IllegalStateException("Story creation transaction result is empty")
     }
@@ -314,6 +331,11 @@ class SimpleStoryCreationService(
             name = name,
             category = tagType,
         )
+
+    private data class StoryCreationOutcome(
+        val response: SimpleStoryCreateResponse,
+        val aiCallLogId: Long,
+    )
 
     private data class StoryCreationTagDraft(
         val tagType: SimpleStoryTagCategory,

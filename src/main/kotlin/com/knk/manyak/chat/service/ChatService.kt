@@ -26,6 +26,9 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.global.observability.LengthBuckets
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.global.observability.aicall.AiCallContext
+import com.knk.manyak.global.observability.aicall.AiCallFeature
+import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -56,6 +59,7 @@ class ChatService(
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
     private val structuredLogger: StructuredLogger,
+    private val aiCallRecorder: AiCallRecorder,
 ) {
 
     @Transactional
@@ -255,22 +259,39 @@ class ChatService(
                         .name("started")
                         .data(ChatStreamStartedEvent(chatId)),
                 )
-                val result = chatTurnAiClient.streamTurn(aiRequest) { token ->
-                    if (Thread.currentThread().isInterrupted) {
-                        return@streamTurn
+                // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
+                // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
+                // turn_index는 persistTurn이 DB에서 확정한 뒤 attachTurnIndex로 채운다(동시 요청 정합성).
+                val recorded = aiCallRecorder.record(
+                    AiCallContext(
+                        feature = AiCallFeature.CHAT_RESPONSE,
+                        storyId = session.storyId,
+                        chatId = session.publicId,
+                    ),
+                    errorCode = { throwable ->
+                        if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
+                    },
+                ) {
+                    chatTurnAiClient.streamTurn(aiRequest) { token ->
+                        if (Thread.currentThread().isInterrupted) {
+                            return@streamTurn
+                        }
+                        emitter.send(
+                            SseEmitter.event()
+                                .name("token")
+                                .data(ChatStreamTokenEvent(token)),
+                        )
                     }
-                    emitter.send(
-                        SseEmitter.event()
-                            .name("token")
-                            .data(ChatStreamTokenEvent(token)),
-                    )
                 }
+                val result = recorded.result
                 val persisted = chatTurnPersister.persistTurn(
                     playSessionId = sessionId,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
+                // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
+                aiCallRecorder.attachTurnIndex(recorded.aiCallLogId, persisted.turnIndex)
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,
@@ -283,6 +304,7 @@ class ChatService(
                     "chat_id" to chatId,
                     "story_id" to session.storyId,
                     "turn_index" to persisted.turnIndex,
+                    "ai_call_log_id" to recorded.aiCallLogId,
                 )
                 emitter.send(
                     SseEmitter.event()
