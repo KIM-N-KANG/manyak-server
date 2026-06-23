@@ -255,6 +255,8 @@ class ChatService(
         }
 
         val future = CompletableFuture.runAsync({
+            // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
+            var succeededAiCallLogId: Long? = null
             try {
                 emitter.send(
                     SseEmitter.event()
@@ -288,6 +290,7 @@ class ChatService(
                         )
                     }
                 }
+                succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
                 val persisted = chatTurnPersister.persistTurn(
                     playSessionId = sessionId,
@@ -330,8 +333,12 @@ class ChatService(
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 emitter.complete()
             } catch (exception: Exception) {
-                // Sentry 캡처·sentry_event_id 연결은 record의 onFailure(captureChatFailure)에서 처리한다.
-                // 여기선 클라이언트에 SSE 오류만 내려보낸다.
+                // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
+                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류)는 GlobalExceptionHandler를 거치지 않고
+                // 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
+                succeededAiCallLogId?.let {
+                    captureChatFailure(it, exception, session, chatId, attachToAiCallLog = false)
+                }
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
                 emitter.complete()
             }
@@ -426,6 +433,7 @@ class ChatService(
         throwable: Throwable,
         session: StoryPlaySession,
         chatId: String,
+        attachToAiCallLog: Boolean = true,
     ) {
         if (throwable is ChatTurnAiException) {
             return
@@ -443,7 +451,10 @@ class ChatService(
             )
             sentryId = Sentry.captureException(throwable)
         }
-        aiCallRecorder.attachSentryEventId(aiCallLogId, sentryId.toString())
+        // AI 호출이 성공한 뒤(저장 등)의 실패는 ai_call_logs 행(SUCCEEDED)을 건드리지 않고 scope·로그에 상관관계만 남긴다.
+        if (attachToAiCallLog) {
+            aiCallRecorder.attachSentryEventId(aiCallLogId, sentryId.toString())
+        }
         structuredLogger.event(
             "ai_stream_failed",
             "chat_id" to chatId,
