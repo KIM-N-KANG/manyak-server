@@ -29,3 +29,13 @@ manyak:
   analytics:
     # 익명 ID 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
     anonymous-id-pepper: ${MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER:}
+
+sentry:
+  # DSN 미설정(빈 값)이면 Sentry는 비활성(no-op)이다. 운영에서 SENTRY_DSN으로 주입한다.
+  dsn: ${SENTRY_DSN:}
+  # 배포 환경 구분(local/production 등). 운영에서 SENTRY_ENVIRONMENT로 주입한다.
+  environment: ${SENTRY_ENVIRONMENT:local}
+  # 트레이싱 표본율(0=비활성). 운영에서 SENTRY_TRACES_SAMPLE_RATE로 조정한다.
+  traces-sample-rate: ${SENTRY_TRACES_SAMPLE_RATE:0.0}
+  # 예외는 @RestControllerAdvice·SSE·Slack 지점에서 코드로만 캡처하고, 식별자/원문 PII는 보내지 않는다.
+  send-default-pii: false
