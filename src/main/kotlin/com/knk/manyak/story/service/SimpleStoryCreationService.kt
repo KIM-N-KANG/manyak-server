@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.StoryAiClient
@@ -52,6 +53,7 @@ class SimpleStoryCreationService(
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyAiClient: StoryAiClient,
+    private val structuredLogger: StructuredLogger,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -153,6 +155,33 @@ class SimpleStoryCreationService(
     }
 
     fun createSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
+        val startNanos = System.nanoTime()
+        structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
+        try {
+            val response = doCreateSimpleStory(request)
+            structuredLogger.event(
+                "story_created",
+                "story_id" to response.id,
+                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+            )
+            return response
+        } catch (exception: Exception) {
+            structuredLogger.event(
+                "story_create_failed",
+                "error_code" to storyErrorCode(exception),
+                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+            )
+            throw exception
+        }
+    }
+
+    private fun storyErrorCode(exception: Exception): String = when (exception) {
+        is ResponseStatusException ->
+            HttpStatus.resolve(exception.statusCode.value())?.name ?: exception.statusCode.toString()
+        else -> exception::class.simpleName ?: "UNKNOWN"
+    }
+
+    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")

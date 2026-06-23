@@ -24,6 +24,8 @@ import com.knk.manyak.chat.entity.StoryPlaySession
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.global.observability.LengthBuckets
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -53,6 +55,7 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
+    private val structuredLogger: StructuredLogger,
 ) {
 
     @Transactional
@@ -69,6 +72,11 @@ class ChatService(
                 storyId = request.storyId,
                 startSettingId = startSetting?.id,
             ),
+        )
+        structuredLogger.event(
+            "chat_started",
+            "story_id" to session.storyId,
+            "chat_id" to session.publicId.toString(),
         )
 
         val suggestedInputs = loadSuggestedInputs(startSetting?.id)
@@ -257,11 +265,24 @@ class ChatService(
                             .data(ChatStreamTokenEvent(token)),
                     )
                 }
-                val turnId = chatTurnPersister.persistTurn(
+                val persisted = chatTurnPersister.persistTurn(
                     playSessionId = sessionId,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
+                )
+                structuredLogger.event(
+                    "user_message_saved",
+                    "chat_id" to chatId,
+                    "story_id" to session.storyId,
+                    "turn_index" to persisted.turnIndex,
+                    "message_length_bucket" to LengthBuckets.of(request.userInput.length),
+                )
+                structuredLogger.event(
+                    "ai_response_saved",
+                    "chat_id" to chatId,
+                    "story_id" to session.storyId,
+                    "turn_index" to persisted.turnIndex,
                 )
                 emitter.send(
                     SseEmitter.event()
@@ -269,7 +290,7 @@ class ChatService(
                         .data(
                             ChatStreamCompletedEvent(
                                 chatId = chatId,
-                                turnId = turnId,
+                                turnId = persisted.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
                             ),

@@ -1,11 +1,15 @@
 package com.knk.manyak.chat.controller
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryPlaySession
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
@@ -15,6 +19,7 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
@@ -244,4 +249,39 @@ class ChatStreamControllerIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+
+    @Test
+    fun `비동기 채팅 턴 이벤트가 request_id를 MDC로 전파받아 기록된다`() {
+        val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val story = seedStory()
+            val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+
+            restTestClient.post()
+                .uri("/api/v1/chats/${session.publicId}/turns/stream")
+                .header("X-Manyak-Request-Id", "req_async_test")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .body("""{"userInput":"마법수정에 손을 올린다."}""")
+                .exchange()
+                .expectStatus().isOk
+                .expectBody(String::class.java)
+                .returnResult()
+
+            val userSaved = appender.list.filter { it.formattedMessage.contains("event_name=user_message_saved") }
+            assertThat(userSaved).hasSize(1)
+            assertThat(userSaved.first().formattedMessage).contains("turn_index=1")
+            assertThat(userSaved.first().formattedMessage).contains("message_length_bucket=")
+            // 비동기 워커 스레드 로그에도 request_id가 전파됐는지(코덱스 ② 핵심 검증)
+            assertThat(userSaved.first().mdcPropertyMap["request_id"]).isEqualTo("req_async_test")
+
+            val aiSaved = appender.list.filter { it.formattedMessage.contains("event_name=ai_response_saved") }
+            assertThat(aiSaved).hasSize(1)
+            assertThat(aiSaved.first().mdcPropertyMap["request_id"]).isEqualTo("req_async_test")
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
 }
