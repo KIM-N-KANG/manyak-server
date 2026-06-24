@@ -4,4 +4,3 @@ region  = "ap-northeast-2"
 
 # 미설정 시 "<project>-tfstate-<account_id>"로 자동 생성
 # state_bucket_name = "manyak-tfstate-123456789012"
-# lock_table_name   = "manyak-terraform-locks"

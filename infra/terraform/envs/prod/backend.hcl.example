@@ -1,4 +1,3 @@
-# cp backend.hcl.example backend.hcl 후 bootstrap 출력값으로 채운다.
+# cp backend.hcl.example backend.hcl 후 bootstrap 출력값(state_bucket_name)으로 채운다.
 # terraform init -backend-config=backend.hcl
-bucket         = "manyak-tfstate-123456789012" # bootstrap output: state_bucket_name
-dynamodb_table = "manyak-terraform-locks"      # bootstrap output: lock_table_name
+bucket = "manyak-tfstate-123456789012" # bootstrap output: state_bucket_name

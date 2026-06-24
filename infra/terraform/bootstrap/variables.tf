@@ -15,9 +15,3 @@ variable "state_bucket_name" {
   type        = string
   default     = ""
 }
-
-variable "lock_table_name" {
-  description = "Terraform state lock용 DynamoDB 테이블 이름"
-  type        = string
-  default     = "manyak-terraform-locks"
-}

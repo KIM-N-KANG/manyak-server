@@ -6,7 +6,7 @@
 
 ```
 infra/terraform/
-  bootstrap/      # 1회성: 원격 state 백엔드(S3 + DynamoDB lock) 생성 (로컬 state)
+  bootstrap/      # 1회성: 원격 state 백엔드(S3, 잠금은 S3 네이티브 use_lockfile) 생성 (로컬 state)
   envs/prod/      # 운영 환경 구성 (S3 backend 사용)
   modules/        # 재사용 모듈 (ecr/network/security/data/compute/edge — 후속 서브태스크에서 추가)
 ```
@@ -28,7 +28,7 @@ terraform init
 terraform apply
 ```
 
-출력된 `state_bucket_name`, `lock_table_name`을 다음 단계에서 사용한다.
+출력된 `state_bucket_name`을 다음 단계(`backend.hcl`)에서 사용한다.
 
 ## 2) 운영 환경 (envs/prod)
 
