@@ -37,6 +37,12 @@ resource "aws_instance" "app" {
     http_tokens   = "required" # IMDSv2 강제
   }
 
+  lifecycle {
+    # SSM(latest) 파라미터는 새 AMI 발행 시 값이 바뀌지만, 그때마다 인스턴스를 교체하지 않도록
+    # ami 변경은 무시한다(최초 생성 시점의 표준 AMI로 고정). 의도적 AMI 갱신은 taint/-replace 로.
+    ignore_changes = [ami]
+  }
+
   tags = {
     Name = "${var.project}-${var.environment}-app"
   }
