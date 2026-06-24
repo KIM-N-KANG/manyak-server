@@ -2,3 +2,7 @@
 project     = "manyak"
 environment = "prod"
 region      = "ap-northeast-2"
+
+# GitHub OIDC provider 를 이 구성에서 생성할지 여부.
+# 계정에 token.actions.githubusercontent.com provider 가 이미 있으면 false 로 둔다.
+create_github_oidc_provider = true

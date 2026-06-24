@@ -5,6 +5,7 @@
 | 모듈 | 서브태스크 | 내용 |
 |------|-----------|------|
 | `ecr` | KNK-236 | 컨테이너 이미지 레포 |
+| `github-oidc` | KNK-236 | GitHub Actions OIDC + ECR 푸시 IAM role |
 | `network` | KNK-237 | VPC 3계층(public/app/db)·IGW·NAT·route |
 | `security` | KNK-238 | SG 체인 + IAM(인스턴스 역할) |
 | `data` | KNK-239 | RDS PostgreSQL(+ElastiCache Redis 선택) |
