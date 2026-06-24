@@ -11,6 +11,9 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.validation.BindException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
+import org.springframework.web.HttpMediaTypeNotSupportedException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -117,6 +120,34 @@ class GlobalExceptionHandler {
             },
         )
 
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun handleHttpMediaTypeNotAcceptableException(
+        exception: HttpMediaTypeNotAcceptableException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        // SSE(text/event-stream) 엔드포인트에 Accept: application/json 같은 요청이 오면 발생. 클라이언트 잘못(4xx)이다.
+        log.debug("Not acceptable representation: path={}, supported={}", request.requestURI, exception.supportedMediaTypes)
+        return errorResponse(HttpStatus.NOT_ACCEPTABLE, request, "요청한 응답 형식(Accept)을 제공할 수 없습니다.")
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException::class)
+    fun handleHttpMediaTypeNotSupportedException(
+        exception: HttpMediaTypeNotSupportedException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("Unsupported media type: path={}, contentType={}", request.requestURI, exception.contentType)
+        return errorResponse(HttpStatus.UNSUPPORTED_MEDIA_TYPE, request, "지원하지 않는 Content-Type입니다.")
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleHttpRequestMethodNotSupportedException(
+        exception: HttpRequestMethodNotSupportedException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("Method not supported: path={}, method={}", request.requestURI, exception.method)
+        return errorResponse(HttpStatus.METHOD_NOT_ALLOWED, request, "지원하지 않는 HTTP 메서드입니다.")
+    }
+
     @ExceptionHandler(Exception::class)
     fun handleException(
         exception: Exception,
@@ -163,6 +194,25 @@ class GlobalExceptionHandler {
     private fun durationMs(request: HttpServletRequest): Long? =
         (request.getAttribute(ApiRequestLoggingFilter.REQUEST_START_NANOS_ATTRIBUTE) as? Long)
             ?.let { (System.nanoTime() - it) / 1_000_000 }
+
+    /**
+     * 예상 가능한 4xx 오류를 표준 ApiErrorResponse로 변환한다. Sentry로는 보내지 않는다(captureToSentry는 5xx 전용).
+     */
+    private fun errorResponse(
+        status: HttpStatus,
+        request: HttpServletRequest,
+        message: String,
+    ): ResponseEntity<ApiErrorResponse> =
+        ResponseEntity
+            .status(status)
+            .body(
+                ApiErrorResponse(
+                    status = status.value(),
+                    code = status.name,
+                    message = message,
+                    path = request.requestURI,
+                ),
+            )
 
     private fun badRequest(
         request: HttpServletRequest,

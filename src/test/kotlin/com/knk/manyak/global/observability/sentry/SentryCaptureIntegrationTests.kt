@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -76,6 +77,21 @@ class SentryCaptureIntegrationTests {
             .body("""{"userInput":"손을 올린다."}""")
             .exchange()
             .expectStatus().isNotFound
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    @Test
+    fun `SSE 엔드포인트에 잘못된 Accept(406)도 Sentry로 전송되지 않는다`() {
+        // SSE(text/event-stream) 엔드포인트에 application/json만 요청 → HttpMediaTypeNotAcceptableException(406).
+        // 핸들러가 없던 시절엔 500으로 둔갑해 Sentry로 갔다(KNK-226). 이제 4xx로 처리되고 전송되지 않아야 한다.
+        restTestClient.post()
+            .uri("/api/v1/chats/999999/turns/stream")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"테스트"}""")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.NOT_ACCEPTABLE)
 
         assertThat(capturedEvents).isEmpty()
     }
