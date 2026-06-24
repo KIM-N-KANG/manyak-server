@@ -271,6 +271,23 @@ class AiCallRecorderTests {
     }
 
     @Test
+    fun `컬럼 제약을 넘는 meta가 와도 성공한 AI 호출을 깨지 않고 잘라서 SUCCEEDED로 적재한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+
+        val recorded = recorder.record(
+            AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+            meta = { AiCallMeta(model = "m".repeat(200), provider = "p".repeat(80), retryCount = -1) },
+        ) { "ok" }
+
+        assertEquals("ok", recorded.result)
+        val log = repository.findById(recorded.aiCallLogId).orElseThrow()
+        assertEquals(AiCallStatus.SUCCEEDED, log.status)
+        assertEquals(100, log.model!!.length)
+        assertEquals(40, log.provider!!.length)
+        assertEquals(0, log.retryCount)
+    }
+
+    @Test
     fun `attachSentryEventId는 sentry_event_id를 채운다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req")
         val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }

@@ -169,6 +169,28 @@ class AiCallLogRepositoryTests {
         assertEquals(0, found.retryCount)
     }
 
+    @Test
+    fun `applyMeta는 컬럼 제약을 넘는 model·provider를 자르고 음수 retryCount를 0으로 보정해 적재가 깨지지 않게 한다`() {
+        val log = startedLog(feature = AiCallFeature.CHAT_RESPONSE).apply {
+            applyMeta(
+                AiCallMeta(
+                    model = "m".repeat(200),     // model VARCHAR(100) 초과
+                    provider = "p".repeat(80),   // provider VARCHAR(40) 초과
+                    retryCount = -3,             // ck_ai_call_logs_retry_count CHECK(>=0) 위반
+                ),
+            )
+        }
+
+        // 제약 위반으로 save가 터지지 않아야 한다(외부 meta가 성공한 호출 적재를 깨면 안 됨).
+        val savedId = repository.saveAndFlush(log).id
+        entityManager.clear()
+
+        val found = repository.findById(savedId).orElseThrow()
+        assertEquals(100, found.model!!.length)
+        assertEquals(40, found.provider!!.length)
+        assertEquals(0, found.retryCount)
+    }
+
     private fun startedLog(feature: AiCallFeature) = AiCallLog(
         requestId = "req_test",
         callerService = "manyak-server",

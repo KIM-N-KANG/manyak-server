@@ -114,13 +114,17 @@ class AiCallLog(
      *
      * null 필드는 덮어쓰지 않아, 부분 meta가 와도 기존 값(예: retryCount 기본 0)을 보존한다.
      * promptVersions는 AI가 보낸 맵을 그대로 적재한다(레이어 키 변환 없음).
+     *
+     * model·provider는 컬럼 길이로, retryCount는 CHECK(>=0)에 맞춰 방어적으로 보정한다.
+     * 외부(AI) 값이 컬럼 제약을 넘어도 적재 save가 제약 위반으로 터져 성공한 AI 호출을 깨지 않게 하기 위함이다
+     * (requestId·errorCode·story title 등 다른 외부 값과 동일한 방어 원칙. 관측이 비즈니스를 막지 않는다).
      */
     fun applyMeta(meta: AiCallMeta) {
-        meta.model?.let { this.model = it }
-        meta.provider?.let { this.provider = it }
+        meta.model?.let { this.model = it.take(MODEL_MAX_LENGTH) }
+        meta.provider?.let { this.provider = it.take(PROVIDER_MAX_LENGTH) }
         meta.inputTokenCount?.let { this.inputTokenCount = it }
         meta.outputTokenCount?.let { this.outputTokenCount = it }
-        meta.retryCount?.let { this.retryCount = it }
+        meta.retryCount?.let { this.retryCount = it.coerceAtLeast(0) }
         meta.promptVersions?.let { this.promptVersions = it }
     }
 
@@ -134,5 +138,11 @@ class AiCallLog(
         this.latencyMs = latencyMs
         this.errorCode = errorCode
         this.completedAt = completedAt
+    }
+
+    private companion object {
+        // 컬럼 정의와 일치시켜, 초과 입력이 적재 실패로 비즈니스 호출을 막지 않도록 자른다.
+        const val MODEL_MAX_LENGTH = 100 // model VARCHAR(100)
+        const val PROVIDER_MAX_LENGTH = 40 // provider VARCHAR(40)
     }
 }
