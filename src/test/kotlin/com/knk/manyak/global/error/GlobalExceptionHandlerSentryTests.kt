@@ -8,8 +8,12 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.web.HttpMediaTypeNotAcceptableException
+import org.springframework.web.HttpMediaTypeNotSupportedException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.server.ResponseStatusException
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -96,5 +100,50 @@ class GlobalExceptionHandlerSentryTests {
         @Suppress("UNCHECKED_CAST")
         val timing = event.contexts["timing"] as Map<String, Any>
         assertThat(timing["duration_ms"]).isNotNull()
+    }
+
+    @Test
+    fun `406 HttpMediaTypeNotAcceptable은 4xx로 응답하고 Sentry로 보내지 않는다`() {
+        val response = handler.handleHttpMediaTypeNotAcceptableException(
+            HttpMediaTypeNotAcceptableException("No acceptable representation"),
+            request(),
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(406)
+        assertThat(captured).isEmpty()
+    }
+
+    @Test
+    fun `415 HttpMediaTypeNotSupported는 4xx로 응답하고 Sentry로 보내지 않는다`() {
+        val response = handler.handleHttpMediaTypeNotSupportedException(
+            HttpMediaTypeNotSupportedException("Unsupported media type"),
+            request(),
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(415)
+        assertThat(captured).isEmpty()
+    }
+
+    @Test
+    fun `405 HttpRequestMethodNotSupported는 4xx로 응답하고 Sentry로 보내지 않는다`() {
+        val response = handler.handleHttpRequestMethodNotSupportedException(
+            HttpRequestMethodNotSupportedException("DELETE"),
+            request(),
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(405)
+        assertThat(captured).isEmpty()
+    }
+
+    @Test
+    fun `405 응답은 Allow 헤더로 지원 메서드를 알린다`() {
+        val response = handler.handleHttpRequestMethodNotSupportedException(
+            HttpRequestMethodNotSupportedException("DELETE", listOf("GET", "POST")),
+            request(),
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(405)
+        assertThat(response.headers.allow).containsExactlyInAnyOrder(HttpMethod.GET, HttpMethod.POST)
+        assertThat(captured).isEmpty()
     }
 }

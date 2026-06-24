@@ -1,0 +1,78 @@
+### 표준 4xx 예외 핸들러 수동 검증 (KNK-226)
+###
+### 검증 대상: GlobalExceptionHandler의 표준 4xx 핸들러
+###   - 406 HttpMediaTypeNotAcceptable : SSE(text/event-stream) 엔드포인트에 Accept: application/json
+###   - 415 HttpMediaTypeNotSupported  : JSON 엔드포인트에 Content-Type: text/plain
+###   - 405 HttpRequestMethodNotSupported : POST 전용 엔드포인트에 GET (Allow 헤더 포함)
+### 모두 4xx로 응답해야 한다. 과거엔 전용 핸들러가 없어 500으로 둔갑하고 Sentry로 오분류 전송됐다.
+###
+### 사전 준비:
+###   1. PostgreSQL 기동 (로컬 프로파일은 실 DB 필요)
+###   2. ./gradlew bootRun  (또는 IntelliJ 실행)
+### 위에서부터 순서대로 실행한다. 데이터 준비가 필요 없는 "잘못된 요청" 케이스들이다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 헬스 체크 — 서버가 떴는지 먼저 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버가 떠 있다", () => {
+        client.assert(response.status === 200, `actuator/health 200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 1. 406 Not Acceptable
+### SSE(produces=text/event-stream) 엔드포인트에 JSON만 받겠다고 요청하면 406이어야 한다(클라이언트 잘못).
+### chatId는 content negotiation 단계에서 막히므로 존재하지 않는 값이어도 무방하다.
+POST {{baseUrl}}/api/v1/chats/00000000-0000-0000-0000-000000000000/turns/stream
+Accept: application/json
+Content-Type: application/json
+
+{ "userInput": "406 테스트" }
+
+> {%
+    client.test("406으로 응답한다(500 아님)", () => {
+        client.assert(response.status === 406, `406이 아닙니다. actual=${response.status}`);
+    });
+    client.test("표준 에러 응답 포맷을 따른다", () => {
+        client.assert(response.body.status === 406, `body.status가 406이 아닙니다. actual=${response.body.status}`);
+        client.assert(response.body.code === "NOT_ACCEPTABLE", `code가 NOT_ACCEPTABLE이 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 2. 415 Unsupported Media Type
+### JSON 본문을 받는 엔드포인트에 Content-Type: text/plain 으로 보내면 415여야 한다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Content-Type: text/plain
+
+이것은 JSON이 아닌 평문 본문
+
+> {%
+    client.test("415로 응답한다", () => {
+        client.assert(response.status === 415, `415가 아닙니다. actual=${response.status}`);
+    });
+    client.test("code가 UNSUPPORTED_MEDIA_TYPE이다", () => {
+        client.assert(response.body.code === "UNSUPPORTED_MEDIA_TYPE", `code가 다릅니다. actual=${response.body.code}`);
+    });
+%}
+
+### 3. (참고) 405 Method Not Allowed
+### 이 앱의 SecurityConfig는 경로+메서드 단위로 허용하므로, 허용되지 않은 메서드는 405(컨트롤러)에
+### 도달하기 전에 403(Security)으로 막힌다. 따라서 405는 외부에서 직접 유발이 드물다.
+### 405 핸들러(Allow 헤더 포함)는 단위 테스트 GlobalExceptionHandlerSentryTests 로 검증한다.
+### 예) GET {{baseUrl}}/api/v1/feedbacks  → 403 (Security), 405 아님
+
+### 4. (대조) 정상 SSE 요청은 4xx가 아니다 — Accept를 text/event-stream으로 맞춘 경우
+### 존재하지 않는 채팅이므로 404가 나야 한다(406이 아니라). 정상 Accept에서는 content negotiation을 통과함을 확인.
+POST {{baseUrl}}/api/v1/chats/00000000-0000-0000-0000-000000000000/turns/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{ "userInput": "정상 Accept 대조" }
+
+> {%
+    client.test("정상 Accept면 406이 아니라 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}

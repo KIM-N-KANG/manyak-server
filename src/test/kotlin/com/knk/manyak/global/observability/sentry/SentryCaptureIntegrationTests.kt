@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -79,4 +80,34 @@ class SentryCaptureIntegrationTests {
 
         assertThat(capturedEvents).isEmpty()
     }
+
+    @Test
+    fun `SSE 엔드포인트에 잘못된 Accept(406)도 Sentry로 전송되지 않는다`() {
+        // SSE(text/event-stream) 엔드포인트에 application/json만 요청 → HttpMediaTypeNotAcceptableException(406).
+        // 핸들러가 없던 시절엔 500으로 둔갑해 Sentry로 갔다(KNK-226). 이제 4xx로 처리되고 전송되지 않아야 한다.
+        restTestClient.post()
+            .uri("/api/v1/chats/999999/turns/stream")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"테스트"}""")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.NOT_ACCEPTABLE)
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    @Test
+    fun `잘못된 Content-Type(415)도 Sentry로 전송되지 않는다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.TEXT_PLAIN)
+            .body("이것은 JSON이 아닌 평문")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    // 405는 SecurityConfig가 경로+메서드 단위로 허용해 미허용 메서드가 403(Security)으로 먼저 막히므로
+    // 통합 경로로는 재현되지 않는다. 405 핸들러와 Allow 헤더는 GlobalExceptionHandlerSentryTests(단위)에서 검증한다.
 }
