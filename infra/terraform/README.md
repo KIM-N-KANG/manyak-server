@@ -92,6 +92,8 @@ aws secretsmanager put-secret-value \
 
 DB 자격증명(`MANYAK_DB_*`)은 RDS가 자동 관리하는 secret에서 user-data가 읽어 주입하므로 별도 입력이 필요 없다.
 
+> ⚠️ 시크릿 값을 변경한 뒤에는 **재배포해야 `.env`에 반영된다**(`deploy.sh`가 매 실행마다 Secrets Manager를 재조회). `main` 재푸시 또는 SSM Run Command로 `bash /opt/manyak/deploy.sh` 재실행.
+
 ### 배포 (자동)
 
 `main` 푸시 → `.github/workflows/docker-image.yml`:

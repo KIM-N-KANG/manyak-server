@@ -24,12 +24,13 @@ Accept: application/json
     });
 %}
 
-### 2. HTTPS(443) 직접 접근 — ACM 인증서 종단(api.manyak.app) 확인
-GET {{baseUrl}}/actuator/info
+### 2. liveness probe — ACM(HTTPS) 종단 + 앱 활성 확인
+### SecurityConfig 는 /actuator/health/** 만 인증 없이 허용하므로 info 대신 liveness 를 쓴다.
+GET {{baseUrl}}/actuator/health/liveness
 Accept: application/json
 
 > {%
-    client.test("info 200", () => {
+    client.test("liveness 200", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
 %}

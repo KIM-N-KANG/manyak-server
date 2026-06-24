@@ -49,8 +49,9 @@ module "compute" {
   db_port        = module.data.db_port
   db_name        = module.data.db_name
 
-  # SG egress 규칙·IAM 정책 attachment(+시크릿 읽기 정책)가 EC2 부팅(user-data의 ECR pull·시크릿 조회) 전에 준비되도록 대기
-  depends_on = [module.security, aws_iam_role_policy.ec2_secrets_read]
+  # EC2 부팅(deploy.sh: ECR pull·시크릿 조회) 전에 준비되어야 하는 것들을 명시적으로 대기:
+  # SG egress 규칙·IAM attachment(security), 시크릿 읽기 정책(ec2_secrets_read), 앱 시크릿 값(secrets 의 secret+version).
+  depends_on = [module.security, module.secrets, aws_iam_role_policy.ec2_secrets_read]
 }
 
 # #7 KNK-240 엣지 (ALB + ACM + Cloudflare DNS)

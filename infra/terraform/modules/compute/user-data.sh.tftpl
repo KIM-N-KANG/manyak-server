@@ -36,7 +36,9 @@ SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SENTRY_DSN // ""')"
 SLACK_WEBHOOK="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_SLACK_FEEDBACK_WEBHOOK_URL // ""')"
 umask 077
 {
-  echo "SERVER_IMAGE=${server_image}"
+  # SERVER_IMAGE 는 CI deploy 가 SERVER_IMAGE_OVERRIDE(빌드된 short-sha 태그)로 덮어쓸 수 있다.
+  # 미지정 시(최초 부팅 등) terraform 기본값(:latest) 사용.
+  echo "SERVER_IMAGE=$${SERVER_IMAGE_OVERRIDE:-${server_image}}"
   echo "AI_IMAGE=${ai_image}"
   echo "MANYAK_DB_URL=jdbc:postgresql://${db_address}:${db_port}/${db_name}"
   echo "MANYAK_DB_USERNAME=$DB_USERNAME"
