@@ -278,6 +278,8 @@ class ChatService(
                     onFailure = { aiCallLogId, throwable ->
                         captureChatFailure(aiCallLogId, throwable, session, chatId)
                     },
+                    // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
+                    meta = { it.meta },
                 ) {
                     chatTurnAiClient.streamTurn(aiRequest) { token ->
                         if (Thread.currentThread().isInterrupted) {

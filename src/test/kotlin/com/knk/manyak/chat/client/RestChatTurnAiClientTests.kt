@@ -6,6 +6,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -71,6 +72,47 @@ class RestChatTurnAiClientTests {
 
         assertEquals("choices 없는 응답", result.aiOutput)
         assertEquals(emptyList(), result.choices)
+    }
+
+    @Test
+    fun `completed의 meta(camelCase)를 도메인 meta로 정규화해 전달한다`() {
+        server.enqueue(sseResponse(
+            """
+            event: completed
+            data: {"aiOutput":"끝","choices":["a"],"meta":{"model":"deepseek-v4-flash","provider":"deepseek","inputTokenCount":6180,"outputTokenCount":256,"retryCount":0,"promptVersions":{"SAFETY":1,"CORE":2,"STORY":3,"CHARACTER":2,"USER":2,"MEMORY":2}}}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val result = client().streamTurn(sampleRequest(), onToken = {})
+
+        val meta = requireNotNull(result.meta)
+        assertEquals("deepseek-v4-flash", meta.model)
+        assertEquals("deepseek", meta.provider)
+        assertEquals(6180, meta.inputTokenCount)
+        assertEquals(256, meta.outputTokenCount)
+        assertEquals(0, meta.retryCount)
+        assertEquals(
+            mapOf("SAFETY" to 1, "CORE" to 2, "STORY" to 3, "CHARACTER" to 2, "USER" to 2, "MEMORY" to 2),
+            meta.promptVersions,
+        )
+    }
+
+    @Test
+    fun `completed에 meta가 없거나 미지 필드가 있어도 결과 매핑이 깨지지 않는다`() {
+        server.enqueue(sseResponse(
+            """
+            event: completed
+            data: {"aiOutput":"끝","choices":[],"unexpectedField":1,"meta":{"model":"m","unexpectedMetaField":2}}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val result = client().streamTurn(sampleRequest(), onToken = {})
+
+        assertEquals("끝", result.aiOutput)
+        assertEquals("m", result.meta?.model)
+        assertNull(result.meta?.inputTokenCount)
     }
 
     @Test

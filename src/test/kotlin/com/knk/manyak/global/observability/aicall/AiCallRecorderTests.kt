@@ -195,6 +195,99 @@ class AiCallRecorderTests {
     }
 
     @Test
+    fun `meta 추출기가 성공 시 model·토큰·prompt_versions를 같은 저장에 반영한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+
+        val recorded = recorder.record(
+            AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+            meta = {
+                AiCallMeta(
+                    model = "deepseek-v4-pro",
+                    provider = "deepseek",
+                    inputTokenCount = 6180,
+                    outputTokenCount = 512,
+                    retryCount = 1,
+                    promptVersions = mapOf("COMPILE" to 2),
+                )
+            },
+        ) { "ai-result" }
+
+        val log = repository.findById(recorded.aiCallLogId).orElseThrow()
+        assertEquals(AiCallStatus.SUCCEEDED, log.status)
+        assertEquals("deepseek-v4-pro", log.model)
+        assertEquals("deepseek", log.provider)
+        assertEquals(6180, log.inputTokenCount)
+        assertEquals(512, log.outputTokenCount)
+        assertEquals(1, log.retryCount)
+        assertEquals(mapOf("COMPILE" to 2), log.promptVersions)
+    }
+
+    @Test
+    fun `meta 추출기가 null이면 meta 컬럼을 비워 둔다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+
+        val recorded = recorder.record(
+            AiCallContext(feature = AiCallFeature.CHAT_RESPONSE),
+            meta = { null },
+        ) { 1 }
+
+        val log = repository.findById(recorded.aiCallLogId).orElseThrow()
+        assertNull(log.model)
+        assertNull(log.inputTokenCount)
+        assertNull(log.promptVersions)
+    }
+
+    @Test
+    fun `실패 시 meta 추출기를 호출하지 않고 FAILED로 적재한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+        var metaCalled = false
+
+        assertFailsWith<IllegalStateException> {
+            recorder.record(
+                AiCallContext(feature = AiCallFeature.CHAT_RESPONSE),
+                meta = { metaCalled = true; null },
+            ) { throw IllegalStateException("boom") }
+        }
+
+        assertEquals(false, metaCalled)
+        val log = repository.findAll().single()
+        assertEquals(AiCallStatus.FAILED, log.status)
+        assertNull(log.model)
+    }
+
+    @Test
+    fun `meta 추출이 던져도 성공한 AI 호출을 SUCCEEDED로 보존한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+
+        val recorded = recorder.record(
+            AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+            meta = { throw IllegalStateException("meta boom") },
+        ) { "ok" }
+
+        assertEquals("ok", recorded.result)
+        val log = repository.findById(recorded.aiCallLogId).orElseThrow()
+        assertEquals(AiCallStatus.SUCCEEDED, log.status)
+        assertNull(log.model)
+    }
+
+    @Test
+    fun `컬럼 제약을 넘는 meta가 와도 성공한 AI 호출을 깨지 않고 잘라서 SUCCEEDED로 적재한다`() {
+        MDC.put(MdcKeys.REQUEST_ID, "req")
+
+        val recorded = recorder.record(
+            AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+            meta = { AiCallMeta(model = "m".repeat(200), provider = "p".repeat(80), retryCount = -1) },
+        ) { "ok" }
+
+        assertEquals("ok", recorded.result)
+        val log = repository.findById(recorded.aiCallLogId).orElseThrow()
+        assertEquals(AiCallStatus.SUCCEEDED, log.status)
+        assertEquals(100, log.model!!.length)
+        assertEquals(40, log.provider!!.length)
+        assertEquals(0, log.retryCount)
+    }
+
+    @Test
     fun `attachSentryEventId는 sentry_event_id를 채운다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req")
         val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }

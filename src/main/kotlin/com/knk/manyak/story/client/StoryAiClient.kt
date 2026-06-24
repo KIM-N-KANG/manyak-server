@@ -1,6 +1,8 @@
 package com.knk.manyak.story.client
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.global.observability.aicall.AiCallMeta
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
@@ -26,9 +28,42 @@ data class AiStorylinesRequest(
     val supportingTags: List<String>,
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class AiStorylinesResponse(
     val stories: List<AiStoryItem>,
+    val meta: AiResponseMeta? = null,
 )
+
+/**
+ * AI story 응답(storyline/compile)에 실려 오는 호출 meta. 와이어 키는 snake_case다.
+ *
+ * 미지 필드를 무시해, AI가 meta를 확장하거나 strict 역직렬화가 켜져도 파싱이 깨지지 않게 한다
+ * (Jackson 기본값 FAIL_ON_UNKNOWN_PROPERTIES=false에만 의존하지 않는다).
+ * promptVersions는 AI가 보낸 키→버전 맵(예: {"STORYLINES":2}, {"COMPILE":2})을 그대로 받는다.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiResponseMeta(
+    val model: String? = null,
+    val provider: String? = null,
+    @JsonProperty("input_token_count")
+    val inputTokenCount: Int? = null,
+    @JsonProperty("output_token_count")
+    val outputTokenCount: Int? = null,
+    @JsonProperty("retry_count")
+    val retryCount: Int? = null,
+    @JsonProperty("prompt_versions")
+    val promptVersions: Map<String, Int>? = null,
+) {
+    /** ai_call_logs 적재용 공통 도메인 meta로 정규화한다. */
+    fun toAiCallMeta(): AiCallMeta = AiCallMeta(
+        model = model,
+        provider = provider,
+        inputTokenCount = inputTokenCount,
+        outputTokenCount = outputTokenCount,
+        retryCount = retryCount,
+        promptVersions = promptVersions,
+    )
+}
 
 data class AiStoryItem(
     val id: Int,
@@ -54,6 +89,7 @@ data class AiStoryCompileRequest(
     val extraInfo: String,
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class AiStoryCompileResponse(
     val stories: AiStoryMeta,
 
@@ -65,6 +101,8 @@ data class AiStoryCompileResponse(
 
     @JsonProperty("story_suggested_inputs")
     val storySuggestedInputs: List<String>,
+
+    val meta: AiResponseMeta? = null,
 )
 
 data class AiStoryMeta(

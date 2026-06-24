@@ -1,5 +1,7 @@
 package com.knk.manyak.chat.client
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.knk.manyak.global.observability.aicall.AiCallMeta
 import java.time.Duration
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -59,6 +61,7 @@ class RestChatTurnAiClient(
                             result = ChatTurnAiResult(
                                 aiOutput = data.aiOutput,
                                 choices = data.choices ?: emptyList(),
+                                meta = data.meta?.toAiCallMeta(),
                             )
                         }
                         EVENT_ERROR -> {
@@ -86,8 +89,37 @@ class RestChatTurnAiClient(
      * SSE `completed` 이벤트 페이로드. 와이어 키는 camelCase(aiOutput)다.
      * choices가 누락돼도 이미 중계된 토큰·저장이 통째로 실패하지 않도록 nullable로 받아
      * 매핑 시 빈 목록으로 보정한다(Jackson은 누락 필드를 기본값이 아닌 null로 전달한다).
+     * 미지 필드는 무시해, AI가 completed 페이로드를 확장해도 파싱이 깨지지 않는다.
      */
-    private data class CompletedData(val aiOutput: String, val choices: List<String>? = null)
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class CompletedData(
+        val aiOutput: String,
+        val choices: List<String>? = null,
+        val meta: ChatCompletedMeta? = null,
+    )
+
+    /**
+     * SSE `completed` 이벤트의 호출 meta. 와이어 키는 camelCase(promptVersions 등)다.
+     * promptVersions는 AI가 보낸 레이어 키→버전 맵(예: {"SAFETY":1,"CORE":2,...})을 그대로 받는다.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class ChatCompletedMeta(
+        val model: String? = null,
+        val provider: String? = null,
+        val inputTokenCount: Int? = null,
+        val outputTokenCount: Int? = null,
+        val retryCount: Int? = null,
+        val promptVersions: Map<String, Int>? = null,
+    ) {
+        fun toAiCallMeta(): AiCallMeta = AiCallMeta(
+            model = model,
+            provider = provider,
+            inputTokenCount = inputTokenCount,
+            outputTokenCount = outputTokenCount,
+            retryCount = retryCount,
+            promptVersions = promptVersions,
+        )
+    }
 
     /** SSE `error` 이벤트 페이로드. */
     private data class ErrorData(val code: String, val message: String)

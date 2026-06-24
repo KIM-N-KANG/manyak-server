@@ -102,10 +102,11 @@ class AiCallLogRecordingIntegrationTests {
             assertThat(log.turnIndex).isEqualTo(1)
             assertThat(log.latencyMs).isNotNull()
             assertThat(log.completedAt).isNotNull()
-            // 적재 골격 범위: 토큰·모델 메타는 AI 응답 계약 확장 전까지 비운다.
+            // stub은 meta를 내려주지 않으므로, AI 응답 meta 컬럼은 비어 있어야 한다(실 AI 연동 전 회귀 가드).
             assertThat(log.model).isNull()
             assertThat(log.inputTokenCount).isNull()
             assertThat(log.outputTokenCount).isNull()
+            assertThat(log.promptVersions).isNull()
 
             // ai_response_saved 로그에 ai_call_log_id가 실려 적재 행과 연결된다.
             val aiSaved = appender.list.filter { it.formattedMessage.contains("event_name=ai_response_saved") }
