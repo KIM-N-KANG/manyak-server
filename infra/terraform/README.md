@@ -13,7 +13,7 @@ infra/terraform/
 
 ## 사전 요구
 
-- Terraform >= 1.9
+- Terraform >= 1.10 (prod backend의 S3 native locking `use_lockfile`이 1.10+ 필요)
 - AWS 자격증명 (`aws configure` 또는 환경변수). 부트스트랩은 S3/DynamoDB 생성 권한 필요
 - 리전: ap-northeast-2
 
