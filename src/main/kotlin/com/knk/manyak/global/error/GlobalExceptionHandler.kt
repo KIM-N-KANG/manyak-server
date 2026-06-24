@@ -145,7 +145,17 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
         log.debug("Method not supported: path={}, method={}", request.requestURI, exception.method)
-        return errorResponse(HttpStatus.METHOD_NOT_ALLOWED, request, "지원하지 않는 HTTP 메서드입니다.")
+        // 405는 표준상 Allow 헤더로 허용 메서드를 알려야 한다(클라이언트가 유효 메서드를 발견할 수 있도록).
+        val builder = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+        exception.supportedHttpMethods?.let { methods -> builder.allow(*methods.toTypedArray()) }
+        return builder.body(
+            ApiErrorResponse(
+                status = HttpStatus.METHOD_NOT_ALLOWED.value(),
+                code = HttpStatus.METHOD_NOT_ALLOWED.name,
+                message = "지원하지 않는 HTTP 메서드입니다.",
+                path = request.requestURI,
+            ),
+        )
     }
 
     @ExceptionHandler(Exception::class)

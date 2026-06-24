@@ -95,4 +95,19 @@ class SentryCaptureIntegrationTests {
 
         assertThat(capturedEvents).isEmpty()
     }
+
+    @Test
+    fun `잘못된 Content-Type(415)도 Sentry로 전송되지 않는다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.TEXT_PLAIN)
+            .body("이것은 JSON이 아닌 평문")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    // 405는 SecurityConfig가 경로+메서드 단위로 허용해 미허용 메서드가 403(Security)으로 먼저 막히므로
+    // 통합 경로로는 재현되지 않는다. 405 핸들러와 Allow 헤더는 GlobalExceptionHandlerSentryTests(단위)에서 검증한다.
 }
