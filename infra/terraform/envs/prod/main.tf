@@ -41,6 +41,10 @@ module "compute" {
   server_image          = "${module.ecr.repository_urls["manyak-server"]}:latest"
   ai_image              = "${module.ecr.repository_urls["manyak-ai"]}:latest"
   compose_content       = file("${path.module}/../../../../docker-compose.prod.yml")
+
+  # SG egress 규칙·IAM 정책 attachment가 EC2 부팅(user-data의 ECR pull·아웃바운드) 전에 준비되도록
+  # security 모듈 전체 완료를 기다린다. (app_sg/instance_profile 객체 참조만으론 규칙·attachment 순서가 보장되지 않음)
+  depends_on = [module.security]
 }
 
 # #7 KNK-240 엣지 (ALB + ACM + Cloudflare DNS)
