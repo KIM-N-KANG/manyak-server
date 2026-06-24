@@ -21,3 +21,9 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
+
+variable "enable_redis" {
+  description = "ElastiCache Redis 생성 여부 (KNK-239 data 모듈 토글)"
+  type        = bool
+  default     = true
+}

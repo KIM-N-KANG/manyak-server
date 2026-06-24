@@ -33,6 +33,21 @@ output "instance_profile_name" {
   value       = module.security.instance_profile_name
 }
 
+output "db_instance_endpoint" {
+  description = "RDS 엔드포인트 (host:port)"
+  value       = module.data.db_instance_endpoint
+}
+
+output "db_master_user_secret_arn" {
+  description = "RDS 마스터 자격증명 Secrets Manager ARN (KNK-241 앱 시크릿 주입)"
+  value       = module.data.db_master_user_secret_arn
+}
+
+output "redis_endpoint" {
+  description = "Redis 엔드포인트 (enable_redis=true 일 때)"
+  value       = module.data.redis_endpoint
+}
+
 output "ecr_repository_urls" {
   description = "ECR 레포지토리 URL (CI 푸시 대상)"
   value       = module.ecr.repository_urls
