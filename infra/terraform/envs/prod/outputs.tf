@@ -18,6 +18,21 @@ output "db_subnet_ids" {
   value       = module.network.db_subnet_ids
 }
 
+output "security_group_ids" {
+  description = "보안 그룹 ID (alb/app/rds/redis)"
+  value = {
+    alb   = module.security.alb_security_group_id
+    app   = module.security.app_security_group_id
+    rds   = module.security.rds_security_group_id
+    redis = module.security.redis_security_group_id
+  }
+}
+
+output "instance_profile_name" {
+  description = "EC2 인스턴스 프로파일 이름"
+  value       = module.security.instance_profile_name
+}
+
 output "ecr_repository_urls" {
   description = "ECR 레포지토리 URL (CI 푸시 대상)"
   value       = module.ecr.repository_urls
