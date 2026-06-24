@@ -7,14 +7,18 @@ on:
   push:
     branches:
       - dev
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+  packages: write # GHCR(dev) 푸시
+  id-token: write # AWS OIDC(main) 인증
 
 env:
-  IMAGE_NAME: ghcr.io/kim-n-kang/manyak-server
+  GHCR_IMAGE: ghcr.io/kim-n-kang/manyak-server
+  ECR_REPOSITORY: manyak-server
+  AWS_REGION: ap-northeast-2
 
 jobs:
   build:
@@ -45,17 +49,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Set image tags
-        id: image-tags
-        run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
-          {
-            echo "tags<<EOF"
-            echo "${IMAGE_NAME}:dev"
-            echo "${IMAGE_NAME}:${SHORT_SHA}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
+      # dev 푸시 → 개발용 GHCR
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         uses: docker/login-action@v3
@@ -64,10 +58,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # main 푸시 → 배포용 ECR (OIDC, 장기 키 미보관)
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 대상 레지스트리/태그 결정: main → ECR(latest, short-sha), 그 외 → GHCR(dev, short-sha)
+      - name: Resolve image tags
+        id: image-tags
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+            {
+              echo "tags<<EOF"
+              echo "${REGISTRY}/${ECR_REPOSITORY}:latest"
+              echo "${REGISTRY}/${ECR_REPOSITORY}:${SHORT_SHA}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "tags<<EOF"
+              echo "${GHCR_IMAGE}:dev"
+              echo "${GHCR_IMAGE}:${SHORT_SHA}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
           tags: ${{ steps.image-tags.outputs.tags }}

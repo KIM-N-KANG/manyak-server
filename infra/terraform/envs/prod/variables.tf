@@ -15,3 +15,9 @@ variable "region" {
   type        = string
   default     = "ap-northeast-2"
 }
+
+variable "create_github_oidc_provider" {
+  description = "GitHub OIDC provider 생성 여부. 계정에 이미 존재하면 false"
+  type        = bool
+  default     = true
+}
