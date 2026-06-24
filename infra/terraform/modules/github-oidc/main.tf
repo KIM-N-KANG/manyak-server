@@ -19,8 +19,14 @@ resource "aws_iam_openid_connect_provider" "github" {
   }
 }
 
+# 생성하지 않는 경우, 계정에 이미 있는 provider 를 조회해 ARN 을 얻는다
+data "aws_iam_openid_connect_provider" "existing" {
+  count = var.create_oidc_provider ? 0 : 1
+  url   = "https://token.actions.githubusercontent.com"
+}
+
 locals {
-  oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.oidc_provider_arn
+  oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.existing[0].arn
   role_name         = coalesce(var.role_name, "${var.project}-${var.environment}-gha-ecr-push")
   subjects          = [for branch in var.allowed_branches : "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/${branch}"]
 }

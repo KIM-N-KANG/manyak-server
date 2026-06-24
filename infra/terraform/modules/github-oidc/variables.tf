@@ -14,12 +14,6 @@ variable "create_oidc_provider" {
   default     = true
 }
 
-variable "oidc_provider_arn" {
-  description = "create_oidc_provider=false 일 때 사용할 기존 OIDC provider ARN"
-  type        = string
-  default     = ""
-}
-
 variable "github_owner" {
   description = "GitHub 소유자(org/user)"
   type        = string
