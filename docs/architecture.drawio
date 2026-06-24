@@ -1,0 +1,81 @@
+<mxfile host="Electron" agent="manyak-server">
+  <diagram name="manyak-mvp-aws" id="manyak-aws-mvp">
+    <mxGraphModel dx="1088" dy="1654" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="awscloud" parent="1" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_aws_cloud_alt;strokeColor=#232F3E;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#232F3E;dashed=0;" value="AWS Cloud" vertex="1">
+          <mxGeometry height="965" width="790" x="95" y="-195" as="geometry" />
+        </mxCell>
+        <mxCell id="user" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3D;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.user;" value="사용자 / 웹" vertex="1">
+          <mxGeometry height="48" width="48" x="431" y="-275" as="geometry" />
+        </mxCell>
+        <mxCell id="route53" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.route_53;" value="Route 53&#xa;api.manyak.app" vertex="1">
+          <mxGeometry height="48" width="48" x="431" y="-158" as="geometry" />
+        </mxCell>
+        <mxCell id="region" parent="1" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_region;strokeColor=#00A4A6;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#147EBA;dashed=1;" value="Region · ap-northeast-2 (Seoul)" vertex="1">
+          <mxGeometry height="790" width="740" x="120" y="-40" as="geometry" />
+        </mxCell>
+        <mxCell id="igw" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.internet_gateway;" value="Internet Gateway" vertex="1">
+          <mxGeometry height="48" width="48" x="431" y="-34" as="geometry" />
+        </mxCell>
+        <mxCell id="vpc" parent="1" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc2;strokeColor=#8C4FFF;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#8C4FFF;dashed=0;" value="VPC 10.0.0.0/16" vertex="1">
+          <mxGeometry height="660" width="600" x="180" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="az" parent="vpc" style="fillColor=none;strokeColor=#147EBA;dashed=1;verticalAlign=top;fontStyle=0;fontColor=#147EBA;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;pointerEvents=0;align=left;spacingLeft=10;spacingTop=4;" value="AZ · ap-northeast-2a" vertex="1">
+          <mxGeometry height="560" width="540" x="30" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pubsub" parent="az" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_security_group;grStroke=0;strokeColor=#7AA116;fillColor=#F2F6E8;verticalAlign=top;align=left;spacingLeft=30;fontColor=#248814;dashed=0;" value="Public Subnet 10.0.0.0/24" vertex="1">
+          <mxGeometry height="110" width="490" x="25" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="alb" parent="pubsub" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.application_load_balancer;" value="ALB :443&#xa;HTTPS · ACM" vertex="1">
+          <mxGeometry height="48" width="48" x="70" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="nat" parent="pubsub" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.nat_gateway;" value="NAT Gateway" vertex="1">
+          <mxGeometry height="48" width="48" x="340" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="appsub" parent="az" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_security_group;grStroke=0;strokeColor=#00A4A6;fillColor=#E6F6F7;verticalAlign=top;align=left;spacingLeft=30;fontColor=#147EBA;dashed=0;" value="Private App Subnet 10.0.10.0/24" vertex="1">
+          <mxGeometry height="195" width="490" x="25" y="175" as="geometry" />
+        </mxCell>
+        <mxCell id="ec2" parent="appsub" style="sketch=0;outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_ec2_instance_contents;strokeColor=#ED7100;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#ED7100;dashed=0;" value="EC2 인스턴스 · t3.small · docker compose" vertex="1">
+          <mxGeometry height="120" width="400" x="45" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="csrv" parent="ec2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#ED7100;fontColor=#232F3E;fontSize=11;" value="manyak-server&#xa;:8080 (container)" vertex="1">
+          <mxGeometry height="50" width="160" x="25" y="46" as="geometry" />
+        </mxCell>
+        <mxCell id="cai" parent="ec2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#ED7100;fontColor=#232F3E;fontSize=11;" value="manyak-ai&#xa;LLM 래퍼 (container)" vertex="1">
+          <mxGeometry height="50" width="160" x="215" y="46" as="geometry" />
+        </mxCell>
+        <mxCell id="dbsub" parent="az" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_security_group;grStroke=0;strokeColor=#00A4A6;fillColor=#E6F6F7;verticalAlign=top;align=left;spacingLeft=30;fontColor=#147EBA;dashed=0;" value="Private DB Subnet 10.0.20.0/24 (폐쇄망)" vertex="1">
+          <mxGeometry height="120" width="490" x="25" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="rds" parent="dbsub" style="sketch=0;points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;fontColor=#232F3E;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" value="RDS PostgreSQL :5432" vertex="1">
+          <mxGeometry height="48" width="48" x="120" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" parent="dbsub" style="sketch=0;points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;fontColor=#232F3E;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elasticache;" value="ElastiCache Redis :6379" vertex="1">
+          <mxGeometry height="48" width="48" x="310" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ops" parent="vpc" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#8C4FFF;" value="운영: EC2 IAM Role · SSM 접속(SSH 22 미개방) · VPC Flow Log · HTTP(80)→HTTPS(443) 리다이렉트" vertex="1">
+          <mxGeometry height="20" width="560" x="30" y="635" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#879196;fontColor=#232F3E;fontSize=11;" value="외부 LLM API&#xa;(Claude / OpenAI)" vertex="1">
+          <mxGeometry height="60" width="170" x="930" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="sentry" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#879196;fontColor=#232F3E;fontSize=11;" value="Sentry&#xa;(에러 추적 SaaS)" vertex="1">
+          <mxGeometry height="60" width="170" x="930" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="e_user_r53" value="api.manyak.app" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="user" target="route53"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_r53_igw" value="HTTPS · 443" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="route53" target="igw"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_igw_alb" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="igw" target="alb"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_alb_srv" value="8080 · app-sg←alb-sg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="alb" target="csrv"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_srv_ai" value="localhost" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=1;exitY=0.5;entryX=0;entryY=0.5;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="csrv" target="cai"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_srv_rds" value="5432 · rds-sg←app-sg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.25;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="csrv" target="rds"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_srv_redis" value="6379 · redis-sg←app-sg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#232F3E;exitX=0.7;exitY=1;entryX=0.5;entryY=0;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="csrv" target="redis"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="417" y="500" /><mxPoint x="569" y="500" /></Array></mxGeometry></mxCell>
+        <mxCell id="e_ai_nat" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#879196;exitX=0.5;exitY=0;entryX=0.5;entryY=1;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="cai" target="nat"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_nat_llm" value="LLM 호출" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#879196;exitX=1;exitY=0.5;entryX=0;entryY=0.5;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="nat" target="llm"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="e_srv_sentry" value="에러" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#879196;exitX=0.5;exitY=1;entryX=0;entryY=0.7;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="csrv" target="sentry"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="385" y="525" /><mxPoint x="1015" y="525" /></Array></mxGeometry></mxCell>
+        <mxCell id="e_ai_sentry" value="에러" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#879196;exitX=1;exitY=0.5;entryX=0;entryY=0.3;fontSize=10;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="cai" target="sentry"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
