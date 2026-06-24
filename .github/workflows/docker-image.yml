@@ -106,6 +106,10 @@ jobs:
     name: Deploy to EC2 (prod)
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # 순서가 어긋난 run 이 older SHA 를 재배포하지 않도록 배포를 직렬화하고, 진행 중인 이전 배포는 취소(최신만 반영)
+    concurrency:
+      group: manyak-prod-deploy
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials (OIDC)
