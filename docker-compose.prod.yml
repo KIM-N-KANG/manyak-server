@@ -1,0 +1,31 @@
+# 운영용 compose: server + ai 두 컨테이너.
+# DB(PostgreSQL)와 Redis는 RDS/ElastiCache(외부)를 쓰므로 여기엔 없다.
+# DB/Redis 접속정보 등 비밀은 KNK-241에서 .env(Secrets Manager 경유)로 주입한다.
+# server -> ai 통신은 compose 서비스명 DNS(http://ai:8000) 사용 — localhost 아님.
+# 이미지 좌표(SERVER_IMAGE/AI_IMAGE)는 EC2 user-data가 생성한 .env 에서 주입.
+services:
+  server:
+    image: ${SERVER_IMAGE}
+    container_name: manyak-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      MANYAK_AI_BASE_URL: http://ai:8000
+    env_file:
+      - .env
+    depends_on:
+      - ai
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+  ai:
+    image: ${AI_IMAGE}
+    container_name: manyak-ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"

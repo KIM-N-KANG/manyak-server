@@ -9,5 +9,5 @@
 | `network` | KNK-237 | VPC 3계층(public/app/db)·IGW·NAT(MVP 단일)·route·S3 Gateway Endpoint |
 | `security` | KNK-238 | SG 체인(alb→app→rds/redis) + EC2 IAM(SSM·ECR pull·CloudWatch, SSH 미개방) |
 | `data` | KNK-239 | RDS PostgreSQL(단일AZ·자동백업·Secrets Manager) + ElastiCache Redis(토글) + DB subnet group(2AZ) |
-| `compute` | KNK-240 | EC2 + SSM + user-data(compose) |
-| `edge` | KNK-240 | ALB + ACM + Route53 |
+| `compute` | KNK-240 | EC2(2a, SSM) + user-data(docker compose: server+ai) |
+| `edge` | KNK-240 | ALB + ACM(DNS 검증) + Cloudflare DNS(api.manyak.app) |

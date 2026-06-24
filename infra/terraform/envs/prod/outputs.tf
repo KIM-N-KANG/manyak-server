@@ -48,6 +48,21 @@ output "redis_endpoint" {
   value       = module.data.redis_endpoint
 }
 
+output "app_instance_id" {
+  description = "app EC2 인스턴스 ID (SSM 접속·ALB 타깃)"
+  value       = module.compute.instance_id
+}
+
+output "alb_dns_name" {
+  description = "ALB DNS 이름 (Cloudflare CNAME 대상)"
+  value       = module.edge.alb_dns_name
+}
+
+output "api_url" {
+  description = "백엔드 HTTPS URL"
+  value       = module.edge.api_url
+}
+
 output "ecr_repository_urls" {
   description = "ECR 레포지토리 URL (CI 푸시 대상)"
   value       = module.ecr.repository_urls

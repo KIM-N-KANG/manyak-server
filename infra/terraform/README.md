@@ -8,7 +8,7 @@
 infra/terraform/
   bootstrap/      # 1회성: 원격 state 백엔드(S3, 잠금은 S3 네이티브 use_lockfile) 생성 (로컬 state)
   envs/prod/      # 운영 환경 구성 (S3 backend 사용)
-  modules/        # 재사용 모듈 (ecr·github-oidc·network·security·data 완료, compute/edge 후속)
+  modules/        # 재사용 모듈 (ecr·github-oidc·network·security·data·compute·edge 완료)
 ```
 
 ## 사전 요구
@@ -89,4 +89,5 @@ cd infra/terraform/bootstrap && terraform init -backend=false && terraform valid
 ## 비고
 
 - `.terraform.lock.hcl`은 커밋한다(프로바이더 버전 고정). `*.tfstate`·`*.tfvars`·`backend.hcl`은 커밋하지 않는다(.gitignore).
-- 리소스 모듈: ECR·github-oidc(KNK-236)·network(KNK-237)·security(KNK-238)·data(KNK-239, RDS+Redis) 완료. EC2/ALB는 KNK-240에서 `modules/`에 추가한다.
+- 리소스 모듈: ECR·github-oidc(KNK-236)·network(KNK-237)·security(KNK-238)·data(KNK-239)·compute+edge(KNK-240, EC2+ALB/ACM/Cloudflare) 완료. KNK-241에서 시크릿 주입·배포로 마무리한다.
+- DNS는 Cloudflare(manyak.app). edge 모듈이 cloudflare provider로 ACM 검증·`api.manyak.app` 레코드를 생성하며, `cloudflare_api_token`을 tfvars/환경변수로 주입한다(커밋 금지).
