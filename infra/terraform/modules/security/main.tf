@@ -144,7 +144,7 @@ data "aws_iam_policy_document" "ec2_assume" {
 
 resource "aws_iam_role" "ec2" {
   name               = "${var.project}-${var.environment}-ec2-role"
-  description        = "EC2 인스턴스 역할: SSM 접속·ECR pull·CloudWatch Logs"
+  description        = "EC2 instance role: SSM access, ECR pull, CloudWatch Logs"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
 
   tags = {
