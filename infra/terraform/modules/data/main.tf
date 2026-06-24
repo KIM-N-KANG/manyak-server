@@ -53,7 +53,9 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible     = false
   deletion_protection     = var.db_deletion_protection
   skip_final_snapshot     = var.db_skip_final_snapshot
-  apply_immediately       = false
+  # skip_final_snapshot=false(운영)면 삭제 시 최종 스냅샷 이름이 필요하다
+  final_snapshot_identifier = var.db_skip_final_snapshot ? null : "${var.project}-${var.environment}-pg-final"
+  apply_immediately         = false
 
   tags = {
     Name = "${var.project}-${var.environment}-pg"

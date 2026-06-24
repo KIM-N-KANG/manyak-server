@@ -31,9 +31,9 @@ variable "redis_security_group_id" {
 # --- RDS PostgreSQL ---
 
 variable "db_engine_version" {
-  description = "RDS PostgreSQL 엔진 버전"
+  description = "RDS PostgreSQL 엔진 버전. major(예: 16)만 지정하면 AWS가 지원되는 최신 minor 를 자동 선택"
   type        = string
-  default     = "16.4"
+  default     = "16"
 }
 
 variable "db_parameter_group_family" {
