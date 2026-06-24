@@ -170,12 +170,14 @@ class AiCallLogRepositoryTests {
     }
 
     @Test
-    fun `applyMeta는 컬럼 제약을 넘는 model·provider를 자르고 음수 retryCount를 0으로 보정해 적재가 깨지지 않게 한다`() {
+    fun `applyMeta는 컬럼 제약을 넘는 model·provider를 자르고 음수 retryCount·토큰을 0으로 보정해 적재가 깨지지 않게 한다`() {
         val log = startedLog(feature = AiCallFeature.CHAT_RESPONSE).apply {
             applyMeta(
                 AiCallMeta(
                     model = "m".repeat(200),     // model VARCHAR(100) 초과
                     provider = "p".repeat(80),   // provider VARCHAR(40) 초과
+                    inputTokenCount = -7,        // 음수 토큰(불가능한 값) → 분석 오염 방지
+                    outputTokenCount = -1,
                     retryCount = -3,             // ck_ai_call_logs_retry_count CHECK(>=0) 위반
                 ),
             )
@@ -188,6 +190,8 @@ class AiCallLogRepositoryTests {
         val found = repository.findById(savedId).orElseThrow()
         assertEquals(100, found.model!!.length)
         assertEquals(40, found.provider!!.length)
+        assertEquals(0, found.inputTokenCount)
+        assertEquals(0, found.outputTokenCount)
         assertEquals(0, found.retryCount)
     }
 
