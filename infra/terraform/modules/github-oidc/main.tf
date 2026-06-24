@@ -29,6 +29,11 @@ locals {
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.existing[0].arn
   role_name         = coalesce(var.role_name, "${var.project}-${var.environment}-gha-ecr-push")
   subjects          = [for branch in var.allowed_branches : "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/${branch}"]
+
+  # KNK-241 deploy 대상 인스턴스 ARN. 지정 시 해당 인스턴스로만 SendCommand 제한(폭발 반경 축소), 비우면 instance/* 폴백.
+  deploy_instance_arns = length(var.deploy_instance_ids) > 0 ? [
+    for id in var.deploy_instance_ids : "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/${id}"
+  ] : ["arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*"]
 }
 
 # OIDC 토큰으로만 assume, 지정 레포+브랜치(sub)로 제한
@@ -95,4 +100,47 @@ resource "aws_iam_role_policy" "ecr_push" {
   name   = "ecr-push"
   role   = aws_iam_role.ci.id
   policy = data.aws_iam_policy_document.ecr_push.json
+}
+
+# ── 배포(deploy) 권한: main 워크플로가 SSM Run Command 로 EC2에 compose 재기동 (KNK-241) ──
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "deploy" {
+  # 대상 EC2로의 SendCommand: Project 태그(provider default_tags)로 제한
+  statement {
+    sid       = "SsmSendCommandInstance"
+    effect    = "Allow"
+    actions   = ["ssm:SendCommand"]
+    resources = local.deploy_instance_arns
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Project"
+      values   = [var.project]
+    }
+  }
+  # 실행 문서(표준 쉘 스크립트)
+  statement {
+    sid       = "SsmSendCommandDocument"
+    effect    = "Allow"
+    actions   = ["ssm:SendCommand"]
+    resources = ["arn:aws:ssm:${data.aws_region.current.name}::document/AWS-RunShellScript"]
+  }
+  # 명령 결과 폴링 + 대상 인스턴스 조회
+  statement {
+    sid    = "SsmStatusAndDescribe"
+    effect = "Allow"
+    actions = [
+      "ssm:GetCommandInvocation",
+      "ssm:ListCommandInvocations",
+      "ec2:DescribeInstances",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "deploy" {
+  name   = "ssm-deploy"
+  role   = aws_iam_role.ci.id
+  policy = data.aws_iam_policy_document.deploy.json
 }

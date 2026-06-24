@@ -42,3 +42,9 @@ variable "role_name" {
   type        = string
   default     = ""
 }
+
+variable "deploy_instance_ids" {
+  description = "deploy(ssm:SendCommand) 대상 EC2 인스턴스 ID 목록. 비우면 Project 태그 조건의 instance/* 로 폴백 (KNK-241)"
+  type        = list(string)
+  default     = []
+}
