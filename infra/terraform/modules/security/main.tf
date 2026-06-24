@@ -14,7 +14,7 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_security_group" "alb" {
   name        = "${var.project}-${var.environment}-alb-sg"
-  description = "ALB: 인터넷에서 80/443 수신, App으로 8080 송신"
+  description = "ALB: HTTP/HTTPS from internet, 8080 out to app SG"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -24,7 +24,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "app" {
   name        = "${var.project}-${var.environment}-app-sg"
-  description = "App(EC2): ALB에서 8080 수신, 아웃바운드 허용"
+  description = "App (EC2): 8080 from ALB SG, all outbound"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -34,7 +34,7 @@ resource "aws_security_group" "app" {
 
 resource "aws_security_group" "rds" {
   name        = "${var.project}-${var.environment}-rds-sg"
-  description = "RDS PostgreSQL: App에서 5432 수신 (폐쇄망, egress 없음)"
+  description = "RDS PostgreSQL: 5432 from app SG (isolated, no egress)"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -44,7 +44,7 @@ resource "aws_security_group" "rds" {
 
 resource "aws_security_group" "redis" {
   name        = "${var.project}-${var.environment}-redis-sg"
-  description = "ElastiCache Redis: App에서 6379 수신 (폐쇄망, egress 없음)"
+  description = "ElastiCache Redis: 6379 from app SG (isolated, no egress)"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -57,7 +57,7 @@ resource "aws_security_group" "redis" {
 # ALB ← 인터넷 80/443
 resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   security_group_id = aws_security_group.alb.id
-  description       = "HTTP from internet (HTTPS 리다이렉트용)"
+  description       = "HTTP from internet (for HTTPS redirect)"
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "tcp"
   from_port         = 80
@@ -99,7 +99,7 @@ resource "aws_vpc_security_group_ingress_rule" "app_from_alb" {
 # 제한할 수 있으나, 외부 의존성 포트를 MVP 단계에서 단정하기 어려워 전체 허용으로 둔다.
 resource "aws_vpc_security_group_egress_rule" "app_all" {
   security_group_id = aws_security_group.app.id
-  description       = "App 아웃바운드 전체 (ECR/LLM/DB/SSM/CloudWatch)"
+  description       = "App outbound all (ECR/LLM/DB/SSM/CloudWatch)"
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1"
 }
