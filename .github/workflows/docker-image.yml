@@ -106,10 +106,12 @@ jobs:
     name: Deploy to EC2 (prod)
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # 순서가 어긋난 run 이 older SHA 를 재배포하지 않도록 배포를 직렬화하고, 진행 중인 이전 배포는 취소(최신만 반영)
+    # 배포를 직렬화(큐잉)한다. cancel-in-progress=false: 진행 중 배포를 취소하지 않는다.
+    # (true 면 SSM send-command 로 EC2에 이미 dispatch된 원격 배포는 못 막고 GitHub 잡만 취소돼 레이스가 남음)
+    # 큐잉이라 푸시 순서대로 배포되어 최신 SHA 가 마지막에 반영된다.
     concurrency:
       group: manyak-prod-deploy
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials (OIDC)
