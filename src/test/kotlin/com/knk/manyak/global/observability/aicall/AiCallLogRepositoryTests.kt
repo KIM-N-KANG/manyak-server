@@ -103,6 +103,72 @@ class AiCallLogRepositoryTests {
         assertEquals(3, found.turnIndex)
     }
 
+    @Test
+    fun `prompt_versions를 JSONB로 round-trip 적재한다`() {
+        val saved = repository.saveAndFlush(
+            startedLog(feature = AiCallFeature.CHAT_RESPONSE).apply {
+                promptVersions = linkedMapOf(
+                    "SAFETY" to 1,
+                    "CORE" to 2,
+                    "STORY" to 3,
+                    "CHARACTER" to 2,
+                    "USER" to 2,
+                    "MEMORY" to 2,
+                )
+            },
+        )
+        // 영속성 컨텍스트 캐시가 아니라 실제 DB 직렬화·역직렬화 경로를 통과시킨다.
+        entityManager.clear()
+
+        val found = repository.findById(saved.id).orElseThrow()
+        assertEquals(
+            mapOf("SAFETY" to 1, "CORE" to 2, "STORY" to 3, "CHARACTER" to 2, "USER" to 2, "MEMORY" to 2),
+            found.promptVersions,
+        )
+    }
+
+    @Test
+    fun `applyMeta는 model·provider·토큰·retry·prompt_versions를 채운다`() {
+        val log = startedLog(feature = AiCallFeature.STORYLINE_GENERATION).apply {
+            applyMeta(
+                AiCallMeta(
+                    model = "deepseek-v4-pro",
+                    provider = "deepseek",
+                    inputTokenCount = 6180,
+                    outputTokenCount = 512,
+                    retryCount = 1,
+                    promptVersions = mapOf("STORYLINES" to 2),
+                ),
+            )
+        }
+        val savedId = repository.saveAndFlush(log).id
+        entityManager.clear()
+
+        val found = repository.findById(savedId).orElseThrow()
+        assertEquals("deepseek-v4-pro", found.model)
+        assertEquals("deepseek", found.provider)
+        assertEquals(6180, found.inputTokenCount)
+        assertEquals(512, found.outputTokenCount)
+        assertEquals(1, found.retryCount)
+        assertEquals(mapOf("STORYLINES" to 2), found.promptVersions)
+    }
+
+    @Test
+    fun `applyMeta의 null 필드는 덮어쓰지 않아 기본값을 보존한다`() {
+        val log = startedLog(feature = AiCallFeature.CHAT_RESPONSE).apply {
+            applyMeta(AiCallMeta(model = "deepseek-v4-flash"))
+        }
+        val savedId = repository.saveAndFlush(log).id
+        entityManager.clear()
+
+        val found = repository.findById(savedId).orElseThrow()
+        assertEquals("deepseek-v4-flash", found.model)
+        assertNull(found.inputTokenCount)
+        assertNull(found.outputTokenCount)
+        assertNull(found.promptVersions)
+        assertEquals(0, found.retryCount)
+    }
+
     private fun startedLog(feature: AiCallFeature) = AiCallLog(
         requestId = "req_test",
         callerService = "manyak-server",

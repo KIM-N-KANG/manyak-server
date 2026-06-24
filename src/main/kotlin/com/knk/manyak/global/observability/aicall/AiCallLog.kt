@@ -9,6 +9,8 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.util.UUID
 
@@ -18,8 +20,9 @@ import java.util.UUID
  * 프롬프트·원문은 저장하지 않고(§6·§8), 식별자·메타와 상태(STARTED → SUCCEEDED/FAILED)만 남겨
  * 서버 로그·저장 데이터와 ai_call_log_id(=this.id)로 연결한다.
  *
- * provider/model/promptTemplateVersion/input·outputTokenCount는 AI 응답 계약이 확장되면 채운다.
- * 현재 manyak-ai 응답에는 해당 메타가 없어 nullable로 비워 둔다.
+ * provider/model/input·outputTokenCount/retryCount/promptVersions는 AI 응답 meta로 채운다([applyMeta]).
+ * AI가 meta를 아직 내려주지 않으면(stub 등) 모두 nullable로 비워 둔다.
+ * (단일 스칼라 promptTemplateVersion은 chat의 다중 키 버전을 담지 못해, 신규 promptVersions JSONB와 병존한다.)
  */
 @Entity
 @Table(name = "ai_call_logs")
@@ -62,6 +65,12 @@ class AiCallLog(
     @Column(name = "prompt_template_version", length = 40)
     var promptTemplateVersion: String? = null,
 
+    // AI가 보낸 프롬프트 버전 맵(레이어 키→버전)을 JSONB로 그대로 보관한다.
+    // 운영 PostgreSQL은 V12 마이그레이션이 jsonb로, 테스트 H2는 ddl-auto가 dialect별 JSON 타입으로 생성한다.
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "prompt_versions")
+    var promptVersions: Map<String, Int>? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 16)
     var status: AiCallStatus = AiCallStatus.STARTED,
@@ -98,6 +107,21 @@ class AiCallLog(
         this.status = AiCallStatus.SUCCEEDED
         this.latencyMs = latencyMs
         this.completedAt = completedAt
+    }
+
+    /**
+     * AI 응답 meta를 컬럼에 반영한다.
+     *
+     * null 필드는 덮어쓰지 않아, 부분 meta가 와도 기존 값(예: retryCount 기본 0)을 보존한다.
+     * promptVersions는 AI가 보낸 맵을 그대로 적재한다(레이어 키 변환 없음).
+     */
+    fun applyMeta(meta: AiCallMeta) {
+        meta.model?.let { this.model = it }
+        meta.provider?.let { this.provider = it }
+        meta.inputTokenCount?.let { this.inputTokenCount = it }
+        meta.outputTokenCount?.let { this.outputTokenCount = it }
+        meta.retryCount?.let { this.retryCount = it }
+        meta.promptVersions?.let { this.promptVersions = it }
     }
 
     /** 호출 실패로 전이한다. errorCode는 도메인 오류 코드 또는 예외 분류값이다. */

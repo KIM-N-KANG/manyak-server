@@ -28,11 +28,15 @@ class AiCallRecorder(
      *
      * @param errorCode 실패 예외를 error_code로 매핑한다. 기본은 예외 클래스 이름.
      *  도메인 오류 코드를 가진 호출부(예: ChatTurnAiException.code)는 직접 넘긴다.
+     * @param meta 성공한 [block] 결과에서 AI 응답 meta를 추출한다(없으면 null). 추출값은 SUCCEEDED 전이와
+     *  같은 저장에 반영돼 추가 UPDATE·동시성 갭이 없다. chat도 completed 결과(ChatTurnAiResult)에 meta가
+     *  실려 오므로 동일하게 처리한다. 추출이 던져도 관측이 비즈니스 호출을 깨지 않도록 격리한다.
      */
     fun <T> record(
         context: AiCallContext,
         errorCode: (Throwable) -> String? = { it::class.simpleName },
         onFailure: (aiCallLogId: Long, throwable: Throwable) -> Unit = { _, _ -> },
+        meta: (T) -> AiCallMeta? = { null },
         block: () -> T,
     ): RecordedAiCall<T> {
         val log = repository.save(started(context))
@@ -40,6 +44,8 @@ class AiCallRecorder(
         val startNanos = System.nanoTime()
         try {
             val result = block()
+            // meta 추출·반영 실패가 성공한 AI 호출을 FAILED로 둔갑시키지 않도록 격리한다(관측 < 비즈니스).
+            runCatching { meta(result)?.let(log::applyMeta) }
             log.markSucceeded(latencyMs = elapsedMs(startNanos))
             repository.save(log)
             Sentry.addBreadcrumb("ai_call succeeded: ${context.feature.value}", "ai")
