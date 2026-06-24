@@ -19,50 +19,47 @@ cat > /opt/manyak/docker-compose.yml <<'COMPOSE'
 ${compose_content}
 COMPOSE
 
-# 런타임 환경변수(.env): 이미지 좌표 + DB 자격증명/앱 시크릿(Secrets Manager 경유).
-# RDS 마스터 자격증명은 data 모듈이 자동 생성한 secret(username/password JSON), 앱 시크릿은 secrets 모듈.
-# 시크릿 값이 cloud-init 로그(/var/log/cloud-init-output.log·EC2 콘솔)에 평문으로 남지 않도록 이 구간만 xtrace(-x)를 끈다.
-set +x
-DB_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${db_secret_arn} --query SecretString --output text)"
-DB_USERNAME="$(echo "$DB_SECRET_JSON" | jq -r '.username')"
-DB_PASSWORD="$(echo "$DB_SECRET_JSON" | jq -r '.password')"
-
-APP_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${app_secret_arn} --query SecretString --output text)"
-SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SENTRY_DSN // ""')"
-SLACK_WEBHOOK="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_SLACK_FEEDBACK_WEBHOOK_URL // ""')"
-
-cat > /opt/manyak/.env <<ENVFILE
-SERVER_IMAGE=${server_image}
-AI_IMAGE=${ai_image}
-MANYAK_DB_URL=jdbc:postgresql://${db_address}:${db_port}/${db_name}
-MANYAK_DB_USERNAME=$DB_USERNAME
-MANYAK_DB_PASSWORD=$DB_PASSWORD
-SENTRY_DSN=$SENTRY_DSN
-SENTRY_ENVIRONMENT=${environment}
-MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=$SLACK_WEBHOOK
-ENVFILE
-chmod 600 /opt/manyak/.env
-# docker compose v2 의 env_file 은 값 안의 $ 를 변수 보간으로 해석하므로 .env 의 모든 $ 를 $$ 로 이스케이프한다.
-# (RDS 자동생성 비밀번호에 $ 가 들어가면 보간으로 잘려 DB 인증 실패 → 헬스체크 실패로만 드러남)
-sed -i 's/\$/$$$$/g' /opt/manyak/.env
-# 시크릿 처리 끝 — 트레이스 복구
-set -x
-
 # 배포/기동 스크립트 생성(최초 부팅·이후 CI 의 SSM Run Command 에서 공용 사용).
-# ECR 토큰은 12h 만료라 매 실행마다 재로그인한다. EC2 인스턴스 프로파일의 ECR pull 권한 사용.
+# 매 실행마다 Secrets Manager 를 재조회해 .env 를 갱신하므로, apply 후 시크릿 값을 바꿔도 재배포로 반영된다.
 cat > /opt/manyak/deploy.sh <<'DEPLOY'
 #!/bin/bash
 set -euxo pipefail
 cd /opt/manyak
+
+# 시크릿 조회 + .env 갱신. 값이 cloud-init/SSM 로그에 평문으로 남지 않도록 이 구간만 xtrace(-x)를 끈다.
+set +x
+DB_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${db_secret_arn} --query SecretString --output text)"
+DB_USERNAME="$(echo "$DB_SECRET_JSON" | jq -r '.username')"
+DB_PASSWORD="$(echo "$DB_SECRET_JSON" | jq -r '.password')"
+APP_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${app_secret_arn} --query SecretString --output text)"
+SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SENTRY_DSN // ""')"
+SLACK_WEBHOOK="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_SLACK_FEEDBACK_WEBHOOK_URL // ""')"
+umask 077
+{
+  echo "SERVER_IMAGE=${server_image}"
+  echo "AI_IMAGE=${ai_image}"
+  echo "MANYAK_DB_URL=jdbc:postgresql://${db_address}:${db_port}/${db_name}"
+  echo "MANYAK_DB_USERNAME=$DB_USERNAME"
+  echo "MANYAK_DB_PASSWORD=$DB_PASSWORD"
+  echo "SENTRY_DSN=$SENTRY_DSN"
+  echo "SENTRY_ENVIRONMENT=${environment}"
+  echo "MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=$SLACK_WEBHOOK"
+} > /opt/manyak/.env
+chmod 600 /opt/manyak/.env
+# docker compose v2 의 env_file 은 값 안의 $ 를 변수 보간으로 해석하므로 .env 의 $ 를 $$ 로 이스케이프한다.
+# (RDS 자동생성 비밀번호에 $ 가 들어가면 보간으로 잘려 DB 인증 실패 → 헬스체크 실패로만 드러남)
+sed -i 's/\$/$$/g' /opt/manyak/.env
+set -x
+
+# ECR 재로그인(토큰 12h 만료) 후 server 기동. ai 이미지는 미구현이라 server 만 명시 기동(준비 후 `up -d`).
+# pull/up 실패는 CI 워크플로의 SSM 상태 게이트·스모크가 감지하도록 || true 없이 전파한다.
 aws ecr get-login-password --region ${aws_region} \
   | docker login --username AWS --password-stdin ${ecr_registry_url}
-# ai 이미지는 아직 미구현이라 server 만 명시 기동한다(ai 준비 후 `docker compose up -d` 로 전체).
-# server pull/up 실패는 CI 워크플로의 SSM 상태 게이트·스모크가 감지하도록 || true 없이 전파한다.
 docker compose pull server
 docker compose up -d server
 docker image prune -f || true
 DEPLOY
 chmod +x /opt/manyak/deploy.sh
 
-# 최초 기동 (set -e 로 부팅이 중단되지 않도록 실패 무시)
+# 최초 기동 (set -e 로 부팅이 중단되지 않도록 실패 무시; 이후 재배포는 CI 가 deploy.sh 를 SSM 으로 재실행)
 bash /opt/manyak/deploy.sh || true
