@@ -42,6 +42,9 @@ out/
 ### Kotlin ###
 .kotlin
 
+### macOS ###
+.DS_Store
+
 ### Terraform ###
 **/.terraform/*
 *.tfstate

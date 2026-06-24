@@ -19,4 +19,8 @@ USER app
 
 EXPOSE 8080
 
+# 컨테이너 자체 헬스체크 (alpine busybox wget). ALB/compose 상태 판단에 사용.
+HEALTHCHECK --interval=15s --timeout=5s --retries=10 --start-period=60s \
+  CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
