@@ -1,6 +1,7 @@
 package com.knk.manyak.chat.client
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.global.observability.aicall.AiCallMeta
 
 /**
  * 백엔드 → AI 서비스 채팅 턴 생성 계약.
@@ -67,8 +68,14 @@ enum class ChatMessageRole {
     ASSISTANT,
 }
 
-/** AI completed 이벤트 결과. aiOutput 전체와 다음 행동 선택지를 담는다. */
+/**
+ * AI completed 이벤트 결과. aiOutput 전체와 다음 행동 선택지, 그리고 호출 meta를 담는다.
+ *
+ * chat meta는 completed 이벤트에 실려 오므로, client가 도메인 [AiCallMeta]로 정규화해 함께 전달한다.
+ * AI가 meta를 내려주지 않으면(stub 등) null이다.
+ */
 data class ChatTurnAiResult(
     val aiOutput: String,
     val choices: List<String>,
+    val meta: AiCallMeta? = null,
 )

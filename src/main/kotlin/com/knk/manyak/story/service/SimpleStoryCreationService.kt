@@ -98,6 +98,7 @@ class SimpleStoryCreationService(
         val aiResponse = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
+                meta = { it.meta?.toAiCallMeta() },
             ) {
                 storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest())
             }.result
@@ -220,6 +221,7 @@ class SimpleStoryCreationService(
         val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
+                meta = { it.meta?.toAiCallMeta() },
             ) {
                 storyAiClient.compileStory(aiRequest)
             }
