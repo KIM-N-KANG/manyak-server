@@ -82,7 +82,6 @@ resource "aws_elasticache_cluster" "redis" {
   engine_version       = var.redis_engine_version
   node_type            = var.redis_node_type
   num_cache_nodes      = 1
-  az_mode              = "single-az"
   port                 = 6379
   parameter_group_name = var.redis_parameter_group_name
   subnet_group_name    = aws_elasticache_subnet_group.redis[0].name
