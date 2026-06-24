@@ -44,3 +44,19 @@ out/
 
 ### macOS ###
 .DS_Store
+
+### Terraform ###
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+backend.hcl
+!backend.hcl.example

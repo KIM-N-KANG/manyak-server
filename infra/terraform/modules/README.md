@@ -1,0 +1,12 @@
+# Terraform 모듈
+
+재사용 가능한 인프라 모듈을 둔다. 후속 서브태스크에서 추가한다.
+
+| 모듈 | 서브태스크 | 내용 |
+|------|-----------|------|
+| `ecr` | KNK-236 | 컨테이너 이미지 레포 |
+| `network` | KNK-237 | VPC 3계층(public/app/db)·IGW·NAT·route |
+| `security` | KNK-238 | SG 체인 + IAM(인스턴스 역할) |
+| `data` | KNK-239 | RDS PostgreSQL(+ElastiCache Redis 선택) |
+| `compute` | KNK-240 | EC2 + SSM + user-data(compose) |
+| `edge` | KNK-240 | ALB + ACM + Route53 |
