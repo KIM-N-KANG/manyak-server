@@ -86,10 +86,12 @@ aws ecr get-login-password --region ${aws_region} \
 # - SERVER_IMAGE_OVERRIDE 가 오면 server 만 (재)기동(manyak-server 워크플로 트리거).
 # - 둘 다 없으면(최초 부팅) server 를 기동하고, ai 는 이미지가 ECR 에 있으면 함께 기동(없으면 graceful 스킵).
 #   → manyak-ai 이미지가 아직 없어도 server 배포가 깨지지 않게 한다(순서 의존 제거).
-# pull/up 실패는 CI 의 SSM 상태 게이트·스모크가 감지하도록 || true 없이 전파한다.
+# pull/up 실패는 CI 의 SSM 상태 게이트가 감지하도록 || true 없이 전파한다.
+# ai 는 `up -d --wait` 로 healthcheck 통과까지 대기한다: 전용 SSM 문서(manyak-prod-ai-deploy) 경로에선
+# 별도 셸 스모크가 불가하므로, 컨테이너가 health 에 도달하지 못하면 SendCommand 자체가 실패로 보고되게 한다(codex P2).
 if [ -n "$${AI_IMAGE_OVERRIDE:-}" ]; then
   docker compose pull ai
-  docker compose up -d ai
+  docker compose up -d --wait ai
 elif [ -n "$${SERVER_IMAGE_OVERRIDE:-}" ]; then
   docker compose pull server
   docker compose up -d server
@@ -108,7 +110,7 @@ else
   set -e
   if [ $ai_rc -eq 0 ]; then
     docker compose pull ai
-    docker compose up -d ai
+    docker compose up -d --wait ai
   elif echo "$ai_describe" | grep -q "ImageNotFoundException"; then
     echo "manyak-ai 이미지($AI_TAG) 미존재 — ai 기동 건너뜀(부트스트랩; 이후 manyak-ai 배포 시 기동)"
   else
