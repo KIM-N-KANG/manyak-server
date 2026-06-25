@@ -69,6 +69,11 @@ output "ecr_repository_urls" {
 }
 
 output "github_actions_ci_role_arn" {
-  description = "GitHub Actions 변수 AWS_ROLE_ARN 에 설정할 IAM role ARN"
+  description = "manyak-server 레포 GitHub Actions 변수 AWS_ROLE_ARN 에 설정할 IAM role ARN"
   value       = module.github_oidc.ci_role_arn
+}
+
+output "github_actions_ai_ci_role_arn" {
+  description = "manyak-ai 레포 GitHub Actions 변수 AWS_ROLE_ARN 에 설정할 IAM role ARN (KNK-260)"
+  value       = module.github_oidc_ai.ci_role_arn
 }

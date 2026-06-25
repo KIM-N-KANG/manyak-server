@@ -73,15 +73,34 @@ module "ecr" {
   repository_names = ["manyak-server", "manyak-ai"] # KNK-240: ai 이미지 레포 추가
 }
 
-# #3 KNK-236 GitHub Actions(OIDC) -> ECR 푸시 역할
+# #3 KNK-236 GitHub Actions(OIDC) -> ECR 푸시 역할 (manyak-server 전용)
 module "github_oidc" {
   source               = "../../modules/github-oidc"
   project              = var.project
   environment          = var.environment
   create_oidc_provider = var.create_github_oidc_provider
-  ecr_repository_arns  = values(module.ecr.repository_arns)
+  # KNK-260: 최소권한 — server 워크플로는 manyak-server ECR 만 푸시한다.
+  ecr_repository_arns = [module.ecr.repository_arns["manyak-server"]]
   # KNK-241: deploy 의 ssm:SendCommand 를 실제 운영 인스턴스로만 제한
   deploy_instance_ids = [module.compute.instance_id]
+}
+
+# #B KNK-260 manyak-ai 전용 OIDC 역할.
+# CI 역할을 레포별로 분리해 최소권한·감사를 확보한다(server 역할과 권한이 섞이지 않음).
+# manyak-ai 레포 main 만 신뢰하며, 권한은 manyak-ai ECR 푸시 + 해당 EC2 SSM 배포로 제한.
+module "github_oidc_ai" {
+  source      = "../../modules/github-oidc"
+  project     = var.project
+  environment = var.environment
+  # OIDC provider 는 위 github_oidc 가 생성하므로 여기선 재생성하지 않고 조회해서 쓴다.
+  create_oidc_provider = false
+  github_repo          = "manyak-ai"
+  role_name            = "${var.project}-${var.environment}-gha-ai"
+  ecr_repository_arns  = [module.ecr.repository_arns["manyak-ai"]]
+  deploy_instance_ids  = [module.compute.instance_id]
+
+  # provider data 조회가 github_oidc 의 provider 생성 이후 일어나도록 보장(최초 apply 순서).
+  depends_on = [module.github_oidc]
 }
 
 # #8 KNK-241 앱 런타임 시크릿 (Sentry DSN·Slack webhook 등; DB 비번은 RDS가 자동 관리)
