@@ -63,7 +63,7 @@ data "aws_iam_policy_document" "assume" {
 
 resource "aws_iam_role" "ci" {
   name               = local.role_name
-  description        = "GitHub Actions(OIDC)가 ECR 푸시를 위해 assume 하는 역할"
+  description        = "Role assumed by GitHub Actions (OIDC) to push images to ECR and run SSM deploy"
   assume_role_policy = data.aws_iam_policy_document.assume.json
 
   tags = {
