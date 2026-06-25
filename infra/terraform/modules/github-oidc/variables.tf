@@ -17,7 +17,10 @@ variable "create_oidc_provider" {
 variable "github_owner" {
   description = "GitHub 소유자(org/user)"
   type        = string
-  default     = "kim-n-kang"
+  # GitHub OIDC sub 클레임은 레포의 정규(canonical) 대소문자를 그대로 전달하고 IAM StringLike는 대소문자를 구분한다.
+  # 따라서 GitHub 실제 표기(KIM-N-KANG)와 정확히 일치해야 한다. 소문자로 두면 sts:AssumeRoleWithWebIdentity 가 거부된다.
+  # (GHCR 이미지 경로의 소문자 kim-n-kang 과는 무관 — 레지스트리 경로는 소문자 강제)
+  default = "KIM-N-KANG"
 }
 
 variable "github_repo" {
