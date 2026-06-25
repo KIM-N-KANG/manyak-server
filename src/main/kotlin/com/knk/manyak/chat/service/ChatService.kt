@@ -29,6 +29,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -66,16 +67,16 @@ class ChatService(
 
     @Transactional
     fun createChat(request: CreateChatRequest): CreateChatResponse {
-        // 시작 설정은 stories에 FK가 걸려 있어 존재하면 스토리도 반드시 존재한다.
-        // 따라서 시작 설정을 먼저 조회하고, 없을 때만 스토리 존재 여부를 확인해 불필요한 조회를 줄인다.
-        val startSetting = storyStartSettingRepository.findByStoryId(request.storyId)
-        if (startSetting == null && !storyRepository.existsById(request.storyId)) {
-            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-        }
+        // 스토리 공개 식별자(public_id)로 받아 삭제되지 않은 내부 스토리를 조회한다.
+        // 이 한 번의 조회가 KNK-256(public_id 해석)과 KNK-257(삭제된 스토리로 채팅 생성 차단)을 함께 처리한다.
+        // 형식 오류·미존재·삭제는 모두 404로 통일된다.
+        val story = resolveStory(request.storyId)
+        // 시작 설정은 내부 PK(story.id)로 조회한다.
+        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
 
         val session = storyPlaySessionRepository.save(
             StoryPlaySession(
-                storyId = request.storyId,
+                storyId = story.id,
                 startSettingId = startSetting?.id,
             ),
         )
@@ -89,7 +90,7 @@ class ChatService(
 
         return CreateChatResponse(
             id = session.publicId.toString(),
-            storyId = session.storyId,
+            storyId = story.publicId.toString(),
             prologue = startSetting?.prologue.orEmpty(),
             suggestedInputs = suggestedInputs,
             createdAt = session.createdAt,
@@ -113,8 +114,9 @@ class ChatService(
             return emptyList()
         }
 
-        val titlesByStoryId = storyRepository.findAllById(sessions.map { it.storyId })
-            .associate { it.id to it.title }
+        // 응답에 스토리 공개 식별자(public_id)와 제목을 노출하기 위해 스토리를 한 번에 조회해 매핑한다.
+        val storiesByStoryId = storyRepository.findAllById(sessions.map { it.storyId })
+            .associateBy { it.id }
 
         // 세션별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
         val lastPreviewBySessionId = storyMessageRepository
@@ -122,10 +124,11 @@ class ChatService(
             .associate { it.playSessionId to it.content }
 
         return sessions.map { session ->
+            val story = storiesByStoryId[session.storyId]
             ChatSummaryResponse(
                 id = session.publicId.toString(),
-                storyId = session.storyId,
-                storyTitle = titlesByStoryId[session.storyId].orEmpty(),
+                storyId = story?.publicId?.toString().orEmpty(),
+                storyTitle = story?.title.orEmpty(),
                 lastStoryPreview = lastPreviewBySessionId[session.id].orEmpty(),
                 // 채팅 횟수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 chatCount = session.currentTurn,
@@ -138,9 +141,8 @@ class ChatService(
     fun getChatDetail(chatId: String): ChatDetailResponse {
         val session = resolveSession(chatId)
 
-        val storyTitle = storyRepository.findById(session.storyId)
-            .map { it.title }
-            .orElse("")
+        val story = storyRepository.findById(session.storyId).orElse(null)
+        val storyTitle = story?.title.orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
 
@@ -161,7 +163,7 @@ class ChatService(
 
         return ChatDetailResponse(
             id = session.publicId.toString(),
-            storyId = session.storyId,
+            storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
             prologue = startSetting?.prologue.orEmpty(),
             turns = turns.map { assistant ->
@@ -409,6 +411,17 @@ class ChatService(
         } catch (ignored: IllegalArgumentException) {
             null
         }
+
+    /**
+     * 스토리 공개 식별자(UUID 문자열)로 삭제되지 않은 스토리를 조회한다. 형식 오류·미존재·삭제는 404로 통일한다.
+     * createChat이 KNK-256(public_id 해석)과 KNK-257(삭제 스토리 채팅 차단)을 한 조회로 처리하게 한다.
+     */
+    private fun resolveStory(publicId: String): Story {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+    }
 
     /**
      * 세션의 전체 대화 내역(USER+ASSISTANT)을 시간순으로 조립한다.
