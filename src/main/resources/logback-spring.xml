@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  운영 로그 양식(AN-3 §4).
+  - prod 프로파일: JSON 1줄 로그(LogstashEncoder). MDC(request_id/session_id/anonymous_id_hash)와
+    StructuredArguments(event_name 등)를 최상위 필드로 내보내 CloudWatch에서 그대로 질의한다.
+  - 그 외(local/test 등): 사람이 읽기 쉬운 Spring Boot 기본 콘솔 패턴 유지.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProfile name="prod">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"manyak-server"}</customFields>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: ${MANYAK_DB_URL}
+    username: ${MANYAK_DB_USERNAME}
+    password: ${MANYAK_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+manyak:
+  ai:
+    chat:
+      stub: true

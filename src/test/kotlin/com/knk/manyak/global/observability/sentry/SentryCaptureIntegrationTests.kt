@@ -1,0 +1,113 @@
+package com.knk.manyak.global.observability.sentry
+
+import io.sentry.Sentry
+import io.sentry.SentryEvent
+import io.sentry.SentryOptions
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.web.servlet.client.RestTestClient
+import java.util.concurrent.CopyOnWriteArrayList
+
+/**
+ * 실제 요청 흐름에서 Sentry 전송 정책을 검증한다.
+ * GlobalExceptionHandler가 모든 예외를 처리하므로 Sentry의 자동 MVC resolver는 동작하지 않아야 하고,
+ * 예상 가능한 4xx는 (자동·명시 어느 경로로도) 전송되지 않아야 한다.
+ *
+ * beforeSend로 이벤트를 가로채 수집하고 실제 전송은 차단한다(DSN은 더미).
+ */
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["sentry.dsn=http://test@localhost/1"],
+)
+@Import(SentryCaptureIntegrationTests.CaptureConfig::class)
+class SentryCaptureIntegrationTests {
+
+    @TestConfiguration
+    class CaptureConfig {
+        @Bean
+        fun capturedEvents(): CopyOnWriteArrayList<SentryEvent> = CopyOnWriteArrayList()
+
+        @Bean
+        fun captureOptions(
+            capturedEvents: CopyOnWriteArrayList<SentryEvent>,
+        ): Sentry.OptionsConfiguration<SentryOptions> =
+            Sentry.OptionsConfiguration { options ->
+                options.beforeSend = SentryOptions.BeforeSendCallback { event, _ ->
+                    capturedEvents.add(event)
+                    null // 수집만 하고 실제 전송은 막는다
+                }
+            }
+    }
+
+    @Autowired
+    private lateinit var restTestClient: RestTestClient
+
+    @Autowired
+    private lateinit var capturedEvents: CopyOnWriteArrayList<SentryEvent>
+
+    @BeforeEach
+    fun setUp() {
+        capturedEvents.clear()
+    }
+
+    @Test
+    fun `예상 가능한 4xx(404)는 Sentry로 전송되지 않는다`() {
+        // 셋업이 실제로 캡처를 수집하는지 먼저 확인한다(probe).
+        Sentry.captureMessage("probe")
+        assertThat(capturedEvents).hasSize(1)
+        capturedEvents.clear()
+
+        // 존재하지 않는 채팅 → 404. 자동 resolver/명시 캡처 어느 경로로도 전송되지 않아야 한다.
+        restTestClient.post()
+            .uri("/api/v1/chats/999999/turns/stream")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"손을 올린다."}""")
+            .exchange()
+            .expectStatus().isNotFound
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    @Test
+    fun `SSE 엔드포인트에 잘못된 Accept(406)도 Sentry로 전송되지 않는다`() {
+        // SSE(text/event-stream) 엔드포인트에 application/json만 요청 → HttpMediaTypeNotAcceptableException(406).
+        // 핸들러가 없던 시절엔 500으로 둔갑해 Sentry로 갔다(KNK-226). 이제 4xx로 처리되고 전송되지 않아야 한다.
+        restTestClient.post()
+            .uri("/api/v1/chats/999999/turns/stream")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"테스트"}""")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.NOT_ACCEPTABLE)
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    @Test
+    fun `잘못된 Content-Type(415)도 Sentry로 전송되지 않는다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.TEXT_PLAIN)
+            .body("이것은 JSON이 아닌 평문")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+
+        assertThat(capturedEvents).isEmpty()
+    }
+
+    // 405는 SecurityConfig가 경로+메서드 단위로 허용해 미허용 메서드가 403(Security)으로 먼저 막히므로
+    // 통합 경로로는 재현되지 않는다. 405 핸들러와 Allow 헤더는 GlobalExceptionHandlerSentryTests(단위)에서 검증한다.
+}

@@ -1,0 +1,36 @@
+### 배포 스모크 검증 (prod) — KNK-241
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### main 머지 → CI deploy 잡 실행 후, prod 엔드포인트 정상 여부를 수동 확인합니다.
+### (CI deploy 잡도 /actuator/health 를 자동 스모크합니다.)
+###
+### 사전:
+###   - terraform apply 로 인프라 생성 + server 이미지가 ECR(manyak-server:latest)에 push 완료
+###   - ALB 타깃이 healthy 로 전환되기까지 2~5분 걸리므로, 그 후 실행하세요(초기엔 502/503 정상).
+###   - 상세 API 시나리오는 기존 *.http 의 @baseUrl 을 https://api.manyak.app 로 바꿔 재사용합니다.
+
+@baseUrl = https://api.manyak.app
+
+### 1. 헬스체크 — 200 & status=UP
+### actuator health 는 datasource(RDS) 상태를 집계하므로, UP 이면 DB 연결·Flyway 마이그레이션까지 정상입니다.
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.test("health 200", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("status UP (DB 포함)", () => {
+        client.assert(response.body.status === "UP", `UP이 아닙니다. actual=${response.body.status}`);
+    });
+%}
+
+### 2. liveness probe — ACM(HTTPS) 종단 + 앱 활성 확인
+### SecurityConfig 는 /actuator/health/** 만 인증 없이 허용하므로 info 대신 liveness 를 쓴다.
+GET {{baseUrl}}/actuator/health/liveness
+Accept: application/json
+
+> {%
+    client.test("liveness 200", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
