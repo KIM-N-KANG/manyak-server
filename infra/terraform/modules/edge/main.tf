@@ -78,7 +78,7 @@ resource "cloudflare_record" "acm_validation" {
   zone_id = data.cloudflare_zone.this.id
   name    = each.value.name
   type    = each.value.type
-  value   = trimsuffix(each.value.value, ".")
+  content = trimsuffix(each.value.value, ".")
   ttl     = 60
   proxied = false
 }
@@ -125,7 +125,7 @@ resource "cloudflare_record" "api" {
   zone_id = data.cloudflare_zone.this.id
   name    = var.api_subdomain
   type    = "CNAME"
-  value   = aws_lb.this.dns_name
+  content = aws_lb.this.dns_name
   ttl     = 60
   proxied = false
 }
