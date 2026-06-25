@@ -42,9 +42,16 @@ module "compute" {
   ai_image              = "${module.ecr.repository_urls["manyak-ai"]}:latest"
   compose_content       = file("${path.module}/../../../../docker-compose.prod.yml")
 
-  # SG egress 규칙·IAM 정책 attachment가 EC2 부팅(user-data의 ECR pull·아웃바운드) 전에 준비되도록
-  # security 모듈 전체 완료를 기다린다. (app_sg/instance_profile 객체 참조만으론 규칙·attachment 순서가 보장되지 않음)
-  depends_on = [module.security]
+  # KNK-241 시크릿 주입: user-data가 부팅 시 Secrets Manager에서 읽어 .env 생성
+  db_secret_arn  = module.data.db_master_user_secret_arn
+  app_secret_arn = module.secrets.app_secret_arn
+  db_address     = module.data.db_address
+  db_port        = module.data.db_port
+  db_name        = module.data.db_name
+
+  # EC2 부팅(deploy.sh: ECR pull·시크릿 조회) 전에 준비되어야 하는 것들을 명시적으로 대기:
+  # SG egress 규칙·IAM attachment(security), 시크릿 읽기 정책(ec2_secrets_read), 앱 시크릿 값(secrets 의 secret+version).
+  depends_on = [module.security, module.secrets, aws_iam_role_policy.ec2_secrets_read]
 }
 
 # #7 KNK-240 엣지 (ALB + ACM + Cloudflare DNS)
@@ -73,4 +80,30 @@ module "github_oidc" {
   environment          = var.environment
   create_oidc_provider = var.create_github_oidc_provider
   ecr_repository_arns  = values(module.ecr.repository_arns)
+  # KNK-241: deploy 의 ssm:SendCommand 를 실제 운영 인스턴스로만 제한
+  deploy_instance_ids = [module.compute.instance_id]
+}
+
+# #8 KNK-241 앱 런타임 시크릿 (Sentry DSN·Slack webhook 등; DB 비번은 RDS가 자동 관리)
+module "secrets" {
+  source      = "../../modules/secrets"
+  project     = var.project
+  environment = var.environment
+}
+
+# #8 KNK-241 EC2 role 시크릿 읽기 권한.
+# security↔data 순환을 피하려 security 모듈 안이 아닌 여기(envs)에서 role 에 attach 한다.
+data "aws_iam_policy_document" "ec2_secrets_read" {
+  statement {
+    sid       = "SecretsRead"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [module.data.db_master_user_secret_arn, module.secrets.app_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "ec2_secrets_read" {
+  name   = "secrets-read"
+  role   = module.security.ec2_role_name
+  policy = data.aws_iam_policy_document.ec2_secrets_read.json
 }

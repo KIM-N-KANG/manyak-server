@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euxo pipefail
 
-# Docker 설치 (Amazon Linux 2023)
+# Docker + jq 설치 (Amazon Linux 2023). jq 는 Secrets Manager JSON 파싱에 사용.
 dnf update -y
-dnf install -y docker
+dnf install -y docker jq
 systemctl enable --now docker
 
 # docker compose v2 플러그인 설치
@@ -19,19 +19,49 @@ cat > /opt/manyak/docker-compose.yml <<'COMPOSE'
 ${compose_content}
 COMPOSE
 
-# 이미지 좌표(.env). DB/Redis 등 비밀은 KNK-241에서 Secrets Manager 경유로 추가 주입한다.
-cat > /opt/manyak/.env <<ENVFILE
-SERVER_IMAGE=${server_image}
-AI_IMAGE=${ai_image}
-ENVFILE
+# 배포/기동 스크립트 생성(최초 부팅·이후 CI 의 SSM Run Command 에서 공용 사용).
+# 매 실행마다 Secrets Manager 를 재조회해 .env 를 갱신하므로, apply 후 시크릿 값을 바꿔도 재배포로 반영된다.
+cat > /opt/manyak/deploy.sh <<'DEPLOY'
+#!/bin/bash
+set -euxo pipefail
+cd /opt/manyak
 
-# ECR 로그인 (EC2 인스턴스 프로파일의 ECR pull 권한 사용)
+# 시크릿 조회 + .env 갱신. 값이 cloud-init/SSM 로그에 평문으로 남지 않도록 이 구간만 xtrace(-x)를 끈다.
+set +x
+DB_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${db_secret_arn} --query SecretString --output text)"
+DB_USERNAME="$(echo "$DB_SECRET_JSON" | jq -r '.username')"
+DB_PASSWORD="$(echo "$DB_SECRET_JSON" | jq -r '.password')"
+APP_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${app_secret_arn} --query SecretString --output text)"
+SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SENTRY_DSN // ""')"
+SLACK_WEBHOOK="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_SLACK_FEEDBACK_WEBHOOK_URL // ""')"
+umask 077
+{
+  # SERVER_IMAGE 는 CI deploy 가 SERVER_IMAGE_OVERRIDE(빌드된 short-sha 태그)로 덮어쓸 수 있다.
+  # 미지정 시(최초 부팅 등) terraform 기본값(:latest) 사용.
+  echo "SERVER_IMAGE=$${SERVER_IMAGE_OVERRIDE:-${server_image}}"
+  echo "AI_IMAGE=${ai_image}"
+  echo "MANYAK_DB_URL=jdbc:postgresql://${db_address}:${db_port}/${db_name}"
+  echo "MANYAK_DB_USERNAME=$DB_USERNAME"
+  echo "MANYAK_DB_PASSWORD=$DB_PASSWORD"
+  echo "SENTRY_DSN=$SENTRY_DSN"
+  echo "SENTRY_ENVIRONMENT=${environment}"
+  echo "MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=$SLACK_WEBHOOK"
+} > /opt/manyak/.env
+chmod 600 /opt/manyak/.env
+# docker compose v2 의 env_file 은 값 안의 $ 를 변수 보간으로 해석하므로 .env 의 $ 를 $$ 로 이스케이프한다.
+# (RDS 자동생성 비밀번호에 $ 가 들어가면 보간으로 잘려 DB 인증 실패 → 헬스체크 실패로만 드러남)
+sed -i 's/\$/$$/g' /opt/manyak/.env
+set -x
+
+# ECR 재로그인(토큰 12h 만료) 후 server 기동. ai 이미지는 미구현이라 server 만 명시 기동(준비 후 `up -d`).
+# pull/up 실패는 CI 워크플로의 SSM 상태 게이트·스모크가 감지하도록 || true 없이 전파한다.
 aws ecr get-login-password --region ${aws_region} \
   | docker login --username AWS --password-stdin ${ecr_registry_url}
+docker compose pull server
+docker compose up -d server
+docker image prune -f || true
+DEPLOY
+chmod +x /opt/manyak/deploy.sh
 
-# 기동. server·ai 이미지가 모두 ECR에 준비되면 정상 기동된다.
-# 일부 이미지가 아직 없으면 pull/up이 실패할 수 있으나, set -e로 부팅 자체가 중단되지 않도록 무시한다.
-# (이미지 준비 후 인스턴스 교체 또는 `docker compose up -d` 재실행으로 기동)
-cd /opt/manyak
-docker compose pull || true
-docker compose up -d || true
+# 최초 기동 (set -e 로 부팅이 중단되지 않도록 실패 무시; 이후 재배포는 CI 가 deploy.sh 를 SSM 으로 재실행)
+bash /opt/manyak/deploy.sh || true

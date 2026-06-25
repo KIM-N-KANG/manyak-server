@@ -78,6 +78,44 @@ aws ecr describe-images \
   --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags'
 ```
 
+## 4) 배포 + 시크릿 (KNK-241)
+
+### 앱 시크릿 입력 (apply 후 1회)
+
+`secrets` 모듈은 `manyak/prod/app` 시크릿 그릇만 만든다(빈 값, `ignore_changes`). 실제 값을 입력한다:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id manyak/prod/app --region ap-northeast-2 \
+  --secret-string '{"SENTRY_DSN":"<dsn>","MANYAK_SLACK_FEEDBACK_WEBHOOK_URL":"<url>"}'
+```
+
+DB 자격증명(`MANYAK_DB_*`)은 RDS가 자동 관리하는 secret에서 user-data가 읽어 주입하므로 별도 입력이 필요 없다.
+
+> ⚠️ 시크릿 값을 변경한 뒤에는 **재배포해야 `.env`에 반영된다**(`deploy.sh`가 매 실행마다 Secrets Manager를 재조회). `main` 재푸시 또는 SSM Run Command로 `bash /opt/manyak/deploy.sh` 재실행.
+
+### 배포 (자동)
+
+`main` 푸시 → `.github/workflows/docker-image.yml`:
+
+1. **build 잡**: 테스트 → 이미지 빌드 → ECR push(`manyak-server:latest`, `<short-sha>`)
+2. **deploy 잡**: SSM Run Command 로 EC2의 `/opt/manyak/deploy.sh` 실행(ECR 재로그인 → `docker compose pull` → `up -d`) → `https://api.manyak.app/actuator/health` 스모크
+
+> EC2 IAM 은 `secretsmanager:GetSecretValue`(RDS+앱 secret)·SSM·ECR pull 권한을, GitHub OIDC 역할은 `ssm:SendCommand`(Project 태그 제한) 권한을 가진다.
+
+수동 검증: `http/smoke-prod.http` (ALB 타깃 healthy 까지 2~5분 후).
+
+### 롤백
+
+ECR 에 직전 `<short-sha>` 태그가 보존되므로 이전 이미지로 되돌릴 수 있다.
+
+```bash
+# 대상 EC2 에서(SSM Session Manager 접속): /opt/manyak/.env 의 SERVER_IMAGE 를 직전 정상 <short-sha> 로 교체 후
+cd /opt/manyak && docker compose pull && docker compose up -d
+```
+
+또는 직전 정상 커밋을 `main` 에 다시 머지해 재배포한다. Flyway 마이그레이션은 전진 전용이므로, 스키마 변경 롤백은 보상(역) 마이그레이션으로 처리한다.
+
 ## 검증 (오프라인, 자격증명 불필요)
 
 ```bash

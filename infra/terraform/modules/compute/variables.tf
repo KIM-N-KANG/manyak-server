@@ -54,3 +54,29 @@ variable "compose_content" {
   description = "docker-compose.prod.yml 원문 (env에서 file()로 읽어 주입). user-data가 인스턴스에 기록"
   type        = string
 }
+
+# KNK-241 시크릿 주입: user-data가 부팅 시 Secrets Manager에서 읽어 .env 생성
+variable "db_secret_arn" {
+  description = "RDS 마스터 자격증명 Secrets Manager ARN (data db_master_user_secret_arn). username/password 주입"
+  type        = string
+}
+
+variable "app_secret_arn" {
+  description = "앱 시크릿 Secrets Manager ARN (secrets app_secret_arn). Sentry DSN·Slack webhook 등 주입"
+  type        = string
+}
+
+variable "db_address" {
+  description = "RDS 호스트 주소 (data db_address). MANYAK_DB_URL 구성에 사용"
+  type        = string
+}
+
+variable "db_port" {
+  description = "RDS 포트 (data db_port)"
+  type        = number
+}
+
+variable "db_name" {
+  description = "초기 DB 이름 (data db_name)"
+  type        = string
+}
