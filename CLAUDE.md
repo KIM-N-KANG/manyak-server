@@ -23,3 +23,10 @@
 - JPA, Flyway, Security, datasource, API 동작을 변경할 때는 완료 보고 전에 관련 Gradle 검증을 실행합니다.
 - 로컬 환경 제한으로 검증을 실행할 수 없다면 정확한 차단 사유와 실행해야 할 명령을 설명합니다.
 - API 엔드포인트를 추가하거나 동작을 변경하면 통합 테스트와 함께 `http/` 디렉터리에 수동 검증용 `.http` 파일을 항상 작성하거나 갱신합니다. 작성 방법과 IntelliJ 호환 규칙은 `create-http-verification` 스킬을 따릅니다.
+
+### Terraform/IaC 작업
+
+- AWS IAM 역할·정책·보안 그룹의 `name`·`description`은 ASCII(Latin-1)만 허용됩니다. 한글·`>` 등이 들어가면 `plan`은 통과해도 `apply`에서 거부되므로, 이런 필드에는 영문만 씁니다.
+- `terraform plan` 통과가 `apply` 성공을 보장하지 않습니다. 위 ASCII 제약, Secrets Manager secret 존재, IAM 권한 등 apply 시점 제약도 함께 점검합니다.
+- 비밀은 `secret_string`을 `ignore_changes`로 두고 실제 값은 `aws secretsmanager put-secret-value`로 주입합니다. terraform 코드·state·`*.tfvars`에 평문 비밀을 넣지 않습니다.
+- 인프라(`infra/terraform`)를 변경하면 완료 보고 전에 `terraform fmt`·`validate`(가능하면 `plan`)를 실행합니다.
