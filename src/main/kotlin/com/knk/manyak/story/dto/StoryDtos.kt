@@ -2,7 +2,6 @@ package com.knk.manyak.story.dto
 
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
-import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
 import java.time.Instant
@@ -23,23 +22,26 @@ enum class StoryStatus {
 data class BatchStoryRequest(
     @field:NotEmpty
     @field:Size(max = 100)
-    @field:Schema(description = "클라이언트가 로컬스토리지에 보관 중인 스토리 ID 목록", example = "[1, 2, 3]")
+    @field:Schema(
+        description = "클라이언트가 로컬스토리지에 보관 중인 스토리 ID(공개 식별자) 목록",
+        example = """["3f2504e0-4f89-41d3-9a0c-0305e82c3301","9c5b94b1-35ad-49bb-b118-8e8fc24abf80"]""",
+    )
     @field:ArraySchema(
-        schema = Schema(description = "스토리 ID", example = "1"),
+        schema = Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"),
         minItems = 1,
         maxItems = 100,
         arraySchema = Schema(
-            description = "클라이언트가 로컬스토리지에 보관 중인 스토리 ID 목록",
-            example = "[1, 2, 3]",
+            description = "클라이언트가 로컬스토리지에 보관 중인 스토리 ID(공개 식별자) 목록",
+            example = """["3f2504e0-4f89-41d3-9a0c-0305e82c3301","9c5b94b1-35ad-49bb-b118-8e8fc24abf80"]""",
         ),
     )
-    val storyIds: List<@Min(1) Long>,
+    val storyIds: List<String>,
 )
 
 @Schema(description = "스토리 목록 항목")
 data class StorySummaryResponse(
-    @field:Schema(description = "스토리 ID", example = "1")
-    val id: Long,
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val id: String,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
@@ -71,8 +73,8 @@ data class StorySummaryResponse(
 
 @Schema(description = "스토리 상세 응답")
 data class StoryDetailResponse(
-    @field:Schema(description = "스토리 ID", example = "1")
-    val id: Long,
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val id: String,
 
     @field:Schema(description = "커버 이미지 URL", example = "https://example.com/covers/moon-contract.png")
     val coverImageUrl: String?,
