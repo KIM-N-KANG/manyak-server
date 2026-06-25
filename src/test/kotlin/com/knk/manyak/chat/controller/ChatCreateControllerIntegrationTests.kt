@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -81,14 +82,15 @@ class ChatCreateControllerIntegrationTests {
         val response = restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":${story.id}}""")
+            .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
             .expectStatus().isCreated
             .expectBody(CreateChatResponse::class.java)
             .returnResult()
             .responseBody!!
 
-        assertThat(response.storyId).isEqualTo(story.id)
+        // 응답 storyId는 순차 PK가 아니라 스토리 공개 식별자(public_id)다.
+        assertThat(response.storyId).isEqualTo(story.publicId.toString())
         assertThat(response.prologue).isEqualTo("마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.")
         assertThat(response.suggestedInputs).containsExactly("검사장을 둘러본다.", "마법수정에 손을 올린다.")
         assertThat(response.createdAt).isNotNull()
@@ -99,6 +101,7 @@ class ChatCreateControllerIntegrationTests {
         // 응답 id는 순차 PK가 아니라 추측 불가능한 공개 식별자(publicId)다 (IDOR 방지)
         assertThat(response.id).isEqualTo(session.publicId.toString())
         assertThat(response.id).isNotEqualTo(session.id.toString())
+        // 세션의 내부 FK(storyId)는 스토리 내부 PK로 저장된다.
         assertThat(session.storyId).isEqualTo(story.id)
         assertThat(session.startSettingId).isEqualTo(startSetting.id)
         assertThat(session.status).isEqualTo(PlaySessionStatus.ACTIVE)
@@ -117,11 +120,11 @@ class ChatCreateControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":${story.id}}""")
+            .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.storyId").isEqualTo(story.id)
+            .jsonPath("$.storyId").isEqualTo(story.publicId.toString())
             .jsonPath("$.prologue").isEqualTo("")
             .jsonPath("$.suggestedInputs").isArray()
             .jsonPath("$.suggestedInputs").isEmpty()
@@ -147,7 +150,7 @@ class ChatCreateControllerIntegrationTests {
         val response = restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":${story.id}}""")
+            .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
             .expectStatus().isCreated
             .expectBody(CreateChatResponse::class.java)
@@ -160,10 +163,11 @@ class ChatCreateControllerIntegrationTests {
 
     @Test
     fun `존재하지 않는 스토리로 채팅을 생성하면 404로 응답한다`() {
+        val missing = java.util.UUID.randomUUID()
         restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":999999}""")
+            .body("""{"storyId":"$missing"}""")
             .exchange()
             .expectStatus().isNotFound
             .expectBody()
@@ -175,15 +179,40 @@ class ChatCreateControllerIntegrationTests {
     }
 
     @Test
-    fun `storyId가 올바르지 않으면 400으로 응답한다`() {
+    fun `순차 정수나 비-UUID storyId로 채팅을 생성하면 404로 통일된다 (IDOR 차단)`() {
+        // 스토리 식별자는 공개 UUID이므로 순차 정수를 추측해도 채팅을 시작할 수 없다.
+        val story = storyRepository.save(Story(title = "공개 식별자만 노출하는 스토리"))
+
         restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":0}""")
+            .body("""{"storyId":"${story.id}"}""")
             .exchange()
-            .expectStatus().isBadRequest
+            .expectStatus().isNotFound
             .expectBody()
-            .jsonPath("$.status").isEqualTo(400)
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
+
+        assertThat(storyPlaySessionRepository.count()).isZero()
+    }
+
+    @Test
+    fun `소프트 삭제된 스토리로 채팅을 생성하면 404로 응답한다 (KNK-257)`() {
+        val story = storyRepository.save(Story(title = "삭제될 스토리"))
+        // 소프트 삭제 후에도 시작 설정(자식 행)은 보존된다. 그럼에도 채팅 생성은 거부되어야 한다.
+        storyStartSettingRepository.save(
+            StoryStartSetting(story = story, name = "시작 장면", prologue = "이야기가 시작된다."),
+        )
+        story.deletedAt = Instant.now()
+        storyRepository.save(story)
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
 
         assertThat(storyPlaySessionRepository.count()).isZero()
     }

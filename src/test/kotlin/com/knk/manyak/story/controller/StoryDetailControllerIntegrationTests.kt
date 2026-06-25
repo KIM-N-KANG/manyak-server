@@ -65,11 +65,12 @@ class StoryDetailControllerIntegrationTests {
         )
 
         restTestClient.get()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.id").isEqualTo(story.id)
+            // 응답 id는 순차 PK가 아니라 추측 불가능한 공개 식별자(public_id)다.
+            .jsonPath("$.id").isEqualTo(story.publicId.toString())
             .jsonPath("$.title").isEqualTo("잿빛 왕관")
             .jsonPath("$.oneLineIntro").isEqualTo("무너진 왕국에서 진실을 좇는다.")
             .jsonPath("$.description").isEqualTo("역병과 반란으로 무너진 아르덴 왕국 이야기.")
@@ -104,6 +105,23 @@ class StoryDetailControllerIntegrationTests {
     }
 
     @Test
+    fun `순차 PK(내부 id)로는 조회되지 않고 404로 통일된다 (IDOR 차단)`() {
+        val story = storyRepository.save(Story(title = "공개 식별자만 노출하는 스토리"))
+
+        // 내부 순차 PK를 추측해 접근해도 공개 식별자(UUID)가 아니므로 404로 통일된다.
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.id}")
+            .exchange()
+            .expectStatus().isNotFound
+
+        // 공개 식별자로는 정상 조회된다.
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+    }
+
+    @Test
     fun `시작 설정이 없는 스토리도 빈 시작 정보로 조회된다`() {
         val story = storyRepository.save(
             Story(
@@ -115,7 +133,7 @@ class StoryDetailControllerIntegrationTests {
         )
 
         restTestClient.get()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()

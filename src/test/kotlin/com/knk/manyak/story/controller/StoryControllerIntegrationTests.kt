@@ -373,7 +373,8 @@ class StoryControllerIntegrationTests {
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.id").isNumber
+            // 생성된 스토리 id는 순차 PK가 아니라 공개 식별자(public_id UUID 문자열)다.
+            .jsonPath("$.id").isNotEmpty
             .jsonPath("$.storyId").doesNotExist()
             .jsonPath("$.title").isEqualTo("잿빛 왕관")
             .jsonPath("$.genres.length()").isEqualTo(2)
