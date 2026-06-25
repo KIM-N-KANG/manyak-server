@@ -51,3 +51,9 @@ variable "deploy_instance_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "ssm_document_arns" {
+  description = "deploy(ssm:SendCommand)에 허용할 SSM 문서 ARN 목록. null이면 범용 AWS-RunShellScript(임의 셸). 전용 배포 문서 ARN을 주면 그 문서로만 제한해 임의 셸을 막는다(레포별 최소권한, KNK-260)."
+  type        = list(string)
+  default     = null
+}

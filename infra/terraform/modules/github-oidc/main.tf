@@ -119,12 +119,12 @@ data "aws_iam_policy_document" "deploy" {
       values   = [var.project]
     }
   }
-  # 실행 문서(표준 쉘 스크립트)
+  # 실행 문서: 기본은 범용 AWS-RunShellScript, ssm_document_arns 지정 시 그 전용 문서로만 제한(KNK-260).
   statement {
     sid       = "SsmSendCommandDocument"
     effect    = "Allow"
     actions   = ["ssm:SendCommand"]
-    resources = ["arn:aws:ssm:${data.aws_region.current.name}::document/AWS-RunShellScript"]
+    resources = var.ssm_document_arns != null ? var.ssm_document_arns : ["arn:aws:ssm:${data.aws_region.current.name}::document/AWS-RunShellScript"]
   }
   # 명령 결과 폴링 + 대상 인스턴스 조회
   statement {
