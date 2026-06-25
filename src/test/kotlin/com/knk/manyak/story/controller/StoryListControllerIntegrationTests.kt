@@ -39,13 +39,15 @@ class StoryListControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            // 요청 순서: second → 없는 ID → first
-            .body("""{"storyIds":[${second.id}, 999999, ${first.id}]}""")
+            // 요청 순서: second → 존재하지 않는 공개 식별자 → first
+            .body(
+                """{"storyIds":["${second.publicId}", "00000000-0000-0000-0000-000000000000", "${first.publicId}"]}""",
+            )
             .exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(2)
-            .jsonPath("$[0].id").isEqualTo(second.id)
+            .jsonPath("$[0].id").isEqualTo(second.publicId.toString())
             .jsonPath("$[0].title").isEqualTo("달빛 아래의 계약")
             .jsonPath("$[0].oneLineIntro").isEqualTo("기억을 잃은 마법사")
             .jsonPath("$[0].genres.length()").isEqualTo(1)
@@ -54,7 +56,7 @@ class StoryListControllerIntegrationTests {
             .jsonPath("$[0].chatCount").isEqualTo(0)
             .jsonPath("$[0].likeCount").isEqualTo(0)
             .jsonPath("$[0].status").isEqualTo("PUBLISHED")
-            .jsonPath("$[1].id").isEqualTo(first.id)
+            .jsonPath("$[1].id").isEqualTo(first.publicId.toString())
             .jsonPath("$[1].title").isEqualTo("잿빛 왕관")
             .jsonPath("$[1].genres.length()").isEqualTo(2)
             .jsonPath("$[1].genres[0]").isEqualTo("다크 판타지")
@@ -66,7 +68,9 @@ class StoryListControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyIds":[999999, 888888]}""")
+            .body(
+                """{"storyIds":["00000000-0000-0000-0000-000000000000", "11111111-1111-1111-1111-111111111111"]}""",
+            )
             .exchange()
             .expectStatus().isOk
             .expectBody()

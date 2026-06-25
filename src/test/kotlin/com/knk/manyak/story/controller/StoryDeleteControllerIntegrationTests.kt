@@ -43,7 +43,7 @@ class StoryDeleteControllerIntegrationTests {
         )
 
         restTestClient.delete()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isNoContent
 
@@ -59,12 +59,12 @@ class StoryDeleteControllerIntegrationTests {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
 
         restTestClient.delete()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isNoContent
 
         restTestClient.get()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isNotFound
             .expectBody()
@@ -77,29 +77,29 @@ class StoryDeleteControllerIntegrationTests {
         val deleted = storyRepository.save(Story(title = "삭제 대상 스토리"))
 
         restTestClient.delete()
-            .uri("/api/v1/stories/${deleted.id}")
+            .uri("/api/v1/stories/${deleted.publicId}")
             .exchange()
             .expectStatus().isNoContent
 
         restTestClient.post()
             .uri("/api/v1/stories/batch")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyIds":[${kept.id}, ${deleted.id}]}""")
+            .body("""{"storyIds":["${kept.publicId}", "${deleted.publicId}"]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(1)
-            .jsonPath("$[0].id").isEqualTo(kept.id)
+            .jsonPath("$[0].id").isEqualTo(kept.publicId.toString())
     }
 
     @Test
     fun `이미 삭제된 스토리를 다시 삭제하면 404로 응답한다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
 
-        restTestClient.delete().uri("/api/v1/stories/${story.id}").exchange().expectStatus().isNoContent
+        restTestClient.delete().uri("/api/v1/stories/${story.publicId}").exchange().expectStatus().isNoContent
 
         restTestClient.delete()
-            .uri("/api/v1/stories/${story.id}")
+            .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isNotFound
             .expectBody()
@@ -119,19 +119,33 @@ class StoryDeleteControllerIntegrationTests {
     }
 
     @Test
+    fun `순차 PK(내부 id)로는 삭제되지 않고 404로 통일된다 (IDOR 차단)`() {
+        val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
+
+        // 내부 순차 PK 추측 삭제는 차단된다.
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.id}")
+            .exchange()
+            .expectStatus().isNotFound
+
+        // 삭제되지 않았다.
+        assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
     fun `삭제는 다른 스토리에 영향을 주지 않는다`() {
         val target = storyRepository.save(Story(title = "삭제 대상 스토리"))
         val other = storyRepository.save(Story(title = "보존 스토리"))
 
-        restTestClient.delete().uri("/api/v1/stories/${target.id}").exchange().expectStatus().isNoContent
+        restTestClient.delete().uri("/api/v1/stories/${target.publicId}").exchange().expectStatus().isNoContent
 
         // 다른 스토리는 그대로 조회된다
         restTestClient.get()
-            .uri("/api/v1/stories/${other.id}")
+            .uri("/api/v1/stories/${other.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.id").isEqualTo(other.id)
+            .jsonPath("$.id").isEqualTo(other.publicId.toString())
 
         val reloadedOther = storyRepository.findById(other.id).orElseThrow()
         assertThat(reloadedOther.deletedAt).isNull()
