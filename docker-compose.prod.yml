@@ -34,6 +34,10 @@ services:
     environment:
       # ai 전용 Sentry DSN(server 와 다른 프로젝트). .env 의 AI_SENTRY_DSN 을 ai 컨테이너의 SENTRY_DSN 으로 매핑.
       SENTRY_DSN: ${AI_SENTRY_DSN}
+      # ai Sentry 이벤트의 environment 태그. .env 의 SENTRY_ENVIRONMENT(user-data 가 prod 로 기록)를 보간해 주입한다.
+      # 미주입 시 ai Sentry 가 local 로 폴백한다. server 는 env_file 로 받지만, ai 는 불필요 비밀(DB 크레덴셜 등)
+      # 과다 노출을 피하려고 env_file 대신 이 한 줄만 둔다.
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       # DeepSeek API 키(필수). manyak-ai config.py 에 기본값이 없어 미주입 시 부팅 실패.
       # deploy.sh 가 Secrets Manager(manyak/prod/app)의 DEEPSEEK_API_KEY 를 .env 로 기록한다.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
