@@ -17,7 +17,10 @@ variable "create_oidc_provider" {
 variable "github_owner" {
   description = "GitHub 소유자(org/user)"
   type        = string
-  default     = "kim-n-kang"
+  # GitHub OIDC sub 클레임은 레포의 정규(canonical) 대소문자를 그대로 전달하고 IAM StringLike는 대소문자를 구분한다.
+  # 따라서 GitHub 실제 표기(KIM-N-KANG)와 정확히 일치해야 한다. 소문자로 두면 sts:AssumeRoleWithWebIdentity 가 거부된다.
+  # (GHCR 이미지 경로의 소문자 kim-n-kang 과는 무관 — 레지스트리 경로는 소문자 강제)
+  default = "KIM-N-KANG"
 }
 
 variable "github_repo" {
@@ -47,4 +50,10 @@ variable "deploy_instance_ids" {
   description = "deploy(ssm:SendCommand) 대상 EC2 인스턴스 ID 목록. 비우면 Project 태그 조건의 instance/* 로 폴백 (KNK-241)"
   type        = list(string)
   default     = []
+}
+
+variable "ssm_document_arns" {
+  description = "deploy(ssm:SendCommand)에 허용할 SSM 문서 ARN 목록. null이면 범용 AWS-RunShellScript(임의 셸). 전용 배포 문서 ARN을 주면 그 문서로만 제한해 임의 셸을 막는다(레포별 최소권한, KNK-260)."
+  type        = list(string)
+  default     = null
 }

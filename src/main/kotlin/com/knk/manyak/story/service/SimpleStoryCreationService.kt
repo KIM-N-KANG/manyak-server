@@ -284,7 +284,7 @@ class SimpleStoryCreationService(
 
             StoryCreationOutcome(
                 response = SimpleStoryCreateResponse(
-                    id = story.id,
+                    id = story.publicId.toString(),
                     title = story.title,
                     oneLineIntro = story.oneLineIntro,
                     description = story.description,

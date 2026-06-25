@@ -62,7 +62,8 @@ terraform apply
    ```
 
 2. GitHub 레포 **Settings → Secrets and variables → Actions → Variables**에 추가한다.
-   - `AWS_ROLE_ARN` = 위 ARN
+   - manyak-server 레포: `AWS_ROLE_ARN` = 위 ARN
+   - manyak-ai 레포: `AWS_ROLE_ARN` = `terraform output -raw github_actions_ai_ci_role_arn` (manyak-ai 전용 역할, KNK-260)
 
    계정에 GitHub OIDC provider(`token.actions.githubusercontent.com`)가 이미 있으면,
    `terraform.tfvars`에 `create_github_oidc_provider = false`를 두고 apply 한다.
@@ -87,12 +88,14 @@ aws ecr describe-images \
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id manyak/prod/app --region ap-northeast-2 \
-  --secret-string '{"SERVER_SENTRY_DSN":"<백엔드 Sentry DSN>","AI_SENTRY_DSN":"","MANYAK_SLACK_FEEDBACK_WEBHOOK_URL":"<Slack webhook>","MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER":"<임의 난수: openssl rand -hex 32>"}'
+  --secret-string '{"SERVER_SENTRY_DSN":"<백엔드 Sentry DSN>","AI_SENTRY_DSN":"","MANYAK_SLACK_FEEDBACK_WEBHOOK_URL":"<Slack webhook>","MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER":"<임의 난수: openssl rand -hex 32>","DEEPSEEK_API_KEY":"<manyak-ai DeepSeek API 키>"}'
 ```
+
+> ⚠️ `put-secret-value`는 시크릿 **전체를 덮어쓴다**. 일부 키만 바꿀 때도 **나머지 키의 현재 값을 모두 포함**해 보내야 한다(누락 시 해당 값이 지워짐). `DEEPSEEK_API_KEY`는 manyak-ai 컨테이너 필수값으로, 없으면 ai 부팅이 실패한다(KNK-260).
 
 DB 자격증명(`MANYAK_DB_*`)은 RDS가 자동 관리하는 secret에서 user-data가 읽어 주입하므로 별도 입력이 필요 없다.
 
-> ⚠️ 시크릿 값을 변경한 뒤에는 **재배포해야 `.env`에 반영된다**(`deploy.sh`가 매 실행마다 Secrets Manager를 재조회). `main` 재푸시 또는 SSM Run Command로 `bash /opt/manyak/deploy.sh` 재실행.
+> ⚠️ 시크릿 값을 변경한 뒤에는 **재배포해야 `.env`에 반영된다**(`deploy.sh`가 매 실행마다 Secrets Manager를 재조회). 단, **워크플로 재배포는 `*_IMAGE_OVERRIDE`가 가리키는 한 서비스만 (재)기동**하므로(`docker compose up -d <서비스>`), 회전한 키를 쓰는 **그 서비스 쪽 워크플로**로 재배포해야 한다(`DEEPSEEK_API_KEY`·`AI_SENTRY_DSN` → manyak-ai, `SERVER_SENTRY_DSN` 등 → manyak-server). server·ai를 한 번에 반영하려면 **OVERRIDE 없이** SSM으로 `bash /opt/manyak/deploy.sh`를 실행한다(`else` 분기 → server·ai 모두 재기동).
 
 ### 배포 (자동)
 

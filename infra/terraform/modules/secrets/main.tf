@@ -5,7 +5,7 @@
 resource "aws_secretsmanager_secret" "app" {
   # 슬래시 경로 네이밍(ASCII). DB secret(rds!...)과 구분되는 앱 전용 시크릿.
   name        = "${var.project}/${var.environment}/app"
-  description = "manyak app runtime secrets: server/ai Sentry DSN, Slack webhook, analytics pepper"
+  description = "manyak app runtime secrets: server/ai Sentry DSN, Slack webhook, analytics pepper, DeepSeek API key"
 
   tags = {
     Name = "${var.project}-${var.environment}-app-secrets"
@@ -19,9 +19,10 @@ resource "aws_secretsmanager_secret_version" "app" {
   # 앱은 이 키들을 환경변수로 바인딩한다(application.yml 참조).
   secret_string = jsonencode({
     SERVER_SENTRY_DSN                    = "" # 백엔드(server) 컨테이너의 SENTRY_DSN 으로 매핑
-    AI_SENTRY_DSN                        = "" # manyak-ai 컨테이너의 SENTRY_DSN 으로 매핑(ai 구현 시)
+    AI_SENTRY_DSN                        = "" # manyak-ai 컨테이너의 SENTRY_DSN 으로 매핑
     MANYAK_SLACK_FEEDBACK_WEBHOOK_URL    = ""
     MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER = ""
+    DEEPSEEK_API_KEY                     = "" # manyak-ai DeepSeek API 키(필수). 실제 값은 put-secret-value 로 입력(KNK-260)
   })
 
   lifecycle {

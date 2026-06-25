@@ -105,12 +105,14 @@ class BusinessEventLoggingIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/chats")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":${story.id}}""")
+            // 채팅 생성 요청은 스토리 공개 식별자(public_id)를 받는다.
+            .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
             .expectStatus().isCreated
 
         val messages = messagesFor("chat_started")
         assertThat(messages).hasSize(1)
+        // 구조화 로그의 story_id는 내부 PK(Long)를 그대로 기록한다(관측용, 외부 식별자와 무관).
         assertThat(messages.first()).contains("story_id=${story.id}")
         assertThat(messages.first()).contains("chat_id=")
     }

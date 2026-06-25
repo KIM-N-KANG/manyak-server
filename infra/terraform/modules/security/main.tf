@@ -175,6 +175,8 @@ data "aws_iam_policy_document" "ecr_pull" {
       "ecr:BatchCheckLayerAvailability",
       "ecr:GetDownloadUrlForLayer",
       "ecr:BatchGetImage",
+      # KNK-260: deploy.sh가 ai 이미지 존재 여부를 판정(부트스트랩 graceful 스킵 vs 실제 pull 실패 구분)하는 데 사용.
+      "ecr:DescribeImages",
     ]
     resources = var.ecr_repository_arns
   }

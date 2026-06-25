@@ -2,6 +2,9 @@
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ### 위에서부터 순서대로 실행하면 스토리를 하나 생성한 뒤 그 storyId로 상세를 조회합니다.
 ###
+### [KNK-256] 스토리 식별자는 순차 정수가 아니라 추측 불가능한 공개 식별자(UUID, public_id)입니다.
+###   경로 변수 {storyId}에는 UUID가 들어가며, 순차 정수를 추측해도 404로 통일됩니다(IDOR 차단).
+###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
@@ -37,7 +40,7 @@ Accept: application/json
 
 ### 2. 최종 스토리 생성·저장 (상세 조회용 스토리 준비 2/2)
 # 1번을 먼저 실행해야 simpleCreationId / storylineId 변수가 설정됩니다.
-# 응답의 storyId를 전역 변수로 저장해 3번에서 사용합니다.
+# 응답의 id(공개 식별자 UUID)와 내부 PK 추정용 비교를 위해 id를 전역 변수로 저장해 3번에서 사용합니다.
 POST {{baseUrl}}/api/v1/stories/simple
 Content-Type: application/json
 Accept: application/json
@@ -65,8 +68,12 @@ Accept: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     const b = response.body;
+    client.test("id는 순차 정수가 아니라 공개 식별자(UUID)다", () => {
+        client.assert(typeof b.id === "string" &&
+            /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(b.id),
+            `id가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.id)}`);
+    });
     client.test("표시 메타가 채워져 있다", () => {
-        client.assert(b.id !== undefined, "id가 없습니다.");
         client.assert(Boolean(b.title), "title이 없습니다.");
         client.assert(typeof b.oneLineIntro === "string", "oneLineIntro가 없습니다.");
     });
@@ -88,8 +95,20 @@ Accept: application/json
     });
 %}
 
-### 4. 존재하지 않는 스토리 → 404
-GET {{baseUrl}}/api/v1/stories/999999999
+### 4. 순차 정수 id로 조회 → 404 (IDOR 차단)
+# 외부 식별자는 공개 UUID이므로 순차 정수(예: 1)를 추측해도 열람할 수 없습니다.
+GET {{baseUrl}}/api/v1/stories/1
+Accept: application/json
+
+> {%
+    client.test("순차 정수 id는 404로 통일된다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "이야기를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 5. 형식은 올바르나 존재하지 않는 UUID → 404
+GET {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
 Accept: application/json
 
 > {%
@@ -99,7 +118,7 @@ Accept: application/json
     });
 %}
 
-### 5. (선택) 이미 알고 있는 storyId로 직접 조회
-# 위 흐름 없이 특정 ID만 빠르게 확인하고 싶을 때 사용합니다.
-GET {{baseUrl}}/api/v1/stories/1
+### 6. (자유 조회) 이미 알고 있는 storyId(공개 식별자 UUID)로 직접 조회
+# 위 흐름 없이 특정 public_id만 빠르게 확인하고 싶을 때 사용합니다. 자리표시 UUID를 실제 값으로 교체하세요.
+GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
 Accept: application/json

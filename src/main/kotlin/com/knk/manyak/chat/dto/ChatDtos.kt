@@ -4,15 +4,13 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
-import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
 @Schema(description = "채팅 생성 요청")
 data class CreateChatRequest(
-    @field:Positive
-    @field:Schema(description = "채팅을 시작할 스토리 ID", example = "1")
-    val storyId: Long,
+    @field:Schema(description = "채팅을 시작할 스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val storyId: String,
 )
 
 @Schema(description = "채팅 생성 응답")
@@ -23,8 +21,8 @@ data class CreateChatResponse(
     )
     val id: String,
 
-    @field:Schema(description = "스토리 ID", example = "1")
-    val storyId: Long,
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val storyId: String,
 
     @field:Schema(
         description = "채팅 시작 프롤로그",
@@ -70,8 +68,8 @@ data class ChatSummaryResponse(
     @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "스토리 ID", example = "1")
-    val storyId: Long,
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val storyId: String,
 
     @field:Schema(description = "스토리 제목", example = "호아킨 아카데미의 무속성 신입생")
     val storyTitle: String,
@@ -91,8 +89,8 @@ data class ChatDetailResponse(
     @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "스토리 ID", example = "1")
-    val storyId: Long,
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val storyId: String,
 
     @field:Schema(description = "스토리 제목", example = "호아킨 아카데미의 무속성 신입생")
     val storyTitle: String,
