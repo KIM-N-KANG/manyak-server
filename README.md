@@ -73,4 +73,4 @@ MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER=optional-random-pepper
 
 - 팀 위키: `../llm-wiki`
 - 팀 LLM 하네스: `../knk-harness`
-- 서버 레포 LLM 지침: `AGENTS.md`
+- 서버 레포 LLM 지침: `CLAUDE.md`
