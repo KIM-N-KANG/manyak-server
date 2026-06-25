@@ -77,3 +77,8 @@ output "github_actions_ai_ci_role_arn" {
   description = "manyak-ai 레포 GitHub Actions 변수 AWS_ROLE_ARN 에 설정할 IAM role ARN (KNK-260)"
   value       = module.github_oidc_ai.ci_role_arn
 }
+
+output "ai_deploy_ssm_document_name" {
+  description = "manyak-ai 배포용 SSM 문서 이름. manyak-ai 워크플로가 send-command 대상으로 사용(ImageUri 파라미터). 범용 RunShellScript 대신 이 문서로 제한됨 (KNK-260)"
+  value       = aws_ssm_document.ai_deploy.name
+}
