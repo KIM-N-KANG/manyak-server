@@ -5,7 +5,7 @@
 resource "aws_secretsmanager_secret" "app" {
   # 슬래시 경로 네이밍(ASCII). DB secret(rds!...)과 구분되는 앱 전용 시크릿.
   name        = "${var.project}/${var.environment}/app"
-  description = "manyak app runtime secrets (Sentry DSN, Slack webhook; AI/LLM key added with ai service)"
+  description = "manyak app runtime secrets: server/ai Sentry DSN, Slack webhook, analytics pepper"
 
   tags = {
     Name = "${var.project}-${var.environment}-app-secrets"
@@ -18,8 +18,10 @@ resource "aws_secretsmanager_secret_version" "app" {
   # 초기 빈 그릇. 실제 값은 콘솔/CLI로 입력한다(아래 ignore_changes 로 terraform 이 덮어쓰지 않음).
   # 앱은 이 키들을 환경변수로 바인딩한다(application.yml 참조).
   secret_string = jsonencode({
-    SENTRY_DSN                        = ""
-    MANYAK_SLACK_FEEDBACK_WEBHOOK_URL = ""
+    SERVER_SENTRY_DSN                    = "" # 백엔드(server) 컨테이너의 SENTRY_DSN 으로 매핑
+    AI_SENTRY_DSN                        = "" # manyak-ai 컨테이너의 SENTRY_DSN 으로 매핑(ai 구현 시)
+    MANYAK_SLACK_FEEDBACK_WEBHOOK_URL    = ""
+    MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER = ""
   })
 
   lifecycle {

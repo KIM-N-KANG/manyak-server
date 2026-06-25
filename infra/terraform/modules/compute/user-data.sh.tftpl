@@ -32,8 +32,10 @@ DB_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --s
 DB_USERNAME="$(echo "$DB_SECRET_JSON" | jq -r '.username')"
 DB_PASSWORD="$(echo "$DB_SECRET_JSON" | jq -r '.password')"
 APP_SECRET_JSON="$(aws secretsmanager get-secret-value --region ${aws_region} --secret-id ${app_secret_arn} --query SecretString --output text)"
-SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SENTRY_DSN // ""')"
+SERVER_SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.SERVER_SENTRY_DSN // .SENTRY_DSN // ""')"
+AI_SENTRY_DSN="$(echo "$APP_SECRET_JSON" | jq -r '.AI_SENTRY_DSN // ""')"
 SLACK_WEBHOOK="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_SLACK_FEEDBACK_WEBHOOK_URL // ""')"
+PEPPER="$(echo "$APP_SECRET_JSON" | jq -r '.MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER // ""')"
 umask 077
 {
   # SERVER_IMAGE 는 CI deploy 가 SERVER_IMAGE_OVERRIDE(빌드된 short-sha 태그)로 덮어쓸 수 있다.
@@ -43,9 +45,11 @@ umask 077
   echo "MANYAK_DB_URL=jdbc:postgresql://${db_address}:${db_port}/${db_name}"
   echo "MANYAK_DB_USERNAME=$DB_USERNAME"
   echo "MANYAK_DB_PASSWORD=$DB_PASSWORD"
-  echo "SENTRY_DSN=$SENTRY_DSN"
+  echo "SENTRY_DSN=$SERVER_SENTRY_DSN"
+  echo "AI_SENTRY_DSN=$AI_SENTRY_DSN"
   echo "SENTRY_ENVIRONMENT=${environment}"
   echo "MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=$SLACK_WEBHOOK"
+  echo "MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER=$PEPPER"
 } > /opt/manyak/.env
 chmod 600 /opt/manyak/.env
 # docker compose v2 의 env_file 은 값 안의 $ 를 변수 보간으로 해석하므로 .env 의 $ 를 $$ 로 이스케이프한다.

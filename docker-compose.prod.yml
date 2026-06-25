@@ -31,3 +31,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      # ai 전용 Sentry DSN(server 와 다른 프로젝트). .env 의 AI_SENTRY_DSN 을 ai 컨테이너의 SENTRY_DSN 으로 매핑.
+      SENTRY_DSN: ${AI_SENTRY_DSN}
