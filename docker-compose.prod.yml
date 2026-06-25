@@ -34,3 +34,14 @@ services:
     environment:
       # ai 전용 Sentry DSN(server 와 다른 프로젝트). .env 의 AI_SENTRY_DSN 을 ai 컨테이너의 SENTRY_DSN 으로 매핑.
       SENTRY_DSN: ${AI_SENTRY_DSN}
+      # DeepSeek API 키(필수). manyak-ai config.py 에 기본값이 없어 미주입 시 부팅 실패.
+      # deploy.sh 가 Secrets Manager(manyak/prod/app)의 DEEPSEEK_API_KEY 를 .env 로 기록한다.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    # 컨테이너 자체 헬스체크. 배포 게이트는 CI 의 SSM 내부 스모크(/api/v1/health)가 담당한다.
+    # probe 로 wget 사용 — manyak-ai 이미지에 wget 이 없으면 커맨드 조정 필요(미존재 시 unhealthy 표시만, 기동엔 영향 없음).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
