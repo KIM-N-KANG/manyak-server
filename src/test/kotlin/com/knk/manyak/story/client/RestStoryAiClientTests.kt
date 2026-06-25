@@ -1,7 +1,9 @@
 package com.knk.manyak.story.client
 
+import com.knk.manyak.global.observability.MdcKeys
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import org.slf4j.MDC
 import org.springframework.web.client.RestClientException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -10,6 +12,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RestStoryAiClientTests {
@@ -19,6 +22,7 @@ class RestStoryAiClientTests {
     @AfterTest
     fun tearDown() {
         server?.stop(0)
+        MDC.clear()
     }
 
     @Test
@@ -63,6 +67,41 @@ class RestStoryAiClientTests {
         assertTrue(requireNotNull(capturedBody).contains(""""protagonist_tags":["기억상실"]"""))
         assertTrue(requireNotNull(capturedBody).contains(""""supporting_tags":["비밀스러운 조력자"]"""))
         assertEquals("생성 스토리", response.stories.single().story)
+    }
+
+    @Test
+    fun `MDC 상관관계 식별자를 outbound 헤더로 forward한다`() {
+        var requestId: String? = null
+        var sessionId: String? = null
+        var anonymousIdHash: String? = null
+        var anonymousIdRaw: String? = null
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/storylines") { exchange ->
+                requestId = exchange.requestHeaders.getFirst("X-Manyak-Request-Id")
+                sessionId = exchange.requestHeaders.getFirst("X-Manyak-Session-Id")
+                anonymousIdHash = exchange.requestHeaders.getFirst("X-Manyak-Anonymous-Id-Hash")
+                anonymousIdRaw = exchange.requestHeaders.getFirst("X-Manyak-Anonymous-Id")
+                exchange.respondJson(STORYLINES_RESPONSE_JSON)
+            }
+            start()
+        }
+
+        val port = requireNotNull(server).address.port
+        MDC.put(MdcKeys.REQUEST_ID, "req_story_1")
+        MDC.put(MdcKeys.SESSION_ID, "sess_story_1")
+        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_story")
+        RestStoryAiClient("http://localhost:$port").createStorylines(
+            AiStorylinesRequest(
+                genreTags = listOf("판타지"),
+                protagonistTags = emptyList(),
+                supportingTags = emptyList(),
+            ),
+        )
+
+        assertEquals("req_story_1", requestId)
+        assertEquals("sess_story_1", sessionId)
+        assertEquals("anon_hash_story", anonymousIdHash)
+        assertNull(anonymousIdRaw, "원본 익명 ID 헤더는 forward하지 않는다")
     }
 
     @Test
@@ -154,6 +193,19 @@ class RestStoryAiClientTests {
     }
 
     companion object {
+        private val STORYLINES_RESPONSE_JSON =
+            """
+            {
+              "stories": [
+                {
+                  "id": 1,
+                  "story": "생성 스토리",
+                  "recommended_infos": ["추가 정보 1", "추가 정보 2", "추가 정보 3"]
+                }
+              ]
+            }
+            """.trimIndent()
+
         private val COMPILE_RESPONSE_JSON =
             """
             {

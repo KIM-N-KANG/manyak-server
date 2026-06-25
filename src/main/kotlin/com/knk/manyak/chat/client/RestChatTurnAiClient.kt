@@ -1,6 +1,7 @@
 package com.knk.manyak.chat.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import java.time.Duration
 import org.springframework.beans.factory.annotation.Qualifier
@@ -41,8 +42,13 @@ class RestChatTurnAiClient(
     ): ChatTurnAiResult {
         var result: ChatTurnAiResult? = null
 
+        // 리액티브 체인이 다른 스레드로 넘어가기 전에 호출 스레드의 MDC에서 상관관계 헤더를 캡처한다.
+        // (구독 시점 스레드에는 MDC가 전파되지 않으므로 여기서 미리 읽어 둔다.)
+        val correlationHeaders = CorrelationHeaders.forwardingHeadersFromMdc()
+
         webClient.post()
             .uri(CHAT_TURNS_PATH)
+            .headers { headers -> correlationHeaders.forEach { (name, value) -> headers.set(name, value) } }
             .accept(MediaType.TEXT_EVENT_STREAM)
             .bodyValue(request)
             .retrieve()

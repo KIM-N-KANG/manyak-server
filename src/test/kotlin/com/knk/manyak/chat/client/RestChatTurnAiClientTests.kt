@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.client
 
+import com.knk.manyak.global.observability.MdcKeys
 import java.time.Duration
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -11,6 +12,7 @@ import kotlin.test.assertTrue
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import org.slf4j.MDC
 import org.springframework.web.reactive.function.client.WebClient
 import tools.jackson.databind.json.JsonMapper
 
@@ -32,6 +34,7 @@ class RestChatTurnAiClientTests {
     @AfterTest
     fun tearDown() {
         server.shutdown()
+        MDC.clear()
     }
 
     @Test
@@ -199,6 +202,45 @@ class RestChatTurnAiClientTests {
         assertTrue(body.contains(""""story_settings""""), "snake_case로 직렬화해야 한다")
         assertTrue(body.contains(""""user_input":"마법수정에 손을 올린다.""""))
         assertTrue(body.contains(""""role":"USER""""), "role은 대문자로 직렬화해야 한다")
+    }
+
+    @Test
+    fun `MDC 상관관계 식별자를 outbound 헤더로 forward한다`() {
+        server.enqueue(sseResponse(
+            """
+            event: completed
+            data: {"aiOutput":"끝","choices":[]}
+
+            """.trimIndent() + "\n",
+        ))
+
+        MDC.put(MdcKeys.REQUEST_ID, "req_chat_1")
+        MDC.put(MdcKeys.SESSION_ID, "sess_chat_1")
+        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_chat")
+        client().streamTurn(sampleRequest(), onToken = {})
+
+        val recorded = server.takeRequest()
+        assertEquals("req_chat_1", recorded.getHeader("X-Manyak-Request-Id"))
+        assertEquals("sess_chat_1", recorded.getHeader("X-Manyak-Session-Id"))
+        assertEquals("anon_hash_chat", recorded.getHeader("X-Manyak-Anonymous-Id-Hash"))
+    }
+
+    @Test
+    fun `MDC가 비어 있으면 상관관계 헤더를 붙이지 않는다`() {
+        server.enqueue(sseResponse(
+            """
+            event: completed
+            data: {"aiOutput":"끝","choices":[]}
+
+            """.trimIndent() + "\n",
+        ))
+
+        client().streamTurn(sampleRequest(), onToken = {})
+
+        val recorded = server.takeRequest()
+        assertNull(recorded.getHeader("X-Manyak-Request-Id"))
+        assertNull(recorded.getHeader("X-Manyak-Session-Id"))
+        assertNull(recorded.getHeader("X-Manyak-Anonymous-Id-Hash"))
     }
 
     private fun client() = RestChatTurnAiClient(
