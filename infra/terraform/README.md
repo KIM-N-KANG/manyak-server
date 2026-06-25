@@ -87,7 +87,7 @@ aws ecr describe-images \
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id manyak/prod/app --region ap-northeast-2 \
-  --secret-string '{"SENTRY_DSN":"<dsn>","MANYAK_SLACK_FEEDBACK_WEBHOOK_URL":"<url>"}'
+  --secret-string '{"SERVER_SENTRY_DSN":"<백엔드 Sentry DSN>","AI_SENTRY_DSN":"","MANYAK_SLACK_FEEDBACK_WEBHOOK_URL":"<Slack webhook>","MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER":"<임의 난수: openssl rand -hex 32>"}'
 ```
 
 DB 자격증명(`MANYAK_DB_*`)은 RDS가 자동 관리하는 secret에서 user-data가 읽어 주입하므로 별도 입력이 필요 없다.
