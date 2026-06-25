@@ -2,9 +2,11 @@ package com.knk.manyak.story.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
+import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
@@ -169,6 +171,7 @@ class RestStoryAiClient(
         RestClient
             .builder()
             .baseUrl(validatedAiBaseUrl.toString())
+            .requestInterceptor(correlationForwardingInterceptor())
             .requestFactory(
                 SimpleClientHttpRequestFactory().apply {
                     setConnectTimeout(connectTimeout)
@@ -176,6 +179,15 @@ class RestStoryAiClient(
                 },
             )
             .build()
+
+    /**
+     * 동기 RestClient는 호출 스레드에서 실행되므로 인터셉터 시점에 MDC가 살아 있다.
+     * storyline·compile 양쪽 RestClient에 동일하게 적용해 상관관계 헤더를 forward한다.
+     */
+    private fun correlationForwardingInterceptor() = ClientHttpRequestInterceptor { request, body, execution ->
+        CorrelationHeaders.forwardingHeadersFromMdc().forEach { (name, value) -> request.headers.set(name, value) }
+        execution.execute(request, body)
+    }
 
     private fun validateAiBaseUrl(aiBaseUrl: String): URI {
         val uri = URI.create(aiBaseUrl.trim())
