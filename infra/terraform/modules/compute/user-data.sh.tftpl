@@ -96,10 +96,24 @@ elif [ -n "$${SERVER_IMAGE_OVERRIDE:-}" ]; then
 else
   docker compose pull server
   docker compose up -d server
-  if docker compose pull ai; then
+  # ai: 이미지 태그가 ECR 에 실제로 존재할 때만 (재)기동하고, 그 경우 pull/up 실패는 전파한다.
+  # (부트스트랩으로 아직 푸시 전이면 ImageNotFound 만 조용히 건너뛰고, 네트워크/권한 등 다른 오류는
+  #  배포 실패로 종료해 SSM 게이트가 감지하게 한다 — pull 실패를 "이미지 없음"으로 가리지 않는다.)
+  AI_REPO_TAG="$${AI_IMAGE##*/}"
+  AI_REPO="$${AI_REPO_TAG%%:*}"
+  AI_TAG="$${AI_REPO_TAG##*:}"
+  set +e
+  ai_describe="$(aws ecr describe-images --region ${aws_region} --repository-name "$AI_REPO" --image-ids imageTag="$AI_TAG" 2>&1)"
+  ai_rc=$?
+  set -e
+  if [ $ai_rc -eq 0 ]; then
+    docker compose pull ai
     docker compose up -d ai
+  elif echo "$ai_describe" | grep -q "ImageNotFoundException"; then
+    echo "manyak-ai 이미지($AI_TAG) 미존재 — ai 기동 건너뜀(부트스트랩; 이후 manyak-ai 배포 시 기동)"
   else
-    echo "manyak-ai 이미지 미존재 — ai 기동 건너뜀(이후 manyak-ai 배포 시 기동)"
+    echo "manyak-ai 이미지 존재 확인 실패(네트워크/권한 등) — 배포 실패 처리: $ai_describe" >&2
+    exit 1
   fi
 fi
 docker image prune -f || true
