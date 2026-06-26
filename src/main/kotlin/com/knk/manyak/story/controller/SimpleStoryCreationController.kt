@@ -193,5 +193,7 @@ class SimpleStoryCreationController(
     @DeleteMapping("/storylines/{storylineId}/rating")
     fun cancelStorylineRating(
         @PathVariable storylineId: Long,
-    ) = storylineRatingService.cancel(storylineId)
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+    ) = storylineRatingService.cancel(storylineId, userId)
 }

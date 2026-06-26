@@ -203,6 +203,19 @@ class SimpleStoryCreationService(
             throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
         }
 
+        // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
+        // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속.
+        // - 소유 세션(소유자 있음): 같은 사용자만 완료 가능. 다른 사용자/익명(만료·무효 토큰 포함)이 simpleCreationId로
+        //   남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
+        val attributedUserId = when {
+            session.userId == null -> userId
+            session.userId == userId -> userId
+            else -> throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "본인이 시작한 간편 제작만 완료할 수 있습니다.",
+            )
+        }
+
         val selectedStoryline = storyCreationExampleRepository
             .findByIdAndCreationSessionId(request.storylineId, request.simpleCreationId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "선택한 스토리라인을 찾을 수 없습니다.")
@@ -245,18 +258,6 @@ class SimpleStoryCreationService(
             selectedStoryline.isSelected = true
             storyCreationExampleRepository.save(selectedStoryline)
 
-            // 다단계 간편 제작의 소유권을 강제한다(Codex PR #76 P2).
-            // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속한다.
-            // - 소유 세션(소유자 있음): 같은 사용자만 완료할 수 있다. 다른 사용자/익명(만료·무효 토큰 포함)이
-            //   simpleCreationId로 남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
-            val attributedUserId = when {
-                lockedSession.userId == null -> userId
-                lockedSession.userId == userId -> userId
-                else -> throw ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "본인이 시작한 간편 제작만 완료할 수 있습니다.",
-                )
-            }
             val story = storyRepository.save(
                 Story(
                     userId = attributedUserId,

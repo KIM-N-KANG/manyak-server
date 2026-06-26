@@ -22,6 +22,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationExample
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -47,6 +48,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * KNK-286: 익명 허용(permitAll) 도메인 경로의 optional 인증/귀속 통합 검증.
@@ -64,6 +66,9 @@ import java.util.UUID
 class OptionalAuthAttributionIntegrationTests {
 
     companion object {
+        // fake AI의 compileStory 호출 횟수. finalize 소유권 거부가 AI 호출 '전'에 일어남을 검증한다(Codex #76 P2).
+        val compileStoryCalls = AtomicInteger(0)
+
         @JvmStatic
         @DynamicPropertySource
         fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
@@ -80,8 +85,9 @@ class OptionalAuthAttributionIntegrationTests {
             override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
 
-            override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse =
-                AiStoryCompileResponse(
+            override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse {
+                compileStoryCalls.incrementAndGet()
+                return AiStoryCompileResponse(
                     stories = AiStoryMeta(
                         title = "생성된 스토리",
                         oneLineIntro = "한 줄 소개",
@@ -101,6 +107,7 @@ class OptionalAuthAttributionIntegrationTests {
                     storySuggestedInputs = listOf("추천1"),
                     meta = AiResponseMeta(),
                 )
+            }
         }
     }
 
@@ -143,11 +150,16 @@ class OptionalAuthAttributionIntegrationTests {
     @Autowired
     private lateinit var creationExampleRepository: StoryCreationExampleRepository
 
+    @Autowired
+    private lateinit var ratingRepository: StoryCreationExampleRatingRepository
+
     @BeforeEach
     fun setUp() {
+        compileStoryCalls.set(0)
         feedbackRepository.deleteAllInBatch()
         storyMessageRepository.deleteAllInBatch()
         storyPlaySessionRepository.deleteAllInBatch()
+        ratingRepository.deleteAllInBatch()
         creationExampleRepository.deleteAllInBatch()
         creationSessionRepository.deleteAllInBatch()
         storySuggestedInputRepository.deleteAllInBatch()
@@ -309,7 +321,8 @@ class OptionalAuthAttributionIntegrationTests {
 
         postSimpleStory(storyline, "Bearer ${validToken(attacker)}").expectStatus().isForbidden
 
-        // 거부 전에 Story가 저장되지 않는다(Story 저장은 소유권 검사 뒤에 일어난다).
+        // 소유권 거부는 AI 호출(비용) 전에 일어난다 → compileStory 미호출, Story도 미저장.
+        assertThat(compileStoryCalls.get()).isZero()
         assertThat(storyRepository.findAll()).isEmpty()
     }
 
@@ -322,6 +335,40 @@ class OptionalAuthAttributionIntegrationTests {
         postSimpleStory(storyline, null).expectStatus().isForbidden
 
         assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    // ---- PUT /api/v1/stories/simple/storylines/{id}/rating (소유권) ----
+
+    @Test
+    fun `소유 세션 스토리라인을 같은 사용자가 평가하면 200이다`() {
+        val owner = saveUser()
+        val storyline = persistStorylineOwnedBy(owner.id)
+
+        putRating(storyline.id, "Bearer ${validToken(owner)}").expectStatus().isOk
+    }
+
+    @Test
+    fun `소유 세션 스토리라인을 다른 사용자가 평가하려 하면 403이다`() {
+        val owner = saveUser("owner")
+        val attacker = saveUser("attacker")
+        val storyline = persistStorylineOwnedBy(owner.id)
+
+        putRating(storyline.id, "Bearer ${validToken(attacker)}").expectStatus().isForbidden
+    }
+
+    @Test
+    fun `익명 세션 스토리라인은 토큰 없이 평가해도 200이다`() {
+        val storyline = persistStoryline()
+
+        putRating(storyline.id, null).expectStatus().isOk
+    }
+
+    private fun putRating(storylineId: Long, authorization: String?): RestTestClient.ResponseSpec {
+        val spec = restTestClient.put()
+            .uri("/api/v1/stories/simple/storylines/$storylineId/rating")
+            .contentType(MediaType.APPLICATION_JSON)
+        authorization?.let { spec.header("Authorization", it) }
+        return spec.body("""{"rating":"GOOD"}""").exchange()
     }
 
     private fun persistStoryline(): StoryCreationExample = persistStorylineSession(ownerId = null)
