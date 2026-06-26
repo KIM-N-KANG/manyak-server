@@ -245,12 +245,21 @@ class SimpleStoryCreationService(
             selectedStoryline.isSelected = true
             storyCreationExampleRepository.save(selectedStoryline)
 
+            // 다단계 간편 제작의 소유권을 강제한다(Codex PR #76 P2).
+            // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속한다.
+            // - 소유 세션(소유자 있음): 같은 사용자만 완료할 수 있다. 다른 사용자/익명(만료·무효 토큰 포함)이
+            //   simpleCreationId로 남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
+            val attributedUserId = when {
+                lockedSession.userId == null -> userId
+                lockedSession.userId == userId -> userId
+                else -> throw ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인이 시작한 간편 제작만 완료할 수 있습니다.",
+                )
+            }
             val story = storyRepository.save(
                 Story(
-                    // 이 생성 요청의 인증 사용자에만 귀속한다(익명/무효/만료면 null). session 소유자로 폴백하지 않는다 —
-                    // 익명 create가 simpleCreationId만으로 다른 사용자(session 생성자)의 user_id로 기록되는 귀속 스푸핑을
-                    // 막고, optional 인증 의미(무효 토큰=익명)를 지킨다(Codex PR #76 P2).
-                    userId = userId,
+                    userId = attributedUserId,
                     title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,

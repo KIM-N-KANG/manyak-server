@@ -157,8 +157,8 @@ class OptionalAuthAttributionIntegrationTests {
         userRepository.deleteAllInBatch()
     }
 
-    private fun saveUser(): User =
-        userRepository.save(User(nickname = "manyak_user", status = UserStatus.ACTIVE))
+    private fun saveUser(nickname: String = "manyak_user"): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 
     private fun validToken(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
 
@@ -292,15 +292,36 @@ class OptionalAuthAttributionIntegrationTests {
     }
 
     @Test
-    fun `생성 요청이 익명이면 storyline 생성자의 user_id로 폴백하지 않는다 (귀속 스푸핑 차단)`() {
-        // storyline 생성을 로그인 사용자(owner)가 한 상황(session.user_id=owner). 그 simpleCreationId만 알면
-        // 익명으로 create해 owner의 user_id로 스토리가 기록되는 일이 없어야 한다 → 익명 create는 null 귀속.
+    fun `소유 세션을 같은 사용자가 완료하면 201과 함께 owner에 귀속된다`() {
         val owner = saveUser()
         val storyline = persistStorylineOwnedBy(owner.id)
 
-        postSimpleStory(storyline, null).expectStatus().isCreated
+        postSimpleStory(storyline, "Bearer ${validToken(owner)}").expectStatus().isCreated
 
-        assertThat(storyRepository.findAll().first().userId).isNull()
+        assertThat(storyRepository.findAll().first().userId).isEqualTo(owner.id)
+    }
+
+    @Test
+    fun `소유 세션을 다른 로그인 사용자가 완료하려 하면 403이다 (세션 가로채기 차단)`() {
+        val owner = saveUser("owner")
+        val attacker = saveUser("attacker")
+        val storyline = persistStorylineOwnedBy(owner.id)
+
+        postSimpleStory(storyline, "Bearer ${validToken(attacker)}").expectStatus().isForbidden
+
+        // 거부 전에 Story가 저장되지 않는다(Story 저장은 소유권 검사 뒤에 일어난다).
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
+    fun `소유 세션을 익명(만료·무토큰)으로 완료하려 하면 403이다`() {
+        // 소유 세션을 익명으로 떨어뜨려 완료하는 것도 막는다 — 본인 토큰 재인증이 필요하다.
+        val owner = saveUser()
+        val storyline = persistStorylineOwnedBy(owner.id)
+
+        postSimpleStory(storyline, null).expectStatus().isForbidden
+
+        assertThat(storyRepository.findAll()).isEmpty()
     }
 
     private fun persistStoryline(): StoryCreationExample = persistStorylineSession(ownerId = null)
