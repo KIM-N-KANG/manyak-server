@@ -25,6 +25,16 @@ data class TokenResponse(
     val tokenType: String = "Bearer",
 )
 
+@Schema(description = "Google 로그인 요청")
+data class GoogleLoginRequest(
+    @field:NotBlank
+    @field:Schema(
+        description = "Google에서 발급받은 ID 토큰(JWT). 서버가 Google 공개키로 검증한다.",
+        example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
+    )
+    val idToken: String,
+)
+
 @Schema(description = "refresh 토큰 회전 요청")
 data class RefreshTokenRequest(
     @field:NotBlank

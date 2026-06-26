@@ -37,6 +37,10 @@ manyak:
       access-ttl: PT30M
       # refresh 토큰 수명(길게). RefreshTokenStore TTL과 동일하다.
       refresh-ttl: P14D
+    google:
+      # 허용할 Google OAuth client-id 목록. ID 토큰의 aud가 이 중 하나와 일치해야 로그인이 통과한다.
+      # 콤마 구분 환경변수(MANYAK_GOOGLE_CLIENT_IDS)로 주입한다. 운영 값은 하드코딩하지 않는다(미주입 시 빈 목록 → 모든 토큰 거부).
+      client-ids: ${MANYAK_GOOGLE_CLIENT_IDS:}
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
   cors:

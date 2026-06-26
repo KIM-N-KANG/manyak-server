@@ -57,30 +57,34 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/batch")).permitAll()
                     // 피드백은 익명 제출을 허용한다. 로그인 상태면 인증 도입 후 서버가 user_id 를 채운다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/feedbacks")).permitAll()
-                    // refresh 회전·로그아웃은 access 토큰 없이 호출하므로 인증을 요구하지 않는다(토큰 유효성은 서비스가 검증한다).
+                    // 인증 없이 호출하는 공개 인증 엔드포인트(Google 로그인, refresh 회전).
+                    // - 로그인: 아직 우리 토큰이 없는 상태에서 호출한다.
+                    // - refresh: access 없이 회전한다(토큰 유효성은 서비스가 검증한다).
+                    // 두 경로 모두 bearerTokenResolver에서도 토큰을 무시하므로(아래 resolver),
+                    // 클라이언트가 자동 첨부한 만료/위조 access 헤더로 막히지 않는다.
                     // /api/v1/auth/me 는 anyRequest().authenticated() 로 보호된다.
-                    // 이 경로들은 bearerTokenResolver에서도 토큰을 무시하므로, 자동 첨부된 만료/위조 access 헤더로 막히지 않는다.
                     .requestMatchers(*BEARER_SKIP_MATCHERS).permitAll()
                     .anyRequest().authenticated()
             }
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
             // 토큰 없음·만료·위조는 BearerTokenAuthenticationEntryPoint가 401로 응답한다.
-            // refresh 경로에서는 토큰을 resolve하지 않아(아래 resolver) 자동 첨부된 만료/위조 access 헤더로 막히지 않는다.
+            // 공개 인증 경로(BEARER_SKIP_MATCHERS)에서는 토큰을 resolve하지 않아(아래 resolver) 자동 첨부된 만료/위조 access 헤더로 막히지 않는다.
             .oauth2ResourceServer {
-                it.bearerTokenResolver(refreshAwareBearerTokenResolver())
+                it.bearerTokenResolver(bearerSkipAwareResolver())
                 it.jwt { }
             }
             .build()
 
     /**
-     * bearer-skip 경로(refresh 회전·로그아웃)에서는 Bearer 토큰을 resolve하지 않는다.
+     * 공개 인증 경로(Google 로그인, refresh 회전)에서는 Bearer 토큰을 resolve하지 않는다.
      *
      * 모바일 등 클라이언트가 인터셉터로 access 토큰을 모든 요청에 자동 첨부하면, 만료/위조된 access 헤더가
-     * BearerTokenAuthenticationFilter에 걸려 인가(permitAll)보다 먼저 401이 난다. 그러면 유효한 refresh를
-     * 들고도 컨트롤러에 도달하지 못한다. 이 경로들에서만 토큰을 무시해(null) 인증 자체를 시도하지 않게 하고,
-     * 토큰 유효성은 AuthTokenService가 검증하게 한다. (단일 필터체인 유지 — 체인 분리 없이 cors/csrf/session 중복 회피)
+     * BearerTokenAuthenticationFilter에 걸려 인가(permitAll)보다 먼저 401이 난다. 그러면 로그인/회전을
+     * 시도하지도 못한다(로그아웃 후 stale access를 들고 다시 로그인하는 경우 등). 이 경로들에서만 토큰을
+     * 무시해(null) 인증 자체를 시도하지 않게 하고, 검증은 각 서비스(Google verifier·AuthTokenService)가 한다.
+     * (단일 필터체인 유지 — 체인 분리 없이 cors/csrf/session 중복 회피)
      */
-    private fun refreshAwareBearerTokenResolver(): BearerTokenResolver {
+    private fun bearerSkipAwareResolver(): BearerTokenResolver {
         val delegate = DefaultBearerTokenResolver()
         return BearerTokenResolver { request: HttpServletRequest ->
             if (BEARER_SKIP_MATCHERS.any { it.matches(request) }) null else delegate.resolve(request)
@@ -88,9 +92,10 @@ class SecurityConfig {
     }
 
     private companion object {
-        // bearer-skip 대상 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
-        // refresh 회전과 로그아웃은 access 없이 호출되며, 자동 첨부된 만료/위조 access 헤더로 막히면 안 된다.
+        // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
+        // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/logout"),
         )
