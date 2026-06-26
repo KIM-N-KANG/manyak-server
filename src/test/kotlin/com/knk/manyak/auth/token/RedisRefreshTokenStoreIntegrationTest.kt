@@ -14,6 +14,7 @@ import org.springframework.test.context.DynamicPropertySource
 import redis.embedded.RedisServer
 import java.net.ServerSocket
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * embedded-redis로 실제 Redis(7.x) 동작을 띄워 RedisRefreshTokenStore의 실동작을 검증한다.
@@ -84,6 +85,25 @@ class RedisRefreshTokenStoreIntegrationTest {
         assertThat(store.findUserId("hash-a")).isNull()
         assertThat(store.findUserId("hash-b")).isNull()
         assertThat(store.findUserId("hash-c")).isEqualTo(100L)
+    }
+
+    @Test
+    fun `다른 사용자로 덮어쓴 토큰은 이전 사용자의 전체 무효화에 영향받지 않는다`() {
+        store.save(tokenHash = "hash-x", userId = 1L, ttl = Duration.ofMinutes(30))
+        store.save(tokenHash = "hash-x", userId = 2L, ttl = Duration.ofMinutes(30))
+
+        store.deleteAllForUser(1L)
+
+        assertThat(store.findUserId("hash-x")).isEqualTo(2L)
+    }
+
+    @Test
+    fun `사용자 인덱스 TTL은 더 짧은 토큰 추가로 단축되지 않는다`() {
+        store.save(tokenHash = "hash-long", userId = 5L, ttl = Duration.ofSeconds(120))
+        store.save(tokenHash = "hash-short", userId = 5L, ttl = Duration.ofSeconds(5))
+
+        val indexTtl = redisTemplate.getExpire("user:5:refresh", TimeUnit.SECONDS)
+        assertThat(indexTtl).isGreaterThan(60)
     }
 
     companion object {

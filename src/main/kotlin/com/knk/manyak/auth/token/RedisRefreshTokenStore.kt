@@ -3,6 +3,7 @@ package com.knk.manyak.auth.token
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Repository
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * RefreshTokenStore의 Redis 구현.
@@ -26,11 +27,21 @@ class RedisRefreshTokenStore(
             return
         }
         val tokenKey = tokenKey(tokenHash)
+        // 같은 해시가 다른 사용자에게 매핑돼 있었다면 이전 사용자 인덱스의 stale 엔트리를 먼저 제거한다.
+        // (안 그러면 이전 사용자의 deleteAllForUser가 새 주인의 토큰을 폐기할 수 있다.)
+        val previousUserId = redisTemplate.opsForValue().get(tokenKey)?.toLongOrNull()
+        if (previousUserId != null && previousUserId != userId) {
+            redisTemplate.opsForSet().remove(userIndexKey(previousUserId), tokenHash)
+        }
         redisTemplate.opsForValue().set(tokenKey, userId.toString(), ttl)
-        // 사용자 인덱스에 해시를 추가하고, 토큰 만료보다 일찍 사라지지 않도록 인덱스 TTL을 함께 연장한다.
         val userKey = userIndexKey(userId)
         redisTemplate.opsForSet().add(userKey, tokenHash)
-        redisTemplate.expire(userKey, ttl)
+        // 인덱스 만료는 연장만 한다. 더 짧은 TTL의 토큰이 추가돼도 기존 인덱스 수명을 단축하지 않는다.
+        // (인덱스가 토큰보다 먼저 만료되면 deleteAllForUser가 아직 유효한 토큰을 못 지운다.)
+        val currentTtlSeconds = redisTemplate.getExpire(userKey, TimeUnit.SECONDS)
+        if (currentTtlSeconds < ttl.seconds) {
+            redisTemplate.expire(userKey, ttl)
+        }
     }
 
     override fun findUserId(tokenHash: String): Long? =
