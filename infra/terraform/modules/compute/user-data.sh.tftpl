@@ -70,6 +70,8 @@ umask 077
   echo "MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=$SLACK_WEBHOOK"
   echo "MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER=$PEPPER"
   echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+  echo "SPRING_DATA_REDIS_HOST=${redis_address}"
+  echo "SPRING_DATA_REDIS_PORT=${redis_port}"
 } > /opt/manyak/.env
 chmod 600 /opt/manyak/.env
 # docker compose v2 의 env_file 은 값 안의 $ 를 변수 보간으로 해석하므로 .env 의 $ 를 $$ 로 이스케이프한다.

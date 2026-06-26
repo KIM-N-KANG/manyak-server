@@ -49,6 +49,11 @@ module "compute" {
   db_port        = module.data.db_port
   db_name        = module.data.db_name
 
+  # KNK-284 Redis 주입: ElastiCache endpoint/port를 .env(SPRING_DATA_REDIS_*)로 전달.
+  # enable_redis=false면 출력이 null이라 templatefile이 거부하므로 coalesce로 기본값 대체(운영은 실제 endpoint).
+  redis_address = coalesce(module.data.redis_endpoint, "")
+  redis_port    = coalesce(module.data.redis_port, 6379)
+
   # EC2 부팅(deploy.sh: ECR pull·시크릿 조회) 전에 준비되어야 하는 것들을 명시적으로 대기:
   # SG egress 규칙·IAM attachment(security), 시크릿 읽기 정책(ec2_secrets_read), 앱 시크릿 값(secrets 의 secret+version).
   depends_on = [module.security, module.secrets, aws_iam_role_policy.ec2_secrets_read]
