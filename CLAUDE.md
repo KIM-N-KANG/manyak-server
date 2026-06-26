@@ -30,6 +30,7 @@
 - JPA, Flyway, Security, datasource, API 동작을 변경할 때는 완료 보고 전에 관련 Gradle 검증을 실행합니다.
 - 로컬 환경 제한으로 검증을 실행할 수 없다면 정확한 차단 사유와 실행해야 할 명령을 설명합니다.
 - API 엔드포인트를 추가하거나 동작을 변경하면 통합 테스트와 함께 `http/` 디렉터리에 수동 검증용 `.http` 파일을 항상 작성하거나 갱신합니다. 작성 방법과 IntelliJ 호환 규칙은 `create-http-verification` 스킬을 따릅니다.
+- DB 스키마(마이그레이션)를 변경하면 `scripts/gen-db-docs.sh`로 `dbdoc/`(tbls가 실 DB에서 생성하는 ERD 문서)를 재생성해 함께 커밋합니다. 현행 ERD는 `dbdoc/`, 목표 설계는 `docs/schema-roadmap.sql`을 보며, ERDCloud는 유지보수하지 않습니다.
 
 ### Terraform/IaC 작업
 
