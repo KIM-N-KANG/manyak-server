@@ -245,4 +245,83 @@ class AuthControllerIntegrationTests {
             .exchange()
             .expectStatus().isUnauthorized
     }
+
+    // ---- POST /api/v1/auth/logout ----
+
+    @Test
+    fun `유효한 refresh로 로그아웃하면 204이고 그 refresh로는 회전이 401이다`() {
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+
+        // 로그아웃: refresh 폐기. 204 No Content.
+        restTestClient.post()
+            .uri("/api/v1/auth/logout")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isNoContent
+
+        // 폐기됐으므로 그 refresh로는 회전 불가(401).
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `발급된 적 없는 refresh로 로그아웃해도 멱등하게 204다`() {
+        // 멱등: 없는 토큰 폐기는 무시하고 204로 응답한다(존재 여부를 노출하지 않는다).
+        restTestClient.post()
+            .uri("/api/v1/auth/logout")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"never-issued-token"}""")
+            .exchange()
+            .expectStatus().isNoContent
+    }
+
+    @Test
+    fun `logout 본문에 refreshToken이 비어 있으면 400이다`() {
+        restTestClient.post()
+            .uri("/api/v1/auth/logout")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":""}""")
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `만료된 Authorization Bearer 헤더가 붙어도 유효한 refresh면 204로 로그아웃한다`() {
+        // 모바일 인터셉터가 만료 access 토큰을 자동 첨부하는 시나리오.
+        // logout 경로도 refresh와 동일하게 bearer-skip이므로 만료 헤더로 401이 나면 안 된다.
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+        val past = Instant.now().minus(Duration.ofHours(2))
+        val expiredAccess = JwtTokenProvider(properties, Clock.fixed(past, ZoneOffset.UTC))
+            .issueAccessToken(user.publicId)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/logout")
+            .header("Authorization", "Bearer $expiredAccess")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isNoContent
+    }
+
+    @Test
+    fun `위조된 Authorization Bearer 헤더가 붙어도 유효한 refresh면 204로 로그아웃한다`() {
+        // 서명 검증 실패 토큰이 자동 첨부돼도 logout 경로에서는 토큰을 무시한다(bearer-skip).
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/logout")
+            .header("Authorization", "Bearer not-a-real-jwt.forged.token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isNoContent
+    }
 }

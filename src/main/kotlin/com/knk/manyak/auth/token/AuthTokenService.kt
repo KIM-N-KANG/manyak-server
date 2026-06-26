@@ -62,6 +62,16 @@ class AuthTokenService(
         return issueTokens(user)
     }
 
+    /**
+     * 제시된 refresh를 폐기해 재발급(회전)을 막는다(단일 기기 로그아웃).
+     * 원문을 해시해 store에서 **원자적으로 제거**한다(consume=GETDEL). 회전(rotate)도 같은 원자 소비를 쓰므로,
+     * 동시 logout·refresh가 단일 Redis 명령에서 경합해 한쪽만 토큰을 소비한다(폐기와 회전이 둘 다 일어나는 레이스 차단).
+     * 멱등하다 — 없는 토큰은 무시한다. (전체 기기 로그아웃은 범위 밖. 후속에서 deleteAllForUser로 다룬다.)
+     */
+    fun logout(rawRefresh: String) {
+        refreshTokenStore.consume(hash(rawRefresh))
+    }
+
     /** 256bit 랜덤을 base64url(패딩 없음)로 인코딩한 불투명 refresh 토큰을 만든다. */
     private fun generateRefreshToken(): String {
         val bytes = ByteArray(REFRESH_TOKEN_BYTES)

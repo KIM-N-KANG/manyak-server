@@ -45,6 +45,16 @@ data class RefreshTokenRequest(
     val refreshToken: String,
 )
 
+@Schema(description = "로그아웃 요청")
+data class LogoutRequest(
+    @field:NotBlank
+    @field:Schema(
+        description = "폐기할 refresh 토큰. 단일 기기 로그아웃으로 이 토큰만 폐기되어 재발급(회전)이 막힌다.",
+        example = "Qm9vdHN0cmFwUmVmcmVzaFRva2VuRXhhbXBsZVZhbHVlMTIz",
+    )
+    val refreshToken: String,
+)
+
 @Schema(description = "현재 로그인 사용자 정보")
 data class MeResponse(
     @field:Schema(description = "사용자 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")

@@ -97,6 +97,7 @@ class SecurityConfig {
         val BEARER_SKIP_MATCHERS = arrayOf(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/logout"),
         )
     }
 
