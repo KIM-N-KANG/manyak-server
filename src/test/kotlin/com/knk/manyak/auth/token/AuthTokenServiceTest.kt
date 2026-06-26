@@ -122,4 +122,26 @@ class AuthTokenServiceTest {
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")
     }
+
+    @Test
+    fun `logout은 refresh를 폐기해 이후 rotate가 401이다`() {
+        val user = registerUser(6L)
+        val issued = service.issueTokens(user)
+
+        service.logout(issued.refreshToken)
+
+        // 폐기됐으므로 store에서 더 이상 조회되지 않는다.
+        assertThat(store.findUserId(sha256Base64Url(issued.refreshToken))).isNull()
+        // 폐기된 refresh로는 회전할 수 없다(401).
+        assertThatThrownBy { service.rotate(issued.refreshToken) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `발급된 적 없는 refresh를 logout해도 예외 없이 멱등하다`() {
+        // 멱등: 없는 토큰 폐기는 무시한다(예외를 던지지 않는다).
+        service.logout("never-issued-token")
+    }
 }

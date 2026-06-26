@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.controller
 
+import com.knk.manyak.auth.dto.LogoutRequest
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.TokenResponse
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
@@ -93,6 +95,34 @@ class AuthController(
     fun refresh(
         @Valid @RequestBody request: RefreshTokenRequest,
     ): TokenResponse = authTokenService.rotate(request.refreshToken)
+
+    @Operation(
+        summary = "로그아웃",
+        description = "제시된 refresh 토큰을 폐기해 재발급(회전)을 막습니다(단일 기기 로그아웃). " +
+            "멱등하므로 이미 폐기됐거나 발급된 적 없는 토큰도 204로 응답합니다. " +
+            "access 토큰 없이 호출할 수 있으며, 자동 첨부된 만료·위조 access 헤더로는 막히지 않습니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "204",
+                description = "로그아웃 처리됨(refresh 폐기). 본문 없음.",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PostMapping("/logout")
+    fun logout(
+        @Valid @RequestBody request: LogoutRequest,
+    ) {
+        authTokenService.logout(request.refreshToken)
+    }
 
     /** sub(공개 식별자)를 UUID로 파싱한다. 형식이 깨졌으면(토큰은 유효했어도) 401로 본다. */
     private fun parsePublicId(subject: String?): UUID =

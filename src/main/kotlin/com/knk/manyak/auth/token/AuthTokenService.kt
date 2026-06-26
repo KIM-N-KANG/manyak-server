@@ -62,6 +62,15 @@ class AuthTokenService(
         return issueTokens(user)
     }
 
+    /**
+     * 제시된 refresh를 폐기해 재발급(회전)을 막는다(단일 기기 로그아웃).
+     * 원문을 해시해 store에서 제거한다. 멱등하다 — 없는 토큰 삭제는 무시한다.
+     * (전체 기기 로그아웃은 범위 밖. 후속 작업에서 deleteAllForUser로 다룬다.)
+     */
+    fun logout(rawRefresh: String) {
+        refreshTokenStore.delete(hash(rawRefresh))
+    }
+
     /** 256bit 랜덤을 base64url(패딩 없음)로 인코딩한 불투명 refresh 토큰을 만든다. */
     private fun generateRefreshToken(): String {
         val bytes = ByteArray(REFRESH_TOKEN_BYTES)
