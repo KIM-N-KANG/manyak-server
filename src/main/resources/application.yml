@@ -3,6 +3,11 @@ spring:
     name: manyak-server
   profiles:
     default: local
+  data:
+    redis:
+      # 운영은 ElastiCache endpoint를 env로 주입(AUTH/TLS 없음). Lettuce는 지연 연결이라 미가용 시에도 컨텍스트 로딩은 실패하지 않는다.
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
 
 management:
   endpoints:

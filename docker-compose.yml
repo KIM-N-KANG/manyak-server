@@ -16,5 +16,17 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    # 운영 ElastiCache 7.1과 메이저 일치(redis 7). AUTH/TLS 없는 로컬 개발용.
+    image: redis:7-alpine
+    container_name: manyak-redis
+    ports:
+      - "${MANYAK_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   manyak-postgres-data:
