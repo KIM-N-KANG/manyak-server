@@ -30,7 +30,12 @@ gh pr ready <PR번호>     # isDraft=true일 때만
 
 ### 2. Codex 리뷰 호출
 
+호출 **전에** 현재 Codex 봇 리뷰 수를 기준선(`PREV`)으로 기록합니다. 사람 리뷰가 먼저 달려 있을 수 있으므로 전체 리뷰 수가 아니라 **Codex 봇 리뷰 수**를 기준으로 잡아야, 폴링이 사람 리뷰를 Codex 리뷰로 오판하지 않습니다.
+
 ```bash
+REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+BOT="chatgpt-codex-connector[bot]"
+PREV=$(gh api "repos/$REPO/pulls/<PR번호>/reviews" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
 gh pr comment <PR번호> --body "@codex review"
 ```
 
@@ -38,13 +43,13 @@ gh pr comment <PR번호> --body "@codex review"
 
 ### 3. 첫 리뷰 도착까지 폴링 (최대 ~20분)
 
-`reviews`가 0에서 늘어나면 리뷰가 도착한 것입니다.
+전체 `reviews` 수가 아니라 **Codex 봇 리뷰 수가 기준선보다 늘어났는지**로 도착을 감지합니다(첫 리뷰·재리뷰 경로가 동일한 방식).
 
 ```bash
 for i in $(seq 1 40); do
-  R=$(gh pr view <PR번호> --json reviews --jq '.reviews | length' 2>/dev/null || echo 0)
-  if [ "${R:-0}" -gt 0 ]; then echo "CODEX_REVIEW_DETECTED reviews=$R"; exit 0; fi
-  echo "poll $i/40: reviews=$R — 30s 대기"
+  cv=$(gh api "repos/$REPO/pulls/<PR번호>/reviews" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV")
+  if [ "${cv:-0}" -gt "$PREV" ]; then echo "CODEX_REVIEW_DETECTED codex_reviews=$cv"; exit 0; fi
+  echo "poll $i/40: codex_reviews=$cv (baseline $PREV) — 30s 대기"
   sleep 30
 done
 echo "TIMEOUT_20MIN_NO_REVIEW"; exit 0
