@@ -1,9 +1,11 @@
 package com.knk.manyak.auth.controller
 
+import com.knk.manyak.auth.dto.GoogleLoginRequest
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.social.GoogleLoginService
 import com.knk.manyak.auth.token.AuthTokenService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
@@ -29,7 +31,37 @@ import java.util.UUID
 class AuthController(
     private val authTokenService: AuthTokenService,
     private val userRepository: UserRepository,
+    private val googleLoginService: GoogleLoginService,
 ) {
+
+    @Operation(
+        summary = "Google 로그인",
+        description = "Google ID 토큰을 검증해 사용자를 find-or-create하고 access+refresh 토큰을 발급합니다. " +
+            "토큰이 유효하지 않으면(서명·만료·issuer·audience 불일치) 401, 본문이 올바르지 않으면 400으로 응답합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "로그인 성공(토큰 발급)",
+                content = [Content(schema = Schema(implementation = TokenResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음(idToken 누락 등)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "401",
+                description = "유효하지 않은 Google ID 토큰",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @PostMapping("/login/google")
+    fun loginWithGoogle(
+        @Valid @RequestBody request: GoogleLoginRequest,
+    ): TokenResponse = googleLoginService.login(request.idToken)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",
