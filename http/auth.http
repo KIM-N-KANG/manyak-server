@@ -5,13 +5,12 @@
 ###   - access 토큰 = HS256 JWT (Authorization: Bearer <accessToken>). sub=user.public_id(UUID).
 ###   - refresh 토큰 = 불투명 랜덤 문자열(JWT 아님). 저장소에는 SHA-256 해시만 둔다. 회전 시 1회용으로 폐기된다.
 ###
-### 주의(선행 의존성):
-###   구글 로그인(KNK-55)이 아직 없어서, 유효한 토큰을 발급하는 공개 엔드포인트가 없습니다.
-###   따라서 "토큰 없음/위조/만료 → 401", "refresh 검증 실패 → 400/401" 같은 **준비가 필요 없는 케이스**는
+### 주의(유효 토큰 준비):
+###   "토큰 없음/위조/만료 → 401", "refresh 검증 실패 → 400/401" 같은 **준비가 필요 없는 케이스**는
 ###   이 파일만으로 바로 검증됩니다(아래 1~3, 6~8번).
-###   유효 토큰이 필요한 해피 패스(4~5, 9번)는 사용자/토큰을 수동으로 준비해 @accessToken / @refreshToken 에 채운 뒤 실행하세요.
-###   (준비 방법 예: 로컬 DB에 users 행을 만들고, 통합테스트의 JwtTokenProvider.issueAccessToken / AuthTokenService.issueTokens
-###    경로로 토큰을 한 번 찍어 복사. 로그인 도입 후에는 로그인 응답의 토큰을 그대로 쓰면 됩니다.)
+###   유효 토큰이 필요한 해피 패스(4~5, 9번)는 @accessToken / @refreshToken 에 채운 뒤 실행하세요.
+###   토큰 얻는 법(KNK-55 도입): http/auth-login-google.http 의 Google 로그인을 실행하면 응답의
+###   accessToken/refreshToken 이 그대로 나옵니다(전역 변수로도 저장됨). 그 값을 여기에 붙여 쓰면 됩니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
