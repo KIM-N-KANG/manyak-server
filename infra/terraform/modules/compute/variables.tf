@@ -80,3 +80,16 @@ variable "db_name" {
   description = "초기 DB 이름 (data db_name)"
   type        = string
 }
+
+# KNK-284 Redis 주입: user-data가 .env에 SPRING_DATA_REDIS_HOST/PORT로 emit (refresh 토큰 저장)
+variable "redis_address" {
+  description = "ElastiCache Redis 엔드포인트 주소 (data redis_endpoint). SPRING_DATA_REDIS_HOST로 주입. enable_redis=false면 빈 문자열"
+  type        = string
+  default     = ""
+}
+
+variable "redis_port" {
+  description = "ElastiCache Redis 포트 (data redis_port). SPRING_DATA_REDIS_PORT로 주입"
+  type        = number
+  default     = 6379
+}
