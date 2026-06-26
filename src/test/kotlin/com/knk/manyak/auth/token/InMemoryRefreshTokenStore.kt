@@ -3,53 +3,67 @@ package com.knk.manyak.auth.token
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /**
- * RefreshTokenStore의 테스트용 in-memory 페이크.
+ * RefreshTokenStore의 테스트용 in-memory 페이크(family 의미).
  *
- * Redis 인프라 없이 계약(save/find/delete, 만료 의미)을 검증하기 위한 구현이다.
- * 만료는 저장 시점의 만료 시각으로 시뮬레이션하며, 조회/삭제 시 만료된 항목을 정리한다.
+ * Redis 인프라 없이 family 계약(생성/회전/재사용 탐지/family·사용자 단위 폐기, 만료)을 검증한다.
+ * 단일 스레드 사용을 전제로 하므로 회전의 원자성은 자명하다(맵 연산 사이 끼어듦 없음).
  * 주입 가능한 Clock으로 만료 경계도 테스트할 수 있다.
  */
 class InMemoryRefreshTokenStore(
     private val clock: Clock = Clock.systemUTC(),
 ) : RefreshTokenStore {
 
-    private data class Entry(val userId: Long, val expiresAt: Instant)
+    /** family 레코드: 소유자 + 현재 유효한 토큰 해시 + 만료. */
+    private data class Family(val userId: Long, val currentTokenHash: String, val expiresAt: Instant)
 
-    private val entries = mutableMapOf<String, Entry>()
+    /** 발급된 토큰 해시 → familyId (과거 토큰 포함, 재사용 탐지용) + 만료. */
+    private data class TokenRef(val familyId: String, val expiresAt: Instant)
 
-    override fun save(tokenHash: String, userId: Long, ttl: Duration) {
-        if (ttl.isZero || ttl.isNegative) {
-            entries.remove(tokenHash)
-            return
+    private val families = mutableMapOf<String, Family>()
+    private val tokens = mutableMapOf<String, TokenRef>()
+
+    override fun createFamily(tokenHash: String, userId: Long, ttl: Duration): String {
+        val familyId = UUID.randomUUID().toString()
+        if (ttl.isZero || ttl.isNegative) return familyId // 즉시 만료: 저장하지 않는다.
+        val expiresAt = clock.instant().plus(ttl)
+        families[familyId] = Family(userId = userId, currentTokenHash = tokenHash, expiresAt = expiresAt)
+        tokens[tokenHash] = TokenRef(familyId = familyId, expiresAt = expiresAt)
+        return familyId
+    }
+
+    override fun rotate(presentedTokenHash: String, newTokenHash: String, ttl: Duration): RotateResult {
+        if (ttl.isZero || ttl.isNegative) return RotateResult.Invalid // 회전은 양수 TTL 전제(실제 refreshTtl).
+        val tokenRef = tokens[presentedTokenHash]?.takeUnless { isExpired(it.expiresAt) } ?: return RotateResult.Invalid
+        val family = families[tokenRef.familyId]?.takeUnless { isExpired(it.expiresAt) } ?: return RotateResult.Invalid
+        if (family.currentTokenHash != presentedTokenHash) {
+            // 과거(이미 회전된) 토큰의 재사용 → family 전체 폐기(탈취 정황).
+            revokeFamily(tokenRef.familyId)
+            return RotateResult.ReuseDetected(family.userId)
         }
-        entries[tokenHash] = Entry(userId = userId, expiresAt = clock.instant().plus(ttl))
+        val expiresAt = clock.instant().plus(ttl)
+        families[tokenRef.familyId] = family.copy(currentTokenHash = newTokenHash, expiresAt = expiresAt)
+        // 과거 토큰 매핑(presentedTokenHash)은 남겨 둔다 — 이후 재사용 시 family를 찾아 탐지하기 위해.
+        tokens[newTokenHash] = TokenRef(familyId = tokenRef.familyId, expiresAt = expiresAt)
+        return RotateResult.Rotated(family.userId)
     }
 
-    override fun findUserId(tokenHash: String): Long? {
-        val entry = entries[tokenHash] ?: return null
-        if (isExpired(entry)) {
-            entries.remove(tokenHash)
-            return null
-        }
-        return entry.userId
+    override fun revokeFamilyByToken(tokenHash: String) {
+        val familyId = tokens[tokenHash]?.familyId ?: return
+        revokeFamily(familyId)
     }
 
-    override fun consume(tokenHash: String): Long? {
-        // 조회+삭제를 한 번에. 단일 스레드 페이크라 원자성은 자명하다(removeIf/remove 사이 끼어듦 없음).
-        val entry = entries.remove(tokenHash) ?: return null
-        // 만료된 항목은 소비되지 않은 것으로 본다(이미 remove로 정리됨).
-        return if (isExpired(entry)) null else entry.userId
+    override fun revokeAllForUser(userId: Long) {
+        families.filterValues { it.userId == userId }.keys.toList().forEach { revokeFamily(it) }
     }
 
-    override fun delete(tokenHash: String) {
-        entries.remove(tokenHash)
+    private fun revokeFamily(familyId: String) {
+        families.remove(familyId)
+        // 해당 family의 토큰 매핑도 함께 제거한다(남아도 family가 없어 Invalid이지만 흔적을 정리한다).
+        tokens.entries.removeIf { it.value.familyId == familyId }
     }
 
-    override fun deleteAllForUser(userId: Long) {
-        entries.entries.removeIf { it.value.userId == userId }
-    }
-
-    private fun isExpired(entry: Entry): Boolean = !entry.expiresAt.isAfter(clock.instant())
+    private fun isExpired(expiresAt: Instant): Boolean = !expiresAt.isAfter(clock.instant())
 }

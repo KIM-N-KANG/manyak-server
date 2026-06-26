@@ -3,37 +3,57 @@ package com.knk.manyak.auth.token
 import java.time.Duration
 
 /**
- * refresh 토큰을 (해시 → userId)로 보관하는 저장소 추상화.
+ * refresh 토큰을 "family(세션/기기)" 단위로 보관하는 저장소 추상화.
  *
- * 토큰 원문이 아니라 해시를 키로 사용해 저장소 유출 시 원문 노출을 막는다.
- * TTL로 만료를 위임하며, 만료된 토큰은 조회되지 않는다.
- * 로그인/JWT 발급 로직은 이 추상화의 사용처(후속 작업)에서 다룬다.
+ * 한 번의 로그인이 하나의 family를 만든다. 회전(rotate)은 같은 family의 **현재 토큰**을
+ * 새 토큰으로 교체하고, 로그아웃·재사용 탐지는 **family 전체**를 폐기한다.
+ *
+ * 토큰 원문이 아니라 SHA-256 해시를 키로 사용해 저장소 유출 시 원문 노출을 막는다.
+ * TTL로 만료를 위임하며, 만료된 항목은 조회/회전되지 않는다.
+ *
+ * 보안 동기(KNK-288, Codex PR #72 P2):
+ * - **logout vs 동시 refresh 경합**: 같은 토큰을 logout과 refresh가 동시에 처리해도 family를
+ *   통째로 폐기하므로, 회전으로 새 토큰이 나가도 그 family가 사라져 세션이 살아남지 못한다.
+ * - **재사용 탐지**: 이미 회전된(폐기된) 과거 토큰이 다시 제시되면(탈취 정황) family 전체를 폐기한다.
  */
 interface RefreshTokenStore {
 
     /**
-     * 토큰 해시를 userId에 매핑해 저장한다. ttl 이후 만료된다.
-     * ttl이 0 이하이면 즉시 만료된 것으로 간주한다(저장하지 않거나 즉시 제거).
-     * 같은 tokenHash로 다시 저장하면 최신 값으로 덮어쓴다.
+     * 로그인: 새 세션 family를 만들고 첫 refresh 토큰 해시를 현재 토큰으로 등록한다.
+     * 생성된 familyId를 반환한다. ttl 이후 family와 토큰 매핑이 만료된다.
+     * ttl이 0 이하이면 아무것도 저장하지 않고 새 familyId만 반환한다(즉시 만료).
      */
-    fun save(tokenHash: String, userId: Long, ttl: Duration)
-
-    /** 토큰 해시에 매핑된 userId를 반환한다. 없거나 만료됐으면 null. */
-    fun findUserId(tokenHash: String): Long?
+    fun createFamily(tokenHash: String, userId: Long, ttl: Duration): String
 
     /**
-     * 토큰 해시에 매핑된 userId를 반환하면서 **원자적으로 제거**한다(조회+삭제를 한 연산으로).
-     * 없거나 만료됐으면 null.
+     * 회전: [presentedTokenHash]를 원자적으로 검증·소비하고, 같은 family의 현재 토큰이면 [newTokenHash]로 교체한다.
      *
-     * refresh 회전 시 동시 요청이 같은 토큰을 둘 다 소비하는 레이스(1회용/재사용 탐지 위반)를 막는다.
-     * findUserId 후 delete를 따로 부르면 두 호출 사이에 다른 요청이 끼어들 수 있으므로,
-     * 회전 경로는 반드시 이 메서드(예: Redis GETDEL)로 단일 원자 소비를 한다.
+     * - 현재 토큰 → [RotateResult.Rotated] (현재 토큰을 newTokenHash로 교체, family TTL을 ttl로 갱신)
+     * - 살아있는 family의 과거(이미 회전된) 토큰 → 재사용으로 보고 family 전체를 폐기하고 [RotateResult.ReuseDetected]
+     * - 알 수 없음/만료/이미 폐기된 family → [RotateResult.Invalid]
+     *
+     * 검증과 교체는 단일 원자 연산이어야 한다(동시 회전이 같은 현재 토큰을 둘 다 통과시키는 레이스 차단).
      */
-    fun consume(tokenHash: String): Long?
+    fun rotate(presentedTokenHash: String, newTokenHash: String, ttl: Duration): RotateResult
 
-    /** 토큰 해시를 제거한다. 없는 키 삭제는 무시한다. */
-    fun delete(tokenHash: String)
+    /**
+     * 제시된 토큰이 속한 family 전체를 폐기한다(단일 기기 로그아웃).
+     * 현재 토큰이든 과거 토큰이든 같은 family면 모두 무효화된다. 멱등 — 알 수 없는 토큰은 무시한다.
+     */
+    fun revokeFamilyByToken(tokenHash: String)
 
-    /** 해당 사용자의 모든 refresh 토큰을 무효화한다(전체 로그아웃 등). */
-    fun deleteAllForUser(userId: Long)
+    /** 사용자의 모든 family를 폐기한다(전체 로그아웃·계정 정지/삭제 등). */
+    fun revokeAllForUser(userId: Long)
+}
+
+/** [RefreshTokenStore.rotate]의 결과. */
+sealed interface RotateResult {
+    /** 회전 성공. [newTokenHash]가 현재 토큰으로 등록됐다. */
+    data class Rotated(val userId: Long) : RotateResult
+
+    /** 이미 회전된 과거 토큰의 재사용을 탐지해 family 전체를 폐기했다(탈취 정황). */
+    data class ReuseDetected(val userId: Long) : RotateResult
+
+    /** 알 수 없거나 만료됐거나 이미 폐기된 토큰. */
+    data object Invalid : RotateResult
 }
