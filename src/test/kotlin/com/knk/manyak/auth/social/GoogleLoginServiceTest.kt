@@ -1,156 +1,101 @@
 package com.knk.manyak.auth.social
 
-import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.SocialAccountRepository
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
+import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.util.Optional
 
 /**
- * GoogleLoginService의 find-or-create 계약을 고정한다.
+ * GoogleLoginService의 오케스트레이션 계약을 고정한다(검증 → find-or-create → 토큰 발급).
  *
- * Google 호출은 가짜 [GoogleIdTokenVerifier]로 대체하고(외부 IO 없음),
- * 영속성([UserRepository]/[SocialAccountRepository])은 mock으로 검증한다.
- * 토큰 발급은 실제 [AuthTokenService]를 mock으로 두고 호출 여부만 본다.
+ * 영속성은 [GoogleAccountRegistrar] mock으로 대체하고(트랜잭션 경계는 그 빈이 가진다),
+ * 토큰 발급은 [AuthTokenService] mock으로 호출 여부만 본다.
  *
- * - 신규: SocialAccount가 없으면 User+SocialAccount를 생성하고 토큰을 발급한다.
- * - 기존: SocialAccount가 있으면 User를 재사용하고 lastLoginAt을 갱신한다.
- * - 검증 실패: verifier가 401을 던지면 그대로 전파한다(저장 부작용 없음).
+ * - 기존 사용자: registrar.findExistingUser가 User를 주면 그대로 토큰을 발급한다.
+ * - 신규 사용자: 없으면 createUserAndAccount로 만들고 토큰을 발급한다.
+ * - 동시 첫 로그인: create가 유니크 위반(DataIntegrityViolationException)이면 재조회로 상대가 만든 계정을 재사용한다.
+ * - 검증 실패: verifier가 401을 던지면 전파하고 저장 부작용이 없다.
  */
 class GoogleLoginServiceTest {
 
-    private val userRepository: UserRepository = mock(UserRepository::class.java)
-    private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
+    private val registrar: GoogleAccountRegistrar = mock(GoogleAccountRegistrar::class.java)
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
-        GoogleLoginService(verifier, userRepository, socialAccountRepository, authTokenService)
+        GoogleLoginService(verifier, registrar, authTokenService)
 
-    private fun fakeVerifier(info: SocialUserInfo): GoogleIdTokenVerifier =
-        GoogleIdTokenVerifier { info }
+    private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
+        GoogleIdTokenVerifier { SocialUserInfo(providerUserId = providerUserId) }
+
+    // Kotlin non-null 파라미터에 Mockito any()를 쓰면 matcher가 null을 반환해 NPE가 난다.
+    // 매처는 stubbing에서 값 자체가 쓰이지 않으므로, 타입만 맞춰주는 헬퍼로 우회한다(mockito-kotlin 미사용).
+    private fun anySocialUserInfo(): SocialUserInfo = any(SocialUserInfo::class.java) ?: SocialUserInfo("x")
+    private fun anyInstant(): Instant = any(Instant::class.java) ?: Instant.EPOCH
 
     @Test
-    fun `신규 사용자는 User와 SocialAccount를 생성하고 토큰을 발급한다`() {
-        val verifier = fakeVerifier(
-            SocialUserInfo(
-                providerUserId = "google-sub-123",
-                email = "alice@example.com",
-                name = "Alice",
-                picture = "https://example.com/alice.png",
-            ),
-        )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "google-sub-123"))
+    fun `기존 사용자면 재사용해 토큰을 발급하고 새로 만들지 않는다`() {
+        val user = User(id = 42L, nickname = "기존닉")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
+
+        serviceWith(fakeVerifier("sub")).login("dummy")
+
+        verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant())
+        verify(authTokenService).issueTokens(user)
+    }
+
+    @Test
+    fun `신규 사용자면 생성해 토큰을 발급한다`() {
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+
+        serviceWith(fakeVerifier("sub")).login("dummy")
+
+        verify(registrar).createUserAndAccount(anySocialUserInfo(), anyInstant())
+        verify(authTokenService).issueTokens(created)
+    }
+
+    @Test
+    fun `동시 첫 로그인으로 create가 유니크 위반이면 재조회로 기존 User를 재사용한다`() {
+        val concurrentlyCreated = User(id = 100L, nickname = "상대가만듦")
+        // 1차 findExistingUser: 아직 못 찾음(둘 다 lookup miss). 2차(재시도): 상대가 커밋한 계정을 찾음.
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant()))
             .thenReturn(null)
-        // save가 id가 채워진 User를 반환하도록(IDENTITY 시뮬레이션) 입력을 그대로 돌려준다.
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
+            .thenReturn(concurrentlyCreated)
+        // create는 유니크 위반으로 실패한다.
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+            .thenThrow(DataIntegrityViolationException("uq_social_accounts_provider_user"))
 
-        serviceWith(verifier).login("dummy-id-token")
+        serviceWith(fakeVerifier("sub")).login("dummy")
 
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        val savedUser = userCaptor.value
-        assertThat(savedUser.nickname).isEqualTo("Alice")
-        assertThat(savedUser.profileImageUrl).isEqualTo("https://example.com/alice.png")
-        assertThat(savedUser.status).isEqualTo(UserStatus.ACTIVE)
-
-        val socialCaptor = ArgumentCaptor.forClass(SocialAccount::class.java)
-        verify(socialAccountRepository).save(socialCaptor.capture())
-        val savedSocial = socialCaptor.value
-        assertThat(savedSocial.provider).isEqualTo(SocialProvider.GOOGLE)
-        assertThat(savedSocial.providerUserId).isEqualTo("google-sub-123")
-        assertThat(savedSocial.email).isEqualTo("alice@example.com")
-        assertThat(savedSocial.lastLoginAt).isNotNull()
-
-        verify(authTokenService).issueTokens(savedUser)
+        // 재조회로 찾은 기존 User로 토큰을 발급한다(500이 아님).
+        verify(registrar, times(2)).findExistingUser(anySocialUserInfo(), anyInstant())
+        verify(authTokenService).issueTokens(concurrentlyCreated)
     }
 
     @Test
-    fun `이름이 없으면 이메일 local-part를 닉네임으로 쓴다`() {
-        val verifier = fakeVerifier(
-            SocialUserInfo(providerUserId = "sub", email = "bob@example.com", name = null, picture = null),
-        )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(null)
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
+    fun `create가 유니크 위반인데 재조회로도 못 찾으면 원 예외를 던진다`() {
+        // 둘 다 못 찾고, create는 계속 실패하는 비정상 상태(데이터 정합성 문제). 삼키지 않고 드러낸다.
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+            .thenThrow(DataIntegrityViolationException("boom"))
 
-        serviceWith(verifier).login("dummy")
+        assertThatThrownBy { serviceWith(fakeVerifier("sub")).login("dummy") }
+            .isInstanceOf(DataIntegrityViolationException::class.java)
 
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("bob")
-    }
-
-    @Test
-    fun `이름과 이메일이 모두 없으면 기본 닉네임을 쓴다`() {
-        val verifier = fakeVerifier(
-            SocialUserInfo(providerUserId = "sub", email = null, name = null, picture = null),
-        )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(null)
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
-
-        serviceWith(verifier).login("dummy")
-
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("사용자")
-    }
-
-    @Test
-    fun `기존 사용자는 재사용하고 lastLoginAt을 갱신하며 새 User를 만들지 않는다`() {
-        val verifier = fakeVerifier(
-            SocialUserInfo(providerUserId = "google-sub-123", email = "alice@example.com", name = "Alice", picture = null),
-        )
-        val existingUser = User(id = 42L, nickname = "기존닉")
-        val before = Instant.now().minusSeconds(3600)
-        val existingSocial = SocialAccount(
-            id = 7L,
-            userId = 42L,
-            provider = SocialProvider.GOOGLE,
-            providerUserId = "google-sub-123",
-            email = "alice@example.com",
-            lastLoginAt = before,
-        )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "google-sub-123"))
-            .thenReturn(existingSocial)
-        `when`(userRepository.findById(42L)).thenReturn(Optional.of(existingUser))
-
-        serviceWith(verifier).login("dummy")
-
-        // 신규 생성 경로를 타지 않는다.
-        verify(userRepository, never()).save(any(User::class.java))
-        // lastLoginAt이 더 최근으로 갱신된다.
-        assertThat(existingSocial.lastLoginAt).isAfter(before)
-        verify(authTokenService).issueTokens(existingUser)
-    }
-
-    @Test
-    fun `기존 SocialAccount가 가리키는 User가 사라졌으면 401이다`() {
-        val verifier = fakeVerifier(
-            SocialUserInfo(providerUserId = "sub", email = null, name = null, picture = null),
-        )
-        val social = SocialAccount(userId = 99L, provider = SocialProvider.GOOGLE, providerUserId = "sub")
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(social)
-        `when`(userRepository.findById(99L)).thenReturn(Optional.empty())
-
-        assertThatThrownBy { serviceWith(verifier).login("dummy") }
-            .isInstanceOf(ResponseStatusException::class.java)
-            .extracting("statusCode")
-            .hasToString("401 UNAUTHORIZED")
+        verifyNoInteractions(authTokenService)
     }
 
     @Test
@@ -164,7 +109,6 @@ class GoogleLoginServiceTest {
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")
 
-        // 검증이 먼저 실패하므로 저장소·토큰 발급은 전혀 호출되지 않는다.
-        verifyNoInteractions(userRepository, socialAccountRepository, authTokenService)
+        verifyNoInteractions(registrar, authTokenService)
     }
 }

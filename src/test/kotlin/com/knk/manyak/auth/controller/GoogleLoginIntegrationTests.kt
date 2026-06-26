@@ -39,21 +39,36 @@ class GoogleLoginIntegrationTests {
 
     @TestConfiguration
     class FakeGoogleConfig {
-        // "invalid"는 401, 그 외(유효 토큰)는 토큰을 sub로 삼아 고정 사용자 정보를 돌려준다.
+        // "invalid"는 401, "long-name:<n>"은 길이 n짜리 display name(경계 테스트용),
+        // 그 외(유효 토큰)는 토큰을 sub로 삼아 고정 사용자 정보를 돌려준다.
         @Bean
         @Primary
         fun fakeGoogleIdTokenVerifier(): GoogleIdTokenVerifier =
             GoogleIdTokenVerifier { idToken ->
-                if (idToken == "invalid") {
-                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 Google ID 토큰입니다.")
+                when {
+                    idToken == "invalid" ->
+                        throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 Google ID 토큰입니다.")
+                    idToken.startsWith(LONG_NAME_PREFIX) -> {
+                        val length = idToken.removePrefix(LONG_NAME_PREFIX).toInt()
+                        SocialUserInfo(
+                            providerUserId = idToken,
+                            email = "user@example.com",
+                            name = "가".repeat(length),
+                            picture = null,
+                        )
+                    }
+                    else -> SocialUserInfo(
+                        providerUserId = idToken,
+                        email = "user@example.com",
+                        name = "테스터",
+                        picture = "https://example.com/p.png",
+                    )
                 }
-                SocialUserInfo(
-                    providerUserId = idToken,
-                    email = "user@example.com",
-                    name = "테스터",
-                    picture = "https://example.com/p.png",
-                )
             }
+
+        companion object {
+            const val LONG_NAME_PREFIX = "long-name:"
+        }
 
         @Bean
         @Primary
@@ -92,6 +107,23 @@ class GoogleLoginIntegrationTests {
         val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "new-google-sub")
         assertThat(social).isNotNull
         assertThat(userRepository.findById(social!!.userId)).isPresent
+    }
+
+    @Test
+    fun `display name이 50자를 넘으면 50자로 잘려 정상 생성·로그인된다`() {
+        // users.nickname 은 VARCHAR(50). 80자 이름을 그대로 저장하면 flush에서 길이 초과로 500이 난다.
+        // 50자로 정규화돼 200으로 로그인되고, 저장된 nickname 길이가 50이어야 한다.
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"long-name:80"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "long-name:80")
+        assertThat(social).isNotNull
+        val user = userRepository.findById(social!!.userId).orElseThrow()
+        assertThat(user.nickname).hasSize(50)
     }
 
     @Test

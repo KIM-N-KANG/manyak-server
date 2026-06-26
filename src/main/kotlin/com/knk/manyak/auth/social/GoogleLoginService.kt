@@ -1,88 +1,56 @@
 package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.SocialAccountRepository
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
-import org.springframework.http.HttpStatus
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
-import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 /**
  * Google ID 토큰으로 로그인한다(검증 → find-or-create → 우리 토큰 발급).
  *
  * 1) [GoogleIdTokenVerifier]로 ID 토큰을 검증해 [SocialUserInfo]를 얻는다(실패는 401).
- * 2) (GOOGLE, providerUserId)로 [SocialAccount]를 찾는다.
+ * 2) [GoogleAccountRegistrar]로 (GOOGLE, providerUserId) 연동을 find-or-create한다.
  *    - 있으면: 연결된 [User]를 재사용하고 `lastLoginAt`을 갱신한다.
- *    - 없으면: [User](nickname=name→email local-part→"사용자", profileImageUrl=picture, ACTIVE)와
- *      [SocialAccount]를 생성한다.
+ *    - 없으면: [User](nickname=name→email local-part→"사용자", 50자 제한, ACTIVE)와 [SocialAccount]를 생성한다.
  * 3) [AuthTokenService.issueTokens]로 access+refresh를 발급해 반환한다.
  *
- * @Transactional로 묶어, 생성 도중 실패 시 부분 저장이 남지 않게 한다.
+ * 트랜잭션은 [GoogleAccountRegistrar]가 가진다(이 빈은 트랜잭션 밖에서 오케스트레이션만 한다).
+ * 그래서 동시 첫 로그인으로 생성이 유니크 위반([DataIntegrityViolationException])이면,
+ * 실패한 내부 트랜잭션과 무관하게 한 번 더 조회해 상대 요청이 만든 계정을 재사용한다(아래 참고).
  */
 @Service
 class GoogleLoginService(
     private val verifier: GoogleIdTokenVerifier,
-    private val userRepository: UserRepository,
-    private val socialAccountRepository: SocialAccountRepository,
+    private val registrar: GoogleAccountRegistrar,
     private val authTokenService: AuthTokenService,
 ) {
 
-    @Transactional
     fun login(idToken: String): TokenResponse {
         val info = verifier.verify(idToken)
-        val now = Instant.now()
-
-        val existing = socialAccountRepository.findByProviderAndProviderUserId(
-            SocialProvider.GOOGLE,
-            info.providerUserId,
-        )
-
-        val user = if (existing != null) {
-            // 기존 연동: 사용자를 재사용하고 마지막 로그인 시각만 갱신한다.
-            existing.lastLoginAt = now
-            userRepository.findById(existing.userId).orElseThrow {
-                // 연동은 있는데 사용자가 사라진 비정상 상태. 존재 여부를 노출하지 않도록 401로 통일한다.
-                ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-            }
-        } else {
-            // 신규 연동: 사용자와 소셜 계정을 함께 생성한다.
-            val created = userRepository.save(
-                User(
-                    nickname = resolveNickname(info),
-                    profileImageUrl = info.picture,
-                    status = UserStatus.ACTIVE,
-                ),
-            )
-            socialAccountRepository.save(
-                SocialAccount(
-                    userId = created.id,
-                    provider = SocialProvider.GOOGLE,
-                    providerUserId = info.providerUserId,
-                    email = info.email,
-                    connectedAt = now,
-                    lastLoginAt = now,
-                ),
-            )
-            created
-        }
-
+        val user = findOrCreateUser(info)
         return authTokenService.issueTokens(user)
     }
 
-    /** 닉네임 우선순위: 프로필 이름 → 이메일 local-part → 기본값. 빈 문자열은 없는 것으로 본다. */
-    private fun resolveNickname(info: SocialUserInfo): String =
-        info.name?.takeIf { it.isNotBlank() }
-            ?: info.email?.substringBefore("@")?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_NICKNAME
+    /**
+     * 연동을 찾으면 그 User를, 없으면 새로 만들어 반환한다.
+     *
+     * 동시 첫 로그인 경합: 두 요청이 모두 조회에서 놓치고 둘 다 생성을 시도하면, 한쪽은
+     * 유니크 위반으로 실패한다. 이때 [GoogleAccountRegistrar.createUserAndAccount]는 독립 트랜잭션이라
+     * 그 실패가 여기(트랜잭션 밖)로 전파돼도 우리는 rollback-only에 걸리지 않는다. 한 번 더 조회하면
+     * 이번엔 상대 요청이 커밋한 계정이 보이므로 그 User를 재사용한다(500 대신 정상 로그인).
+     * 재조회로도 못 찾으면 일시적 경합이 아니라 실제 정합성 문제이므로 원 예외를 그대로 드러낸다.
+     */
+    private fun findOrCreateUser(info: SocialUserInfo): User {
+        val now = Instant.now()
+        registrar.findExistingUser(info, now)?.let { return it }
 
-    private companion object {
-        const val DEFAULT_NICKNAME = "사용자"
+        return try {
+            registrar.createUserAndAccount(info, now)
+        } catch (ex: DataIntegrityViolationException) {
+            // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
+            registrar.findExistingUser(info, Instant.now()) ?: throw ex
+        }
     }
 }
