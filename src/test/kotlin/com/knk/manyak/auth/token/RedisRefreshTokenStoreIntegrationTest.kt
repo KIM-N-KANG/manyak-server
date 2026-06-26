@@ -75,6 +75,20 @@ class RedisRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    fun `consume은 GETDEL로 userId를 반환하며 토큰 키와 사용자 인덱스를 함께 제거한다`() {
+        store.save(tokenHash = "hash-consume", userId = 8L, ttl = Duration.ofMinutes(30))
+
+        // 첫 소비: userId 반환 + 원자적 삭제.
+        assertThat(store.consume("hash-consume")).isEqualTo(8L)
+        // 토큰 키가 사라졌다(GETDEL).
+        assertThat(redisTemplate.hasKey("refresh:hash-consume")).isFalse()
+        // 사용자 인덱스 SET에서도 해당 해시가 빠졌다.
+        assertThat(redisTemplate.opsForSet().isMember("user:8:refresh", "hash-consume")).isFalse()
+        // 둘째 소비는 null(재사용 차단).
+        assertThat(store.consume("hash-consume")).isNull()
+    }
+
+    @Test
     fun `deleteAllForUser는 해당 사용자의 모든 토큰을 무효화한다`() {
         store.save(tokenHash = "hash-a", userId = 99L, ttl = Duration.ofMinutes(30))
         store.save(tokenHash = "hash-b", userId = 99L, ttl = Duration.ofMinutes(30))

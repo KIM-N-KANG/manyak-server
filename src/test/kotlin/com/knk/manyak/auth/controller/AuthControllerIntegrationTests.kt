@@ -168,6 +168,43 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
+    fun `만료된 Authorization Bearer 헤더가 붙어도 유효한 refresh면 200으로 회전한다`() {
+        // 모바일 인터셉터가 만료 access 토큰을 모든 요청에 자동 첨부하는 시나리오.
+        // refresh 경로는 bearerTokenResolver에서 토큰을 무시하므로, 만료 헤더로 401이 나면 안 된다.
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+        val past = Instant.now().minus(Duration.ofHours(2))
+        val expiredAccess = JwtTokenProvider(properties, Clock.fixed(past, ZoneOffset.UTC))
+            .issueAccessToken(user.publicId)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .header("Authorization", "Bearer $expiredAccess")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.accessToken").isNotEmpty
+            .jsonPath("$.refreshToken").isNotEmpty
+    }
+
+    @Test
+    fun `위조된 Authorization Bearer 헤더가 붙어도 유효한 refresh면 200으로 회전한다`() {
+        // 서명 검증 실패 토큰이 자동 첨부돼도 refresh 경로에서는 토큰을 무시한다.
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .header("Authorization", "Bearer not-a-real-jwt.forged.token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isOk
+    }
+
+    @Test
     fun `무효한 refresh로 회전하면 401이다`() {
         restTestClient.post()
             .uri("/api/v1/auth/token/refresh")

@@ -55,9 +55,9 @@ class AuthTokenService(
      */
     fun rotate(rawRefresh: String): TokenResponse {
         val oldHash = hash(rawRefresh)
-        val userId = refreshTokenStore.findUserId(oldHash) ?: throw unauthorized()
-        // 회전: old를 먼저 폐기해 동일 토큰 재사용을 막는다.
-        refreshTokenStore.delete(oldHash)
+        // 회전은 원자적 소비(consume=GETDEL)로 한다. 동시 요청이 같은 refresh로 둘 다 발급하는 레이스를 막는다.
+        // (findUserId 후 delete를 따로 부르면 두 호출 사이에 다른 요청이 끼어들 수 있다.)
+        val userId = refreshTokenStore.consume(oldHash) ?: throw unauthorized()
         val user = userRepository.findById(userId).orElseThrow { unauthorized() }
         return issueTokens(user)
     }
