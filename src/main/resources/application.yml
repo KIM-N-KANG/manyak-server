@@ -5,9 +5,11 @@ spring:
     default: local
   data:
     redis:
-      # 운영은 ElastiCache endpoint를 env로 주입(AUTH/TLS 없음). Lettuce는 지연 연결이라 미가용 시에도 컨텍스트 로딩은 실패하지 않는다.
+      # 로컬은 docker-compose의 redis(기본 6379). MANYAK_REDIS_PORT로 게시 포트를 바꾸면 앱도 같이 따라가도록 폴백한다.
+      # 운영은 ElastiCache endpoint를 env(SPRING_DATA_REDIS_*)로 주입한다(KNK-284). Lettuce는 지연 연결이라
+      # Redis 미가용 시에도 컨텍스트 로딩은 실패하지 않으며, 운영 health에서는 Redis를 분리한다(application-prod.yml).
       host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
+      port: ${SPRING_DATA_REDIS_PORT:${MANYAK_REDIS_PORT:6379}}
 
 management:
   endpoints:
