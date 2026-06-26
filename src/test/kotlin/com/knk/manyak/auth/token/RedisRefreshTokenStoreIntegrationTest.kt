@@ -3,6 +3,7 @@ package com.knk.manyak.auth.token
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,10 +18,10 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 /**
- * embedded-redis로 실제 Redis(7.x) 동작을 띄워 RedisRefreshTokenStore의 실동작을 검증한다.
+ * embedded-redis로 실제 Redis(7.x)를 띄워 RedisRefreshTokenStore의 family 동작을 검증한다.
  *
- * 계약(save/find/delete, 만료, 사용자 인덱스 기반 전체 무효화)을 in-memory 페이크가 아닌
- * 실제 Redis 명령으로 확인한다. @DataRedisTest로 StringRedisTemplate만 슬라이스 로딩한다.
+ * family 계약(생성/회전/재사용 탐지/폐기)을 in-memory 페이크가 아닌 실제 Redis 명령(Lua 포함)으로 확인한다.
+ * @DataRedisTest로 StringRedisTemplate만 슬라이스 로딩한다.
  */
 @DataRedisTest
 @Import(RedisRefreshTokenStore::class)
@@ -33,91 +34,98 @@ class RedisRefreshTokenStoreIntegrationTest {
     @Autowired
     private lateinit var store: RedisRefreshTokenStore
 
-    @org.junit.jupiter.api.BeforeEach
+    private val ttl = Duration.ofMinutes(30)
+
+    @BeforeEach
     fun flush() {
         redisTemplate.connectionFactory?.connection?.use { it.serverCommands().flushAll() }
     }
 
     @Test
-    fun `저장한 토큰 해시로 userId를 조회한다`() {
-        store.save(tokenHash = "hash-1", userId = 42L, ttl = Duration.ofMinutes(30))
+    fun `createFamily는 family·토큰·사용자 인덱스 키를 TTL과 함께 만든다`() {
+        val familyId = store.createFamily(tokenHash = "t1", userId = 42L, ttl = ttl)
 
-        assertThat(store.findUserId("hash-1")).isEqualTo(42L)
+        assertThat(redisTemplate.opsForValue().get("rt:fam:$familyId")).isEqualTo("42:t1")
+        assertThat(redisTemplate.opsForValue().get("rt:tok:t1")).isEqualTo(familyId)
+        assertThat(redisTemplate.opsForSet().isMember("rt:user:42", familyId)).isTrue()
+        assertThat(redisTemplate.getExpire("rt:fam:$familyId")).isGreaterThan(0)
+        assertThat(redisTemplate.getExpire("rt:tok:t1")).isGreaterThan(0)
     }
 
     @Test
-    fun `저장하지 않은 토큰 해시는 null을 반환한다`() {
-        assertThat(store.findUserId("unknown")).isNull()
+    fun `TTL이 0 이하면 아무 키도 만들지 않는다`() {
+        val familyId = store.createFamily("t0", 1L, Duration.ZERO)
+
+        assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
+        assertThat(redisTemplate.hasKey("rt:tok:t0")).isFalse()
     }
 
     @Test
-    fun `save는 refresh 키에 TTL을 적용한다`() {
-        store.save(tokenHash = "hash-ttl", userId = 1L, ttl = Duration.ofMinutes(30))
+    fun `현재 토큰 회전은 Rotated이고 새 토큰이 현재가 된다`() {
+        val familyId = store.createFamily("t1", 1L, ttl)
 
-        val ttl = redisTemplate.getExpire("refresh:hash-ttl")
-        assertThat(ttl).isGreaterThan(0)
+        assertThat(store.rotate("t1", "t2", ttl)).isEqualTo(RotateResult.Rotated(1L))
+        assertThat(redisTemplate.opsForValue().get("rt:fam:$familyId")).isEqualTo("1:t2")
+        assertThat(redisTemplate.opsForValue().get("rt:tok:t2")).isEqualTo(familyId)
+        // 새 토큰으로 다시 회전된다.
+        assertThat(store.rotate("t2", "t3", ttl)).isEqualTo(RotateResult.Rotated(1L))
     }
 
     @Test
-    fun `삭제한 토큰 해시는 더 이상 조회되지 않는다`() {
-        store.save(tokenHash = "hash-2", userId = 7L, ttl = Duration.ofMinutes(30))
-
-        store.delete("hash-2")
-
-        assertThat(store.findUserId("hash-2")).isNull()
+    fun `알 수 없는 토큰 회전은 Invalid다`() {
+        assertThat(store.rotate("unknown", "new", ttl)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `TTL이 0 이하면 저장되지 않는다`() {
-        store.save(tokenHash = "hash-zero", userId = 1L, ttl = Duration.ZERO)
+    fun `과거 토큰 재사용은 ReuseDetected이고 family 레코드와 사용자 인덱스가 삭제된다`() {
+        val familyId = store.createFamily("t1", 7L, ttl)
+        store.rotate("t1", "t2", ttl) // t1은 과거, t2가 현재.
 
-        assertThat(store.findUserId("hash-zero")).isNull()
+        assertThat(store.rotate("t1", "tx", ttl)).isEqualTo(RotateResult.ReuseDetected(7L))
+        // family 레코드 삭제 → 현재 토큰이던 t2도 무효.
+        assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
+        assertThat(redisTemplate.opsForSet().isMember("rt:user:7", familyId)).isFalse()
+        assertThat(store.rotate("t2", "ty", ttl)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `consume은 GETDEL로 userId를 반환하며 토큰 키와 사용자 인덱스를 함께 제거한다`() {
-        store.save(tokenHash = "hash-consume", userId = 8L, ttl = Duration.ofMinutes(30))
+    fun `revokeFamilyByToken은 과거 토큰으로도 family 전체를 폐기한다 (logout vs 동시 회전 경합 차단)`() {
+        val familyId = store.createFamily("t1", 1L, ttl)
+        store.rotate("t1", "t2", ttl) // 동시 회전이 새 토큰(t2)을 발급한 상황 모사.
 
-        // 첫 소비: userId 반환 + 원자적 삭제.
-        assertThat(store.consume("hash-consume")).isEqualTo(8L)
-        // 토큰 키가 사라졌다(GETDEL).
-        assertThat(redisTemplate.hasKey("refresh:hash-consume")).isFalse()
-        // 사용자 인덱스 SET에서도 해당 해시가 빠졌다.
-        assertThat(redisTemplate.opsForSet().isMember("user:8:refresh", "hash-consume")).isFalse()
-        // 둘째 소비는 null(재사용 차단).
-        assertThat(store.consume("hash-consume")).isNull()
+        store.revokeFamilyByToken("t1") // 로그아웃이 과거 토큰을 제시.
+
+        assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
+        assertThat(store.rotate("t2", "t3", ttl)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `deleteAllForUser는 해당 사용자의 모든 토큰을 무효화한다`() {
-        store.save(tokenHash = "hash-a", userId = 99L, ttl = Duration.ofMinutes(30))
-        store.save(tokenHash = "hash-b", userId = 99L, ttl = Duration.ofMinutes(30))
-        store.save(tokenHash = "hash-c", userId = 100L, ttl = Duration.ofMinutes(30))
-
-        store.deleteAllForUser(99L)
-
-        assertThat(store.findUserId("hash-a")).isNull()
-        assertThat(store.findUserId("hash-b")).isNull()
-        assertThat(store.findUserId("hash-c")).isEqualTo(100L)
+    fun `revokeFamilyByToken은 멱등하다`() {
+        store.revokeFamilyByToken("never-issued") // 예외 없이 무시한다.
     }
 
     @Test
-    fun `다른 사용자로 덮어쓴 토큰은 이전 사용자의 전체 무효화에 영향받지 않는다`() {
-        store.save(tokenHash = "hash-x", userId = 1L, ttl = Duration.ofMinutes(30))
-        store.save(tokenHash = "hash-x", userId = 2L, ttl = Duration.ofMinutes(30))
+    fun `revokeAllForUser는 사용자의 모든 family를 폐기하고 다른 사용자는 보존한다`() {
+        store.createFamily("a1", 99L, ttl)
+        store.createFamily("a2", 99L, ttl)
+        store.createFamily("b1", 100L, ttl)
 
-        store.deleteAllForUser(1L)
+        store.revokeAllForUser(99L)
 
-        assertThat(store.findUserId("hash-x")).isEqualTo(2L)
+        assertThat(store.rotate("a1", "x", ttl)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("a2", "y", ttl)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("b1", "z", ttl)).isEqualTo(RotateResult.Rotated(100L))
+        assertThat(redisTemplate.hasKey("rt:user:99")).isFalse()
     }
 
     @Test
-    fun `사용자 인덱스 TTL은 더 짧은 토큰 추가로 단축되지 않는다`() {
-        store.save(tokenHash = "hash-long", userId = 5L, ttl = Duration.ofSeconds(120))
-        store.save(tokenHash = "hash-short", userId = 5L, ttl = Duration.ofSeconds(5))
+    fun `회전은 family TTL을 갱신한다 (sliding)`() {
+        val familyId = store.createFamily("t1", 1L, Duration.ofSeconds(60))
 
-        val indexTtl = redisTemplate.getExpire("user:5:refresh", TimeUnit.SECONDS)
-        assertThat(indexTtl).isGreaterThan(60)
+        store.rotate("t1", "t2", Duration.ofMinutes(30))
+
+        val famTtl = redisTemplate.getExpire("rt:fam:$familyId", TimeUnit.SECONDS)
+        assertThat(famTtl).isGreaterThan(120)
     }
 
     companion object {
