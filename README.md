@@ -59,6 +59,22 @@ MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER=optional-random-pepper
 
 비즈니스 API는 `/api/v1` prefix를 사용합니다.
 
+## 스키마 문서
+
+DB 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 **실 DB에서 자동 생성**합니다. Flyway 마이그레이션이 진실원본이고, 문서는 거기서 파생됩니다.
+
+- **현행 스키마**: `dbdoc/` (tbls 자동 생성, ER 다이어그램 포함). 손으로 고치지 않습니다.
+- **목표(설계) 스키마**: `docs/schema-roadmap.sql` (수기, 새 기능 설계 시 갱신). ERDCloud는 유지보수를 중단했습니다.
+
+스키마(마이그레이션)를 바꾸면 문서를 재생성해 함께 커밋합니다.
+
+```bash
+brew install tbls          # 최초 1회
+./scripts/gen-db-docs.sh   # Docker 실행 + .env 필요
+```
+
+> 최초 도입 시 `dbdoc/` 베이스라인은 Docker가 켜진 환경에서 위 스크립트를 1회 실행해 생성·커밋해야 합니다. 이후 `tbls diff` CI(`.github/workflows/db-docs.yml`)가 마이그레이션 변경 시 문서 드리프트를 차단합니다.
+
 ## 팀 위키
 
 팀 LLM 위키와 공통 하네스는 manyak-server와 같은 상위 디렉터리에 둡니다.

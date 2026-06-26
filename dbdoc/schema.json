@@ -1,0 +1,2166 @@
+{
+  "name": "manyak",
+  "tables": [
+    {
+      "name": "public.story_creation_tags",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_tags_id_seq'::regclass)"
+        },
+        {
+          "name": "tag_type",
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        {
+          "name": "tag_source",
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_tags_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_tags_pkey ON public.story_creation_tags USING btree (id)",
+          "table": "public.story_creation_tags",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_story_creation_tags_lookup",
+          "def": "CREATE INDEX idx_story_creation_tags_lookup ON public.story_creation_tags USING btree (tag_source, is_active, tag_type, sort_order, id)",
+          "table": "public.story_creation_tags",
+          "columns": [
+            "tag_source",
+            "is_active",
+            "tag_type",
+            "sort_order",
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_tags_source_type_name",
+          "def": "CREATE UNIQUE INDEX uq_story_creation_tags_source_type_name ON public.story_creation_tags USING btree (tag_source, tag_type, name)",
+          "table": "public.story_creation_tags",
+          "columns": [
+            "tag_source",
+            "tag_type",
+            "name"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_creation_tags_sort_order",
+          "type": "CHECK",
+          "def": "CHECK ((sort_order \u003e= 0))",
+          "table": "public.story_creation_tags",
+          "referenced_table": "",
+          "columns": [
+            "sort_order"
+          ]
+        },
+        {
+          "name": "ck_story_creation_tags_tag_source",
+          "type": "CHECK",
+          "def": "CHECK (((tag_source)::text = ANY ((ARRAY['PREDEFINED'::character varying, 'CUSTOM'::character varying])::text[])))",
+          "table": "public.story_creation_tags",
+          "referenced_table": "",
+          "columns": [
+            "tag_source"
+          ]
+        },
+        {
+          "name": "ck_story_creation_tags_tag_type",
+          "type": "CHECK",
+          "def": "CHECK (((tag_type)::text = ANY ((ARRAY['GENRE'::character varying, 'PROTAGONIST'::character varying, 'SUPPORTING_CHARACTER'::character varying])::text[])))",
+          "table": "public.story_creation_tags",
+          "referenced_table": "",
+          "columns": [
+            "tag_type"
+          ]
+        },
+        {
+          "name": "story_creation_tags_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_tags",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_tags_source_type_name",
+          "type": "UNIQUE",
+          "def": "UNIQUE (tag_source, tag_type, name)",
+          "table": "public.story_creation_tags",
+          "referenced_table": "",
+          "columns": [
+            "tag_source",
+            "tag_type",
+            "name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_creation_sessions",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_sessions_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "story_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_sessions_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_sessions_pkey ON public.story_creation_sessions USING btree (id)",
+          "table": "public.story_creation_sessions",
+          "columns": [
+            "id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_creation_sessions_status",
+          "type": "CHECK",
+          "def": "CHECK (((status)::text = ANY ((ARRAY['STORYLINES_GENERATED'::character varying, 'STORY_CREATED'::character varying])::text[])))",
+          "table": "public.story_creation_sessions",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "story_creation_sessions_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_sessions",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_creation_session_tags",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_session_tags_id_seq'::regclass)"
+        },
+        {
+          "name": "creation_session_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "tag_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_session_tags_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_session_tags_pkey ON public.story_creation_session_tags USING btree (id)",
+          "table": "public.story_creation_session_tags",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_session_tags_tag",
+          "def": "CREATE UNIQUE INDEX uq_story_creation_session_tags_tag ON public.story_creation_session_tags USING btree (creation_session_id, tag_id)",
+          "table": "public.story_creation_session_tags",
+          "columns": [
+            "creation_session_id",
+            "tag_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "story_creation_session_tags_tag_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)",
+          "table": "public.story_creation_session_tags",
+          "referenced_table": "public.story_creation_tags",
+          "columns": [
+            "tag_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_creation_session_tags_creation_session_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE",
+          "table": "public.story_creation_session_tags",
+          "referenced_table": "public.story_creation_sessions",
+          "columns": [
+            "creation_session_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_creation_session_tags_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_session_tags",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_session_tags_tag",
+          "type": "UNIQUE",
+          "def": "UNIQUE (creation_session_id, tag_id)",
+          "table": "public.story_creation_session_tags",
+          "referenced_table": "",
+          "columns": [
+            "creation_session_id",
+            "tag_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_creation_examples",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_examples_id_seq'::regclass)"
+        },
+        {
+          "name": "creation_session_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "example_text",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "example_order",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "is_selected",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_examples_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_examples_pkey ON public.story_creation_examples USING btree (id)",
+          "table": "public.story_creation_examples",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_examples_order",
+          "def": "CREATE UNIQUE INDEX uq_story_creation_examples_order ON public.story_creation_examples USING btree (creation_session_id, example_order)",
+          "table": "public.story_creation_examples",
+          "columns": [
+            "creation_session_id",
+            "example_order"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_creation_examples_order",
+          "type": "CHECK",
+          "def": "CHECK ((example_order \u003e 0))",
+          "table": "public.story_creation_examples",
+          "referenced_table": "",
+          "columns": [
+            "example_order"
+          ]
+        },
+        {
+          "name": "story_creation_examples_creation_session_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE",
+          "table": "public.story_creation_examples",
+          "referenced_table": "public.story_creation_sessions",
+          "columns": [
+            "creation_session_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_creation_examples_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_examples",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_examples_order",
+          "type": "UNIQUE",
+          "def": "UNIQUE (creation_session_id, example_order)",
+          "table": "public.story_creation_examples",
+          "referenced_table": "",
+          "columns": [
+            "creation_session_id",
+            "example_order"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_creation_example_recommended_infos",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_example_recommended_infos_id_seq'::regclass)"
+        },
+        {
+          "name": "example_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "info_text",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "info_order",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_example_recommended_infos_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_example_recommended_infos_pkey ON public.story_creation_example_recommended_infos USING btree (id)",
+          "table": "public.story_creation_example_recommended_infos",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_example_recommended_infos_order",
+          "def": "CREATE UNIQUE INDEX uq_story_creation_example_recommended_infos_order ON public.story_creation_example_recommended_infos USING btree (example_id, info_order)",
+          "table": "public.story_creation_example_recommended_infos",
+          "columns": [
+            "example_id",
+            "info_order"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_creation_example_recommended_infos_order",
+          "type": "CHECK",
+          "def": "CHECK ((info_order \u003e 0))",
+          "table": "public.story_creation_example_recommended_infos",
+          "referenced_table": "",
+          "columns": [
+            "info_order"
+          ]
+        },
+        {
+          "name": "story_creation_example_recommended_infos_example_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE",
+          "table": "public.story_creation_example_recommended_infos",
+          "referenced_table": "public.story_creation_examples",
+          "columns": [
+            "example_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_creation_example_recommended_infos_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_example_recommended_infos",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_example_recommended_infos_order",
+          "type": "UNIQUE",
+          "def": "UNIQUE (example_id, info_order)",
+          "table": "public.story_creation_example_recommended_infos",
+          "referenced_table": "",
+          "columns": [
+            "example_id",
+            "info_order"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.stories",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('stories_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "title",
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        {
+          "name": "one_line_intro",
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "genre",
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "public_id",
+          "type": "uuid",
+          "nullable": false,
+          "default": "gen_random_uuid()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "stories_pkey",
+          "def": "CREATE UNIQUE INDEX stories_pkey ON public.stories USING btree (id)",
+          "table": "public.stories",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_stories_public_id",
+          "def": "CREATE UNIQUE INDEX uq_stories_public_id ON public.stories USING btree (public_id)",
+          "table": "public.stories",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "stories_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.stories",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_stories_public_id",
+          "type": "UNIQUE",
+          "def": "UNIQUE (public_id)",
+          "table": "public.stories",
+          "referenced_table": "",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_settings",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_settings_id_seq'::regclass)"
+        },
+        {
+          "name": "story_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "world_setting",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "character_setting",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "user_role_setting",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "rule_setting",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_settings_pkey",
+          "def": "CREATE UNIQUE INDEX story_settings_pkey ON public.story_settings USING btree (id)",
+          "table": "public.story_settings",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_settings_story",
+          "def": "CREATE UNIQUE INDEX uq_story_settings_story ON public.story_settings USING btree (story_id)",
+          "table": "public.story_settings",
+          "columns": [
+            "story_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "story_settings_story_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE",
+          "table": "public.story_settings",
+          "referenced_table": "public.stories",
+          "columns": [
+            "story_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_settings_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_settings",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_settings_story",
+          "type": "UNIQUE",
+          "def": "UNIQUE (story_id)",
+          "table": "public.story_settings",
+          "referenced_table": "",
+          "columns": [
+            "story_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_start_settings",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_start_settings_id_seq'::regclass)"
+        },
+        {
+          "name": "story_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        {
+          "name": "prologue",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "start_situation",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_start_settings_pkey",
+          "def": "CREATE UNIQUE INDEX story_start_settings_pkey ON public.story_start_settings USING btree (id)",
+          "table": "public.story_start_settings",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_start_settings_story",
+          "def": "CREATE UNIQUE INDEX uq_story_start_settings_story ON public.story_start_settings USING btree (story_id)",
+          "table": "public.story_start_settings",
+          "columns": [
+            "story_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "story_start_settings_story_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE",
+          "table": "public.story_start_settings",
+          "referenced_table": "public.stories",
+          "columns": [
+            "story_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_start_settings_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_start_settings",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_start_settings_story",
+          "type": "UNIQUE",
+          "def": "UNIQUE (story_id)",
+          "table": "public.story_start_settings",
+          "referenced_table": "",
+          "columns": [
+            "story_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_suggested_inputs",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_suggested_inputs_id_seq'::regclass)"
+        },
+        {
+          "name": "start_setting_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "input_text",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "input_order",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_suggested_inputs_pkey",
+          "def": "CREATE UNIQUE INDEX story_suggested_inputs_pkey ON public.story_suggested_inputs USING btree (id)",
+          "table": "public.story_suggested_inputs",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_suggested_inputs_order",
+          "def": "CREATE UNIQUE INDEX uq_story_suggested_inputs_order ON public.story_suggested_inputs USING btree (start_setting_id, input_order)",
+          "table": "public.story_suggested_inputs",
+          "columns": [
+            "start_setting_id",
+            "input_order"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_suggested_inputs_order",
+          "type": "CHECK",
+          "def": "CHECK ((input_order \u003e 0))",
+          "table": "public.story_suggested_inputs",
+          "referenced_table": "",
+          "columns": [
+            "input_order"
+          ]
+        },
+        {
+          "name": "story_suggested_inputs_start_setting_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE",
+          "table": "public.story_suggested_inputs",
+          "referenced_table": "public.story_start_settings",
+          "columns": [
+            "start_setting_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_suggested_inputs_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_suggested_inputs",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_suggested_inputs_order",
+          "type": "UNIQUE",
+          "def": "UNIQUE (start_setting_id, input_order)",
+          "table": "public.story_suggested_inputs",
+          "referenced_table": "",
+          "columns": [
+            "start_setting_id",
+            "input_order"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_play_sessions",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_play_sessions_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "story_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "start_setting_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "title",
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        {
+          "name": "summary",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "current_turn",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "status",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": "'ACTIVE'::character varying"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "public_id",
+          "type": "uuid",
+          "nullable": false,
+          "default": "gen_random_uuid()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_play_sessions_pkey",
+          "def": "CREATE UNIQUE INDEX story_play_sessions_pkey ON public.story_play_sessions USING btree (id)",
+          "table": "public.story_play_sessions",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_story_play_sessions_story",
+          "def": "CREATE INDEX idx_story_play_sessions_story ON public.story_play_sessions USING btree (story_id)",
+          "table": "public.story_play_sessions",
+          "columns": [
+            "story_id"
+          ]
+        },
+        {
+          "name": "uq_story_play_sessions_public_id",
+          "def": "CREATE UNIQUE INDEX uq_story_play_sessions_public_id ON public.story_play_sessions USING btree (public_id)",
+          "table": "public.story_play_sessions",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_play_sessions_current_turn",
+          "type": "CHECK",
+          "def": "CHECK ((current_turn \u003e= 0))",
+          "table": "public.story_play_sessions",
+          "referenced_table": "",
+          "columns": [
+            "current_turn"
+          ]
+        },
+        {
+          "name": "ck_story_play_sessions_status",
+          "type": "CHECK",
+          "def": "CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[])))",
+          "table": "public.story_play_sessions",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "story_play_sessions_story_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE",
+          "table": "public.story_play_sessions",
+          "referenced_table": "public.stories",
+          "columns": [
+            "story_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_play_sessions_start_setting_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL",
+          "table": "public.story_play_sessions",
+          "referenced_table": "public.story_start_settings",
+          "columns": [
+            "start_setting_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_play_sessions_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_play_sessions",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_play_sessions_public_id",
+          "type": "UNIQUE",
+          "def": "UNIQUE (public_id)",
+          "table": "public.story_play_sessions",
+          "referenced_table": "",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_messages",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_messages_id_seq'::regclass)"
+        },
+        {
+          "name": "play_session_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "varchar(16)",
+          "nullable": false
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "message_order",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_messages_pkey",
+          "def": "CREATE UNIQUE INDEX story_messages_pkey ON public.story_messages USING btree (id)",
+          "table": "public.story_messages",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_messages_order",
+          "def": "CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (play_session_id, message_order)",
+          "table": "public.story_messages",
+          "columns": [
+            "play_session_id",
+            "message_order"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_messages_order",
+          "type": "CHECK",
+          "def": "CHECK ((message_order \u003e 0))",
+          "table": "public.story_messages",
+          "referenced_table": "",
+          "columns": [
+            "message_order"
+          ]
+        },
+        {
+          "name": "ck_story_messages_role",
+          "type": "CHECK",
+          "def": "CHECK (((role)::text = ANY ((ARRAY['USER'::character varying, 'ASSISTANT'::character varying, 'SYSTEM'::character varying])::text[])))",
+          "table": "public.story_messages",
+          "referenced_table": "",
+          "columns": [
+            "role"
+          ]
+        },
+        {
+          "name": "story_messages_play_session_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE",
+          "table": "public.story_messages",
+          "referenced_table": "public.story_play_sessions",
+          "columns": [
+            "play_session_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_messages_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_messages",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_messages_order",
+          "type": "UNIQUE",
+          "def": "UNIQUE (play_session_id, message_order)",
+          "table": "public.story_messages",
+          "referenced_table": "",
+          "columns": [
+            "play_session_id",
+            "message_order"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_choices",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_choices_id_seq'::regclass)"
+        },
+        {
+          "name": "play_session_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "message_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "choice_text",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "choice_order",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "is_selected",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "selected_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_choices_pkey",
+          "def": "CREATE UNIQUE INDEX story_choices_pkey ON public.story_choices USING btree (id)",
+          "table": "public.story_choices",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_choices_order",
+          "def": "CREATE UNIQUE INDEX uq_story_choices_order ON public.story_choices USING btree (message_id, choice_order)",
+          "table": "public.story_choices",
+          "columns": [
+            "message_id",
+            "choice_order"
+          ]
+        },
+        {
+          "name": "idx_story_choices_message",
+          "def": "CREATE INDEX idx_story_choices_message ON public.story_choices USING btree (message_id)",
+          "table": "public.story_choices",
+          "columns": [
+            "message_id"
+          ]
+        },
+        {
+          "name": "idx_story_choices_play_session",
+          "def": "CREATE INDEX idx_story_choices_play_session ON public.story_choices USING btree (play_session_id)",
+          "table": "public.story_choices",
+          "columns": [
+            "play_session_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_choices_order",
+          "type": "CHECK",
+          "def": "CHECK ((choice_order \u003e 0))",
+          "table": "public.story_choices",
+          "referenced_table": "",
+          "columns": [
+            "choice_order"
+          ]
+        },
+        {
+          "name": "story_choices_play_session_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE",
+          "table": "public.story_choices",
+          "referenced_table": "public.story_play_sessions",
+          "columns": [
+            "play_session_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_choices_message_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE",
+          "table": "public.story_choices",
+          "referenced_table": "public.story_messages",
+          "columns": [
+            "message_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_choices_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_choices",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_choices_order",
+          "type": "UNIQUE",
+          "def": "UNIQUE (message_id, choice_order)",
+          "table": "public.story_choices",
+          "referenced_table": "",
+          "columns": [
+            "message_id",
+            "choice_order"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.story_creation_example_ratings",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('story_creation_example_ratings_id_seq'::regclass)"
+        },
+        {
+          "name": "example_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "rating",
+          "type": "varchar(8)",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "story_creation_example_ratings_pkey",
+          "def": "CREATE UNIQUE INDEX story_creation_example_ratings_pkey ON public.story_creation_example_ratings USING btree (id)",
+          "table": "public.story_creation_example_ratings",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_example_ratings_example",
+          "def": "CREATE UNIQUE INDEX uq_story_creation_example_ratings_example ON public.story_creation_example_ratings USING btree (example_id)",
+          "table": "public.story_creation_example_ratings",
+          "columns": [
+            "example_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_story_creation_example_ratings_rating",
+          "type": "CHECK",
+          "def": "CHECK (((rating)::text = ANY ((ARRAY['GOOD'::character varying, 'BAD'::character varying])::text[])))",
+          "table": "public.story_creation_example_ratings",
+          "referenced_table": "",
+          "columns": [
+            "rating"
+          ]
+        },
+        {
+          "name": "story_creation_example_ratings_example_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE",
+          "table": "public.story_creation_example_ratings",
+          "referenced_table": "public.story_creation_examples",
+          "columns": [
+            "example_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "story_creation_example_ratings_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.story_creation_example_ratings",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_story_creation_example_ratings_example",
+          "type": "UNIQUE",
+          "def": "UNIQUE (example_id)",
+          "table": "public.story_creation_example_ratings",
+          "referenced_table": "",
+          "columns": [
+            "example_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.feedbacks",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('feedbacks_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "varchar(320)",
+          "nullable": true
+        },
+        {
+          "name": "platform",
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        {
+          "name": "app_version",
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "feedbacks_pkey",
+          "def": "CREATE UNIQUE INDEX feedbacks_pkey ON public.feedbacks USING btree (id)",
+          "table": "public.feedbacks",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_feedbacks_created_at",
+          "def": "CREATE INDEX idx_feedbacks_created_at ON public.feedbacks USING btree (created_at DESC)",
+          "table": "public.feedbacks",
+          "columns": [
+            "created_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_feedbacks_body_not_blank",
+          "type": "CHECK",
+          "def": "CHECK ((length(btrim(body)) \u003e 0))",
+          "table": "public.feedbacks",
+          "referenced_table": "",
+          "columns": [
+            "body"
+          ]
+        },
+        {
+          "name": "ck_feedbacks_platform",
+          "type": "CHECK",
+          "def": "CHECK (((platform IS NULL) OR ((platform)::text = ANY ((ARRAY['IOS'::character varying, 'ANDROID'::character varying, 'WEB'::character varying])::text[]))))",
+          "table": "public.feedbacks",
+          "referenced_table": "",
+          "columns": [
+            "platform"
+          ]
+        },
+        {
+          "name": "feedbacks_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.feedbacks",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.ai_call_logs",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('ai_call_logs_id_seq'::regclass)"
+        },
+        {
+          "name": "request_id",
+          "type": "varchar(128)",
+          "nullable": false
+        },
+        {
+          "name": "caller_service",
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        {
+          "name": "feature",
+          "type": "varchar(40)",
+          "nullable": false
+        },
+        {
+          "name": "anonymous_id_hash",
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        {
+          "name": "session_id",
+          "type": "varchar(128)",
+          "nullable": true
+        },
+        {
+          "name": "story_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "chat_id",
+          "type": "uuid",
+          "nullable": true
+        },
+        {
+          "name": "turn_index",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "provider",
+          "type": "varchar(40)",
+          "nullable": true
+        },
+        {
+          "name": "model",
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        {
+          "name": "prompt_template_version",
+          "type": "varchar(40)",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "varchar(16)",
+          "nullable": false
+        },
+        {
+          "name": "latency_ms",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "input_token_count",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "output_token_count",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "retry_count",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "error_code",
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        {
+          "name": "sentry_event_id",
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "prompt_versions",
+          "type": "jsonb",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_call_logs_pkey",
+          "def": "CREATE UNIQUE INDEX ai_call_logs_pkey ON public.ai_call_logs USING btree (id)",
+          "table": "public.ai_call_logs",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_ai_call_logs_request_id",
+          "def": "CREATE INDEX idx_ai_call_logs_request_id ON public.ai_call_logs USING btree (request_id)",
+          "table": "public.ai_call_logs",
+          "columns": [
+            "request_id"
+          ]
+        },
+        {
+          "name": "idx_ai_call_logs_created_at",
+          "def": "CREATE INDEX idx_ai_call_logs_created_at ON public.ai_call_logs USING btree (created_at DESC)",
+          "table": "public.ai_call_logs",
+          "columns": [
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_ai_call_logs_story",
+          "def": "CREATE INDEX idx_ai_call_logs_story ON public.ai_call_logs USING btree (story_id)",
+          "table": "public.ai_call_logs",
+          "columns": [
+            "story_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_ai_call_logs_feature",
+          "type": "CHECK",
+          "def": "CHECK (((feature)::text = ANY ((ARRAY['storyline_generation'::character varying, 'story_completion'::character varying, 'chat_response'::character varying, 'suggestion_generation'::character varying])::text[])))",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "feature"
+          ]
+        },
+        {
+          "name": "ck_ai_call_logs_latency",
+          "type": "CHECK",
+          "def": "CHECK (((latency_ms IS NULL) OR (latency_ms \u003e= 0)))",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "latency_ms"
+          ]
+        },
+        {
+          "name": "ck_ai_call_logs_retry_count",
+          "type": "CHECK",
+          "def": "CHECK ((retry_count \u003e= 0))",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "retry_count"
+          ]
+        },
+        {
+          "name": "ck_ai_call_logs_status",
+          "type": "CHECK",
+          "def": "CHECK (((status)::text = ANY ((ARRAY['STARTED'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying])::text[])))",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "ck_ai_call_logs_turn_index",
+          "type": "CHECK",
+          "def": "CHECK (((turn_index IS NULL) OR (turn_index \u003e= 0)))",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "turn_index"
+          ]
+        },
+        {
+          "name": "ai_call_logs_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.ai_call_logs",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.users",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('users_id_seq'::regclass)"
+        },
+        {
+          "name": "public_id",
+          "type": "uuid",
+          "nullable": false,
+          "default": "gen_random_uuid()"
+        },
+        {
+          "name": "nickname",
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        {
+          "name": "profile_image_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "profile_thumbnail_base64",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": "'ACTIVE'::character varying"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "users_pkey",
+          "def": "CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)",
+          "table": "public.users",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_users_public_id",
+          "def": "CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id)",
+          "table": "public.users",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_users_status",
+          "type": "CHECK",
+          "def": "CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'SUSPENDED'::character varying, 'DELETED'::character varying])::text[])))",
+          "table": "public.users",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "users_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.users",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_users_public_id",
+          "type": "UNIQUE",
+          "def": "UNIQUE (public_id)",
+          "table": "public.users",
+          "referenced_table": "",
+          "columns": [
+            "public_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.social_accounts",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('social_accounts_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "provider",
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        {
+          "name": "provider_user_id",
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        {
+          "name": "connected_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "last_login_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "social_accounts_pkey",
+          "def": "CREATE UNIQUE INDEX social_accounts_pkey ON public.social_accounts USING btree (id)",
+          "table": "public.social_accounts",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_social_accounts_provider_user",
+          "def": "CREATE UNIQUE INDEX uq_social_accounts_provider_user ON public.social_accounts USING btree (provider, provider_user_id)",
+          "table": "public.social_accounts",
+          "columns": [
+            "provider",
+            "provider_user_id"
+          ]
+        },
+        {
+          "name": "idx_social_accounts_user",
+          "def": "CREATE INDEX idx_social_accounts_user ON public.social_accounts USING btree (user_id)",
+          "table": "public.social_accounts",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_social_accounts_provider",
+          "type": "CHECK",
+          "def": "CHECK (((provider)::text = ANY ((ARRAY['GOOGLE'::character varying, 'KAKAO'::character varying, 'APPLE'::character varying, 'NAVER'::character varying])::text[])))",
+          "table": "public.social_accounts",
+          "referenced_table": "",
+          "columns": [
+            "provider"
+          ]
+        },
+        {
+          "name": "social_accounts_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+          "table": "public.social_accounts",
+          "referenced_table": "public.users",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "social_accounts_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.social_accounts",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_social_accounts_provider_user",
+          "type": "UNIQUE",
+          "def": "UNIQUE (provider, provider_user_id)",
+          "table": "public.social_accounts",
+          "referenced_table": "",
+          "columns": [
+            "provider",
+            "provider_user_id"
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "table": "public.story_creation_session_tags",
+      "columns": [
+        "tag_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_creation_tags",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+    },
+    {
+      "table": "public.story_creation_session_tags",
+      "columns": [
+        "creation_session_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_creation_sessions",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_creation_examples",
+      "columns": [
+        "creation_session_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_creation_sessions",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_creation_example_recommended_infos",
+      "columns": [
+        "example_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_creation_examples",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_settings",
+      "columns": [
+        "story_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.stories",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_start_settings",
+      "columns": [
+        "story_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.stories",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_suggested_inputs",
+      "columns": [
+        "start_setting_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_start_settings",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_play_sessions",
+      "columns": [
+        "story_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.stories",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_play_sessions",
+      "columns": [
+        "start_setting_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_start_settings",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "zero_or_one",
+      "def": "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+    },
+    {
+      "table": "public.story_messages",
+      "columns": [
+        "play_session_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_play_sessions",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_choices",
+      "columns": [
+        "play_session_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_play_sessions",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_choices",
+      "columns": [
+        "message_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.story_messages",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.story_creation_example_ratings",
+      "columns": [
+        "example_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.story_creation_examples",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.social_accounts",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.users",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    }
+  ],
+  "driver": {
+    "name": "postgres",
+    "database_version": "PostgreSQL 16.14 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "meta": {
+      "current_schema": "public",
+      "search_paths": [
+        "manyak",
+        "public"
+      ],
+      "dict": {
+        "Functions": "Stored procedures and functions"
+      }
+    }
+  }
+}

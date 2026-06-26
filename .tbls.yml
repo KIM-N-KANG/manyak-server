@@ -1,0 +1,16 @@
+# tbls 설정 — 실 DB 스키마에서 문서(dbdoc/)를 자동 생성한다.
+# Flyway 마이그레이션이 진실원본이고, 이 문서는 거기서 파생된 "현행 스키마"다.
+# 목표(설계) 스키마는 docs/schema-roadmap.sql 을 본다.
+#
+# DSN은 비밀을 커밋하지 않도록 환경변수로 주입한다.
+#   - 로컬:  scripts/gen-db-docs.sh
+#   - CI:    .github/workflows/db-docs.yml
+dsn: "${TBLS_DSN}"
+
+docPath: dbdoc
+
+# ER 다이어그램은 tbls 내장 렌더러로 SVG를 생성한다(시스템 graphviz 설치 불필요 — CI도 동일).
+# Flyway 메타테이블은 문서 대상에서 제외한다(스키마명까지 매칭).
+exclude:
+  - flyway_schema_history
+  - public.flyway_schema_history
