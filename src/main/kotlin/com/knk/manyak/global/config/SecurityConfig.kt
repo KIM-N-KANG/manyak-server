@@ -1,6 +1,7 @@
 package com.knk.manyak.global.config
 
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.OptionalJwtAuthenticationFilter
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -9,10 +10,13 @@ import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver
 import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
+import org.springframework.security.web.util.matcher.OrRequestMatcher
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
@@ -22,7 +26,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain =
+    fun securityFilterChain(http: HttpSecurity, jwtDecoder: JwtDecoder): SecurityFilterChain =
         http
             .cors { }
             .csrf { it.disable() }
@@ -66,6 +70,14 @@ class SecurityConfig {
                     .requestMatchers(*BEARER_SKIP_MATCHERS).permitAll()
                     .anyRequest().authenticated()
             }
+            // optional 인증 필터. 익명 허용(permitAll) 도메인 경로(OPTIONAL_AUTH_MATCHERS)에서만 동작하며,
+            // 유효 access 토큰이면 principal(Jwt)을 채우고 토큰이 없거나 만료·위조면 익명으로 통과시킨다(401 없음).
+            // 이 경로들은 아래 bearerTokenResolver에서 토큰 resolve를 건너뛰므로 RS 필터(BearerTokenAuthenticationFilter)가
+            // 401을 내지 않고, 인증 시도는 이 필터만 수행한다. RS 필터보다 앞에 둬 동일 요청에서 principal을 먼저 확정한다.
+            .addFilterBefore(
+                OptionalJwtAuthenticationFilter(jwtDecoder, OrRequestMatcher(*OPTIONAL_AUTH_MATCHERS)),
+                BearerTokenAuthenticationFilter::class.java,
+            )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
             // 토큰 없음·만료·위조는 BearerTokenAuthenticationEntryPoint가 401로 응답한다.
             // 공개 인증 경로(BEARER_SKIP_MATCHERS)에서는 토큰을 resolve하지 않아(아래 resolver) 자동 첨부된 만료/위조 access 헤더로 막히지 않는다.
@@ -87,7 +99,17 @@ class SecurityConfig {
     private fun bearerSkipAwareResolver(): BearerTokenResolver {
         val delegate = DefaultBearerTokenResolver()
         return BearerTokenResolver { request: HttpServletRequest ->
-            if (BEARER_SKIP_MATCHERS.any { it.matches(request) }) null else delegate.resolve(request)
+            if (
+                BEARER_SKIP_MATCHERS.any { it.matches(request) } ||
+                OPTIONAL_AUTH_MATCHERS.any { it.matches(request) }
+            ) {
+                // 공개 인증 경로(BEARER_SKIP) 또는 optional 인증 도메인 경로(OPTIONAL_AUTH)에서는
+                // RS 필터가 토큰을 resolve하지 않게 해 만료/위조 헤더로 401이 나지 않게 한다.
+                // OPTIONAL_AUTH 경로의 유효 토큰 귀속은 OptionalJwtAuthenticationFilter가 별도로 처리한다.
+                null
+            } else {
+                delegate.resolve(request)
+            }
         }
     }
 
@@ -98,6 +120,26 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/logout"),
+        )
+
+        // optional 인증 도메인 경로. authorizeHttpRequests의 permitAll 매처와 동일한 method·path로 맞춘다.
+        // 이 경로들은 (1) RS 필터의 토큰 resolve를 건너뛰어 만료/위조 헤더로 401이 나지 않게 하고(아래 resolver),
+        // (2) OptionalJwtAuthenticationFilter가 유효 access 토큰이면 principal(Jwt)을 채워 user_id 귀속을 가능하게 한다.
+        val OPTIONAL_AUTH_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/batch"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/v1/stories/simple/storylines/{storylineId:\\d+}/rating"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/simple/storylines/{storylineId:\\d+}/rating"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/batch"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/feedbacks"),
         )
     }
 

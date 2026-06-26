@@ -17,8 +17,13 @@ class StorylineRatingService(
 ) {
 
     // 스토리라인 평가는 대상당 1개다. 같은 스토리라인을 다시 평가하면 값만 갱신한다(upsert).
+    //
+    // userId는 optional 인증으로 해석된 로그인 사용자 내부 id(익명이면 null)다. 다만 스토리라인은
+    // 생성한 단 한 명만 보고 평가하므로(공유되지 않음, V9 마이그레이션 주석) story_creation_example_ratings에는
+    // 평가 주체(user_id) 컬럼이 없다. 따라서 현재는 귀속을 저장하지 않는다. 시그니처에만 받아 두어,
+    // 추후 컬럼이 생기면 저장만 추가하면 되도록 호출부(컨트롤러 @CurrentUserId)를 맞춰 둔다.
     @Transactional
-    fun rate(storylineId: Long, rating: StorylineRating): StorylineRatingResponse {
+    fun rate(storylineId: Long, rating: StorylineRating, userId: Long? = null): StorylineRatingResponse {
         val existing = storyCreationExampleRatingRepository.findByExampleId(storylineId)
         if (existing != null) {
             // 영속 상태 엔티티이므로 변경 감지(dirty checking)로 커밋 시 자동 반영된다. save() 불필요.

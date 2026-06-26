@@ -66,7 +66,7 @@ class ChatService(
 ) {
 
     @Transactional
-    fun createChat(request: CreateChatRequest): CreateChatResponse {
+    fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
         // 스토리 공개 식별자(public_id)로 받아 삭제되지 않은 내부 스토리를 조회한다.
         // 이 한 번의 조회가 KNK-256(public_id 해석)과 KNK-257(삭제된 스토리로 채팅 생성 차단)을 함께 처리한다.
         // 형식 오류·미존재·삭제는 모두 404로 통일된다.
@@ -76,6 +76,7 @@ class ChatService(
 
         val session = storyPlaySessionRepository.save(
             StoryPlaySession(
+                userId = userId,
                 storyId = story.id,
                 startSettingId = startSetting?.id,
             ),

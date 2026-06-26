@@ -1,6 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.error.ApiErrorResponse
+import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
@@ -91,8 +92,10 @@ class SimpleStoryCreationController(
     @PostMapping("/storylines")
     fun generateSimpleStorylines(
         @Valid @RequestBody request: GenerateSimpleStorylinesRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
     ): GenerateSimpleStorylinesResponse =
-        simpleStoryCreationService.generateSimpleStorylines(request)
+        simpleStoryCreationService.generateSimpleStorylines(request, userId)
 
     @Operation(
         summary = "간편 제작 이야기 생성",
@@ -134,8 +137,10 @@ class SimpleStoryCreationController(
     @PostMapping
     fun createSimpleStory(
         @Valid @RequestBody request: CreateSimpleStoryRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
     ): SimpleStoryCreateResponse =
-        simpleStoryCreationService.createSimpleStory(request)
+        simpleStoryCreationService.createSimpleStory(request, userId)
 
     @Operation(
         summary = "스토리라인 평가 설정/변경",
@@ -165,8 +170,10 @@ class SimpleStoryCreationController(
     fun rateStoryline(
         @PathVariable storylineId: Long,
         @Valid @RequestBody request: StorylineRatingRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
     ): StorylineRatingResponse =
-        storylineRatingService.rate(storylineId, request.rating!!)
+        storylineRatingService.rate(storylineId, request.rating!!, userId)
 
     @Operation(
         summary = "스토리라인 평가 취소",

@@ -80,7 +80,10 @@ class SimpleStoryCreationService(
                 )
             }
 
-    fun generateSimpleStorylines(request: GenerateSimpleStorylinesRequest): GenerateSimpleStorylinesResponse {
+    fun generateSimpleStorylines(
+        request: GenerateSimpleStorylinesRequest,
+        userId: Long? = null,
+    ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
             StoryCreationTagDraft(
@@ -110,7 +113,7 @@ class SimpleStoryCreationService(
             val customTags = findOrCreateCustomTags(customTagDrafts)
             val tags = predefinedTags + customTags
             val creationSession = storyCreationSessionRepository.save(
-                StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+                StoryCreationSession(userId = userId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
             )
             storyCreationSessionTagRepository.saveAll(
                 tags.map { tag ->
@@ -163,11 +166,11 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Storyline creation transaction result is empty")
     }
 
-    fun createSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
+    fun createSimpleStory(request: CreateSimpleStoryRequest, userId: Long? = null): SimpleStoryCreateResponse {
         val startNanos = System.nanoTime()
         structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
         try {
-            val outcome = doCreateSimpleStory(request)
+            val outcome = doCreateSimpleStory(request, userId)
             structuredLogger.event(
                 "story_created",
                 "story_id" to outcome.response.id,
@@ -191,7 +194,7 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest): StoryCreationOutcome {
+    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -244,7 +247,9 @@ class SimpleStoryCreationService(
 
             val story = storyRepository.save(
                 Story(
-                    userId = lockedSession.userId,
+                    // 이 호출의 로그인 사용자(userId)를 우선 귀속하고, 익명 호출이면 스토리라인 생성 시점에
+                    // 기록한 진행(session) 소유자를 사용한다(생성과 확정 사이 로그인 상태 변화 흡수).
+                    userId = userId ?: lockedSession.userId,
                     title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,

@@ -7,6 +7,7 @@ import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.service.ChatService
+import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -65,7 +66,9 @@ class ChatController(
     @PostMapping("/chats")
     fun createChat(
         @Valid @RequestBody request: CreateChatRequest,
-    ): CreateChatResponse = chatService.createChat(request)
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+    ): CreateChatResponse = chatService.createChat(request, userId)
 
     @Operation(
         summary = "채팅 ID 목록으로 이전 채팅 목록 조회",

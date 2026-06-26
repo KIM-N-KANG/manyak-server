@@ -2,6 +2,7 @@ package com.knk.manyak.feedback.controller
 
 import com.knk.manyak.feedback.dto.CreateFeedbackRequest
 import com.knk.manyak.feedback.service.FeedbackService
+import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -31,8 +32,10 @@ class FeedbackController(
     @PostMapping("/feedbacks")
     fun createFeedback(
         @Valid @RequestBody request: CreateFeedbackRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
     ): ResponseEntity<Void> {
-        feedbackService.createFeedback(request)
+        feedbackService.createFeedback(request, userId)
         // Unit 반환은 Jackson 이 빈 객체 {} 로 직렬화할 수 있어, 본문 없는 201 을 명시한다.
         return ResponseEntity.status(HttpStatus.CREATED).build()
     }
