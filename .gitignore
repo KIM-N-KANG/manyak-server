@@ -45,6 +45,11 @@ out/
 ### macOS ###
 .DS_Store
 
+### draw.io ###
+*.drawio.bkp
+*.drawio.dtmp
+*.bkp
+
 ### Terraform ###
 **/.terraform/*
 *.tfstate
