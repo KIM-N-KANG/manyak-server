@@ -16,3 +16,12 @@ manyak:
     chat:
       # 운영은 실제 manyak-ai 호출 (local만 stub)
       stub: false
+
+management:
+  health:
+    redis:
+      # 운영엔 아직 ElastiCache 접속정보(SPRING_DATA_REDIS_HOST/PORT)가 주입되지 않아(KNK-284 예정),
+      # Redis health가 기본값 localhost:6379를 프로브하면 /actuator/health 가 DOWN으로 떨어진다.
+      # 그러면 ALB 타깃그룹·배포 스모크가 모든 배포를 unhealthy로 판정한다.
+      # ElastiCache 주입(KNK-284) 후 Redis가 load-bearing이 되는 로그인(KNK-56) 시점에 다시 켠다.
+      enabled: false

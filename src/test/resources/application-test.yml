@@ -11,6 +11,12 @@ spring:
   flyway:
     enabled: false
 
+management:
+  health:
+    redis:
+      # 테스트는 Redis 인프라 없이 돈다. health를 Redis 가용성과 분리해 /actuator/health가 항상 200이도록 비활성화.
+      enabled: false
+
 manyak:
   ai:
     base-url: http://localhost:8000
