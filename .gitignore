@@ -65,3 +65,9 @@ override.tf.json
 *_override.tf.json
 backend.hcl
 !backend.hcl.example
+
+### tbls 스키마 문서 ###
+# dbdoc/schema.json 은 추적하지 않는다 — driver.database_version 에 Postgres 빌드 문자열
+# (aarch64/x86_64 등 플랫폼별)이 박혀 호스트마다 달라지므로, 커밋하면 재생성 git-diff 게이트가
+# 스키마 변경 없이도 실패한다. 사람이 읽는 문서는 .md 이며 schema.json 은 파생물이라 추적 대상에서 뺀다.
+dbdoc/schema.json

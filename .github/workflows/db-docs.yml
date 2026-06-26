@@ -62,9 +62,9 @@ jobs:
       - name: Lint schema
         run: tbls lint -c .tbls.yml
 
-      # dbdoc/ 전체(마크다운·schema.json)를 실제로 재생성해 git diff로 비교한다.
-      # tbls diff 는 마크다운 스키마만 비교해 schema.json 등 다른 산출물의 누락·변조를 놓치므로,
-      # 재생성 후 git diff 로 전체 산출물의 드리프트를 차단한다.
+      # 커밋된 dbdoc/(마크다운)을 실제로 재생성해 git diff로 비교한다 — tbls diff 는 마크다운만
+      # 비교하지만, 재생성+git diff 는 추적되는 모든 산출물의 드리프트를 차단한다.
+      # schema.json 은 플랫폼별 database_version 때문에 .gitignore 로 추적 제외된다(git add -A 가 자동 제외).
       - name: Verify dbdoc/ is up to date
         run: |
           tbls doc -c .tbls.yml --rm-dist
