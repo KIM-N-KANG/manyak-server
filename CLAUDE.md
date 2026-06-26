@@ -8,6 +8,13 @@
 
 ## Manyak Server 전용 지침
 
+### 작업 워크플로
+
+- 작업 전 주기는 스킬로 표준화돼 있습니다: 티켓 생성(`create-ticket`) → 브랜치(`create-branch`) → 커밋(`create-commit`) → PR(`create-pr`) → 리뷰(`request-codex-review`) → 머지 후 마무리(`complete-ticket`).
+- Jira 티켓을 새로 만들 때는 `create-ticket` 스킬을 따릅니다. 제목은 간결한 명사구로 쓰고, 배경·변경·검증 같은 상세는 description이나 서브태스크로 분리합니다.
+- PR 리뷰는 ready 전환 후 PR 코멘트 `@codex review`로 받습니다. ready 전환·호출·리뷰 대기·반영은 `request-codex-review` 스킬을 따릅니다(Codex는 draft PR을 리뷰하지 않습니다).
+- 머지 후 마무리(로컬 브랜치 정리, Jira 완료 트랜지션, 작업시간 worklog 기록)는 `complete-ticket` 스킬을 따릅니다.
+
 ### Kotlin Spring 작업
 
 - 이 백엔드는 Kotlin, Spring Boot, Gradle Kotlin DSL, Java 21, JPA, Flyway, Security, PostgreSQL을 사용합니다.
