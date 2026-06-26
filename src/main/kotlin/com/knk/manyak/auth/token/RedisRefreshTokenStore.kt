@@ -38,8 +38,9 @@ class RedisRefreshTokenStore(
         redisTemplate.opsForSet().add(userKey, tokenHash)
         // 인덱스 만료는 연장만 한다. 더 짧은 TTL의 토큰이 추가돼도 기존 인덱스 수명을 단축하지 않는다.
         // (인덱스가 토큰보다 먼저 만료되면 deleteAllForUser가 아직 유효한 토큰을 못 지운다.)
-        val currentTtlSeconds = redisTemplate.getExpire(userKey, TimeUnit.SECONDS)
-        if (currentTtlSeconds < ttl.seconds) {
+        // 비교는 밀리초로 한다 — 초 단위로 자르면 sub-second 차이가 같게 잘려 연장이 누락될 수 있다.
+        val currentTtlMillis = redisTemplate.getExpire(userKey, TimeUnit.MILLISECONDS)
+        if (currentTtlMillis < ttl.toMillis()) {
             redisTemplate.expire(userKey, ttl)
         }
     }
