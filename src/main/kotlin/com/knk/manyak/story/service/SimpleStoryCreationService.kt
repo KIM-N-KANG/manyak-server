@@ -247,9 +247,10 @@ class SimpleStoryCreationService(
 
             val story = storyRepository.save(
                 Story(
-                    // 이 호출의 로그인 사용자(userId)를 우선 귀속하고, 익명 호출이면 스토리라인 생성 시점에
-                    // 기록한 진행(session) 소유자를 사용한다(생성과 확정 사이 로그인 상태 변화 흡수).
-                    userId = userId ?: lockedSession.userId,
+                    // 이 생성 요청의 인증 사용자에만 귀속한다(익명/무효/만료면 null). session 소유자로 폴백하지 않는다 —
+                    // 익명 create가 simpleCreationId만으로 다른 사용자(session 생성자)의 user_id로 기록되는 귀속 스푸핑을
+                    // 막고, optional 인증 의미(무효 토큰=익명)를 지킨다(Codex PR #76 P2).
+                    userId = userId,
                     title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,

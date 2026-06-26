@@ -291,9 +291,25 @@ class OptionalAuthAttributionIntegrationTests {
         assertThat(storyRepository.findAll().first().userId).isNull()
     }
 
-    private fun persistStoryline(): StoryCreationExample {
+    @Test
+    fun `생성 요청이 익명이면 storyline 생성자의 user_id로 폴백하지 않는다 (귀속 스푸핑 차단)`() {
+        // storyline 생성을 로그인 사용자(owner)가 한 상황(session.user_id=owner). 그 simpleCreationId만 알면
+        // 익명으로 create해 owner의 user_id로 스토리가 기록되는 일이 없어야 한다 → 익명 create는 null 귀속.
+        val owner = saveUser()
+        val storyline = persistStorylineOwnedBy(owner.id)
+
+        postSimpleStory(storyline, null).expectStatus().isCreated
+
+        assertThat(storyRepository.findAll().first().userId).isNull()
+    }
+
+    private fun persistStoryline(): StoryCreationExample = persistStorylineSession(ownerId = null)
+
+    private fun persistStorylineOwnedBy(ownerId: Long): StoryCreationExample = persistStorylineSession(ownerId)
+
+    private fun persistStorylineSession(ownerId: Long?): StoryCreationExample {
         val session = creationSessionRepository.save(
-            StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+            StoryCreationSession(userId = ownerId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
         return creationExampleRepository.save(
             StoryCreationExample(
