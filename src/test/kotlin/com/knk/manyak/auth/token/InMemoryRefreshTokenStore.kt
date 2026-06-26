@@ -36,6 +36,13 @@ class InMemoryRefreshTokenStore(
         return entry.userId
     }
 
+    override fun consume(tokenHash: String): Long? {
+        // 조회+삭제를 한 번에. 단일 스레드 페이크라 원자성은 자명하다(removeIf/remove 사이 끼어듦 없음).
+        val entry = entries.remove(tokenHash) ?: return null
+        // 만료된 항목은 소비되지 않은 것으로 본다(이미 remove로 정리됨).
+        return if (isExpired(entry)) null else entry.userId
+    }
+
     override fun delete(tokenHash: String) {
         entries.remove(tokenHash)
     }

@@ -48,6 +48,14 @@ class RedisRefreshTokenStore(
     override fun findUserId(tokenHash: String): Long? =
         redisTemplate.opsForValue().get(tokenKey(tokenHash))?.toLongOrNull()
 
+    override fun consume(tokenHash: String): Long? {
+        // GETDEL: 토큰 키의 값을 읽으면서 같은 연산으로 삭제한다(원자적). 동시 회전에서 둘 다 소비하는 레이스를 막는다.
+        val userId = redisTemplate.opsForValue().getAndDelete(tokenKey(tokenHash))?.toLongOrNull() ?: return null
+        // 사용자 인덱스 정리는 best-effort. (인덱스에서 빠져도 토큰 키는 이미 삭제됐으므로 인증에는 영향 없다.)
+        redisTemplate.opsForSet().remove(userIndexKey(userId), tokenHash)
+        return userId
+    }
+
     override fun delete(tokenHash: String) {
         val userId = findUserId(tokenHash)
         redisTemplate.delete(tokenKey(tokenHash))

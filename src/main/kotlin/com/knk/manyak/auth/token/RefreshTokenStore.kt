@@ -21,6 +21,16 @@ interface RefreshTokenStore {
     /** 토큰 해시에 매핑된 userId를 반환한다. 없거나 만료됐으면 null. */
     fun findUserId(tokenHash: String): Long?
 
+    /**
+     * 토큰 해시에 매핑된 userId를 반환하면서 **원자적으로 제거**한다(조회+삭제를 한 연산으로).
+     * 없거나 만료됐으면 null.
+     *
+     * refresh 회전 시 동시 요청이 같은 토큰을 둘 다 소비하는 레이스(1회용/재사용 탐지 위반)를 막는다.
+     * findUserId 후 delete를 따로 부르면 두 호출 사이에 다른 요청이 끼어들 수 있으므로,
+     * 회전 경로는 반드시 이 메서드(예: Redis GETDEL)로 단일 원자 소비를 한다.
+     */
+    fun consume(tokenHash: String): Long?
+
     /** 토큰 해시를 제거한다. 없는 키 삭제는 무시한다. */
     fun delete(tokenHash: String)
 
