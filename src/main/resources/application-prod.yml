@@ -12,6 +12,7 @@ spring:
     enabled: true
 
 manyak:
+  # auth.jwt.secret 은 여기에 하드코딩하지 않는다. 운영은 env(MANYAK_AUTH_JWT_SECRET)로만 주입한다(application.yml 기본 바인딩).
   ai:
     chat:
       # 운영은 실제 manyak-ai 호출 (local만 stub)

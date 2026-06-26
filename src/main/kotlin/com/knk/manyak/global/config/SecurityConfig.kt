@@ -54,8 +54,14 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/batch")).permitAll()
                     // 피드백은 익명 제출을 허용한다. 로그인 상태면 인증 도입 후 서버가 user_id 를 채운다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/feedbacks")).permitAll()
+                    // refresh 회전은 access 토큰 없이 호출하므로 인증을 요구하지 않는다(토큰 유효성은 서비스가 검증한다).
+                    // /api/v1/auth/me 는 anyRequest().authenticated() 로 보호된다.
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh")).permitAll()
                     .anyRequest().authenticated()
             }
+            // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
+            // 토큰 없음·만료·위조는 BearerTokenAuthenticationEntryPoint가 401로 응답한다.
+            .oauth2ResourceServer { it.jwt { } }
             .build()
 
     @Bean

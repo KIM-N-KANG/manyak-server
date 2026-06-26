@@ -18,6 +18,10 @@ management:
       enabled: false
 
 manyak:
+  auth:
+    jwt:
+      # 테스트 전용 고정 키(>=32바이트). 운영 키와 무관한 더미 값이다.
+      secret: test-only-jwt-secret-fixed-value-32-bytes-min
   ai:
     base-url: http://localhost:8000
     chat:

@@ -26,6 +26,17 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  auth:
+    jwt:
+      # access JWT(HS256) 서명·검증용 대칭키. 운영은 env(MANYAK_AUTH_JWT_SECRET)로 주입한다.
+      # 기본값은 빈 문자열이라 미주입 시 빈 초기화에서 실패한다(잘못된 운영 기동을 조기 차단). 최소 32바이트 필요.
+      secret: ${MANYAK_AUTH_JWT_SECRET:}
+      # 발급자(iss) 클레임. 검증 시 동일 issuer만 허용한다.
+      issuer: manyak
+      # access 토큰 수명(짧게). 만료되면 refresh로 회전한다.
+      access-ttl: PT30M
+      # refresh 토큰 수명(길게). RefreshTokenStore TTL과 동일하다.
+      refresh-ttl: P14D
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
   cors:
