@@ -7,6 +7,10 @@
 #   - CI:    .github/workflows/db-docs.yml
 dsn: "${TBLS_DSN}"
 
+# README 제목(문서 이름)을 고정한다 — 미설정 시 로컬 .env의 DB 이름에서 유도돼
+# 개발자/CI마다 제목이 달라져 드리프트가 날 수 있다.
+name: manyak
+
 docPath: dbdoc
 
 # ER 다이어그램은 mermaid로 출력한다 — 마크다운에 임베드되어 SVG 바이너리 없이 텍스트만 남고,

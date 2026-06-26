@@ -35,8 +35,10 @@ done
 
 echo "▶ Flyway 마이그레이션 적용"
 # 앱과 동일한 마이그레이션을 Flyway CLI(도커)로 적용한다.
-# Docker Desktop(mac/win)에서 host.docker.internal 로 호스트에 게시된 포트에 접속한다.
+# Docker Desktop(mac/win)에서는 host.docker.internal 이 기본 제공되지만, 네이티브 Linux Docker Engine에는
+# 없으므로 --add-host 로 host-gateway 매핑을 명시해 호스트에 게시된 포트에 접속한다.
 docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
   -v "$PWD/src/main/resources/db/migration:/flyway/sql:ro" \
   flyway/flyway:11 \
   -url="jdbc:postgresql://host.docker.internal:${DB_PORT}/${DB_NAME}" \
