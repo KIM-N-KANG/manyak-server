@@ -81,6 +81,13 @@ variable "db_name" {
   type        = string
 }
 
+# KNK-294 CORS 허용 오리진: user-data가 .env에 MANYAK_CORS_ALLOWED_ORIGINS로 emit(콤마 구분 origin 목록).
+# 미주입 시 compose 기본값(apex)으로 떨어져 FE(www 등)의 POST가 CORS 403으로 막힌다.
+variable "cors_allowed_origins" {
+  description = "CORS 허용 오리진(콤마 구분). MANYAK_CORS_ALLOWED_ORIGINS로 주입"
+  type        = string
+  default     = "https://manyak.app"
+
 # KNK-284 Redis 주입: user-data가 .env에 SPRING_DATA_REDIS_HOST/PORT로 emit (refresh 토큰 저장)
 variable "redis_address" {
   description = "ElastiCache Redis 엔드포인트 주소 (data redis_endpoint). SPRING_DATA_REDIS_HOST로 주입. enable_redis=false면 빈 문자열"

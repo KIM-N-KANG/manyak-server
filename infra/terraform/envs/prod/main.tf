@@ -49,6 +49,9 @@ module "compute" {
   db_port        = module.data.db_port
   db_name        = module.data.db_name
 
+  # KNK-294 CORS 허용 오리진 주입: apex + www(FE). 미주입 시 compose 기본값(apex만)으로 떨어져 www POST가 403이 된다.
+  cors_allowed_origins = "https://manyak.app,https://www.manyak.app"
+
   # KNK-284 Redis 주입: ElastiCache endpoint/port를 .env(SPRING_DATA_REDIS_*)로 전달.
   # enable_redis=false면 출력이 null이다. coalesce는 ""(빈 문자열)도 null처럼 건너뛰어 에러를 내므로,
   # ""를 실제로 반환할 수 있는 명시적 null 검사를 쓴다(운영은 enable_redis=true라 실제 endpoint가 들어간다).

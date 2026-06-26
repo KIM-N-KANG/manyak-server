@@ -28,6 +28,7 @@ resource "aws_instance" "app" {
     db_address       = var.db_address
     db_port          = var.db_port
     db_name          = var.db_name
+    cors_allowed_origins = var.cors_allowed_origins
     redis_address    = var.redis_address
     redis_port       = var.redis_port
   })
