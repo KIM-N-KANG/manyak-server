@@ -65,3 +65,7 @@ override.tf.json
 *_override.tf.json
 backend.hcl
 !backend.hcl.example
+
+### 로컬 개발 도구(커밋하지 않음) ###
+# 구글 로그인 수동 라운드트립 테스트용 로컬 HTML(프론트 작업 전 백엔드 검증용 개인 도구).
+/local-google-login.html
