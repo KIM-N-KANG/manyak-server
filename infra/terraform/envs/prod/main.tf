@@ -50,9 +50,10 @@ module "compute" {
   db_name        = module.data.db_name
 
   # KNK-284 Redis 주입: ElastiCache endpoint/port를 .env(SPRING_DATA_REDIS_*)로 전달.
-  # enable_redis=false면 출력이 null이라 templatefile이 거부하므로 coalesce로 기본값 대체(운영은 실제 endpoint).
-  redis_address = coalesce(module.data.redis_endpoint, "")
-  redis_port    = coalesce(module.data.redis_port, 6379)
+  # enable_redis=false면 출력이 null이다. coalesce는 ""(빈 문자열)도 null처럼 건너뛰어 에러를 내므로,
+  # ""를 실제로 반환할 수 있는 명시적 null 검사를 쓴다(운영은 enable_redis=true라 실제 endpoint가 들어간다).
+  redis_address = module.data.redis_endpoint != null ? module.data.redis_endpoint : ""
+  redis_port    = module.data.redis_port != null ? module.data.redis_port : 6379
 
   # EC2 부팅(deploy.sh: ECR pull·시크릿 조회) 전에 준비되어야 하는 것들을 명시적으로 대기:
   # SG egress 규칙·IAM attachment(security), 시크릿 읽기 정책(ec2_secrets_read), 앱 시크릿 값(secrets 의 secret+version).

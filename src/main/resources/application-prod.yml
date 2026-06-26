@@ -21,6 +21,9 @@ manyak:
 management:
   health:
     redis:
-      # KNK-284: ElastiCache 접속정보(SPRING_DATA_REDIS_HOST/PORT)가 .env로 주입됨 → Redis health 재활성화.
-      # refresh 토큰 저장이 Redis에 의존하므로, Redis 장애를 /actuator/health(ALB·배포 스모크)가 감지하도록 켠다.
-      enabled: true
+      # KNK-284는 Redis 주입(.env)만 하고, Redis health 재활성화는 분리한다(후속 PR).
+      # CI(docker-image.yml)가 main 푸시 시 이미지만 기존 인스턴스에 SERVER_IMAGE_OVERRIDE로 배포하면, 그 인스턴스의
+      # deploy.sh는 옛 user-data라 SPRING_DATA_REDIS_*를 .env에 쓰지 않는다. 이때 health를 켜두면 terraform apply
+      # (인스턴스 교체)로 새 user-data가 반영되기 전까지 localhost:6379를 프로브해 /actuator/health가 DOWN이 된다.
+      # → 운영에 새 user-data가 반영되고 Redis 도달이 확인된 뒤 별도 PR에서 켠다.
+      enabled: false
