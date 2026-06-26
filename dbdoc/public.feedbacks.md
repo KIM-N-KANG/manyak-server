@@ -29,7 +29,20 @@
 
 ## Relations
 
-![er](public.feedbacks.svg)
+```mermaid
+erDiagram
+
+
+"public.feedbacks" {
+  bigint id
+  bigint user_id
+  text body
+  varchar_320_ email
+  varchar_20_ platform
+  varchar_50_ app_version
+  timestamp_with_time_zone created_at
+}
+```
 
 ---
 

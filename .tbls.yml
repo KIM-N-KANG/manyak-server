@@ -9,7 +9,11 @@ dsn: "${TBLS_DSN}"
 
 docPath: dbdoc
 
-# ER 다이어그램은 tbls 내장 렌더러로 SVG를 생성한다(시스템 graphviz 설치 불필요 — CI도 동일).
+# ER 다이어그램은 mermaid로 출력한다 — 마크다운에 임베드되어 SVG 바이너리 없이 텍스트만 남고,
+# 재생성 시 결정적이라 'tbls doc 재생성 + git diff' 드리프트 게이트가 안정적으로 동작한다.
+er:
+  format: mermaid
+
 # Flyway 메타테이블은 문서 대상에서 제외한다(스키마명까지 매칭).
 exclude:
   - flyway_schema_history

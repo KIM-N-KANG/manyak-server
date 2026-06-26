@@ -30,7 +30,34 @@
 
 ## Relations
 
-![er](public.story_settings.svg)
+```mermaid
+erDiagram
+
+"public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+
+"public.story_settings" {
+  bigint id
+  bigint story_id FK
+  text world_setting
+  text character_setting
+  text user_role_setting
+  text rule_setting
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.stories" {
+  bigint id
+  bigint user_id
+  varchar_100_ title
+  varchar_255_ one_line_intro
+  text description
+  varchar_255_ genre
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+```
 
 ---
 

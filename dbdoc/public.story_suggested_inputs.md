@@ -28,7 +28,28 @@
 
 ## Relations
 
-![er](public.story_suggested_inputs.svg)
+```mermaid
+erDiagram
+
+"public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
+
+"public.story_suggested_inputs" {
+  bigint id
+  bigint start_setting_id FK
+  text input_text
+  smallint input_order
+  timestamp_with_time_zone created_at
+}
+"public.story_start_settings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text prologue
+  text start_situation
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+```
 
 ---
 

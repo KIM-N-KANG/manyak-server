@@ -33,7 +33,28 @@
 
 ## Relations
 
-![er](public.story_creation_tags.svg)
+```mermaid
+erDiagram
+
+"public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+
+"public.story_creation_tags" {
+  bigint id
+  varchar_50_ tag_type
+  varchar_30_ name
+  varchar_20_ tag_source
+  integer sort_order
+  boolean is_active
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_creation_session_tags" {
+  bigint id
+  bigint creation_session_id FK
+  bigint tag_id FK
+  timestamp_with_time_zone created_at
+}
+```
 
 ---
 

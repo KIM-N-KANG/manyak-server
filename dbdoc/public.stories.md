@@ -31,7 +31,59 @@
 
 ## Relations
 
-![er](public.stories.svg)
+```mermaid
+erDiagram
+
+"public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_play_sessions" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+
+"public.stories" {
+  bigint id
+  bigint user_id
+  varchar_100_ title
+  varchar_255_ one_line_intro
+  text description
+  varchar_255_ genre
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+"public.story_settings" {
+  bigint id
+  bigint story_id FK
+  text world_setting
+  text character_setting
+  text user_role_setting
+  text rule_setting
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_start_settings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text prologue
+  text start_situation
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_play_sessions" {
+  bigint id
+  bigint user_id
+  bigint story_id FK
+  bigint start_setting_id FK
+  varchar_100_ title
+  text summary
+  integer current_turn
+  varchar_20_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+```
 
 ---
 

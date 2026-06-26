@@ -31,7 +31,34 @@
 
 ## Relations
 
-![er](public.users.svg)
+```mermaid
+erDiagram
+
+"public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+
+"public.users" {
+  bigint id
+  uuid public_id
+  varchar_50_ nickname
+  text profile_image_url
+  text profile_thumbnail_base64
+  varchar_20_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+}
+"public.social_accounts" {
+  bigint id
+  bigint user_id FK
+  varchar_20_ provider
+  varchar_255_ provider_user_id
+  varchar_255_ email
+  timestamp_with_time_zone connected_at
+  timestamp_with_time_zone last_login_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+```
 
 ---
 

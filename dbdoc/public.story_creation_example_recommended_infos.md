@@ -28,7 +28,27 @@
 
 ## Relations
 
-![er](public.story_creation_example_recommended_infos.svg)
+```mermaid
+erDiagram
+
+"public.story_creation_example_recommended_infos" }o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+
+"public.story_creation_example_recommended_infos" {
+  bigint id
+  bigint example_id FK
+  text info_text
+  smallint info_order
+  timestamp_with_time_zone created_at
+}
+"public.story_creation_examples" {
+  bigint id
+  bigint creation_session_id FK
+  text example_text
+  smallint example_order
+  boolean is_selected
+  timestamp_with_time_zone created_at
+}
+```
 
 ---
 

@@ -29,7 +29,56 @@
 
 ## Relations
 
-![er](public.story_start_settings.svg)
+```mermaid
+erDiagram
+
+"public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
+"public.story_play_sessions" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+
+"public.story_start_settings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text prologue
+  text start_situation
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_suggested_inputs" {
+  bigint id
+  bigint start_setting_id FK
+  text input_text
+  smallint input_order
+  timestamp_with_time_zone created_at
+}
+"public.story_play_sessions" {
+  bigint id
+  bigint user_id
+  bigint story_id FK
+  bigint start_setting_id FK
+  varchar_100_ title
+  text summary
+  integer current_turn
+  varchar_20_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+"public.stories" {
+  bigint id
+  bigint user_id
+  varchar_100_ title
+  varchar_255_ one_line_intro
+  text description
+  varchar_255_ genre
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+```
 
 ---
 

@@ -34,7 +34,45 @@
 
 ## Relations
 
-![er](public.story_choices.svg)
+```mermaid
+erDiagram
+
+"public.story_choices" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+"public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+
+"public.story_choices" {
+  bigint id
+  bigint play_session_id FK
+  bigint message_id FK
+  text choice_text
+  smallint choice_order
+  boolean is_selected
+  timestamp_with_time_zone selected_at
+  timestamp_with_time_zone created_at
+}
+"public.story_play_sessions" {
+  bigint id
+  bigint user_id
+  bigint story_id FK
+  bigint start_setting_id FK
+  varchar_100_ title
+  text summary
+  integer current_turn
+  varchar_20_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+}
+"public.story_messages" {
+  bigint id
+  bigint play_session_id FK
+  varchar_16_ role
+  text content
+  integer message_order
+  timestamp_with_time_zone created_at
+}
+```
 
 ---
 

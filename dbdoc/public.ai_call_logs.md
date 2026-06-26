@@ -49,7 +49,35 @@
 
 ## Relations
 
-![er](public.ai_call_logs.svg)
+```mermaid
+erDiagram
+
+
+"public.ai_call_logs" {
+  bigint id
+  varchar_128_ request_id
+  varchar_50_ caller_service
+  varchar_40_ feature
+  varchar_64_ anonymous_id_hash
+  varchar_128_ session_id
+  bigint story_id
+  uuid chat_id
+  integer turn_index
+  varchar_40_ provider
+  varchar_100_ model
+  varchar_40_ prompt_template_version
+  varchar_16_ status
+  bigint latency_ms
+  integer input_token_count
+  integer output_token_count
+  integer retry_count
+  varchar_100_ error_code
+  varchar_64_ sentry_event_id
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  jsonb prompt_versions
+}
+```
 
 ---
 

@@ -54,16 +54,24 @@ jobs:
 
       - name: Set up tbls
         uses: k1low/setup-tbls@v1
+        with:
+          # 로컬 생성본과 동일 버전으로 고정 — 재생성 git-diff 게이트의 결정성 확보.
+          version: v1.94.5
 
       # -c 를 명시한다: TBLS_DSN env가 있으면 tbls가 .tbls.yml 자동탐색을 건너뛰어 exclude 등이 무시된다.
       - name: Lint schema
         run: tbls lint -c .tbls.yml
 
+      # dbdoc/ 전체(마크다운·schema.json)를 실제로 재생성해 git diff로 비교한다.
+      # tbls diff 는 마크다운 스키마만 비교해 schema.json 등 다른 산출물의 누락·변조를 놓치므로,
+      # 재생성 후 git diff 로 전체 산출물의 드리프트를 차단한다.
       - name: Verify dbdoc/ is up to date
         run: |
-          if [ -n "$(tbls diff -c .tbls.yml)" ]; then
+          tbls doc -c .tbls.yml --rm-dist
+          git add -A dbdoc
+          if ! git diff --cached --quiet -- dbdoc; then
             echo "::error::dbdoc/ 가 최신 스키마와 다릅니다. 'scripts/gen-db-docs.sh' 로 재생성 후 커밋하세요."
-            tbls diff -c .tbls.yml
+            git diff --cached -- dbdoc
             exit 1
           fi
           echo "✅ dbdoc/ 가 최신 스키마와 일치합니다."
