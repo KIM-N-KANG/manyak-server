@@ -49,6 +49,9 @@ module "compute" {
   db_port        = module.data.db_port
   db_name        = module.data.db_name
 
+  # KNK-294 CORS 허용 오리진 주입: apex + www(FE). 미주입 시 compose 기본값(apex만)으로 떨어져 www POST가 403이 된다.
+  cors_allowed_origins = "https://manyak.app,https://www.manyak.app"
+
   # EC2 부팅(deploy.sh: ECR pull·시크릿 조회) 전에 준비되어야 하는 것들을 명시적으로 대기:
   # SG egress 규칙·IAM attachment(security), 시크릿 읽기 정책(ec2_secrets_read), 앱 시크릿 값(secrets 의 secret+version).
   depends_on = [module.security, module.secrets, aws_iam_role_policy.ec2_secrets_read]

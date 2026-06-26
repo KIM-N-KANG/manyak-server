@@ -17,17 +17,18 @@ resource "aws_instance" "app" {
   associate_public_ip_address = false
 
   user_data = templatefile("${path.module}/user-data.sh.tftpl", {
-    aws_region       = var.aws_region
-    ecr_registry_url = var.ecr_registry_url
-    server_image     = var.server_image
-    ai_image         = var.ai_image
-    compose_content  = var.compose_content
-    environment      = var.environment
-    db_secret_arn    = var.db_secret_arn
-    app_secret_arn   = var.app_secret_arn
-    db_address       = var.db_address
-    db_port          = var.db_port
-    db_name          = var.db_name
+    aws_region           = var.aws_region
+    ecr_registry_url     = var.ecr_registry_url
+    server_image         = var.server_image
+    ai_image             = var.ai_image
+    compose_content      = var.compose_content
+    environment          = var.environment
+    db_secret_arn        = var.db_secret_arn
+    app_secret_arn       = var.app_secret_arn
+    db_address           = var.db_address
+    db_port              = var.db_port
+    db_name              = var.db_name
+    cors_allowed_origins = var.cors_allowed_origins
   })
   # user-data가 바뀌면 인스턴스를 교체해 재프로비저닝
   user_data_replace_on_change = true
