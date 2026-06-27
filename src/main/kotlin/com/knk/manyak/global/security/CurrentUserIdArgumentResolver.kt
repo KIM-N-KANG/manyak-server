@@ -42,10 +42,13 @@ class CurrentUserIdArgumentResolver(
         return userRepository.findByPublicId(publicId)?.id
     }
 
-    private fun parsePublicIdOrNull(subject: String?): UUID? =
-        try {
+    private fun parsePublicIdOrNull(subject: String?): UUID? {
+        // sub가 없는 토큰(subject=null)은 익명으로 본다. UUID.fromString(null)이 NPE를 던지지 않도록 먼저 거른다.
+        if (subject == null) return null
+        return try {
             UUID.fromString(subject)
         } catch (_: IllegalArgumentException) {
             null
         }
+    }
 }
