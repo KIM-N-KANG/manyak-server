@@ -35,4 +35,4 @@
 ### Terraform/IaC 작업
 
 - 운영 인프라(Terraform/IaC)는 `manyak-terraform` 레포로 분리됨(KNK-296). terraform 코드·작업·검증·apply는 그 레포에서 수행하고, 이 레포에는 IaC 코드를 두지 않습니다.
-- IaC 관련 제약(IAM/SG `name`·`description` ASCII 전용, `plan`≠`apply`, 비밀 주입 규칙, `fmt`·`validate` 선행 등)은 `manyak-terraform` 레포의 README를 따릅니다.
+- IaC 관련 제약(IAM/SG `name`·`description` ASCII 전용, `plan`≠`apply`, 비밀 주입 규칙, `fmt`·`validate` 선행 등)은 `manyak-terraform` 레포의 `CLAUDE.md`를 따릅니다.
