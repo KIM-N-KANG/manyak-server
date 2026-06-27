@@ -23,8 +23,9 @@ class StoryCreationSession(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
+    // 익명으로 시작한 세션을 로그인 사용자가 완료(claim)하면 소유자를 박을 수 있어야 한다(KNK-286).
     @Column(name = "user_id")
-    val userId: Long? = null,
+    var userId: Long? = null,
 
     @Column(name = "story_id")
     var storyId: Long? = null,
