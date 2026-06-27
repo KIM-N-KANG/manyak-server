@@ -294,6 +294,9 @@ class SimpleStoryCreationService(
                 },
             )
 
+            // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
+            // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).
+            lockedSession.userId = attributedUserId
             lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
             lockedSession.storyId = story.id
             storyCreationSessionRepository.save(lockedSession)

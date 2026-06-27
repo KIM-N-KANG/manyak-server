@@ -363,6 +363,20 @@ class OptionalAuthAttributionIntegrationTests {
         putRating(storyline.id, null).expectStatus().isOk
     }
 
+    @Test
+    fun `익명 세션을 로그인 사용자가 완료하면 세션 소유자가 그 사용자가 되어 이후 평가가 보호된다`() {
+        val owner = saveUser("owner")
+        val storyline = persistStoryline() // 익명 세션
+
+        // 익명 세션을 owner가 완료(claim)
+        postSimpleStory(storyline, "Bearer ${validToken(owner)}").expectStatus().isCreated
+
+        // 세션 소유자가 owner로 박혀, 다른 사용자는 그 스토리라인을 평가하지 못한다(403).
+        assertThat(creationSessionRepository.findAll().first().userId).isEqualTo(owner.id)
+        val attacker = saveUser("attacker")
+        putRating(storyline.id, "Bearer ${validToken(attacker)}").expectStatus().isForbidden
+    }
+
     private fun putRating(storylineId: Long, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.put()
             .uri("/api/v1/stories/simple/storylines/$storylineId/rating")
