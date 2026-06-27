@@ -34,7 +34,5 @@
 
 ### Terraform/IaC 작업
 
-- AWS IAM 역할·정책·보안 그룹의 `name`·`description`은 ASCII(Latin-1)만 허용됩니다. 한글·`>` 등이 들어가면 `plan`은 통과해도 `apply`에서 거부되므로, 이런 필드에는 영문만 씁니다.
-- `terraform plan` 통과가 `apply` 성공을 보장하지 않습니다. 위 ASCII 제약, Secrets Manager secret 존재, IAM 권한 등 apply 시점 제약도 함께 점검합니다.
-- 비밀은 `secret_string`을 `ignore_changes`로 두고 실제 값은 `aws secretsmanager put-secret-value`로 주입합니다. terraform 코드·state·`*.tfvars`에 평문 비밀을 넣지 않습니다.
-- 인프라(`infra/terraform`)를 변경하면 완료 보고 전에 `terraform fmt`·`validate`(가능하면 `plan`)를 실행합니다.
+- 운영 인프라(Terraform/IaC)는 `manyak-terraform` 레포로 분리됨(KNK-296). terraform 코드·작업·검증·apply는 그 레포에서 수행하고, 이 레포에는 IaC 코드를 두지 않습니다.
+- IaC 관련 제약(IAM/SG `name`·`description` ASCII 전용, `plan`≠`apply`, 비밀 주입 규칙, `fmt`·`validate` 선행 등)은 `manyak-terraform` 레포의 README를 따릅니다.

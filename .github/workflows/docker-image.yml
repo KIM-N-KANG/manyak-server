@@ -149,7 +149,7 @@ jobs:
             --filters "Name=tag:Project,Values=manyak" "Name=tag:Name,Values=manyak-prod-app" "Name=instance-state-name,Values=running" \
             --query "Reservations[].Instances[].InstanceId | [0]" --output text)
           if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
-            echo "::error::running 상태의 manyak-prod-app EC2를 찾지 못했습니다 (terraform apply 선행 필요)"; exit 1
+            echo "::error::running 상태의 manyak-prod-app EC2를 찾지 못했습니다 (manyak-terraform 레포에서 terraform apply 선행 필요)"; exit 1
           fi
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
           echo "대상 인스턴스: $INSTANCE_ID"
@@ -195,4 +195,4 @@ jobs:
             fi
             echo "health 대기 $i/12 (15s)..."; sleep 15
           done
-          echo "::error::health 200/UP 확인 실패 — 롤백 검토 (infra/terraform/README 참조)"; exit 1
+          echo "::error::health 200/UP 확인 실패 — 롤백 검토 (manyak-terraform 레포 참조)"; exit 1
