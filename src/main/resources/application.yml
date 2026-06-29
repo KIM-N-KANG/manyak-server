@@ -49,8 +49,9 @@ manyak:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
   analytics:
-    # 익명 ID 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
-    device-id-pepper: ${MANYAK_ANALYTICS_DEVICE_ID_PEPPER:}
+    # device_id 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
+    # 전환기(KNK-317): 새 env가 없으면 구 MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER로 fallback. 롤아웃 완료 후 fallback 제거.
+    device-id-pepper: ${MANYAK_ANALYTICS_DEVICE_ID_PEPPER:${MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER:}}
 
 sentry:
   # DSN 미설정(빈 값)이면 Sentry는 비활성(no-op)이다. 운영에서 SENTRY_DSN으로 주입한다.
