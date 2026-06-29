@@ -172,7 +172,7 @@ erDiagram
   varchar_128_ request_id
   varchar_50_ caller_service
   varchar_40_ feature
-  varchar_64_ anonymous_id_hash
+  varchar_64_ device_id_hash
   varchar_128_ session_id
   bigint story_id
   uuid chat_id

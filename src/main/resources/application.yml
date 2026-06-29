@@ -50,7 +50,7 @@ manyak:
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
   analytics:
     # 익명 ID 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
-    anonymous-id-pepper: ${MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER:}
+    device-id-pepper: ${MANYAK_ANALYTICS_DEVICE_ID_PEPPER:}
 
 sentry:
   # DSN 미설정(빈 값)이면 Sentry는 비활성(no-op)이다. 운영에서 SENTRY_DSN으로 주입한다.

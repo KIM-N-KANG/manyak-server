@@ -21,14 +21,14 @@ class CorrelationHeadersTests {
     fun `MDC의 세 식별자를 outbound 헤더로 변환한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, "sess_1")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_xyz")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_xyz")
 
         val headers = CorrelationHeaders.forwardingHeadersFromMdc()
 
         assertThat(headers).containsOnly(
             entry("X-Manyak-Request-Id", "req_abc"),
             entry("X-Manyak-Session-Id", "sess_1"),
-            entry("X-Manyak-Anonymous-Id-Hash", "anon_hash_xyz"),
+            entry("X-Manyak-Device-Id-Hash", "device_hash_xyz"),
         )
     }
 
@@ -36,7 +36,7 @@ class CorrelationHeadersTests {
     fun `unknown sentinel 값은 헤더에서 생략한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, RequestCorrelationFilter.UNKNOWN)
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, RequestCorrelationFilter.UNKNOWN)
+        MDC.put(MdcKeys.DEVICE_ID_HASH, RequestCorrelationFilter.UNKNOWN)
 
         val headers = CorrelationHeaders.forwardingHeadersFromMdc()
 

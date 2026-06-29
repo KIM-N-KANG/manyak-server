@@ -8,7 +8,7 @@
 | request_id | varchar(128) |  | false |  |  |  |
 | caller_service | varchar(50) |  | false |  |  |  |
 | feature | varchar(40) |  | false |  |  |  |
-| anonymous_id_hash | varchar(64) |  | true |  |  |  |
+| device_id_hash | varchar(64) |  | true |  |  |  |
 | session_id | varchar(128) |  | true |  |  |  |
 | story_id | bigint |  | true |  |  |  |
 | chat_id | uuid |  | true |  |  |  |
@@ -58,7 +58,7 @@ erDiagram
   varchar_128_ request_id
   varchar_50_ caller_service
   varchar_40_ feature
-  varchar_64_ anonymous_id_hash
+  varchar_64_ device_id_hash
   varchar_128_ session_id
   bigint story_id
   uuid chat_id

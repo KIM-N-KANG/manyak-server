@@ -10,19 +10,19 @@ import java.security.MessageDigest
  * 분석에서 동일 사용자를 묶기 위해 결정적(고정) 해시를 사용하며, pepper로 추측 공격을 완화한다.
  */
 @Component
-class AnonymousIdHasher(
-    @Value("\${manyak.analytics.anonymous-id-pepper:}")
+class DeviceIdHasher(
+    @Value("\${manyak.analytics.device-id-pepper:}")
     private val pepper: String,
 ) {
-    fun hash(rawAnonymousId: String): String {
+    fun hash(rawDeviceId: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        val bytes = digest.digest((pepper + rawAnonymousId).toByteArray(StandardCharsets.UTF_8))
+        val bytes = digest.digest((pepper + rawDeviceId).toByteArray(StandardCharsets.UTF_8))
         val hex = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         return PREFIX + hex.take(HASH_LENGTH)
     }
 
     companion object {
-        const val PREFIX = "anon_hash_"
+        const val PREFIX = "device_hash_"
         private const val HASH_LENGTH = 16
     }
 }

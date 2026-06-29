@@ -19,10 +19,10 @@ class SentryMdcEventProcessorTests {
     }
 
     @Test
-    fun `request_id는 tag, session·anonymous는 identity context로 부착한다`() {
+    fun `request_id는 tag, session·device는 identity context로 부착한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, "sess_1")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_x")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_x")
 
         val event = processor.process(SentryEvent(), Hint())
 
@@ -30,7 +30,7 @@ class SentryMdcEventProcessorTests {
         @Suppress("UNCHECKED_CAST")
         val identity = event.contexts["identity"] as Map<String, Any>
         assertEquals("sess_1", identity[MdcKeys.SESSION_ID])
-        assertEquals("anon_hash_x", identity[MdcKeys.ANONYMOUS_ID_HASH])
+        assertEquals("device_hash_x", identity[MdcKeys.DEVICE_ID_HASH])
     }
 
     @Test

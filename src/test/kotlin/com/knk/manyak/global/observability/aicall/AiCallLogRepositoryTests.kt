@@ -80,14 +80,14 @@ class AiCallLogRepositoryTests {
     }
 
     @Test
-    fun `식별자(session·anonymous·story·chat·turn)를 적재한다`() {
+    fun `식별자(session·device·story·chat·turn)를 적재한다`() {
         val chatId = UUID.randomUUID()
         val saved = repository.save(
             AiCallLog(
                 requestId = "req_identifiers",
                 callerService = "manyak-server",
                 feature = AiCallFeature.CHAT_RESPONSE,
-                anonymousIdHash = "anon_hash_0123456789abcdef",
+                deviceIdHash = "device_hash_0123456789abcdef",
                 sessionId = "sess_1",
                 storyId = 7L,
                 chatId = chatId,
@@ -97,7 +97,7 @@ class AiCallLogRepositoryTests {
 
         val found = repository.findById(saved.id).orElseThrow()
         assertEquals("sess_1", found.sessionId)
-        assertEquals("anon_hash_0123456789abcdef", found.anonymousIdHash)
+        assertEquals("device_hash_0123456789abcdef", found.deviceIdHash)
         assertEquals(7L, found.storyId)
         assertEquals(chatId, found.chatId)
         assertEquals(3, found.turnIndex)

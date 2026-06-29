@@ -19,7 +19,7 @@ import org.springframework.mock.web.MockHttpServletResponse
  */
 class RequestCorrelationFilterTests {
 
-    private val filter = RequestCorrelationFilter(AnonymousIdHasher(pepper = ""))
+    private val filter = RequestCorrelationFilter(DeviceIdHasher(pepper = ""))
 
     @AfterEach
     fun clearMdc() {
@@ -36,28 +36,28 @@ class RequestCorrelationFilterTests {
     }
 
     private fun request(
-        anonymousId: String? = null,
+        deviceId: String? = null,
         sessionId: String? = null,
         requestId: String? = null,
     ): MockHttpServletRequest = MockHttpServletRequest("GET", "/api/v1/stories/simple/tags").apply {
-        anonymousId?.let { addHeader("X-Manyak-Anonymous-Id", it) }
+        deviceId?.let { addHeader("X-Manyak-Device-Id", it) }
         sessionId?.let { addHeader("X-Manyak-Session-Id", it) }
         requestId?.let { addHeader("X-Manyak-Request-Id", it) }
     }
 
     @Test
-    fun `헤더가 있으면 request_id·session_id·anonymous_id_hash를 MDC에 넣는다`() {
-        val (mdc, _) = runFilter(request(anonymousId = "anon-raw-1", sessionId = "sess-1", requestId = "req_given"))
+    fun `헤더가 있으면 request_id·session_id·device_id_hash를 MDC에 넣는다`() {
+        val (mdc, _) = runFilter(request(deviceId = "anon-raw-1", sessionId = "sess-1", requestId = "req_given"))
 
         assertThat(mdc["request_id"]).isEqualTo("req_given")
         assertThat(mdc["session_id"]).isEqualTo("sess-1")
-        assertThat(mdc["anonymous_id_hash"]).startsWith("anon_hash_")
-        assertThat(mdc["anonymous_id_hash"]).isNotEqualTo("anon-raw-1")
+        assertThat(mdc["device_id_hash"]).startsWith("device_hash_")
+        assertThat(mdc["device_id_hash"]).isNotEqualTo("anon-raw-1")
     }
 
     @Test
     fun `request_id 헤더가 없으면 req_ 접두 ID를 생성한다`() {
-        val (mdc, _) = runFilter(request(anonymousId = "anon-raw-1", sessionId = "sess-1"))
+        val (mdc, _) = runFilter(request(deviceId = "anon-raw-1", sessionId = "sess-1"))
 
         assertThat(mdc["request_id"]).startsWith("req_")
         assertThat(mdc["request_id"]!!.length).isGreaterThan("req_".length)
@@ -65,14 +65,14 @@ class RequestCorrelationFilterTests {
 
     @Test
     fun `요청에 있던 X-Manyak-Request-Id를 응답에 그대로 echo한다`() {
-        val (_, response) = runFilter(request(anonymousId = "a", sessionId = "s", requestId = "req_given"))
+        val (_, response) = runFilter(request(deviceId = "a", sessionId = "s", requestId = "req_given"))
 
         assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo("req_given")
     }
 
     @Test
     fun `request_id를 생성한 경우에도 동일 값을 응답에 echo한다`() {
-        val (mdc, response) = runFilter(request(anonymousId = "a", sessionId = "s"))
+        val (mdc, response) = runFilter(request(deviceId = "a", sessionId = "s"))
 
         assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo(mdc["request_id"])
     }
@@ -80,22 +80,22 @@ class RequestCorrelationFilterTests {
     @Test
     fun `익명 ID 원본은 MDC에 남기지 않고 해시만 남긴다`() {
         val raw = "super-secret-anon"
-        val (mdc, _) = runFilter(request(anonymousId = raw, sessionId = "s"))
+        val (mdc, _) = runFilter(request(deviceId = raw, sessionId = "s"))
 
-        assertThat(mdc["anonymous_id_hash"]).startsWith("anon_hash_")
-        assertThat(mdc["anonymous_id_hash"]).doesNotContain(raw)
+        assertThat(mdc["device_id_hash"]).startsWith("device_hash_")
+        assertThat(mdc["device_id_hash"]).doesNotContain(raw)
     }
 
     @Test
     fun `요청 처리 후 MDC를 비운다 (스레드풀 누수 없음)`() {
-        runFilter(request(anonymousId = "a", sessionId = "s", requestId = "req_x"))
+        runFilter(request(deviceId = "a", sessionId = "s", requestId = "req_x"))
 
         val after = MDC.getCopyOfContextMap()
         assertThat(after == null || after.isEmpty()).isTrue()
     }
 
     @Test
-    fun `필수 헤더(anonymous·session)가 없으면 unknown으로 채우고 경고를 남긴다`() {
+    fun `필수 헤더(device·session)가 없으면 unknown으로 채우고 경고를 남긴다`() {
         val logger = LoggerFactory.getLogger(RequestCorrelationFilter::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
@@ -103,7 +103,7 @@ class RequestCorrelationFilterTests {
             val (mdc, _) = runFilter(request(requestId = "req_x"))
 
             assertThat(mdc["session_id"]).isEqualTo("unknown")
-            assertThat(mdc["anonymous_id_hash"]).isEqualTo("unknown")
+            assertThat(mdc["device_id_hash"]).isEqualTo("unknown")
         } finally {
             logger.detachAppender(appender)
         }

@@ -7,5 +7,5 @@ package com.knk.manyak.global.observability
 object MdcKeys {
     const val REQUEST_ID = "request_id"
     const val SESSION_ID = "session_id"
-    const val ANONYMOUS_ID_HASH = "anonymous_id_hash"
+    const val DEVICE_ID_HASH = "device_id_hash"
 }

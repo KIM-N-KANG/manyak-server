@@ -9,7 +9,7 @@
 ###
 ### 검증 포인트:
 ###   - 응답 헤더 X-Manyak-Request-Id: 보낸 값은 그대로 echo, 없으면 서버가 req_ 접두로 생성 (HTTP로 관찰 가능)
-###   - MDC(request_id/session_id/anonymous_id_hash): 서버 로그 필드로만 드러남.
+###   - MDC(request_id/session_id/device_id_hash): 서버 로그 필드로만 드러남.
 ###     구조화 로그 출력은 KNK-217에서 들어오므로, 지금은 (1) echo 헤더와 (2) 누락 시 WARN 로그로 확인합니다.
 ###
 ### 사전 준비:
@@ -35,7 +35,7 @@ X-Manyak-Request-Id: req_health_check
 ### 1. 세 헤더를 모두 보내면 보낸 request_id가 그대로 응답에 echo된다 → 200
 GET {{baseUrl}}/api/v1/stories/simple/tags
 Accept: application/json
-X-Manyak-Anonymous-Id: anon-manual-1
+X-Manyak-Device-Id: anon-manual-1
 X-Manyak-Session-Id: sess-manual-1
 X-Manyak-Request-Id: req_manual_check_1
 
@@ -50,7 +50,7 @@ X-Manyak-Request-Id: req_manual_check_1
 ### 2. X-Manyak-Request-Id를 생략하면 서버가 req_ 접두 ID를 생성해 응답에 담는다 → 200
 GET {{baseUrl}}/api/v1/stories/simple/tags
 Accept: application/json
-X-Manyak-Anonymous-Id: anon-manual-2
+X-Manyak-Device-Id: anon-manual-2
 X-Manyak-Session-Id: sess-manual-2
 
 > {%
@@ -62,9 +62,9 @@ X-Manyak-Session-Id: sess-manual-2
     });
 %}
 
-### 3. 필수 헤더(anonymous·session)가 없어도 4xx로 막지 않고 200을 반환한다 (관대 처리)
+### 3. 필수 헤더(device·session)가 없어도 4xx로 막지 않고 200을 반환한다 (관대 처리)
 # 수동 확인: 이 요청을 보낸 뒤 서버 콘솔 로그에
-#   WARN ... 필수 추적 헤더 누락: missing=[X-Manyak-Anonymous-Id, X-Manyak-Session-Id], method=GET, path=/api/v1/stories/simple/tags
+#   WARN ... 필수 추적 헤더 누락: missing=[X-Manyak-Device-Id, X-Manyak-Session-Id], method=GET, path=/api/v1/stories/simple/tags
 # 가 한 줄 찍히는지 눈으로 확인하세요. (분석 신호 누락이 제품 가용성을 깨지 않는다는 정책)
 GET {{baseUrl}}/api/v1/stories/simple/tags
 Accept: application/json
@@ -83,21 +83,21 @@ X-Manyak-Request-Id: req_manual_check_3
 # 서버 로그에 같은 request_id로 요청이 묶이는지(=KNK-217 구조화 로그 적용 후 더 명확) 확인합니다.
 GET {{baseUrl}}/api/v1/stories/simple/tags
 Accept: application/json
-X-Manyak-Anonymous-Id: anon-자유입력
+X-Manyak-Device-Id: anon-자유입력
 X-Manyak-Session-Id: sess-자유입력
 X-Manyak-Request-Id: req_자유입력
 
 ### 5. (KNK-267) AI 호출로 상관관계 헤더가 forward되는지 확인 — 백엔드 경유 스토리라인 생성
 # forward는 서버→AI 내부 동작이라 이 클라이언트의 응답으로는 직접 보이지 않습니다.
 # 따라서 아래 백엔드 요청(AI를 호출하는 엔드포인트)에 X-Manyak-* 헤더를 실어 보낸 뒤,
-# AI 서버 쪽 로그/Sentry에서 같은 request_id(req_forward_check_1)와 session_id·anonymous_id_hash로
+# AI 서버 쪽 로그/Sentry에서 같은 request_id(req_forward_check_1)와 session_id·device_id_hash로
 # 묶이는지 눈으로 확인합니다.
 #
 # 검증 포인트(AI 측에서 확인):
 #   - X-Manyak-Request-Id        → req_forward_check_1 그대로 수신
 #   - X-Manyak-Session-Id        → sess_forward_check_1 그대로 수신
-#   - X-Manyak-Anonymous-Id-Hash → 서버가 원본(anon-forward-1)을 해시한 anon_hash_... 값 수신
-#   - 원본 X-Manyak-Anonymous-Id 는 AI로 전달되지 않음(원본 PII forward 금지)
+#   - X-Manyak-Device-Id-Hash → 서버가 원본(anon-forward-1)을 해시한 device_hash_... 값 수신
+#   - 원본 X-Manyak-Device-Id 는 AI로 전달되지 않음(원본 PII forward 금지)
 #
 # 사전 준비:
 #   - 백엔드가 실제 AI를 호출하도록 manyak.ai.chat.stub=false, MANYAK_AI_BASE_URL 설정(scheme 포함).
@@ -106,7 +106,7 @@ X-Manyak-Request-Id: req_자유입력
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 Accept: application/json
 Content-Type: application/json
-X-Manyak-Anonymous-Id: anon-forward-1
+X-Manyak-Device-Id: anon-forward-1
 X-Manyak-Session-Id: sess_forward_check_1
 X-Manyak-Request-Id: req_forward_check_1
 

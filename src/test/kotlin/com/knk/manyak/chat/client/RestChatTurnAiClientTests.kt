@@ -216,13 +216,13 @@ class RestChatTurnAiClientTests {
 
         MDC.put(MdcKeys.REQUEST_ID, "req_chat_1")
         MDC.put(MdcKeys.SESSION_ID, "sess_chat_1")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_chat")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_chat")
         client().streamTurn(sampleRequest(), onToken = {})
 
         val recorded = server.takeRequest()
         assertEquals("req_chat_1", recorded.getHeader("X-Manyak-Request-Id"))
         assertEquals("sess_chat_1", recorded.getHeader("X-Manyak-Session-Id"))
-        assertEquals("anon_hash_chat", recorded.getHeader("X-Manyak-Anonymous-Id-Hash"))
+        assertEquals("device_hash_chat", recorded.getHeader("X-Manyak-Device-Id-Hash"))
     }
 
     @Test
@@ -240,7 +240,7 @@ class RestChatTurnAiClientTests {
         val recorded = server.takeRequest()
         assertNull(recorded.getHeader("X-Manyak-Request-Id"))
         assertNull(recorded.getHeader("X-Manyak-Session-Id"))
-        assertNull(recorded.getHeader("X-Manyak-Anonymous-Id-Hash"))
+        assertNull(recorded.getHeader("X-Manyak-Device-Id-Hash"))
     }
 
     private fun client() = RestChatTurnAiClient(
