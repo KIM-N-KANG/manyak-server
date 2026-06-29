@@ -11,6 +11,15 @@ spring:
   flyway:
     enabled: true
 
+# 운영에서는 Swagger UI·OpenAPI 문서를 비공개화한다(KNK-321).
+# 경로(/swagger-ui.html, /v3/api-docs)는 springdoc 기본값이라 사실상 고정이고 SecurityConfig에서 permitAll이라,
+# api.manyak.app 같은 추측 가능한 주소로 외부에서 전체 API 스펙이 노출된다. dev/local은 노출을 유지한다(개발 편의).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 manyak:
   # auth.jwt.secret 은 여기에 하드코딩하지 않는다. 운영은 env(MANYAK_AUTH_JWT_SECRET)로만 주입한다(application.yml 기본 바인딩).
   ai:
