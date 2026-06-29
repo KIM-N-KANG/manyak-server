@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component
 /**
  * 모든 Sentry 이벤트에 MDC 상관관계 식별자를 부착한다.
  *
- * request_id는 검색·필터에 쓰이므로 tag로, 개인정보성 식별자(session_id·anonymous_id_hash)는
+ * request_id는 검색·필터에 쓰이므로 tag로, 개인정보성 식별자(session_id·device_id_hash)는
  * context로 싣는다. MdcTaskDecorator가 비동기 워커까지 MDC를 전파하므로 chatSseExecutor에서
  * 캡처한 이벤트도 동일하게 채워진다.
  *
@@ -24,7 +24,7 @@ class SentryMdcEventProcessor : EventProcessor {
 
         val identity = buildMap {
             mdc(MdcKeys.SESSION_ID)?.let { put(MdcKeys.SESSION_ID, it) }
-            mdc(MdcKeys.ANONYMOUS_ID_HASH)?.let { put(MdcKeys.ANONYMOUS_ID_HASH, it) }
+            mdc(MdcKeys.DEVICE_ID_HASH)?.let { put(MdcKeys.DEVICE_ID_HASH, it) }
         }
         if (identity.isNotEmpty()) {
             event.contexts["identity"] = identity

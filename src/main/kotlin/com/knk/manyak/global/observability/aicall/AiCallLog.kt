@@ -41,8 +41,8 @@ class AiCallLog(
     @Column(name = "feature", nullable = false, length = 40)
     val feature: AiCallFeature,
 
-    @Column(name = "anonymous_id_hash", length = 64)
-    val anonymousIdHash: String? = null,
+    @Column(name = "device_id_hash", length = 64)
+    val deviceIdHash: String? = null,
 
     @Column(name = "session_id", length = 128)
     val sessionId: String? = null,

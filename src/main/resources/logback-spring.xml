@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   운영 로그 양식(AN-3 §4).
-  - prod 프로파일: JSON 1줄 로그(LogstashEncoder). MDC(request_id/session_id/anonymous_id_hash)와
+  - prod 프로파일: JSON 1줄 로그(LogstashEncoder). MDC(request_id/session_id/device_id_hash)와
     StructuredArguments(event_name 등)를 최상위 필드로 내보내 CloudWatch에서 그대로 질의한다.
   - 그 외(local/test 등): 사람이 읽기 쉬운 Spring Boot 기본 콘솔 패턴 유지.
 -->

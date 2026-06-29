@@ -25,7 +25,7 @@ class RequestCorrelationFilterWiringIntegrationTests {
         restTestClient.get()
             .uri("/actuator/health")
             .header("X-Manyak-Request-Id", "req_test_123")
-            .header("X-Manyak-Anonymous-Id", "anon-itest")
+            .header("X-Manyak-Device-Id", "anon-itest")
             .header("X-Manyak-Session-Id", "sess-itest")
             .exchange()
             .expectStatus().isOk

@@ -11,7 +11,7 @@ import java.util.UUID
  * AI 호출을 감싸 ai_call_logs에 적재한다.
  *
  * 호출 직전 STARTED로 적재하고, [block] 실행 결과에 따라 SUCCEEDED/FAILED로 전이한다.
- * latency는 여기서 측정하고, request_id·session_id·anonymous_id_hash는 MDC에서 읽는다.
+ * latency는 여기서 측정하고, request_id·session_id·device_id_hash는 MDC에서 읽는다.
  * (chat_response처럼 chatSseExecutor 워커에서 호출돼도 MdcTaskDecorator가 MDC를 전파하므로 동일하게 동작한다.)
  *
  * 반환한 [RecordedAiCall.aiCallLogId]를 호출부가 ai_response_saved 등 로그에 실어 상관관계를 잇는다.
@@ -96,8 +96,8 @@ class AiCallRecorder(
         requestId = (MDC.get(MdcKeys.REQUEST_ID) ?: UNKNOWN).take(IDENTIFIER_MAX_LENGTH),
         callerService = callerService,
         feature = context.feature,
-        // session_id·anonymous_id_hash는 헤더 누락 시 필터가 "unknown"으로 채우므로, 분석을 위해 null로 정규화한다.
-        anonymousIdHash = cleanMdc(MdcKeys.ANONYMOUS_ID_HASH),
+        // session_id·device_id_hash는 헤더 누락 시 필터가 "unknown"으로 채우므로, 분석을 위해 null로 정규화한다.
+        deviceIdHash = cleanMdc(MdcKeys.DEVICE_ID_HASH),
         sessionId = cleanMdc(MdcKeys.SESSION_ID),
         storyId = context.storyId,
         chatId = context.chatId,

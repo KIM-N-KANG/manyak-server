@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory
 
 /**
  * 구조화 이벤트 로깅 헬퍼: event_name과 임의 필드를 INFO 구조화 로그로 남긴다.
- * (MDC 공통 필드 request_id/session_id/anonymous_id_hash는 logback 인코더가 자동 부착하므로
+ * (MDC 공통 필드 request_id/session_id/device_id_hash는 logback 인코더가 자동 부착하므로
  *  헬퍼 단위 테스트 범위 밖이다.)
  */
 class StructuredLoggerTests {
