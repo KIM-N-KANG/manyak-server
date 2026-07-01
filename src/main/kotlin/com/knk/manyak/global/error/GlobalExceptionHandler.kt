@@ -18,6 +18,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.server.ResponseStatusException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -174,6 +175,19 @@ class GlobalExceptionHandler {
                 path = request.requestURI,
             ),
         )
+    }
+
+    @ExceptionHandler(NoResourceFoundException::class)
+    fun handleNoResourceFoundException(
+        exception: NoResourceFoundException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        // 매핑된 핸들러가 없는 경로(예: 운영에서 비활성화한 springdoc의 /swagger-ui·/v3/api-docs, KNK-321).
+        // SecurityConfig permitAll이라 보안은 통과하지만 정적 리소스도 없어 발생한다. catch-all(Exception)으로
+        // 떨어지면 500 + Sentry가 되어 스캐너의 /swagger-ui 폴링마다 5xx 노이즈가 쌓이므로, 표준대로 404로
+        // 응답하고 Sentry로는 보내지 않는다(예상 가능한 4xx). (KNK-349)
+        log.debug("No resource found: path={}", request.requestURI)
+        return errorResponse(HttpStatus.NOT_FOUND, request, "요청한 리소스를 찾을 수 없습니다.")
     }
 
     @ExceptionHandler(Exception::class)
