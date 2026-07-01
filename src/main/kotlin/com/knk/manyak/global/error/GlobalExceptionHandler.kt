@@ -52,14 +52,32 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
         status: HttpStatus,
     ) {
-        val message = "ResponseStatusException occurred: status={}, path={}, reason={}"
         val reason = exception.reason ?: status.reasonPhrase
+        val cause = exception.cause
         when {
-            status.is5xxServerError -> log.error(message, status.value(), request.requestURI, reason, exception)
-            exception.cause != null -> log.warn(message, status.value(), request.requestURI, reason, exception)
-            else -> log.debug(message, status.value(), request.requestURI, reason)
+            // 예상하지 못한 5xx만 스택트레이스까지 남긴다(Sentry 캡처도 5xx 전용).
+            status.is5xxServerError ->
+                log.error(
+                    "ResponseStatusException occurred: status={}, path={}, reason={}",
+                    status.value(), request.requestURI, reason, exception,
+                )
+            // 예상 가능한 4xx(인증 실패·형식 오류 등)는 cause가 있어도 스택트레이스를 남기지 않는다.
+            // 잘못된/만료 토큰마다 전체 스택이 WARN으로 찍혀 로그가 폭주하던 문제(KNK-289). cause는 한 줄 요약만 남긴다.
+            cause != null ->
+                log.warn(
+                    "ResponseStatusException occurred: status={}, path={}, reason={}, cause={}",
+                    status.value(), request.requestURI, reason, causeSummary(cause),
+                )
+            else ->
+                log.debug(
+                    "ResponseStatusException occurred: status={}, path={}, reason={}",
+                    status.value(), request.requestURI, reason,
+                )
         }
     }
+
+    /** cause를 스택트레이스 없이 "클래스: 메시지" 한 줄로 요약한다(4xx 로그 노이즈 방지). */
+    private fun causeSummary(cause: Throwable): String = "${cause::class.simpleName}: ${cause.message}"
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun handleMethodArgumentNotValidException(

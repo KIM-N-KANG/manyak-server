@@ -1,0 +1,77 @@
+name: DB Docs (tbls)
+
+# 마이그레이션이 바뀌면 커밋된 dbdoc/ 가 최신인지 검증한다(문서 드리프트 차단).
+# 트리거는 스키마 관련 경로로 한정한다 — dbdoc/ 베이스라인이 커밋된 뒤부터 게이트가 의미를 가진다.
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - "src/main/resources/db/migration/**"
+      - "dbdoc/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tbls:
+    name: Verify schema docs are up to date
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: manyak
+          POSTGRES_USER: manyak
+          POSTGRES_PASSWORD: manyak
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U manyak -d manyak"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TBLS_DSN: postgres://manyak:manyak@localhost:5432/manyak?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply Flyway migrations
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/src/main/resources/db/migration:/flyway/sql:ro" \
+            flyway/flyway:11 \
+            -url="jdbc:postgresql://localhost:5432/manyak" \
+            -user=manyak -password=manyak \
+            -locations=filesystem:/flyway/sql \
+            -connectRetries=10 \
+            migrate
+
+      - name: Set up tbls
+        uses: k1low/setup-tbls@v1
+        with:
+          # 로컬 생성본과 동일 버전으로 고정 — 재생성 git-diff 게이트의 결정성 확보.
+          version: v1.94.5
+
+      # -c 를 명시한다: TBLS_DSN env가 있으면 tbls가 .tbls.yml 자동탐색을 건너뛰어 exclude 등이 무시된다.
+      - name: Lint schema
+        run: tbls lint -c .tbls.yml
+
+      # 커밋된 dbdoc/(마크다운)을 실제로 재생성해 git diff로 비교한다 — tbls diff 는 마크다운만
+      # 비교하지만, 재생성+git diff 는 추적되는 모든 산출물의 드리프트를 차단한다.
+      # schema.json 은 플랫폼별 database_version 때문에 .gitignore 로 추적 제외된다(git add -A 가 자동 제외).
+      - name: Verify dbdoc/ is up to date
+        run: |
+          tbls doc -c .tbls.yml --rm-dist
+          git add -A dbdoc
+          if ! git diff --cached --quiet -- dbdoc; then
+            echo "::error::dbdoc/ 가 최신 스키마와 다릅니다. 'scripts/gen-db-docs.sh' 로 재생성 후 커밋하세요."
+            git diff --cached -- dbdoc
+            exit 1
+          fi
+          echo "✅ dbdoc/ 가 최신 스키마와 일치합니다."

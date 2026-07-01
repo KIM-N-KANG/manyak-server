@@ -1,0 +1,182 @@
+### 인증(Auth) API 수동 검증 — /me, /token/refresh
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-56] 토큰 기반 머신러리:
+###   - access 토큰 = HS256 JWT (Authorization: Bearer <accessToken>). sub=user.public_id(UUID).
+###   - refresh 토큰 = 불투명 랜덤 문자열(JWT 아님). 저장소에는 SHA-256 해시만 둔다. 회전 시 1회용으로 폐기된다.
+###
+### 주의(유효 토큰 준비):
+###   "토큰 없음/위조/만료 → 401", "refresh 검증 실패 → 400/401" 같은 **준비가 필요 없는 케이스**는
+###   이 파일만으로 바로 검증됩니다(아래 1~3, 6~8번).
+###   유효 토큰이 필요한 해피 패스(4~5, 9번)는 @accessToken / @refreshToken 에 채운 뒤 실행하세요.
+###   토큰 얻는 법(KNK-55 도입): http/auth-login-google.http 의 Google 로그인을 실행하면 응답의
+###   accessToken/refreshToken 이 그대로 나옵니다(전역 변수로도 저장됨). 그 값을 여기에 붙여 쓰면 됩니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동 (docker compose up -d) — /me 는 실제 DB의 users 를 조회합니다.
+###   - 운영/실서버는 MANYAK_AUTH_JWT_SECRET 환경변수로 서명 키를 주입합니다(로컬은 application-local.yml 더미 키).
+
+@baseUrl = http://localhost:8080
+
+# 준비가 필요한 요청에서 사용. 실제 발급받은 값으로 교체하세요.
+@accessToken = PUT_A_VALID_ACCESS_JWT_HERE
+@refreshToken = PUT_A_VALID_REFRESH_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 /me → 401
+# Authorization 헤더가 없으면 리소스 서버가 Bearer 챌린지(401)로 응답합니다.
+GET {{baseUrl}}/api/v1/auth/me
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 /me 는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (에러) 형식이 깨진/위조된 토큰으로 /me → 401
+# 임의 문자열은 서명 검증을 통과하지 못해 401입니다(존재 여부를 노출하지 않습니다).
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer not-a-real-jwt.forged.token
+Accept: application/json
+
+> {%
+    client.test("위조 토큰 /me 는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. (에러) 만료된 토큰으로 /me → 401
+# exp가 지난 access JWT는 만료로 거부됩니다. (아래는 예시 형태일 뿐 실제 만료 토큰으로 교체해 확인하세요.)
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJtYW55YWsiLCJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDAiLCJleHAiOjE1MDAwMDAwMDB9.invalid-signature-for-illustration
+Accept: application/json
+
+> {%
+    client.test("만료/검증 실패 토큰 /me 는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (해피 패스) 유효한 access 토큰으로 /me → 200
+# @accessToken 을 실제 유효 토큰으로 교체한 뒤 실행하세요.
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("유효 토큰 /me 는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰을 교체했는지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("id는 공개 식별자(UUID)다", () => {
+        client.assert(typeof b.id === "string" &&
+            /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(b.id),
+            `id가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.id)}`);
+    });
+    client.test("프로필 필드와 상태가 내려온다", () => {
+        client.assert(typeof b.nickname === "string" && b.nickname.length > 0, "nickname이 없습니다.");
+        client.assert("profileImageUrl" in b, "profileImageUrl 필드가 없습니다.");
+        client.assert(["ACTIVE", "SUSPENDED", "DELETED"].indexOf(b.status) >= 0,
+            `status가 허용 값이 아닙니다. actual=${b.status}`);
+    });
+%}
+
+### 5. (해피 패스) 유효한 access 토큰의 sub 가 /me 의 id 와 일치
+# 별도 어서션 없이 sub 와 응답 id를 눈으로 비교하고 싶을 때 사용합니다. (4번과 동일 요청)
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+### 6. (에러) refreshToken 이 빈 문자열 → 400
+# @NotBlank 검증 실패. 본문 형식은 맞지만 값이 비어 있으면 400입니다.
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "" }
+
+> {%
+    client.test("빈 refreshToken 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.status === 400, `body.status가 400이 아닙니다. actual=${response.body.status}`);
+    });
+%}
+
+### 7. (에러) 본문 누락(refreshToken 필드 없음) → 400
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{}
+
+> {%
+    client.test("refreshToken 누락은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (에러) 발급된 적 없는 refreshToken → 401
+# 임의 문자열은 저장소에 매핑이 없어 401입니다(무효/만료/재사용을 401로 통일).
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "never-issued-token-value" }
+
+> {%
+    client.test("무효 refreshToken 은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. (해피 패스 + 회전) 유효한 refresh 로 새 토큰 발급
+# @refreshToken 을 실제 유효 토큰으로 교체한 뒤 실행하세요.
+# 응답의 새 accessToken / refreshToken 을 전역 변수에 저장해 10번에서 "옛 refresh 재사용 → 401"을 검증합니다.
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "{{refreshToken}}" }
+
+> {%
+    client.test("유효 refresh 회전은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(refresh 토큰을 교체했는지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("새 access/refresh 와 메타가 내려온다", () => {
+        client.assert(typeof b.accessToken === "string" && b.accessToken.length > 0, "accessToken이 없습니다.");
+        client.assert(typeof b.refreshToken === "string" && b.refreshToken.length > 0, "refreshToken이 없습니다.");
+        client.assert(b.tokenType === "Bearer", `tokenType이 Bearer가 아닙니다. actual=${b.tokenType}`);
+        client.assert(typeof b.expiresIn === "number" && b.expiresIn > 0, `expiresIn이 양수가 아닙니다. actual=${b.expiresIn}`);
+    });
+    // 회전 전 옛 refresh(요청에 쓴 값)와, 새로 받은 refresh를 저장한다.
+    client.global.set("usedRefreshToken", "{{refreshToken}}");
+    client.global.set("rotatedRefreshToken", b.refreshToken);
+%}
+
+### 10. (회전 검증) 9번에서 쓴 옛 refresh 를 재사용 → 401
+# 9번을 먼저 실행해야 usedRefreshToken 변수가 채워집니다. 1회용이라 회전 후 옛 토큰은 폐기되어 401이어야 합니다.
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "{{usedRefreshToken}}" }
+
+> {%
+    client.test("회전 후 옛 refresh 재사용은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 11. (자유 조회) 임의의 refresh 로 회전 직접 확인
+# 위 흐름 없이 특정 refresh 토큰만 빠르게 눌러보고 싶을 때 사용합니다. 자리표시 값을 실제 토큰으로 교체하세요.
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "PASTE_A_REFRESH_TOKEN_TO_TRY" }

@@ -178,14 +178,15 @@ class SimpleStorylineRatingControllerIntegrationTests {
     }
 
     @Test
-    fun `숫자가 아닌 스토리라인 ID 경로는 보안 매처에 막혀 403을 반환한다`() {
+    fun `숫자가 아닌 스토리라인 ID 경로는 보안 매처에 막혀 401을 반환한다`() {
         // SecurityConfig가 {storylineId:\d+}로만 permitAll 하므로, 비숫자 경로는 인증 대상으로 떨어진다.
+        // JWT 리소스 서버(KNK-56) 도입 후, 인증 없는 요청은 Bearer 챌린지(401)로 응답한다(이전 403에서 변경).
         restTestClient.put()
             .uri("/api/v1/stories/simple/storylines/abc/rating")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"rating":"GOOD"}""")
             .exchange()
-            .expectStatus().isForbidden
+            .expectStatus().isUnauthorized
     }
 
     @Test

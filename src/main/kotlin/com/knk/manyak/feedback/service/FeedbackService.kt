@@ -17,9 +17,10 @@ class FeedbackService(
     private val structuredLogger: StructuredLogger,
 ) {
     @Transactional
-    fun createFeedback(request: CreateFeedbackRequest) {
+    fun createFeedback(request: CreateFeedbackRequest, userId: Long? = null) {
         val feedback = feedbackRepository.save(
             Feedback(
+                userId = userId,
                 body = request.body,
                 // 공백뿐인 선택 입력은 null 로 정규화해 데이터 일관성을 유지한다.
                 email = request.email?.takeIf { it.isNotBlank() },

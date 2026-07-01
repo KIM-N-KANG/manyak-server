@@ -45,7 +45,7 @@ class AiCallRecorderTests {
     fun `성공 시 SUCCEEDED로 적재하고 결과와 log id를 반환한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, "sess_1")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_x")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_x")
 
         val recorded = recorder.record(
             AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION, storyId = 5L),
@@ -57,7 +57,7 @@ class AiCallRecorderTests {
         assertEquals("manyak-server", log.callerService)
         assertEquals("req_abc", log.requestId)
         assertEquals("sess_1", log.sessionId)
-        assertEquals("anon_hash_x", log.anonymousIdHash)
+        assertEquals("device_hash_x", log.deviceIdHash)
         assertEquals(AiCallFeature.STORYLINE_GENERATION, log.feature)
         assertEquals(5L, log.storyId)
         assertNotNull(log.latencyMs)
@@ -85,17 +85,17 @@ class AiCallRecorderTests {
     }
 
     @Test
-    fun `MDC가 unknown이면 session·anonymous는 null로 정규화한다`() {
+    fun `MDC가 unknown이면 session·device는 null로 정규화한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_x")
         MDC.put(MdcKeys.SESSION_ID, "unknown")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "unknown")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "unknown")
 
         val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }
 
         val log = repository.findById(recorded.aiCallLogId).orElseThrow()
         assertEquals("req_x", log.requestId)
         assertNull(log.sessionId)
-        assertNull(log.anonymousIdHash)
+        assertNull(log.deviceIdHash)
     }
 
     @Test

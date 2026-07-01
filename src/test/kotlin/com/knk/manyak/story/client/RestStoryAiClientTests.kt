@@ -73,14 +73,14 @@ class RestStoryAiClientTests {
     fun `MDC 상관관계 식별자를 outbound 헤더로 forward한다`() {
         var requestId: String? = null
         var sessionId: String? = null
-        var anonymousIdHash: String? = null
-        var anonymousIdRaw: String? = null
+        var deviceIdHash: String? = null
+        var deviceIdRaw: String? = null
         server = HttpServer.create(InetSocketAddress(0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 requestId = exchange.requestHeaders.getFirst("X-Manyak-Request-Id")
                 sessionId = exchange.requestHeaders.getFirst("X-Manyak-Session-Id")
-                anonymousIdHash = exchange.requestHeaders.getFirst("X-Manyak-Anonymous-Id-Hash")
-                anonymousIdRaw = exchange.requestHeaders.getFirst("X-Manyak-Anonymous-Id")
+                deviceIdHash = exchange.requestHeaders.getFirst("X-Manyak-Device-Id-Hash")
+                deviceIdRaw = exchange.requestHeaders.getFirst("X-Manyak-Device-Id")
                 exchange.respondJson(STORYLINES_RESPONSE_JSON)
             }
             start()
@@ -89,7 +89,7 @@ class RestStoryAiClientTests {
         val port = requireNotNull(server).address.port
         MDC.put(MdcKeys.REQUEST_ID, "req_story_1")
         MDC.put(MdcKeys.SESSION_ID, "sess_story_1")
-        MDC.put(MdcKeys.ANONYMOUS_ID_HASH, "anon_hash_story")
+        MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_story")
         RestStoryAiClient("http://localhost:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
@@ -100,8 +100,8 @@ class RestStoryAiClientTests {
 
         assertEquals("req_story_1", requestId)
         assertEquals("sess_story_1", sessionId)
-        assertEquals("anon_hash_story", anonymousIdHash)
-        assertNull(anonymousIdRaw, "원본 익명 ID 헤더는 forward하지 않는다")
+        assertEquals("device_hash_story", deviceIdHash)
+        assertNull(deviceIdRaw, "원본 익명 ID 헤더는 forward하지 않는다")
     }
 
     @Test

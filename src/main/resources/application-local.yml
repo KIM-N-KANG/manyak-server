@@ -12,6 +12,14 @@ spring:
     enabled: true
 
 manyak:
+  auth:
+    jwt:
+      # 로컬 개발 전용 더미 키(>=32바이트). 운영은 절대 이 값을 쓰지 않고 env(MANYAK_AUTH_JWT_SECRET)로 주입한다.
+      secret: local-dev-only-jwt-secret-change-me-please-32b
+    google:
+      # 로컬 더미 client-id를 기본값으로 두되 env로 덮어쓸 수 있게 한다.
+      # 실제 Google 로그인을 로컬에서 검증하려면 MANYAK_GOOGLE_CLIENT_IDS=<본인 OAuth client-id>로 주입한다.
+      client-ids: ${MANYAK_GOOGLE_CLIENT_IDS:local-dev-only.apps.googleusercontent.com}
   ai:
     chat:
       stub: true

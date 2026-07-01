@@ -80,7 +80,10 @@ class SimpleStoryCreationService(
                 )
             }
 
-    fun generateSimpleStorylines(request: GenerateSimpleStorylinesRequest): GenerateSimpleStorylinesResponse {
+    fun generateSimpleStorylines(
+        request: GenerateSimpleStorylinesRequest,
+        userId: Long? = null,
+    ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
             StoryCreationTagDraft(
@@ -110,7 +113,7 @@ class SimpleStoryCreationService(
             val customTags = findOrCreateCustomTags(customTagDrafts)
             val tags = predefinedTags + customTags
             val creationSession = storyCreationSessionRepository.save(
-                StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+                StoryCreationSession(userId = userId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
             )
             storyCreationSessionTagRepository.saveAll(
                 tags.map { tag ->
@@ -163,11 +166,11 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Storyline creation transaction result is empty")
     }
 
-    fun createSimpleStory(request: CreateSimpleStoryRequest): SimpleStoryCreateResponse {
+    fun createSimpleStory(request: CreateSimpleStoryRequest, userId: Long? = null): SimpleStoryCreateResponse {
         val startNanos = System.nanoTime()
         structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
         try {
-            val outcome = doCreateSimpleStory(request)
+            val outcome = doCreateSimpleStory(request, userId)
             structuredLogger.event(
                 "story_created",
                 "story_id" to outcome.response.id,
@@ -191,13 +194,26 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest): StoryCreationOutcome {
+    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             }
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+        }
+
+        // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
+        // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속.
+        // - 소유 세션(소유자 있음): 같은 사용자만 완료 가능. 다른 사용자/익명(만료·무효 토큰 포함)이 simpleCreationId로
+        //   남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
+        val attributedUserId = when {
+            session.userId == null -> userId
+            session.userId == userId -> userId
+            else -> throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "본인이 시작한 간편 제작만 완료할 수 있습니다.",
+            )
         }
 
         val selectedStoryline = storyCreationExampleRepository
@@ -244,7 +260,7 @@ class SimpleStoryCreationService(
 
             val story = storyRepository.save(
                 Story(
-                    userId = lockedSession.userId,
+                    userId = attributedUserId,
                     title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,
@@ -278,6 +294,9 @@ class SimpleStoryCreationService(
                 },
             )
 
+            // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
+            // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).
+            lockedSession.userId = attributedUserId
             lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
             lockedSession.storyId = story.id
             storyCreationSessionRepository.save(lockedSession)

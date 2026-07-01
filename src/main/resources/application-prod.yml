@@ -11,8 +11,28 @@ spring:
   flyway:
     enabled: true
 
+# 운영에서는 Swagger UI·OpenAPI 문서를 비공개화한다(KNK-321).
+# 경로(/swagger-ui.html, /v3/api-docs)는 springdoc 기본값이라 사실상 고정이고 SecurityConfig에서 permitAll이라,
+# api.manyak.app 같은 추측 가능한 주소로 외부에서 전체 API 스펙이 노출된다. dev/local은 노출을 유지한다(개발 편의).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 manyak:
+  # auth.jwt.secret 은 여기에 하드코딩하지 않는다. 운영은 env(MANYAK_AUTH_JWT_SECRET)로만 주입한다(application.yml 기본 바인딩).
   ai:
     chat:
       # 운영은 실제 manyak-ai 호출 (local만 stub)
       stub: false
+
+management:
+  health:
+    redis:
+      # KNK-284는 Redis 주입(.env)만 하고, Redis health 재활성화는 분리한다(후속 PR).
+      # CI(docker-image.yml)가 main 푸시 시 이미지만 기존 인스턴스에 SERVER_IMAGE_OVERRIDE로 배포하면, 그 인스턴스의
+      # deploy.sh는 옛 user-data라 SPRING_DATA_REDIS_*를 .env에 쓰지 않는다. 이때 health를 켜두면 terraform apply
+      # (인스턴스 교체)로 새 user-data가 반영되기 전까지 localhost:6379를 프로브해 /actuator/health가 DOWN이 된다.
+      # → 운영에 새 user-data가 반영되고 Redis 도달이 확인된 뒤 별도 PR에서 켠다.
+      enabled: false

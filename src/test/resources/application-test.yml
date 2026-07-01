@@ -11,7 +11,20 @@ spring:
   flyway:
     enabled: false
 
+management:
+  health:
+    redis:
+      # 테스트는 Redis 인프라 없이 돈다. health를 Redis 가용성과 분리해 /actuator/health가 항상 200이도록 비활성화.
+      enabled: false
+
 manyak:
+  auth:
+    jwt:
+      # 테스트 전용 고정 키(>=32바이트). 운영 키와 무관한 더미 값이다.
+      secret: test-only-jwt-secret-fixed-value-32-bytes-min
+    google:
+      # 테스트 전용 더미 client-id. 통합 테스트는 가짜 verifier(@Primary)를 쓰므로 실제 검증에는 쓰이지 않는다.
+      client-ids: test-only.apps.googleusercontent.com
   ai:
     base-url: http://localhost:8000
     chat:
