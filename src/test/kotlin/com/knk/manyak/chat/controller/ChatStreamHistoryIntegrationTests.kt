@@ -7,11 +7,11 @@ import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -81,14 +81,11 @@ class ChatStreamHistoryIntegrationTests {
     private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
-    private lateinit var storyChoiceRepository: StoryChoiceRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

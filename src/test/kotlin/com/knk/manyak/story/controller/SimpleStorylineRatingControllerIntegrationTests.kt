@@ -7,6 +7,7 @@ import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,11 +35,12 @@ class SimpleStorylineRatingControllerIntegrationTests {
     @Autowired
     private lateinit var ratingRepository: StoryCreationExampleRatingRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        ratingRepository.deleteAllInBatch()
-        exampleRepository.deleteAllInBatch()
-        sessionRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     private fun persistStoryline(): StoryCreationExample {

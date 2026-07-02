@@ -3,10 +3,9 @@ package com.knk.manyak.global.observability
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
-import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -43,22 +42,17 @@ class BusinessEventLoggingIntegrationTests {
     private lateinit var restTestClient: RestTestClient
 
     @Autowired
-    private lateinit var feedbackRepository: FeedbackRepository
-
-    @Autowired
     private lateinit var storyRepository: StoryRepository
-
-    @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
 
     private val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
     private val appender = ListAppender<ILoggingEvent>()
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storyPlaySessionRepository.deleteAllInBatch()
-        feedbackRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
         appender.start()
         logger.addAppender(appender)
     }

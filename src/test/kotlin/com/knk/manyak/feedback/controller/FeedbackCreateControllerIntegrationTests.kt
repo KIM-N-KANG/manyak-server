@@ -2,6 +2,7 @@ package com.knk.manyak.feedback.controller
 
 import com.knk.manyak.feedback.entity.Platform
 import com.knk.manyak.feedback.repository.FeedbackRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -38,9 +39,12 @@ class FeedbackCreateControllerIntegrationTests {
     @Autowired
     private lateinit var environment: Environment
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        feedbackRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

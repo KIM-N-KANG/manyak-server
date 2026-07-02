@@ -25,6 +25,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -79,17 +80,12 @@ class StoryControllerIntegrationTests {
     @Autowired
     private lateinit var storyAiClient: CapturingStoryAiClient
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storySuggestedInputRepository.deleteAll()
-        storyStartSettingRepository.deleteAll()
-        storySettingRepository.deleteAll()
-        storyRepository.deleteAll()
-        recommendedInfoRepository.deleteAll()
-        exampleRepository.deleteAll()
-        sessionTagRepository.deleteAll()
-        sessionRepository.deleteAll()
-        tagRepository.deleteAll()
+        databaseCleaner.cleanAll()
         storyAiClient.reset()
     }
 

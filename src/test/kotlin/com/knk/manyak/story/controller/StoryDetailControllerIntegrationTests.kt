@@ -6,6 +6,7 @@ import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -31,11 +32,12 @@ class StoryDetailControllerIntegrationTests {
     @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storySuggestedInputRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

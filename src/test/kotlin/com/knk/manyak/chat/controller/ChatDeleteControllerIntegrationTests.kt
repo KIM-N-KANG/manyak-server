@@ -3,14 +3,11 @@ package com.knk.manyak.chat.controller
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -40,28 +37,13 @@ class ChatDeleteControllerIntegrationTests {
     private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
-    private lateinit var storyChoiceRepository: StoryChoiceRepository
-
-    @Autowired
-    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
-
-    @Autowired
-    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
-
-    @Autowired
-    private lateinit var storySettingRepository: StorySettingRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         // 공유 H2(스프링 컨텍스트 캐시)에서 다른 테스트 클래스가 남긴 스토리 자식 행까지 FK 순서로 정리한다.
         // 자식(start_settings·settings 등)이 남아 있으면 stories 삭제가 FK 위반으로 실패한다.
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storySuggestedInputRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

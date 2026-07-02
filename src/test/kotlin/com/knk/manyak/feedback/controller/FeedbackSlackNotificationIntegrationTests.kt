@@ -1,6 +1,7 @@
 package com.knk.manyak.feedback.controller
 
 import com.knk.manyak.feedback.repository.FeedbackRepository
+import com.knk.manyak.support.DatabaseCleaner
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -57,9 +58,12 @@ class FeedbackSlackNotificationIntegrationTests {
     @Autowired
     private lateinit var feedbackRepository: FeedbackRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        feedbackRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

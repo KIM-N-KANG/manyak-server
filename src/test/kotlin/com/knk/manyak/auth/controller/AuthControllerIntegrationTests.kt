@@ -8,6 +8,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -61,9 +62,12 @@ class AuthControllerIntegrationTests {
     @Autowired
     private lateinit var properties: AuthProperties
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        userRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     private fun saveUser(): User =
