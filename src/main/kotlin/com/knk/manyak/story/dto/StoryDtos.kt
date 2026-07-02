@@ -116,7 +116,7 @@ data class StoryDetailResponse(
         schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
         arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
     )
-    val recommendedInputs: List<String>,
+    val suggestedInputs: List<String>,
 
     @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,

@@ -130,21 +130,21 @@ class ChatStreamControllerIntegrationTests {
     }
 
     @Test
-    fun `채팅 목록의 chatCount는 실제 이어쓰기를 거치며 누적된다`() {
+    fun `채팅 목록의 turnCount는 실제 이어쓰기를 거치며 누적된다`() {
         val story = seedStory()
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
         val publicId = session.publicId.toString()
 
-        // 막 생성한 채팅: 진행 이력 없음 → chatCount 0
-        assertChatCount(publicId, 0)
+        // 막 생성한 채팅: 진행 이력 없음 → turnCount 0
+        assertTurnCount(publicId, 0)
 
         // 1턴 이어쓰기 → persistTurn이 current_turn을 1로 증가 → 목록에 1로 반영
         stream(publicId, "마법수정에 손을 올린다.")
-        assertChatCount(publicId, 1)
+        assertTurnCount(publicId, 1)
 
         // 2턴 이어쓰기 → 2로 누적
         stream(publicId, "앞으로 나선다.")
-        assertChatCount(publicId, 2)
+        assertTurnCount(publicId, 2)
     }
 
     @Test
@@ -225,7 +225,7 @@ class ChatStreamControllerIntegrationTests {
         assertThat(contentType!!.charset).isEqualTo(Charsets.UTF_8)
     }
 
-    private fun assertChatCount(chatId: String, expected: Int) {
+    private fun assertTurnCount(chatId: String, expected: Int) {
         restTestClient.post()
             .uri("/api/v1/chats/batch")
             .contentType(MediaType.APPLICATION_JSON)
@@ -234,7 +234,7 @@ class ChatStreamControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$[0].id").isEqualTo(chatId)
-            .jsonPath("$[0].chatCount").isEqualTo(expected)
+            .jsonPath("$[0].turnCount").isEqualTo(expected)
     }
 
     private fun stream(chatId: String, userInput: String): String =
