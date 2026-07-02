@@ -7,6 +7,7 @@ import com.knk.manyak.auth.social.GoogleIdTokenVerifier
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -84,10 +85,12 @@ class GoogleLoginIntegrationTests {
     @Autowired
     private lateinit var socialAccountRepository: SocialAccountRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        socialAccountRepository.deleteAllInBatch()
-        userRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

@@ -4,8 +4,6 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryChoiceRepository
-import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
@@ -14,6 +12,7 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -54,20 +53,11 @@ class AiCallLogRecordingIntegrationTests {
     private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
 
     @Autowired
-    private lateinit var storyMessageRepository: StoryMessageRepository
-
-    @Autowired
-    private lateinit var storyChoiceRepository: StoryChoiceRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
-        aiCallLogRepository.deleteAllInBatch()
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

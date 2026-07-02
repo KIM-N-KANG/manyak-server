@@ -5,7 +5,6 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryPlaySessionRepository
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.story.client.AiResponseMeta
@@ -22,13 +21,10 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationExample
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
 import com.knk.manyak.story.repository.StoryCreationExampleRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -130,19 +126,7 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
-
-    @Autowired
-    private lateinit var storySettingRepository: StorySettingRepository
-
-    @Autowired
-    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
-
-    @Autowired
     private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
-
-    @Autowired
-    private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
     private lateinit var creationSessionRepository: StoryCreationSessionRepository
@@ -151,22 +135,12 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var creationExampleRepository: StoryCreationExampleRepository
 
     @Autowired
-    private lateinit var ratingRepository: StoryCreationExampleRatingRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         compileStoryCalls.set(0)
-        feedbackRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        ratingRepository.deleteAllInBatch()
-        creationExampleRepository.deleteAllInBatch()
-        creationSessionRepository.deleteAllInBatch()
-        storySuggestedInputRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
-        userRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     private fun saveUser(nickname: String = "manyak_user"): User =
