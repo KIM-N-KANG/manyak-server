@@ -355,7 +355,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `선택한 스토리라인으로 최종 이야기를 생성하고 저장한다`() {
+    fun `선택한 스토리라인으로 최종 스토리를 생성하고 저장한다`() {
         val seeded = seedGeneratedSession()
 
         restTestClient.post()
@@ -405,7 +405,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `존재하지 않는 진행 정보면 이야기 생성을 거절한다`() {
+    fun `존재하지 않는 진행 정보면 스토리 생성을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
@@ -418,7 +418,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `세션에 속하지 않은 스토리라인이면 이야기 생성을 거절한다`() {
+    fun `세션에 속하지 않은 스토리라인이면 스토리 생성을 거절한다`() {
         val seeded = seedGeneratedSession()
 
         restTestClient.post()
@@ -433,7 +433,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `이미 이야기가 생성된 진행이면 충돌로 응답한다`() {
+    fun `이미 스토리가 생성된 진행이면 충돌로 응답한다`() {
         val seeded = seedGeneratedSession()
         val session = sessionRepository.findById(seeded.sessionId).orElseThrow()
         session.status = StoryCreationSessionStatus.STORY_CREATED
@@ -447,7 +447,7 @@ class StoryControllerIntegrationTests {
             .expectStatus().isEqualTo(409)
             .expectBody()
             .jsonPath("$.status").isEqualTo(409)
-            .jsonPath("$.message").isEqualTo("이미 이야기가 생성된 간편 제작 진행입니다.")
+            .jsonPath("$.message").isEqualTo("이미 스토리가 생성된 간편 제작 진행입니다.")
     }
 
     @Test
@@ -469,7 +469,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `최종 이야기 생성 AI 오류는 Bad Gateway로 응답한다`() {
+    fun `최종 스토리 생성 AI 오류는 Bad Gateway로 응답한다`() {
         val seeded = seedGeneratedSession()
         storyAiClient.compileFail = true
 
@@ -490,7 +490,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `이야기 생성 API는 Bad Gateway 응답을 문서화한다`() {
+    fun `스토리 생성 API는 Bad Gateway 응답을 문서화한다`() {
         restTestClient.get()
             .uri("/v3/api-docs")
             .exchange()

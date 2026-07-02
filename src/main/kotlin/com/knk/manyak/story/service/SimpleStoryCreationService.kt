@@ -168,7 +168,7 @@ class SimpleStoryCreationService(
 
     fun createSimpleStory(request: CreateSimpleStoryRequest, userId: Long? = null): SimpleStoryCreateResponse {
         val startNanos = System.nanoTime()
-        structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
+        structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
         try {
             val outcome = doCreateSimpleStory(request, userId)
             structuredLogger.event(
@@ -200,7 +200,7 @@ class SimpleStoryCreationService(
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             }
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
         }
 
         // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
@@ -252,7 +252,7 @@ class SimpleStoryCreationService(
             val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             if (lockedSession.status == StoryCreationSessionStatus.STORY_CREATED) {
-                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
             }
 
             selectedStoryline.isSelected = true

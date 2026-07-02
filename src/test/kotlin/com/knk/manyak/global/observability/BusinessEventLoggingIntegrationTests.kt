@@ -112,8 +112,8 @@ class BusinessEventLoggingIntegrationTests {
 
         val messages = messagesFor("chat_started")
         assertThat(messages).hasSize(1)
-        // 구조화 로그의 story_id는 내부 PK(Long)를 그대로 기록한다(관측용, 외부 식별자와 무관).
-        assertThat(messages.first()).contains("story_id=${story.id}")
+        // 구조화 로그의 story_id는 story_created·분석 이벤트와 조인되도록 공개 식별자(public UUID)로 기록한다.
+        assertThat(messages.first()).contains("story_id=${story.publicId}")
         assertThat(messages.first()).contains("chat_id=")
     }
 
@@ -127,7 +127,11 @@ class BusinessEventLoggingIntegrationTests {
             .exchange()
             .expectStatus().isNotFound
 
-        assertThat(messagesFor("story_create_requested")).hasSize(1)
+        val requested = messagesFor("story_create_requested")
+        assertThat(requested).hasSize(1)
+        // 분석 스펙(6-analytics)의 로그 필드명은 creation_id다. simple_creation_id로 남지 않아야 한다.
+        assertThat(requested.first()).contains("creation_id=999999")
+        assertThat(requested.first()).doesNotContain("simple_creation_id=")
         val failed = messagesFor("story_create_failed")
         assertThat(failed).hasSize(1)
         assertThat(failed.first()).contains("error_code=NOT_FOUND")

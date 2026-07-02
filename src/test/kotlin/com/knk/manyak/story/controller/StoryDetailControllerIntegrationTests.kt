@@ -100,7 +100,7 @@ class StoryDetailControllerIntegrationTests {
             .expectStatus().isNotFound
             .expectBody()
             .jsonPath("$.status").isEqualTo(404)
-            .jsonPath("$.message").isEqualTo("이야기를 찾을 수 없습니다.")
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
             .jsonPath("$.path").isEqualTo("/api/v1/stories/999999")
     }
 
