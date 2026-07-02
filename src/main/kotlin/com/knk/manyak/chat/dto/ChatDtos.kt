@@ -78,7 +78,7 @@ data class ChatSummaryResponse(
     val lastStoryPreview: String,
 
     @field:Schema(description = "이 채팅에서 사용자가 이어쓴 횟수(완료된 턴 수)", example = "2")
-    val chatCount: Int,
+    val turnCount: Int,
 
     @field:Schema(description = "마지막 진행 시각", example = "2026-06-12T12:10:00Z")
     val updatedAt: Instant,

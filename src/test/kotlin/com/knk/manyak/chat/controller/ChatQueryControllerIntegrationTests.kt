@@ -213,7 +213,7 @@ class ChatQueryControllerIntegrationTests {
     fun `채팅 목록은 요청 순서와 무관하게 updatedAt 내림차순으로 정렬하고 마지막 AI 출력으로 프리뷰를 만든다`() {
         val storyA = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
         val storyB = storyRepository.save(Story(title = "왕국의 마지막 편지"))
-        // chatCount는 세션의 비정규화 카운터(currentTurn)를 그대로 노출한다. persistTurn을 우회해
+        // turnCount는 세션의 비정규화 카운터(currentTurn)를 그대로 노출한다. persistTurn을 우회해
         // 직접 시드하므로 currentTurn을 명시한다. (A: 2턴, B: 1턴)
         // updatedAt(마지막 진행 시각)을 명시해 정렬 기준을 고정한다. A가 B보다 최근이다.
         val sessionA = storyPlaySessionRepository.save(
@@ -252,12 +252,12 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$[0].storyId").isEqualTo(storyA.publicId.toString())
             .jsonPath("$[0].storyTitle").isEqualTo("호아킨 아카데미의 무속성 신입생")
             .jsonPath("$[0].lastStoryPreview").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
-            .jsonPath("$[0].chatCount").isEqualTo(2)
+            .jsonPath("$[0].turnCount").isEqualTo(2)
             .jsonPath("$[1].id").isEqualTo(sessionB.publicId.toString())
             .jsonPath("$[1].storyId").isEqualTo(storyB.publicId.toString())
             .jsonPath("$[1].storyTitle").isEqualTo("왕국의 마지막 편지")
             .jsonPath("$[1].lastStoryPreview").isEqualTo("봉인이 풀린 편지 끝에서 오래된 왕가의 문장이 희미하게 떠올랐다.")
-            .jsonPath("$[1].chatCount").isEqualTo(1)
+            .jsonPath("$[1].turnCount").isEqualTo(1)
     }
 
     @Test
@@ -295,7 +295,7 @@ class ChatQueryControllerIntegrationTests {
     }
 
     @Test
-    fun `진행 이력이 없는 채팅 목록 항목의 chatCount는 0이다`() {
+    fun `진행 이력이 없는 채팅 목록 항목의 turnCount는 0이다`() {
         val story = storyRepository.save(Story(title = "아직 시작 안 한 스토리"))
         val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
 
@@ -308,7 +308,7 @@ class ChatQueryControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.length()").isEqualTo(1)
             .jsonPath("$[0].id").isEqualTo(session.publicId.toString())
-            .jsonPath("$[0].chatCount").isEqualTo(0)
+            .jsonPath("$[0].turnCount").isEqualTo(0)
     }
 
     private fun message(playSessionId: Long, role: MessageRole, content: String, order: Int): StoryMessage =

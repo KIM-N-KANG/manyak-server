@@ -84,7 +84,7 @@ Accept: application/json
     });
     client.test("시작 정보와 추천 입력이 있다", () => {
         client.assert(b.startSetting && Boolean(b.startSetting.name), "startSetting.name이 없습니다.");
-        client.assert(Array.isArray(b.recommendedInputs) && b.recommendedInputs.length > 0, "recommendedInputs가 비어 있습니다.");
+        client.assert(Array.isArray(b.suggestedInputs) && b.suggestedInputs.length > 0, "suggestedInputs가 비어 있습니다.");
     });
     client.test("MVP 기본값이 계약대로다", () => {
         client.assert(b.coverImageUrl === null, "coverImageUrl은 null이어야 합니다.");

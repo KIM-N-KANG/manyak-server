@@ -66,7 +66,7 @@ class StoryService(
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
-        val recommendedInputs = startSetting
+        val suggestedInputs = startSetting
             ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
             ?.map { it.inputText }
             ?: emptyList()
@@ -94,7 +94,7 @@ class StoryService(
                     startSituation = it.startSituation,
                 )
             },
-            recommendedInputs = recommendedInputs,
+            suggestedInputs = suggestedInputs,
             visibility = StoryVisibility.PRIVATE,
             status = StoryStatus.PUBLISHED,
             lorebooks = lorebooks,
