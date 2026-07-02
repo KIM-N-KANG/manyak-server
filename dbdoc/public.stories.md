@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_play_sessions](public.story_play_sessions.md) |  |  |
+| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_play_sessions](public.story_play_sessions.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_endings](public.story_endings.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
@@ -37,6 +37,8 @@ erDiagram
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_play_sessions" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.stories" {
   bigint id
@@ -82,6 +84,24 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+}
+"public.story_lorebooks" {
+  bigint id
+  bigint story_id FK
+  bigint lorebook_id FK
+  smallint sort_order
+  timestamp_with_time_zone created_at
+}
+"public.story_endings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ title
+  text content
+  text condition_text
+  smallint sort_order
+  boolean enabled
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 
