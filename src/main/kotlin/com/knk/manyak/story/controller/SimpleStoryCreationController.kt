@@ -98,7 +98,7 @@ class SimpleStoryCreationController(
         simpleStoryCreationService.generateSimpleStorylines(request, userId)
 
     @Operation(
-        summary = "간편 제작 이야기 생성",
+        summary = "간편 제작 스토리 생성",
         description = "선택한 스토리라인과 추가 정보를 AI 서버에 전달해 최종 스토리를 생성하고 저장합니다. " +
             "응답으로 받은 id는 클라이언트 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.",
     )
@@ -106,7 +106,7 @@ class SimpleStoryCreationController(
         value = [
             ApiResponse(
                 responseCode = "201",
-                description = "간편 제작 이야기 생성 성공",
+                description = "간편 제작 스토리 생성 성공",
                 content = [
                     Content(schema = Schema(implementation = SimpleStoryCreateResponse::class)),
                 ],
@@ -123,7 +123,7 @@ class SimpleStoryCreationController(
             ),
             ApiResponse(
                 responseCode = "409",
-                description = "이미 이야기가 생성된 간편 제작 진행",
+                description = "이미 스토리가 생성된 간편 제작 진행",
                 content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(

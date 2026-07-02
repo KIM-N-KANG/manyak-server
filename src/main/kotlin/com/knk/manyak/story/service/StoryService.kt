@@ -120,9 +120,9 @@ class StoryService(
      */
     private fun resolveStory(publicId: String): Story {
         val parsed = parsePublicIdOrNull(publicId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "이야기를 찾을 수 없습니다.")
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 
     private fun parsePublicIdOrNull(raw: String): UUID? =

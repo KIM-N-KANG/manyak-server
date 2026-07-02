@@ -109,7 +109,7 @@ Accept: application/json
 > {%
     client.test("순차 정수 id는 404로 통일된다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
     });
 %}
 
@@ -120,7 +120,7 @@ Accept: application/json
 > {%
     client.test("없는 스토리는 404다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
     });
 %}
 

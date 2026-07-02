@@ -83,7 +83,8 @@ class ChatService(
         )
         structuredLogger.event(
             "chat_started",
-            "story_id" to session.storyId,
+            // 로그의 story_id는 story_created·분석 이벤트와 조인되도록 공개 식별자(public UUID)로 남긴다.
+            "story_id" to story.publicId.toString(),
             "chat_id" to session.publicId.toString(),
         )
 
@@ -241,7 +242,10 @@ class ChatService(
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
         val session = resolveSession(chatId)
         val sessionId = session.id
-        val aiRequest = assembleAiRequest(session, request.userInput)
+        // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
+        val story = storyRepository.findById(session.storyId).orElse(null)
+        val storyPublicId = story?.publicId?.toString().orEmpty()
+        val aiRequest = assembleAiRequest(session, story, request.userInput)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -279,7 +283,7 @@ class ChatService(
                         if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
                     },
                     onFailure = { aiCallLogId, throwable ->
-                        captureChatFailure(aiCallLogId, throwable, session, chatId)
+                        captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
                     },
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
@@ -309,14 +313,14 @@ class ChatService(
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,
-                    "story_id" to session.storyId,
+                    "story_id" to storyPublicId,
                     "turn_index" to persisted.turnIndex,
                     "message_length_bucket" to LengthBuckets.of(request.userInput.length),
                 )
                 structuredLogger.event(
                     "ai_response_saved",
                     "chat_id" to chatId,
-                    "story_id" to session.storyId,
+                    "story_id" to storyPublicId,
                     "turn_index" to persisted.turnIndex,
                     "ai_call_log_id" to recorded.aiCallLogId,
                 )
@@ -342,7 +346,7 @@ class ChatService(
                 // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류)는 GlobalExceptionHandler를 거치지 않고
                 // 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
                 succeededAiCallLogId?.let {
-                    captureChatFailure(it, exception, session, chatId, attachToAiCallLog = false)
+                    captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
                 }
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
                 emitter.complete()
@@ -358,11 +362,8 @@ class ChatService(
      * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
      * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
      */
-    private fun assembleAiRequest(session: StoryPlaySession, userInput: String): ChatTurnAiRequest {
-        val genre = storyRepository.findById(session.storyId)
-            .map { it.genre }
-            .orElse(null)
-            .orEmpty()
+    private fun assembleAiRequest(session: StoryPlaySession, story: Story?, userInput: String): ChatTurnAiRequest {
+        val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(session.storyId)
         val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
 
@@ -447,7 +448,7 @@ class ChatService(
     private fun captureChatFailure(
         aiCallLogId: Long,
         throwable: Throwable,
-        session: StoryPlaySession,
+        storyPublicId: String,
         chatId: String,
         attachToAiCallLog: Boolean = true,
     ) {
@@ -456,7 +457,7 @@ class ChatService(
         }
         var sentryId = SentryId.EMPTY_ID
         Sentry.withScope { scope ->
-            scope.setTag("story_id", session.storyId.toString())
+            scope.setTag("story_id", storyPublicId)
             scope.setTag("chat_id", chatId)
             scope.setContexts(
                 "ai",
@@ -474,7 +475,7 @@ class ChatService(
         structuredLogger.event(
             "ai_stream_failed",
             "chat_id" to chatId,
-            "story_id" to session.storyId,
+            "story_id" to storyPublicId,
             "ai_call_log_id" to aiCallLogId,
             "sentry_event_id" to sentryId.toString(),
         )

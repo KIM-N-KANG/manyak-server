@@ -72,7 +72,7 @@ Accept: application/json
 > {%
     client.test("삭제된 스토리는 상세에서 404다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.",
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.",
             `message가 기대와 다릅니다. actual=${response.body.message}`);
     });
 %}
@@ -83,7 +83,7 @@ DELETE {{baseUrl}}/api/v1/stories/{{deleteStoryId}}
 > {%
     client.test("이미 삭제된 스토리 재삭제는 404다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.",
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.",
             `message가 기대와 다릅니다. actual=${response.body.message}`);
     });
 %}
@@ -112,7 +112,7 @@ DELETE {{baseUrl}}/api/v1/stories/1
 > {%
     client.test("순차 정수 id 삭제는 404로 통일된다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.",
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.",
             `message가 기대와 다릅니다. actual=${response.body.message}`);
     });
 %}
@@ -123,7 +123,7 @@ DELETE {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
 > {%
     client.test("존재하지 않는 스토리 삭제는 404다", () => {
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
-        client.assert(response.body.message === "이야기를 찾을 수 없습니다.",
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.",
             `message가 기대와 다릅니다. actual=${response.body.message}`);
     });
 %}

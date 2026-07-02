@@ -274,6 +274,8 @@ class ChatStreamControllerIntegrationTests {
             assertThat(userSaved).hasSize(1)
             assertThat(userSaved.first().formattedMessage).contains("turn_index=1")
             assertThat(userSaved.first().formattedMessage).contains("message_length_bucket=")
+            // 로그의 story_id는 내부 PK가 아니라 공개 식별자(public UUID)로 남는다.
+            assertThat(userSaved.first().formattedMessage).contains("story_id=${story.publicId}")
             // 비동기 워커 스레드 로그에도 request_id가 전파됐는지(코덱스 ② 핵심 검증)
             assertThat(userSaved.first().mdcPropertyMap["request_id"]).isEqualTo("req_async_test")
 

@@ -166,7 +166,7 @@ data class StorylineRatingResponse(
     val rating: StorylineRating,
 )
 
-@Schema(description = "간편 제작 이야기 생성 요청")
+@Schema(description = "간편 제작 스토리 생성 요청")
 data class CreateSimpleStoryRequest(
     @field:Min(1)
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
@@ -196,7 +196,7 @@ data class CreateSimpleStoryRequest(
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
 )
 
-@Schema(description = "간편 제작 이야기 생성 응답")
+@Schema(description = "간편 제작 스토리 생성 응답")
 data class SimpleStoryCreateResponse(
     @field:Schema(description = "생성된 스토리 ID(공개 식별자). 클라이언트는 이 값을 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
