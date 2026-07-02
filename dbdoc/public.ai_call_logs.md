@@ -31,7 +31,7 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| ck_ai_call_logs_feature | CHECK | CHECK (((feature)::text = ANY ((ARRAY['storyline_generation'::character varying, 'story_completion'::character varying, 'chat_response'::character varying, 'suggestion_generation'::character varying])::text[]))) |
+| ck_ai_call_logs_feature | CHECK | CHECK (((feature)::text = ANY ((ARRAY['storyline_generation'::character varying, 'story_completion'::character varying, 'chat_response'::character varying, 'choice_generation'::character varying])::text[]))) |
 | ck_ai_call_logs_latency | CHECK | CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))) |
 | ck_ai_call_logs_retry_count | CHECK | CHECK ((retry_count >= 0)) |
 | ck_ai_call_logs_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['STARTED'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying])::text[]))) |

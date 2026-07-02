@@ -33,9 +33,10 @@ class StoryCreationTag(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
+    // 용어집(KNK-360) 기준 코드 표기는 category. DB 컬럼은 rename 비용 때문에 tag_type을 유지한다.
     @Enumerated(EnumType.STRING)
     @Column(name = "tag_type", nullable = false, length = 50)
-    val tagType: SimpleStoryTagCategory,
+    val category: SimpleStoryTagCategory,
 
     @Column(nullable = false, length = 30)
     val name: String,
