@@ -1,6 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.story.dto.BatchStoryRequest
+import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.StoryService
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
@@ -63,6 +65,31 @@ class StoryController(
     fun getStoriesByIds(
         @Valid @RequestBody request: BatchStoryRequest,
     ): List<StorySummaryResponse> = storyService.getStoriesByIds(request)
+
+    @Operation(
+        summary = "로어북 카탈로그 조회",
+        description = "일반 제작에서 참조할 로어북(장르 공용 용어 사전) 목록을 조회합니다. genre로 필터할 수 있습니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공",
+                content = [
+                    Content(
+                        array = ArraySchema(
+                            schema = Schema(implementation = LorebookListItemResponse::class),
+                        ),
+                    ),
+                ],
+            ),
+        ],
+    )
+    @GetMapping("/lorebooks")
+    fun getLorebooks(
+        @Parameter(description = "장르 필터. 생략하면 전체 활성 로어북을 조회합니다.")
+        @RequestParam(required = false) genre: String?,
+    ): List<LorebookListItemResponse> = storyService.getLorebooks(genre)
 
     @Operation(
         summary = "이야기 상세 조회",

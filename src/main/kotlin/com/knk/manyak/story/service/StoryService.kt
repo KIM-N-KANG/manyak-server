@@ -1,12 +1,21 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.BatchStoryRequest
+import com.knk.manyak.story.dto.LorebookListItemResponse
+import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryEndingResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryEnding
+import com.knk.manyak.story.entity.StoryLorebook
+import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -22,7 +31,18 @@ class StoryService(
     private val storyRepository: StoryRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    private val lorebookRepository: LorebookRepository,
+    private val storyLorebookRepository: StoryLorebookRepository,
+    private val storyEndingRepository: StoryEndingRepository,
 ) {
+
+    @Transactional(readOnly = true)
+    fun getLorebooks(genre: String?): List<LorebookListItemResponse> {
+        val lorebooks = genre
+            ?.let { lorebookRepository.findByGenreAndIsActiveTrueOrderBySortOrderAscIdAsc(it) }
+            ?: lorebookRepository.findByIsActiveTrueOrderByGenreAscSortOrderAscIdAsc()
+        return lorebooks.map { it.toListItemResponse() }
+    }
 
     @Transactional(readOnly = true)
     fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
@@ -51,6 +71,11 @@ class StoryService(
             ?.map { it.inputText }
             ?: emptyList()
 
+        val lorebooks = storyLorebookRepository.findByStoryIdOrderBySortOrderAscIdAsc(story.id)
+            .map { it.toLorebookResponse() }
+        val endings = storyEndingRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+            .map { it.toEndingResponse() }
+
         return StoryDetailResponse(
             id = story.publicId.toString(),
             coverImageUrl = null,
@@ -72,6 +97,8 @@ class StoryService(
             recommendedInputs = recommendedInputs,
             visibility = StoryVisibility.PRIVATE,
             status = StoryStatus.PUBLISHED,
+            lorebooks = lorebooks,
+            endings = endings,
             createdAt = story.createdAt,
         )
     }
@@ -104,6 +131,26 @@ class StoryService(
         } catch (ignored: IllegalArgumentException) {
             null
         }
+
+    private fun Lorebook.toListItemResponse(): LorebookListItemResponse =
+        LorebookListItemResponse(id = id, name = name, genre = genre)
+
+    private fun StoryLorebook.toLorebookResponse(): LorebookResponse =
+        LorebookResponse(
+            id = lorebook.id,
+            name = lorebook.name,
+            genre = lorebook.genre,
+            content = lorebook.content,
+        )
+
+    private fun StoryEnding.toEndingResponse(): StoryEndingResponse =
+        StoryEndingResponse(
+            title = title,
+            content = content,
+            conditionText = conditionText,
+            sortOrder = sortOrder.toInt(),
+            enabled = enabled,
+        )
 
     private fun Story.toGenreNames(): List<String> =
         genre

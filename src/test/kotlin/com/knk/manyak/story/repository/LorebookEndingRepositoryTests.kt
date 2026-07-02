@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest
@@ -31,6 +32,16 @@ class LorebookEndingRepositoryTests {
 
     @Autowired
     private lateinit var storyEndingRepository: StoryEndingRepository
+
+    // 테스트용 H2(jdbc:h2:mem:manyak-test)는 컨텍스트 간 공유된다. @SpringBootTest가 커밋한 로어북 카탈로그 행이
+    // 남아 전역 카탈로그 조회를 오염시키지 않도록, 트랜잭션 안에서 자식→부모 순으로 비운다(테스트 종료 시 롤백).
+    @BeforeEach
+    fun setUp() {
+        storyLorebookRepository.deleteAllInBatch()
+        storyEndingRepository.deleteAllInBatch()
+        lorebookRepository.deleteAllInBatch()
+        storyRepository.deleteAllInBatch()
+    }
 
     private fun newStory(): Story = storyRepository.save(Story(title = "잿빛 왕관"))
 
