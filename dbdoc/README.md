@@ -21,6 +21,9 @@
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
 | [public.users](public.users.md) | 9 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
+| [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
+| [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
+| [public.story_endings](public.story_endings.md) | 9 |  | BASE TABLE |
 
 ## Relations
 
@@ -41,6 +44,9 @@ erDiagram
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_example_ratings" |o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -210,6 +216,34 @@ erDiagram
   varchar_255_ email
   timestamp_with_time_zone connected_at
   timestamp_with_time_zone last_login_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.lorebooks" {
+  bigint id
+  varchar_100_ name
+  varchar_50_ genre
+  text content
+  integer sort_order
+  boolean is_active
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_lorebooks" {
+  bigint id
+  bigint story_id FK
+  bigint lorebook_id FK
+  smallint sort_order
+  timestamp_with_time_zone created_at
+}
+"public.story_endings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ title
+  text content
+  text condition_text
+  smallint sort_order
+  boolean enabled
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }
