@@ -71,12 +71,12 @@ class SimpleStoryCreationService(
     @Transactional(readOnly = true)
     fun getSimpleStoryTags(): List<SimpleStoryTagListItemResponse> =
         storyCreationTagRepository
-            .findByTagSourceAndIsActiveTrueOrderByTagTypeAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
+            .findByTagSourceAndIsActiveTrueOrderByCategoryAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
             .map { tag ->
                 SimpleStoryTagListItemResponse(
                     id = tag.id,
                     name = tag.name,
-                    category = tag.tagType,
+                    category = tag.category,
                 )
             }
 
@@ -87,13 +87,13 @@ class SimpleStoryCreationService(
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
             StoryCreationTagDraft(
-                tagType = tag.category,
+                category = tag.category,
                 name = tag.name.trim(),
             )
         }.distinctBy { it.key }
         val aiRequestTags = predefinedTags.map { tag ->
             StoryCreationTagDraft(
-                tagType = tag.tagType,
+                category = tag.category,
                 name = tag.name,
             )
         } + customTagDrafts
@@ -224,12 +224,12 @@ class SimpleStoryCreationService(
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
             .map { it.tag }
         val genreTags = sessionTags
-            .filter { it.tagType == SimpleStoryTagCategory.GENRE }
+            .filter { it.category == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
-            protagonistTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
             selectedStoryline = selectedStoryline.exampleText,
             extraInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
@@ -341,16 +341,16 @@ class SimpleStoryCreationService(
 
     private fun List<StoryCreationTagDraft>.toAiStorylinesRequest(): AiStorylinesRequest =
         AiStorylinesRequest(
-            genreTags = filter { it.tagType == SimpleStoryTagCategory.GENRE }.map { it.name },
-            protagonistTags = filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            genreTags = filter { it.category == SimpleStoryTagCategory.GENRE }.map { it.name },
+            protagonistTags = filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
         )
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
         SimpleStoryTagResponse(
             id = id,
             name = name,
-            category = tagType,
+            category = category,
         )
 
     private data class StoryCreationOutcome(
@@ -359,11 +359,11 @@ class SimpleStoryCreationService(
     )
 
     private data class StoryCreationTagDraft(
-        val tagType: SimpleStoryTagCategory,
+        val category: SimpleStoryTagCategory,
         val name: String,
     ) {
         val key: Pair<SimpleStoryTagCategory, String>
-            get() = tagType to name
+            get() = category to name
     }
 
     private fun findOrCreateCustomTags(customTagDrafts: List<StoryCreationTagDraft>): List<StoryCreationTag> {
@@ -372,20 +372,20 @@ class SimpleStoryCreationService(
         }
 
         val existingTags = customTagDrafts
-            .groupBy { it.tagType }
-            .flatMap { (tagType, drafts) ->
-                storyCreationTagRepository.findByTagSourceAndTagTypeAndNameIn(
+            .groupBy { it.category }
+            .flatMap { (category, drafts) ->
+                storyCreationTagRepository.findByTagSourceAndCategoryAndNameIn(
                     tagSource = StoryCreationTagSource.CUSTOM,
-                    tagType = tagType,
+                    category = category,
                     names = drafts.map { it.name },
                 )
             }
-        val tagsByKey = existingTags.associateBy { it.tagType to it.name }.toMutableMap()
+        val tagsByKey = existingTags.associateBy { it.category to it.name }.toMutableMap()
         val newTags = customTagDrafts
             .filterNot { tagsByKey.containsKey(it.key) }
             .map { tag ->
                 StoryCreationTag(
-                    tagType = tag.tagType,
+                    category = tag.category,
                     name = tag.name,
                     tagSource = StoryCreationTagSource.CUSTOM,
                     sortOrder = 0,
@@ -394,7 +394,7 @@ class SimpleStoryCreationService(
             }
 
         storyCreationTagRepository.saveAll(newTags)
-            .forEach { tag -> tagsByKey[tag.tagType to tag.name] = tag }
+            .forEach { tag -> tagsByKey[tag.category to tag.name] = tag }
 
         return customTagDrafts.map { tag -> tagsByKey.getValue(tag.key) }
     }

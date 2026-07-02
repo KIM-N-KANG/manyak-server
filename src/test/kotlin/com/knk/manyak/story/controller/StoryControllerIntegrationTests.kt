@@ -100,7 +100,7 @@ class StoryControllerIntegrationTests {
         seedTag(SimpleStoryTagCategory.PROTAGONIST, "기억상실", 10)
         tagRepository.save(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "사용자 입력",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -229,7 +229,7 @@ class StoryControllerIntegrationTests {
     fun `이미 저장된 직접 추가 태그는 재사용한다`() {
         tagRepository.save(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "마법 학교",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -263,7 +263,7 @@ class StoryControllerIntegrationTests {
     fun `같은 출처와 분류와 이름의 태그는 중복 저장할 수 없다`() {
         tagRepository.saveAndFlush(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "마법 학교",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -272,7 +272,7 @@ class StoryControllerIntegrationTests {
         assertThrows<DataIntegrityViolationException> {
             tagRepository.saveAndFlush(
                 StoryCreationTag(
-                    tagType = SimpleStoryTagCategory.GENRE,
+                    category = SimpleStoryTagCategory.GENRE,
                     name = "마법 학교",
                     tagSource = StoryCreationTagSource.CUSTOM,
                 ),
@@ -536,7 +536,7 @@ class StoryControllerIntegrationTests {
     ): StoryCreationTag =
         tagRepository.save(
             StoryCreationTag(
-                tagType = category,
+                category = category,
                 name = name,
                 tagSource = StoryCreationTagSource.PREDEFINED,
                 sortOrder = sortOrder,
