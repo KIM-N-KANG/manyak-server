@@ -15,6 +15,11 @@
 - PR 리뷰는 ready 전환 후 PR 코멘트 `@codex review`로 받습니다. ready 전환·호출·리뷰 대기·반영은 `request-codex-review` 스킬을 따릅니다(Codex는 draft PR을 리뷰하지 않습니다).
 - 머지 후 마무리(로컬 브랜치 정리, Jira 완료 트랜지션, 작업시간 worklog 기록)는 `complete-ticket` 스킬을 따릅니다.
 
+### 하네스 스킬 심링크와 워크트리
+
+- `.claude/skills/`의 공용 스킬(create-branch, create-commit, create-pr, karpathy-guidelines, technical-writing)은 `../../../knk-harness`로 가는 상대 심링크입니다.
+- Claude Code 워크트리(`.claude/worktrees/<name>/`)에서는 경로 깊이가 달라 이 심링크가 깨지므로, 이를 보정하는 `.claude/worktrees/knk-harness → ../../../knk-harness` 심링크를 커밋해 두었습니다. 이 심링크를 지우면 워크트리 세션에서 하네스 스킬이 로드되지 않습니다.
+
 ### Kotlin Spring 작업
 
 - 이 백엔드는 Kotlin, Spring Boot, Gradle Kotlin DSL, Java 21, JPA, Flyway, Security, PostgreSQL을 사용합니다.
