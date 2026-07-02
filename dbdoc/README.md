@@ -7,8 +7,8 @@
 | [public.story_creation_tags](public.story_creation_tags.md) | 8 |  | BASE TABLE |
 | [public.story_creation_sessions](public.story_creation_sessions.md) | 6 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
-| [public.story_creation_examples](public.story_creation_examples.md) | 6 |  | BASE TABLE |
-| [public.story_creation_example_recommended_infos](public.story_creation_example_recommended_infos.md) | 5 |  | BASE TABLE |
+| [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
+| [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
 | [public.stories](public.stories.md) | 10 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
@@ -16,7 +16,7 @@
 | [public.story_play_sessions](public.story_play_sessions.md) | 12 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
-| [public.story_creation_example_ratings](public.story_creation_example_ratings.md) | 5 |  | BASE TABLE |
+| [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
 | [public.users](public.users.md) | 9 |  | BASE TABLE |
@@ -32,8 +32,8 @@ erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
-"public.story_creation_examples" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
-"public.story_creation_example_recommended_infos" }o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+"public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_creation_storyline_recommended_infos" }o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
@@ -42,7 +42,7 @@ erDiagram
 "public.story_messages" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
-"public.story_creation_example_ratings" |o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+"public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
@@ -72,17 +72,17 @@ erDiagram
   bigint tag_id FK
   timestamp_with_time_zone created_at
 }
-"public.story_creation_examples" {
+"public.story_creation_storylines" {
   bigint id
   bigint creation_session_id FK
-  text example_text
-  smallint example_order
+  text storyline_text
+  smallint storyline_order
   boolean is_selected
   timestamp_with_time_zone created_at
 }
-"public.story_creation_example_recommended_infos" {
+"public.story_creation_storyline_recommended_infos" {
   bigint id
-  bigint example_id FK
+  bigint storyline_id FK
   text info_text
   smallint info_order
   timestamp_with_time_zone created_at
@@ -157,9 +157,9 @@ erDiagram
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
 }
-"public.story_creation_example_ratings" {
+"public.story_creation_storyline_ratings" {
   bigint id
-  bigint example_id FK
+  bigint storyline_id FK
   varchar_8_ rating
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at

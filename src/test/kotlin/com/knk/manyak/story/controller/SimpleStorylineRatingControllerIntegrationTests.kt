@@ -1,11 +1,11 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.story.dto.StorylineRating
-import com.knk.manyak.story.entity.StoryCreationExample
+import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRatingRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -30,10 +30,10 @@ class SimpleStorylineRatingControllerIntegrationTests {
     private lateinit var sessionRepository: StoryCreationSessionRepository
 
     @Autowired
-    private lateinit var exampleRepository: StoryCreationExampleRepository
+    private lateinit var storylineRepository: StoryCreationStorylineRepository
 
     @Autowired
-    private lateinit var ratingRepository: StoryCreationExampleRatingRepository
+    private lateinit var ratingRepository: StoryCreationStorylineRatingRepository
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -43,15 +43,15 @@ class SimpleStorylineRatingControllerIntegrationTests {
         databaseCleaner.cleanAll()
     }
 
-    private fun persistStoryline(): StoryCreationExample {
+    private fun persistStoryline(): StoryCreationStoryline {
         val session = sessionRepository.save(
             StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
-        return exampleRepository.save(
-            StoryCreationExample(
+        return storylineRepository.save(
+            StoryCreationStoryline(
                 creationSession = session,
-                exampleText = "기억을 잃은 주인공이 금지된 숲에서 과거를 추적한다.",
-                exampleOrder = 1,
+                storylineText = "기억을 잃은 주인공이 금지된 숲에서 과거를 추적한다.",
+                storylineOrder = 1,
             ),
         )
     }
@@ -73,7 +73,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
             .jsonPath("$.id").isEqualTo(storyline.id)
             .jsonPath("$.rating").isEqualTo("GOOD")
 
-        val saved = ratingRepository.findByExampleId(storyline.id)
+        val saved = ratingRepository.findByStorylineId(storyline.id)
         assertThat(saved).isNotNull
         assertThat(saved!!.rating).isEqualTo(StorylineRating.GOOD)
     }
@@ -83,7 +83,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
         val storyline = persistStoryline()
 
         rate(storyline.id, "GOOD").expectStatus().isOk
-        val first = ratingRepository.findByExampleId(storyline.id)!!
+        val first = ratingRepository.findByStorylineId(storyline.id)!!
         val firstCreatedAt = first.createdAt
         val firstUpdatedAt = first.updatedAt
 
@@ -96,7 +96,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
             .jsonPath("$.rating").isEqualTo("BAD")
 
         assertThat(ratingRepository.count()).isEqualTo(1)
-        val second = ratingRepository.findByExampleId(storyline.id)!!
+        val second = ratingRepository.findByStorylineId(storyline.id)!!
         assertThat(second.rating).isEqualTo(StorylineRating.BAD)
         // @PreUpdate로 updatedAt은 갱신되고 createdAt은 보존된다.
         assertThat(second.updatedAt).isAfter(firstUpdatedAt)
@@ -115,7 +115,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
             .jsonPath("$.rating").isEqualTo("GOOD")
 
         assertThat(ratingRepository.count()).isEqualTo(1)
-        assertThat(ratingRepository.findByExampleId(storyline.id)!!.rating).isEqualTo(StorylineRating.GOOD)
+        assertThat(ratingRepository.findByStorylineId(storyline.id)!!.rating).isEqualTo(StorylineRating.GOOD)
     }
 
     @Test
@@ -128,7 +128,7 @@ class SimpleStorylineRatingControllerIntegrationTests {
             .exchange()
             .expectStatus().isNoContent
 
-        assertThat(ratingRepository.findByExampleId(storyline.id)).isNull()
+        assertThat(ratingRepository.findByStorylineId(storyline.id)).isNull()
     }
 
     @Test
