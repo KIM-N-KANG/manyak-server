@@ -15,22 +15,22 @@ import java.time.Instant
 
 @Entity
 @Table(
-    name = "story_creation_example_ratings",
+    name = "story_creation_storyline_ratings",
     uniqueConstraints = [
         UniqueConstraint(
-            name = "uq_story_creation_example_ratings_example",
-            columnNames = ["example_id"],
+            name = "uq_story_creation_storyline_ratings_storyline",
+            columnNames = ["storyline_id"],
         ),
     ],
 )
-class StoryCreationExampleRating(
+class StoryCreationStorylineRating(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    // 평가 대상 스토리라인(story_creation_examples.id). 탐색이 필요 없어 원시 FK 값만 보관한다.
-    @Column(name = "example_id", nullable = false)
-    val exampleId: Long,
+    // 평가 대상 스토리라인(story_creation_storylines.id). 탐색이 필요 없어 원시 FK 값만 보관한다.
+    @Column(name = "storyline_id", nullable = false)
+    val storylineId: Long,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 8)
