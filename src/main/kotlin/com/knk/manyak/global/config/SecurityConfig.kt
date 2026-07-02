@@ -49,6 +49,8 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream")).permitAll()
+                    // 로어북 카탈로그는 인증 없이 조회하는 공개 목록이다(일반 제작 참조용). {storyId} 매처보다 앞에 둬 명시적으로 허용한다.
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks")).permitAll()
                     // 스토리 ID도 추측 불가능한 공개 식별자(UUID)다(KNK-256). 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
@@ -131,6 +133,7 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
