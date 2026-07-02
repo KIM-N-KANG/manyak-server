@@ -8,6 +8,9 @@ import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StorySettingRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -36,8 +39,23 @@ class StoryLorebookEndingControllerIntegrationTests {
     @Autowired
     private lateinit var storyEndingRepository: StoryEndingRepository
 
+    @Autowired
+    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
+
+    @Autowired
+    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
+
+    @Autowired
+    private lateinit var storySettingRepository: StorySettingRepository
+
     @BeforeEach
     fun setUp() {
+        // 테스트 프로파일은 Flyway가 꺼져 있어(Hibernate DDL) 마이그레이션의 ON DELETE CASCADE가 없다.
+        // 같은 JVM의 다른 테스트가 커밋해둔 기존 자식 행이 남아 있으면 stories 삭제가 FK 위반으로 실패하므로,
+        // 기존 자식 테이블(추천 입력 → 시작 설정 → 스토리 설정)까지 자식→부모 순으로 먼저 비운다.
+        storySuggestedInputRepository.deleteAllInBatch()
+        storyStartSettingRepository.deleteAllInBatch()
+        storySettingRepository.deleteAllInBatch()
         storyLorebookRepository.deleteAllInBatch()
         storyEndingRepository.deleteAllInBatch()
         lorebookRepository.deleteAllInBatch()
