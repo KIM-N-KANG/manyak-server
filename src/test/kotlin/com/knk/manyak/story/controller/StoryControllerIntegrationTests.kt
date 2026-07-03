@@ -401,6 +401,44 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `추가 정보가 13개면 스토리를 생성한다`() {
+        val seeded = seedGeneratedSession()
+        val additionalInfos = (1..13).joinToString(",") { "\"추가 정보 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        check(storyRepository.count() == 1L)
+    }
+
+    @Test
+    fun `추가 정보가 14개면 스토리 생성을 거절한다`() {
+        val seeded = seedGeneratedSession()
+        val additionalInfos = (1..14).joinToString(",") { "\"추가 정보 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(400)
+            .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+            .jsonPath("$.path").isEqualTo("/api/v1/stories/simple")
+
+        check(storyRepository.count() == 0L)
+    }
+
+    @Test
     fun `존재하지 않는 진행 정보면 스토리 생성을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
