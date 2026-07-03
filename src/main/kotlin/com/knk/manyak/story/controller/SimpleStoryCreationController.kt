@@ -144,7 +144,7 @@ class SimpleStoryCreationController(
 
     @Operation(
         summary = "스토리라인 평가 설정/변경",
-        description = "간편 제작으로 생성된 예시 스토리라인에 좋아요/나빠요 평가를 남깁니다. " +
+        description = "간편 제작으로 생성된 스토리라인에 좋아요/나빠요 평가를 남깁니다. " +
             "같은 스토리라인을 다시 평가하면 값이 갱신됩니다(대상당 1개). 취소는 DELETE를 사용합니다.",
     )
     @ApiResponses(

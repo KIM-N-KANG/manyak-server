@@ -18,10 +18,10 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryCreationExample
+import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
@@ -132,7 +132,7 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var creationSessionRepository: StoryCreationSessionRepository
 
     @Autowired
-    private lateinit var creationExampleRepository: StoryCreationExampleRepository
+    private lateinit var creationStorylineRepository: StoryCreationStorylineRepository
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -359,24 +359,24 @@ class OptionalAuthAttributionIntegrationTests {
         return spec.body("""{"rating":"GOOD"}""").exchange()
     }
 
-    private fun persistStoryline(): StoryCreationExample = persistStorylineSession(ownerId = null)
+    private fun persistStoryline(): StoryCreationStoryline = persistStorylineSession(ownerId = null)
 
-    private fun persistStorylineOwnedBy(ownerId: Long): StoryCreationExample = persistStorylineSession(ownerId)
+    private fun persistStorylineOwnedBy(ownerId: Long): StoryCreationStoryline = persistStorylineSession(ownerId)
 
-    private fun persistStorylineSession(ownerId: Long?): StoryCreationExample {
+    private fun persistStorylineSession(ownerId: Long?): StoryCreationStoryline {
         val session = creationSessionRepository.save(
             StoryCreationSession(userId = ownerId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
-        return creationExampleRepository.save(
-            StoryCreationExample(
+        return creationStorylineRepository.save(
+            StoryCreationStoryline(
                 creationSession = session,
-                exampleText = "예시 스토리라인",
-                exampleOrder = 1,
+                storylineText = "예시 스토리라인",
+                storylineOrder = 1,
             ),
         )
     }
 
-    private fun postSimpleStory(storyline: StoryCreationExample, authorization: String?): RestTestClient.ResponseSpec {
+    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)

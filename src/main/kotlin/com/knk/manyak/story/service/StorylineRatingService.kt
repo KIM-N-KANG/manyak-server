@@ -2,10 +2,10 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.StorylineRating
 import com.knk.manyak.story.dto.StorylineRatingResponse
-import com.knk.manyak.story.entity.StoryCreationExample
-import com.knk.manyak.story.entity.StoryCreationExampleRating
-import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.entity.StoryCreationStoryline
+import com.knk.manyak.story.entity.StoryCreationStorylineRating
+import com.knk.manyak.story.repository.StoryCreationStorylineRatingRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -13,8 +13,8 @@ import org.springframework.web.server.ResponseStatusException
 
 @Service
 class StorylineRatingService(
-    private val storyCreationExampleRepository: StoryCreationExampleRepository,
-    private val storyCreationExampleRatingRepository: StoryCreationExampleRatingRepository,
+    private val storyCreationStorylineRepository: StoryCreationStorylineRepository,
+    private val storyCreationStorylineRatingRepository: StoryCreationStorylineRatingRepository,
 ) {
 
     // 스토리라인 평가는 대상당 1개다. 같은 스토리라인을 다시 평가하면 값만 갱신한다(upsert).
@@ -26,13 +26,13 @@ class StorylineRatingService(
     fun rate(storylineId: Long, rating: StorylineRating, userId: Long? = null): StorylineRatingResponse {
         loadStorylineEnforcingOwner(storylineId, userId)
 
-        val existing = storyCreationExampleRatingRepository.findByExampleId(storylineId)
+        val existing = storyCreationStorylineRatingRepository.findByStorylineId(storylineId)
         if (existing != null) {
             // 영속 상태 엔티티이므로 변경 감지(dirty checking)로 커밋 시 자동 반영된다. save() 불필요.
             existing.rating = rating
         } else {
-            storyCreationExampleRatingRepository.save(
-                StoryCreationExampleRating(exampleId = storylineId, rating = rating),
+            storyCreationStorylineRatingRepository.save(
+                StoryCreationStorylineRating(storylineId = storylineId, rating = rating),
             )
         }
 
@@ -43,15 +43,15 @@ class StorylineRatingService(
     @Transactional
     fun cancel(storylineId: Long, userId: Long? = null) {
         loadStorylineEnforcingOwner(storylineId, userId)
-        storyCreationExampleRatingRepository.deleteByExampleId(storylineId)
+        storyCreationStorylineRatingRepository.deleteByStorylineId(storylineId)
     }
 
     /**
      * 스토리라인을 로드하며 소유권을 강제한다. 없으면 404, 소유 세션(소유자 있음)인데 요청자가 다르거나 익명이면 403.
      * 익명 세션(소유자 없음)은 누구나 허용한다.
      */
-    private fun loadStorylineEnforcingOwner(storylineId: Long, userId: Long?): StoryCreationExample {
-        val storyline = storyCreationExampleRepository.findById(storylineId)
+    private fun loadStorylineEnforcingOwner(storylineId: Long, userId: Long?): StoryCreationStoryline {
+        val storyline = storyCreationStorylineRepository.findById(storylineId)
             .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "스토리라인을 찾을 수 없습니다.") }
         val ownerId = storyline.creationSession.userId
         if (ownerId != null && ownerId != userId) {
