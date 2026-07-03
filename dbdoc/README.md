@@ -182,7 +182,7 @@ erDiagram
   varchar_128_ session_id
   bigint story_id
   uuid chat_id
-  integer turn_index
+  integer turn_number
   varchar_40_ provider
   varchar_100_ model
   varchar_40_ prompt_template_version

@@ -271,7 +271,7 @@ class ChatStreamControllerIntegrationTests {
 
             val userSaved = appender.list.filter { it.formattedMessage.contains("event_name=user_message_saved") }
             assertThat(userSaved).hasSize(1)
-            assertThat(userSaved.first().formattedMessage).contains("turn_index=1")
+            assertThat(userSaved.first().formattedMessage).contains("turn_number=1")
             assertThat(userSaved.first().formattedMessage).contains("message_length_bucket=")
             // 로그의 story_id는 내부 PK가 아니라 공개 식별자(public UUID)로 남는다.
             assertThat(userSaved.first().formattedMessage).contains("story_id=${story.publicId}")
