@@ -29,7 +29,7 @@ class ChatTurnPersister(
      * 한 턴(USER 입력 + AI 출력 + 선택지)을 원자적으로 저장하고 current_turn을 1 증가시킨다.
      * 메시지 순서는 직전 마지막 순서 n에 이어 USER=n+1, ASSISTANT=n+2로 매긴다.
      *
-     * @return 저장된 ASSISTANT 메시지 id(turnId)와 증가된 턴 번호(turnIndex)
+     * @return 저장된 ASSISTANT 메시지 id(turnId)와 증가된 턴 번호(turnNumber)
      */
     @Transactional
     fun persistTurn(
@@ -79,8 +79,8 @@ class ChatTurnPersister(
         chat.currentTurn += 1
         storyChatRepository.save(chat)
 
-        return PersistedTurn(turnId = assistant.id, turnIndex = chat.currentTurn)
+        return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn)
     }
 
-    data class PersistedTurn(val turnId: Long, val turnIndex: Int)
+    data class PersistedTurn(val turnId: Long, val turnNumber: Int)
 }

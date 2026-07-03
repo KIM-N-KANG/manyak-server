@@ -91,7 +91,7 @@ class AiCallLogRepositoryTests {
                 sessionId = "sess_1",
                 storyId = 7L,
                 chatId = chatId,
-                turnIndex = 3,
+                turnNumber = 3,
             ),
         )
 
@@ -100,7 +100,7 @@ class AiCallLogRepositoryTests {
         assertEquals("device_hash_0123456789abcdef", found.deviceIdHash)
         assertEquals(7L, found.storyId)
         assertEquals(chatId, found.chatId)
-        assertEquals(3, found.turnIndex)
+        assertEquals(3, found.turnNumber)
     }
 
     @Test

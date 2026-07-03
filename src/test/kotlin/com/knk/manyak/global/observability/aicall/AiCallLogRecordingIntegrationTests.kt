@@ -89,7 +89,7 @@ class AiCallLogRecordingIntegrationTests {
             assertThat(log.requestId).isEqualTo("req_aicall_chat")
             assertThat(log.storyId).isEqualTo(story.id)
             assertThat(log.chatId).isEqualTo(session.publicId)
-            assertThat(log.turnIndex).isEqualTo(1)
+            assertThat(log.turnNumber).isEqualTo(1)
             assertThat(log.latencyMs).isNotNull()
             assertThat(log.completedAt).isNotNull()
             // stub은 meta를 내려주지 않으므로, AI 응답 meta 컬럼은 비어 있어야 한다(실 AI 연동 전 회귀 가드).

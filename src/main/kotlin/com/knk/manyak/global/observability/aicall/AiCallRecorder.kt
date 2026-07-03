@@ -67,14 +67,14 @@ class AiCallRecorder(
     }
 
     /**
-     * 적재된 호출의 turn_index를 사후에 채운다.
+     * 적재된 호출의 turn_number를 사후에 채운다.
      *
      * chat_response의 실제 turn 번호는 persistTurn이 DB에서 확정하므로, 그 뒤에 호출해야
-     * 같은 채팅에 동시 요청이 겹쳐도 ai_call_logs.turn_index가 저장된 턴과 어긋나지 않는다.
+     * 같은 채팅에 동시 요청이 겹쳐도 ai_call_logs.turn_number가 저장된 턴과 어긋나지 않는다.
      */
-    fun attachTurnIndex(aiCallLogId: Long, turnIndex: Int) {
+    fun attachTurnNumber(aiCallLogId: Long, turnNumber: Int) {
         repository.findById(aiCallLogId).ifPresent { log ->
-            log.turnIndex = turnIndex
+            log.turnNumber = turnNumber
             repository.save(log)
         }
     }
@@ -101,7 +101,7 @@ class AiCallRecorder(
         sessionId = cleanMdc(MdcKeys.SESSION_ID),
         storyId = context.storyId,
         chatId = context.chatId,
-        // turn_index는 적재 시점엔 비워 두고, persistTurn이 실제 턴을 확정한 뒤 attachTurnIndex로 채운다.
+        // turn_number는 적재 시점엔 비워 두고, persistTurn이 실제 턴을 확정한 뒤 attachTurnNumber로 채운다.
     )
 
     private fun cleanMdc(key: String): String? =
@@ -120,7 +120,7 @@ class AiCallRecorder(
 
 /**
  * 호출부가 아는, MDC에 없는 식별자. feature는 필수이고 나머지는 호출 종류에 따라 채운다.
- * (storyline_generation은 story_id 없음, chat_response만 chat_id·turn_index가 있음)
+ * (storyline_generation은 story_id 없음, chat_response만 chat_id·turn_number가 있음)
  */
 data class AiCallContext(
     val feature: AiCallFeature,

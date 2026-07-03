@@ -272,7 +272,7 @@ class ChatService(
                 )
                 // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
                 // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
-                // turn_index는 persistTurn이 DB에서 확정한 뒤 attachTurnIndex로 채운다(동시 요청 정합성).
+                // turn_number는 persistTurn이 DB에서 확정한 뒤 attachTurnNumber로 채운다(동시 요청 정합성).
                 val recorded = aiCallRecorder.record(
                     AiCallContext(
                         feature = AiCallFeature.CHAT_RESPONSE,
@@ -307,21 +307,21 @@ class ChatService(
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
-                Sentry.addBreadcrumb("chat turn persisted: turn=${persisted.turnIndex}", "db")
+                Sentry.addBreadcrumb("chat turn persisted: turn=${persisted.turnNumber}", "db")
                 // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
-                aiCallRecorder.attachTurnIndex(recorded.aiCallLogId, persisted.turnIndex)
+                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persisted.turnNumber)
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_index" to persisted.turnIndex,
+                    "turn_number" to persisted.turnNumber,
                     "message_length_bucket" to LengthBuckets.of(request.userInput.length),
                 )
                 structuredLogger.event(
                     "ai_response_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_index" to persisted.turnIndex,
+                    "turn_number" to persisted.turnNumber,
                     "ai_call_log_id" to recorded.aiCallLogId,
                 )
                 emitter.send(
