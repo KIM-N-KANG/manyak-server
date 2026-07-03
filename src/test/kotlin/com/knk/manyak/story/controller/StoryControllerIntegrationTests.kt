@@ -154,7 +154,7 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.selectedTags.length()").isEqualTo(2)
             .jsonPath("$.selectedTags[0].name").isEqualTo("판타지")
             .jsonPath("$.storylines.length()").isEqualTo(3)
-            .jsonPath("$.storylines[0].story").isEqualTo("생성 스토리 1")
+            .jsonPath("$.storylines[0].storyline").isEqualTo("생성 스토리 1")
             .jsonPath("$.storylines[0].recommendedInfos.length()").isEqualTo(3)
             .jsonPath("$.storylines[0].recommendedInfos[0].text").isEqualTo("추가 정보 1-1")
 
@@ -386,7 +386,7 @@ class StoryControllerIntegrationTests {
         check(compileRequest.genreTags == listOf("다크 판타지", "정치극"))
         check(compileRequest.protagonistTags == listOf("신중한"))
         check(compileRequest.selectedStoryline == "스토리라인 2")
-        check(compileRequest.extraInfo == "주인공은 신중하다\n결말은 여운 있게")
+        check(compileRequest.additionalInfo == "주인공은 신중하다\n결말은 여운 있게")
 
         check(storyRepository.count() == 1L)
         check(storySettingRepository.count() == 1L)
@@ -572,7 +572,7 @@ class StoryControllerIntegrationTests {
                 stories = (1..3).map { index ->
                     AiStoryItem(
                         id = index,
-                        story = "생성 스토리 $index",
+                        storyline = "생성 스토리 $index",
                         recommendedInfos = if (emptyRecommendedInfos) {
                             emptyList()
                         } else {

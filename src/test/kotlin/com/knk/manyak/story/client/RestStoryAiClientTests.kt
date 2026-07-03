@@ -41,7 +41,7 @@ class RestStoryAiClientTests {
                       "stories": [
                         {
                           "id": 1,
-                          "story": "생성 스토리",
+                          "storyline": "생성 스토리",
                           "recommended_infos": ["추가 정보 1", "추가 정보 2", "추가 정보 3"]
                         }
                       ]
@@ -66,7 +66,7 @@ class RestStoryAiClientTests {
         assertTrue(requireNotNull(capturedBody).contains(""""genre_tags":["판타지"]"""))
         assertTrue(requireNotNull(capturedBody).contains(""""protagonist_tags":["기억상실"]"""))
         assertTrue(requireNotNull(capturedBody).contains(""""supporting_tags":["비밀스러운 조력자"]"""))
-        assertEquals("생성 스토리", response.stories.single().story)
+        assertEquals("생성 스토리", response.stories.single().storyline)
     }
 
     @Test
@@ -176,7 +176,7 @@ class RestStoryAiClientTests {
                 protagonistTags = emptyList(),
                 supportingTags = emptyList(),
                 selectedStoryline = "선택된 스토리라인",
-                extraInfo = "추가 정보",
+                additionalInfo = "추가 정보",
             ),
         )
 
@@ -199,7 +199,7 @@ class RestStoryAiClientTests {
               "stories": [
                 {
                   "id": 1,
-                  "story": "생성 스토리",
+                  "storyline": "생성 스토리",
                   "recommended_infos": ["추가 정보 1", "추가 정보 2", "추가 정보 3"]
                 }
               ]

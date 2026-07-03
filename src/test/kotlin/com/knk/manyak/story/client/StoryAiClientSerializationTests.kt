@@ -30,6 +30,24 @@ class StoryAiClientSerializationTests {
     }
 
     @Test
+    fun `AI 스토리 완성 요청은 additional_info 필드명으로 직렬화한다`() {
+        val json = objectMapper.writeValueAsString(
+            AiStoryCompileRequest(
+                genreTags = listOf("판타지"),
+                protagonistTags = listOf("기억상실"),
+                supportingTags = listOf("비밀스러운 조력자"),
+                selectedStoryline = "선택한 스토리라인",
+                additionalInfo = "주인공은 신중하다",
+            ),
+        )
+
+        assertTrue(json.contains(""""additional_info":"주인공은 신중하다""""))
+        assertTrue(json.contains(""""selected_storyline":"선택한 스토리라인""""))
+        assertFalse(json.contains("extra_info"))
+        assertFalse(json.contains("additionalInfo"))
+    }
+
+    @Test
     fun `AI 스토리라인 응답을 역직렬화한다`() {
         val response = objectMapper.readValue(
             """
@@ -37,7 +55,7 @@ class StoryAiClientSerializationTests {
               "stories": [
                 {
                   "id": 1,
-                  "story": "기억을 잃은 주인공의 이야기",
+                  "storyline": "기억을 잃은 주인공의 이야기",
                   "recommended_infos": ["첫 추가 정보", "두 번째 추가 정보", "세 번째 추가 정보"]
                 }
               ]
@@ -47,7 +65,7 @@ class StoryAiClientSerializationTests {
         )
 
         assertEquals(1, response.stories.single().id)
-        assertEquals("기억을 잃은 주인공의 이야기", response.stories.single().story)
+        assertEquals("기억을 잃은 주인공의 이야기", response.stories.single().storyline)
         assertEquals(listOf("첫 추가 정보", "두 번째 추가 정보", "세 번째 추가 정보"), response.stories.single().recommendedInfos)
     }
 
