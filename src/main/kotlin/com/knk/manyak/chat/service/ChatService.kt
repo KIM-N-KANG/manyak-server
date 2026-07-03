@@ -20,10 +20,10 @@ import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.LengthBuckets
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -56,7 +56,7 @@ class ChatService(
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
-    private val storyPlaySessionRepository: StoryPlaySessionRepository,
+    private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
@@ -74,8 +74,8 @@ class ChatService(
         // 시작 설정은 내부 PK(story.id)로 조회한다.
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
 
-        val session = storyPlaySessionRepository.save(
-            StoryPlaySession(
+        val chat = storyChatRepository.save(
+            StoryChat(
                 userId = userId,
                 storyId = story.id,
                 startSettingId = startSetting?.id,
@@ -85,17 +85,17 @@ class ChatService(
             "chat_started",
             // 로그의 story_id는 story_created·분석 이벤트와 조인되도록 공개 식별자(public UUID)로 남긴다.
             "story_id" to story.publicId.toString(),
-            "chat_id" to session.publicId.toString(),
+            "chat_id" to chat.publicId.toString(),
         )
 
         val suggestedInputs = loadSuggestedInputs(startSetting?.id)
 
         return CreateChatResponse(
-            id = session.publicId.toString(),
+            id = chat.publicId.toString(),
             storyId = story.publicId.toString(),
             prologue = startSetting?.prologue.orEmpty(),
             suggestedInputs = suggestedInputs,
-            createdAt = session.createdAt,
+            createdAt = chat.createdAt,
         )
     }
 
@@ -110,45 +110,45 @@ class ChatService(
         // 존재하고 삭제되지 않은 채팅만 마지막 진행 시각(updatedAt) 내림차순으로 노출한다.
         // updatedAt이 같으면 id 내림차순으로 결정적 순서를 보장한다. 존재하지 않거나 형식이
         // 잘못된 채팅 ID는 조회되지 않으므로 자연히 제외된다.
-        val sessions = storyPlaySessionRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
-            .sortedWith(compareByDescending<StoryPlaySession> { it.updatedAt }.thenByDescending { it.id })
-        if (sessions.isEmpty()) {
+        val chats = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
+            .sortedWith(compareByDescending<StoryChat> { it.updatedAt }.thenByDescending { it.id })
+        if (chats.isEmpty()) {
             return emptyList()
         }
 
         // 응답에 스토리 공개 식별자(public_id)와 제목을 노출하기 위해 스토리를 한 번에 조회해 매핑한다.
-        val storiesByStoryId = storyRepository.findAllById(sessions.map { it.storyId })
+        val storiesByStoryId = storyRepository.findAllById(chats.map { it.storyId })
             .associateBy { it.id }
 
-        // 세션별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
-        val lastPreviewBySessionId = storyMessageRepository
-            .findLatestMessagesByPlaySessionIdsAndRole(sessions.map { it.id }, MessageRole.ASSISTANT)
-            .associate { it.playSessionId to it.content }
+        // 채팅별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
+        val lastPreviewByChatId = storyMessageRepository
+            .findLatestMessagesByChatIdsAndRole(chats.map { it.id }, MessageRole.ASSISTANT)
+            .associate { it.chatId to it.content }
 
-        return sessions.map { session ->
-            val story = storiesByStoryId[session.storyId]
+        return chats.map { chat ->
+            val story = storiesByStoryId[chat.storyId]
             ChatSummaryResponse(
-                id = session.publicId.toString(),
+                id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
                 storyTitle = story?.title.orEmpty(),
-                lastStoryPreview = lastPreviewBySessionId[session.id].orEmpty(),
+                lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
-                turnCount = session.currentTurn,
-                updatedAt = session.updatedAt,
+                turnCount = chat.currentTurn,
+                updatedAt = chat.updatedAt,
             )
         }
     }
 
     @Transactional(readOnly = true)
     fun getChatDetail(chatId: String): ChatDetailResponse {
-        val session = resolveSession(chatId)
+        val chat = resolveChat(chatId)
 
-        val story = storyRepository.findById(session.storyId).orElse(null)
+        val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyTitle = story?.title.orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
-        val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
+        val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
 
-        val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
+        val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
         val turns = pairTurns(messages)
 
         val choicesByMessageId = if (turns.isEmpty()) {
@@ -164,7 +164,7 @@ class ChatService(
         val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
 
         return ChatDetailResponse(
-            id = session.publicId.toString(),
+            id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
             prologue = startSetting?.prologue.orEmpty(),
@@ -188,8 +188,8 @@ class ChatService(
     @Transactional
     fun deleteChat(chatId: String) {
         // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
-        val session = resolveSession(chatId)
-        session.deletedAt = Instant.now()
+        val chat = resolveChat(chatId)
+        chat.deletedAt = Instant.now()
     }
 
     /**
@@ -229,7 +229,7 @@ class ChatService(
     /**
      * 채팅 턴을 SSE로 스트리밍한다.
      *
-     * 세션 검증과 AI 요청 재료 조립은 동기로 끝내 잘못된 요청은 즉시 404/400으로 응답하고,
+     * 채팅 검증과 AI 요청 재료 조립은 동기로 끝내 잘못된 요청은 즉시 404/400으로 응답하고,
      * 실제 토큰 스트리밍과 저장은 [chatSseExecutor] 위에서 비동기로 처리한다.
      * 스트리밍 동안에는 트랜잭션을 점유하지 않고, 저장은 completed 시점에 [ChatTurnPersister]가
      * 단일 트랜잭션으로 원자적으로 수행한다.
@@ -238,14 +238,14 @@ class ChatService(
         chatId: String,
         request: ContinueChatRequest,
     ): SseEmitter {
-        // 세션을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
+        // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
-        val session = resolveSession(chatId)
-        val sessionId = session.id
+        val chat = resolveChat(chatId)
+        val chatPk = chat.id
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
-        val story = storyRepository.findById(session.storyId).orElse(null)
+        val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyPublicId = story?.publicId?.toString().orEmpty()
-        val aiRequest = assembleAiRequest(session, story, request.userInput)
+        val aiRequest = assembleAiRequest(chat, story, request.userInput)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -276,8 +276,8 @@ class ChatService(
                 val recorded = aiCallRecorder.record(
                     AiCallContext(
                         feature = AiCallFeature.CHAT_RESPONSE,
-                        storyId = session.storyId,
-                        chatId = session.publicId,
+                        storyId = chat.storyId,
+                        chatId = chat.publicId,
                     ),
                     errorCode = { throwable ->
                         if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
@@ -302,7 +302,7 @@ class ChatService(
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
                 val persisted = chatTurnPersister.persistTurn(
-                    playSessionId = sessionId,
+                    chatId = chatPk,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
@@ -358,14 +358,14 @@ class ChatService(
     }
 
     /**
-     * 이미 검증된 세션으로 AI 채팅 턴 요청 재료를 조립한다.
+     * 이미 검증된 채팅으로 AI 채팅 턴 요청 재료를 조립한다.
      * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
      * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
      */
-    private fun assembleAiRequest(session: StoryPlaySession, story: Story?, userInput: String): ChatTurnAiRequest {
+    private fun assembleAiRequest(chat: StoryChat, story: Story?, userInput: String): ChatTurnAiRequest {
         val genre = story?.genre.orEmpty()
-        val setting = storySettingRepository.findByStoryId(session.storyId)
-        val startSetting = storyStartSettingRepository.findByStoryId(session.storyId)
+        val setting = storySettingRepository.findByStoryId(chat.storyId)
+        val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
 
         return ChatTurnAiRequest(
             genre = genre,
@@ -380,7 +380,7 @@ class ChatService(
                 prologue = startSetting?.prologue.orEmpty(),
                 startSituation = startSetting?.startSituation.orEmpty(),
             ),
-            history = assembleHistory(session.id),
+            history = assembleHistory(chat.id),
             userInput = userInput,
             summary = "",
         )
@@ -397,13 +397,13 @@ class ChatService(
             ?: emptyList()
 
     /**
-     * 공개 식별자(UUID 문자열)로 세션을 조회한다. 형식이 잘못됐거나 존재하지 않으면 404로 통일한다.
+     * 공개 식별자(UUID 문자열)로 채팅을 조회한다. 형식이 잘못됐거나 존재하지 않으면 404로 통일한다.
      * 순차 정수든 임의 문자열이든 동일하게 404를 반환해 존재 여부를 노출하지 않는다.
      */
-    private fun resolveSession(publicId: String): StoryPlaySession {
+    private fun resolveChat(publicId: String): StoryChat {
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
-        return storyPlaySessionRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+        return storyChatRepository.findByPublicIdAndDeletedAtIsNull(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
     }
 
@@ -426,11 +426,11 @@ class ChatService(
     }
 
     /**
-     * 세션의 전체 대화 내역(USER+ASSISTANT)을 시간순으로 조립한다.
+     * 채팅의 전체 대화 내역(USER+ASSISTANT)을 시간순으로 조립한다.
      * SYSTEM 메시지는 AI history에서 제외한다.
      */
     private fun assembleHistory(chatId: Long): List<ChatHistoryMessage> {
-        val all = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(chatId)
+        val all = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatId)
         return all.mapNotNull { message ->
             when (message.role) {
                 MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)

@@ -1,9 +1,9 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.dto.CreateChatResponse
-import com.knk.manyak.chat.entity.PlaySessionStatus
+import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
@@ -40,7 +40,7 @@ class ChatCreateControllerIntegrationTests {
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
@@ -95,7 +95,7 @@ class ChatCreateControllerIntegrationTests {
         assertThat(response.suggestedInputs).containsExactly("검사장을 둘러본다.", "마법수정에 손을 올린다.")
         assertThat(response.createdAt).isNotNull()
 
-        val sessions = storyPlaySessionRepository.findAll()
+        val sessions = storyChatRepository.findAll()
         assertThat(sessions).hasSize(1)
         val session = sessions.first()
         // 응답 id는 순차 PK가 아니라 추측 불가능한 공개 식별자(publicId)다 (IDOR 방지)
@@ -104,7 +104,7 @@ class ChatCreateControllerIntegrationTests {
         // 세션의 내부 FK(storyId)는 스토리 내부 PK로 저장된다.
         assertThat(session.storyId).isEqualTo(story.id)
         assertThat(session.startSettingId).isEqualTo(startSetting.id)
-        assertThat(session.status).isEqualTo(PlaySessionStatus.ACTIVE)
+        assertThat(session.status).isEqualTo(ChatStatus.ACTIVE)
         assertThat(session.userId).isNull()
 
         // 오프닝 메시지는 저장하지 않는다 (prologue는 start_setting이 단일 출처)
@@ -129,7 +129,7 @@ class ChatCreateControllerIntegrationTests {
             .jsonPath("$.suggestedInputs").isArray()
             .jsonPath("$.suggestedInputs").isEmpty()
 
-        val session = storyPlaySessionRepository.findAll().first()
+        val session = storyChatRepository.findAll().first()
         assertThat(session.startSettingId).isNull()
     }
 
@@ -175,7 +175,7 @@ class ChatCreateControllerIntegrationTests {
             .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
             .jsonPath("$.path").isEqualTo("/api/v1/chats")
 
-        assertThat(storyPlaySessionRepository.count()).isZero()
+        assertThat(storyChatRepository.count()).isZero()
     }
 
     @Test
@@ -192,7 +192,7 @@ class ChatCreateControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
 
-        assertThat(storyPlaySessionRepository.count()).isZero()
+        assertThat(storyChatRepository.count()).isZero()
     }
 
     @Test
@@ -214,6 +214,6 @@ class ChatCreateControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
 
-        assertThat(storyPlaySessionRepository.count()).isZero()
+        assertThat(storyChatRepository.count()).isZero()
     }
 }

@@ -23,7 +23,7 @@ enum class MessageRole {
     uniqueConstraints = [
         UniqueConstraint(
             name = "uq_story_messages_order",
-            columnNames = ["play_session_id", "message_order"],
+            columnNames = ["chat_id", "message_order"],
         ),
     ],
 )
@@ -32,8 +32,8 @@ class StoryMessage(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    @Column(name = "play_session_id", nullable = false)
-    val playSessionId: Long,
+    @Column(name = "chat_id", nullable = false)
+    val chatId: Long,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)

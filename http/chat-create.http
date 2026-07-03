@@ -65,7 +65,7 @@ Accept: application/json
 
 ### 3. 채팅 생성 (핵심 검증)
 # 2번을 먼저 실행해야 storyId 변수가 설정됩니다. storyId는 UUID 문자열이므로 따옴표로 감쌉니다.
-# story 존재 검증 → story_play_sessions(status=ACTIVE) 생성 → start_setting의 prologue 반환.
+# story 존재 검증 → story_chats(status=ACTIVE) 생성 → start_setting의 prologue 반환.
 POST {{baseUrl}}/api/v1/chats
 Content-Type: application/json
 Accept: application/json

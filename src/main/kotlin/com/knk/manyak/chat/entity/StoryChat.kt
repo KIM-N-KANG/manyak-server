@@ -12,14 +12,14 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
 
-enum class PlaySessionStatus {
+enum class ChatStatus {
     ACTIVE,
     ENDED,
 }
 
 @Entity
-@Table(name = "story_play_sessions")
-class StoryPlaySession(
+@Table(name = "story_chats")
+class StoryChat(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
@@ -49,7 +49,7 @@ class StoryPlaySession(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    var status: PlaySessionStatus = PlaySessionStatus.ACTIVE,
+    var status: ChatStatus = ChatStatus.ACTIVE,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

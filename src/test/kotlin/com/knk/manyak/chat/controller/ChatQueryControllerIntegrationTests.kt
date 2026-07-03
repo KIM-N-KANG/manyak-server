@@ -3,10 +3,10 @@ package com.knk.manyak.chat.controller
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
@@ -42,7 +42,7 @@ class ChatQueryControllerIntegrationTests {
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
@@ -69,7 +69,7 @@ class ChatQueryControllerIntegrationTests {
                 startSituation = "적성 검사 직전의 검사장.",
             ),
         )
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         val assistant1 = message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
@@ -106,7 +106,7 @@ class ChatQueryControllerIntegrationTests {
     @Test
     fun `시작 설정이 없는 채팅 상세는 빈 프롤로그와 빈 추천 입력으로 조회된다`() {
         val story = storyRepository.save(Story(title = "설정 미완 스토리"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.get()
             .uri("/api/v1/chats/${session.publicId}")
@@ -140,7 +140,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.get()
             .uri("/api/v1/chats/${session.publicId}")
@@ -168,7 +168,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
 
@@ -215,15 +215,15 @@ class ChatQueryControllerIntegrationTests {
         // turnCount는 세션의 비정규화 카운터(currentTurn)를 그대로 노출한다. persistTurn을 우회해
         // 직접 시드하므로 currentTurn을 명시한다. (A: 2턴, B: 1턴)
         // updatedAt(마지막 진행 시각)을 명시해 정렬 기준을 고정한다. A가 B보다 최근이다.
-        val sessionA = storyPlaySessionRepository.save(
-            StoryPlaySession(
+        val sessionA = storyChatRepository.save(
+            StoryChat(
                 storyId = storyA.id,
                 currentTurn = 2,
                 updatedAt = Instant.parse("2026-06-20T10:00:00Z"),
             ),
         )
-        val sessionB = storyPlaySessionRepository.save(
-            StoryPlaySession(
+        val sessionB = storyChatRepository.save(
+            StoryChat(
                 storyId = storyB.id,
                 currentTurn = 1,
                 updatedAt = Instant.parse("2026-06-19T10:00:00Z"),
@@ -262,9 +262,9 @@ class ChatQueryControllerIntegrationTests {
     @Test
     fun `채팅 목록은 소프트 삭제된 채팅을 제외한다`() {
         val story = storyRepository.save(Story(title = "왕국의 마지막 편지"))
-        val active = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
-        val deleted = storyPlaySessionRepository.save(
-            StoryPlaySession(storyId = story.id, deletedAt = Instant.parse("2026-06-20T10:00:00Z")),
+        val active = storyChatRepository.save(StoryChat(storyId = story.id))
+        val deleted = storyChatRepository.save(
+            StoryChat(storyId = story.id, deletedAt = Instant.parse("2026-06-20T10:00:00Z")),
         )
 
         restTestClient.post()
@@ -296,7 +296,7 @@ class ChatQueryControllerIntegrationTests {
     @Test
     fun `진행 이력이 없는 채팅 목록 항목의 turnCount는 0이다`() {
         val story = storyRepository.save(Story(title = "아직 시작 안 한 스토리"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.post()
             .uri("/api/v1/chats/batch")
@@ -310,20 +310,20 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$[0].turnCount").isEqualTo(0)
     }
 
-    private fun message(playSessionId: Long, role: MessageRole, content: String, order: Int): StoryMessage =
+    private fun message(chatId: Long, role: MessageRole, content: String, order: Int): StoryMessage =
         storyMessageRepository.save(
             StoryMessage(
-                playSessionId = playSessionId,
+                chatId = chatId,
                 role = role,
                 content = content,
                 messageOrder = order,
             ),
         )
 
-    private fun choice(playSessionId: Long, messageId: Long, text: String, order: Int): StoryChoice =
+    private fun choice(chatId: Long, messageId: Long, text: String, order: Int): StoryChoice =
         storyChoiceRepository.save(
             StoryChoice(
-                playSessionId = playSessionId,
+                chatId = chatId,
                 messageId = messageId,
                 choiceText = text,
                 choiceOrder = order.toShort(),

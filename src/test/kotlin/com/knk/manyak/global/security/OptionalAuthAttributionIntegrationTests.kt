@@ -5,7 +5,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
@@ -126,7 +126,7 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var creationSessionRepository: StoryCreationSessionRepository
@@ -206,7 +206,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer ${validToken(user)}").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isEqualTo(user.id)
+        assertThat(storyChatRepository.findAll().first().userId).isEqualTo(user.id)
     }
 
     @Test
@@ -216,7 +216,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer ${expiredToken(user)}").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     @Test
@@ -225,7 +225,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer $forgedToken").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     @Test
@@ -234,7 +234,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, null).expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     private fun postChat(storyPublicId: UUID, authorization: String?): RestTestClient.ResponseSpec {

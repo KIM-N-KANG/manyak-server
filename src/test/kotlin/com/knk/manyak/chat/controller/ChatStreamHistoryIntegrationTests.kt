@@ -6,9 +6,9 @@ import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
@@ -75,7 +75,7 @@ class ChatStreamHistoryIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
@@ -91,20 +91,20 @@ class ChatStreamHistoryIntegrationTests {
     @Test
     fun `이어쓰기는 최근 N턴이 아니라 세션의 전체 대화 내역을 시간순으로 AI에 전달한다`() {
         val story = storyRepository.save(Story(title = "전체 내역 전송 스토리", genre = "판타지"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         // SYSTEM 1건(order 1) + 11턴(USER/ASSISTANT, order 2..23) = 23건.
         // 최근 10턴 제한(메시지 20건)으로는 전체가 담기지 않는다.
         storyMessageRepository.save(
-            StoryMessage(playSessionId = session.id, role = MessageRole.SYSTEM, content = "시스템 지시문", messageOrder = 1),
+            StoryMessage(chatId = session.id, role = MessageRole.SYSTEM, content = "시스템 지시문", messageOrder = 1),
         )
         repeat(11) { i ->
             val turn = i + 1
             storyMessageRepository.save(
-                StoryMessage(playSessionId = session.id, role = MessageRole.USER, content = "유저 메시지 $turn", messageOrder = turn * 2),
+                StoryMessage(chatId = session.id, role = MessageRole.USER, content = "유저 메시지 $turn", messageOrder = turn * 2),
             )
             storyMessageRepository.save(
-                StoryMessage(playSessionId = session.id, role = MessageRole.ASSISTANT, content = "AI 응답 $turn", messageOrder = turn * 2 + 1),
+                StoryMessage(chatId = session.id, role = MessageRole.ASSISTANT, content = "AI 응답 $turn", messageOrder = turn * 2 + 1),
             )
         }
 
