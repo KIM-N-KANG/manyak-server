@@ -109,7 +109,7 @@ Accept: application/json
         client.assert(Boolean(response.body.simpleCreationId), "simpleCreationId가 없습니다.");
         client.assert(Array.isArray(response.body.storylines), "storylines 배열이 없습니다.");
         client.assert(response.body.storylines.length === 3, "스토리라인은 3개여야 합니다.");
-        client.assert(Boolean(response.body.storylines[0].story), "story 본문이 없습니다.");
+        client.assert(Boolean(response.body.storylines[0].storyline), "storyline 본문이 없습니다.");
         client.assert(Array.isArray(response.body.storylines[0].recommendedInfos), "recommendedInfos 배열이 없습니다.");
         client.assert(response.body.storylines[0].recommendedInfos.length === 3, "추천 추가 정보는 3개여야 합니다.");
     });
@@ -208,7 +208,7 @@ Accept: application/json
   "protagonist_tags": ["신중한", "관찰력 있는"],
   "supporting_tags": ["충직한", "계산적인", "거친"],
   "selected_storyline": "역병과 반란으로 무너진 왕국에서, 견습 기사인 주인공이 선왕의 의문사를 둘러싼 진실에 다가갈수록 동료와 적의 경계가 흐려지는 선택의 기로에 선다.",
-  "extra_info": "주인공은 복수보다 진실을 택하는 신중한 성격이다."
+  "additional_info": "주인공은 복수보다 진실을 택하는 신중한 성격이다."
 }
 
 > {%

@@ -128,7 +128,7 @@ class SimpleStoryCreationService(
                 aiResponse.stories.mapIndexed { index, story ->
                     StoryCreationStoryline(
                         creationSession = creationSession,
-                        storylineText = story.story,
+                        storylineText = story.storyline,
                         storylineOrder = (index + 1).toShort(),
                     )
                 },
@@ -148,7 +148,7 @@ class SimpleStoryCreationService(
             val storylineResponses = storylines.map { storyline ->
                 SimpleStorylineResponse(
                     id = storyline.id,
-                    story = storyline.storylineText,
+                    storyline = storyline.storylineText,
                     recommendedInfos = recommendedInfos[storyline.id].orEmpty().map { info ->
                         SimpleStoryRecommendedInfoResponse(
                             id = info.id,
@@ -231,7 +231,7 @@ class SimpleStoryCreationService(
             protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
             supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
             selectedStoryline = selectedStoryline.storylineText,
-            extraInfo = request.additionalInfos.joinToString(separator = "\n"),
+            additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
         val recorded = try {

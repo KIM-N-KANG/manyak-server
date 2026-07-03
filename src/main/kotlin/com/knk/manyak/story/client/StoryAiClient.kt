@@ -69,7 +69,7 @@ data class AiResponseMeta(
 
 data class AiStoryItem(
     val id: Int,
-    val story: String,
+    val storyline: String,
     @JsonProperty("recommended_infos")
     val recommendedInfos: List<String>,
 )
@@ -87,8 +87,8 @@ data class AiStoryCompileRequest(
     @JsonProperty("selected_storyline")
     val selectedStoryline: String,
 
-    @JsonProperty("extra_info")
-    val extraInfo: String,
+    @JsonProperty("additional_info")
+    val additionalInfo: String,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
