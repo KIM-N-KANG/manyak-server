@@ -15,7 +15,7 @@ description: 이미 올라간 PR을 ready로 전환하고 `@codex review` 코멘
 - 리뷰 호출은 PR 본문이 아니라 **PR 코멘트 `@codex review`** 로만 트리거됩니다.
 - 리뷰는 즉시 오지 않습니다. **폴링으로 도착을 감지**합니다(보통 수 분~20분).
 - Codex 봇 계정은 `chatgpt-codex-connector[bot]`입니다.
-- **Codex는 지적이 있을 때만 정식 review(`pulls/{n}/reviews`)를 만듭니다. 지적이 없으면 "Didn't find any major issues" 같은 이슈 코멘트(`issues/{n}/comments`)나 호출 코멘트의 👍 리액션으로만 응답합니다.** 그래서 `reviews` 수만 폴링하면 "지적 없음" 응답을 놓쳐 timeout이 납니다. **리뷰 도착은 리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 👍 세 신호 중 하나로 감지**합니다. (메모리: codex-review-as-issue-comment)
+- **Codex는 지적이 있을 때만 정식 review(`pulls/{n}/reviews`)를 만듭니다. 지적이 없으면 "Didn't find any major issues" 같은 이슈 코멘트(`issues/{n}/comments`)나 호출 코멘트의 👍 리액션으로만 응답합니다.** 그래서 `reviews` 수만 폴링하면 "지적 없음" 응답을 놓쳐 timeout이 납니다. **리뷰 도착은 리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트의 Codex 봇 👍 세 신호 중 하나로 감지**합니다. 👍는 반드시 **봇 계정 리액션만** 세야 합니다. 사람이 호출 코멘트에 먼저 👍를 누르면 오탐하므로 `.content=="+1"`에 더해 `.user.login==$BOT`로 필터합니다. (메모리: codex-review-as-issue-comment)
 
 ## 작업 흐름
 
@@ -53,7 +53,7 @@ echo "baseline reviews=$PREV_REVIEWS comments=$PREV_COMMENTS trigger_comment=$CM
 for i in $(seq 1 40); do
   rv=$(gh api "repos/$REPO/pulls/$PR/reviews"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_REVIEWS")
   cm=$(gh api "repos/$REPO/issues/$PR/comments"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_COMMENTS")
-  tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\")]|length" 2>/dev/null || echo 0)
+  tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "CODEX_REVIEW_DETECTED reviews=$rv (정식 리뷰 — 지적 있음)"; exit 0; fi
   if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 — 지적 없음/요약 포함)"; exit 0; fi
   if [ "${tu:-0}" -ge 1 ];                then echo "CODEX_THUMB_DETECTED (👍 — 지적 없음)"; exit 0; fi
@@ -97,7 +97,7 @@ CMT_URL=$(gh pr comment $PR --body "@codex review"); CMTID=${CMT_URL##*-}
 for i in $(seq 1 40); do
   rv=$(gh api "repos/$REPO/pulls/$PR/reviews"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_REVIEWS")
   cm=$(gh api "repos/$REPO/issues/$PR/comments"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_COMMENTS")
-  tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\")]|length" 2>/dev/null || echo 0)
+  tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "NEW_REVIEW reviews=$rv"; exit 0; fi
   if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "NEW_COMMENT comments=$cm (이슈 코멘트 — 지적 없음/요약)"; exit 0; fi
   if [ "${tu:-0}" -ge 1 ];                then echo "APPROVED_THUMB (👍 — 추가 지적 없음)"; exit 0; fi
