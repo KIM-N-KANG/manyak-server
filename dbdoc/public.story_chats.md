@@ -1,10 +1,10 @@
-# public.story_play_sessions
+# public.story_chats
 
 ## Columns
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_play_sessions_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) |  |  |
+| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | start_setting_id | bigint |  | true |  | [public.story_start_settings](public.story_start_settings.md) |  |
@@ -21,32 +21,32 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| ck_story_play_sessions_current_turn | CHECK | CHECK ((current_turn >= 0)) |
-| ck_story_play_sessions_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
-| story_play_sessions_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
-| story_play_sessions_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
-| story_play_sessions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_play_sessions_public_id | UNIQUE | UNIQUE (public_id) |
+| ck_story_chats_current_turn | CHECK | CHECK ((current_turn >= 0)) |
+| ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
+| story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
+| story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
+| story_chats_pkey | PRIMARY KEY | PRIMARY KEY (id) |
+| uq_story_chats_public_id | UNIQUE | UNIQUE (public_id) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
-| story_play_sessions_pkey | CREATE UNIQUE INDEX story_play_sessions_pkey ON public.story_play_sessions USING btree (id) |
-| idx_story_play_sessions_story | CREATE INDEX idx_story_play_sessions_story ON public.story_play_sessions USING btree (story_id) |
-| uq_story_play_sessions_public_id | CREATE UNIQUE INDEX uq_story_play_sessions_public_id ON public.story_play_sessions USING btree (public_id) |
+| story_chats_pkey | CREATE UNIQUE INDEX story_chats_pkey ON public.story_chats USING btree (id) |
+| idx_story_chats_story | CREATE INDEX idx_story_chats_story ON public.story_chats USING btree (story_id) |
+| uq_story_chats_public_id | CREATE UNIQUE INDEX uq_story_chats_public_id ON public.story_chats USING btree (public_id) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
-"public.story_messages" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
-"public.story_choices" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 
-"public.story_play_sessions" {
+"public.story_chats" {
   bigint id
   bigint user_id
   bigint story_id FK
@@ -62,7 +62,7 @@ erDiagram
 }
 "public.story_messages" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   varchar_16_ role
   text content
   integer message_order
@@ -70,7 +70,7 @@ erDiagram
 }
 "public.story_choices" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   bigint message_id FK
   text choice_text
   smallint choice_order

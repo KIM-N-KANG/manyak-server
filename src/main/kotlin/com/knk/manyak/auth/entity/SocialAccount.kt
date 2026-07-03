@@ -38,7 +38,7 @@ class SocialAccount(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    // 소유 사용자의 내부 PK. JPA 관계 매핑 대신 평문 컬럼으로 둔다(StoryPlaySession.userId 선례).
+    // 소유 사용자의 내부 PK. JPA 관계 매핑 대신 평문 컬럼으로 둔다(StoryChat.userId 선례).
     @Column(name = "user_id", nullable = false)
     val userId: Long,
 

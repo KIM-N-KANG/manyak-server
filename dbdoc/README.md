@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_play_sessions](public.story_play_sessions.md) | 12 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 12 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -37,10 +37,10 @@ erDiagram
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
-"public.story_messages" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
-"public.story_choices" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+"public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
@@ -125,7 +125,7 @@ erDiagram
   smallint input_order
   timestamp_with_time_zone created_at
 }
-"public.story_play_sessions" {
+"public.story_chats" {
   bigint id
   bigint user_id
   bigint story_id FK
@@ -141,7 +141,7 @@ erDiagram
 }
 "public.story_messages" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   varchar_16_ role
   text content
   integer message_order
@@ -149,7 +149,7 @@ erDiagram
 }
 "public.story_choices" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   bigint message_id FK
   text choice_text
   smallint choice_order

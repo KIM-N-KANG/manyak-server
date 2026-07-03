@@ -3,8 +3,8 @@ package com.knk.manyak.global.observability.aicall
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StorySetting
@@ -50,7 +50,7 @@ class AiCallLogRecordingIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -63,7 +63,7 @@ class AiCallLogRecordingIntegrationTests {
     @Test
     fun `채팅 이어쓰기는 chat_response 호출을 식별자와 함께 SUCCEEDED로 적재하고 ai_response_saved에 연결한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }

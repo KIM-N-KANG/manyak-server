@@ -5,7 +5,7 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_messages_id_seq'::regclass) | false | [public.story_choices](public.story_choices.md) |  |  |
-| play_session_id | bigint |  | false |  | [public.story_play_sessions](public.story_play_sessions.md) |  |
+| chat_id | bigint |  | false |  | [public.story_chats](public.story_chats.md) |  |
 | role | varchar(16) |  | false |  |  |  |
 | content | text |  | false |  |  |  |
 | message_order | integer |  | false |  |  |  |
@@ -17,16 +17,16 @@
 | ---- | ---- | ---------- |
 | ck_story_messages_order | CHECK | CHECK ((message_order > 0)) |
 | ck_story_messages_role | CHECK | CHECK (((role)::text = ANY ((ARRAY['USER'::character varying, 'ASSISTANT'::character varying, 'SYSTEM'::character varying])::text[]))) |
-| story_messages_play_session_id_fkey | FOREIGN KEY | FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE |
+| story_messages_chat_id_fkey | FOREIGN KEY | FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE |
 | story_messages_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_messages_order | UNIQUE | UNIQUE (play_session_id, message_order) |
+| uq_story_messages_order | UNIQUE | UNIQUE (chat_id, message_order) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | story_messages_pkey | CREATE UNIQUE INDEX story_messages_pkey ON public.story_messages USING btree (id) |
-| uq_story_messages_order | CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (play_session_id, message_order) |
+| uq_story_messages_order | CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (chat_id, message_order) |
 
 ## Relations
 
@@ -34,11 +34,11 @@
 erDiagram
 
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
-"public.story_messages" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+"public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 
 "public.story_messages" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   varchar_16_ role
   text content
   integer message_order
@@ -46,7 +46,7 @@ erDiagram
 }
 "public.story_choices" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   bigint message_id FK
   text choice_text
   smallint choice_order
@@ -54,7 +54,7 @@ erDiagram
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
 }
-"public.story_play_sessions" {
+"public.story_chats" {
   bigint id
   bigint user_id
   bigint story_id FK

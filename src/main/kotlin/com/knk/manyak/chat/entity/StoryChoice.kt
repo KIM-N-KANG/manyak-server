@@ -24,8 +24,8 @@ class StoryChoice(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    @Column(name = "play_session_id", nullable = false)
-    val playSessionId: Long,
+    @Column(name = "chat_id", nullable = false)
+    val chatId: Long,
 
     @Column(name = "message_id", nullable = false)
     val messageId: Long,

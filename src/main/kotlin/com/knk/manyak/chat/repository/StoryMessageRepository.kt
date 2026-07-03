@@ -8,34 +8,34 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface StoryMessageRepository : JpaRepository<StoryMessage, Long> {
-    fun findByPlaySessionIdOrderByMessageOrderAsc(playSessionId: Long): List<StoryMessage>
+    fun findByChatIdOrderByMessageOrderAsc(chatId: Long): List<StoryMessage>
 
-    fun findByPlaySessionIdOrderByMessageOrderDesc(
-        playSessionId: Long,
+    fun findByChatIdOrderByMessageOrderDesc(
+        chatId: Long,
         pageable: Pageable,
     ): List<StoryMessage>
 
-    fun findFirstByPlaySessionIdOrderByMessageOrderDesc(playSessionId: Long): StoryMessage?
+    fun findFirstByChatIdOrderByMessageOrderDesc(chatId: Long): StoryMessage?
 
     /**
-     * 주어진 세션들에서 해당 role의 마지막(messageOrder 최대) 메시지만 세션당 1건씩 조회한다.
-     * 목록 프리뷰처럼 세션별 최신 한 건만 필요할 때 메모리 로드를 줄이기 위해 사용한다.
+     * 주어진 채팅들에서 해당 role의 마지막(messageOrder 최대) 메시지만 채팅당 1건씩 조회한다.
+     * 목록 프리뷰처럼 채팅별 최신 한 건만 필요할 때 메모리 로드를 줄이기 위해 사용한다.
      */
     @Query(
         """
         SELECT sm FROM StoryMessage sm
-        WHERE sm.playSessionId IN :playSessionIds
+        WHERE sm.chatId IN :chatIds
           AND sm.role = :role
           AND sm.messageOrder = (
               SELECT MAX(sub.messageOrder)
               FROM StoryMessage sub
-              WHERE sub.playSessionId = sm.playSessionId
+              WHERE sub.chatId = sm.chatId
                 AND sub.role = :role
           )
         """,
     )
-    fun findLatestMessagesByPlaySessionIdsAndRole(
-        @Param("playSessionIds") playSessionIds: Collection<Long>,
+    fun findLatestMessagesByChatIdsAndRole(
+        @Param("chatIds") chatIds: Collection<Long>,
         @Param("role") role: MessageRole,
     ): List<StoryMessage>
 }

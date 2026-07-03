@@ -5,10 +5,10 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StorySetting
@@ -46,7 +46,7 @@ class ChatStreamControllerIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
@@ -65,7 +65,7 @@ class ChatStreamControllerIntegrationTests {
     @Test
     fun `이어쓰기는 started·token·completed 순서로 스트리밍하고 턴을 원자적으로 저장한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         val body = stream(session.publicId.toString(), "마법수정에 손을 올린다.")
 
@@ -78,7 +78,7 @@ class ChatStreamControllerIntegrationTests {
         assertThat(completedAt).isGreaterThan(tokenAt)
 
         // 저장 검증: USER(order 1) + ASSISTANT(order 2)
-        val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
+        val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(session.id)
         assertThat(messages).hasSize(2)
         val user = messages[0]
         val assistant = messages[1]
@@ -95,7 +95,7 @@ class ChatStreamControllerIntegrationTests {
         assertThat(choices.map { it.choiceOrder.toInt() }).startsWith(1)
 
         // current_turn++
-        val reloaded = storyPlaySessionRepository.findById(session.id).orElseThrow()
+        val reloaded = storyChatRepository.findById(session.id).orElseThrow()
         assertThat(reloaded.currentTurn).isEqualTo(1)
 
         // completed 페이로드: turnId=ASSISTANT id, aiOutput, choices 포함
@@ -107,16 +107,16 @@ class ChatStreamControllerIntegrationTests {
     @Test
     fun `다음 턴은 직전 메시지 순서에 이어 저장하고 current_turn을 누적한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(
-            StoryPlaySession(storyId = story.id, currentTurn = 1),
+        val session = storyChatRepository.save(
+            StoryChat(storyId = story.id, currentTurn = 1),
         )
         // 이미 1턴(order 1,2)이 쌓여 있는 상태
-        storyMessageRepository.save(StoryMessage(playSessionId = session.id, role = MessageRole.USER, content = "이름은 강진우야.", messageOrder = 1))
-        storyMessageRepository.save(StoryMessage(playSessionId = session.id, role = MessageRole.ASSISTANT, content = "기록판에 새겨졌다.", messageOrder = 2))
+        storyMessageRepository.save(StoryMessage(chatId = session.id, role = MessageRole.USER, content = "이름은 강진우야.", messageOrder = 1))
+        storyMessageRepository.save(StoryMessage(chatId = session.id, role = MessageRole.ASSISTANT, content = "기록판에 새겨졌다.", messageOrder = 2))
 
         stream(session.publicId.toString(), "앞으로 나선다.")
 
-        val messages = storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
+        val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(session.id)
         assertThat(messages).hasSize(4)
         assertThat(messages[2].role).isEqualTo(MessageRole.USER)
         assertThat(messages[2].content).isEqualTo("앞으로 나선다.")
@@ -124,14 +124,14 @@ class ChatStreamControllerIntegrationTests {
         assertThat(messages[3].role).isEqualTo(MessageRole.ASSISTANT)
         assertThat(messages[3].messageOrder).isEqualTo(4)
 
-        val reloaded = storyPlaySessionRepository.findById(session.id).orElseThrow()
+        val reloaded = storyChatRepository.findById(session.id).orElseThrow()
         assertThat(reloaded.currentTurn).isEqualTo(2)
     }
 
     @Test
     fun `채팅 목록의 turnCount는 실제 이어쓰기를 거치며 누적된다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
         val publicId = session.publicId.toString()
 
         // 막 생성한 채팅: 진행 이력 없음 → turnCount 0
@@ -167,7 +167,7 @@ class ChatStreamControllerIntegrationTests {
     @Test
     fun `빈 입력으로 이어쓰면 400으로 응답한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.post()
             .uri("/api/v1/chats/${session.publicId}/turns/stream")
@@ -207,7 +207,7 @@ class ChatStreamControllerIntegrationTests {
     @Test
     fun `스트리밍 응답 Content-Type은 charset=UTF-8을 포함한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         val contentType = restTestClient.post()
             .uri("/api/v1/chats/${session.publicId}/turns/stream")
@@ -256,7 +256,7 @@ class ChatStreamControllerIntegrationTests {
         logger.addAppender(appender)
         try {
             val story = seedStory()
-            val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+            val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
             restTestClient.post()
                 .uri("/api/v1/chats/${session.publicId}/turns/stream")
