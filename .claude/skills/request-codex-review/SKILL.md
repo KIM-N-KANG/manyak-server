@@ -16,6 +16,7 @@ description: 이미 올라간 PR을 ready로 전환하고 `@codex review` 코멘
 - 리뷰는 즉시 오지 않습니다. **폴링으로 도착을 감지**합니다(보통 수 분~20분).
 - Codex 봇 계정은 `chatgpt-codex-connector[bot]`입니다.
 - **Codex는 지적이 있을 때만 정식 review(`pulls/{n}/reviews`)를 만듭니다. 지적이 없으면 "Didn't find any major issues" 같은 이슈 코멘트(`issues/{n}/comments`)나 호출 코멘트의 👍 리액션으로만 응답합니다.** 그래서 `reviews` 수만 폴링하면 "지적 없음" 응답을 놓쳐 timeout이 납니다. **리뷰 도착은 리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트의 Codex 봇 👍 세 신호 중 하나로 감지**합니다. 👍는 반드시 **봇 계정 리액션만** 세야 합니다. 사람이 호출 코멘트에 먼저 👍를 누르면 오탐하므로 `.content=="+1"`에 더해 `.user.login==$BOT`로 필터합니다. (메모리: codex-review-as-issue-comment)
+- `issues/{n}/comments`·`pulls/{n}/reviews`·`pulls/{n}/comments`는 기본 30개씩 페이지네이션됩니다. 코멘트가 많은 PR에서는 Codex의 새 응답이 2페이지 이상으로 밀려 1페이지만 세면 감지에 실패하므로 **항상 `--paginate`(+`per_page=100`)로 전 페이지를 훑습니다.** 단, `--slurp`는 `--jq`와 함께 못 씁니다(gh 에러). **카운트는 `--paginate --jq "…|length"`가 페이지마다 수를 뱉으니 `| awk '{s+=$1} END{print s+0}'`로 합산**하고, **조회는 `--paginate --jq 'select(…)'`**로 페이지별 필터 결과를 이어 받습니다.
 
 ## 작업 흐름
 
@@ -36,8 +37,8 @@ gh pr ready <PR번호>     # isDraft=true일 때만
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 BOT="chatgpt-codex-connector[bot]"; PR=<PR번호>
-PREV_REVIEWS=$(gh api "repos/$REPO/pulls/$PR/reviews"   --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
-PREV_COMMENTS=$(gh api "repos/$REPO/issues/$PR/comments" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
+PREV_REVIEWS=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100"   --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+PREV_COMMENTS=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
 CMT_URL=$(gh pr comment $PR --body "@codex review")
 CMTID=${CMT_URL##*-}   # .../pull/<PR>#issuecomment-<id> → <id>
 echo "baseline reviews=$PREV_REVIEWS comments=$PREV_COMMENTS trigger_comment=$CMTID"
@@ -51,8 +52,8 @@ echo "baseline reviews=$PREV_REVIEWS comments=$PREV_COMMENTS trigger_comment=$CM
 
 ```bash
 for i in $(seq 1 40); do
-  rv=$(gh api "repos/$REPO/pulls/$PR/reviews"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_REVIEWS")
-  cm=$(gh api "repos/$REPO/issues/$PR/comments"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_COMMENTS")
+  rv=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+  cm=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
   tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "CODEX_REVIEW_DETECTED reviews=$rv (정식 리뷰 — 지적 있음)"; exit 0; fi
   if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 — 지적 없음/요약 포함)"; exit 0; fi
@@ -75,9 +76,9 @@ REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 # 정식 리뷰 본문
 gh pr view $PR --json reviews --jq '.reviews[] | {author: .author.login, state, body}'
 # Codex 봇 이슈 코멘트("Didn't find any major issues" 같은 요약·지적 없음 응답이 여기로 온다)
-gh api "repos/$REPO/issues/$PR/comments" --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {created_at, body}'
+gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {created_at, body}'
 # 인라인(파일 위) 코멘트 본문
-gh api "repos/$REPO/pulls/$PR/comments"  --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {path, line, body}'
+gh api --paginate "repos/$REPO/pulls/$PR/comments?per_page=100"  --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {path, line, body}'
 ```
 
 - 지적을 **메이저(반영 필요)** 와 **마이너/제안(보류 가능)** 으로 분류합니다.
@@ -91,12 +92,12 @@ gh api "repos/$REPO/pulls/$PR/comments"  --jq '.[] | select(.user.login=="chatgp
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 BOT="chatgpt-codex-connector[bot]"; PR=<PR번호>
-PREV_REVIEWS=$(gh api "repos/$REPO/pulls/$PR/reviews"   --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
-PREV_COMMENTS=$(gh api "repos/$REPO/issues/$PR/comments" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
+PREV_REVIEWS=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100"   --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+PREV_COMMENTS=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
 CMT_URL=$(gh pr comment $PR --body "@codex review"); CMTID=${CMT_URL##*-}
 for i in $(seq 1 40); do
-  rv=$(gh api "repos/$REPO/pulls/$PR/reviews"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_REVIEWS")
-  cm=$(gh api "repos/$REPO/issues/$PR/comments"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null || echo "$PREV_COMMENTS")
+  rv=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100"    --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+  cm=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100"  --jq "[.[]|select(.user.login==\"$BOT\")]|length" 2>/dev/null | awk '{s+=$1} END{print s+0}')
   tu=$(gh api "repos/$REPO/issues/comments/$CMTID/reactions" --jq "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length" 2>/dev/null || echo 0)
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "NEW_REVIEW reviews=$rv"; exit 0; fi
   if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "NEW_COMMENT comments=$cm (이슈 코멘트 — 지적 없음/요약)"; exit 0; fi
