@@ -186,13 +186,14 @@ data class CreateSimpleStoryRequest(
             example = "강진우의 목표는 회귀 전 막지 못했던 세계의 멸망을 막고 가족을 지키는 것임",
             maxLength = 100,
         ),
-        maxItems = 3,
+        maxItems = 13,
         arraySchema = Schema(
             description = "선택한 스토리라인을 보완하는 자유 추가 정보 목록",
             example = """["주인공의 목표는 회귀 전 막지 못했던 세계의 멸망을 막는 것임","결말은 주인공의 희생으로 세계가 구원되는 여운 있는 해피엔딩","정체를 숨긴 인물은 적이자 조력자가 될 수 있음"]""",
         ),
     )
-    @field:Size(max = 3)
+    // 프론트 최악값(자유 텍스트 10 + 스토리라인당 추천 태그 3 = 13)을 단일 배열로 그대로 수용한다(스펙 간극 B5).
+    @field:Size(max = 13)
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
 )
 

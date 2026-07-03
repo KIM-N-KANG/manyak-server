@@ -120,6 +120,81 @@ Accept: application/json
     }
 %}
 
+### 2-1. (추가 정보 다개수 검증용) 별도 세션 생성
+# KNK-379(스펙 간극 B5): 추가 정보 13개 성공 케이스는 최종 생성에서 세션을 소비하므로
+# 7번과 세션이 겹치지 않도록 전용 세션을 하나 더 만들어 multiInfoCreationId/Id로 저장합니다.
+# 1번 요청을 먼저 실행해 태그 변수가 설정돼 있어야 합니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Content-Type: application/json
+Accept: application/json
+
+{
+  "selectedTagIds": [
+    {{genreTagId}},
+    {{protagonistTagId}},
+    {{supportingCharacterTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("다개수 검증용 세션 생성 응답이 정상이다", () => {
+        client.assert(response.status === 201, `201 Created가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+
+    if (response.status === 201 && response.body.storylines && response.body.storylines[0]) {
+        client.global.set("multiInfoCreationId", response.body.simpleCreationId);
+        client.global.set("multiInfoStorylineId", response.body.storylines[0].id);
+    }
+%}
+
+### 2-2. 추가 정보 13개(자유 10 + 추천 3 최악값)면 최종 스토리를 생성한다
+# KNK-379(스펙 간극 B5): 프론트가 [추천 태그 텍스트 3 + 자유 텍스트 10]을 단일 배열로 최대 13개까지
+# 합산 전송해도 서버가 400 없이 수용해야 합니다(서버 상한 13). 2-1을 먼저 실행하세요.
+POST {{baseUrl}}/api/v1/stories/simple
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{multiInfoCreationId}},
+  "storylineId": {{multiInfoStorylineId}},
+  "additionalInfos": [
+    "추천 태그 1", "추천 태그 2", "추천 태그 3",
+    "자유 1", "자유 2", "자유 3", "자유 4", "자유 5",
+    "자유 6", "자유 7", "자유 8", "자유 9", "자유 10"
+  ]
+}
+
+> {%
+    client.test("추가 정보 13개면 스토리를 생성한다", () => {
+        client.assert(response.status === 201, `201 Created가 아닙니다(13개는 통과해야 함). actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(Boolean(response.body.id), "id가 없습니다.");
+    });
+%}
+
+### 2-3. 추가 정보 14개면 400
+# KNK-379(스펙 간극 B5): 서버 상한 13을 초과하면 검증 실패로 거절합니다.
+# 검증은 세션 조회 이전 단계라 세션을 소비하지 않으므로 어떤 유효 세션 변수로 요청해도 됩니다.
+POST {{baseUrl}}/api/v1/stories/simple
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": [
+    "1", "2", "3", "4", "5", "6", "7",
+    "8", "9", "10", "11", "12", "13", "14"
+  ]
+}
+
+> {%
+    client.test("추가 정보 14개는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다(14개는 거절해야 함). actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code가 BAD_REQUEST가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
 ### 3. 직접 추가 태그만으로 스토리라인 생성
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 Content-Type: application/json
