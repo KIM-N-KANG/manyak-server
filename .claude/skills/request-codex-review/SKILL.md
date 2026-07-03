@@ -61,7 +61,7 @@ for i in $(seq 1 40); do
   cm=$(codex_count "repos/$REPO/issues/$PR/comments?per_page=100"  "[.[]|select(.user.login==\"$BOT\")]|length") || cm=$PREV_COMMENTS
   tu=$(codex_count "repos/$REPO/issues/comments/$CMTID/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || tu=0
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "CODEX_REVIEW_DETECTED reviews=$rv (정식 리뷰 — 지적 있음)"; exit 0; fi
-  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 — 지적 없음/요약 포함)"; exit 0; fi
+  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 도착 — 4단계 본문 확인 필요)"; exit 0; fi
   if [ "${tu:-0}" -ge 1 ];                then echo "CODEX_THUMB_DETECTED (👍 — 지적 없음)"; exit 0; fi
   echo "poll $i/40: reviews=$rv comments=$cm thumb=$tu (baseline rev=$PREV_REVIEWS cmt=$PREV_COMMENTS) — 30s 대기"
   sleep 30
@@ -109,7 +109,7 @@ for i in $(seq 1 40); do
   cm=$(codex_count "repos/$REPO/issues/$PR/comments?per_page=100"  "[.[]|select(.user.login==\"$BOT\")]|length") || cm=$PREV_COMMENTS
   tu=$(codex_count "repos/$REPO/issues/comments/$CMTID/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || tu=0
   if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "NEW_REVIEW reviews=$rv"; exit 0; fi
-  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "NEW_COMMENT comments=$cm (이슈 코멘트 — 지적 없음/요약)"; exit 0; fi
+  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "NEW_COMMENT comments=$cm (이슈 코멘트 도착 — 4단계 본문 확인 필요)"; exit 0; fi
   if [ "${tu:-0}" -ge 1 ];                then echo "APPROVED_THUMB (👍 — 추가 지적 없음)"; exit 0; fi
   echo "poll $i/40: reviews=$rv comments=$cm thumb=$tu — 30s 대기"
   sleep 30
@@ -117,7 +117,7 @@ done
 echo "TIMEOUT_NO_RERESPONSE"; exit 0
 ```
 
-- 👍 또는 새 이슈 코멘트("no major issues")는 "재리뷰 결과 추가 지적 없음"을 뜻합니다. 새 정식 리뷰가 달리면 4단계로 돌아가 다시 판단합니다.
+- **오직 봇 👍(`APPROVED_THUMB`)만이 "추가 지적 없음"의 확정 신호입니다.** `NEW_REVIEW`·`NEW_COMMENT`는 승인으로 단정하지 말고 반드시 **4단계로 돌아가 본문을 읽고** 판단합니다. 재리뷰의 이슈 코멘트에도 질문이나 새 지적이 섞일 수 있으므로, 본문을 읽기 전에는 머지 가능으로 보고하지 않습니다.
 
 ## 금지 사항
 
