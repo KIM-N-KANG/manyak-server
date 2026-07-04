@@ -22,6 +22,7 @@ class Story(
     @Column(name = "public_id", nullable = false, unique = true, updatable = false)
     val publicId: UUID = UUID.randomUUID(),
 
+    // 게스트(비로그인) 생성 시 NULL. 로그인 후 마이그레이션(KNK-389)이 조건부 UPDATE로 요청자 user_id를 클레임한다.
     @Column(name = "user_id")
     val userId: Long? = null,
 
