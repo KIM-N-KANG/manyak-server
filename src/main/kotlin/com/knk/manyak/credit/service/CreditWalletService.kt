@@ -3,9 +3,9 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
-import com.knk.manyak.credit.entity.CreditWallet
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.repository.CreditWalletRepository
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -24,6 +24,7 @@ data class RewardOutcome(val rewarded: Boolean, val balance: Long)
 class CreditWalletService(
     private val walletRepository: CreditWalletRepository,
     private val transactionRepository: CreditTransactionRepository,
+    private val walletProvisioner: CreditWalletProvisioner,
 ) {
 
     /** 요청자의 현재 잔액. 지갑이 없으면 0. */
@@ -48,8 +49,10 @@ class CreditWalletService(
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             return RewardOutcome(rewarded = false, balance = balanceOf(userId))
         }
+        // 지갑을 먼저 보장(독립 트랜잭션)한 뒤 락을 잡는다. 첫 지갑 생성을 직렬화해, 동시 첫 적립에서 유효한 적립이 유실되지 않게 한다.
+        ensureWallet(userId)
         val wallet = walletRepository.findByUserIdForUpdate(userId)
-            ?: walletRepository.save(CreditWallet(userId = userId))
+            ?: error("지갑을 보장한 뒤 조회에 실패했습니다: userId=$userId")
         transactionRepository.save(
             CreditTransaction(
                 userId = userId,
@@ -62,6 +65,19 @@ class CreditWalletService(
         )
         wallet.balance += amount
         return RewardOutcome(rewarded = true, balance = wallet.balance)
+    }
+
+    /**
+     * 요청자의 지갑이 없으면 만든다. 생성은 독립 트랜잭션([CreditWalletProvisioner.createWallet])이라,
+     * 동시 첫 적립 경합으로 유니크 위반이 나도 그 실패는 내부 트랜잭션에 갇히고, 여기서 잡아 멱등하게 통과한다(지갑은 이미 존재).
+     */
+    private fun ensureWallet(userId: Long) {
+        if (walletRepository.findByUserId(userId) != null) return
+        try {
+            walletProvisioner.createWallet(userId)
+        } catch (ignored: DataIntegrityViolationException) {
+            // 동시 첫 생성 경합: 다른 트랜잭션이 이미 지갑을 만들었다.
+        }
     }
 
     /**

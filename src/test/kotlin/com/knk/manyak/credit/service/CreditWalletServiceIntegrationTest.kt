@@ -75,11 +75,13 @@ class CreditWalletServiceIntegrationTest {
     }
 
     @Test
-    fun `다른 키로는 각각 적립된다`() {
+    fun `다른 키로는 각각 적립되고 지갑은 한 번만 생성된다`() {
+        // 새 유저에게 서로 다른 키로 연속 적립: 첫 적립이 지갑을 만들고 둘째는 그 지갑에 더한다(create-once).
         service.reward(userId, 100, CreditReason.SIGNUP_REWARD, "signup:$userId")
         service.reward(userId, 50, CreditReason.ATTENDANCE_REWARD, "attendance:$userId:2026-07-05")
 
         assertThat(walletRepository.findByUserId(userId)!!.balance).isEqualTo(150)
+        assertThat(walletRepository.count()).isEqualTo(1)
         assertThat(transactionRepository.findAll()).hasSize(2)
     }
 
