@@ -292,10 +292,11 @@ class ChatService(
             creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
         }
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
-        // completed 도달 시 true로 세워 종료 콜백이 환불을 건너뛰게 한다.
+        // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persistTurn 성공 직후 세워, 이후 completed 전송 실패·연결
+        // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
         val refundKey = "refund:chatturn:${UUID.randomUUID()}"
         val refundGate = AtomicBoolean(false)
-        val succeeded = AtomicBoolean(false)
+        val persisted = AtomicBoolean(false)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -306,9 +307,9 @@ class ChatService(
         }
         emitter.onCompletion {
             futureRef.get()?.cancel(true)
-            // 안전망: completed 없이 끝난 모든 종료(error·연결 끊김·타임아웃)에서 선차감분을 환불한다.
-            // 성공(succeeded)엔 건너뛰고, 아래 catch의 즉시 환불과는 게이트·멱등 키로 이중 실행되지 않는다.
-            if (!succeeded.get()) {
+            // 안전망: 턴이 저장되지 않은 채 끝난 모든 종료(저장 전 error·연결 끊김·타임아웃)에서만 선차감분을 환불한다.
+            // 저장된 턴(persisted)은 차감이 확정이라 건너뛰고, 아래 catch의 즉시 환불과는 게이트·멱등 키로 이중 실행되지 않는다.
+            if (!persisted.get()) {
                 refundChatTurn(userId, chatPk, refundKey, refundGate)
             }
         }
@@ -357,27 +358,30 @@ class ChatService(
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
-                val persisted = chatTurnPersister.persistTurn(
+                val persistedTurn = chatTurnPersister.persistTurn(
                     chatId = chatPk,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
-                Sentry.addBreadcrumb("chat turn persisted: turn=${persisted.turnNumber}", "db")
+                // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
+                // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
+                persisted.set(true)
+                Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                 // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
-                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persisted.turnNumber)
+                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_number" to persisted.turnNumber,
+                    "turn_number" to persistedTurn.turnNumber,
                     "message_length_bucket" to LengthBuckets.of(request.userInput.length),
                 )
                 structuredLogger.event(
                     "ai_response_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_number" to persisted.turnNumber,
+                    "turn_number" to persistedTurn.turnNumber,
                     "ai_call_log_id" to recorded.aiCallLogId,
                 )
                 emitter.send(
@@ -386,31 +390,32 @@ class ChatService(
                         .data(
                             ChatStreamCompletedEvent(
                                 chatId = chatId,
-                                turnId = persisted.turnId,
+                                turnId = persistedTurn.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
                             ),
                         ),
                 )
-                // completed를 성공적으로 전송한 턴만 환불 대상에서 제외한다(스펙: completed 이벤트가 나가면 차감 확정).
-                // completed 전송이 던지면(연결 끊김 등) 아래 catch가 환불한다 — 클라이언트가 못 받은 턴엔 과금하지 않는다.
-                // emitter.complete()가 onCompletion을 부르기 전에 세워, 종료 콜백이 환불을 건너뛰게 한다.
-                succeeded.set(true)
                 emitter.complete()
             } catch (exception: ChatTurnAiException) {
-                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. completed 없이 끝나므로 선차감분을 환불한다.
-                refundChatTurn(userId, chatPk, refundKey, refundGate)
+                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 저장 전 실패이므로 선차감분을 환불한다.
+                if (!persisted.get()) {
+                    refundChatTurn(userId, chatPk, refundKey, refundGate)
+                }
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 emitter.complete()
             } catch (exception: Exception) {
                 // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
-                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류)는 GlobalExceptionHandler를 거치지 않고
-                // 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
+                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류, completed 전송 실패)는 GlobalExceptionHandler를
+                // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
                 succeededAiCallLogId?.let {
                     captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
                 }
-                // completed 없이 끝났으므로 선차감분을 환불한다(저장 실패 등 성공 반환 이후 예외 포함).
-                refundChatTurn(userId, chatPk, refundKey, refundGate)
+                // 저장 전 실패만 환불한다. 저장이 확정된 뒤의 실패(completed 전송 실패·연결 끊김)는 환불하지 않는다 —
+                // 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
+                if (!persisted.get()) {
+                    refundChatTurn(userId, chatPk, refundKey, refundGate)
+                }
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
                 emitter.complete()
             }
