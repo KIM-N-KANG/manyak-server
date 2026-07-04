@@ -178,6 +178,34 @@ class SimpleStoryCreationCreditIntegrationTests {
     }
 
     @Test
+    fun `같은 세션을 두 번 실패하며 재시도해도 두 차감이 모두 환불되어 순 잔액이 그대로다`() {
+        // 환불 멱등 키가 세션 단위면 두 번째 환불이 첫 환불 키와 충돌해 미적립 → 크레딧 유실(Codex P1).
+        // 시도별 키면 각 차감이 자기 환불과 짝지어져, 재시도 실패에도 유실이 없다.
+        val user = saveUser()
+        creditWalletService.reward(user.id, 100, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val storyline = persistStorylineOwnedBy(user.id)
+        failCompile = true
+
+        // 첫 시도: compile 실패 → 502. 세션은 STORY_CREATED에 이르지 못해 같은 simpleCreationId 재시도가 허용된다.
+        postSimpleStory(storyline, "Bearer ${validToken(user)}").expectStatus().isEqualTo(502)
+        // 둘째 시도: 같은 세션으로 재시도 → 또 compile 실패 → 502.
+        postSimpleStory(storyline, "Bearer ${validToken(user)}").expectStatus().isEqualTo(502)
+
+        // 두 번 차감(-10, -10)과 두 번 환불(+10, +10)이 모두 원장에 남고 순 잔액은 100 그대로.
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(100)
+        val all = creditTransactionRepository.findAll()
+        val deducts = all.filter { it.reason == CreditReason.STORY_CREATION }
+        assertThat(deducts).hasSize(2)
+        assertThat(deducts.map { it.amount }).containsExactly(-storyCreationCost, -storyCreationCost)
+        val refunds = all.filter { it.reason == CreditReason.REFUND }
+        assertThat(refunds).hasSize(2)
+        assertThat(refunds.map { it.amount }).containsExactly(storyCreationCost, storyCreationCost)
+        // 두 환불의 멱등 키가 서로 달라야(시도별) 둘 다 실제 적립된다.
+        assertThat(refunds.mapNotNull { it.idempotencyKey }.distinct()).hasSize(2)
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
     fun `게스트는 토큰 없이 간편 제작해도 차감되지 않고 크레딧 원장이 비어 있다`() {
         val storyline = persistStoryline()
 

@@ -47,6 +47,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
+import java.util.UUID
 
 @Service
 class SimpleStoryCreationService(
@@ -248,9 +249,15 @@ class SimpleStoryCreationService(
         // 소모(스펙 §4-3-7): 회원만 compile 시작 전에 선차감한다. 게스트(attributedUserId == null)는 차감하지 않는다.
         // 잔액 부족은 동기 402로 변환하고(SSE 없이 즉시 실패), 이후 compile/저장이 실패하면 전액 환불한다.
         // refId는 compile 전에 확정돼 있는 세션 id(=simpleCreationId)를 쓴다(story.id는 저장 성공 후에야 생긴다).
+        //
+        // 환불 멱등 키는 이 호출(=차감 시도)마다 새로 만든다(chargeAttemptId). deduct는 멱등 키가 없어 시도마다 실제 차감되므로,
+        // 첫 시도 실패 후 같은 simpleCreationId로 재시도(첫 시도가 STORY_CREATED에 못 이르러 허용됨)하면 두 번째 차감이 또 생긴다.
+        // 세션 단위 고정 키를 쓰면 두 번째 환불이 첫 환불 키와 충돌해 미적립(rewarded=false)되어 크레딧이 유실된다(Codex P1).
+        // 시도별 키면 각 시도의 차감·환불이 독립적으로 짝지어져 재시도에도 유실이 없다.
+        val chargeAttemptId = UUID.randomUUID().toString()
         attributedUserId?.let { chargeStoryCreation(it, refId = session.id) }
 
-        return runWithRefundOnFailure(attributedUserId, refId = session.id) {
+        return runWithRefundOnFailure(attributedUserId, refId = session.id, chargeAttemptId = chargeAttemptId) {
             compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, aiRequest)
         }
     }
@@ -273,24 +280,25 @@ class SimpleStoryCreationService(
     /**
      * [block]이 성공하면 선차감을 유지하고, 실패(예외)하면 회원에게 전액 환불한 뒤 원래 예외를 다시 던진다.
      *
-     * 환불은 결정적 멱등 키(`refund:story:{refId}`)를 써서, 재시도·중복 실패에도 두 번 적립되지 않는다.
-     * 게스트([userId] null)는 선차감이 없으므로 환불도 하지 않는다.
+     * 환불 멱등 키(`refund:story:{chargeAttemptId}`)는 차감 시도별로 유일하므로, 같은 세션을 재시도해 여러 번 차감돼도
+     * 각 차감이 자기 시도의 환불과만 짝지어진다(재시도 시 환불 유실 방지). 재시도 안전은 시도별 키가, 중복 실행 방지는
+     * 이 키의 유니크 제약이 함께 보장한다. 게스트([userId] null)는 선차감이 없으므로 환불도 하지 않는다.
      */
-    private fun <T> runWithRefundOnFailure(userId: Long?, refId: Long, block: () -> T): T {
+    private fun <T> runWithRefundOnFailure(userId: Long?, refId: Long, chargeAttemptId: String, block: () -> T): T {
         try {
             return block()
         } catch (throwable: Throwable) {
-            userId?.let { refundStoryCreation(it, refId) }
+            userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
             throw throwable
         }
     }
 
-    private fun refundStoryCreation(userId: Long, refId: Long) {
+    private fun refundStoryCreation(userId: Long, refId: Long, chargeAttemptId: String) {
         creditWalletService.reward(
             userId = userId,
             amount = storyCreationCost,
             reason = CreditReason.REFUND,
-            idempotencyKey = "refund:story:$refId",
+            idempotencyKey = "refund:story:$chargeAttemptId",
             refType = STORY_CREDIT_REF_TYPE,
             refId = refId,
         )
