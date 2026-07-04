@@ -114,6 +114,7 @@ Accept: application/json
 
 ### 6. (해피 패스 연계) 5번에서 받은 access 로 /me → 200
 # 5번을 먼저 실행해 accessToken 전역 변수가 채워져야 합니다.
+# [KNK-446] 신규 가입 닉네임은 Google 이름이 아니라 "형용사 명사" 랜덤 발급입니다(공백 1개 포함).
 GET {{baseUrl}}/api/v1/auth/me
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -121,6 +122,12 @@ Accept: application/json
 > {%
     client.test("로그인으로 받은 access 로 /me 는 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다(5번을 먼저 실행했는지 확인). actual=${response.status}`);
+    });
+    client.test("닉네임은 형용사+명사 랜덤 발급 형식이다(공백 1개)", () => {
+        const nickname = response.body.nickname;
+        client.assert(typeof nickname === "string" && nickname.length > 0, "nickname이 없습니다.");
+        client.assert(nickname.length <= 50, `nickname이 50자를 넘습니다. actual=${nickname.length}`);
+        client.assert(nickname.split(" ").length === 2, `"형용사 명사" 형식이 아닙니다. actual=${nickname}`);
     });
 %}
 

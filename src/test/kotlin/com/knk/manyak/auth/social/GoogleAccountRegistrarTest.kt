@@ -25,13 +25,16 @@ import java.util.Optional
  * 저장소는 mock으로 두고 호출·인자만 검증한다(JPA flush는 통합 테스트의 관심사).
  *
  * - findExistingUser: 연동이 있으면 lastLoginAt 갱신 + User 반환, 없으면 null, User 부재면 401.
- * - createUserAndAccount: nickname을 50자로 정규화해 User+SocialAccount를 생성한다.
+ * - createUserAndAccount: 닉네임을 [NicknameGenerator]로 발급해(Google `name`과 무관) User+SocialAccount를 생성한다.
  */
 class GoogleAccountRegistrarTest {
 
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
-    private val registrar = GoogleAccountRegistrar(userRepository, socialAccountRepository)
+
+    // 닉네임 발급은 결정적 고정값으로 스텁해, 레지스트라가 생성기 결과를 그대로 쓰는지만 검증한다.
+    private val nicknameGenerator = NicknameGenerator { GENERATED_NICKNAME }
+    private val registrar = GoogleAccountRegistrar(userRepository, socialAccountRepository, nicknameGenerator)
 
     @Test
     fun `findExistingUser는 연동이 있으면 lastLoginAt을 갱신하고 User를 반환한다`() {
@@ -76,7 +79,7 @@ class GoogleAccountRegistrarTest {
     }
 
     @Test
-    fun `createUserAndAccount는 User와 SocialAccount를 생성한다`() {
+    fun `createUserAndAccount는 생성기가 만든 닉네임으로 User와 SocialAccount를 생성한다`() {
         `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
 
         registrar.createUserAndAccount(
@@ -91,7 +94,8 @@ class GoogleAccountRegistrarTest {
 
         val userCaptor = ArgumentCaptor.forClass(User::class.java)
         verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("Alice")
+        // Google `name`("Alice")이 아니라 생성기가 발급한 닉네임을 써야 한다(실명 노출 방지).
+        assertThat(userCaptor.value.nickname).isEqualTo(GENERATED_NICKNAME)
         assertThat(userCaptor.value.profileImageUrl).isEqualTo("https://example.com/alice.png")
         assertThat(userCaptor.value.status).isEqualTo(UserStatus.ACTIVE)
 
@@ -103,65 +107,10 @@ class GoogleAccountRegistrarTest {
         assertThat(socialCaptor.value.lastLoginAt).isNotNull()
     }
 
-    @Test
-    fun `이름이 없으면 이메일 local-part를 닉네임으로 쓴다`() {
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
-
-        registrar.createUserAndAccount(
-            SocialUserInfo(providerUserId = "sub", email = "bob@example.com", name = null, picture = null),
-            Instant.now(),
-        )
-
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("bob")
-    }
-
-    @Test
-    fun `이름과 이메일이 모두 없으면 기본 닉네임을 쓴다`() {
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
-
-        registrar.createUserAndAccount(
-            SocialUserInfo(providerUserId = "sub", email = null, name = null, picture = null),
-            Instant.now(),
-        )
-
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("사용자")
-    }
-
-    @Test
-    fun `50자를 넘는 이름은 50자로 잘라 저장한다`() {
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
-        val longName = "가".repeat(80)
-
-        registrar.createUserAndAccount(
-            SocialUserInfo(providerUserId = "sub", email = null, name = longName, picture = null),
-            Instant.now(),
-        )
-
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).hasSize(50)
-        assertThat(userCaptor.value.nickname).isEqualTo("가".repeat(50))
-    }
-
-    @Test
-    fun `이름이 없고 이메일 local-part가 50자를 넘으면 50자로 잘라 저장한다`() {
-        `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
-        val longLocal = "a".repeat(80)
-
-        registrar.createUserAndAccount(
-            SocialUserInfo(providerUserId = "sub", email = "$longLocal@example.com", name = null, picture = null),
-            Instant.now(),
-        )
-
-        val userCaptor = ArgumentCaptor.forClass(User::class.java)
-        verify(userRepository).save(userCaptor.capture())
-        assertThat(userCaptor.value.nickname).isEqualTo("a".repeat(50))
-    }
-
     private fun info(providerUserId: String) =
         SocialUserInfo(providerUserId = providerUserId, email = null, name = null, picture = null)
+
+    private companion object {
+        const val GENERATED_NICKNAME = "랜덤닉네임"
+    }
 }

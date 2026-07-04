@@ -25,6 +25,7 @@ import java.time.Instant
 class GoogleAccountRegistrar(
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
+    private val nicknameGenerator: NicknameGenerator,
 ) {
 
     /**
@@ -57,7 +58,9 @@ class GoogleAccountRegistrar(
     fun createUserAndAccount(info: SocialUserInfo, now: Instant): User {
         val user = userRepository.save(
             User(
-                nickname = resolveNickname(info),
+                // 실명 노출을 피하기 위해 Google `name` 대신 랜덤 닉네임을 발급한다(스펙 §4-5, B7).
+                nickname = nicknameGenerator.generate(),
+                // 프로필 이미지 프리셋 랜덤 배정은 KNK-388 범위. 현재는 Google `picture`를 유지한다.
                 profileImageUrl = info.picture,
                 status = UserStatus.ACTIVE,
             ),
@@ -73,21 +76,5 @@ class GoogleAccountRegistrar(
             ),
         )
         return user
-    }
-
-    /**
-     * 닉네임 우선순위: 프로필 이름 → 이메일 local-part → 기본값. 빈 문자열은 없는 것으로 본다.
-     * `users.nickname`은 VARCHAR(50)이므로 컬럼 길이에 맞춰 50자로 자른다(초과 시 flush 실패 방지).
-     */
-    private fun resolveNickname(info: SocialUserInfo): String {
-        val raw = info.name?.takeIf { it.isNotBlank() }
-            ?: info.email?.substringBefore("@")?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_NICKNAME
-        return raw.trim().take(MAX_NICKNAME_LENGTH)
-    }
-
-    private companion object {
-        const val DEFAULT_NICKNAME = "사용자"
-        const val MAX_NICKNAME_LENGTH = 50
     }
 }
