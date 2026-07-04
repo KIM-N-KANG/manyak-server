@@ -306,12 +306,12 @@ class ChatService(
             emitter.complete()
         }
         emitter.onCompletion {
+            // 정리만 한다. 환불은 여기서 하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
+            // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persistTurn을 성공시킬 수 있다
+            // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
+            // 아는 워커의 catch에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
+            // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 catch에서 환불된다.
             futureRef.get()?.cancel(true)
-            // 안전망: 턴이 저장되지 않은 채 끝난 모든 종료(저장 전 error·연결 끊김·타임아웃)에서만 선차감분을 환불한다.
-            // 저장된 턴(persisted)은 차감이 확정이라 건너뛰고, 아래 catch의 즉시 환불과는 게이트·멱등 키로 이중 실행되지 않는다.
-            if (!persisted.get()) {
-                refundChatTurn(userId, chatPk, refundKey, refundGate)
-            }
         }
         emitter.onError {
             futureRef.get()?.cancel(true)
@@ -398,10 +398,7 @@ class ChatService(
                 )
                 emitter.complete()
             } catch (exception: ChatTurnAiException) {
-                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 저장 전 실패이므로 선차감분을 환불한다.
-                if (!persisted.get()) {
-                    refundChatTurn(userId, chatPk, refundKey, refundGate)
-                }
+                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 emitter.complete()
             } catch (exception: Exception) {
@@ -411,13 +408,15 @@ class ChatService(
                 succeededAiCallLogId?.let {
                     captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
                 }
-                // 저장 전 실패만 환불한다. 저장이 확정된 뒤의 실패(completed 전송 실패·연결 끊김)는 환불하지 않는다 —
-                // 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
+                sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
+                emitter.complete()
+            } finally {
+                // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,
+                // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
+                // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 if (!persisted.get()) {
                     refundChatTurn(userId, chatPk, refundKey, refundGate)
                 }
-                sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
-                emitter.complete()
             }
         }, chatSseExecutor)
         } catch (rejected: Throwable) {

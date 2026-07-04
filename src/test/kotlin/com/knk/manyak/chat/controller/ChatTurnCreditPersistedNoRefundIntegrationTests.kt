@@ -33,10 +33,14 @@ import org.springframework.test.web.servlet.client.RestTestClient
 /**
  * 저장된 턴은 환불하지 않는다(KNK-399, Codex P1) 통합 검증.
  *
- * 판정 기준은 completed 전송이 아니라 "저장 성공(persistTurn 반환)"이다. 실제 클라이언트의 post-persist 연결
- * 끊김은 RestTestClient로 재현할 수 없으므로, persistTurn 성공 직후의 종료 단계(attachTurnNumber)가 던지도록
- * AiCallRecorder를 대체해, 저장은 됐지만 completed까지 못 간 상태를 결정적으로 만든다. 이때 선차감분이
+ * 판정 기준은 completed 전송이 아니라 "저장 성공(persistTurn 반환)"이다. 환불은 워커의 finally 단일 판정으로
+ * 일원화됐고(onCompletion은 환불하지 않음), 그 판정은 !persisted에만 환불하므로 저장된 턴에는 환불 경로 자체가
+ * 없다. 이 테스트가 그 불변식을 지킨다: 저장 직후의 종료 단계(attachTurnNumber)가 던져 completed까지 못 가도
+ * (타임아웃 뒤 워커가 뒤늦게 저장하는 경합과 같은 코드 경로 — 워커가 persisted를 세운 뒤 종료), 선차감분이
  * 환불되지 않고(REFUND 없음) 차감이 유지되며 턴이 이력에 저장돼 있는지 확인한다.
+ *
+ * (실제 클라이언트의 post-persist 연결 끊김·60s 타임아웃은 RestTestClient로 재현할 수 없으므로,
+ * persistTurn 성공 직후의 종료 단계가 던지도록 AiCallRecorder를 대체해 결정적으로 만든다.)
  *
  * (kotlin-spring 플러그인이 @Component를 open으로 열어 AiCallRecorder를 서브클래싱할 수 있다. record 등은
  * 실제 동작을 그대로 상속하고 attachTurnNumber만 던지게 오버라이드한다. @Primary 빈으로 별도 컨텍스트가
