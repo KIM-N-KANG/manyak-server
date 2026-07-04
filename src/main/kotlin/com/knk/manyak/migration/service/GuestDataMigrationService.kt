@@ -18,6 +18,9 @@ import java.util.UUID
  * 서버에는 게스트 식별 수단이 없어(콘텐츠 행에 device_id를 저장하지 않음) 클라이언트가 제출한 공개 ID 목록을 신뢰한다.
  * `user_id`가 NULL인 행에만 요청자의 `user_id`를 설정하고, 스토리·채팅은 서로 독립 처리한다(채팅은 참조 스토리 소유자와 무관).
  * 효과는 멱등하며(재호출해도 소유권 불변, 응답 status만 상태를 반영), 항목별 부분 성공이라 일부 충돌이 전체를 롤백하지 않는다.
+ *
+ * 클레임은 조건부 UPDATE(`WHERE user_id IS NULL`)로 원자적으로 수행한다. 두 계정이 같은 게스트 ID를 동시에 제출해도
+ * DB가 갱신 시점에 조건을 재평가하므로 한 트랜잭션만 MIGRATED가 되고 나머지는 CONFLICT가 된다(소유권 무결성 보장).
  */
 @Service
 class GuestDataMigrationService(
@@ -33,33 +36,41 @@ class GuestDataMigrationService(
         )
 
     private fun claimStories(userId: Long, ids: List<UUID>): List<MigrationResult> {
-        val byPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
-            .associateBy { it.publicId }
+        val ownerByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
+            .associate { it.publicId to it.userId }
+        val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
-            val story = byPublicId[id]
-            val status = when {
-                story == null -> MigrationStatus.NOT_FOUND
-                story.userId == null -> { story.userId = userId; MigrationStatus.MIGRATED }
-                story.userId == userId -> MigrationStatus.ALREADY_OWNED
-                else -> MigrationStatus.CONFLICT
-            }
-            MigrationResult(id.toString(), status)
+            MigrationResult(id.toString(), status(id, userId, ownerByPublicId, claimed) { storyRepository.claimByPublicId(id, userId) })
         }
     }
 
     private fun claimChats(userId: Long, ids: List<UUID>): List<MigrationResult> {
-        val byPublicId = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
-            .associateBy { it.publicId }
+        val ownerByPublicId = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
+            .associate { it.publicId to it.userId }
+        val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
-            val chat = byPublicId[id]
-            val status = when {
-                chat == null -> MigrationStatus.NOT_FOUND
-                chat.userId == null -> { chat.userId = userId; MigrationStatus.MIGRATED }
-                chat.userId == userId -> MigrationStatus.ALREADY_OWNED
-                else -> MigrationStatus.CONFLICT
-            }
-            MigrationResult(id.toString(), status)
+            MigrationResult(id.toString(), status(id, userId, ownerByPublicId, claimed) { storyChatRepository.claimByPublicId(id, userId) })
         }
+    }
+
+    /**
+     * 스냅샷 소유권으로 우선 판정하고, 게스트(NULL) 행만 [claim] 조건부 UPDATE로 원자적으로 클레임한다.
+     * - 스냅샷에 없음 → NOT_FOUND, 요청자 소유 → ALREADY_OWNED, 타인 소유 → CONFLICT.
+     * - 게스트 행: 이번 요청에서 이미 클레임했으면(중복 ID) ALREADY_OWNED, 아니면 claim 결과 1이면 MIGRATED, 0(동시 선점)이면 CONFLICT.
+     */
+    private fun status(
+        id: UUID,
+        userId: Long,
+        ownerByPublicId: Map<UUID, Long?>,
+        claimed: MutableSet<UUID>,
+        claim: () -> Int,
+    ): MigrationStatus = when {
+        id !in ownerByPublicId -> MigrationStatus.NOT_FOUND
+        ownerByPublicId[id] == userId -> MigrationStatus.ALREADY_OWNED
+        ownerByPublicId[id] != null -> MigrationStatus.CONFLICT
+        id in claimed -> MigrationStatus.ALREADY_OWNED
+        claim() == 1 -> { claimed.add(id); MigrationStatus.MIGRATED }
+        else -> MigrationStatus.CONFLICT
     }
 
     /**

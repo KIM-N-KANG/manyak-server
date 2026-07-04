@@ -12,15 +12,18 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyCollection
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.times
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
- * GuestDataMigrationService의 클레임 계약을 고정한다(저장소는 mock, 소유권 판정·설정만 검증).
+ * GuestDataMigrationService의 클레임 계약을 고정한다(저장소는 mock, 소유권 판정만 검증).
  *
- * - user_id NULL → MIGRATED(요청자 소유로 설정), 요청자 소유 → ALREADY_OWNED, 타인 소유 → CONFLICT(불변), 부재/삭제 → NOT_FOUND.
- * - 스토리·채팅은 독립 처리한다. UUID 형식 오류는 400.
+ * - 스냅샷 소유권: 요청자 소유 → ALREADY_OWNED, 타인 소유 → CONFLICT, 부재/삭제 → NOT_FOUND.
+ * - 게스트(NULL) 행은 원자적 조건부 클레임([StoryRepository.claimByPublicId])으로 처리: 1이면 MIGRATED, 0(동시 선점)이면 CONFLICT.
+ * - 같은 요청 내 중복 ID는 두 번째부터 ALREADY_OWNED. 스토리·채팅은 독립 처리하며, UUID 형식 오류는 400.
  */
 class GuestDataMigrationServiceTest {
 
@@ -38,16 +41,26 @@ class GuestDataMigrationServiceTest {
         StoryChat(publicId = publicId, userId = ownerId, storyId = 1L)
 
     @Test
-    fun `게스트 스토리는 MIGRATED되고 소유권이 요청자에게 설정된다`() {
+    fun `게스트 스토리는 원자적 클레임에 성공하면 MIGRATED다`() {
         val pid = UUID.randomUUID()
-        val guestStory = story(pid, null)
-        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(guestStory))
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
 
         val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
         assertThat(result.stories).containsExactly(MigrationResult(pid.toString(), MigrationStatus.MIGRATED))
-        assertThat(guestStory.userId).isEqualTo(userId)
         assertThat(result.chats).isEmpty()
+    }
+
+    @Test
+    fun `게스트 스토리라도 동시 선점되면(클레임 0건) CONFLICT다`() {
+        val pid = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(0)
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        assertThat(result.stories).containsExactly(MigrationResult(pid.toString(), MigrationStatus.CONFLICT))
     }
 
     @Test
@@ -61,15 +74,13 @@ class GuestDataMigrationServiceTest {
     }
 
     @Test
-    fun `타인 소유 스토리는 CONFLICT고 소유권을 바꾸지 않는다`() {
+    fun `타인 소유 스토리는 CONFLICT다`() {
         val pid = UUID.randomUUID()
-        val othersStory = story(pid, otherUserId)
-        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(othersStory))
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, otherUserId)))
 
         val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
         assertThat(result.stories).containsExactly(MigrationResult(pid.toString(), MigrationStatus.CONFLICT))
-        assertThat(othersStory.userId).isEqualTo(otherUserId)
     }
 
     @Test
@@ -84,12 +95,27 @@ class GuestDataMigrationServiceTest {
     }
 
     @Test
+    fun `같은 요청에 중복된 게스트 ID는 한 번만 클레임하고 두 번째는 ALREADY_OWNED다`() {
+        val pid = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString(), pid.toString())))
+
+        assertThat(result.stories).containsExactly(
+            MigrationResult(pid.toString(), MigrationStatus.MIGRATED),
+            MigrationResult(pid.toString(), MigrationStatus.ALREADY_OWNED),
+        )
+        verify(storyRepository, times(1)).claimByPublicId(pid, userId)
+    }
+
+    @Test
     fun `채팅도 스토리와 동일 규칙으로 독립 이관된다`() {
         val guestPid = UUID.randomUUID()
         val othersPid = UUID.randomUUID()
-        val guestChat = chat(guestPid, null)
         `when`(storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection()))
-            .thenReturn(listOf(guestChat, chat(othersPid, otherUserId)))
+            .thenReturn(listOf(chat(guestPid, null), chat(othersPid, otherUserId)))
+        `when`(storyChatRepository.claimByPublicId(guestPid, userId)).thenReturn(1)
 
         val result = service.migrate(
             userId,
@@ -100,7 +126,6 @@ class GuestDataMigrationServiceTest {
             MigrationResult(guestPid.toString(), MigrationStatus.MIGRATED),
             MigrationResult(othersPid.toString(), MigrationStatus.CONFLICT),
         )
-        assertThat(guestChat.userId).isEqualTo(userId)
         assertThat(result.stories).isEmpty()
     }
 
@@ -109,7 +134,9 @@ class GuestDataMigrationServiceTest {
         val storyPid = UUID.randomUUID()
         val chatPid = UUID.randomUUID()
         `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(storyPid, null)))
+        `when`(storyRepository.claimByPublicId(storyPid, userId)).thenReturn(1)
         `when`(storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(chat(chatPid, null)))
+        `when`(storyChatRepository.claimByPublicId(chatPid, userId)).thenReturn(1)
 
         val result = service.migrate(
             userId,

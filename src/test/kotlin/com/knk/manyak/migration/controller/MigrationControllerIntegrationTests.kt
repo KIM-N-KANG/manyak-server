@@ -62,8 +62,11 @@ class MigrationControllerIntegrationTests {
     private fun saveStory(ownerId: Long?): Story =
         storyRepository.save(Story(userId = ownerId, title = "제목"))
 
-    private fun saveChat(ownerId: Long?): StoryChat =
-        storyChatRepository.save(StoryChat(userId = ownerId, storyId = 1L))
+    private fun saveChat(ownerId: Long?): StoryChat {
+        // 채팅은 실제 스토리를 참조하도록 픽스처를 만든다(story_id 무결성 유지).
+        val story = storyRepository.save(Story(title = "채팅용 스토리"))
+        return storyChatRepository.save(StoryChat(userId = ownerId, storyId = story.id))
+    }
 
     private fun accessTokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
 

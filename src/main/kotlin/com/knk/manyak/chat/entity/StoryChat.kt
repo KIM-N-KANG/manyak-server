@@ -29,9 +29,9 @@ class StoryChat(
     @Column(name = "public_id", nullable = false, unique = true, updatable = false)
     val publicId: UUID = UUID.randomUUID(),
 
-    // 게스트(비로그인) 생성 시 NULL. 로그인 후 마이그레이션(KNK-389)으로 소유권을 클레임하면 요청자 user_id로 설정된다.
+    // 게스트(비로그인) 생성 시 NULL. 로그인 후 마이그레이션(KNK-389)이 조건부 UPDATE로 요청자 user_id를 클레임한다.
     @Column(name = "user_id")
-    var userId: Long? = null,
+    val userId: Long? = null,
 
     @Column(name = "story_id", nullable = false)
     val storyId: Long,
