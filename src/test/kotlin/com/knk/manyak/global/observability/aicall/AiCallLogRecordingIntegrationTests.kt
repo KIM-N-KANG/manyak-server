@@ -3,10 +3,8 @@ package com.knk.manyak.global.observability.aicall
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryChoiceRepository
-import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StorySetting
@@ -14,6 +12,7 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -51,29 +50,20 @@ class AiCallLogRecordingIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
-    private lateinit var storyMessageRepository: StoryMessageRepository
-
-    @Autowired
-    private lateinit var storyChoiceRepository: StoryChoiceRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
-        aiCallLogRepository.deleteAllInBatch()
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test
     fun `채팅 이어쓰기는 chat_response 호출을 식별자와 함께 SUCCEEDED로 적재하고 ai_response_saved에 연결한다`() {
         val story = seedStory()
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
@@ -99,7 +89,7 @@ class AiCallLogRecordingIntegrationTests {
             assertThat(log.requestId).isEqualTo("req_aicall_chat")
             assertThat(log.storyId).isEqualTo(story.id)
             assertThat(log.chatId).isEqualTo(session.publicId)
-            assertThat(log.turnIndex).isEqualTo(1)
+            assertThat(log.turnNumber).isEqualTo(1)
             assertThat(log.latencyMs).isNotNull()
             assertThat(log.completedAt).isNotNull()
             // stub은 meta를 내려주지 않으므로, AI 응답 meta 컬럼은 비어 있어야 한다(실 AI 연동 전 회귀 가드).

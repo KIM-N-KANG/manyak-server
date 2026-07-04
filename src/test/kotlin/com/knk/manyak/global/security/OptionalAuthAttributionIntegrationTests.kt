@@ -5,8 +5,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
@@ -19,16 +18,13 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryCreationExample
+import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.repository.StoryCreationExampleRatingRepository
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -130,43 +126,21 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
-
-    @Autowired
-    private lateinit var storySettingRepository: StorySettingRepository
-
-    @Autowired
-    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
-
-    @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
-
-    @Autowired
-    private lateinit var storyMessageRepository: StoryMessageRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var creationSessionRepository: StoryCreationSessionRepository
 
     @Autowired
-    private lateinit var creationExampleRepository: StoryCreationExampleRepository
+    private lateinit var creationStorylineRepository: StoryCreationStorylineRepository
 
     @Autowired
-    private lateinit var ratingRepository: StoryCreationExampleRatingRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         compileStoryCalls.set(0)
-        feedbackRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        ratingRepository.deleteAllInBatch()
-        creationExampleRepository.deleteAllInBatch()
-        creationSessionRepository.deleteAllInBatch()
-        storySuggestedInputRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
-        userRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     private fun saveUser(nickname: String = "manyak_user"): User =
@@ -232,7 +206,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer ${validToken(user)}").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isEqualTo(user.id)
+        assertThat(storyChatRepository.findAll().first().userId).isEqualTo(user.id)
     }
 
     @Test
@@ -242,7 +216,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer ${expiredToken(user)}").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     @Test
@@ -251,7 +225,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, "Bearer $forgedToken").expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     @Test
@@ -260,7 +234,7 @@ class OptionalAuthAttributionIntegrationTests {
 
         postChat(story.publicId, null).expectStatus().isCreated
 
-        assertThat(storyPlaySessionRepository.findAll().first().userId).isNull()
+        assertThat(storyChatRepository.findAll().first().userId).isNull()
     }
 
     private fun postChat(storyPublicId: UUID, authorization: String?): RestTestClient.ResponseSpec {
@@ -385,24 +359,24 @@ class OptionalAuthAttributionIntegrationTests {
         return spec.body("""{"rating":"GOOD"}""").exchange()
     }
 
-    private fun persistStoryline(): StoryCreationExample = persistStorylineSession(ownerId = null)
+    private fun persistStoryline(): StoryCreationStoryline = persistStorylineSession(ownerId = null)
 
-    private fun persistStorylineOwnedBy(ownerId: Long): StoryCreationExample = persistStorylineSession(ownerId)
+    private fun persistStorylineOwnedBy(ownerId: Long): StoryCreationStoryline = persistStorylineSession(ownerId)
 
-    private fun persistStorylineSession(ownerId: Long?): StoryCreationExample {
+    private fun persistStorylineSession(ownerId: Long?): StoryCreationStoryline {
         val session = creationSessionRepository.save(
             StoryCreationSession(userId = ownerId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
-        return creationExampleRepository.save(
-            StoryCreationExample(
+        return creationStorylineRepository.save(
+            StoryCreationStoryline(
                 creationSession = session,
-                exampleText = "예시 스토리라인",
-                exampleOrder = 1,
+                storylineText = "예시 스토리라인",
+                storylineOrder = 1,
             ),
         )
     }
 
-    private fun postSimpleStory(storyline: StoryCreationExample, authorization: String?): RestTestClient.ResponseSpec {
+    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)

@@ -4,14 +4,13 @@ import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -66,7 +65,7 @@ class ChatStreamErrorRelayIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
@@ -75,25 +74,17 @@ class ChatStreamErrorRelayIntegrationTests {
     private lateinit var storyChoiceRepository: StoryChoiceRepository
 
     @Autowired
-    private lateinit var storySettingRepository: StorySettingRepository
-
-    @Autowired
-    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test
     fun `AI 오류는 code와 message를 error 이벤트로 relay하고 아무것도 저장하지 않는다`() {
         val story = storyRepository.save(Story(title = "설정 미완 스토리", genre = "판타지"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         val body = restTestClient.post()
             .uri("/api/v1/chats/${session.publicId}/turns/stream")
@@ -114,7 +105,7 @@ class ChatStreamErrorRelayIntegrationTests {
         // 턴 원자성: 실패 시 USER·ASSISTANT·choices 아무것도 저장되지 않는다
         assertThat(storyMessageRepository.count()).isZero()
         assertThat(storyChoiceRepository.count()).isZero()
-        val reloaded = storyPlaySessionRepository.findById(session.id).orElseThrow()
+        val reloaded = storyChatRepository.findById(session.id).orElseThrow()
         assertThat(reloaded.currentTurn).isZero()
     }
 }

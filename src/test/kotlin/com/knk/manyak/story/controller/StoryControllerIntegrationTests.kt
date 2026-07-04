@@ -10,14 +10,14 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
-import com.knk.manyak.story.entity.StoryCreationExample
+import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
-import com.knk.manyak.story.repository.StoryCreationExampleRecommendedInfoRepository
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
@@ -25,6 +25,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -59,10 +60,10 @@ class StoryControllerIntegrationTests {
     private lateinit var sessionTagRepository: StoryCreationSessionTagRepository
 
     @Autowired
-    private lateinit var exampleRepository: StoryCreationExampleRepository
+    private lateinit var storylineRepository: StoryCreationStorylineRepository
 
     @Autowired
-    private lateinit var recommendedInfoRepository: StoryCreationExampleRecommendedInfoRepository
+    private lateinit var recommendedInfoRepository: StoryCreationStorylineRecommendedInfoRepository
 
     @Autowired
     private lateinit var storyRepository: StoryRepository
@@ -79,17 +80,12 @@ class StoryControllerIntegrationTests {
     @Autowired
     private lateinit var storyAiClient: CapturingStoryAiClient
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storySuggestedInputRepository.deleteAll()
-        storyStartSettingRepository.deleteAll()
-        storySettingRepository.deleteAll()
-        storyRepository.deleteAll()
-        recommendedInfoRepository.deleteAll()
-        exampleRepository.deleteAll()
-        sessionTagRepository.deleteAll()
-        sessionRepository.deleteAll()
-        tagRepository.deleteAll()
+        databaseCleaner.cleanAll()
         storyAiClient.reset()
     }
 
@@ -100,7 +96,7 @@ class StoryControllerIntegrationTests {
         seedTag(SimpleStoryTagCategory.PROTAGONIST, "기억상실", 10)
         tagRepository.save(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "사용자 입력",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -158,7 +154,7 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.selectedTags.length()").isEqualTo(2)
             .jsonPath("$.selectedTags[0].name").isEqualTo("판타지")
             .jsonPath("$.storylines.length()").isEqualTo(3)
-            .jsonPath("$.storylines[0].story").isEqualTo("생성 스토리 1")
+            .jsonPath("$.storylines[0].storyline").isEqualTo("생성 스토리 1")
             .jsonPath("$.storylines[0].recommendedInfos.length()").isEqualTo(3)
             .jsonPath("$.storylines[0].recommendedInfos[0].text").isEqualTo("추가 정보 1-1")
 
@@ -168,7 +164,7 @@ class StoryControllerIntegrationTests {
         check(aiRequest.genreTags == listOf("판타지"))
         check(aiRequest.protagonistTags == listOf("기억상실"))
         check(aiRequest.supportingTags.isEmpty())
-        check(exampleRepository.count() == 3L)
+        check(storylineRepository.count() == 3L)
         check(recommendedInfoRepository.count() == 9L)
     }
 
@@ -229,7 +225,7 @@ class StoryControllerIntegrationTests {
     fun `이미 저장된 직접 추가 태그는 재사용한다`() {
         tagRepository.save(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "마법 학교",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -263,7 +259,7 @@ class StoryControllerIntegrationTests {
     fun `같은 출처와 분류와 이름의 태그는 중복 저장할 수 없다`() {
         tagRepository.saveAndFlush(
             StoryCreationTag(
-                tagType = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.GENRE,
                 name = "마법 학교",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -272,7 +268,7 @@ class StoryControllerIntegrationTests {
         assertThrows<DataIntegrityViolationException> {
             tagRepository.saveAndFlush(
                 StoryCreationTag(
-                    tagType = SimpleStoryTagCategory.GENRE,
+                    category = SimpleStoryTagCategory.GENRE,
                     name = "마법 학교",
                     tagSource = StoryCreationTagSource.CUSTOM,
                 ),
@@ -355,7 +351,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `선택한 스토리라인으로 최종 이야기를 생성하고 저장한다`() {
+    fun `선택한 스토리라인으로 최종 스토리를 생성하고 저장한다`() {
         val seeded = seedGeneratedSession()
 
         restTestClient.post()
@@ -365,7 +361,7 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "simpleCreationId": ${seeded.sessionId},
-                  "storylineId": ${seeded.exampleIds[1]},
+                  "storylineId": ${seeded.storylineIds[1]},
                   "additionalInfos": ["주인공은 신중하다", "결말은 여운 있게"]
                 }
                 """.trimIndent(),
@@ -390,7 +386,7 @@ class StoryControllerIntegrationTests {
         check(compileRequest.genreTags == listOf("다크 판타지", "정치극"))
         check(compileRequest.protagonistTags == listOf("신중한"))
         check(compileRequest.selectedStoryline == "스토리라인 2")
-        check(compileRequest.extraInfo == "주인공은 신중하다\n결말은 여운 있게")
+        check(compileRequest.additionalInfo == "주인공은 신중하다\n결말은 여운 있게")
 
         check(storyRepository.count() == 1L)
         check(storySettingRepository.count() == 1L)
@@ -400,12 +396,50 @@ class StoryControllerIntegrationTests {
         val session = sessionRepository.findById(seeded.sessionId).orElseThrow()
         check(session.status == StoryCreationSessionStatus.STORY_CREATED)
         check(session.storyId != null)
-        val selected = exampleRepository.findById(seeded.exampleIds[1]).orElseThrow()
+        val selected = storylineRepository.findById(seeded.storylineIds[1]).orElseThrow()
         check(selected.isSelected)
     }
 
     @Test
-    fun `존재하지 않는 진행 정보면 이야기 생성을 거절한다`() {
+    fun `추가 정보가 13개면 스토리를 생성한다`() {
+        val seeded = seedGeneratedSession()
+        val additionalInfos = (1..13).joinToString(",") { "\"추가 정보 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        check(storyRepository.count() == 1L)
+    }
+
+    @Test
+    fun `추가 정보가 14개면 스토리 생성을 거절한다`() {
+        val seeded = seedGeneratedSession()
+        val additionalInfos = (1..14).joinToString(",") { "\"추가 정보 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(400)
+            .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+            .jsonPath("$.path").isEqualTo("/api/v1/stories/simple")
+
+        check(storyRepository.count() == 0L)
+    }
+
+    @Test
+    fun `존재하지 않는 진행 정보면 스토리 생성을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
@@ -418,7 +452,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `세션에 속하지 않은 스토리라인이면 이야기 생성을 거절한다`() {
+    fun `세션에 속하지 않은 스토리라인이면 스토리 생성을 거절한다`() {
         val seeded = seedGeneratedSession()
 
         restTestClient.post()
@@ -433,7 +467,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `이미 이야기가 생성된 진행이면 충돌로 응답한다`() {
+    fun `이미 스토리가 생성된 진행이면 충돌로 응답한다`() {
         val seeded = seedGeneratedSession()
         val session = sessionRepository.findById(seeded.sessionId).orElseThrow()
         session.status = StoryCreationSessionStatus.STORY_CREATED
@@ -442,12 +476,12 @@ class StoryControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.exampleIds[0]}}""")
+            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isEqualTo(409)
             .expectBody()
             .jsonPath("$.status").isEqualTo(409)
-            .jsonPath("$.message").isEqualTo("이미 이야기가 생성된 간편 제작 진행입니다.")
+            .jsonPath("$.message").isEqualTo("이미 스토리가 생성된 간편 제작 진행입니다.")
     }
 
     @Test
@@ -459,7 +493,7 @@ class StoryControllerIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.exampleIds[0]}}""")
+            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -469,14 +503,14 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `최종 이야기 생성 AI 오류는 Bad Gateway로 응답한다`() {
+    fun `최종 스토리 생성 AI 오류는 Bad Gateway로 응답한다`() {
         val seeded = seedGeneratedSession()
         storyAiClient.compileFail = true
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.exampleIds[0]}}""")
+            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isEqualTo(502)
             .expectBody()
@@ -490,7 +524,7 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `이야기 생성 API는 Bad Gateway 응답을 문서화한다`() {
+    fun `스토리 생성 API는 Bad Gateway 응답을 문서화한다`() {
         restTestClient.get()
             .uri("/v3/api-docs")
             .exchange()
@@ -512,21 +546,21 @@ class StoryControllerIntegrationTests {
         sessionTagRepository.saveAll(
             tags.map { tag -> StoryCreationSessionTag(creationSession = session, tag = tag) },
         )
-        val examples = exampleRepository.saveAll(
+        val storylines = storylineRepository.saveAll(
             (1..3).map { order ->
-                StoryCreationExample(
+                StoryCreationStoryline(
                     creationSession = session,
-                    exampleText = "스토리라인 $order",
-                    exampleOrder = order.toShort(),
+                    storylineText = "스토리라인 $order",
+                    storylineOrder = order.toShort(),
                 )
             },
         )
-        return SeededSession(session.id, examples.map { it.id })
+        return SeededSession(session.id, storylines.map { it.id })
     }
 
     private data class SeededSession(
         val sessionId: Long,
-        val exampleIds: List<Long>,
+        val storylineIds: List<Long>,
     )
 
     private fun seedTag(
@@ -536,7 +570,7 @@ class StoryControllerIntegrationTests {
     ): StoryCreationTag =
         tagRepository.save(
             StoryCreationTag(
-                tagType = category,
+                category = category,
                 name = name,
                 tagSource = StoryCreationTagSource.PREDEFINED,
                 sortOrder = sortOrder,
@@ -576,7 +610,7 @@ class StoryControllerIntegrationTests {
                 stories = (1..3).map { index ->
                     AiStoryItem(
                         id = index,
-                        story = "생성 스토리 $index",
+                        storyline = "생성 스토리 $index",
                         recommendedInfos = if (emptyRecommendedInfos) {
                             emptyList()
                         } else {

@@ -116,7 +116,7 @@ data class StoryDetailResponse(
         schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
         arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
     )
-    val recommendedInputs: List<String>,
+    val suggestedInputs: List<String>,
 
     @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,
@@ -124,8 +124,65 @@ data class StoryDetailResponse(
     @field:Schema(description = "등록 상태", example = "PUBLISHED")
     val status: StoryStatus,
 
+    @field:ArraySchema(
+        schema = Schema(implementation = LorebookResponse::class),
+        arraySchema = Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전) 목록. 없으면 빈 배열입니다."),
+    )
+    val lorebooks: List<LorebookResponse>,
+
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryEndingResponse::class),
+        arraySchema = Schema(description = "스토리 엔딩 목록. 없으면 빈 배열입니다."),
+    )
+    val endings: List<StoryEndingResponse>,
+
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
+)
+
+@Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전)")
+data class LorebookResponse(
+    @field:Schema(description = "로어북 ID", example = "1")
+    val id: Long,
+
+    @field:Schema(description = "로어북 이름", example = "무협 용어집")
+    val name: String,
+
+    @field:Schema(description = "장르. 없을 수 있습니다.", example = "무협", nullable = true)
+    val genre: String?,
+
+    @field:Schema(description = "용어집 본문", example = "내공: 무공의 근원이 되는 기운")
+    val content: String,
+)
+
+@Schema(description = "스토리 엔딩")
+data class StoryEndingResponse(
+    @field:Schema(description = "엔딩 제목", example = "왕좌를 되찾다")
+    val title: String,
+
+    @field:Schema(description = "엔딩 내용", example = "주인공은 잃어버린 왕좌를 되찾고 새 시대를 연다.")
+    val content: String,
+
+    @field:Schema(description = "도달 조건(자유 텍스트). 없을 수 있습니다.", example = "신뢰도 100 이상", nullable = true)
+    val conditionText: String?,
+
+    @field:Schema(description = "정렬 순서", example = "1")
+    val sortOrder: Int,
+
+    @field:Schema(description = "활성화 여부", example = "true")
+    val enabled: Boolean,
+)
+
+@Schema(description = "로어북 카탈로그 목록 항목")
+data class LorebookListItemResponse(
+    @field:Schema(description = "로어북 ID", example = "1")
+    val id: Long,
+
+    @field:Schema(description = "로어북 이름", example = "무협 용어집")
+    val name: String,
+
+    @field:Schema(description = "장르. 없을 수 있습니다.", example = "무협", nullable = true)
+    val genre: String?,
 )
 
 @Schema(description = "스토리 작성자 정보")

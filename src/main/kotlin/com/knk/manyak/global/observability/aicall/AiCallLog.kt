@@ -53,8 +53,8 @@ class AiCallLog(
     @Column(name = "chat_id")
     val chatId: UUID? = null,
 
-    @Column(name = "turn_index")
-    var turnIndex: Int? = null,
+    @Column(name = "turn_number")
+    var turnNumber: Int? = null,
 
     @Column(name = "provider", length = 40)
     var provider: String? = null,

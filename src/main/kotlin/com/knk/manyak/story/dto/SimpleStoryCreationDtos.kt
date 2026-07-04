@@ -84,7 +84,7 @@ data class GenerateSimpleStorylinesResponse(
         maxItems = 3,
         arraySchema = Schema(
             description = "AI가 생성한 예시 스토리라인 3개. 각 스토리라인은 추가 입력을 돕는 추천 추가 정보 3개를 포함합니다.",
-            example = """[{"id":1,"story":"기억을 잃은 주인공이 금지된 숲에서 자신의 과거와 계약의 비밀을 추적합니다.","recommendedInfos":[{"id":1,"text":"주인공은 반드시 되찾고 싶은 기억이 하나 있다."},{"id":2,"text":"계약의 대가로 수명을 내어주어야 한다."},{"id":3,"text":"첫 장면은 비 내리는 폐허에서 시작된다."}]},{"id":2,"story":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가갑니다.","recommendedInfos":[{"id":4,"text":"편지를 남긴 인물은 주인공의 옛 스승이다."},{"id":5,"text":"왕국은 금기를 어긴 대가로 하루아침에 사라졌다."},{"id":6,"text":"주인공은 결국 진실을 세상에 공개한다."}]},{"id":3,"story":"닫혀 있던 별의 문이 열리며 주인공은 세계를 바꿀 선택 앞에 섭니다.","recommendedInfos":[{"id":7,"text":"별의 문 너머에는 또 다른 세계가 존재한다."},{"id":8,"text":"주인공과 함께할 동료는 냉소적인 마법사다."},{"id":9,"text":"마지막 선택은 동료 중 한 명의 희생을 요구한다."}]}]""",
+            example = """[{"id":1,"storyline":"기억을 잃은 주인공이 금지된 숲에서 자신의 과거와 계약의 비밀을 추적합니다.","recommendedInfos":[{"id":1,"text":"주인공은 반드시 되찾고 싶은 기억이 하나 있다."},{"id":2,"text":"계약의 대가로 수명을 내어주어야 한다."},{"id":3,"text":"첫 장면은 비 내리는 폐허에서 시작된다."}]},{"id":2,"storyline":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가갑니다.","recommendedInfos":[{"id":4,"text":"편지를 남긴 인물은 주인공의 옛 스승이다."},{"id":5,"text":"왕국은 금기를 어긴 대가로 하루아침에 사라졌다."},{"id":6,"text":"주인공은 결국 진실을 세상에 공개한다."}]},{"id":3,"storyline":"닫혀 있던 별의 문이 열리며 주인공은 세계를 바꿀 선택 앞에 섭니다.","recommendedInfos":[{"id":7,"text":"별의 문 너머에는 또 다른 세계가 존재한다."},{"id":8,"text":"주인공과 함께할 동료는 냉소적인 마법사다."},{"id":9,"text":"마지막 선택은 동료 중 한 명의 희생을 요구한다."}]}]""",
         ),
     )
     val storylines: List<SimpleStorylineResponse>,
@@ -120,7 +120,7 @@ data class SimpleStorylineResponse(
     val id: Long,
 
     @field:Schema(description = "AI가 생성한 스토리라인 본문", example = "기억을 잃은 주인공이 금지된 숲에서 자신의 과거와 계약의 비밀을 추적합니다.")
-    val story: String,
+    val storyline: String,
 
     @field:Size(min = 3, max = 3)
     @field:ArraySchema(
@@ -166,7 +166,7 @@ data class StorylineRatingResponse(
     val rating: StorylineRating,
 )
 
-@Schema(description = "간편 제작 이야기 생성 요청")
+@Schema(description = "간편 제작 스토리 생성 요청")
 data class CreateSimpleStoryRequest(
     @field:Min(1)
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
@@ -186,17 +186,18 @@ data class CreateSimpleStoryRequest(
             example = "강진우의 목표는 회귀 전 막지 못했던 세계의 멸망을 막고 가족을 지키는 것임",
             maxLength = 100,
         ),
-        maxItems = 3,
+        maxItems = 13,
         arraySchema = Schema(
             description = "선택한 스토리라인을 보완하는 자유 추가 정보 목록",
             example = """["주인공의 목표는 회귀 전 막지 못했던 세계의 멸망을 막는 것임","결말은 주인공의 희생으로 세계가 구원되는 여운 있는 해피엔딩","정체를 숨긴 인물은 적이자 조력자가 될 수 있음"]""",
         ),
     )
-    @field:Size(max = 3)
+    // 프론트 최악값(자유 텍스트 10 + 스토리라인당 추천 태그 3 = 13)을 단일 배열로 그대로 수용한다(스펙 간극 B5).
+    @field:Size(max = 13)
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
 )
 
-@Schema(description = "간편 제작 이야기 생성 응답")
+@Schema(description = "간편 제작 스토리 생성 응답")
 data class SimpleStoryCreateResponse(
     @field:Schema(description = "생성된 스토리 ID(공개 식별자). 클라이언트는 이 값을 로컬스토리지에 저장해 내 스토리 목록 구성에 사용합니다.", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,

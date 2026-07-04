@@ -6,7 +6,7 @@ import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import org.springframework.data.jpa.repository.JpaRepository
 
 interface StoryCreationTagRepository : JpaRepository<StoryCreationTag, Long> {
-    fun findByTagSourceAndIsActiveTrueOrderByTagTypeAscSortOrderAscIdAsc(
+    fun findByTagSourceAndIsActiveTrueOrderByCategoryAscSortOrderAscIdAsc(
         tagSource: StoryCreationTagSource,
     ): List<StoryCreationTag>
 
@@ -15,9 +15,9 @@ interface StoryCreationTagRepository : JpaRepository<StoryCreationTag, Long> {
         tagSource: StoryCreationTagSource,
     ): List<StoryCreationTag>
 
-    fun findByTagSourceAndTagTypeAndNameIn(
+    fun findByTagSourceAndCategoryAndNameIn(
         tagSource: StoryCreationTagSource,
-        tagType: SimpleStoryTagCategory,
+        category: SimpleStoryTagCategory,
         names: Collection<String>,
     ): List<StoryCreationTag>
 }

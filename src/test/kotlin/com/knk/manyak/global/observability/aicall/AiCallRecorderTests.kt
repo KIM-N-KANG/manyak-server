@@ -150,14 +150,14 @@ class AiCallRecorderTests {
     }
 
     @Test
-    fun `attachTurnIndex는 적재 후 turn_index를 채운다`() {
+    fun `attachTurnNumber는 적재 후 turn_number를 채운다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req")
         val recorded = recorder.record(AiCallContext(feature = AiCallFeature.CHAT_RESPONSE)) { 1 }
-        assertNull(repository.findById(recorded.aiCallLogId).orElseThrow().turnIndex)
+        assertNull(repository.findById(recorded.aiCallLogId).orElseThrow().turnNumber)
 
-        recorder.attachTurnIndex(recorded.aiCallLogId, 3)
+        recorder.attachTurnNumber(recorded.aiCallLogId, 3)
 
-        assertEquals(3, repository.findById(recorded.aiCallLogId).orElseThrow().turnIndex)
+        assertEquals(3, repository.findById(recorded.aiCallLogId).orElseThrow().turnNumber)
     }
 
     @Test

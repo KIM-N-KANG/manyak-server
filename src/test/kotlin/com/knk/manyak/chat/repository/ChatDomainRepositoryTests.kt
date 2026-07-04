@@ -1,10 +1,10 @@
 package com.knk.manyak.chat.repository
 
 import com.knk.manyak.chat.entity.MessageRole
-import com.knk.manyak.chat.entity.PlaySessionStatus
+import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
+import com.knk.manyak.chat.entity.StoryChat
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -20,10 +20,10 @@ import org.springframework.test.context.ActiveProfiles
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @DataJpaTest
-class PlayDomainRepositoryTests {
+class ChatDomainRepositoryTests {
 
     @Autowired
-    private lateinit var playSessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var messageRepository: StoryMessageRepository
@@ -31,15 +31,15 @@ class PlayDomainRepositoryTests {
     @Autowired
     private lateinit var choiceRepository: StoryChoiceRepository
 
-    private fun newSession(storyId: Long = 1L): StoryPlaySession =
-        playSessionRepository.save(StoryPlaySession(storyId = storyId))
+    private fun newSession(storyId: Long = 1L): StoryChat =
+        storyChatRepository.save(StoryChat(storyId = storyId))
 
     @Test
     fun `세션 저장 시 기본값 ACTIVE와 current_turn 0이 적용된다`() {
         val session = newSession()
 
-        val found = playSessionRepository.findById(session.id).orElseThrow()
-        assertEquals(PlaySessionStatus.ACTIVE, found.status)
+        val found = storyChatRepository.findById(session.id).orElseThrow()
+        assertEquals(ChatStatus.ACTIVE, found.status)
         assertEquals(0, found.currentTurn)
         assertNull(found.deletedAt)
     }
@@ -51,9 +51,9 @@ class PlayDomainRepositoryTests {
 
         Thread.sleep(10)
         session.title = "갱신된 제목"
-        playSessionRepository.saveAndFlush(session)
+        storyChatRepository.saveAndFlush(session)
 
-        val found = playSessionRepository.findById(session.id).orElseThrow()
+        val found = storyChatRepository.findById(session.id).orElseThrow()
         assertTrue(found.updatedAt.isAfter(originalUpdatedAt))
     }
 
@@ -63,7 +63,7 @@ class PlayDomainRepositoryTests {
         messageRepository.save(message(session.id, MessageRole.ASSISTANT, "둘째", order = 2))
         messageRepository.save(message(session.id, MessageRole.USER, "첫째", order = 1))
 
-        val messages = messageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)
+        val messages = messageRepository.findByChatIdOrderByMessageOrderAsc(session.id)
 
         assertEquals(listOf("첫째", "둘째"), messages.map { it.content })
         assertEquals(listOf(MessageRole.USER, MessageRole.ASSISTANT), messages.map { it.role })
@@ -86,7 +86,7 @@ class PlayDomainRepositoryTests {
             messageRepository.save(message(session.id, MessageRole.USER, "메시지$order", order = order))
         }
 
-        val recent = messageRepository.findByPlaySessionIdOrderByMessageOrderDesc(
+        val recent = messageRepository.findByChatIdOrderByMessageOrderDesc(
             session.id,
             PageRequest.of(0, 2),
         )
@@ -100,7 +100,7 @@ class PlayDomainRepositoryTests {
         messageRepository.save(message(session.id, MessageRole.USER, "a", order = 1))
         messageRepository.save(message(session.id, MessageRole.ASSISTANT, "b", order = 2))
 
-        val last = messageRepository.findFirstByPlaySessionIdOrderByMessageOrderDesc(session.id)
+        val last = messageRepository.findFirstByChatIdOrderByMessageOrderDesc(session.id)
 
         assertEquals(2, last?.messageOrder)
     }
@@ -130,26 +130,26 @@ class PlayDomainRepositoryTests {
     }
 
     private fun message(
-        playSessionId: Long,
+        chatId: Long,
         role: MessageRole,
         content: String,
         order: Int,
     ): StoryMessage =
         StoryMessage(
-            playSessionId = playSessionId,
+            chatId = chatId,
             role = role,
             content = content,
             messageOrder = order,
         )
 
     private fun choice(
-        playSessionId: Long,
+        chatId: Long,
         messageId: Long,
         text: String,
         order: Int,
     ): StoryChoice =
         StoryChoice(
-            playSessionId = playSessionId,
+            chatId = chatId,
             messageId = messageId,
             choiceText = text,
             choiceOrder = order.toShort(),

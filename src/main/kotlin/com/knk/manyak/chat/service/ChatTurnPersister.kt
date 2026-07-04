@@ -5,7 +5,7 @@ import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException
  */
 @Component
 class ChatTurnPersister(
-    private val storyPlaySessionRepository: StoryPlaySessionRepository,
+    private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
 ) {
@@ -29,26 +29,26 @@ class ChatTurnPersister(
      * 한 턴(USER 입력 + AI 출력 + 선택지)을 원자적으로 저장하고 current_turn을 1 증가시킨다.
      * 메시지 순서는 직전 마지막 순서 n에 이어 USER=n+1, ASSISTANT=n+2로 매긴다.
      *
-     * @return 저장된 ASSISTANT 메시지 id(turnId)와 증가된 턴 번호(turnIndex)
+     * @return 저장된 ASSISTANT 메시지 id(turnId)와 증가된 턴 번호(turnNumber)
      */
     @Transactional
     fun persistTurn(
-        playSessionId: Long,
+        chatId: Long,
         userInput: String,
         aiOutput: String,
         choices: List<String>,
     ): PersistedTurn {
-        val session = storyPlaySessionRepository.findById(playSessionId)
+        val chat = storyChatRepository.findById(chatId)
             .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
 
         val lastOrder = storyMessageRepository
-            .findFirstByPlaySessionIdOrderByMessageOrderDesc(playSessionId)
+            .findFirstByChatIdOrderByMessageOrderDesc(chatId)
             ?.messageOrder
             ?: 0
 
         val user = storyMessageRepository.save(
             StoryMessage(
-                playSessionId = playSessionId,
+                chatId = chatId,
                 role = MessageRole.USER,
                 content = userInput,
                 messageOrder = lastOrder + 1,
@@ -56,7 +56,7 @@ class ChatTurnPersister(
         )
         val assistant = storyMessageRepository.save(
             StoryMessage(
-                playSessionId = playSessionId,
+                chatId = chatId,
                 role = MessageRole.ASSISTANT,
                 content = aiOutput,
                 messageOrder = user.messageOrder + 1,
@@ -67,7 +67,7 @@ class ChatTurnPersister(
             storyChoiceRepository.saveAll(
                 choices.mapIndexed { index, text ->
                     StoryChoice(
-                        playSessionId = playSessionId,
+                        chatId = chatId,
                         messageId = assistant.id,
                         choiceText = text,
                         choiceOrder = (index + 1).toShort(),
@@ -76,11 +76,11 @@ class ChatTurnPersister(
             )
         }
 
-        session.currentTurn += 1
-        storyPlaySessionRepository.save(session)
+        chat.currentTurn += 1
+        storyChatRepository.save(chat)
 
-        return PersistedTurn(turnId = assistant.id, turnIndex = session.currentTurn)
+        return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn)
     }
 
-    data class PersistedTurn(val turnId: Long, val turnIndex: Int)
+    data class PersistedTurn(val turnId: Long, val turnNumber: Int)
 }

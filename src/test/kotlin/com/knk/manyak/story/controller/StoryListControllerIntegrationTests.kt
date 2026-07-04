@@ -2,6 +2,7 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -22,9 +23,12 @@ class StoryListControllerIntegrationTests {
     @Autowired
     private lateinit var storyRepository: StoryRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test

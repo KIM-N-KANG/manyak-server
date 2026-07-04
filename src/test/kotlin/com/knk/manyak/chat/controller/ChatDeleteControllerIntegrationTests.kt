@@ -2,15 +2,12 @@ package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.StoryPlaySession
-import com.knk.manyak.chat.repository.StoryChoiceRepository
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.chat.repository.StoryPlaySessionRepository
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,43 +31,28 @@ class ChatDeleteControllerIntegrationTests {
     private lateinit var storyRepository: StoryRepository
 
     @Autowired
-    private lateinit var storyPlaySessionRepository: StoryPlaySessionRepository
+    private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
-    private lateinit var storyChoiceRepository: StoryChoiceRepository
-
-    @Autowired
-    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
-
-    @Autowired
-    private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
-
-    @Autowired
-    private lateinit var storySettingRepository: StorySettingRepository
+    private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         // 공유 H2(스프링 컨텍스트 캐시)에서 다른 테스트 클래스가 남긴 스토리 자식 행까지 FK 순서로 정리한다.
         // 자식(start_settings·settings 등)이 남아 있으면 stories 삭제가 FK 위반으로 실패한다.
-        storyChoiceRepository.deleteAllInBatch()
-        storyMessageRepository.deleteAllInBatch()
-        storyPlaySessionRepository.deleteAllInBatch()
-        storySuggestedInputRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storySettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test
     fun `채팅을 삭제하면 204와 함께 deletedAt이 기록되는 소프트 삭제다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
         // 자식 메시지는 소프트 삭제 후에도 보존되어야 한다
         storyMessageRepository.save(
-            StoryMessage(playSessionId = session.id, role = MessageRole.USER, content = "손을 올린다.", messageOrder = 1),
+            StoryMessage(chatId = session.id, role = MessageRole.USER, content = "손을 올린다.", messageOrder = 1),
         )
 
         restTestClient.delete()
@@ -79,16 +61,16 @@ class ChatDeleteControllerIntegrationTests {
             .expectStatus().isNoContent
 
         // 행은 남아 있고 deletedAt만 세팅된다 (물리 삭제 아님)
-        val reloaded = storyPlaySessionRepository.findById(session.id).orElseThrow()
+        val reloaded = storyChatRepository.findById(session.id).orElseThrow()
         assertThat(reloaded.deletedAt).isNotNull()
         // 자식 메시지는 보존된다
-        assertThat(storyMessageRepository.findByPlaySessionIdOrderByMessageOrderAsc(session.id)).hasSize(1)
+        assertThat(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(session.id)).hasSize(1)
     }
 
     @Test
     fun `삭제한 채팅은 상세 조회에서 404로 제외된다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.delete()
             .uri("/api/v1/chats/${session.publicId}")
@@ -106,8 +88,8 @@ class ChatDeleteControllerIntegrationTests {
     @Test
     fun `삭제한 채팅은 목록(batch) 조회에서 제외된다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
-        val kept = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
-        val deleted = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val kept = storyChatRepository.save(StoryChat(storyId = story.id))
+        val deleted = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.delete()
             .uri("/api/v1/chats/${deleted.publicId}")
@@ -128,7 +110,7 @@ class ChatDeleteControllerIntegrationTests {
     @Test
     fun `이미 삭제된 채팅을 다시 삭제하면 404로 응답한다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
-        val session = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.delete().uri("/api/v1/chats/${session.publicId}").exchange().expectStatus().isNoContent
 
@@ -167,8 +149,8 @@ class ChatDeleteControllerIntegrationTests {
     @Test
     fun `삭제는 같은 스토리의 다른 채팅에 영향을 주지 않는다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
-        val target = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
-        val other = storyPlaySessionRepository.save(StoryPlaySession(storyId = story.id))
+        val target = storyChatRepository.save(StoryChat(storyId = story.id))
+        val other = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.delete().uri("/api/v1/chats/${target.publicId}").exchange().expectStatus().isNoContent
 
@@ -180,7 +162,7 @@ class ChatDeleteControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.id").isEqualTo(other.publicId.toString())
 
-        val reloadedOther = storyPlaySessionRepository.findById(other.id).orElseThrow()
+        val reloadedOther = storyChatRepository.findById(other.id).orElseThrow()
         assertThat(reloadedOther.deletedAt).isNull()
     }
 }

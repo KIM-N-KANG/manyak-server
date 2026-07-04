@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_creation_sessions_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.story_creation_examples](public.story_creation_examples.md) |  |  |
+| id | bigint | nextval('story_creation_sessions_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.story_creation_storylines](public.story_creation_storylines.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | true |  |  |  |
 | status | varchar(30) |  | false |  |  |  |
@@ -30,7 +30,7 @@
 erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
-"public.story_creation_examples" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 
 "public.story_creation_sessions" {
   bigint id
@@ -46,11 +46,11 @@ erDiagram
   bigint tag_id FK
   timestamp_with_time_zone created_at
 }
-"public.story_creation_examples" {
+"public.story_creation_storylines" {
   bigint id
   bigint creation_session_id FK
-  text example_text
-  smallint example_order
+  text storyline_text
+  smallint storyline_order
   boolean is_selected
   timestamp_with_time_zone created_at
 }

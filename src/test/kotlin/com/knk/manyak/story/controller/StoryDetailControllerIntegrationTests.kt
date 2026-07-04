@@ -6,6 +6,7 @@ import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -31,11 +32,12 @@ class StoryDetailControllerIntegrationTests {
     @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
+    @Autowired
+    private lateinit var databaseCleaner: DatabaseCleaner
+
     @BeforeEach
     fun setUp() {
-        storySuggestedInputRepository.deleteAllInBatch()
-        storyStartSettingRepository.deleteAllInBatch()
-        storyRepository.deleteAllInBatch()
+        databaseCleaner.cleanAll()
     }
 
     @Test
@@ -80,9 +82,9 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
             .jsonPath("$.startSetting.prologue").isEqualTo("잿빛 비가 사흘째 왕성을 적신다.")
             .jsonPath("$.startSetting.startSituation").isEqualTo("장례식이 끝난 늦은 밤, 기사단 숙소.")
-            .jsonPath("$.recommendedInputs.length()").isEqualTo(3)
-            .jsonPath("$.recommendedInputs[0]").isEqualTo("레이에게 문을 열어준다")
-            .jsonPath("$.recommendedInputs[2]").isEqualTo("침묵한다")
+            .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
+            .jsonPath("$.suggestedInputs[0]").isEqualTo("레이에게 문을 열어준다")
+            .jsonPath("$.suggestedInputs[2]").isEqualTo("침묵한다")
             .jsonPath("$.coverImageUrl").isEmpty
             .jsonPath("$.author").isEmpty
             .jsonPath("$.hashtags.length()").isEqualTo(0)
@@ -100,7 +102,7 @@ class StoryDetailControllerIntegrationTests {
             .expectStatus().isNotFound
             .expectBody()
             .jsonPath("$.status").isEqualTo(404)
-            .jsonPath("$.message").isEqualTo("이야기를 찾을 수 없습니다.")
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
             .jsonPath("$.path").isEqualTo("/api/v1/stories/999999")
     }
 
@@ -140,6 +142,6 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.title").isEqualTo("설정 미완 스토리")
             .jsonPath("$.genres.length()").isEqualTo(0)
             .jsonPath("$.startSetting").isEmpty
-            .jsonPath("$.recommendedInputs.length()").isEqualTo(0)
+            .jsonPath("$.suggestedInputs.length()").isEqualTo(0)
     }
 }

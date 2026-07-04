@@ -12,7 +12,7 @@
 | session_id | varchar(128) |  | true |  |  |  |
 | story_id | bigint |  | true |  |  |  |
 | chat_id | uuid |  | true |  |  |  |
-| turn_index | integer |  | true |  |  |  |
+| turn_number | integer |  | true |  |  |  |
 | provider | varchar(40) |  | true |  |  |  |
 | model | varchar(100) |  | true |  |  |  |
 | prompt_template_version | varchar(40) |  | true |  |  |  |
@@ -31,11 +31,11 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| ck_ai_call_logs_feature | CHECK | CHECK (((feature)::text = ANY ((ARRAY['storyline_generation'::character varying, 'story_completion'::character varying, 'chat_response'::character varying, 'suggestion_generation'::character varying])::text[]))) |
+| ck_ai_call_logs_feature | CHECK | CHECK (((feature)::text = ANY ((ARRAY['storyline_generation'::character varying, 'story_completion'::character varying, 'chat_response'::character varying, 'choice_generation'::character varying])::text[]))) |
 | ck_ai_call_logs_latency | CHECK | CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))) |
 | ck_ai_call_logs_retry_count | CHECK | CHECK ((retry_count >= 0)) |
 | ck_ai_call_logs_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['STARTED'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying])::text[]))) |
-| ck_ai_call_logs_turn_index | CHECK | CHECK (((turn_index IS NULL) OR (turn_index >= 0))) |
+| ck_ai_call_logs_turn_number | CHECK | CHECK (((turn_number IS NULL) OR (turn_number >= 0))) |
 | ai_call_logs_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 
 ## Indexes
@@ -62,7 +62,7 @@ erDiagram
   varchar_128_ session_id
   bigint story_id
   uuid chat_id
-  integer turn_index
+  integer turn_number
   varchar_40_ provider
   varchar_100_ model
   varchar_40_ prompt_template_version

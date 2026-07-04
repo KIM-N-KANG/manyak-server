@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_start_settings_id_seq'::regclass) | false | [public.story_suggested_inputs](public.story_suggested_inputs.md) [public.story_play_sessions](public.story_play_sessions.md) |  |  |
+| id | bigint | nextval('story_start_settings_id_seq'::regclass) | false | [public.story_suggested_inputs](public.story_suggested_inputs.md) [public.story_chats](public.story_chats.md) |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | name | varchar(100) |  | false |  |  |  |
 | prologue | text |  | true |  |  |  |
@@ -33,7 +33,7 @@
 erDiagram
 
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_start_settings" {
@@ -52,7 +52,7 @@ erDiagram
   smallint input_order
   timestamp_with_time_zone created_at
 }
-"public.story_play_sessions" {
+"public.story_chats" {
   bigint id
   bigint user_id
   bigint story_id FK

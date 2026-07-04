@@ -7,20 +7,23 @@
 | [public.story_creation_tags](public.story_creation_tags.md) | 8 |  | BASE TABLE |
 | [public.story_creation_sessions](public.story_creation_sessions.md) | 6 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
-| [public.story_creation_examples](public.story_creation_examples.md) | 6 |  | BASE TABLE |
-| [public.story_creation_example_recommended_infos](public.story_creation_example_recommended_infos.md) | 5 |  | BASE TABLE |
+| [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
+| [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
 | [public.stories](public.stories.md) | 10 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_play_sessions](public.story_play_sessions.md) | 12 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 12 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
-| [public.story_creation_example_ratings](public.story_creation_example_ratings.md) | 5 |  | BASE TABLE |
+| [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
 | [public.users](public.users.md) | 9 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
+| [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
+| [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
+| [public.story_endings](public.story_endings.md) | 9 |  | BASE TABLE |
 
 ## Relations
 
@@ -29,18 +32,21 @@ erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
-"public.story_creation_examples" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
-"public.story_creation_example_recommended_infos" }o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+"public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_creation_storyline_recommended_infos" }o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.story_play_sessions" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
-"public.story_messages" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
-"public.story_choices" }o--|| "public.story_play_sessions" : "FOREIGN KEY (play_session_id) REFERENCES story_play_sessions(id) ON DELETE CASCADE"
+"public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
-"public.story_creation_example_ratings" |o--|| "public.story_creation_examples" : "FOREIGN KEY (example_id) REFERENCES story_creation_examples(id) ON DELETE CASCADE"
+"public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -66,17 +72,17 @@ erDiagram
   bigint tag_id FK
   timestamp_with_time_zone created_at
 }
-"public.story_creation_examples" {
+"public.story_creation_storylines" {
   bigint id
   bigint creation_session_id FK
-  text example_text
-  smallint example_order
+  text storyline_text
+  smallint storyline_order
   boolean is_selected
   timestamp_with_time_zone created_at
 }
-"public.story_creation_example_recommended_infos" {
+"public.story_creation_storyline_recommended_infos" {
   bigint id
-  bigint example_id FK
+  bigint storyline_id FK
   text info_text
   smallint info_order
   timestamp_with_time_zone created_at
@@ -119,7 +125,7 @@ erDiagram
   smallint input_order
   timestamp_with_time_zone created_at
 }
-"public.story_play_sessions" {
+"public.story_chats" {
   bigint id
   bigint user_id
   bigint story_id FK
@@ -135,7 +141,7 @@ erDiagram
 }
 "public.story_messages" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   varchar_16_ role
   text content
   integer message_order
@@ -143,7 +149,7 @@ erDiagram
 }
 "public.story_choices" {
   bigint id
-  bigint play_session_id FK
+  bigint chat_id FK
   bigint message_id FK
   text choice_text
   smallint choice_order
@@ -151,9 +157,9 @@ erDiagram
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
 }
-"public.story_creation_example_ratings" {
+"public.story_creation_storyline_ratings" {
   bigint id
-  bigint example_id FK
+  bigint storyline_id FK
   varchar_8_ rating
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
@@ -176,7 +182,7 @@ erDiagram
   varchar_128_ session_id
   bigint story_id
   uuid chat_id
-  integer turn_index
+  integer turn_number
   varchar_40_ provider
   varchar_100_ model
   varchar_40_ prompt_template_version
@@ -210,6 +216,34 @@ erDiagram
   varchar_255_ email
   timestamp_with_time_zone connected_at
   timestamp_with_time_zone last_login_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.lorebooks" {
+  bigint id
+  varchar_100_ name
+  varchar_50_ genre
+  text content
+  integer sort_order
+  boolean is_active
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_lorebooks" {
+  bigint id
+  bigint story_id FK
+  bigint lorebook_id FK
+  smallint sort_order
+  timestamp_with_time_zone created_at
+}
+"public.story_endings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ title
+  text content
+  text condition_text
+  smallint sort_order
+  boolean enabled
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }

@@ -18,8 +18,8 @@ import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryCreationExample
-import com.knk.manyak.story.entity.StoryCreationExampleRecommendedInfo
+import com.knk.manyak.story.entity.StoryCreationStoryline
+import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
@@ -28,8 +28,8 @@ import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.repository.StoryCreationExampleRecommendedInfoRepository
-import com.knk.manyak.story.repository.StoryCreationExampleRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
+import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
@@ -49,8 +49,8 @@ class SimpleStoryCreationService(
     private val storyCreationTagRepository: StoryCreationTagRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
-    private val storyCreationExampleRepository: StoryCreationExampleRepository,
-    private val storyCreationExampleRecommendedInfoRepository: StoryCreationExampleRecommendedInfoRepository,
+    private val storyCreationStorylineRepository: StoryCreationStorylineRepository,
+    private val storyCreationStorylineRecommendedInfoRepository: StoryCreationStorylineRecommendedInfoRepository,
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
@@ -71,12 +71,12 @@ class SimpleStoryCreationService(
     @Transactional(readOnly = true)
     fun getSimpleStoryTags(): List<SimpleStoryTagListItemResponse> =
         storyCreationTagRepository
-            .findByTagSourceAndIsActiveTrueOrderByTagTypeAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
+            .findByTagSourceAndIsActiveTrueOrderByCategoryAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
             .map { tag ->
                 SimpleStoryTagListItemResponse(
                     id = tag.id,
                     name = tag.name,
-                    category = tag.tagType,
+                    category = tag.category,
                 )
             }
 
@@ -87,13 +87,13 @@ class SimpleStoryCreationService(
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
             StoryCreationTagDraft(
-                tagType = tag.category,
+                category = tag.category,
                 name = tag.name.trim(),
             )
         }.distinctBy { it.key }
         val aiRequestTags = predefinedTags.map { tag ->
             StoryCreationTagDraft(
-                tagType = tag.tagType,
+                category = tag.category,
                 name = tag.name,
             )
         } + customTagDrafts
@@ -124,32 +124,32 @@ class SimpleStoryCreationService(
                 },
             )
 
-            val examples = storyCreationExampleRepository.saveAll(
+            val storylines = storyCreationStorylineRepository.saveAll(
                 aiResponse.stories.mapIndexed { index, story ->
-                    StoryCreationExample(
+                    StoryCreationStoryline(
                         creationSession = creationSession,
-                        exampleText = story.story,
-                        exampleOrder = (index + 1).toShort(),
+                        storylineText = story.storyline,
+                        storylineOrder = (index + 1).toShort(),
                     )
                 },
             )
-            val recommendedInfos = storyCreationExampleRecommendedInfoRepository.saveAll(
-                examples.zip(aiResponse.stories).flatMap { (example, story) ->
+            val recommendedInfos = storyCreationStorylineRecommendedInfoRepository.saveAll(
+                storylines.zip(aiResponse.stories).flatMap { (storyline, story) ->
                     story.recommendedInfos.mapIndexed { infoIndex, info ->
-                        StoryCreationExampleRecommendedInfo(
-                            example = example,
+                        StoryCreationStorylineRecommendedInfo(
+                            storyline = storyline,
                             infoText = info,
                             infoOrder = (infoIndex + 1).toShort(),
                         )
                     }
                 }
-            ).groupBy { info -> info.example.id }
+            ).groupBy { info -> info.storyline.id }
 
-            val storylines = examples.map { example ->
+            val storylineResponses = storylines.map { storyline ->
                 SimpleStorylineResponse(
-                    id = example.id,
-                    story = example.exampleText,
-                    recommendedInfos = recommendedInfos[example.id].orEmpty().map { info ->
+                    id = storyline.id,
+                    storyline = storyline.storylineText,
+                    recommendedInfos = recommendedInfos[storyline.id].orEmpty().map { info ->
                         SimpleStoryRecommendedInfoResponse(
                             id = info.id,
                             text = info.infoText,
@@ -161,14 +161,14 @@ class SimpleStoryCreationService(
             GenerateSimpleStorylinesResponse(
                 simpleCreationId = creationSession.id,
                 selectedTags = tags.map { it.toTagResponse() },
-                storylines = storylines,
+                storylines = storylineResponses,
             )
         } ?: throw IllegalStateException("Storyline creation transaction result is empty")
     }
 
     fun createSimpleStory(request: CreateSimpleStoryRequest, userId: Long? = null): SimpleStoryCreateResponse {
         val startNanos = System.nanoTime()
-        structuredLogger.event("story_create_requested", "simple_creation_id" to request.simpleCreationId)
+        structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
         try {
             val outcome = doCreateSimpleStory(request, userId)
             structuredLogger.event(
@@ -200,7 +200,7 @@ class SimpleStoryCreationService(
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             }
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
         }
 
         // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
@@ -216,7 +216,7 @@ class SimpleStoryCreationService(
             )
         }
 
-        val selectedStoryline = storyCreationExampleRepository
+        val selectedStoryline = storyCreationStorylineRepository
             .findByIdAndCreationSessionId(request.storylineId, request.simpleCreationId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "선택한 스토리라인을 찾을 수 없습니다.")
 
@@ -224,14 +224,14 @@ class SimpleStoryCreationService(
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
             .map { it.tag }
         val genreTags = sessionTags
-            .filter { it.tagType == SimpleStoryTagCategory.GENRE }
+            .filter { it.category == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
-            protagonistTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = sessionTags.filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
-            selectedStoryline = selectedStoryline.exampleText,
-            extraInfo = request.additionalInfos.joinToString(separator = "\n"),
+            protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            selectedStoryline = selectedStoryline.storylineText,
+            additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
         val recorded = try {
@@ -252,11 +252,11 @@ class SimpleStoryCreationService(
             val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             if (lockedSession.status == StoryCreationSessionStatus.STORY_CREATED) {
-                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 이야기가 생성된 간편 제작 진행입니다.")
+                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
             }
 
             selectedStoryline.isSelected = true
-            storyCreationExampleRepository.save(selectedStoryline)
+            storyCreationStorylineRepository.save(selectedStoryline)
 
             val story = storyRepository.save(
                 Story(
@@ -341,16 +341,16 @@ class SimpleStoryCreationService(
 
     private fun List<StoryCreationTagDraft>.toAiStorylinesRequest(): AiStorylinesRequest =
         AiStorylinesRequest(
-            genreTags = filter { it.tagType == SimpleStoryTagCategory.GENRE }.map { it.name },
-            protagonistTags = filter { it.tagType == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = filter { it.tagType == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            genreTags = filter { it.category == SimpleStoryTagCategory.GENRE }.map { it.name },
+            protagonistTags = filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
+            supportingTags = filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
         )
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
         SimpleStoryTagResponse(
             id = id,
             name = name,
-            category = tagType,
+            category = category,
         )
 
     private data class StoryCreationOutcome(
@@ -359,11 +359,11 @@ class SimpleStoryCreationService(
     )
 
     private data class StoryCreationTagDraft(
-        val tagType: SimpleStoryTagCategory,
+        val category: SimpleStoryTagCategory,
         val name: String,
     ) {
         val key: Pair<SimpleStoryTagCategory, String>
-            get() = tagType to name
+            get() = category to name
     }
 
     private fun findOrCreateCustomTags(customTagDrafts: List<StoryCreationTagDraft>): List<StoryCreationTag> {
@@ -372,20 +372,20 @@ class SimpleStoryCreationService(
         }
 
         val existingTags = customTagDrafts
-            .groupBy { it.tagType }
-            .flatMap { (tagType, drafts) ->
-                storyCreationTagRepository.findByTagSourceAndTagTypeAndNameIn(
+            .groupBy { it.category }
+            .flatMap { (category, drafts) ->
+                storyCreationTagRepository.findByTagSourceAndCategoryAndNameIn(
                     tagSource = StoryCreationTagSource.CUSTOM,
-                    tagType = tagType,
+                    category = category,
                     names = drafts.map { it.name },
                 )
             }
-        val tagsByKey = existingTags.associateBy { it.tagType to it.name }.toMutableMap()
+        val tagsByKey = existingTags.associateBy { it.category to it.name }.toMutableMap()
         val newTags = customTagDrafts
             .filterNot { tagsByKey.containsKey(it.key) }
             .map { tag ->
                 StoryCreationTag(
-                    tagType = tag.tagType,
+                    category = tag.category,
                     name = tag.name,
                     tagSource = StoryCreationTagSource.CUSTOM,
                     sortOrder = 0,
@@ -394,7 +394,7 @@ class SimpleStoryCreationService(
             }
 
         storyCreationTagRepository.saveAll(newTags)
-            .forEach { tag -> tagsByKey[tag.tagType to tag.name] = tag }
+            .forEach { tag -> tagsByKey[tag.category to tag.name] = tag }
 
         return customTagDrafts.map { tag -> tagsByKey.getValue(tag.key) }
     }
