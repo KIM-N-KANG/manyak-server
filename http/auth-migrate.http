@@ -1,0 +1,131 @@
+### 게스트 데이터 마이그레이션(Auth) API 수동 검증 — POST /api/v1/auth/migrate
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-389] 비로그인→계정 데이터 마이그레이션(클레임):
+###   - 로그인 직후 클라이언트가 기기(localStorage)에 보관한 게스트 스토리·채팅의 공개 ID 목록을 제출한다.
+###   - 서버는 user_id가 NULL인 행에만 요청자의 user_id를 설정(클레임)하고, 항목별 status를 돌려준다.
+###   - status 4종: MIGRATED(이번에 이관) · ALREADY_OWNED(이미 요청자 소유) · CONFLICT(타인 소유) · NOT_FOUND(부재/삭제).
+###   - 효과 멱등: 재호출해도 소유권은 안 바뀌고 status만 바뀐다(1회차 MIGRATED → 2회차 ALREADY_OWNED).
+###   - 인증 필수(anyRequest().authenticated()): 토큰이 없거나 무효면 401.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동: docker compose up -d  (stories/story_chats/users 를 실제로 읽고 씁니다)
+###   - access 토큰: auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 변수 accessToken 이 채워집니다.
+###     같은 IntelliJ 세션이면 아래 {{accessToken}} 이 그대로 재사용됩니다. 아니면 @accessToken 에 직접 붙여넣으세요.
+###   - 공개 ID: 로그인하지 않은 상태(토큰 없이)로 스토리·채팅을 만들어 그 public_id 를 아래 자리표시자에 넣으세요.
+###     (게스트로 만든 것이라야 user_id 가 NULL → MIGRATED 를 관찰할 수 있습니다.)
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+# 게스트(비로그인)로 만든 스토리·채팅의 공개 ID(UUID).
+@guestStoryId = PUT_A_GUEST_STORY_PUBLIC_ID_HERE
+@guestChatId = PUT_A_GUEST_CHAT_PUBLIC_ID_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 호출 → 401
+# 인증 필수 경로라 미인증 요청은 본문 검증 전에 401로 막힙니다.
+POST {{baseUrl}}/api/v1/auth/migrate
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": [], "chatIds": [] }
+
+> {%
+    client.test("토큰 없는 migrate 는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (에러) 공개 ID 가 UUID 형식이 아니면 → 400
+# 유효 토큰이 있어야 본문 검증까지 도달합니다(없으면 401). 형식 오류는 요청 전체를 400으로 봅니다.
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": ["not-a-uuid"], "chatIds": [] }
+
+> {%
+    client.test("UUID 형식 오류는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+%}
+
+### 3. (경계) 빈 배열 → 200, 빈 결과
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": [], "chatIds": [] }
+
+> {%
+    client.test("빈 요청은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("stories/chats 가 빈 배열이다", () => {
+        client.assert(Array.isArray(response.body.stories) && response.body.stories.length === 0,
+            `stories 가 비어있지 않습니다. actual=${JSON.stringify(response.body.stories)}`);
+        client.assert(Array.isArray(response.body.chats) && response.body.chats.length === 0,
+            `chats 가 비어있지 않습니다. actual=${JSON.stringify(response.body.chats)}`);
+    });
+%}
+
+### 4. (해피 패스) 게스트 스토리·채팅 이관 → 200, 항목별 status
+# @guestStoryId / @guestChatId 를 게스트로 만든 실제 공개 ID 로 채운 뒤 실행하세요.
+# 처음 실행하면 게스트(user_id NULL) 항목은 MIGRATED 가 됩니다.
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": ["{{guestStoryId}}"], "chatIds": ["{{guestChatId}}"] }
+
+> {%
+    const VALID = ["MIGRATED", "ALREADY_OWNED", "CONFLICT", "NOT_FOUND"];
+    client.test("이관 요청은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 항목별 {id, status} 구조다", () => {
+        client.assert(Array.isArray(b.stories) && b.stories.length === 1, `stories 개수가 1이 아닙니다. actual=${JSON.stringify(b.stories)}`);
+        client.assert(Array.isArray(b.chats) && b.chats.length === 1, `chats 개수가 1이 아닙니다. actual=${JSON.stringify(b.chats)}`);
+        client.assert(VALID.indexOf(b.stories[0].status) >= 0, `스토리 status 가 유효하지 않습니다. actual=${b.stories[0].status}`);
+        client.assert(VALID.indexOf(b.chats[0].status) >= 0, `채팅 status 가 유효하지 않습니다. actual=${b.chats[0].status}`);
+    });
+%}
+
+### 5. (멱등) 4번을 그대로 재호출 → 소유권 불변, status 는 ALREADY_OWNED
+# 4번에서 MIGRATED 된 게스트 항목은 이제 요청자 소유이므로 재호출 시 ALREADY_OWNED 가 됩니다.
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": ["{{guestStoryId}}"], "chatIds": ["{{guestChatId}}"] }
+
+> {%
+    client.test("재호출은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("재호출 status 는 ALREADY_OWNED 다(멱등)", () => {
+        client.assert(response.body.stories[0].status === "ALREADY_OWNED",
+            `스토리 status 가 ALREADY_OWNED 가 아닙니다(4번을 먼저 실행했는지 확인). actual=${response.body.stories[0].status}`);
+    });
+%}
+
+### 6. (자유 조회) 임의의 공개 ID 로 직접 확인
+# 위 흐름 없이 특정 ID 만 빠르게 눌러보고 싶을 때. 존재하지 않는 UUID 는 NOT_FOUND, 타인 소유는 CONFLICT 로 관찰됩니다.
+# 배열 상한(각 100개) 초과 시 400 은 통합 테스트로 고정돼 있습니다(수기로 101개를 넣기 번거로워 여기서는 생략).
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": ["00000000-0000-0000-0000-000000000000"], "chatIds": [] }
