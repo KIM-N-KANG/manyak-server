@@ -8,6 +8,9 @@ import com.knk.manyak.auth.social.RandomNicknameGenerator
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -77,6 +80,12 @@ class GoogleLoginIntegrationTests {
     private lateinit var socialAccountRepository: SocialAccountRepository
 
     @Autowired
+    private lateinit var creditWalletService: CreditWalletService
+
+    @Autowired
+    private lateinit var creditTransactionRepository: CreditTransactionRepository
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -135,6 +144,44 @@ class GoogleLoginIntegrationTests {
 
         assertThat(userRepository.count()).isEqualTo(1)
         assertThat(socialAccountRepository.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `신규 로그인은 가입 보상 크레딧을 자동 적립한다`() {
+        // 스펙 §4-3-7 가입 보상: 회원 최초 생성 시 서버가 자동 적립(별도 API 없음).
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"reward-new-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-new-sub")
+        val userId = social!!.userId
+        assertThat(creditWalletService.balanceOf(userId)).isGreaterThan(0)
+        val rewards = creditTransactionRepository.findAll()
+            .filter { it.userId == userId && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards).hasSize(1)
+        assertThat(rewards.first().idempotencyKey).isEqualTo("signup:$userId")
+    }
+
+    @Test
+    fun `같은 사용자가 다시 로그인해도 가입 보상은 한 번만 적립된다`() {
+        // 최초 생성만 보상한다. 재로그인(기존 사용자)·생성 재시도(멱등 키) 어느 쪽도 중복 적립하지 않는다.
+        repeat(2) {
+            restTestClient.post()
+                .uri("/api/v1/auth/login/google")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"idToken":"reward-repeat-sub"}""")
+                .exchange()
+                .expectStatus().isOk
+        }
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-repeat-sub")
+        val userId = social!!.userId
+        val rewards = creditTransactionRepository.findAll()
+            .filter { it.userId == userId && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards).hasSize(1)
     }
 
     @Test
