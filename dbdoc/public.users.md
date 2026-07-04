@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.social_accounts](public.social_accounts.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -35,6 +35,8 @@
 erDiagram
 
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.users" {
   bigint id
@@ -57,6 +59,23 @@ erDiagram
   timestamp_with_time_zone last_login_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.credit_wallets" {
+  bigint id
+  bigint user_id FK
+  bigint balance
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.credit_transactions" {
+  bigint id
+  bigint user_id FK
+  bigint amount
+  varchar_30_ reason
+  varchar_30_ ref_type
+  bigint ref_id
+  varchar_255_ idempotency_key
+  timestamp_with_time_zone created_at
 }
 ```
 
