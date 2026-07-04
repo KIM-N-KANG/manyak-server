@@ -26,13 +26,14 @@ import java.time.Instant
  * 영속성은 [GoogleAccountRegistrar] mock으로 대체하고(트랜잭션 경계는 그 빈이 가진다),
  * 토큰 발급은 [AuthTokenService] mock으로 호출 여부만 본다.
  *
- * - 기존 사용자: registrar.findExistingUser가 User를 주면 그대로 토큰을 발급한다(가입 보상 없음).
- * - 신규 사용자: 없으면 createUserAndAccount로 만들고, 가입 보상을 적립한 뒤 토큰을 발급한다.
- * - 동시 첫 로그인: create가 유니크 위반(DataIntegrityViolationException)이면 재조회로 상대가 만든 계정을 재사용한다(보상 없음).
+ * - 기존 사용자: registrar.findExistingUser가 User를 주면 그대로 토큰을 발급한다.
+ * - 신규 사용자: 없으면 createUserAndAccount로 만든다.
+ * - 동시 첫 로그인: create가 유니크 위반(DataIntegrityViolationException)이면 재조회로 상대가 만든 계정을 재사용한다.
  * - 검증 실패: verifier가 401을 던지면 전파하고 저장 부작용이 없다.
  *
- * 가입 보상(KNK-392, 스펙 §4-3-7): **신규 생성 경로에서만** signup:{userId} 멱등 키로 SIGNUP_REWARD를 적립한다.
- * 기존 사용자 재로그인은 다시 보상하지 않는다. 멱등성은 CreditWalletService가 키로 보장한다(여기선 호출 여부·인자만 고정).
+ * 가입 보상(KNK-392, 스펙 §4-3-7): **매 로그인마다** 해석된 User에 signup:{userId} 멱등 키로 SIGNUP_REWARD를 적립한다.
+ * 멱등성은 CreditWalletService가 키로 보장하므로(여기선 호출 여부·인자만 고정), 회원당 최대 1회만 실제 적립된다.
+ * 신규·기존·경합 재조회 어느 경로든 reward가 호출되며, 생성 시 유실된 보상도 다음 로그인에 자가 복구된다.
  */
 class GoogleLoginServiceTest {
 
@@ -62,8 +63,10 @@ class GoogleLoginServiceTest {
 
         verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant())
         verify(authTokenService).issueTokens(user)
-        // 기존 사용자 재로그인은 가입 보상을 다시 적립하지 않는다.
-        verifyNoInteractions(creditWalletService)
+        // 기존 사용자 재로그인도 reward를 호출한다(멱등 키로 실제 적립은 회원당 1회, 유실 자가 복구).
+        val reward = mockingDetails(creditWalletService).invocations.single { it.method.name == "reward" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(42L)
+        assertThat(reward.getArgument<String>(3)).isEqualTo("signup:42")
     }
 
     @Test
@@ -98,7 +101,7 @@ class GoogleLoginServiceTest {
     }
 
     @Test
-    fun `동시 첫 로그인 재조회로 기존 User를 재사용하면 가입 보상을 적립하지 않는다`() {
+    fun `동시 첫 로그인 재조회로 재사용한 User에도 멱등 키로 보상을 적립한다`() {
         val concurrentlyCreated = User(id = 100L, nickname = "상대가만듦")
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant()))
             .thenReturn(null)
@@ -108,8 +111,11 @@ class GoogleLoginServiceTest {
 
         serviceWith(fakeVerifier("sub")).login("dummy")
 
-        // create가 실패해 상대가 만든 계정을 재사용한 경우이므로, 이 요청은 보상하지 않는다.
-        verifyNoInteractions(creditWalletService)
+        // 경합으로 상대 계정을 재사용해도 해석된 User(100)에 signup:100 키로 reward를 시도한다.
+        // 상대 로그인이 이미 적립했다면 멱등 키가 중복을 막는다(실제 적립은 1회).
+        val reward = mockingDetails(creditWalletService).invocations.single { it.method.name == "reward" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(100L)
+        assertThat(reward.getArgument<String>(3)).isEqualTo("signup:100")
     }
 
     @Test
