@@ -46,6 +46,7 @@ class CreditWalletService(
         refId: Long? = null,
     ): RewardOutcome {
         require(amount > 0) { "적립액은 양수여야 합니다: $amount" }
+        // 빠른 경로: 이미 적립된 키면 락 없이 통과(완료 후 재시도의 흔한 경우).
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             return RewardOutcome(rewarded = false, balance = balanceOf(userId))
         }
@@ -53,6 +54,10 @@ class CreditWalletService(
         ensureWallet(userId)
         val wallet = walletRepository.findByUserIdForUpdate(userId)
             ?: error("지갑을 보장한 뒤 조회에 실패했습니다: userId=$userId")
+        // 락 획득 후 재확인: 같은 키 동시 요청이 락을 기다리는 사이 먼저 커밋했을 수 있다(중복 insert·유니크 위반 방지, 멱등 보장).
+        if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
+            return RewardOutcome(rewarded = false, balance = wallet.balance)
+        }
         transactionRepository.save(
             CreditTransaction(
                 userId = userId,
