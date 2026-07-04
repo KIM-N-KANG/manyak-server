@@ -148,6 +148,56 @@ class ChatTurnCreditIntegrationTests {
         assertThat(transactionRepository.findAll()).isEmpty()
     }
 
+    @Test
+    fun `회원 소유 채팅을 토큰 없이 이어쓰면 403이고 아무것도 저장·차감되지 않는다`() {
+        // 우회 차단(스펙 §4-5): owned 채팅에 토큰을 빼고(게스트로 위장) 이어써 무료 턴을 얻으려는 시도를 막는다.
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val owner = saveUser("소유회원")
+        creditWalletService.reward(owner.id, 10, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            // Authorization 헤더 없음 → @CurrentUserId == null.
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"몰래 이어쓴다."}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        // 스트림이 열리지 않아 턴이 저장되지 않고, 소유자 지갑도 차감되지 않는다.
+        val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(reloaded.currentTurn).isZero()
+        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(10)
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
+    @Test
+    fun `다른 회원의 소유 채팅을 이어쓰면 403이고 어느 쪽도 차감되지 않는다`() {
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val owner = saveUser("소유자A")
+        val intruder = saveUser("침입자B")
+        creditWalletService.reward(owner.id, 10, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        creditWalletService.reward(intruder.id, 10, CreditReason.SIGNUP_REWARD, "signup:${intruder.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", authHeaderFor(intruder))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"남의 채팅을 이어쓴다."}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        // 소유자·침입자 어느 쪽도 차감되지 않고 턴도 저장되지 않는다.
+        val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(reloaded.currentTurn).isZero()
+        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(10)
+        assertThat(creditWalletService.balanceOf(intruder.id)).isEqualTo(10)
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
     private fun saveUser(nickname: String): User =
         userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 

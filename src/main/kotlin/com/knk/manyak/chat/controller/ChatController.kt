@@ -179,6 +179,11 @@ class ChatController(
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
+                responseCode = "403",
+                description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원). 소유자만 이어쓸 수 있습니다.",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
                 content = [Content(schema = Schema(hidden = true))],

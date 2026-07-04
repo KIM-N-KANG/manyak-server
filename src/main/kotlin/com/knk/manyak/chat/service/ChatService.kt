@@ -272,6 +272,13 @@ class ChatService(
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
         val chat = resolveChat(chatId)
         val chatPk = chat.id
+        // 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓸 수 있다.
+        // 토큰 누락·만료(요청 userId == null)나 타 회원이 owned 채팅에 이어쓰면 403으로 막는다.
+        // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
+        // 게스트 채팅(chat.userId == null)은 익명 허용이며 차감이 없다(기존 동작 유지).
+        if (chat.userId != null && chat.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 이어쓸 권한이 없습니다.")
+        }
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyPublicId = story?.publicId?.toString().orEmpty()
@@ -279,6 +286,8 @@ class ChatService(
 
         // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
         // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다. 게스트(null)는 차감하지 않는다.
+        // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
+        // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
         if (userId != null) {
             creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
         }
@@ -307,7 +316,8 @@ class ChatService(
             futureRef.get()?.cancel(true)
         }
 
-        val future = CompletableFuture.runAsync({
+        val future = try {
+            CompletableFuture.runAsync({
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
             var succeededAiCallLogId: Long? = null
             try {
@@ -405,6 +415,20 @@ class ChatService(
                 emitter.complete()
             }
         }, chatSseExecutor)
+        } catch (rejected: Throwable) {
+            // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
+            // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
+            // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
+            refundChatTurn(userId, chatPk, refundKey, refundGate)
+            runCatching { emitter.completeWithError(rejected) }
+            structuredLogger.event(
+                "chat_turn_schedule_rejected",
+                "chat_id" to chatId,
+                "story_id" to storyPublicId,
+                "error" to (rejected.message ?: rejected::class.simpleName ?: "unknown"),
+            )
+            throw rejected
+        }
         futureRef.set(future)
 
         return emitter
