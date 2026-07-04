@@ -1,0 +1,106 @@
+### 회원 서재(내 콘텐츠 목록) API 수동 검증 — GET /api/v1/users/me/stories · /chats
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-447] 내 콘텐츠 목록(US-9-4):
+###   - GET /users/me/stories — 요청자 소유 스토리 카드(생성 최신순). 스키마는 POST /stories/batch 와 동일.
+###   - GET /users/me/chats   — 요청자 소유 채팅 카드(최근 활동순). 스키마는 POST /chats/batch 와 동일.
+###   - 소프트 삭제 제외, limit(기본 100, 최대 100). 인증 필수(anyRequest().authenticated()) → 토큰 없으면 401.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동: docker compose up -d
+###   - access 토큰: auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져 아래 {{accessToken}} 에 재사용됩니다.
+###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+###   - 서재에 항목이 보이려면, 그 계정 소유의 스토리·채팅이 있어야 합니다(로그인 후 제작하거나 auth-migrate.http 로 게스트 데이터를 이관).
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 내 스토리 목록 → 401
+GET {{baseUrl}}/api/v1/users/me/stories
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 내 스토리 목록은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (에러) 토큰 없이 내 채팅 목록 → 401
+GET {{baseUrl}}/api/v1/users/me/chats
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 내 채팅 목록은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. (해피 패스) 내 스토리 목록 → 200, 스토리 카드 배열(생성 최신순)
+GET {{baseUrl}}/api/v1/users/me/stories
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("내 스토리 목록은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답은 스토리 카드 배열이다", () => {
+        client.assert(Array.isArray(b), `배열이 아닙니다. actual=${JSON.stringify(b)}`);
+        if (b.length > 0) {
+            client.assert(typeof b[0].id === "string" && typeof b[0].title === "string",
+                `스토리 카드 필드(id, title)가 없습니다. actual=${JSON.stringify(b[0])}`);
+        }
+    });
+    client.test("생성 최신순으로 내림차순 정렬돼 있다", () => {
+        for (let i = 1; i < b.length; i++) {
+            client.assert(b[i - 1].createdAt >= b[i].createdAt,
+                `정렬이 최신순이 아닙니다. ${b[i - 1].createdAt} < ${b[i].createdAt}`);
+        }
+    });
+%}
+
+### 4. (해피 패스) 내 채팅 목록 → 200, 채팅 카드 배열(최근 활동순)
+GET {{baseUrl}}/api/v1/users/me/chats
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("내 채팅 목록은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답은 채팅 카드 배열이다", () => {
+        client.assert(Array.isArray(b), `배열이 아닙니다. actual=${JSON.stringify(b)}`);
+        if (b.length > 0) {
+            client.assert(typeof b[0].id === "string" && "storyTitle" in b[0] && "turnCount" in b[0],
+                `채팅 카드 필드(id, storyTitle, turnCount)가 없습니다. actual=${JSON.stringify(b[0])}`);
+        }
+    });
+    client.test("최근 활동순으로 내림차순 정렬돼 있다", () => {
+        for (let i = 1; i < b.length; i++) {
+            client.assert(b[i - 1].updatedAt >= b[i].updatedAt,
+                `정렬이 활동순이 아닙니다. ${b[i - 1].updatedAt} < ${b[i].updatedAt}`);
+        }
+    });
+%}
+
+### 5. (경계) limit 으로 개수 제한 → 200, 최대 limit 개
+# limit 은 최대 100. 100 초과로 요청해도 서버가 100으로 캡합니다.
+GET {{baseUrl}}/api/v1/users/me/stories?limit=2
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("limit 이하로 반환한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.length <= 2, `limit=2 를 초과했습니다. actual=${response.body.length}`);
+    });
+%}

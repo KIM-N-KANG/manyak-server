@@ -1,6 +1,7 @@
 package com.knk.manyak.chat.repository
 
 import com.knk.manyak.chat.entity.StoryChat
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -8,6 +9,9 @@ import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 interface StoryChatRepository : JpaRepository<StoryChat, Long> {
+
+    // KNK-447: 회원 서재(내 채팅 목록). 요청자 소유·미삭제만 최근 활동순(updatedAt)으로 조회한다. limit은 Pageable로 상한을 건다.
+    fun findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId: Long, pageable: Pageable): List<StoryChat>
     // 소프트 삭제된(deleted_at IS NOT NULL) 채팅은 조회에서 제외한다.
     fun findByPublicIdAndDeletedAtIsNull(publicId: UUID): StoryChat?
 
