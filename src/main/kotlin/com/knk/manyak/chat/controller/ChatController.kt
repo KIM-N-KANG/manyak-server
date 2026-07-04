@@ -7,6 +7,7 @@ import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.service.ChatService
+import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @Tag(name = "Chats", description = "채팅 API")
@@ -172,6 +174,11 @@ class ChatController(
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
+                responseCode = "402",
+                description = "크레딧 잔액 부족(회원). SSE를 열기 전 동기 JSON으로 응답합니다.",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
                 content = [Content(schema = Schema(hidden = true))],
@@ -186,6 +193,8 @@ class ChatController(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
         @Valid @RequestBody request: ContinueChatRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
         response: HttpServletResponse,
     ): SseEmitter {
         // SSE 본문은 UTF-8 한글을 포함한다. SseEmitter는 Content-Type을 charset 없는
@@ -194,6 +203,13 @@ class ChatController(
         // 디코딩해 한글이 깨진다. (세션 404는 아래 호출에서 동기로 던져지며, 에러 응답은
         // 메시지 컨버터가 application/json으로 Content-Type을 다시 덮어쓴다.)
         response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
-        return chatService.streamChatTurn(chatId = chatId, request = request)
+        return try {
+            chatService.streamChatTurn(chatId = chatId, request = request, userId = userId)
+        } catch (exception: InsufficientCreditException) {
+            // 회원 선차감은 streamChatTurn이 SseEmitter를 만들기 전에 동기로 수행하므로, 잔액 부족 예외는
+            // 스트림이 열리기 전에 이 요청 스레드로 전파된다. 여기서 402로 변환해 동기 HTTP 응답으로 돌려준다
+            // (스트림 안 error 이벤트가 아님, 스펙 §4-3-7). 공유 @ControllerAdvice를 추가하지 않고 컨트롤러에서 지역 변환한다.
+            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+        }
     }
 }
