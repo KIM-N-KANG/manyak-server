@@ -37,6 +37,7 @@ import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
@@ -112,19 +113,34 @@ class ChatService(
         // 잘못된 채팅 ID는 조회되지 않으므로 자연히 제외된다.
         val chats = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
             .sortedWith(compareByDescending<StoryChat> { it.updatedAt }.thenByDescending { it.id })
+        return toSummaryResponses(chats)
+    }
+
+    /**
+     * 회원 서재(KNK-447): 요청자가 소유한 채팅 카드를 최근 활동순(updatedAt)으로 반환한다. 소프트 삭제는 제외한다.
+     * 카드 스키마는 [getChatsByIds](/chats/batch)와 동일하다([toSummaryResponses]).
+     */
+    @Transactional(readOnly = true)
+    fun getMyChats(userId: Long, limit: Int): List<ChatSummaryResponse> =
+        toSummaryResponses(
+            storyChatRepository.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId, PageRequest.of(0, limit)),
+        )
+
+    /**
+     * 채팅 목록을 카드 응답으로 매핑한다. 스토리 제목·마지막 프리뷰를 각각 한 번의 배치 조회로 채운다(N+1 방지).
+     * 입력 순서를 그대로 보존하므로, 정렬은 호출부(요청 순서·최근 활동순)에서 결정한다.
+     */
+    private fun toSummaryResponses(chats: List<StoryChat>): List<ChatSummaryResponse> {
         if (chats.isEmpty()) {
             return emptyList()
         }
-
         // 응답에 스토리 공개 식별자(public_id)와 제목을 노출하기 위해 스토리를 한 번에 조회해 매핑한다.
         val storiesByStoryId = storyRepository.findAllById(chats.map { it.storyId })
             .associateBy { it.id }
-
         // 채팅별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
         val lastPreviewByChatId = storyMessageRepository
             .findLatestMessagesByChatIdsAndRole(chats.map { it.id }, MessageRole.ASSISTANT)
             .associate { it.chatId to it.content }
-
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
             ChatSummaryResponse(

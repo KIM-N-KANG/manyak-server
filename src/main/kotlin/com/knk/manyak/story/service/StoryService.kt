@@ -19,6 +19,7 @@ import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -59,6 +60,16 @@ class StoryService(
             .mapNotNull { storiesByPublicId[it] }
             .map { it.toSummaryResponse() }
     }
+
+    /**
+     * 회원 서재(KNK-447): 요청자가 소유한 스토리 카드를 생성 최신순으로 반환한다. 소프트 삭제는 제외한다.
+     * 카드 스키마는 [getStoriesByIds](/stories/batch)와 동일하다([Story.toSummaryResponse]).
+     */
+    @Transactional(readOnly = true)
+    fun getMyStories(userId: Long, limit: Int): List<StorySummaryResponse> =
+        storyRepository
+            .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, limit))
+            .map { it.toSummaryResponse() }
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String): StoryDetailResponse {

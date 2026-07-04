@@ -1,6 +1,7 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -8,6 +9,9 @@ import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
+
+    // KNK-447: 회원 서재(내 스토리 목록). 요청자 소유·미삭제만 생성 최신순으로 조회한다. limit은 Pageable로 상한을 건다.
+    fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId: Long, pageable: Pageable): List<Story>
     // 소프트 삭제된 스토리(deleted_at IS NOT NULL)는 조회·삭제 대상에서 제외한다.
     fun findByIdAndDeletedAtIsNull(id: Long): Story?
 
