@@ -27,4 +27,12 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Modifying
     @Query("UPDATE Story s SET s.userId = :userId WHERE s.publicId = :publicId AND s.userId IS NULL AND s.deletedAt IS NULL")
     fun claimByPublicId(@Param("publicId") publicId: UUID, @Param("userId") userId: Long): Int
+
+    /**
+     * public_id로 현재 소유자(user_id)를 조회한다. 클레임 실패(0건) 후 실제 소유자를 재확인하는 용도(동시 요청 멱등 판정).
+     *
+     * 엔티티 로드가 아닌 스칼라 조회라 영속성 컨텍스트 캐시를 우회해 DB의 최신 커밋 값을 읽는다.
+     */
+    @Query("SELECT s.userId FROM Story s WHERE s.publicId = :publicId")
+    fun findUserIdByPublicId(@Param("publicId") publicId: UUID): Long?
 }

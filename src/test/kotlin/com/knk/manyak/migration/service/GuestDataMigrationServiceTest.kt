@@ -6,12 +6,15 @@ import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyCollection
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -29,7 +32,10 @@ class GuestDataMigrationServiceTest {
 
     private val storyRepository: StoryRepository = mock(StoryRepository::class.java)
     private val storyChatRepository: StoryChatRepository = mock(StoryChatRepository::class.java)
-    private val service = GuestDataMigrationService(storyRepository, storyChatRepository)
+    private val storyCreationSessionRepository: StoryCreationSessionRepository =
+        mock(StoryCreationSessionRepository::class.java)
+    private val service =
+        GuestDataMigrationService(storyRepository, storyChatRepository, storyCreationSessionRepository)
 
     private val userId = 10L
     private val otherUserId = 99L
@@ -53,14 +59,28 @@ class GuestDataMigrationServiceTest {
     }
 
     @Test
-    fun `게스트 스토리라도 동시 선점되면(클레임 0건) CONFLICT다`() {
+    fun `게스트 스토리를 타인이 동시 선점하면(클레임 0건, 타인 소유) CONFLICT다`() {
         val pid = UUID.randomUUID()
         `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
         `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(0)
+        `when`(storyRepository.findUserIdByPublicId(pid)).thenReturn(otherUserId)
 
         val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
         assertThat(result.stories).containsExactly(MigrationResult(pid.toString(), MigrationStatus.CONFLICT))
+    }
+
+    @Test
+    fun `같은 유저의 동시 요청으로 선점됐으면(클레임 0건, 요청자 소유) ALREADY_OWNED다`() {
+        // 같은 유저가 동시에 두 번 마이그레이션 → 한쪽이 먼저 소유. 나머지는 CONFLICT가 아니라 멱등하게 ALREADY_OWNED여야 한다.
+        val pid = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(0)
+        `when`(storyRepository.findUserIdByPublicId(pid)).thenReturn(userId)
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        assertThat(result.stories).containsExactly(MigrationResult(pid.toString(), MigrationStatus.ALREADY_OWNED))
     }
 
     @Test
@@ -145,6 +165,28 @@ class GuestDataMigrationServiceTest {
 
         assertThat(result.stories).containsExactly(MigrationResult(storyPid.toString(), MigrationStatus.MIGRATED))
         assertThat(result.chats).containsExactly(MigrationResult(chatPid.toString(), MigrationStatus.MIGRATED))
+    }
+
+    @Test
+    fun `스토리를 MIGRATED하면 연결된 생성 세션도 클레임한다`() {
+        val pid = UUID.randomUUID()
+        val migratedStory = Story(id = 77L, publicId = pid, userId = null, title = "제목")
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(migratedStory))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
+
+        service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        verify(storyCreationSessionRepository).claimByStoryId(77L, userId)
+    }
+
+    @Test
+    fun `이미 소유했거나 충돌한 스토리는 세션을 클레임하지 않는다`() {
+        val pid = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, userId)))
+
+        service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
     }
 
     @Test

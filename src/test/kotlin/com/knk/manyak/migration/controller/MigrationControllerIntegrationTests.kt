@@ -9,6 +9,9 @@ import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCreationSession
+import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -49,6 +52,7 @@ class MigrationControllerIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
+    @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -142,6 +146,27 @@ class MigrationControllerIntegrationTests {
             .jsonPath("$.chats[0].status").isEqualTo("MIGRATED")
 
         assertThat(storyChatRepository.findByPublicIdAndDeletedAtIsNull(guestChat.publicId)!!.userId).isEqualTo(me.id)
+    }
+
+    @Test
+    fun `스토리를 이관하면 연결된 생성 세션 소유권도 함께 클레임한다`() {
+        val me = saveUser("me")
+        val guest = saveStory(ownerId = null)
+        val session = storyCreationSessionRepository.save(
+            StoryCreationSession(userId = null, storyId = guest.id, status = StoryCreationSessionStatus.STORY_CREATED),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":["${guest.publicId}"],"chatIds":[]}""")
+            .exchange()
+            .expectStatus().isOk
+
+        assertThat(storyRepository.findByPublicIdAndDeletedAtIsNull(guest.publicId)!!.userId).isEqualTo(me.id)
+        // 스토리와 함께 연결 세션도 요청자 소유로 바뀌어야 storyline 평가가 익명으로 열리지 않는다.
+        assertThat(storyCreationSessionRepository.findById(session.id).orElseThrow().userId).isEqualTo(me.id)
     }
 
     @Test
