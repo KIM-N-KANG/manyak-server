@@ -1,5 +1,8 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.credit.InsufficientCreditException
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
@@ -37,12 +40,14 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
+import java.util.UUID
 
 @Service
 class SimpleStoryCreationService(
@@ -58,6 +63,10 @@ class SimpleStoryCreationService(
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
+    private val creditWalletService: CreditWalletService,
+    // 간편 제작 1회 소모 크레딧(스펙 §4-3-7). 금액 미확정이라 설정으로 두고 기본값 10을 적용한다(application.yml 미기재).
+    @param:Value("\${manyak.credit.story-creation-cost:10}")
+    private val storyCreationCost: Long,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -66,6 +75,9 @@ class SimpleStoryCreationService(
         // AI 응답이 컬럼 길이를 초과해도 트랜잭션이 실패하지 않도록 방어적으로 자른다. (stories 컬럼 정의와 일치)
         const val STORY_TITLE_MAX_LENGTH = 100
         const val STORY_ONE_LINE_INTRO_MAX_LENGTH = 255
+
+        // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
+        const val STORY_CREDIT_REF_TYPE = "STORY"
     }
 
     @Transactional(readOnly = true)
@@ -234,6 +246,72 @@ class SimpleStoryCreationService(
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
+        // 소모(스펙 §4-3-7): 회원만 compile 시작 전에 선차감한다. 게스트(attributedUserId == null)는 차감하지 않는다.
+        // 잔액 부족은 동기 402로 변환하고(SSE 없이 즉시 실패), 이후 compile/저장이 실패하면 전액 환불한다.
+        // refId는 compile 전에 확정돼 있는 세션 id(=simpleCreationId)를 쓴다(story.id는 저장 성공 후에야 생긴다).
+        //
+        // 환불 멱등 키는 이 호출(=차감 시도)마다 새로 만든다(chargeAttemptId). deduct는 멱등 키가 없어 시도마다 실제 차감되므로,
+        // 첫 시도 실패 후 같은 simpleCreationId로 재시도(첫 시도가 STORY_CREATED에 못 이르러 허용됨)하면 두 번째 차감이 또 생긴다.
+        // 세션 단위 고정 키를 쓰면 두 번째 환불이 첫 환불 키와 충돌해 미적립(rewarded=false)되어 크레딧이 유실된다(Codex P1).
+        // 시도별 키면 각 시도의 차감·환불이 독립적으로 짝지어져 재시도에도 유실이 없다.
+        val chargeAttemptId = UUID.randomUUID().toString()
+        attributedUserId?.let { chargeStoryCreation(it, refId = session.id) }
+
+        return runWithRefundOnFailure(attributedUserId, refId = session.id, chargeAttemptId = chargeAttemptId) {
+            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, aiRequest)
+        }
+    }
+
+    /** 회원 선차감. 잔액 부족([InsufficientCreditException])은 동기 402로 변환한다. */
+    private fun chargeStoryCreation(userId: Long, refId: Long) {
+        try {
+            creditWalletService.deduct(
+                userId = userId,
+                amount = storyCreationCost,
+                reason = CreditReason.STORY_CREATION,
+                refType = STORY_CREDIT_REF_TYPE,
+                refId = refId,
+            )
+        } catch (exception: InsufficientCreditException) {
+            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+        }
+    }
+
+    /**
+     * [block]이 성공하면 선차감을 유지하고, 실패(예외)하면 회원에게 전액 환불한 뒤 원래 예외를 다시 던진다.
+     *
+     * 환불 멱등 키(`refund:story:{chargeAttemptId}`)는 차감 시도별로 유일하므로, 같은 세션을 재시도해 여러 번 차감돼도
+     * 각 차감이 자기 시도의 환불과만 짝지어진다(재시도 시 환불 유실 방지). 재시도 안전은 시도별 키가, 중복 실행 방지는
+     * 이 키의 유니크 제약이 함께 보장한다. 게스트([userId] null)는 선차감이 없으므로 환불도 하지 않는다.
+     */
+    private fun <T> runWithRefundOnFailure(userId: Long?, refId: Long, chargeAttemptId: String, block: () -> T): T {
+        try {
+            return block()
+        } catch (throwable: Throwable) {
+            userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
+            throw throwable
+        }
+    }
+
+    private fun refundStoryCreation(userId: Long, refId: Long, chargeAttemptId: String) {
+        creditWalletService.reward(
+            userId = userId,
+            amount = storyCreationCost,
+            reason = CreditReason.REFUND,
+            idempotencyKey = "refund:story:$chargeAttemptId",
+            refType = STORY_CREDIT_REF_TYPE,
+            refId = refId,
+        )
+    }
+
+    private fun compileAndPersist(
+        session: StoryCreationSession,
+        // finalize에서 이미 소유권을 반영해 확정한 귀속 사용자(익명 세션을 로그인 사용자가 claim한 경우 그 사용자). 게스트면 null.
+        attributedUserId: Long?,
+        selectedStoryline: StoryCreationStoryline,
+        genreTags: List<StoryCreationTag>,
+        aiRequest: AiStoryCompileRequest,
+    ): StoryCreationOutcome {
         val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORY_COMPLETION),

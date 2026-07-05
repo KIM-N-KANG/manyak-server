@@ -5,6 +5,18 @@
 # 올바른 예: export MANYAK_AI_BASE_URL=http://localhost:8000
 # 잘못된 예: export MANYAK_AI_BASE_URL=localhost:8000
 
+# [KNK-398] 간편 제작 크레딧 차감(스펙 §4-3-7 소모):
+#   - 회원(유효 토큰)만 compile 시작 전에 스토리 제작 크레딧 1회분(manyak.credit.story-creation-cost, 기본 10)을 선차감합니다.
+#   - compile/저장이 실패하면 전액 환불되어 순 잔액은 변하지 않습니다(REFUND 원장 행).
+#   - 잔액이 부족하면 compile 없이 동기 402(PAYMENT_REQUIRED)로 즉시 실패합니다.
+#   - 게스트(토큰 없음/무효 토큰)는 차감하지 않습니다(위 2·7번 익명 흐름은 크레딧과 무관하게 그대로 동작).
+#   - 402 재현(9번 섹션)에는 로그인 회원 토큰이 필요합니다. auth-login-google.http 5번으로 accessToken을 채우거나
+#     아래 @memberAccessToken에 직접 붙여넣으세요. 잔액은 그 회원 지갑이 비용(기본 10) 미만이어야 402가 납니다
+#     (지갑 적립 정책은 KNK-392 등 별도 티켓 소관이라 이 파일에서는 만들지 않습니다).
+
+# auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken이 이 값을 덮어씁니다.
+@memberAccessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
 ### -1. 백엔드 서버 상태 확인
 # 이 요청이 연결되지 않으면 백엔드가 8080 포트에서 실행 중이 아닙니다.
 GET {{baseUrl}}/actuator/health
@@ -338,5 +350,60 @@ Accept: application/json
 > {%
     client.test("이미 생성된 진행은 409다", () => {
         client.assert(response.status === 409, `409가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. [KNK-398] (크레딧) 회원 세션 생성 — 402 재현용 전용 세션
+# 회원 토큰으로 스토리라인을 생성하면 그 회원 소유 세션이 됩니다(다음 요청에서 같은 회원이 finalize해야 소유권 통과 후 차감 단계에 도달).
+# @memberAccessToken을 유효한 로그인 회원 토큰으로 채운 뒤, 1번(태그)도 먼저 실행해 태그 변수가 있어야 합니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Authorization: Bearer {{memberAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "selectedTagIds": [
+    {{genreTagId}},
+    {{protagonistTagId}},
+    {{supportingCharacterTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("회원 세션 생성 응답이 정상이다", () => {
+        client.assert(response.status === 201, `201 Created가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+
+    if (response.status === 201 && response.body.storylines && response.body.storylines[0]) {
+        client.global.set("creditCreationId", response.body.simpleCreationId);
+        client.global.set("creditStorylineId", response.body.storylines[0].id);
+    }
+%}
+
+### 9-1. [KNK-398] (크레딧) 잔액 부족 회원이 최종 생성하면 402
+# 9번을 먼저 실행하세요. 이 회원 지갑 잔액이 스토리 제작 비용(manyak.credit.story-creation-cost, 기본 10) 미만이면
+# compile 없이 동기 402로 실패합니다. 잔액이 충분하면 이 요청은 대신 201이 되고 비용만큼 차감됩니다(그 경우 402 재현 불가).
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{memberAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{creditCreationId}},
+  "storylineId": {{creditStorylineId}},
+  "additionalInfos": [
+    "주인공은 복수보다 진실을 택하는 신중한 성격이다."
+  ]
+}
+
+> {%
+    // 잔액 부족 전제에서만 402. 지갑이 충분히 충전돼 있으면 201(차감 성공)이 날 수 있어, 두 경우를 함께 안내한다.
+    client.test("잔액 부족 회원의 최종 생성은 402다", () => {
+        if (response.status === 201) {
+            client.log("지갑 잔액이 비용 이상이라 402가 아니라 201(차감 성공)입니다. 402 재현에는 잔액을 비용 미만으로 두세요.");
+        } else {
+            client.assert(response.status === 402, `402(또는 잔액 충분 시 201)가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        }
     });
 %}
