@@ -1,0 +1,47 @@
+### 크레딧 잔액 조회 API 수동 검증 — GET /api/v1/users/me/credits
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-87] 크레딧 잔액 조회:
+###   - 요청자의 현재 크레딧 잔액 {balance} 을 반환한다. 지갑이 없으면 0.
+###   - 인증 필수(anyRequest().authenticated()) → 토큰 없으면 401.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동: docker compose up -d
+###   - access 토큰: auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져 아래 {{accessToken}} 에 재사용됩니다.
+###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+###   - 잔액이 0보다 크려면 그 계정에 크레딧 적립이 있어야 합니다(가입 보상 KNK-392 등, 아직 미구현이면 0이 정상).
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 크레딧 조회 → 401
+GET {{baseUrl}}/api/v1/users/me/credits
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 크레딧 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (해피 패스) 크레딧 잔액 조회 → 200, {balance}
+GET {{baseUrl}}/api/v1/users/me/credits
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("크레딧 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.test("balance 가 0 이상의 숫자다", () => {
+        const b = response.body.balance;
+        client.assert(typeof b === "number" && b >= 0, `balance 가 0 이상의 숫자가 아닙니다. actual=${b}`);
+    });
+%}
