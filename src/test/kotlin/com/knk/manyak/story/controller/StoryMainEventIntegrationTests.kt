@@ -146,6 +146,22 @@ class StoryMainEventIntegrationTests {
     }
 
     @Test
+    fun `만료된 Authorization Bearer 헤더가 붙어도 조회·교체가 동작한다`() {
+        // 클라이언트가 로그아웃 후에도 stale access를 자동 첨부하는 시나리오. optional 인증 경로라 401이 나면 안 된다.
+        val storyId = seedStory()
+
+        restTestClient.get().uri("/api/v1/stories/$storyId/main-events")
+            .header("Authorization", "Bearer stale.access.token")
+            .exchange().expectStatus().isOk
+
+        restTestClient.put().uri("/api/v1/stories/$storyId/main-events")
+            .header("Authorization", "Bearer stale.access.token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"mainEvents":[${item("사건")}]}""")
+            .exchange().expectStatus().isOk
+    }
+
+    @Test
     fun `스토리 상세에 주요 사건이 포함된다`() {
         val storyId = seedStory()
         putMainEvents(storyId, item("상세 노출 사건")).expectStatus().isOk
