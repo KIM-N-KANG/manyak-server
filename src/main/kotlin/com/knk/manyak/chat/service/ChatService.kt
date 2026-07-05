@@ -311,6 +311,11 @@ class ChatService(
             // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
             // 아는 워커의 catch에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
             // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 catch에서 환불된다.
+            //
+            // 잔여 케이스(의도적 미처리): executor 백로그로 아직 큐에 있던 태스크가 여기 cancel(true)로 취소되면
+            // supplier(워커 본문)가 아예 실행되지 않아 워커 finally 환불도 돌지 않는다(선차감만 남고 저장 없음).
+            // executor 포화 + 큐 대기 중 타임아웃이 겹쳐야 하는 드문 경합이라, in-flight로 잠그지 않고 크레딧
+            // 대사 배치(스펙 §4-3-7 ai_call_logs 대사, KNK-448)가 이 "누락 환불"류를 사후 복구한다.
             futureRef.get()?.cancel(true)
         }
         emitter.onError {
