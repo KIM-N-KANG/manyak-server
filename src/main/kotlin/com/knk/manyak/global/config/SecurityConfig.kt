@@ -55,10 +55,9 @@ class SecurityConfig {
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}")).permitAll()
-                    // 주요 사건 조회·교체(KNK-418)는 다른 스토리 엔드포인트와 동일한 공개 식별자 기반 접근을 따른다.
-                    // 저작 인증(오너 한정)은 스토리 편집 전반에 인증이 붙는 일반 제작·수정(KNK-45) 시 함께 다룬다.
+                    // 주요 사건 조회(GET)는 다른 스토리 조회와 동일한 공개 조회다(KNK-418). 교체(PUT)는 permitAll에 넣지 않아
+                    // anyRequest().authenticated()로 보호한다 — 저작 데이터 변조를 막기 위해 인증 필수이며, 오너 검증은 서비스가 한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/main-events")).permitAll()
-                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/v1/stories/{storyId}/main-events")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple")).permitAll()
@@ -141,7 +140,6 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/main-events"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/v1/stories/{storyId}/main-events"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple"),

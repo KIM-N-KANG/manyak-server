@@ -16,8 +16,8 @@ import java.util.UUID
 /**
  * 주요 사건의 조회·교체 저장(스펙 §4-3-10, KNK-418). 저작(round-trip) 계약까지이며 런타임 판정 연동은 별도 범위다.
  *
- * 스토리 식별·소유권은 기존 스토리 엔드포인트 관례를 따른다: 공개 식별자(publicId)로 조회하고 없으면 404,
- * 저작 인증(오너 한정)은 일반 제작·수정 도입(KNK-45) 시 스토리 편집 전반과 함께 다룬다.
+ * 스토리는 공개 식별자(publicId)로 조회하고 없으면 404다. 조회(get)는 공개지만, 교체(replace)는 저작 데이터
+ * 변조를 막기 위해 **인증 필수 + 스토리 소유자만** 허용한다(비소유자·게스트 스토리는 403).
  */
 @Service
 class StoryMainEventService(
@@ -38,11 +38,20 @@ class StoryMainEventService(
      * 삭제를 먼저 flush해 DB에 반영한 뒤 insert한다. 개수 상한(10)·필드 검증은 요청 DTO에서 400으로 걸러진다.
      */
     @Transactional
-    fun replaceMainEvents(storyId: String, request: ReplaceMainEventsRequest): List<StoryMainEventResponse> {
+    fun replaceMainEvents(
+        storyId: String,
+        userId: Long,
+        request: ReplaceMainEventsRequest,
+    ): List<StoryMainEventResponse> {
         // 스토리 행을 락으로 잡아 같은 스토리의 동시 교체를 직렬화한다. 없으면 둘 다 delete 후 sort_order 0부터
         // 동시 insert하다 (story_id, sort_order) 유니크 위반으로 한쪽이 500이 된다. 락이면 뒤 요청이 앞을 기다려
         // 결정적으로 교체된다(마지막 요청이 최종 상태).
         val story = resolveStory(storyId, forUpdate = true)
+        // 저작 데이터 변조 방지(KNK-418 P1): 스토리 소유자만 교체할 수 있다. 소유자가 없는 게스트 스토리(userId=null)나
+        // 타인 소유는 403이다. 공개 UUID만 알면 누구나 저작 데이터를 덮어쓰던 노출을 막는다.
+        if (story.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 수정할 권한이 없습니다.")
+        }
         storyMainEventRepository.deleteByStoryId(story.id)
         storyMainEventRepository.flush()
 

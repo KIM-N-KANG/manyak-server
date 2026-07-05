@@ -1,5 +1,9 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.story.entity.Story
@@ -22,9 +26,9 @@ import java.util.UUID
 
 /**
  * GET·PUT /api/v1/stories/{storyId}/main-events 통합 검증(KNK-418, 스펙 §4-3-10).
- * - 교체 저장: 보낸 목록으로 전체 대체, 표시 순서는 배열 순서.
- * - 검증: 최대 10 초과·필드 누락 → 400. 스토리 없음 → 404.
- * - 노출: 스토리 상세(GET /stories/{id})에 mainEvents가 포함된다.
+ * - 조회(GET)는 공개. 교체(PUT)는 인증 필수 + 스토리 소유자만(비소유자·게스트 스토리 403, 무토큰 401).
+ * - 교체 계약: 전체 대체(배열 순서=표시 순서), 최대 10·필드·null 원소·래퍼 누락 검증(400), 스토리 없음 404.
+ * - 노출: 스토리 상세(GET /stories/{id})에 mainEvents 포함.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -41,6 +45,8 @@ class StoryMainEventIntegrationTests {
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyMainEventRepository: StoryMainEventRepository
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -48,119 +54,144 @@ class StoryMainEventIntegrationTests {
         databaseCleaner.cleanAll()
     }
 
-    private fun seedStory(): String =
-        storyRepository.save(Story(title = "테스트 스토리")).publicId.toString()
+    private fun saveUser(nickname: String = "작가"): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+
+    private fun tokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
+
+    private fun seedStory(ownerId: Long?): String =
+        storyRepository.save(Story(title = "테스트 스토리", userId = ownerId)).publicId.toString()
 
     private fun item(name: String, description: String = "설명", keySentence: String = "핵심 문장") =
         """{"name":"$name","description":"$description","keySentence":"$keySentence"}"""
 
-    private fun putMainEvents(storyId: String, itemsJson: String) =
+    private fun putBody(storyId: String, body: String, token: String?) =
         restTestClient.put()
             .uri("/api/v1/stories/$storyId/main-events")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"mainEvents":[$itemsJson]}""")
+            .let { if (token != null) it.header("Authorization", "Bearer $token") else it }
+            .body(body)
             .exchange()
+
+    private fun putMainEvents(storyId: String, itemsJson: String, token: String?) =
+        putBody(storyId, """{"mainEvents":[$itemsJson]}""", token)
 
     private fun getMainEvents(storyId: String) =
         restTestClient.get().uri("/api/v1/stories/$storyId/main-events").exchange()
 
+    // ── 조회(공개) ──
+
     @Test
-    fun `주요 사건이 없으면 빈 배열을 반환한다`() {
-        getMainEvents(seedStory())
+    fun `주요 사건이 없으면 빈 배열을 반환한다(공개 조회)`() {
+        getMainEvents(seedStory(ownerId = null))
             .expectStatus().isOk
             .expectBody().jsonPath("$.length()").isEqualTo(0)
     }
 
-    @Test
-    fun `교체 저장하면 배열 순서로 저장하고 반환한다`() {
-        val storyId = seedStory()
+    // ── 교체 인증·소유권 ──
 
-        putMainEvents(storyId, "${item("첫 사건")},${item("둘째 사건")}")
+    @Test
+    fun `소유자는 교체 저장할 수 있다`() {
+        val owner = saveUser()
+        val storyId = seedStory(ownerId = owner.id)
+
+        putMainEvents(storyId, "${item("첫 사건")},${item("둘째 사건")}", tokenFor(owner))
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.length()").isEqualTo(2)
             .jsonPath("$[0].name").isEqualTo("첫 사건")
             .jsonPath("$[0].sortOrder").isEqualTo(0)
-            .jsonPath("$[1].name").isEqualTo("둘째 사건")
             .jsonPath("$[1].sortOrder").isEqualTo(1)
 
-        getMainEvents(storyId)
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.length()").isEqualTo(2)
-            .jsonPath("$[0].name").isEqualTo("첫 사건")
+        getMainEvents(storyId).expectStatus().isOk.expectBody().jsonPath("$.length()").isEqualTo(2)
     }
 
     @Test
-    fun `다시 교체 저장하면 기존을 대체한다`() {
-        val storyId = seedStory()
-        putMainEvents(storyId, "${item("옛 사건")},${item("옛 사건2")}").expectStatus().isOk
-
-        putMainEvents(storyId, item("새 사건")).expectStatus().isOk
-
-        getMainEvents(storyId)
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.length()").isEqualTo(1)
-            .jsonPath("$[0].name").isEqualTo("새 사건")
-            .jsonPath("$[0].sortOrder").isEqualTo(0)
+    fun `토큰 없이 교체하면 401이다`() {
+        putMainEvents(seedStory(ownerId = saveUser().id), item("사건"), token = null)
+            .expectStatus().isUnauthorized
     }
 
     @Test
-    fun `빈 배열로 교체하면 전부 삭제된다`() {
-        val storyId = seedStory()
-        putMainEvents(storyId, item("사건")).expectStatus().isOk
+    fun `다른 사용자가 교체하면 403이고 기존이 보존된다`() {
+        val owner = saveUser("주인")
+        val other = saveUser("타인")
+        val storyId = seedStory(ownerId = owner.id)
+        putMainEvents(storyId, item("주인 사건"), tokenFor(owner)).expectStatus().isOk
 
-        restTestClient.put()
-            .uri("/api/v1/stories/$storyId/main-events")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"mainEvents":[]}""")
-            .exchange()
-            .expectStatus().isOk
+        putMainEvents(storyId, item("침입 사건"), tokenFor(other)).expectStatus().isForbidden
+
+        getMainEvents(storyId).expectStatus().isOk
+            .expectBody().jsonPath("$.length()").isEqualTo(1).jsonPath("$[0].name").isEqualTo("주인 사건")
+    }
+
+    @Test
+    fun `게스트 스토리(소유자 없음)는 교체할 수 없다(403)`() {
+        putMainEvents(seedStory(ownerId = null), item("사건"), tokenFor(saveUser()))
+            .expectStatus().isForbidden
+    }
+
+    @Test
+    fun `소유자가 다시 교체하면 기존을 대체한다`() {
+        val owner = saveUser()
+        val storyId = seedStory(ownerId = owner.id)
+        val token = tokenFor(owner)
+        putMainEvents(storyId, "${item("옛1")},${item("옛2")}", token).expectStatus().isOk
+
+        putMainEvents(storyId, item("새 사건"), token).expectStatus().isOk
+
+        getMainEvents(storyId).expectStatus().isOk.expectBody()
+            .jsonPath("$.length()").isEqualTo(1).jsonPath("$[0].name").isEqualTo("새 사건")
+    }
+
+    @Test
+    fun `소유자가 빈 배열로 교체하면 전부 삭제된다`() {
+        val owner = saveUser()
+        val storyId = seedStory(ownerId = owner.id)
+        val token = tokenFor(owner)
+        putMainEvents(storyId, item("사건"), token).expectStatus().isOk
+
+        putBody(storyId, """{"mainEvents":[]}""", token).expectStatus().isOk
             .expectBody().jsonPath("$.length()").isEqualTo(0)
 
         getMainEvents(storyId).expectStatus().isOk.expectBody().jsonPath("$.length()").isEqualTo(0)
     }
 
+    // ── 검증(400): 인증·소유는 통과, 본문만 문제 ──
+
     @Test
     fun `10개를 넘기면 400이다`() {
-        val storyId = seedStory()
+        val owner = saveUser()
         val eleven = (1..11).joinToString(",") { item("사건$it") }
-
-        putMainEvents(storyId, eleven).expectStatus().isBadRequest
+        putMainEvents(seedStory(ownerId = owner.id), eleven, tokenFor(owner)).expectStatus().isBadRequest
     }
 
     @Test
     fun `이름이 비어 있으면 400이다`() {
-        putMainEvents(seedStory(), item(name = "")).expectStatus().isBadRequest
+        val owner = saveUser()
+        putMainEvents(seedStory(ownerId = owner.id), item(name = ""), tokenFor(owner)).expectStatus().isBadRequest
     }
 
     @Test
     fun `mainEvents에 null 원소가 있으면 400이다`() {
-        // `[null]`은 null 원소가 담긴 리스트로 역직렬화된다. 원소 @NotNull 제약이 없으면 서비스까지 내려가 500이 난다.
-        restTestClient.put()
-            .uri("/api/v1/stories/${seedStory()}/main-events")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"mainEvents":[null]}""")
-            .exchange()
+        val owner = saveUser()
+        putBody(seedStory(ownerId = owner.id), """{"mainEvents":[null]}""", tokenFor(owner))
             .expectStatus().isBadRequest
     }
 
     @Test
     fun `mainEvents 필드가 누락되면 400이고 기존 사건을 지우지 않는다`() {
-        val storyId = seedStory()
-        putMainEvents(storyId, item("보존될 사건")).expectStatus().isOk
+        val owner = saveUser()
+        val storyId = seedStory(ownerId = owner.id)
+        val token = tokenFor(owner)
+        putMainEvents(storyId, item("보존될 사건"), token).expectStatus().isOk
 
-        // 래퍼 필드 누락(`{}`·오타)은 역직렬화 실패로 400이어야 한다. 명시적 빈 배열과 달리 전체 삭제가 되면 안 된다.
-        restTestClient.put()
-            .uri("/api/v1/stories/$storyId/main-events")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("{}")
-            .exchange()
-            .expectStatus().isBadRequest
+        putBody(storyId, "{}", token).expectStatus().isBadRequest
 
         getMainEvents(storyId).expectStatus().isOk.expectBody().jsonPath("$.length()").isEqualTo(1)
     }
+
+    // ── 스토리 없음 ──
 
     @Test
     fun `없는 스토리에 조회하면 404다`() {
@@ -168,30 +199,31 @@ class StoryMainEventIntegrationTests {
     }
 
     @Test
-    fun `없는 스토리에 교체 저장하면 404다`() {
-        putMainEvents(UUID.randomUUID().toString(), item("사건")).expectStatus().isNotFound
+    fun `없는 스토리에 교체하면 404다`() {
+        putMainEvents(UUID.randomUUID().toString(), item("사건"), tokenFor(saveUser())).expectStatus().isNotFound
     }
 
+    // ── stale Bearer: GET(공개)은 무시, PUT(인증)은 401 ──
+
     @Test
-    fun `만료된 Authorization Bearer 헤더가 붙어도 조회·교체가 동작한다`() {
-        // 클라이언트가 로그아웃 후에도 stale access를 자동 첨부하는 시나리오. optional 인증 경로라 401이 나면 안 된다.
-        val storyId = seedStory()
+    fun `조회는 만료 Bearer 헤더가 붙어도 동작하고 교체는 401이다`() {
+        val storyId = seedStory(ownerId = saveUser().id)
 
         restTestClient.get().uri("/api/v1/stories/$storyId/main-events")
             .header("Authorization", "Bearer stale.access.token")
             .exchange().expectStatus().isOk
 
-        restTestClient.put().uri("/api/v1/stories/$storyId/main-events")
-            .header("Authorization", "Bearer stale.access.token")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"mainEvents":[${item("사건")}]}""")
-            .exchange().expectStatus().isOk
+        putBody(storyId, """{"mainEvents":[${item("사건")}]}""", token = "stale.access.token")
+            .expectStatus().isUnauthorized
     }
+
+    // ── 상세 노출 ──
 
     @Test
     fun `스토리 상세에 주요 사건이 포함된다`() {
-        val storyId = seedStory()
-        putMainEvents(storyId, item("상세 노출 사건")).expectStatus().isOk
+        val owner = saveUser()
+        val storyId = seedStory(ownerId = owner.id)
+        putMainEvents(storyId, item("상세 노출 사건"), tokenFor(owner)).expectStatus().isOk
 
         restTestClient.get().uri("/api/v1/stories/$storyId").exchange()
             .expectStatus().isOk
@@ -199,7 +231,6 @@ class StoryMainEventIntegrationTests {
             .jsonPath("$.mainEvents.length()").isEqualTo(1)
             .jsonPath("$.mainEvents[0].name").isEqualTo("상세 노출 사건")
 
-        // 원장이 실제로 저장됐는지도 확인한다.
         val story = storyRepository.findByPublicIdAndDeletedAtIsNull(UUID.fromString(storyId))!!
         assertThat(storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)).hasSize(1)
     }
