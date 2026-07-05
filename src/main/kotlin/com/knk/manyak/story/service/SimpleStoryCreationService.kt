@@ -390,6 +390,9 @@ class SimpleStoryCreationService(
                         name = aiResponse.storyStartSettings.name,
                         prologue = aiResponse.storyStartSettings.prologue,
                         startSituation = aiResponse.storyStartSettings.startSituation,
+                        // 간편 제작 AI 응답엔 오프닝·첫 메시지가 없다(일반 모드 저작 필드, KNK-460).
+                        openingScene = null,
+                        firstAiMessage = null,
                     ),
                 ),
                 aiCallLogId = recorded.aiCallLogId,

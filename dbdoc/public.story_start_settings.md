@@ -11,6 +11,8 @@
 | start_situation | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| opening_scene | text |  | true |  |  |  |
+| first_ai_message | text |  | true |  |  |  |
 
 ## Constraints
 
@@ -45,6 +47,8 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  text opening_scene
+  text first_ai_message
 }
 "public.story_suggested_inputs" {
   bigint id

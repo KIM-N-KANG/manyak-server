@@ -77,6 +77,8 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  text opening_scene
+  text first_ai_message
 }
 "public.story_chats" {
   bigint id
