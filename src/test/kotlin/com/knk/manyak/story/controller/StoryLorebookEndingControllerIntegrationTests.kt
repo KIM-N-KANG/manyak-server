@@ -4,10 +4,12 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
+import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -34,6 +36,9 @@ class StoryLorebookEndingControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyLorebookRepository: StoryLorebookRepository
+
+    @Autowired
+    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
     private lateinit var storyEndingRepository: StoryEndingRepository
@@ -64,14 +69,15 @@ class StoryLorebookEndingControllerIntegrationTests {
     @Test
     fun `스토리 상세에 참조 로어북과 엔딩이 순서대로 포함된다`() {
         val story = storyRepository.save(Story(title = "잿빛 왕관", genre = "다크 판타지"))
+        val startSetting = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "시작 설정"))
         val worldGlossary = lorebookRepository.save(Lorebook(name = "왕국 용어집", genre = "다크 판타지", content = "아르덴: 몰락한 왕국"))
         val magicGlossary = lorebookRepository.save(Lorebook(name = "마법 용어집", genre = "다크 판타지", content = "계약술: 피로 맺는 마법"))
         // 삽입 역순으로 저장해 sort_order 정렬을 검증한다.
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = magicGlossary, sortOrder = 2))
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = worldGlossary, sortOrder = 1))
-        storyEndingRepository.save(StoryEnding(story = story, title = "배드 엔딩", content = "왕국은 무너진다", sortOrder = 2))
+        storyEndingRepository.save(StoryEnding(startSetting = startSetting, title = "배드 엔딩", content = "왕국은 무너진다", sortOrder = 2))
         storyEndingRepository.save(
-            StoryEnding(story = story, title = "해피 엔딩", content = "왕좌를 되찾는다", conditionText = "신뢰도 100 이상", sortOrder = 1),
+            StoryEnding(startSetting = startSetting, title = "해피 엔딩", content = "왕좌를 되찾는다", conditionText = "신뢰도 100 이상", sortOrder = 1),
         )
 
         restTestClient.get()

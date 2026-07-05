@@ -14,7 +14,7 @@ import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 
 /**
- * 스토리 엔딩(스토리 소유 1:N). 도달 조건은 자유 텍스트로 저장만 하며 발동 로직은 이번 범위 밖이다.
+ * 스토리 엔딩(시작 설정 소유 1:N, KNK-419). 도달 조건은 자유 텍스트로 저장만 하며 발동 로직은 이번 범위 밖이다.
  */
 @Entity
 @Table(
@@ -22,7 +22,7 @@ import java.time.Instant
     uniqueConstraints = [
         UniqueConstraint(
             name = "uq_story_endings_order",
-            columnNames = ["story_id", "sort_order"],
+            columnNames = ["start_setting_id", "sort_order"],
         ),
     ],
 )
@@ -32,8 +32,8 @@ class StoryEnding(
     val id: Long = 0,
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "story_id", nullable = false)
-    val story: Story,
+    @JoinColumn(name = "start_setting_id", nullable = false)
+    val startSetting: StoryStartSetting,
 
     @Column(nullable = false, length = 100)
     val title: String,

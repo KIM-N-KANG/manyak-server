@@ -5,7 +5,6 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_endings_id_seq'::regclass) | false |  |  |  |
-| story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | title | varchar(100) |  | false |  |  |  |
 | content | text |  | false |  |  |  |
 | condition_text | text |  | true |  |  |  |
@@ -13,33 +12,34 @@
 | enabled | boolean | true | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| start_setting_id | bigint |  | false |  | [public.story_start_settings](public.story_start_settings.md) |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_story_endings_order | CHECK | CHECK ((sort_order > 0)) |
-| story_endings_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
+| fk_story_endings_start_setting | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE |
 | story_endings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_endings_order | UNIQUE | UNIQUE (story_id, sort_order) |
+| uq_story_endings_order | UNIQUE | UNIQUE (start_setting_id, sort_order) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | story_endings_pkey | CREATE UNIQUE INDEX story_endings_pkey ON public.story_endings USING btree (id) |
-| uq_story_endings_order | CREATE UNIQUE INDEX uq_story_endings_order ON public.story_endings USING btree (story_id, sort_order) |
+| uq_story_endings_order | CREATE UNIQUE INDEX uq_story_endings_order ON public.story_endings USING btree (start_setting_id, sort_order) |
+| idx_story_endings_start_setting | CREATE INDEX idx_story_endings_start_setting ON public.story_endings USING btree (start_setting_id) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
-"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 
 "public.story_endings" {
   bigint id
-  bigint story_id FK
   varchar_100_ title
   text content
   text condition_text
@@ -47,18 +47,16 @@ erDiagram
   boolean enabled
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint start_setting_id FK
 }
-"public.stories" {
+"public.story_start_settings" {
   bigint id
-  bigint user_id
-  varchar_100_ title
-  varchar_255_ one_line_intro
-  text description
-  varchar_255_ genre
+  bigint story_id FK
+  varchar_100_ name
+  text prologue
+  text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
-  timestamp_with_time_zone deleted_at
-  uuid public_id
 }
 ```
 
