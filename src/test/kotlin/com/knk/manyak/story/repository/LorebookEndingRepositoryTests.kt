@@ -34,6 +34,9 @@ class LorebookEndingRepositoryTests {
     private lateinit var storyEndingRepository: StoryEndingRepository
 
     @Autowired
+    private lateinit var storyMainEventRepository: StoryMainEventRepository
+
+    @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
@@ -53,6 +56,7 @@ class LorebookEndingRepositoryTests {
         storySettingRepository.deleteAllInBatch()
         storyLorebookRepository.deleteAllInBatch()
         storyEndingRepository.deleteAllInBatch()
+        storyMainEventRepository.deleteAllInBatch()
         lorebookRepository.deleteAllInBatch()
         storyRepository.deleteAllInBatch()
     }

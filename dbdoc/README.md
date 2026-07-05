@@ -26,6 +26,7 @@
 | [public.story_endings](public.story_endings.md) | 9 |  | BASE TABLE |
 | [public.credit_wallets](public.credit_wallets.md) | 5 |  | BASE TABLE |
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
+| [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
 
 ## Relations
 
@@ -52,6 +53,7 @@ erDiagram
 "public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -270,6 +272,16 @@ erDiagram
   bigint ref_id
   varchar_255_ idempotency_key
   timestamp_with_time_zone created_at
+}
+"public.story_main_events" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text description
+  text key_sentence
+  smallint sort_order
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 
