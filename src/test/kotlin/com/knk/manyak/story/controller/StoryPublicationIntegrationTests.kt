@@ -73,7 +73,7 @@ class StoryPublicationIntegrationTests {
             .exchange()
 
     private fun patchVisibility(storyId: String, visibility: String, token: String?) =
-        restTestClient.patch().uri("/api/v1/stories/$storyId/visibility")
+        restTestClient.put().uri("/api/v1/stories/$storyId/visibility")
             .contentType(MediaType.APPLICATION_JSON)
             .let { if (token != null) it.header("Authorization", "Bearer $token") else it }
             .body("""{"visibility":"$visibility"}""")

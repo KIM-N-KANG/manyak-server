@@ -25,9 +25,9 @@ import org.springframework.http.HttpStatus
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -231,7 +231,7 @@ class StoryController(
             ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음", content = [Content(schema = Schema(hidden = true))]),
         ],
     )
-    @PatchMapping("/{storyId}/visibility")
+    @PutMapping("/{storyId}/visibility")
     fun updateVisibility(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,

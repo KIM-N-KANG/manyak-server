@@ -71,7 +71,7 @@ Authorization: Bearer {{accessToken}}
 %}
 
 ### 5. (해피) 비공개로 토글 → 200, PRIVATE
-PATCH {{baseUrl}}/api/v1/stories/{{draftId}}/visibility
+PUT {{baseUrl}}/api/v1/stories/{{draftId}}/visibility
 Content-Type: application/json
 Authorization: Bearer {{accessToken}}
 
@@ -95,7 +95,7 @@ Accept: application/json
 %}
 
 ### 7. (에러) 무토큰 발행/토글 → 401
-PATCH {{baseUrl}}/api/v1/stories/{{draftId}}/visibility
+PUT {{baseUrl}}/api/v1/stories/{{draftId}}/visibility
 Content-Type: application/json
 
 { "visibility": "PUBLIC" }
