@@ -50,7 +50,7 @@ erDiagram
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
-"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
@@ -247,7 +247,6 @@ erDiagram
 }
 "public.story_endings" {
   bigint id
-  bigint story_id FK
   varchar_100_ title
   text content
   text condition_text
@@ -255,6 +254,7 @@ erDiagram
   boolean enabled
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint start_setting_id FK
 }
 "public.credit_wallets" {
   bigint id
