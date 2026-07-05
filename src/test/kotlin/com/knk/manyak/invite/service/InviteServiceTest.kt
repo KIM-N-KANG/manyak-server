@@ -58,46 +58,44 @@ class InviteServiceTest {
     }
 
     @Test
-    fun `초대 코드가 없으면(미제출) 적립하지 않는다`() {
-        service.rewardInviteSignup(null, newUserId = 9L)
-
+    fun `초대 코드가 없으면(미제출) 초대자를 해석하지 않는다`() {
+        assertThat(service.resolveInviterId(null)).isNull()
         verifyNoInteractions(creditWalletService)
     }
 
     @Test
-    fun `초대 코드가 공백뿐이면 적립하지 않는다`() {
-        service.rewardInviteSignup("   ", newUserId = 9L)
-
-        verifyNoInteractions(creditWalletService)
+    fun `초대 코드가 공백뿐이면 초대자를 해석하지 않는다`() {
+        assertThat(service.resolveInviterId("   ")).isNull()
+        verify(userRepository, never()).findByInviteCode(anyString())
     }
 
     @Test
-    fun `초대 코드가 어떤 사용자와도 매칭되지 않으면 적립하지 않는다`() {
+    fun `초대 코드가 어떤 사용자와도 매칭되지 않으면 null이다`() {
         `when`(userRepository.findByInviteCode("UNKNOWN")).thenReturn(null)
 
-        service.rewardInviteSignup("UNKNOWN", newUserId = 9L)
-
-        verifyNoInteractions(creditWalletService)
+        assertThat(service.resolveInviterId("UNKNOWN")).isNull()
     }
 
     @Test
-    fun `자기 자신의 코드면 적립하지 않는다`() {
-        val self = User(id = 9L, nickname = "본인", inviteCode = "SELF9999")
-        `when`(userRepository.findByInviteCode("SELF9999")).thenReturn(self)
-
-        service.rewardInviteSignup("SELF9999", newUserId = 9L)
-
-        verifyNoInteractions(creditWalletService)
-    }
-
-    @Test
-    fun `유효한 코드면 초대자와 피초대자 양쪽에 수혜자별 멱등 키로 적립한다`() {
+    fun `유효한 코드면 초대자 id를 해석한다(앞뒤 공백 무시)`() {
         val inviter = User(id = 5L, nickname = "초대자", inviteCode = "GOOD5555")
         `when`(userRepository.findByInviteCode("GOOD5555")).thenReturn(inviter)
 
-        service.rewardInviteSignup("GOOD5555", newUserId = 9L)
+        assertThat(service.resolveInviterId("  GOOD5555  ")).isEqualTo(5L)
+    }
 
-        // 앞선 코드로 초대자(5)·피초대자(9) 두 번 적립한다. Kotlin non-null 파라미터의 matcher NPE를 피하려
+    @Test
+    fun `초대자와 피초대자가 같으면 적립하지 않는다`() {
+        service.rewardInvitePair(inviterId = 9L, inviteeId = 9L)
+
+        verifyNoInteractions(creditWalletService)
+    }
+
+    @Test
+    fun `초대자와 피초대자 양쪽에 수혜자별 멱등 키로 적립한다`() {
+        service.rewardInvitePair(inviterId = 5L, inviteeId = 9L)
+
+        // 초대자(5)·피초대자(9) 두 번 적립한다. Kotlin non-null 파라미터의 matcher NPE를 피하려
         // 기록된 실제 호출 인자를 직접 읽는다(reward는 refType·refId 기본값까지 6개 인자로 기록됨).
         val rewards = mockingDetails(creditWalletService).invocations.filter { it.method.name == "reward" }
         assertThat(rewards).hasSize(2)

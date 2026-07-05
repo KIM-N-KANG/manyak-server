@@ -56,6 +56,9 @@ class GoogleLoginServiceTest {
     private fun anySocialUserInfo(): SocialUserInfo = any(SocialUserInfo::class.java) ?: SocialUserInfo("x")
     private fun anyInstant(): Instant = any(Instant::class.java) ?: Instant.EPOCH
 
+    // inviterUserId는 nullable(Long?)이라 null도 매칭해야 하므로 타입 없는 any()를 쓴다(any(Class)는 null 불일치).
+    private fun anyInviterId(): Long? = any()
+
     @Test
     fun `기존 사용자면 재사용해 토큰을 발급하고 새로 만들지 않는다`() {
         val user = User(id = 42L, nickname = "기존닉")
@@ -63,7 +66,7 @@ class GoogleLoginServiceTest {
 
         serviceWith(fakeVerifier("sub")).login("dummy")
 
-        verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant())
+        verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())
         verify(authTokenService).issueTokens(user)
         // 기존 사용자 재로그인도 reward를 호출한다(멱등 키로 실제 적립은 회원당 1회, 유실 자가 복구).
         val reward = mockingDetails(creditWalletService).invocations.single { it.method.name == "reward" }
@@ -75,11 +78,11 @@ class GoogleLoginServiceTest {
     fun `신규 사용자면 생성해 토큰을 발급한다`() {
         val created = User(id = 7L, nickname = "신규")
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
 
         serviceWith(fakeVerifier("sub")).login("dummy")
 
-        verify(registrar).createUserAndAccount(anySocialUserInfo(), anyInstant())
+        verify(registrar).createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())
         verify(authTokenService).issueTokens(created)
     }
 
@@ -87,7 +90,7 @@ class GoogleLoginServiceTest {
     fun `신규 사용자면 signup 멱등 키로 가입 보상을 적립한다`() {
         val created = User(id = 7L, nickname = "신규")
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
 
         serviceWith(fakeVerifier("sub")).login("dummy")
 
@@ -103,29 +106,49 @@ class GoogleLoginServiceTest {
     }
 
     @Test
-    fun `신규 사용자면 제출한 초대 코드로 초대 보상 적립을 위임한다`() {
-        val created = User(id = 7L, nickname = "신규")
+    fun `신규 사용자면 초대자를 해석해 생성에 넘기고 영속 관계로 적립한다`() {
+        // 초대자(5)를 코드로 해석해 생성 트랜잭션에 넘기고, 영속된 관계(inviterUserId=5)로 양쪽에 적립한다.
+        val created = User(id = 7L, nickname = "신규", inviterUserId = 5L)
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(inviteService.resolveInviterId("INVITE123")).thenReturn(5L)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
 
         serviceWith(fakeVerifier("sub")).login("dummy", "INVITE123")
 
-        // 생성된 userId와 제출 코드 그대로 InviteService에 위임한다(무시 판정은 InviteService의 책임).
-        val invocation = mockingDetails(inviteService).invocations
-            .single { it.method.name == "rewardInviteSignup" }
-        assertThat(invocation.getArgument<String?>(0)).isEqualTo("INVITE123")
-        assertThat(invocation.getArgument<Long>(1)).isEqualTo(7L)
+        // 해석한 초대자 id를 생성에 넘긴다(생성 트랜잭션에 원자적으로 영속).
+        val create = mockingDetails(registrar).invocations.single { it.method.name == "createUserAndAccount" }
+        assertThat(create.getArgument<Long>(2)).isEqualTo(5L)
+        // 영속 관계로 초대자(5)·피초대자(7) 양쪽에 적립을 위임한다.
+        val reward = mockingDetails(inviteService).invocations.single { it.method.name == "rewardInvitePair" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(5L)
+        assertThat(reward.getArgument<Long>(1)).isEqualTo(7L)
     }
 
     @Test
-    fun `기존 사용자면 초대 코드를 보내도 초대 보상을 위임하지 않는다`() {
-        val user = User(id = 42L, nickname = "기존닉")
+    fun `기존 사용자가 초대 관계 없이 로그인하면 초대 적립이 없다`() {
+        val user = User(id = 42L, nickname = "기존닉") // inviterUserId=null
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
 
         serviceWith(fakeVerifier("sub")).login("dummy", "INVITE123")
 
-        // "이미 가입된 계정의 코드 제출은 무시" — 신규 생성 경로가 아니면 InviteService를 아예 부르지 않는다.
+        // 기존 사용자 경로는 코드를 해석하지 않고(관계 세팅 없음), 영속 관계도 없어 초대 적립을 부르지 않는다.
+        // "이미 가입된 계정의 코드 제출은 무시"가 여기서 보장된다.
         verifyNoInteractions(inviteService)
+    }
+
+    @Test
+    fun `영속된 초대자 관계가 있으면 코드 없이 재로그인해도 멱등 재적립한다`() {
+        // 자가 복구: 계정에 초대자 관계(inviterUserId=5)가 남아 있으면 request에 코드가 없어도 매 로그인 재적립한다.
+        val user = User(id = 42L, nickname = "피초대자", inviterUserId = 5L)
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
+
+        serviceWith(fakeVerifier("sub")).login("dummy") // 코드 미제출
+
+        // 기존 사용자 경로라 새로 만들지 않고(관계 재해석도 없이), 영속 관계만으로 초대자(5)·피초대자(42)에 적립한다.
+        verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())
+        val reward = mockingDetails(inviteService).invocations.single { it.method.name == "rewardInvitePair" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(5L)
+        assertThat(reward.getArgument<Long>(1)).isEqualTo(42L)
     }
 
     @Test
@@ -134,7 +157,7 @@ class GoogleLoginServiceTest {
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant()))
             .thenReturn(null)
             .thenReturn(concurrentlyCreated)
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId()))
             .thenThrow(DataIntegrityViolationException("uq_social_accounts_provider_user"))
 
         serviceWith(fakeVerifier("sub")).login("dummy")
@@ -154,7 +177,7 @@ class GoogleLoginServiceTest {
             .thenReturn(null)
             .thenReturn(concurrentlyCreated)
         // create는 유니크 위반으로 실패한다.
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId()))
             .thenThrow(DataIntegrityViolationException("uq_social_accounts_provider_user"))
 
         serviceWith(fakeVerifier("sub")).login("dummy")
@@ -168,7 +191,7 @@ class GoogleLoginServiceTest {
     fun `create가 유니크 위반인데 재조회로도 못 찾으면 원 예외를 던진다`() {
         // 둘 다 못 찾고, create는 계속 실패하는 비정상 상태(데이터 정합성 문제). 삼키지 않고 드러낸다.
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
-        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId()))
             .thenThrow(DataIntegrityViolationException("boom"))
 
         assertThatThrownBy { serviceWith(fakeVerifier("sub")).login("dummy") }

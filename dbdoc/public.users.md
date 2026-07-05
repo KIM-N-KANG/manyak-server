@@ -14,6 +14,7 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
 | invite_code | varchar(16) |  | true |  |  |  |
+| inviter_user_id | bigint |  | true |  |  |  |
 
 ## Constraints
 
@@ -52,6 +53,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   varchar_16_ invite_code
+  bigint inviter_user_id
 }
 "public.social_accounts" {
   bigint id

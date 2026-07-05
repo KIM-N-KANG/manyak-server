@@ -1,5 +1,6 @@
 package com.knk.manyak.invite.controller
 
+import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
@@ -25,6 +26,7 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
 
 /**
  * POST /api/v1/auth/login/google 의 inviteCode 초대 보상 통합 검증(KNK-393, 스펙 §4-3-7).
@@ -129,5 +131,39 @@ class InviteRewardIntegrationTests {
         val inviteeId = userIdOf("nocode-sub")
         assertThat(inviteRewards(inviteeId)).isEmpty()
         assertThat(signupRewards(inviteeId)).hasSize(1)
+    }
+
+    @Test
+    fun `초대 보상이 유실됐어도 다음 로그인이 영속 관계로 자가 복구한다`() {
+        // 회귀 방지(Codex P2): 계정 생성 트랜잭션은 커밋됐으나(초대자 관계 포함) 보상 적립 전에 실패·크래시로
+        // 초대 보상이 유실된 상태를 직접 만든다(User+SocialAccount만 저장, 초대 원장 없음). 재로그인은
+        // findExistingUser 히트라 생성 경로를 안 타지만, 영속된 inviterUserId로 매 로그인 멱등 적립이 복구해야 한다.
+        val now = Instant.now()
+        val inviterId = seedInviter("HEAL5555")
+        val invitee = userRepository.save(
+            User(nickname = "보상유실피초대자", status = UserStatus.ACTIVE, inviterUserId = inviterId),
+        )
+        socialAccountRepository.save(
+            SocialAccount(
+                userId = invitee.id,
+                provider = SocialProvider.GOOGLE,
+                providerUserId = "heal-invitee-sub",
+                email = "invitee@example.com",
+                connectedAt = now,
+                lastLoginAt = now,
+            ),
+        )
+        // 사전 상태: 초대 보상이 유실돼 양쪽 원장이 비어 있다.
+        assertThat(inviteRewards(inviterId)).isEmpty()
+        assertThat(inviteRewards(invitee.id)).isEmpty()
+
+        // 코드 없이 재로그인해도(기존 사용자) 영속 관계로 초대 보상을 복구한다.
+        loginWith("heal-invitee-sub", null)
+
+        assertThat(inviteRewards(inviterId)).hasSize(1)
+        assertThat(inviteRewards(invitee.id)).hasSize(1)
+        assertThat(creditWalletService.balanceOf(inviterId)).isGreaterThan(0)
+        // 새 사용자를 만들지 않았다(기존 계정 재사용).
+        assertThat(userRepository.count()).isEqualTo(2)
     }
 }
