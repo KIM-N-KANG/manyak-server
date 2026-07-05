@@ -27,6 +27,9 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
      * [cutoff]보다 최신 charge가 있는 그룹은 제외한다(HAVING MAX): in-flight 차감/환불이 아직 끝나지 않았을 수 있어
      * 지금 대사하면 진행 중 턴을 성급히 환불할 수 있다. 그룹의 마지막 charge가 [cutoff] 이전이면 그 그룹의 모든
      * 차감은 이미 완료·환불·유실 중 하나로 확정됐으므로(정지 상태) 개수 대조가 정확하다.
+     *
+     * 환불 단위액은 `MIN(ABS(amount))`이다 — 균일 단가에선 실제 단가라 정확하고, 혼합 단가(드묾)에선 서버가
+     * 초과 환불하지 않도록 의도적으로 보수 편향한다(근거는 [StuckChargeGroup] 참고).
      */
     @Query(
         """
