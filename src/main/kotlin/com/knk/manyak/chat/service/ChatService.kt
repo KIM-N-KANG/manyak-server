@@ -24,6 +24,8 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.LengthBuckets
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -37,6 +39,7 @@ import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -47,6 +50,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 @Service
@@ -64,6 +68,10 @@ class ChatService(
     private val chatTurnPersister: ChatTurnPersister,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
+    private val creditWalletService: CreditWalletService,
+    // 채팅 턴 1회 소모량(스펙 §4-3-7). 금액은 미확정이라 설정값으로 두고 기본 1을 쓴다.
+    @param:Value("\${manyak.credit.chat-turn-cost:1}")
+    private val chatTurnCost: Long,
 ) {
 
     @Transactional
@@ -249,19 +257,46 @@ class ChatService(
      * 실제 토큰 스트리밍과 저장은 [chatSseExecutor] 위에서 비동기로 처리한다.
      * 스트리밍 동안에는 트랜잭션을 점유하지 않고, 저장은 completed 시점에 [ChatTurnPersister]가
      * 단일 트랜잭션으로 원자적으로 수행한다.
+     *
+     * 크레딧(스펙 §4-3-7 소모): 회원([userId] != null)이면 SSE를 열기 **전에** 동기로 1턴분을 선차감한다.
+     * 잔액이 부족하면 [com.knk.manyak.credit.InsufficientCreditException]이 여기서 동기로 던져져
+     * 컨트롤러가 스트림을 열기 전에 402로 변환한다(스트림 안 error 이벤트가 아님). 게스트는 차감하지 않는다.
+     * 턴이 completed 없이 끝나면(error·연결 끊김·미완료) 선차감분을 전액 환불한다(정확히 1회, 멱등 키로 이중 방어).
      */
     fun streamChatTurn(
         chatId: String,
         request: ContinueChatRequest,
+        userId: Long? = null,
     ): SseEmitter {
         // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
         val chat = resolveChat(chatId)
         val chatPk = chat.id
+        // 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓸 수 있다.
+        // 토큰 누락·만료(요청 userId == null)나 타 회원이 owned 채팅에 이어쓰면 403으로 막는다.
+        // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
+        // 게스트 채팅(chat.userId == null)은 익명 허용이며 차감이 없다(기존 동작 유지).
+        if (chat.userId != null && chat.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 이어쓸 권한이 없습니다.")
+        }
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyPublicId = story?.publicId?.toString().orEmpty()
         val aiRequest = assembleAiRequest(chat, story, request.userInput)
+
+        // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
+        // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다. 게스트(null)는 차감하지 않는다.
+        // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
+        // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
+        if (userId != null) {
+            creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
+        }
+        // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
+        // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persistTurn 성공 직후 세워, 이후 completed 전송 실패·연결
+        // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
+        val refundKey = "refund:chatturn:${UUID.randomUUID()}"
+        val refundGate = AtomicBoolean(false)
+        val persisted = AtomicBoolean(false)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -271,13 +306,24 @@ class ChatService(
             emitter.complete()
         }
         emitter.onCompletion {
+            // 정리만 한다. 환불은 여기서 하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
+            // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persistTurn을 성공시킬 수 있다
+            // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
+            // 아는 워커의 catch에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
+            // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 catch에서 환불된다.
+            //
+            // 잔여 케이스(의도적 미처리): executor 백로그로 아직 큐에 있던 태스크가 여기 cancel(true)로 취소되면
+            // supplier(워커 본문)가 아예 실행되지 않아 워커 finally 환불도 돌지 않는다(선차감만 남고 저장 없음).
+            // executor 포화 + 큐 대기 중 타임아웃이 겹쳐야 하는 드문 경합이라, in-flight로 잠그지 않고 크레딧
+            // 대사 배치(스펙 §4-3-7 ai_call_logs 대사, KNK-448)가 이 "누락 환불"류를 사후 복구한다.
             futureRef.get()?.cancel(true)
         }
         emitter.onError {
             futureRef.get()?.cancel(true)
         }
 
-        val future = CompletableFuture.runAsync({
+        val future = try {
+            CompletableFuture.runAsync({
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
             var succeededAiCallLogId: Long? = null
             try {
@@ -317,27 +363,30 @@ class ChatService(
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
-                val persisted = chatTurnPersister.persistTurn(
+                val persistedTurn = chatTurnPersister.persistTurn(
                     chatId = chatPk,
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                 )
-                Sentry.addBreadcrumb("chat turn persisted: turn=${persisted.turnNumber}", "db")
+                // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
+                // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
+                persisted.set(true)
+                Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                 // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
-                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persisted.turnNumber)
+                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
                 structuredLogger.event(
                     "user_message_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_number" to persisted.turnNumber,
+                    "turn_number" to persistedTurn.turnNumber,
                     "message_length_bucket" to LengthBuckets.of(request.userInput.length),
                 )
                 structuredLogger.event(
                     "ai_response_saved",
                     "chat_id" to chatId,
                     "story_id" to storyPublicId,
-                    "turn_number" to persisted.turnNumber,
+                    "turn_number" to persistedTurn.turnNumber,
                     "ai_call_log_id" to recorded.aiCallLogId,
                 )
                 emitter.send(
@@ -346,7 +395,7 @@ class ChatService(
                         .data(
                             ChatStreamCompletedEvent(
                                 chatId = chatId,
-                                turnId = persisted.turnId,
+                                turnId = persistedTurn.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
                             ),
@@ -354,23 +403,73 @@ class ChatService(
                 )
                 emitter.complete()
             } catch (exception: ChatTurnAiException) {
-                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다.
+                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 emitter.complete()
             } catch (exception: Exception) {
                 // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
-                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류)는 GlobalExceptionHandler를 거치지 않고
-                // 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
+                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류, completed 전송 실패)는 GlobalExceptionHandler를
+                // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
                 succeededAiCallLogId?.let {
                     captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
                 }
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
                 emitter.complete()
+            } finally {
+                // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,
+                // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
+                // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
+                if (!persisted.get()) {
+                    refundChatTurn(userId, chatPk, refundKey, refundGate)
+                }
             }
         }, chatSseExecutor)
+        } catch (rejected: Throwable) {
+            // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
+            // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
+            // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
+            refundChatTurn(userId, chatPk, refundKey, refundGate)
+            runCatching { emitter.completeWithError(rejected) }
+            structuredLogger.event(
+                "chat_turn_schedule_rejected",
+                "chat_id" to chatId,
+                "story_id" to storyPublicId,
+                "error" to (rejected.message ?: rejected::class.simpleName ?: "unknown"),
+            )
+            throw rejected
+        }
         futureRef.set(future)
 
         return emitter
+    }
+
+    /**
+     * 실패·미완료 턴의 선차감분을 환불한다. [userId]가 null(게스트)이면 아무것도 하지 않는다.
+     *
+     * [gate]로 최초 1회만 실행하고, [reward]의 멱등 키([refundKey])로 한 번 더 방어한다 — 즉시 환불(catch)과
+     * 안전망(onCompletion)이 겹쳐도 원장에 REFUND 행은 정확히 1건만 남는다. 환불 실패가 SSE 종료를 막지 않도록
+     * 예외는 삼키고 로그만 남긴다(선차감이 원장에 있어 사후 정산·재시도로 복구 가능).
+     */
+    private fun refundChatTurn(userId: Long?, chatPk: Long, refundKey: String, gate: AtomicBoolean) {
+        if (userId == null) return
+        if (!gate.compareAndSet(false, true)) return
+        try {
+            creditWalletService.reward(
+                userId = userId,
+                amount = chatTurnCost,
+                reason = CreditReason.REFUND,
+                idempotencyKey = refundKey,
+                refType = "CHAT",
+                refId = chatPk,
+            )
+        } catch (exception: Exception) {
+            structuredLogger.event(
+                "chat_turn_refund_failed",
+                "chat_pk" to chatPk,
+                "idempotency_key" to refundKey,
+                "error" to (exception.message ?: exception::class.simpleName ?: "unknown"),
+            )
+        }
     }
 
     /**
