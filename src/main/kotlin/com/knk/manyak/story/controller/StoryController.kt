@@ -1,8 +1,11 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
+import com.knk.manyak.story.dto.CreateStoryDraftRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryDraftResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Stories", description = "스토리 API")
 @Validated
@@ -33,6 +37,33 @@ import org.springframework.web.bind.annotation.RestController
 class StoryController(
     private val storyService: StoryService,
 ) {
+
+    @Operation(
+        summary = "일반 모드 초안 생성",
+        description = "빈 초안(status=DRAFT, visibility=PRIVATE) 스토리를 생성합니다. 인증 필수이며 생성자 소유가 됩니다. " +
+            "기본정보는 선택이며, 이후 세계관 등 각 탭이 부분 저장(자동저장)으로 채웁니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "201",
+                description = "생성 성공",
+                content = [Content(schema = Schema(implementation = StoryDraftResponse::class))],
+            ),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
+        ],
+    )
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping
+    fun createDraft(
+        @CurrentUserId userId: Long?,
+        @Valid @RequestBody(required = false) request: CreateStoryDraftRequest?,
+    ): StoryDraftResponse {
+        val ownerId = userId
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        return storyService.createDraft(ownerId, request ?: CreateStoryDraftRequest())
+    }
 
     @Operation(
         summary = "스토리 ID 목록으로 스토리 목록 조회",

@@ -9,7 +9,7 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 10 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 12 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
@@ -105,6 +105,8 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
 }
 "public.story_settings" {
   bigint id

@@ -1,22 +1,12 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
 import java.time.Instant
-
-@Schema(description = "스토리 공개 상태")
-enum class StoryVisibility {
-    PUBLIC,
-    PRIVATE,
-}
-
-@Schema(description = "스토리 등록 상태")
-enum class StoryStatus {
-    DRAFT,
-    PUBLISHED,
-}
 
 @Schema(description = "스토리 ID 목록 조회 요청")
 data class BatchStoryRequest(

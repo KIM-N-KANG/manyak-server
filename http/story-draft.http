@@ -1,0 +1,111 @@
+### 일반 모드 초안·세계관 저장 API 수동 검증 (KNK-401)
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### - POST /api/v1/stories                 : (인증 필수) 초안 생성(status=DRAFT, visibility=PRIVATE), 201 {id, status}
+### - PUT  /api/v1/stories/{id}/setting     : (인증·소유자) 세계관 저장(PATCH 의미: 보낸 필드만 갱신, 없으면 생성)
+### - GET  /api/v1/stories/{id}/setting     : (인증·소유자) 세계관 조회(아직 저장 전 필드는 null)
+### - 초안(DRAFT)·비공개(PRIVATE)는 공개 상세(GET /stories/{id})·목록(/batch)에서 제외된다(PUBLISHED∧PUBLIC만 노출).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동: docker compose up -d
+###   - access 토큰: auth-login-google.http 해피 패스 실행 시 전역 accessToken 이 채워집니다. 아니면 @accessToken 에 직접.
+###   - 실행 순서: 위에서부터. 2번이 draftId를 전역에 저장하고 이후 요청이 사용합니다.
+
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 무토큰 초안 생성 → 401
+POST {{baseUrl}}/api/v1/stories
+Content-Type: application/json
+
+{ "title": "내 초안" }
+
+> {%
+    client.test("무토큰 생성은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (해피) 초안 생성 → 201, DRAFT, id를 전역에 저장
+POST {{baseUrl}}/api/v1/stories
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "title": "잿빛 왕관", "genre": "다크 판타지" }
+
+> {%
+    client.test("초안 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.test("status는 DRAFT다", () => {
+        client.assert(response.body.status === "DRAFT", `DRAFT가 아닙니다. actual=${response.body.status}`);
+    });
+    client.global.set("draftId", response.body.id);
+%}
+
+### 3. (해피) 세계관 저장(PATCH) → 200, 값 왕복
+PUT {{baseUrl}}/api/v1/stories/{{draftId}}/setting
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "worldSetting": "몰락한 왕국 아르덴", "characterSetting": "주인공은 방랑 기사" }
+
+> {%
+    client.test("세계관 저장은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.worldSetting === "몰락한 왕국 아르덴", `worldSetting 왕복 실패. actual=${response.body.worldSetting}`);
+    });
+%}
+
+### 4. (해피) 부분 저장(PATCH: worldSetting만) → characterSetting은 유지
+PUT {{baseUrl}}/api/v1/stories/{{draftId}}/setting
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "worldSetting": "재건을 꿈꾸는 왕국" }
+
+> {%
+    client.test("부분 저장은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (해피) 세계관 조회 → worldSetting은 갱신, characterSetting은 유지(PATCH 확인)
+GET {{baseUrl}}/api/v1/stories/{{draftId}}/setting
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("worldSetting은 갱신, characterSetting은 유지된다", () => {
+        client.assert(response.body.worldSetting === "재건을 꿈꾸는 왕국", `worldSetting이 갱신되지 않았습니다. actual=${response.body.worldSetting}`);
+        client.assert(response.body.characterSetting === "주인공은 방랑 기사", `characterSetting이 유지되지 않았습니다. actual=${response.body.characterSetting}`);
+    });
+%}
+
+### 6. (에러) 무토큰 세계관 조회 → 401
+GET {{baseUrl}}/api/v1/stories/{{draftId}}/setting
+Accept: application/json
+
+> {%
+    client.test("무토큰 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 7. (노출) 초안(DRAFT)은 공개 상세 조회에서 404다
+GET {{baseUrl}}/api/v1/stories/{{draftId}}
+Accept: application/json
+
+> {%
+    client.test("초안은 공개 상세에서 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}

@@ -90,7 +90,7 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.hashtags.length()").isEqualTo(0)
             .jsonPath("$.chatCount").isEqualTo(0)
             .jsonPath("$.likeCount").isEqualTo(0)
-            .jsonPath("$.visibility").isEqualTo("PRIVATE")
+            .jsonPath("$.visibility").isEqualTo("PUBLIC")
             .jsonPath("$.status").isEqualTo("PUBLISHED")
     }
 
