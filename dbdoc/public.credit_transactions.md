@@ -30,6 +30,7 @@
 | credit_transactions_pkey | CREATE UNIQUE INDEX credit_transactions_pkey ON public.credit_transactions USING btree (id) |
 | uq_credit_transactions_idempotency | CREATE UNIQUE INDEX uq_credit_transactions_idempotency ON public.credit_transactions USING btree (idempotency_key) |
 | idx_credit_transactions_user | CREATE INDEX idx_credit_transactions_user ON public.credit_transactions USING btree (user_id) |
+| idx_credit_transactions_ref | CREATE INDEX idx_credit_transactions_ref ON public.credit_transactions USING btree (user_id, ref_type, ref_id) |
 
 ## Relations
 
