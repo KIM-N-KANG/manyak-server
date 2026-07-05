@@ -45,3 +45,35 @@ Accept: application/json
         client.assert(typeof b === "number" && b >= 0, `balance 가 0 이상의 숫자가 아닙니다. actual=${b}`);
     });
 %}
+
+### 3. (에러) 토큰 없이 출석체크 → 401
+POST {{baseUrl}}/api/v1/users/me/credits/attendance
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 출석체크는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (해피 패스/멱등) 출석체크 → 200, {rewarded, amount, balance}
+# KST 자정 기준 1일 1회. 오늘 처음이면 rewarded=true, 같은 날 다시 누르면 rewarded=false(멱등).
+# 아래를 연속 두 번 실행하면 1회차 rewarded=true → 2회차 rewarded=false 를 눈으로 확인할 수 있습니다.
+POST {{baseUrl}}/api/v1/users/me/credits/attendance
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("출석체크는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 {rewarded, amount, balance} 구조다", () => {
+        client.assert(typeof b.rewarded === "boolean", `rewarded 가 boolean 이 아닙니다. actual=${b.rewarded}`);
+        client.assert(typeof b.amount === "number" && b.amount >= 0, `amount 가 0 이상 숫자가 아닙니다. actual=${b.amount}`);
+        client.assert(typeof b.balance === "number" && b.balance >= 0, `balance 가 0 이상 숫자가 아닙니다. actual=${b.balance}`);
+    });
+    client.test("미지급(이미 받음)이면 amount 는 0 이다", () => {
+        client.assert(b.rewarded || b.amount === 0, `rewarded=false 인데 amount 가 0 이 아닙니다. actual=${b.amount}`);
+    });
+%}
