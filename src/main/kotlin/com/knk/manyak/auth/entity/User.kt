@@ -40,6 +40,16 @@ class User(
     @Column(name = "profile_thumbnail_base64", columnDefinition = "TEXT")
     var profileThumbnailBase64: String? = null,
 
+    // 사용자별 고유 초대 코드(스펙 §4-3-7). 최초 GET /users/me/invite 시 지연 발급하므로 그 전까지 null이다.
+    // unique: 코드로 초대자를 역해석하므로 전역 유일. null(미발급)은 유니크 충돌 대상이 아니다.
+    @Column(name = "invite_code", unique = true, length = 16)
+    var inviteCode: String? = null,
+
+    // 이 회원을 초대한 사용자(최초 가입 시 제출한 유효 초대 코드의 주인). 초대 없이 가입했으면 null.
+    // 계정 생성 트랜잭션에 함께 커밋해, 초대 보상 유실 시 매 로그인 멱등 재적립으로 자가 복구하는 근거로 쓴다.
+    @Column(name = "inviter_user_id")
+    val inviterUserId: Long? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: UserStatus = UserStatus.ACTIVE,

@@ -33,6 +33,14 @@ data class GoogleLoginRequest(
         example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
     )
     val idToken: String,
+
+    @field:Schema(
+        description = "초대 코드(선택). 최초 가입 시 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립한다. " +
+            "미해결·자기 코드·이미 가입된 계정의 제출은 오류 없이 무시된다.",
+        example = "Ab3Xk9Qz",
+        nullable = true,
+    )
+    val inviteCode: String? = null,
 )
 
 @Schema(description = "refresh 토큰 회전 요청")

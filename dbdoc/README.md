@@ -19,7 +19,7 @@
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
-| [public.users](public.users.md) | 9 |  | BASE TABLE |
+| [public.users](public.users.md) | 11 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
@@ -45,6 +45,7 @@ erDiagram
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
+"public.users" }o--o| "public.users" : "FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
@@ -211,6 +212,8 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  varchar_16_ invite_code
+  bigint inviter_user_id FK
 }
 "public.social_accounts" {
   bigint id

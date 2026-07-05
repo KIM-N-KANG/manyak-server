@@ -59,6 +59,8 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  varchar_16_ invite_code
+  bigint inviter_user_id FK
 }
 ```
 
