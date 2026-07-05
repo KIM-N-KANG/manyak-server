@@ -14,11 +14,15 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
+| status | varchar(20) | 'PUBLISHED'::character varying | false |  |  |  |
+| visibility | varchar(20) | 'PUBLIC'::character varying | false |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_stories_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying])::text[]))) |
+| ck_stories_visibility | CHECK | CHECK (((visibility)::text = ANY ((ARRAY['PUBLIC'::character varying, 'PRIVATE'::character varying])::text[]))) |
 | stories_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_stories_public_id | UNIQUE | UNIQUE (public_id) |
 
@@ -52,6 +56,8 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
 }
 "public.story_settings" {
   bigint id

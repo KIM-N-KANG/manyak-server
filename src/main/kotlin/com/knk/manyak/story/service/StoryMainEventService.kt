@@ -26,8 +26,12 @@ class StoryMainEventService(
 ) {
 
     @Transactional(readOnly = true)
-    fun getMainEvents(storyId: String): List<StoryMainEventResponse> {
+    fun getMainEvents(storyId: String, userId: Long?): List<StoryMainEventResponse> {
         val story = resolveStory(storyId)
+        // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 읽을 수 있다(KNK-401). 비공개 초안 저작 데이터 유출 방지.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
         return storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map { it.toMainEventResponse() }
     }
 

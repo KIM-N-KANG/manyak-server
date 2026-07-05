@@ -6,8 +6,8 @@
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_settings_id_seq'::regclass) | false |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
-| world_setting | text |  | false |  |  |  |
-| character_setting | text |  | false |  |  |  |
+| world_setting | text |  | true |  |  |  |
+| character_setting | text |  | true |  |  |  |
 | user_role_setting | text |  | true |  |  |  |
 | rule_setting | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
@@ -56,6 +56,8 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
 }
 ```
 

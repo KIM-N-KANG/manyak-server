@@ -80,6 +80,10 @@ class ChatService(
         // 이 한 번의 조회가 KNK-256(public_id 해석)과 KNK-257(삭제된 스토리로 채팅 생성 차단)을 함께 처리한다.
         // 형식 오류·미존재·삭제는 모두 404로 통일된다.
         val story = resolveStory(request.storyId)
+        // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 채팅을 시작할 수 있다(KNK-401). 비공개·초안은 소유자 외엔 404.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
         // 시작 설정은 내부 PK(story.id)로 조회한다.
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
 

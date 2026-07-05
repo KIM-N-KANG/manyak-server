@@ -1,13 +1,15 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.BatchStoryRequest
+import com.knk.manyak.story.dto.CreateStoryDraftRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryDraftResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
-import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -48,14 +50,16 @@ class StoryService(
     }
 
     @Transactional(readOnly = true)
-    fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
+    fun getStoriesByIds(request: BatchStoryRequest, userId: Long?): List<StorySummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.storyIds.mapNotNull { parsePublicIdOrNull(it) }.distinct()
         // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
         if (requestedPublicIds.isEmpty()) {
             return emptyList()
         }
+        // 공개 목록은 공개(PUBLISHED∧PUBLIC) 스토리만, 단 요청자가 소유자면 자신의 비공개·초안도 노출한다(KNK-401).
         val storiesByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
+            .filter { it.isReadableBy(userId) }
             .associateBy { it.publicId }
         // 요청 순서를 보존한다. 존재하지 않거나 삭제된 스토리는 자연히 제외된다.
         return requestedPublicIds
@@ -74,8 +78,13 @@ class StoryService(
             .map { it.toSummaryResponse() }
 
     @Transactional(readOnly = true)
-    fun getStoryDetail(storyId: String): StoryDetailResponse {
+    fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
         val story = resolveStory(storyId)
+        // 공개 상세 조회는 공개(PUBLISHED∧PUBLIC) 스토리만, 단 소유자는 자신의 비공개·초안도 볼 수 있다(KNK-401).
+        // 존재 노출 최소화를 위해 접근 불가면 존재하지 않는 것과 동일하게 404로 통일한다.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
@@ -113,8 +122,8 @@ class StoryService(
                 )
             },
             suggestedInputs = suggestedInputs,
-            visibility = StoryVisibility.PRIVATE,
-            status = StoryStatus.PUBLISHED,
+            visibility = story.visibility,
+            status = story.status,
             lorebooks = lorebooks,
             endings = endings,
             mainEvents = mainEvents,
@@ -131,6 +140,26 @@ class StoryService(
         val story = resolveStory(storyId)
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
+    }
+
+    /**
+     * 일반 모드 초안(draft) 스토리를 생성한다(KNK-401). 인증 사용자 소유로 status=DRAFT, visibility=PRIVATE로 만든다.
+     * 기본정보는 선택이며, 이후 세계관 등 각 탭이 부분 저장(자동저장)으로 채운다.
+     */
+    @Transactional
+    fun createDraft(userId: Long, request: CreateStoryDraftRequest): StoryDraftResponse {
+        val story = storyRepository.save(
+            Story(
+                userId = userId,
+                title = request.title ?: "",
+                oneLineIntro = request.oneLineIntro,
+                description = request.description,
+                genre = request.genre,
+                status = StoryStatus.DRAFT,
+                visibility = StoryVisibility.PRIVATE,
+            ),
+        )
+        return StoryDraftResponse(id = story.publicId.toString(), status = story.status)
     }
 
     /**
@@ -178,7 +207,7 @@ class StoryService(
             author = null,
             chatCount = 0,
             likeCount = 0,
-            status = StoryStatus.PUBLISHED,
+            status = this.status,
             createdAt = createdAt,
         )
 }
