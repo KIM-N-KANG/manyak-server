@@ -115,4 +115,45 @@ class CreditWalletService(
         wallet.balance -= amount
         return wallet.balance
     }
+
+    /**
+     * 대사 배치가 유실 환불을 사후 보정한다(스펙 §4-3-7, KNK-448). 한 그룹(userId, refType, refId)에 있어야 할
+     * 총 환불 수([targetRefundCount] = charge 수 − 완료 수)에 맞춰, 아직 모자란 만큼만 REFUND 행을 추가한다.
+     *
+     * 멱등·동시성: 지갑 행을 비관적 락으로 잡은 뒤 **현재 REFUND 수를 다시 세어** 부족분(`target − 현재`)만 발행한다.
+     * 재실행·동시 실행이 겹쳐도 락 안 재확인이 초과 환불을 막는다. 이미 충분하면(부족분 ≤ 0) 아무것도 하지 않는다.
+     * in-flight 환불이 [reward]로 유니크 키를 쓰는 것과 달리, 이 사후 환불의 멱등성은 이 재확인이 보장한다(키 없음).
+     *
+     * @return 이번에 추가한 REFUND 행 수(0이면 이미 충분).
+     */
+    @Transactional
+    fun reconcileRefunds(
+        userId: Long,
+        refType: String,
+        refId: Long,
+        unitAmount: Long,
+        targetRefundCount: Long,
+    ): Int {
+        require(unitAmount > 0) { "환불 단위액은 양수여야 합니다: $unitAmount" }
+        if (targetRefundCount <= 0) return 0
+        // 지갑이 없으면 차감된 적이 없다는 뜻이라 대사할 것도 없다.
+        val wallet = walletRepository.findByUserIdForUpdate(userId) ?: return 0
+        val currentRefunds = transactionRepository
+            .countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND)
+        val missing = targetRefundCount - currentRefunds
+        if (missing <= 0) return 0
+        repeat(missing.toInt()) {
+            transactionRepository.save(
+                CreditTransaction(
+                    userId = userId,
+                    amount = unitAmount,
+                    reason = CreditReason.REFUND,
+                    refType = refType,
+                    refId = refId,
+                ),
+            )
+            wallet.balance += unitAmount
+        }
+        return missing.toInt()
+    }
 }

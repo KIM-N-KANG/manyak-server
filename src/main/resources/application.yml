@@ -49,6 +49,16 @@ manyak:
     # 초대 공유 링크의 웹 베이스 URL. inviteUrl = base-url + "/" + inviteCode 로 만든다(GET /users/me/invite).
     # 운영은 env(MANYAK_INVITE_BASE_URL)로 웹 도메인을 주입한다. 미설정 시 기본값을 쓴다.
     base-url: ${MANYAK_INVITE_BASE_URL:https://manyak.app/invite}
+  credit:
+    reconciliation:
+      # 선차감 대사 배치 on/off(스펙 §4-3-7, KNK-448). 유실 환불을 사후 보정한다. 테스트 프로파일은 끈다.
+      enabled: ${MANYAK_CREDIT_RECONCILIATION_ENABLED:true}
+      # 실행 주기(ms, fixedDelay). 기본 15분.
+      interval-ms: ${MANYAK_CREDIT_RECONCILIATION_INTERVAL_MS:900000}
+      # 부팅 후 첫 실행까지 지연(ms). 기동 직후 부하를 피한다.
+      initial-delay-ms: ${MANYAK_CREDIT_RECONCILIATION_INITIAL_DELAY_MS:60000}
+      # 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제).
+      charge-age-threshold: ${MANYAK_CREDIT_RECONCILIATION_CHARGE_AGE_THRESHOLD:PT15M}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}

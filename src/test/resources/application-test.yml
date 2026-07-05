@@ -31,6 +31,10 @@ manyak:
       stub: true
   cors:
     allowed-origins: http://localhost:3000,http://192.168.0.12:3000
+  credit:
+    reconciliation:
+      # 테스트는 대사 배치 스케줄러를 끈다. 대사 로직은 CreditReconciliationIntegrationTests가 서비스를 직접 호출해 검증한다.
+      enabled: false
   slack:
     # 테스트는 외부로 절대 발송하지 않는다. 환경변수 오염까지 막는 최종 보장은 통합 테스트의 @DynamicPropertySource.
     feedback-webhook-url: ""
