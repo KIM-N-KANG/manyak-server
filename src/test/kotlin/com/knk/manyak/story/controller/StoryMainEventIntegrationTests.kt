@@ -136,6 +136,17 @@ class StoryMainEventIntegrationTests {
     }
 
     @Test
+    fun `mainEvents에 null 원소가 있으면 400이다`() {
+        // `[null]`은 null 원소가 담긴 리스트로 역직렬화된다. 원소 @NotNull 제약이 없으면 서비스까지 내려가 500이 난다.
+        restTestClient.put()
+            .uri("/api/v1/stories/${seedStory()}/main-events")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"mainEvents":[null]}""")
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    @Test
     fun `mainEvents 필드가 누락되면 400이고 기존 사건을 지우지 않는다`() {
         val storyId = seedStory()
         putMainEvents(storyId, item("보존될 사건")).expectStatus().isOk

@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 
 /** 주요 사건 개수 상한(스펙 §4-3-10, 스토리당 최대 10). */
@@ -21,7 +22,10 @@ data class ReplaceMainEventsRequest(
         schema = Schema(implementation = MainEventItem::class),
         arraySchema = Schema(description = "주요 사건 목록(최대 10). 빈 배열이면 전부 삭제된다. 배열 순서가 표시 순서가 된다."),
     )
-    val mainEvents: List<MainEventItem>,
+    // 원소 @NotNull: `[null]` 같은 본문은 null 원소가 담긴 리스트로 역직렬화되는데, @Valid는 non-null 항목에만
+    // 캐스케이드하므로 null이 그대로 replaceMainEvents까지 내려가 mapIndexed에서 500이 된다. 원소 non-null 제약으로
+    // 검증 단계에서 400으로 거른다.
+    val mainEvents: List<@NotNull MainEventItem>,
 )
 
 @Schema(description = "주요 사건 입력 항목")
