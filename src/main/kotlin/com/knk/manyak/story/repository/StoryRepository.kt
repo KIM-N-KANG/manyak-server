@@ -1,8 +1,10 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
+import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -20,6 +22,14 @@ interface StoryRepository : JpaRepository<Story, Long> {
     // KNK-256: API 외부 식별자(public_id) 기준 조회. 순차 PK 열거(IDOR) 차단.
     // 삭제된 스토리 제외라 KNK-257(삭제 스토리 채팅 생성 차단)도 이 조회로 함께 해결된다.
     fun findByPublicIdAndDeletedAtIsNull(publicId: UUID): Story?
+
+    /**
+     * 스토리 행을 비관적 쓰기 락으로 조회한다(KNK-418). 자식 리소스 전체 교체(주요 사건 교체 등)를 스토리 단위로
+     * 직렬화해, 동시 교체가 delete 후 같은 sort_order로 동시 insert하다 유니크 위반(500)이 나는 것을 막는다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Story s WHERE s.publicId = :publicId AND s.deletedAt IS NULL")
+    fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): Story?
 
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<Story>
 

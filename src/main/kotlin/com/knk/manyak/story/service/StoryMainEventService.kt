@@ -39,7 +39,10 @@ class StoryMainEventService(
      */
     @Transactional
     fun replaceMainEvents(storyId: String, request: ReplaceMainEventsRequest): List<StoryMainEventResponse> {
-        val story = resolveStory(storyId)
+        // 스토리 행을 락으로 잡아 같은 스토리의 동시 교체를 직렬화한다. 없으면 둘 다 delete 후 sort_order 0부터
+        // 동시 insert하다 (story_id, sort_order) 유니크 위반으로 한쪽이 500이 된다. 락이면 뒤 요청이 앞을 기다려
+        // 결정적으로 교체된다(마지막 요청이 최종 상태).
+        val story = resolveStory(storyId, forUpdate = true)
         storyMainEventRepository.deleteByStoryId(story.id)
         storyMainEventRepository.flush()
 
@@ -60,13 +63,17 @@ class StoryMainEventService(
      * 공개 식별자(UUID 문자열)로 스토리를 조회한다. 형식이 잘못됐거나 존재하지 않으면(삭제 포함) 404로 통일한다
      * (StoryService.resolveStory와 동일 규칙 — 존재 여부를 노출하지 않아 IDOR 차단).
      */
-    private fun resolveStory(publicId: String): Story {
+    private fun resolveStory(publicId: String, forUpdate: Boolean = false): Story {
         val parsed = try {
             UUID.fromString(publicId)
         } catch (_: IllegalArgumentException) {
             null
         } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-        return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        val story = if (forUpdate) {
+            storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
+        } else {
+            storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+        }
+        return story ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 }
