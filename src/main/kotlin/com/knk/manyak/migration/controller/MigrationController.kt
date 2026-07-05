@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Auth", description = "인증 API")
+@SecurityRequirement(name = "bearerAuth") // 게스트 데이터 마이그레이션은 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
 @RestController
 @RequestMapping("/api/v1/auth")
 class MigrationController(

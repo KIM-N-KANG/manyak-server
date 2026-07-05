@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Credits", description = "크레딧 API")
+@SecurityRequirement(name = "bearerAuth") // 크레딧 API는 인증 필수(스웨거 자물쇠·Authorize 대상). 스킴은 OpenApiConfig.SECURITY_SCHEME_NAME.
 @RestController
 @RequestMapping("/api/v1/users/me")
 class CreditController(
