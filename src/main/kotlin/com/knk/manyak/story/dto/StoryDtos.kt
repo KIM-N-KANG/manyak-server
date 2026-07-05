@@ -151,22 +151,25 @@ data class LorebookResponse(
     val content: String,
 )
 
-@Schema(description = "스토리 엔딩")
+@Schema(description = "스토리 엔딩(유형 없이 이름으로 식별). 표시 순서는 배열 순서를 따른다.")
 data class StoryEndingResponse(
-    @field:Schema(description = "엔딩 제목", example = "왕좌를 되찾다")
-    val title: String,
+    @field:Schema(description = "엔딩 이름", example = "왕좌를 되찾다")
+    val name: String,
 
-    @field:Schema(description = "엔딩 내용", example = "주인공은 잃어버린 왕좌를 되찾고 새 시대를 연다.")
-    val content: String,
+    @field:Schema(description = "도달 조건(최소 턴 수 + 달성 조건)")
+    val requirement: StoryEndingRequirementResponse,
 
-    @field:Schema(description = "도달 조건(자유 텍스트). 없을 수 있습니다.", example = "신뢰도 100 이상", nullable = true)
-    val conditionText: String?,
+    @field:Schema(description = "도달 시 엔딩 응답 생성을 위한 출력 가이드", example = "주인공이 왕좌에 오르는 대관식을 장엄하게 묘사한다.")
+    val epilogue: String,
+)
 
-    @field:Schema(description = "정렬 순서", example = "1")
-    val sortOrder: Int,
+@Schema(description = "엔딩 도달 조건(2파라미터). 최소 턴 수와 달성 조건을 모두 충족(AND)해야 도달한다.")
+data class StoryEndingRequirementResponse(
+    @field:Schema(description = "최소 턴 수(백엔드 결정적 판정)", example = "10")
+    val minTurns: Int,
 
-    @field:Schema(description = "활성화 여부", example = "true")
-    val enabled: Boolean,
+    @field:Schema(description = "달성 조건(자연어, AI 정성 판정). 목적·거쳐온 주요 사건을 한 문장에 서술한다.", example = "주인공이 반란군을 규합해 왕좌를 되찾는다.")
+    val achievementCondition: String,
 )
 
 @Schema(description = "로어북 카탈로그 목록 항목")
@@ -203,10 +206,4 @@ data class StoryStartSettingResponse(
 
     @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
     val startSituation: String?,
-
-    @field:Schema(description = "오프닝 장면. 아직 저작 전이면 null입니다.", nullable = true)
-    val openingScene: String?,
-
-    @field:Schema(description = "첫 AI 메시지. 아직 저작 전이면 null입니다.", nullable = true)
-    val firstAiMessage: String?,
 )

@@ -70,9 +70,12 @@ class Story(
         status == StoryStatus.PUBLISHED && visibility == StoryVisibility.PUBLIC
 
     /**
-     * 읽기 허용 여부: 공개 스토리이거나 요청자가 소유자이면 허용한다(비공개 초안은 소유자만 접근).
-     * 비회원(userId=null)은 공개 스토리만 읽을 수 있다.
+     * 읽기 허용 여부(KNK-464):
+     * - 공개(PUBLISHED∧PUBLIC) 스토리는 누구나 읽을 수 있다.
+     * - 소유자가 없는(게스트 제작) 스토리는 공개 식별자(UUID)를 아는 요청자면 읽을 수 있다. 서버에 게스트 식별
+     *   수단이 없어 소유권으로 가릴 수 없고, UUID 보유가 사실상 본인 서재·링크 보유를 뜻하기 때문이다(게스트 서재 유지).
+     * - 소유자가 있는 스토리는 비공개(PRIVATE)라도 소유자 본인만 읽을 수 있다.
      */
     fun isReadableBy(userId: Long?): Boolean =
-        isPubliclyVisible() || (userId != null && userId == this.userId)
+        isPubliclyVisible() || this.userId == null || (userId != null && userId == this.userId)
 }

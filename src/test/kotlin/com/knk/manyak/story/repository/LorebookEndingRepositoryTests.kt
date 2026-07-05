@@ -6,7 +6,6 @@ import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.entity.StoryStartSetting
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -120,30 +119,39 @@ class LorebookEndingRepositoryTests {
     }
 
     @Test
-    fun `스토리 엔딩을 sort_order 순으로 조회하고 기본값 enabled=true가 적용된다`() {
+    fun `활성 엔딩만 sort_order 순으로 조회하고 비활성(레거시) 엔딩은 제외한다`() {
         val story = newStory()
         val startSetting = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "시작 설정"))
-        storyEndingRepository.save(StoryEnding(startSetting = startSetting, title = "배드 엔딩", content = "몰락한다", sortOrder = 2))
         storyEndingRepository.save(
-            StoryEnding(startSetting = startSetting, title = "해피 엔딩", content = "왕좌에 오른다", conditionText = "신뢰도 100 이상", sortOrder = 1),
+            StoryEnding(startSetting = startSetting, name = "배드 엔딩", minTurns = 5, achievementCondition = "몰락한다", epilogue = "쓸쓸히 퇴장한다", sortOrder = 2),
+        )
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "해피 엔딩", minTurns = 10, achievementCondition = "왕좌를 되찾는다", epilogue = "대관식을 연다", sortOrder = 1),
+        )
+        // 비활성(레거시 보존) 엔딩은 활성 조회에서 제외된다(§4-3-10).
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "레거시", minTurns = 0, achievementCondition = "-", epilogue = "-", sortOrder = 3, enabled = false),
         )
 
-        val endings = storyEndingRepository.findByStartSettingIdOrderBySortOrderAsc(startSetting.id)
+        val endings = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
 
-        assertEquals(listOf("해피 엔딩", "배드 엔딩"), endings.map { it.title })
+        assertEquals(listOf("해피 엔딩", "배드 엔딩"), endings.map { it.name })
         assertTrue(endings.all { it.enabled })
-        assertEquals("신뢰도 100 이상", endings.first().conditionText)
-        assertNull(endings.last().conditionText)
+        assertEquals(10, endings.first().minTurns)
     }
 
     @Test
     fun `같은 시작 설정에 동일 sort_order 엔딩은 UNIQUE 제약으로 거부된다`() {
         val story = newStory()
         val startSetting = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "시작 설정"))
-        storyEndingRepository.saveAndFlush(StoryEnding(startSetting = startSetting, title = "A", content = "...", sortOrder = 1))
+        storyEndingRepository.saveAndFlush(
+            StoryEnding(startSetting = startSetting, name = "A", minTurns = 1, achievementCondition = "...", epilogue = "...", sortOrder = 1),
+        )
 
         assertThrows(DataIntegrityViolationException::class.java) {
-            storyEndingRepository.saveAndFlush(StoryEnding(startSetting = startSetting, title = "B", content = "...", sortOrder = 1))
+            storyEndingRepository.saveAndFlush(
+                StoryEnding(startSetting = startSetting, name = "B", minTurns = 1, achievementCondition = "...", epilogue = "...", sortOrder = 1),
+            )
         }
     }
 }

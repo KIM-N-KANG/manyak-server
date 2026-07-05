@@ -1,15 +1,11 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.story.dto.BatchStoryRequest
-import com.knk.manyak.story.dto.CreateStoryDraftRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
-import com.knk.manyak.story.dto.StoryDraftResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
-import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -95,9 +91,10 @@ class StoryService(
 
         val lorebooks = storyLorebookRepository.findByStoryIdOrderBySortOrderAscIdAsc(story.id)
             .map { it.toLorebookResponse() }
-        // 엔딩은 시작 설정(start_setting) 하위다(KNK-419). 시작 설정이 없으면 매달린 엔딩도 없으므로 빈 배열.
+        // 엔딩은 시작 설정(start_setting) 하위다. 시작 설정이 없으면 매달린 엔딩도 없으므로 빈 배열.
+        // 활성 엔딩만 노출한다(레거시 enabled=false 행 제외 — §4-3-10).
         val endings = startSetting
-            ?.let { storyEndingRepository.findByStartSettingIdOrderBySortOrderAsc(it.id) }
+            ?.let { storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(it.id) }
             ?.map { it.toEndingResponse() }
             ?: emptyList()
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
@@ -119,8 +116,6 @@ class StoryService(
                     name = it.name,
                     prologue = it.prologue,
                     startSituation = it.startSituation,
-                    openingScene = it.openingScene,
-                    firstAiMessage = it.firstAiMessage,
                 )
             },
             suggestedInputs = suggestedInputs,
@@ -142,26 +137,6 @@ class StoryService(
         val story = resolveStory(storyId)
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
-    }
-
-    /**
-     * 일반 모드 초안(draft) 스토리를 생성한다(KNK-401). 인증 사용자 소유로 status=DRAFT, visibility=PRIVATE로 만든다.
-     * 기본정보는 선택이며, 이후 세계관 등 각 탭이 부분 저장(자동저장)으로 채운다.
-     */
-    @Transactional
-    fun createDraft(userId: Long, request: CreateStoryDraftRequest): StoryDraftResponse {
-        val story = storyRepository.save(
-            Story(
-                userId = userId,
-                title = request.title ?: "",
-                oneLineIntro = request.oneLineIntro,
-                description = request.description,
-                genre = request.genre,
-                status = StoryStatus.DRAFT,
-                visibility = StoryVisibility.PRIVATE,
-            ),
-        )
-        return StoryDraftResponse(id = story.publicId.toString(), status = story.status)
     }
 
     /**

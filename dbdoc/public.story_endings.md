@@ -5,19 +5,24 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_endings_id_seq'::regclass) | false |  |  |  |
-| title | varchar(100) |  | false |  |  |  |
-| content | text |  | false |  |  |  |
+| title | varchar(100) |  | true |  |  |  |
+| content | text |  | true |  |  |  |
 | condition_text | text |  | true |  |  |  |
 | sort_order | smallint |  | false |  |  |  |
 | enabled | boolean | true | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | start_setting_id | bigint |  | false |  | [public.story_start_settings](public.story_start_settings.md) |  |
+| name | varchar(100) |  | true |  |  |  |
+| min_turns | integer |  | true |  |  |  |
+| achievement_condition | text |  | true |  |  |  |
+| epilogue | text |  | true |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_story_endings_min_turns | CHECK | CHECK (((min_turns IS NULL) OR (min_turns >= 0))) |
 | ck_story_endings_order | CHECK | CHECK ((sort_order > 0)) |
 | fk_story_endings_start_setting | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE |
 | story_endings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
@@ -48,6 +53,10 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   bigint start_setting_id FK
+  varchar_100_ name
+  integer min_turns
+  text achievement_condition
+  text epilogue
 }
 "public.story_start_settings" {
   bigint id
@@ -57,8 +66,6 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
-  text opening_scene
-  text first_ai_message
 }
 ```
 

@@ -31,6 +31,7 @@ import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
@@ -343,6 +344,8 @@ class SimpleStoryCreationService(
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,
                     genre = genre,
+                    // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
+                    visibility = StoryVisibility.PRIVATE,
                 ),
             )
             storySettingRepository.save(
@@ -390,9 +393,6 @@ class SimpleStoryCreationService(
                         name = aiResponse.storyStartSettings.name,
                         prologue = aiResponse.storyStartSettings.prologue,
                         startSituation = aiResponse.storyStartSettings.startSituation,
-                        // 간편 제작 AI 응답엔 오프닝·첫 메시지가 없다(일반 모드 저작 필드, KNK-460).
-                        openingScene = null,
-                        firstAiMessage = null,
                     ),
                 ),
                 aiCallLogId = recorded.aiCallLogId,
