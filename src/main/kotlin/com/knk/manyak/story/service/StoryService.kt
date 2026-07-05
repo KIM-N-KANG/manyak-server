@@ -119,6 +119,8 @@ class StoryService(
                     name = it.name,
                     prologue = it.prologue,
                     startSituation = it.startSituation,
+                    openingScene = it.openingScene,
+                    firstAiMessage = it.firstAiMessage,
                 )
             },
             suggestedInputs = suggestedInputs,

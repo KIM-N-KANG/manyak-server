@@ -203,4 +203,10 @@ data class StoryStartSettingResponse(
 
     @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
     val startSituation: String?,
+
+    @field:Schema(description = "오프닝 장면. 아직 저작 전이면 null입니다.", nullable = true)
+    val openingScene: String?,
+
+    @field:Schema(description = "첫 AI 메시지. 아직 저작 전이면 null입니다.", nullable = true)
+    val firstAiMessage: String?,
 )

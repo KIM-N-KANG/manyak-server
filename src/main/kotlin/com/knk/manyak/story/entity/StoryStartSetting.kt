@@ -23,14 +23,21 @@ class StoryStartSetting(
     @JoinColumn(name = "story_id", nullable = false, unique = true)
     val story: Story,
 
+    // 일반 모드 초안은 탭별로 부분 저장하므로 빈 값으로 시작할 수 있다(KNK-460). NOT NULL 컬럼이라 빈 문자열 기본값을 둔다.
     @Column(nullable = false, length = 100)
-    val name: String,
+    var name: String = "",
 
     @Column(columnDefinition = "TEXT")
-    val prologue: String? = null,
+    var prologue: String? = null,
 
     @Column(name = "start_situation", columnDefinition = "TEXT")
-    val startSituation: String? = null,
+    var startSituation: String? = null,
+
+    @Column(name = "opening_scene", columnDefinition = "TEXT")
+    var openingScene: String? = null,
+
+    @Column(name = "first_ai_message", columnDefinition = "TEXT")
+    var firstAiMessage: String? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
