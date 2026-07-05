@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -14,13 +14,14 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
 | invite_code | varchar(16) |  | true |  |  |  |
-| inviter_user_id | bigint |  | true |  |  |  |
+| inviter_user_id | bigint |  | true |  | [public.users](public.users.md) |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_users_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'SUSPENDED'::character varying, 'DELETED'::character varying])::text[]))) |
+| fk_users_inviter_user_id | FOREIGN KEY | FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL |
 | users_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_users_public_id | UNIQUE | UNIQUE (public_id) |
 | uq_users_invite_code | UNIQUE | UNIQUE (invite_code) |
@@ -38,6 +39,7 @@
 ```mermaid
 erDiagram
 
+"public.users" }o--o| "public.users" : "FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
@@ -53,7 +55,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   varchar_16_ invite_code
-  bigint inviter_user_id
+  bigint inviter_user_id FK
 }
 "public.social_accounts" {
   bigint id

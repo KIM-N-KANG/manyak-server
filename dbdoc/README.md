@@ -45,6 +45,7 @@ erDiagram
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
+"public.users" }o--o| "public.users" : "FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.lorebooks" : "FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE"
@@ -212,7 +213,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   varchar_16_ invite_code
-  bigint inviter_user_id
+  bigint inviter_user_id FK
 }
 "public.social_accounts" {
   bigint id
