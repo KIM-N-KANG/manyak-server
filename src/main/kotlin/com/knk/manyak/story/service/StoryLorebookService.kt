@@ -29,8 +29,12 @@ class StoryLorebookService(
 ) {
 
     @Transactional(readOnly = true)
-    fun getStoryLorebooks(storyId: String): List<LorebookResponse> {
+    fun getStoryLorebooks(storyId: String, userId: Long?): List<LorebookResponse> {
         val story = resolveStory(storyId)
+        // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 읽을 수 있다(KNK-401). 비공개 초안 참조 데이터 유출 방지.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
         return storyLorebookRepository.findByStoryIdOrderBySortOrderAscIdAsc(story.id).map { it.toLorebookResponse() }
     }
 

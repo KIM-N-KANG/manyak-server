@@ -51,7 +51,8 @@ class StoryLorebookController(
     fun getStoryLorebooks(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ): List<LorebookResponse> = storyLorebookService.getStoryLorebooks(storyId)
+        @CurrentUserId userId: Long?,
+    ): List<LorebookResponse> = storyLorebookService.getStoryLorebooks(storyId, userId)
 
     @Operation(
         summary = "스토리 참조 로어북 교체 저장",

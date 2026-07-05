@@ -51,7 +51,8 @@ class StoryMainEventController(
     fun getMainEvents(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ): List<StoryMainEventResponse> = storyMainEventService.getMainEvents(storyId)
+        @CurrentUserId userId: Long?,
+    ): List<StoryMainEventResponse> = storyMainEventService.getMainEvents(storyId, userId)
 
     @Operation(
         summary = "주요 사건 교체 저장",

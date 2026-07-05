@@ -51,7 +51,8 @@ class StoryEndingController(
     fun getEndings(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ): List<StoryEndingResponse> = storyEndingService.getEndings(storyId)
+        @CurrentUserId userId: Long?,
+    ): List<StoryEndingResponse> = storyEndingService.getEndings(storyId, userId)
 
     @Operation(
         summary = "엔딩 교체 저장",

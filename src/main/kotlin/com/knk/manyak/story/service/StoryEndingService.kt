@@ -29,8 +29,12 @@ class StoryEndingService(
 ) {
 
     @Transactional(readOnly = true)
-    fun getEndings(storyId: String): List<StoryEndingResponse> {
+    fun getEndings(storyId: String, userId: Long?): List<StoryEndingResponse> {
         val story = resolveStory(storyId)
+        // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 읽을 수 있다(KNK-401). 비공개 초안 저작 데이터 유출 방지.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
         // 시작 설정이 없으면 매달린 엔딩도 있을 수 없으므로 빈 배열이다(조회는 관대하게).
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
             ?: return emptyList()

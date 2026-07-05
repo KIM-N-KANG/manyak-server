@@ -95,7 +95,8 @@ class StoryController(
     @PostMapping("/batch")
     fun getStoriesByIds(
         @Valid @RequestBody request: BatchStoryRequest,
-    ): List<StorySummaryResponse> = storyService.getStoriesByIds(request)
+        @CurrentUserId userId: Long?,
+    ): List<StorySummaryResponse> = storyService.getStoriesByIds(request, userId)
 
     @Operation(
         summary = "로어북 카탈로그 조회",
@@ -146,7 +147,8 @@ class StoryController(
     fun getStoryDetail(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ): StoryDetailResponse = storyService.getStoryDetail(storyId)
+        @CurrentUserId userId: Long?,
+    ): StoryDetailResponse = storyService.getStoryDetail(storyId, userId)
 
     @Operation(
         summary = "스토리 삭제 (소프트 삭제)",

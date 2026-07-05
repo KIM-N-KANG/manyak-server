@@ -84,6 +84,11 @@ class StoryDraftSettingIntegrationTests {
             .let { if (token != null) it.header("Authorization", "Bearer $token") else it }
             .exchange()
 
+    private fun getDetail(storyId: String, token: String?) =
+        restTestClient.get().uri("/api/v1/stories/$storyId")
+            .let { if (token != null) it.header("Authorization", "Bearer $token") else it }
+            .exchange()
+
     // ── 초안 생성 ──
 
     @Test
@@ -207,5 +212,41 @@ class StoryDraftSettingIntegrationTests {
             .expectBody()
             .jsonPath("$.length()").isEqualTo(1)
             .jsonPath("$[0].id").isEqualTo(published)
+    }
+
+    // ── 소유자는 자기 비공개 스토리를 읽을 수 있다(공개 or 소유자) ──
+
+    @Test
+    fun `소유자는 자기 초안 상세를 볼 수 있고 비회원·타인은 404다`() {
+        val owner = saveUser("주인")
+        val other = saveUser("타인")
+        val id = seedStory(owner.id, StoryStatus.DRAFT, StoryVisibility.PRIVATE).publicId.toString()
+
+        getDetail(id, tokenFor(owner)).expectStatus().isOk
+        getDetail(id, tokenFor(other)).expectStatus().isNotFound
+        getDetail(id, token = null).expectStatus().isNotFound
+    }
+
+    @Test
+    fun `비공개 초안의 주요 사건 읽기는 소유자 200, 비회원 404다(유출 차단)`() {
+        val owner = saveUser()
+        val id = seedStory(owner.id, StoryStatus.DRAFT, StoryVisibility.PRIVATE).publicId.toString()
+
+        restTestClient.get().uri("/api/v1/stories/$id/main-events")
+            .header("Authorization", "Bearer ${tokenFor(owner)}")
+            .exchange().expectStatus().isOk
+        restTestClient.get().uri("/api/v1/stories/$id/main-events")
+            .exchange().expectStatus().isNotFound
+    }
+
+    @Test
+    fun `비공개 초안으로는 비회원이 채팅을 시작할 수 없다(404)`() {
+        val owner = saveUser()
+        val id = seedStory(owner.id, StoryStatus.DRAFT, StoryVisibility.PRIVATE).publicId.toString()
+
+        restTestClient.post().uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"$id"}""")
+            .exchange().expectStatus().isNotFound
     }
 }

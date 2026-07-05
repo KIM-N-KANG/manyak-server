@@ -50,16 +50,16 @@ class StoryService(
     }
 
     @Transactional(readOnly = true)
-    fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
+    fun getStoriesByIds(request: BatchStoryRequest, userId: Long?): List<StorySummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.storyIds.mapNotNull { parsePublicIdOrNull(it) }.distinct()
         // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
         if (requestedPublicIds.isEmpty()) {
             return emptyList()
         }
-        // 공개 목록도 PUBLISHED이면서 PUBLIC인 스토리만 노출한다(KNK-401). 초안·비공개는 제외된다.
+        // 공개 목록은 공개(PUBLISHED∧PUBLIC) 스토리만, 단 요청자가 소유자면 자신의 비공개·초안도 노출한다(KNK-401).
         val storiesByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
-            .filter { it.isPubliclyVisible() }
+            .filter { it.isReadableBy(userId) }
             .associateBy { it.publicId }
         // 요청 순서를 보존한다. 존재하지 않거나 삭제된 스토리는 자연히 제외된다.
         return requestedPublicIds
@@ -78,10 +78,11 @@ class StoryService(
             .map { it.toSummaryResponse() }
 
     @Transactional(readOnly = true)
-    fun getStoryDetail(storyId: String): StoryDetailResponse {
+    fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
         val story = resolveStory(storyId)
-        // 공개 상세 조회는 PUBLISHED이면서 PUBLIC인 스토리만 노출한다(KNK-401). 초안·비공개는 소유자만 저작 API로 접근한다.
-        if (!story.isPubliclyVisible()) {
+        // 공개 상세 조회는 공개(PUBLISHED∧PUBLIC) 스토리만, 단 소유자는 자신의 비공개·초안도 볼 수 있다(KNK-401).
+        // 존재 노출 최소화를 위해 접근 불가면 존재하지 않는 것과 동일하게 404로 통일한다.
+        if (!story.isReadableBy(userId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         }
 
@@ -196,10 +197,6 @@ class StoryService(
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
-
-    // 공개 조회 노출 조건: 발행(PUBLISHED)이면서 공개(PUBLIC). 초안·비공개는 제외한다(KNK-401).
-    private fun Story.isPubliclyVisible(): Boolean =
-        status == StoryStatus.PUBLISHED && visibility == StoryVisibility.PUBLIC
 
     private fun Story.toSummaryResponse(): StorySummaryResponse =
         StorySummaryResponse(
