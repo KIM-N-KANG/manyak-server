@@ -2,7 +2,7 @@
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ###
 ### - POST  /api/v1/stories/{id}/publish     : (인증·소유자) 초안(DRAFT)→PUBLISHED 발행 + 공개 범위 지정. 제목 필수(400), 이미 발행 409.
-### - PATCH /api/v1/stories/{id}/visibility   : (인증·소유자) 공개↔비공개 토글(공개 피드 노출 제어).
+### - PUT   /api/v1/stories/{id}/visibility   : (인증·소유자) 공개↔비공개 토글(공개 피드 노출 제어).
 ### - 효과: 발행 PUBLIC → 비회원 상세 200, 발행/토글 PRIVATE → 비회원 404.
 ###
 ### 사전 준비:
