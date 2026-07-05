@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -86,6 +87,7 @@ class AuthController(
             ),
         ],
     )
+    @SecurityRequirement(name = "bearerAuth") // /me만 인증 필수(login·refresh·logout은 공개). 스킴은 OpenApiConfig.SECURITY_SCHEME_NAME.
     @GetMapping("/me")
     fun me(
         @AuthenticationPrincipal jwt: Jwt,

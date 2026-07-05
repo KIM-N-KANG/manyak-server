@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
@@ -26,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException
  * 카드 스키마는 각각 `POST /stories/batch`·`POST /chats/batch`(MVP 로컬 조회)와 동일하다.
  */
 @Tag(name = "Users", description = "회원 API")
+@SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
 @RestController
 @RequestMapping("/api/v1/users/me")
 class UserContentController(
