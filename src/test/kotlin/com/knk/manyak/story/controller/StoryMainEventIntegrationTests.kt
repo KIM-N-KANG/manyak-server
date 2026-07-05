@@ -136,6 +136,22 @@ class StoryMainEventIntegrationTests {
     }
 
     @Test
+    fun `mainEvents 필드가 누락되면 400이고 기존 사건을 지우지 않는다`() {
+        val storyId = seedStory()
+        putMainEvents(storyId, item("보존될 사건")).expectStatus().isOk
+
+        // 래퍼 필드 누락(`{}`·오타)은 역직렬화 실패로 400이어야 한다. 명시적 빈 배열과 달리 전체 삭제가 되면 안 된다.
+        restTestClient.put()
+            .uri("/api/v1/stories/$storyId/main-events")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("{}")
+            .exchange()
+            .expectStatus().isBadRequest
+
+        getMainEvents(storyId).expectStatus().isOk.expectBody().jsonPath("$.length()").isEqualTo(1)
+    }
+
+    @Test
     fun `없는 스토리에 조회하면 404다`() {
         getMainEvents(UUID.randomUUID().toString()).expectStatus().isNotFound
     }
