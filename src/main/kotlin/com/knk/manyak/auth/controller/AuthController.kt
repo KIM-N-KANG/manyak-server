@@ -39,6 +39,8 @@ class AuthController(
     @Operation(
         summary = "Google 로그인",
         description = "Google ID 토큰을 검증해 사용자를 find-or-create하고 access+refresh 토큰을 발급합니다. " +
+            "선택 필드 inviteCode를 최초 가입과 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립합니다" +
+            "(미해결·자기 코드·이미 가입된 계정의 제출은 무시). " +
             "토큰이 유효하지 않으면(서명·만료·issuer·audience 불일치) 401, 본문이 올바르지 않으면 400으로 응답합니다.",
     )
     @ApiResponses(
@@ -63,7 +65,7 @@ class AuthController(
     @PostMapping("/login/google")
     fun loginWithGoogle(
         @Valid @RequestBody request: GoogleLoginRequest,
-    ): TokenResponse = googleLoginService.login(request.idToken)
+    ): TokenResponse = googleLoginService.login(request.idToken, request.inviteCode)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",

@@ -40,6 +40,11 @@ class User(
     @Column(name = "profile_thumbnail_base64", columnDefinition = "TEXT")
     var profileThumbnailBase64: String? = null,
 
+    // 사용자별 고유 초대 코드(스펙 §4-3-7). 최초 GET /users/me/invite 시 지연 발급하므로 그 전까지 null이다.
+    // unique: 코드로 초대자를 역해석하므로 전역 유일. null(미발급)은 유니크 충돌 대상이 아니다.
+    @Column(name = "invite_code", unique = true, length = 16)
+    var inviteCode: String? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: UserStatus = UserStatus.ACTIVE,

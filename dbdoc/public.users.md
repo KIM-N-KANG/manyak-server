@@ -13,6 +13,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
+| invite_code | varchar(16) |  | true |  |  |  |
 
 ## Constraints
 
@@ -21,6 +22,7 @@
 | ck_users_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'SUSPENDED'::character varying, 'DELETED'::character varying])::text[]))) |
 | users_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_users_public_id | UNIQUE | UNIQUE (public_id) |
+| uq_users_invite_code | UNIQUE | UNIQUE (invite_code) |
 
 ## Indexes
 
@@ -28,6 +30,7 @@
 | ---- | ---------- |
 | users_pkey | CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id) |
 | uq_users_public_id | CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id) |
+| uq_users_invite_code | CREATE UNIQUE INDEX uq_users_invite_code ON public.users USING btree (invite_code) |
 
 ## Relations
 
@@ -48,6 +51,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  varchar_16_ invite_code
 }
 "public.social_accounts" {
   bigint id

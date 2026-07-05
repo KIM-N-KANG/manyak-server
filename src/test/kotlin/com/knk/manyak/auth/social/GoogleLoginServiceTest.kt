@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.invite.service.InviteService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -40,11 +41,12 @@ class GoogleLoginServiceTest {
     private val registrar: GoogleAccountRegistrar = mock(GoogleAccountRegistrar::class.java)
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
+    private val inviteService: InviteService = mock(InviteService::class.java)
 
     private val signupReward = 100L
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
-        GoogleLoginService(verifier, registrar, authTokenService, creditWalletService, signupReward)
+        GoogleLoginService(verifier, registrar, authTokenService, creditWalletService, inviteService, signupReward)
 
     private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
         GoogleIdTokenVerifier { SocialUserInfo(providerUserId = providerUserId) }
@@ -98,6 +100,32 @@ class GoogleLoginServiceTest {
         assertThat(invocation.getArgument<Long>(1)).isEqualTo(signupReward)
         assertThat(invocation.getArgument<CreditReason>(2)).isEqualTo(CreditReason.SIGNUP_REWARD)
         assertThat(invocation.getArgument<String>(3)).isEqualTo("signup:7")
+    }
+
+    @Test
+    fun `신규 사용자면 제출한 초대 코드로 초대 보상 적립을 위임한다`() {
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", "INVITE123")
+
+        // 생성된 userId와 제출 코드 그대로 InviteService에 위임한다(무시 판정은 InviteService의 책임).
+        val invocation = mockingDetails(inviteService).invocations
+            .single { it.method.name == "rewardInviteSignup" }
+        assertThat(invocation.getArgument<String?>(0)).isEqualTo("INVITE123")
+        assertThat(invocation.getArgument<Long>(1)).isEqualTo(7L)
+    }
+
+    @Test
+    fun `기존 사용자면 초대 코드를 보내도 초대 보상을 위임하지 않는다`() {
+        val user = User(id = 42L, nickname = "기존닉")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", "INVITE123")
+
+        // "이미 가입된 계정의 코드 제출은 무시" — 신규 생성 경로가 아니면 InviteService를 아예 부르지 않는다.
+        verifyNoInteractions(inviteService)
     }
 
     @Test
