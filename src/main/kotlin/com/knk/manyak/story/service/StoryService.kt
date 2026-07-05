@@ -9,6 +9,7 @@ import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
@@ -16,6 +17,7 @@ import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -35,6 +37,7 @@ class StoryService(
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    private val storyMainEventRepository: StoryMainEventRepository,
 ) {
 
     @Transactional(readOnly = true)
@@ -86,6 +89,8 @@ class StoryService(
             .map { it.toLorebookResponse() }
         val endings = storyEndingRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toEndingResponse() }
+        val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+            .map { it.toMainEventResponse() }
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
@@ -110,6 +115,7 @@ class StoryService(
             status = StoryStatus.PUBLISHED,
             lorebooks = lorebooks,
             endings = endings,
+            mainEvents = mainEvents,
             createdAt = story.createdAt,
         )
     }

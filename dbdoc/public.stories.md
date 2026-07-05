@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_endings](public.story_endings.md) |  |  |
+| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_endings](public.story_endings.md) [public.story_main_events](public.story_main_events.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
@@ -40,6 +40,7 @@ erDiagram
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.stories" {
   bigint id
@@ -101,6 +102,16 @@ erDiagram
   text condition_text
   smallint sort_order
   boolean enabled
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_main_events" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text description
+  text key_sentence
+  smallint sort_order
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }
