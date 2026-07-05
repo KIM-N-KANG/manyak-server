@@ -2,11 +2,14 @@ package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
@@ -24,17 +27,24 @@ import java.time.Instant
  * 토큰 발급은 [AuthTokenService] mock으로 호출 여부만 본다.
  *
  * - 기존 사용자: registrar.findExistingUser가 User를 주면 그대로 토큰을 발급한다.
- * - 신규 사용자: 없으면 createUserAndAccount로 만들고 토큰을 발급한다.
+ * - 신규 사용자: 없으면 createUserAndAccount로 만든다.
  * - 동시 첫 로그인: create가 유니크 위반(DataIntegrityViolationException)이면 재조회로 상대가 만든 계정을 재사용한다.
  * - 검증 실패: verifier가 401을 던지면 전파하고 저장 부작용이 없다.
+ *
+ * 가입 보상(KNK-392, 스펙 §4-3-7): **매 로그인마다** 해석된 User에 signup:{userId} 멱등 키로 SIGNUP_REWARD를 적립한다.
+ * 멱등성은 CreditWalletService가 키로 보장하므로(여기선 호출 여부·인자만 고정), 회원당 최대 1회만 실제 적립된다.
+ * 신규·기존·경합 재조회 어느 경로든 reward가 호출되며, 생성 시 유실된 보상도 다음 로그인에 자가 복구된다.
  */
 class GoogleLoginServiceTest {
 
     private val registrar: GoogleAccountRegistrar = mock(GoogleAccountRegistrar::class.java)
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
+    private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
+
+    private val signupReward = 100L
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
-        GoogleLoginService(verifier, registrar, authTokenService)
+        GoogleLoginService(verifier, registrar, authTokenService, creditWalletService, signupReward)
 
     private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
         GoogleIdTokenVerifier { SocialUserInfo(providerUserId = providerUserId) }
@@ -53,6 +63,10 @@ class GoogleLoginServiceTest {
 
         verify(registrar, never()).createUserAndAccount(anySocialUserInfo(), anyInstant())
         verify(authTokenService).issueTokens(user)
+        // 기존 사용자 재로그인도 reward를 호출한다(멱등 키로 실제 적립은 회원당 1회, 유실 자가 복구).
+        val reward = mockingDetails(creditWalletService).invocations.single { it.method.name == "reward" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(42L)
+        assertThat(reward.getArgument<String>(3)).isEqualTo("signup:42")
     }
 
     @Test
@@ -65,6 +79,43 @@ class GoogleLoginServiceTest {
 
         verify(registrar).createUserAndAccount(anySocialUserInfo(), anyInstant())
         verify(authTokenService).issueTokens(created)
+    }
+
+    @Test
+    fun `신규 사용자면 signup 멱등 키로 가입 보상을 적립한다`() {
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+
+        serviceWith(fakeVerifier("sub")).login("dummy")
+
+        // 생성된 userId로 SIGNUP_REWARD를, signup:{userId} 멱등 키로 설정된 금액만큼 적립한다.
+        // Kotlin non-null 파라미터엔 Mockito eq()/captor가 null을 반환해 NPE가 나므로,
+        // 기록된 실제 호출 인자를 직접 읽어 검증한다(reward는 refType·refId 기본값까지 6개 인자로 기록됨).
+        val invocation = mockingDetails(creditWalletService).invocations
+            .single { it.method.name == "reward" }
+        assertThat(invocation.getArgument<Long>(0)).isEqualTo(7L)
+        assertThat(invocation.getArgument<Long>(1)).isEqualTo(signupReward)
+        assertThat(invocation.getArgument<CreditReason>(2)).isEqualTo(CreditReason.SIGNUP_REWARD)
+        assertThat(invocation.getArgument<String>(3)).isEqualTo("signup:7")
+    }
+
+    @Test
+    fun `동시 첫 로그인 재조회로 재사용한 User에도 멱등 키로 보상을 적립한다`() {
+        val concurrentlyCreated = User(id = 100L, nickname = "상대가만듦")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant()))
+            .thenReturn(null)
+            .thenReturn(concurrentlyCreated)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant()))
+            .thenThrow(DataIntegrityViolationException("uq_social_accounts_provider_user"))
+
+        serviceWith(fakeVerifier("sub")).login("dummy")
+
+        // 경합으로 상대 계정을 재사용해도 해석된 User(100)에 signup:100 키로 reward를 시도한다.
+        // 상대 로그인이 이미 적립했다면 멱등 키가 중복을 막는다(실제 적립은 1회).
+        val reward = mockingDetails(creditWalletService).invocations.single { it.method.name == "reward" }
+        assertThat(reward.getArgument<Long>(0)).isEqualTo(100L)
+        assertThat(reward.getArgument<String>(3)).isEqualTo("signup:100")
     }
 
     @Test

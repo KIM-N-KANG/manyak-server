@@ -1,6 +1,9 @@
 package com.knk.manyak.auth.controller
 
+import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.GoogleIdTokenVerifier
@@ -8,6 +11,9 @@ import com.knk.manyak.auth.social.RandomNicknameGenerator
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -23,6 +29,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 
 /**
  * POST /api/v1/auth/login/google 통합 검증.
@@ -75,6 +82,12 @@ class GoogleLoginIntegrationTests {
 
     @Autowired
     private lateinit var socialAccountRepository: SocialAccountRepository
+
+    @Autowired
+    private lateinit var creditWalletService: CreditWalletService
+
+    @Autowired
+    private lateinit var creditTransactionRepository: CreditTransactionRepository
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -135,6 +148,81 @@ class GoogleLoginIntegrationTests {
 
         assertThat(userRepository.count()).isEqualTo(1)
         assertThat(socialAccountRepository.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `신규 로그인은 가입 보상 크레딧을 자동 적립한다`() {
+        // 스펙 §4-3-7 가입 보상: 회원 최초 생성 시 서버가 자동 적립(별도 API 없음).
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"reward-new-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-new-sub")
+        val userId = social!!.userId
+        assertThat(creditWalletService.balanceOf(userId)).isGreaterThan(0)
+        val rewards = creditTransactionRepository.findAll()
+            .filter { it.userId == userId && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards).hasSize(1)
+        assertThat(rewards.first().idempotencyKey).isEqualTo("signup:$userId")
+    }
+
+    @Test
+    fun `같은 사용자가 다시 로그인해도 가입 보상은 한 번만 적립된다`() {
+        // 매 로그인마다 보상을 시도하지만 멱등 키(signup:{userId})가 중복을 막아 실제 적립은 1회다.
+        repeat(2) {
+            restTestClient.post()
+                .uri("/api/v1/auth/login/google")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"idToken":"reward-repeat-sub"}""")
+                .exchange()
+                .expectStatus().isOk
+        }
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-repeat-sub")
+        val userId = social!!.userId
+        val rewards = creditTransactionRepository.findAll()
+            .filter { it.userId == userId && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards).hasSize(1)
+    }
+
+    @Test
+    fun `보상 없이 이미 존재하는 회원이 로그인하면 가입 보상을 자가 복구한다`() {
+        // 회귀 방지(Codex P2): 계정 생성 트랜잭션은 커밋됐으나 보상 적립 전에 실패·크래시로 보상이 유실된 상태를
+        // 직접 만든 뒤(User+SocialAccount만 저장, 원장 없음), 같은 Google sub로 로그인한다.
+        // 다음 로그인은 findExistingUser 히트라 생성 경로를 안 타지만, 매 로그인 멱등 적립이 유실을 복구해야 한다.
+        val now = Instant.now()
+        val user = userRepository.save(User(nickname = "보상유실회원", status = UserStatus.ACTIVE))
+        socialAccountRepository.save(
+            SocialAccount(
+                userId = user.id,
+                provider = SocialProvider.GOOGLE,
+                providerUserId = "self-heal-sub",
+                email = "user@example.com",
+                connectedAt = now,
+                lastLoginAt = now,
+            ),
+        )
+        // 사전 상태: 원장·잔액이 비어 있다(보상 유실).
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(0)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"self-heal-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        // 기존 사용자 로그인이지만 이제 가입 보상이 정확히 1건 적립된다(잔액>0).
+        assertThat(creditWalletService.balanceOf(user.id)).isGreaterThan(0)
+        val rewards = creditTransactionRepository.findAll()
+            .filter { it.userId == user.id && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards).hasSize(1)
+        assertThat(rewards.first().idempotencyKey).isEqualTo("signup:${user.id}")
+        // 새 사용자를 만들지 않았다(기존 계정 재사용).
+        assertThat(userRepository.count()).isEqualTo(1)
     }
 
     @Test
