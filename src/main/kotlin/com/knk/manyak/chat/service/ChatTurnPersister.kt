@@ -38,8 +38,11 @@ class ChatTurnPersister(
         aiOutput: String,
         choices: List<String>,
     ): PersistedTurn {
-        val chat = storyChatRepository.findById(chatId)
-            .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.") }
+        // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
+        // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
+        // 행을 못 봐(READ COMMITTED) 낡은 마지막 턴을 교체·과금하고 append가 뒤이어 커밋될 수 있다(Codex P2).
+        val chat = storyChatRepository.findByIdForUpdate(chatId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
 
         val lastOrder = storyMessageRepository
             .findFirstByChatIdOrderByMessageOrderDesc(chatId)

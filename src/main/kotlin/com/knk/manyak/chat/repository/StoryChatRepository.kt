@@ -13,9 +13,10 @@ import java.util.UUID
 interface StoryChatRepository : JpaRepository<StoryChat, Long> {
 
     /**
-     * 채팅 행을 비관적 쓰기 락으로 조회한다. 재생성(§4-3-9)은 마지막 ASSISTANT를 제자리 교체하므로 정상 턴처럼
-     * message_order 유니크 제약으로 직렬화되지 않는다. 같은 채팅의 동시 재생성이 마지막 턴 검사·교체·regenerated_count
-     * 증가를 각자 수행해 중복 과금·lost update를 내지 않도록, 검사 전에 이 락으로 채팅 단위로 직렬화한다.
+     * 채팅 행을 비관적 쓰기 락으로 조회한다. 이어쓰기(append)와 재생성(replace)이 이 락으로 채팅 단위로 직렬화된다.
+     * 재생성은 마지막 ASSISTANT를 제자리 교체해 message_order 유니크로 자연 직렬화되지 않으므로, 동시 재생성이
+     * 마지막 턴 검사·교체·regenerated_count 증가를 각자 수행하는 것(중복 과금·lost update)과, 이어쓰기의 미커밋 새 턴을
+     * 못 본 채 낡은 마지막 턴을 교체하는 것(재생성 vs 이어쓰기 경합)을 막는다. 두 저장 경로 모두 검사·삽입 전에 이 락을 잡는다.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM StoryChat c WHERE c.id = :id")
