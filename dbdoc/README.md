@@ -11,7 +11,7 @@
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
 | [public.stories](public.stories.md) | 12 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
-| [public.story_start_settings](public.story_start_settings.md) | 9 |  | BASE TABLE |
+| [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 12 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
@@ -23,7 +23,7 @@
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
-| [public.story_endings](public.story_endings.md) | 9 |  | BASE TABLE |
+| [public.story_endings](public.story_endings.md) | 13 |  | BASE TABLE |
 | [public.credit_wallets](public.credit_wallets.md) | 5 |  | BASE TABLE |
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
@@ -126,8 +126,6 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
-  text opening_scene
-  text first_ai_message
 }
 "public.story_suggested_inputs" {
   bigint id
@@ -259,6 +257,10 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   bigint start_setting_id FK
+  varchar_100_ name
+  integer min_turns
+  text achievement_condition
+  text epilogue
 }
 "public.credit_wallets" {
   bigint id

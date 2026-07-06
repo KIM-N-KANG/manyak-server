@@ -75,9 +75,15 @@ class StoryLorebookEndingControllerIntegrationTests {
         // 삽입 역순으로 저장해 sort_order 정렬을 검증한다.
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = magicGlossary, sortOrder = 2))
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = worldGlossary, sortOrder = 1))
-        storyEndingRepository.save(StoryEnding(startSetting = startSetting, title = "배드 엔딩", content = "왕국은 무너진다", sortOrder = 2))
         storyEndingRepository.save(
-            StoryEnding(startSetting = startSetting, title = "해피 엔딩", content = "왕좌를 되찾는다", conditionText = "신뢰도 100 이상", sortOrder = 1),
+            StoryEnding(startSetting = startSetting, name = "배드 엔딩", minTurns = 5, achievementCondition = "왕국은 무너진다", epilogue = "잿더미 위에 홀로 선다", sortOrder = 2),
+        )
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "해피 엔딩", minTurns = 10, achievementCondition = "왕좌를 되찾는다", epilogue = "대관식을 연다", sortOrder = 1),
+        )
+        // 비활성(레거시 보존) 엔딩은 상세 조회에 나타나지 않는다(§4-3-10).
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "레거시", minTurns = 0, achievementCondition = "-", epilogue = "-", sortOrder = 3, enabled = false),
         )
 
         restTestClient.get()
@@ -91,11 +97,12 @@ class StoryLorebookEndingControllerIntegrationTests {
             .jsonPath("$.lorebooks[0].content").isEqualTo("아르덴: 몰락한 왕국")
             .jsonPath("$.lorebooks[1].name").isEqualTo("마법 용어집")
             .jsonPath("$.endings.length()").isEqualTo(2)
-            .jsonPath("$.endings[0].title").isEqualTo("해피 엔딩")
-            .jsonPath("$.endings[0].conditionText").isEqualTo("신뢰도 100 이상")
-            .jsonPath("$.endings[0].enabled").isEqualTo(true)
-            .jsonPath("$.endings[1].title").isEqualTo("배드 엔딩")
-            .jsonPath("$.endings[1].conditionText").isEmpty
+            .jsonPath("$.endings[0].name").isEqualTo("해피 엔딩")
+            .jsonPath("$.endings[0].requirement.minTurns").isEqualTo(10)
+            .jsonPath("$.endings[0].requirement.achievementCondition").isEqualTo("왕좌를 되찾는다")
+            .jsonPath("$.endings[0].epilogue").isEqualTo("대관식을 연다")
+            .jsonPath("$.endings[1].name").isEqualTo("배드 엔딩")
+            .jsonPath("$.endings[1].requirement.minTurns").isEqualTo(5)
     }
 
     @Test

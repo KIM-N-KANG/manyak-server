@@ -2,15 +2,12 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
-import com.knk.manyak.story.dto.CreateStoryDraftRequest
+import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
-import com.knk.manyak.story.dto.PublishStoryRequest
+import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
-import com.knk.manyak.story.dto.StoryDraftResponse
-import com.knk.manyak.story.dto.StoryPublicationResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.dto.UpdateStoryVisibilityRequest
-import com.knk.manyak.story.service.StoryPublicationService
+import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -27,13 +24,11 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Stories", description = "스토리 API")
 @Validated
@@ -41,35 +36,31 @@ import org.springframework.web.server.ResponseStatusException
 @RequestMapping("/api/v1/stories")
 class StoryController(
     private val storyService: StoryService,
-    private val storyPublicationService: StoryPublicationService,
+    private val generalStoryCreationService: GeneralStoryCreationService,
 ) {
 
     @Operation(
-        summary = "일반 모드 초안 생성",
-        description = "빈 초안(status=DRAFT, visibility=PRIVATE) 스토리를 생성합니다. 인증 필수이며 생성자 소유가 됩니다. " +
-            "기본정보는 선택이며, 이후 세계관 등 각 탭이 부분 저장(자동저장)으로 채웁니다.",
+        summary = "일반 제작 스토리 등록",
+        description = "폼에 직접 입력한 스토리 구성 항목을 한 번에 등록합니다(단발, 임시저장 없음). 인증은 선택이며 " +
+            "유효 토큰이면 생성자 소유가 됩니다. AI를 호출하지 않아 크레딧 소모·게스트 한도 카운트가 없습니다. " +
+            "응답은 간편 제작과 동일합니다.",
     )
     @ApiResponses(
         value = [
             ApiResponse(
                 responseCode = "201",
-                description = "생성 성공",
-                content = [Content(schema = Schema(implementation = StoryDraftResponse::class))],
+                description = "등록 성공",
+                content = [Content(schema = Schema(implementation = SimpleStoryCreateResponse::class))],
             ),
             ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
         ],
     )
     @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping
-    fun createDraft(
+    @PostMapping("/general")
+    fun createGeneralStory(
         @CurrentUserId userId: Long?,
-        @Valid @RequestBody(required = false) request: CreateStoryDraftRequest?,
-    ): StoryDraftResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        return storyService.createDraft(ownerId, request ?: CreateStoryDraftRequest())
-    }
+        @Valid @RequestBody request: CreateGeneralStoryRequest,
+    ): SimpleStoryCreateResponse = generalStoryCreationService.createGeneralStory(request, userId)
 
     @Operation(
         summary = "스토리 ID 목록으로 스토리 목록 조회",
@@ -181,65 +172,4 @@ class StoryController(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
     ) = storyService.deleteStory(storyId)
-
-    @Operation(
-        summary = "일반 모드 스토리 발행",
-        description = "초안(DRAFT)을 발행합니다(PUBLISHED). 발행 시 공개 범위(PUBLIC/PRIVATE)를 함께 지정합니다. " +
-            "인증 필수·소유자만(무토큰 401, 타인 403). 제목이 없으면 400, 이미 발행됐으면 409, 스토리가 없으면 404입니다.",
-    )
-    @ApiResponses(
-        value = [
-            ApiResponse(
-                responseCode = "200",
-                description = "발행 성공",
-                content = [Content(schema = Schema(implementation = StoryPublicationResponse::class))],
-            ),
-            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음(제목 없음·visibility 누락/오류)", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "403", description = "스토리 소유자가 아님", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "409", description = "이미 발행된 스토리", content = [Content(schema = Schema(hidden = true))]),
-        ],
-    )
-    @PostMapping("/{storyId}/publish")
-    fun publish(
-        @Parameter(description = "스토리 ID(공개 식별자)")
-        @PathVariable storyId: String,
-        @CurrentUserId userId: Long?,
-        @Valid @RequestBody request: PublishStoryRequest,
-    ): StoryPublicationResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        return storyPublicationService.publish(storyId, ownerId, request.visibility)
-    }
-
-    @Operation(
-        summary = "스토리 공개 범위 변경",
-        description = "스토리의 공개 범위(PUBLIC/PRIVATE)를 변경합니다(공개 피드 노출 제어). " +
-            "인증 필수·소유자만(무토큰 401, 타인 403). 스토리가 없으면 404입니다.",
-    )
-    @ApiResponses(
-        value = [
-            ApiResponse(
-                responseCode = "200",
-                description = "변경 성공",
-                content = [Content(schema = Schema(implementation = StoryPublicationResponse::class))],
-            ),
-            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음(visibility 누락/오류)", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "403", description = "스토리 소유자가 아님", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음", content = [Content(schema = Schema(hidden = true))]),
-        ],
-    )
-    @PutMapping("/{storyId}/visibility")
-    fun updateVisibility(
-        @Parameter(description = "스토리 ID(공개 식별자)")
-        @PathVariable storyId: String,
-        @CurrentUserId userId: Long?,
-        @Valid @RequestBody request: UpdateStoryVisibilityRequest,
-    ): StoryPublicationResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        return storyPublicationService.updateVisibility(storyId, ownerId, request.visibility)
-    }
 }
