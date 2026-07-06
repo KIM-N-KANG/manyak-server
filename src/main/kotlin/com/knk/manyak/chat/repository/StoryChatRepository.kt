@@ -1,14 +1,25 @@
 package com.knk.manyak.chat.repository
 
 import com.knk.manyak.chat.entity.StoryChat
+import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 interface StoryChatRepository : JpaRepository<StoryChat, Long> {
+
+    /**
+     * 채팅 행을 비관적 쓰기 락으로 조회한다. 재생성(§4-3-9)은 마지막 ASSISTANT를 제자리 교체하므로 정상 턴처럼
+     * message_order 유니크 제약으로 직렬화되지 않는다. 같은 채팅의 동시 재생성이 마지막 턴 검사·교체·regenerated_count
+     * 증가를 각자 수행해 중복 과금·lost update를 내지 않도록, 검사 전에 이 락으로 채팅 단위로 직렬화한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM StoryChat c WHERE c.id = :id")
+    fun findByIdForUpdate(@Param("id") id: Long): StoryChat?
 
     // KNK-447: 회원 서재(내 채팅 목록). 요청자 소유·미삭제만 최근 활동순(updatedAt)으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId: Long, pageable: Pageable): List<StoryChat>
