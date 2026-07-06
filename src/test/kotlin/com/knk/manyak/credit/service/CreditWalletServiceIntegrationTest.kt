@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
+import java.time.Instant
 
 /**
  * CreditWalletService의 기반 연산 통합 검증(스펙 §4-3-7 원장과 동시성).
@@ -131,5 +132,51 @@ class CreditWalletServiceIntegrationTest {
         val ledgerSum = transactionRepository.findAll().sumOf { it.amount }
         assertThat(walletRepository.findByUserId(userId)!!.balance).isEqualTo(ledgerSum)
         assertThat(service.balanceOf(userId)).isEqualTo(120)
+    }
+
+    @Test
+    fun `월 상한 미만이면 적립하고 상한에 도달하면 같은 구간 적립을 건너뛴다`() {
+        // 초대 보상 월 상한(스펙 §4-3-7): 지갑 락 안에서 구간 집계가 상한 미만일 때만 적립한다. 상한 3으로 좁혀 경계를 확인한다.
+        val window = MonthlyRewardCap(
+            reason = CreditReason.INVITE_REWARD,
+            cap = 3,
+            windowStart = Instant.parse("2026-07-01T00:00:00Z"),
+            windowEnd = Instant.parse("2026-08-01T00:00:00Z"),
+        )
+
+        // 서로 다른 멱등 키로 3회까지는 적립된다(구간 내 count가 0→1→2에서 상한 3 미만).
+        repeat(3) { i ->
+            val outcome = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:x:$i:$userId", monthlyCap = window)
+            assertThat(outcome.rewarded).isTrue()
+        }
+
+        // 4번째는 구간 count가 이미 3(=상한)이라 적립하지 않는다(오류 아님, rewarded=false·잔액 불변).
+        val capped = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:x:3:$userId", monthlyCap = window)
+        assertThat(capped.rewarded).isFalse()
+        assertThat(capped.balance).isEqualTo(1500)
+
+        val inviteRows = transactionRepository.findAll().filter { it.reason == CreditReason.INVITE_REWARD }
+        assertThat(inviteRows).hasSize(3)
+        assertThat(walletRepository.findByUserId(userId)!!.balance).isEqualTo(1500)
+    }
+
+    @Test
+    fun `구간 밖의 기존 적립은 월 상한 집계에 포함되지 않는다`() {
+        // 6월(구간 밖)에 상한만큼 적립돼 있어도, 7월 구간 집계는 0이라 7월 적립은 통과해야 한다(KST 월 경계 검증).
+        val juneKey = "invite:old:1:$userId"
+        service.reward(userId, 500, CreditReason.INVITE_REWARD, juneKey)
+        // 위 6월 적립 행의 createdAt은 now(테스트 시각)이라, 창을 그보다 더 미래(8월)로 잡아 "구간 밖 과거"를 흉내낸다.
+        val augustWindow = MonthlyRewardCap(
+            reason = CreditReason.INVITE_REWARD,
+            cap = 1,
+            windowStart = Instant.parse("2027-08-01T00:00:00Z"),
+            windowEnd = Instant.parse("2027-09-01T00:00:00Z"),
+        )
+
+        val outcome = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:new:1:$userId", monthlyCap = augustWindow)
+
+        // 창 밖(과거) 적립은 집계에서 빠지므로 상한 1이어도 이번 적립은 통과한다.
+        assertThat(outcome.rewarded).isTrue()
+        assertThat(transactionRepository.findAll().count { it.reason == CreditReason.INVITE_REWARD }).isEqualTo(2)
     }
 }

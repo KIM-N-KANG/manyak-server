@@ -465,6 +465,10 @@ class ChatService(
         val refundKey = "refund:chatturn:${UUID.randomUUID()}"
         val refundGate = AtomicBoolean(false)
         val persisted = AtomicBoolean(false)
+        // supplier(워커 본문)가 실제로 실행됐는지 표식. supplier 첫 줄에서 세운다. CompletableFuture.runAsync는
+        // 큐 대기 중 cancel되면(result 선점) AsyncRun이 supplier를 통째로 스킵하므로, 이 값이 false면 워커 finally가
+        // 영영 돌지 않는다(그 경우 아래 whenComplete가 복원을 맡는다). true면 워커가 실행돼 자기 finally가 복원을 소유한다.
+        val workerStarted = AtomicBoolean(false)
 
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
@@ -474,16 +478,14 @@ class ChatService(
             emitter.complete()
         }
         emitter.onCompletion {
-            // 정리만 한다. 환불은 여기서 하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
+            // 정리만 한다(cancel). 환불은 여기서 판정하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
             // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persist를 성공시킬 수 있다
             // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
-            // 아는 워커의 catch에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
-            // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 catch에서 환불된다.
+            // 아는 워커의 finally에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
+            // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 finally에서 환불된다.
             //
-            // 잔여 케이스(의도적 미처리): executor 백로그로 아직 큐에 있던 태스크가 여기 cancel(true)로 취소되면
-            // supplier(워커 본문)가 아예 실행되지 않아 워커 finally 환불도 돌지 않는다(선차감만 남고 저장 없음).
-            // executor 포화 + 큐 대기 중 타임아웃이 겹쳐야 하는 드문 경합이라, in-flight로 잠그지 않고 크레딧
-            // 대사 배치(스펙 §4-3-7 ai_call_logs 대사, KNK-448)가 이 "누락 환불"류를 사후 복구한다.
+            // 큐드-취소(executor 포화로 큐에서 대기하던 태스크가 cancel로 supplier째 스킵되는 경우)는 워커 finally가
+            // 아예 돌지 않으므로, 아래 future.whenComplete가 workerStarted==false를 근거로 복원을 맡는다(Codex P1 재리뷰).
             futureRef.get()?.cancel(true)
         }
         emitter.onError {
@@ -492,6 +494,8 @@ class ChatService(
 
         val future = try {
             CompletableFuture.runAsync({
+            // 워커가 실제로 실행됐음을 표식(스킵된 큐드-취소와 구분). 이 뒤로는 finally가 반드시 돌아 복원을 소유한다.
+            workerStarted.set(true)
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
             var succeededAiCallLogId: Long? = null
             try {
@@ -589,6 +593,16 @@ class ChatService(
             throw rejected
         }
         futureRef.set(future)
+
+        // 큐드-취소 안전망(Codex P1 재리뷰): 워커가 실행되지 않은 채(future가 큐 대기 중 cancel돼 supplier가 스킵됨)
+        // 종료되면 workerStarted==false다. 이때만 여기서 선차감분을 환불·게스트 카운터를 복원한다. workerStarted==true면
+        // 워커가 실행돼 자기 finally가 persisted 여부로 복원을 판정하므로 여기서는 손대지 않는다(환불+저장 겹침 방지).
+        // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
+        future.whenComplete { _, _ ->
+            if (!workerStarted.get()) {
+                refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
+            }
+        }
 
         return emitter
     }

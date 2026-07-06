@@ -2,8 +2,8 @@ package com.knk.manyak.invite.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
-import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -27,7 +27,6 @@ import java.time.ZoneId
 class InviteService(
     private val userRepository: UserRepository,
     private val creditWalletService: CreditWalletService,
-    private val creditTransactionRepository: CreditTransactionRepository,
     @param:Value("\${manyak.credit.invite-reward:500}") private val inviteReward: Long,
     @param:Value("\${manyak.credit.invite-monthly-cap:10}") private val inviteMonthlyCap: Long,
     @param:Value("\${manyak.invite.base-url:https://manyak.app/invite}") private val inviteBaseUrl: String,
@@ -79,22 +78,24 @@ class InviteService(
 
     /**
      * [rewardedUserId]에게 초대 보상을 적립하되, 이번 KST 월 INVITE_REWARD 건수가 상한([inviteMonthlyCap]) 이상이면
-     * 건너뛴다(오류 아님 — 스펙 §4-3-7 "월 한도 초과분은 무시"). 이미 이 쌍으로 적립된 적이 있으면(멱등 키 존재)
-     * 월 집계 조회 없이 조기 반환한다 — 매 로그인 재시도가 흔한 no-op 경로라 값싸게 처리한다.
+     * 건너뛴다(오류 아님 — 스펙 §4-3-7 "월 한도 초과분은 무시"). 멱등(쌍당 1회)과 월 상한 판정은 모두 지갑 행 락 안에서
+     * 수행돼(카운트·insert가 같은 락 구간), 같은 수령자 동시 적립이 경계에서 상한을 넘기지 못한다.
      */
     private fun rewardIfUnderMonthlyCap(rewardedUserId: Long, inviterId: Long, inviteeId: Long) {
         val idempotencyKey = "invite:$inviterId:$inviteeId:$rewardedUserId"
-        if (creditTransactionRepository.existsByIdempotencyKey(idempotencyKey)) return
         val (monthStart, monthEnd) = currentKstMonthRange()
-        val countThisMonth = creditTransactionRepository
-            .countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
-                rewardedUserId,
-                CreditReason.INVITE_REWARD,
-                monthStart,
-                monthEnd,
-            )
-        if (countThisMonth >= inviteMonthlyCap) return
-        creditWalletService.reward(rewardedUserId, inviteReward, CreditReason.INVITE_REWARD, idempotencyKey)
+        creditWalletService.reward(
+            userId = rewardedUserId,
+            amount = inviteReward,
+            reason = CreditReason.INVITE_REWARD,
+            idempotencyKey = idempotencyKey,
+            monthlyCap = MonthlyRewardCap(
+                reason = CreditReason.INVITE_REWARD,
+                cap = inviteMonthlyCap,
+                windowStart = monthStart,
+                windowEnd = monthEnd,
+            ),
+        )
     }
 
     /** 현재 KST 월의 [시작, 다음달 시작) 구간을 Instant로 반환한다(월 상한 집계 경계). */
