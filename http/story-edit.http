@@ -1,0 +1,85 @@
+### 스토리 수정(Story Edit) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-404] GET /api/v1/stories/{id}/edit · PATCH /api/v1/stories/{id} (스펙 §4-3-8).
+###   - GET /edit : 수정 폼 조회(통글 4필드 포함). 인증 선택 — 회원 소유는 소유자만(타인·미인증 403), 게스트 스토리 허용.
+###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
+###
+### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### E1. (준비) 편집 대상 스토리를 익명 등록해 id를 전역에 저장 (소유자 없어 익명으로 편집 가능)
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "잿빛 왕관",
+  "oneLineIntro": "몰락한 왕국의 이야기",
+  "genres": ["다크 판타지", "미스터리"],
+  "storySettings": { "worldSetting": "몰락한 왕국 아르덴", "characterSetting": "기사", "userRoleSetting": "추적자", "ruleSetting": "규칙" },
+  "startSetting": { "name": "장례식 날", "prologue": "잿빛 비가 내린다", "startSituation": "늦은 밤" },
+  "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
+  "mainEvents": [ {"name": "편지 발견", "description": "편지를 찾는다", "keySentence": "편지를 연다"} ],
+  "endings": [ {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "왕좌를 되찾는다"}, "epilogue": "대관식"} ]
+}
+
+> {%
+    client.test("등록 201", () => { client.assert(response.status === 201, `actual=${response.status}`); });
+    client.global.set("editStoryId", response.body.id);
+%}
+
+### E2. 수정 폼 조회 → 통글 4필드까지 전체 왕복
+GET {{baseUrl}}/api/v1/stories/{{editStoryId}}/edit
+Accept: application/json
+
+> {%
+    client.test("폼 조회 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+    client.test("통글 4필드·엔딩 포함", () => {
+        client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "worldSetting 불일치");
+        client.assert(response.body.endings[0].name === "왕좌를 되찾다", "endings 불일치");
+        client.assert(response.body.suggestedInputs.length === 3, "suggestedInputs 개수 불일치");
+    });
+%}
+
+### E3. (해피 패스) 제목·엔딩만 부분 갱신 → 보낸 필드 교체, 나머지 유지
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{
+  "title": "새 제목",
+  "endings": [ {"name": "새 엔딩", "requirement": {"minTurns": 3, "achievementCondition": "조건"}, "epilogue": "에필로그"} ]
+}
+
+> {%
+    client.test("수정 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+    client.test("보낸 필드 교체·나머지 유지", () => {
+        client.assert(response.body.title === "새 제목", "title 미교체");
+        client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "미전송 필드가 바뀜");
+        client.assert(response.body.endings.length === 1 && response.body.endings[0].name === "새 엔딩", "엔딩 교체 실패");
+    });
+%}
+
+### E4. (에러) 추천 입력을 3개가 아닌 값으로 → 400
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{ "suggestedInputs": ["하나", "둘"] }
+
+> {%
+    client.test("검증 실패 400", () => { client.assert(response.status === 400, `actual=${response.status}`); });
+%}
+
+### E5. (에러) 없는 스토리 수정 → 404
+PATCH {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
+Content-Type: application/json
+
+{ "title": "없는 스토리" }
+
+> {%
+    client.test("없는 스토리 404", () => { client.assert(response.status === 404, `actual=${response.status}`); });
+%}
