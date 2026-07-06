@@ -14,10 +14,8 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
-import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
-import java.time.ZoneOffset
 import java.time.ZonedDateTime
 
 /**
@@ -26,9 +24,10 @@ import java.time.ZonedDateTime
  * - 발급: 코드가 없으면 지연 생성해 저장하고, 있으면 그대로 링크를 만든다.
  * - 적립: 신규 가입 경로에서만 호출되며, 코드의 유효성(존재·비공백·타인)만 걸러 양쪽에 INVITE_REWARD를 준다.
  *   월 상한 판정은 [CreditWalletService.reward]에 [MonthlyRewardCap]으로 위임한다(지갑 락 안에서 원자 판정).
- *   InviteService는 올바른 멱등 키·상한·KST 월 구간을 전달하는지까지만 검증하고, 상한 스킵 자체는 지갑 서비스 통합 테스트가 검증한다.
+ *   InviteService는 올바른 멱등 키·상한·집계 구간을 전달하는지까지만 검증하고, 상한 스킵 자체는 지갑 서비스 통합 테스트가 검증한다.
  *
  * 멱등 키는 `invite:{초대자}:{피초대자}:{수혜자}`로 각 수혜자당 1회다.
+ * 월 상한 집계 구간은 피초대자 가입 월(KST) 기준으로 고정한다(재시도가 상한 초과를 이월하지 않도록).
  */
 class InviteServiceTest {
 
@@ -38,18 +37,16 @@ class InviteServiceTest {
     private val inviteReward = 500L
     private val inviteMonthlyCap = 10L
     private val baseUrl = "https://test.example/invite"
-    // 고정 시계(KST 2026-07-06). 월 경계 판정을 결정적으로 만든다.
-    private val fixedClock = Clock.fixed(Instant.parse("2026-07-06T00:00:00Z"), ZoneOffset.UTC)
     private val service = InviteService(
         userRepository,
         creditWalletService,
         inviteReward,
         inviteMonthlyCap,
         baseUrl,
-        fixedClock,
     )
 
-    // fixedClock(KST 2026-07-06) 기준 이번 달 [시작, 다음달 시작) 경계. reward에 전달되는 MonthlyRewardCap 검증에 쓴다.
+    // 피초대자 가입 시각(KST 2026-07-06 09:00 = UTC 00:00). 이 값이 속한 KST 월 [시작, 다음달 시작)이 상한 집계 구간이다.
+    private val inviteeCreatedAt = Instant.parse("2026-07-06T00:00:00Z")
     private val monthStart = ZonedDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()
     private val monthEnd = ZonedDateTime.of(2026, 8, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()
 
@@ -108,14 +105,14 @@ class InviteServiceTest {
 
     @Test
     fun `초대자와 피초대자가 같으면 적립하지 않는다`() {
-        service.rewardInvitePair(inviterId = 9L, inviteeId = 9L)
+        service.rewardInvitePair(inviterId = 9L, inviteeId = 9L, inviteeCreatedAt = inviteeCreatedAt)
 
         verifyNoInteractions(creditWalletService)
     }
 
     @Test
-    fun `초대자와 피초대자 양쪽에 수혜자 id 멱등 키와 월 상한으로 적립을 위임한다`() {
-        service.rewardInvitePair(inviterId = 5L, inviteeId = 9L)
+    fun `초대자와 피초대자 양쪽에 수혜자 id 멱등 키와 피초대자 가입월 상한으로 적립을 위임한다`() {
+        service.rewardInvitePair(inviterId = 5L, inviteeId = 9L, inviteeCreatedAt = inviteeCreatedAt)
 
         // 초대자(5)·피초대자(9) 두 번 적립을 위임한다. Kotlin non-null 파라미터의 matcher NPE를 피하려
         // 기록된 실제 호출 인자를 직접 읽는다(reward는 refType·refId·monthlyCap 기본값까지 7개 인자로 기록됨).

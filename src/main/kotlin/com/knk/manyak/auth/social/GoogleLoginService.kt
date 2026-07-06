@@ -52,7 +52,8 @@ class GoogleLoginService(
         rewardSignup(user)
         // 초대 보상: 영속된 초대자 관계가 있으면 매 로그인 멱등 재적립한다(가입 보상과 동일한 자가 복구).
         // 관계는 신규 생성 경로에서만 세팅되므로 "이미 가입된 계정의 코드 제출은 무시"가 보장된다.
-        user.inviterUserId?.let { inviterId -> inviteService.rewardInvitePair(inviterId, user.id) }
+        // 월 상한 집계는 피초대자 가입 월(user.createdAt) 기준으로 고정돼, 재시도가 상한 초과를 다음 달로 이월하지 않는다.
+        user.inviterUserId?.let { inviterId -> inviteService.rewardInvitePair(inviterId, user.id, user.createdAt) }
         return authTokenService.issueTokens(user)
     }
 
