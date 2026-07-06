@@ -50,6 +50,13 @@ manyak:
     # 운영은 env(MANYAK_INVITE_BASE_URL)로 웹 도메인을 주입한다. 미설정 시 기본값을 쓴다.
     base-url: ${MANYAK_INVITE_BASE_URL:https://manyak.app/invite}
   credit:
+    # 적립·소모 정책값(스펙 §4-3-7, KNK-477 확정 · KNK-449). 서비스 @Value 기본값과 같은 수치를 명시해 운영 조정 경로를 남긴다.
+    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:500}
+    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:500}
+    invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:20}
+    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:10}
     reconciliation:
       # 선차감 대사 배치 on/off(스펙 §4-3-7, KNK-448). 유실 환불을 사후 보정한다. 테스트 프로파일은 끈다.
       enabled: ${MANYAK_CREDIT_RECONCILIATION_ENABLED:true}
@@ -59,6 +66,11 @@ manyak:
       initial-delay-ms: ${MANYAK_CREDIT_RECONCILIATION_INITIAL_DELAY_MS:60000}
       # 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제).
       charge-age-threshold: ${MANYAK_CREDIT_RECONCILIATION_CHARGE_AGE_THRESHOLD:PT15M}
+  guest-trial:
+    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정). 디바이스 ID별 Redis 카운터 3종, TTL 없음(Phase 1).
+    storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:10}
+    story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:3}
+    chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:15}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}

@@ -65,21 +65,21 @@ class ChatTurnCreditIntegrationTests {
     }
 
     @Test
-    fun `회원이 충분한 잔액으로 이어쓰면 턴이 진행되고 CHAT_TURN 1이 차감된다`() {
+    fun `회원이 충분한 잔액으로 이어쓰면 턴이 진행되고 CHAT_TURN 10이 차감된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("차감회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         val body = streamAsMember(chat.publicId.toString(), member, "마법수정에 손을 올린다.")
 
         // 턴 정상 진행: completed 이벤트 도달
         assertThat(body).contains("completed")
-        // 잔액 1 차감(10 → 9)
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(9)
+        // 잔액 10 차감(100 → 90)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
         // CHAT_TURN 소모 원장 1건: 음수 amount, CHAT 참조
         val consumption = transactionRepository.findAll().first { it.reason == CreditReason.CHAT_TURN }
-        assertThat(consumption.amount).isEqualTo(-1)
+        assertThat(consumption.amount).isEqualTo(-10)
         assertThat(consumption.refType).isEqualTo("CHAT")
         assertThat(consumption.refId).isEqualTo(chat.id)
     }
@@ -88,13 +88,13 @@ class ChatTurnCreditIntegrationTests {
     fun `정상 완료된 턴은 환불되지 않는다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("완료회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         streamAsMember(chat.publicId.toString(), member, "앞으로 나선다.")
 
-        // 정상 완료: CHAT_TURN 1건만 있고 REFUND 행은 없다. 잔액은 9로 유지된다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(9)
+        // 정상 완료: CHAT_TURN 1건만 있고 REFUND 행은 없다. 잔액은 90으로 유지된다.
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.REFUND }).isTrue()
     }
@@ -133,6 +133,7 @@ class ChatTurnCreditIntegrationTests {
 
         val body = restTestClient.post()
             .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"userInput":"조용히 주변을 살핀다."}""")

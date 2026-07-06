@@ -72,6 +72,7 @@ class AiCallLogRecordingIntegrationTests {
             restTestClient.post()
                 .uri("/api/v1/chats/${session.publicId}/turns/stream")
                 .header("X-Manyak-Request-Id", "req_aicall_chat")
+                .header("X-Manyak-Device-Id", "test-device")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .body("""{"userInput":"마법수정에 손을 올린다."}""")

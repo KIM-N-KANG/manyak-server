@@ -20,6 +20,14 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
         reason: CreditReason,
     ): Long
 
+    // 초대 보상 월 상한 판정(스펙 §4-3-7, KNK-477): 보상 수령 계정의 특정 사유 행을 [start, end) 구간(KST 월)으로 집계한다.
+    fun countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+        userId: Long,
+        reason: CreditReason,
+        start: Instant,
+        end: Instant,
+    ): Long
+
     /**
      * 대사(reconciliation) 후보 그룹을 찾는다(스펙 §4-3-7, KNK-448).
      *

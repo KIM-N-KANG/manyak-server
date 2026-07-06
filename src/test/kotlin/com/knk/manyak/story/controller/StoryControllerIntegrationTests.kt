@@ -139,6 +139,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -175,6 +176,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -196,6 +198,7 @@ class StoryControllerIntegrationTests {
     fun `직접 추가 태그만으로 스토리라인을 생성한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -233,6 +236,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -294,6 +298,7 @@ class StoryControllerIntegrationTests {
     fun `태그가 없으면 스토리라인 생성 요청을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"selectedTagIds":[],"customTags":[]}""")
             .exchange()
@@ -310,6 +315,7 @@ class StoryControllerIntegrationTests {
     fun `존재하지 않는 선택 태그가 있으면 스토리라인 생성 요청을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"selectedTagIds":[999999]}""")
             .exchange()
@@ -328,6 +334,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"selectedTagIds":[${genre.id}]}""")
             .exchange()
@@ -356,6 +363,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -407,6 +415,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
@@ -424,6 +433,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
@@ -442,6 +452,7 @@ class StoryControllerIntegrationTests {
     fun `존재하지 않는 진행 정보면 스토리 생성을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"simpleCreationId":999999,"storylineId":1}""")
             .exchange()
@@ -457,6 +468,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":999999}""")
             .exchange()
@@ -475,6 +487,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
@@ -492,6 +505,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
@@ -509,6 +523,7 @@ class StoryControllerIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()

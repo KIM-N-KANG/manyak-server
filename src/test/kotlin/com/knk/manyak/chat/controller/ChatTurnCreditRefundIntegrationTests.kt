@@ -123,12 +123,12 @@ class ChatTurnCreditRefundIntegrationTests {
         await().atMost(Duration.ofSeconds(5)).untilAsserted {
             assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(10)
         }
-        // 원장에는 CHAT_TURN(-1)과 REFUND(+1)가 각각 정확히 1건씩 남는다(차감 1회·환불 1회).
+        // 원장에는 CHAT_TURN(-10)과 REFUND(+10)가 각각 정확히 1건씩 남는다(차감 1회·환불 1회).
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
-        assertThat(refund.first().amount).isEqualTo(1)
+        assertThat(refund.first().amount).isEqualTo(10)
         assertThat(refund.first().refType).isEqualTo("CHAT")
         assertThat(refund.first().refId).isEqualTo(chat.id)
     }

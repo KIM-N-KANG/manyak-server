@@ -29,6 +29,7 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.LengthBuckets
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -72,8 +73,9 @@ class ChatService(
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
-    // 채팅 턴 1회 소모량(스펙 §4-3-7). 금액은 미확정이라 설정값으로 두고 기본 1을 쓴다.
-    @param:Value("\${manyak.credit.chat-turn-cost:1}")
+    private val guestTrialLimitService: GuestTrialLimitService,
+    // 채팅 턴 1회 소모량(스펙 §4-3-7, KNK-477 확정: 10. 재생성도 동일 값·사유를 공유).
+    @param:Value("\${manyak.credit.chat-turn-cost:10}")
     private val chatTurnCost: Long,
 ) {
 
@@ -267,13 +269,15 @@ class ChatService(
      *
      * 크레딧(스펙 §4-3-7 소모): 회원([userId] != null)이면 SSE를 열기 **전에** 동기로 1턴분을 선차감한다.
      * 잔액이 부족하면 [com.knk.manyak.credit.InsufficientCreditException]이 여기서 동기로 던져져
-     * 컨트롤러가 스트림을 열기 전에 402로 변환한다(스트림 안 error 이벤트가 아님). 게스트는 차감하지 않는다.
-     * 턴이 completed 없이 끝나면(error·연결 끊김·미완료) 선차감분을 전액 환불한다(정확히 1회, 멱등 키로 이중 방어).
+     * 컨트롤러가 스트림을 열기 전에 402로 변환한다(스트림 안 error 이벤트가 아님). 게스트는 크레딧 대신
+     * 디바이스 ID별 chat_turn 체험 한도를 예약하며(KNK-477), 한도 소진·device 헤더 누락은 동기 402/400이다.
+     * 턴이 completed 없이 끝나면(error·연결 끊김·미완료) 선차감분·예약분을 전액 환불·복원한다(정확히 1회, 멱등 키로 이중 방어).
      */
     fun streamChatTurn(
         chatId: String,
         request: ContinueChatRequest,
         userId: Long? = null,
+        deviceId: String? = null,
     ): SseEmitter {
         // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
@@ -294,6 +298,7 @@ class ChatService(
             storyPublicId = storyPublicId,
             aiRequest = aiRequest,
             userId = userId,
+            deviceId = deviceId,
             persist = { result ->
                 chatTurnPersister.persistTurn(
                     chatId = chat.id,
@@ -334,6 +339,7 @@ class ChatService(
         chatId: String,
         request: RegenerateChatRequest,
         userId: Long? = null,
+        deviceId: String? = null,
     ): SseEmitter {
         val chat = resolveChat(chatId)
         requireChatOwner(chat, userId)
@@ -353,6 +359,7 @@ class ChatService(
             storyPublicId = storyPublicId,
             aiRequest = aiRequest,
             userId = userId,
+            deviceId = deviceId,
             persist = { result ->
                 chatTurnPersister.regenerateLastTurn(
                     chatId = chat.id,
@@ -437,17 +444,21 @@ class ChatService(
         storyPublicId: String,
         aiRequest: ChatTurnAiRequest,
         userId: Long?,
+        deviceId: String?,
         persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
         // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
-        // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다. 게스트(null)는 차감하지 않는다.
+        // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다.
         // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
         // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
         if (userId != null) {
             creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
         }
+        // 게스트(userId == null)는 크레딧 대신 디바이스 ID별 chat_turn 체험 한도를 예약한다(스펙 §4-3-7, KNK-477).
+        // 한도 소진·device 헤더 누락은 여기서 동기 402/400으로 던져져(스트림 미개시) 그대로 컨트롤러에 전파된다.
+        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
         // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persist 성공 직후 세워, 이후 completed 전송 실패·연결
         // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
@@ -559,7 +570,7 @@ class ChatService(
                 // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 if (!persisted.get()) {
-                    refundChatTurn(userId, chatPk, refundKey, refundGate)
+                    refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
                 }
             }
         }, chatSseExecutor)
@@ -567,7 +578,7 @@ class ChatService(
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
-            refundChatTurn(userId, chatPk, refundKey, refundGate)
+            refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
                 "chat_turn_schedule_rejected",
@@ -583,24 +594,29 @@ class ChatService(
     }
 
     /**
-     * 실패·미완료 턴의 선차감분을 환불한다. [userId]가 null(게스트)이면 아무것도 하지 않는다.
+     * 실패·미완료 턴의 선차감분을 환불하거나(회원) 예약한 게스트 체험 한도를 복원한다(게스트).
+     * 회원·게스트는 배타적이라 [userId]·[guestDeviceId] 중 하나만 채워지며, 둘 다 null이면 아무것도 하지 않는다.
      *
-     * [gate]로 최초 1회만 실행하고, [reward]의 멱등 키([refundKey])로 한 번 더 방어한다 — 즉시 환불(catch)과
-     * 안전망(onCompletion)이 겹쳐도 원장에 REFUND 행은 정확히 1건만 남는다. 환불 실패가 SSE 종료를 막지 않도록
-     * 예외는 삼키고 로그만 남긴다(선차감이 원장에 있어 사후 정산·재시도로 복구 가능).
+     * [gate]로 최초 1회만 실행하고, 회원 환불은 [reward]의 멱등 키([refundKey])로 한 번 더 방어한다 — 즉시 환불(catch)과
+     * 안전망(onCompletion)이 겹쳐도 원장에 REFUND 행은 정확히 1건만 남는다. 환불·복원 실패가 SSE 종료를 막지 않도록
+     * 예외는 삼키고 로그만 남긴다(회원은 선차감이 원장에 있어 사후 정산·재시도로 복구 가능).
      */
-    private fun refundChatTurn(userId: Long?, chatPk: Long, refundKey: String, gate: AtomicBoolean) {
-        if (userId == null) return
+    private fun refundChatTurn(userId: Long?, guestDeviceId: String?, chatPk: Long, refundKey: String, gate: AtomicBoolean) {
+        if (userId == null && guestDeviceId == null) return
         if (!gate.compareAndSet(false, true)) return
         try {
-            creditWalletService.reward(
-                userId = userId,
-                amount = chatTurnCost,
-                reason = CreditReason.REFUND,
-                idempotencyKey = refundKey,
-                refType = "CHAT",
-                refId = chatPk,
-            )
+            if (userId != null) {
+                creditWalletService.reward(
+                    userId = userId,
+                    amount = chatTurnCost,
+                    reason = CreditReason.REFUND,
+                    idempotencyKey = refundKey,
+                    refType = "CHAT",
+                    refId = chatPk,
+                )
+            } else if (guestDeviceId != null) {
+                guestTrialLimitService.restore(guestDeviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+            }
         } catch (exception: Exception) {
             structuredLogger.event(
                 "chat_turn_refund_failed",

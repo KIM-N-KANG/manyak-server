@@ -10,7 +10,9 @@
 ###   - Postgres 기동: docker compose up -d
 ###   - access 토큰: auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져 아래 {{accessToken}} 에 재사용됩니다.
 ###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
-###   - 잔액이 0보다 크려면 그 계정에 크레딧 적립이 있어야 합니다(가입 보상 KNK-392 등, 아직 미구현이면 0이 정상).
+###   - 잔액이 0보다 크려면 그 계정에 크레딧 적립이 있어야 합니다(가입 보상 500 등, KNK-477 확정).
+###   - [KNK-477] 정책값 확정: 가입 500 · 초대 양쪽 각 500(계정별 KST 월 10회) · 출석 250,
+###     스토리 생성 20 · 채팅 턴 10(재생성 포함) · 스토리라인 생성은 무료(manyak.credit.*).
 
 @baseUrl = http://localhost:8080
 
@@ -75,5 +77,9 @@ Accept: application/json
     });
     client.test("미지급(이미 받음)이면 amount 는 0 이다", () => {
         client.assert(b.rewarded || b.amount === 0, `rewarded=false 인데 amount 가 0 이 아닙니다. actual=${b.amount}`);
+    });
+    // [KNK-477] 출석 보상 확정값: 250.
+    client.test("지급됐다면 amount 는 250 이다", () => {
+        client.assert(!b.rewarded || b.amount === 250, `rewarded=true 인데 amount 가 250 이 아닙니다. actual=${b.amount}`);
     });
 %}

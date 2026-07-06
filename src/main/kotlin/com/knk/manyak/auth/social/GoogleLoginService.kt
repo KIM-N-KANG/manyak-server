@@ -41,8 +41,8 @@ class GoogleLoginService(
     private val authTokenService: AuthTokenService,
     private val creditWalletService: CreditWalletService,
     private val inviteService: InviteService,
-    // 가입 보상 지급량. 스펙상 지급량 미정(계획)이라 플레이스홀더 기본값을 두고 설정으로 덮어쓴다.
-    @Value("\${manyak.credit.signup-reward:100}") private val signupReward: Long,
+    // 가입 보상 지급량(스펙 §4-3-7, KNK-477 확정: 500).
+    @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
 ) {
 
     fun login(idToken: String, inviteCode: String? = null): TokenResponse {

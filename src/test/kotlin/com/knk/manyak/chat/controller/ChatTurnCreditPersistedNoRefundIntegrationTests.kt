@@ -112,7 +112,7 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
     fun `저장된 턴은 종료 단계가 실패해도 환불되지 않고 차감이 유지된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("저장확정회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         // 스텁 AI는 정상 반환 → persistTurn이 실제로 저장(차감 확정) → 직후 attachTurnNumber가 던져 completed 미도달.
@@ -130,8 +130,8 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
         assertThat(reloaded.currentTurn).isEqualTo(1)
         assertThat(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
 
-        // 저장된 턴이므로 환불하지 않는다: CHAT_TURN(-1) 1건만 있고 REFUND는 없다. 잔액은 9로 유지된다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(9)
+        // 저장된 턴이므로 환불하지 않는다: CHAT_TURN(-10) 1건만 있고 REFUND는 없다. 잔액은 90으로 유지된다.
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(all.none { it.reason == CreditReason.REFUND }).isTrue()
