@@ -103,13 +103,13 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
             .exchange()
             .expectStatus().is5xxServerError
 
-        // 선차감(-1)과 환불(+1)이 남아 순잔액은 원복되고, 턴은 저장되지 않는다.
+        // 선차감(-10)과 환불(+10)이 남아 순잔액은 원복되고, 턴은 저장되지 않는다.
         assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(10)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
-        assertThat(refund.first().amount).isEqualTo(1)
+        assertThat(refund.first().amount).isEqualTo(10)
         assertThat(refund.first().refType).isEqualTo("CHAT")
         assertThat(refund.first().refId).isEqualTo(chat.id)
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()

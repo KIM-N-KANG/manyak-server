@@ -20,8 +20,8 @@ data class AttendanceOutcome(val rewarded: Boolean, val amount: Long, val balanc
 @Service
 class AttendanceRewardService(
     private val creditWalletService: CreditWalletService,
-    // 출석 보상 지급량. 스펙상 미정(계획)이라 설정으로 두고 기본값을 적용한다(application.yml 미기재).
-    @param:Value("\${manyak.credit.attendance-reward:10}")
+    // 출석 보상 지급량(스펙 §4-3-7, KNK-477 확정: 250).
+    @param:Value("\${manyak.credit.attendance-reward:250}")
     private val attendanceReward: Long,
     private val clock: Clock = Clock.systemUTC(),
 ) {

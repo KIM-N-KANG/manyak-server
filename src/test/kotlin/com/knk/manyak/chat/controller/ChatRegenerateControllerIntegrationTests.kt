@@ -225,7 +225,7 @@ class ChatRegenerateControllerIntegrationTests {
     fun `회원 소유 채팅 재생성은 1턴분을 선차감하고 성공 시 환불하지 않는다`() {
         val story = seedStory()
         val member = saveUser("재생성회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, currentTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
@@ -244,8 +244,8 @@ class ChatRegenerateControllerIntegrationTests {
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
 
         assertThat(body).contains("completed")
-        // 성공 저장이므로 CHAT_TURN(-1)만 남고 REFUND는 없다 → 순잔액 9.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(9)
+        // 성공 저장이므로 CHAT_TURN(-10)만 남고 REFUND는 없다 → 순잔액 90.
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(all.count { it.reason == CreditReason.REFUND }).isZero()
@@ -277,6 +277,7 @@ class ChatRegenerateControllerIntegrationTests {
     private fun regenerate(chatId: String, turnId: Long): String =
         restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/regenerate/stream")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"turnId":$turnId}""")

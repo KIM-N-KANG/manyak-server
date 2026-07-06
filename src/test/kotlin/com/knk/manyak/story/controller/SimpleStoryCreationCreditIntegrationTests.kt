@@ -108,8 +108,8 @@ class SimpleStoryCreationCreditIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
-    // application.yml을 건드리지 않으므로 @Value 기본값(10)이 적용된다.
-    private val storyCreationCost = 10L
+    // application.yml 기본값(스펙 §4-3-7, KNK-477 확정: 20)이 그대로 적용된다.
+    private val storyCreationCost = 20L
 
     @BeforeEach
     fun setUp() {
@@ -250,6 +250,8 @@ class SimpleStoryCreationCreditIntegrationTests {
     private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
+            // 게스트 요청에 필요한 헤더(스펙 §4-3-7). 회원 요청에는 무해하다(회원은 이 헤더를 쓰지 않음).
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
         authorization?.let { spec.header("Authorization", it) }
         return spec

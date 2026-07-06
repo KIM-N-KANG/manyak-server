@@ -393,6 +393,8 @@ class OptionalAuthAttributionIntegrationTests {
     private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
+            // 게스트 요청에 필요한 헤더(스펙 §4-3-7). 회원 요청에는 무해하다(회원은 이 헤더를 쓰지 않음).
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
         authorization?.let { spec.header("Authorization", it) }
         return spec

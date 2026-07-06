@@ -99,11 +99,11 @@ class InviteRewardIntegrationTests {
         // 양쪽 각각 정확히 1건, 수혜자별 멱등 키를 쓴다.
         val inviterRows = inviteRewards(inviterId)
         assertThat(inviterRows).hasSize(1)
-        assertThat(inviterRows.first().idempotencyKey).isEqualTo("invite:$inviterId:$inviteeId:inviter")
+        assertThat(inviterRows.first().idempotencyKey).isEqualTo("invite:$inviterId:$inviteeId:$inviterId")
 
         val inviteeRows = inviteRewards(inviteeId)
         assertThat(inviteeRows).hasSize(1)
-        assertThat(inviteeRows.first().idempotencyKey).isEqualTo("invite:$inviterId:$inviteeId:invitee")
+        assertThat(inviteeRows.first().idempotencyKey).isEqualTo("invite:$inviterId:$inviteeId:$inviteeId")
 
         // 피초대자는 가입 보상도 함께 받는다. 두 지갑 모두 잔액이 쌓인다.
         assertThat(signupRewards(inviteeId)).hasSize(1)

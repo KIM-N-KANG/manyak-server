@@ -3,26 +3,33 @@ package com.knk.manyak.invite.service
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.security.SecureRandom
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * 초대 코드 발급과 초대 보상 적립을 담당한다(스펙 §4-3-7).
  *
  * - 발급: [getOrCreateInvite]는 요청자의 코드를 지연 생성해 공유 링크와 함께 돌려준다.
- * - 적립: [rewardInviteSignup]은 피초대자의 최초 가입 시 초대자·피초대자 양쪽에 INVITE_REWARD를 준다.
+ * - 적립: [rewardInvitePair]는 피초대자의 최초 가입 시 초대자·피초대자 양쪽에 INVITE_REWARD를 준다.
+ *   보상 수령 계정별 KST 월 상한(기본 10회)을 넘으면 그 요청은 조용히 건너뛴다(오류 아님).
  *
- * 지급량은 스펙상 미정(계획)이라 플레이스홀더 기본값을 두고 설정([manyak.credit.invite-reward])으로 덮어쓴다.
+ * 지급량·월 상한은 KNK-477로 확정됐다(설정[manyak.credit.invite-reward]·[manyak.credit.invite-monthly-cap]).
  */
 @Service
 class InviteService(
     private val userRepository: UserRepository,
     private val creditWalletService: CreditWalletService,
-    @param:Value("\${manyak.credit.invite-reward:50}") private val inviteReward: Long,
+    @param:Value("\${manyak.credit.invite-reward:500}") private val inviteReward: Long,
+    @param:Value("\${manyak.credit.invite-monthly-cap:10}") private val inviteMonthlyCap: Long,
     @param:Value("\${manyak.invite.base-url:https://manyak.app/invite}") private val inviteBaseUrl: String,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
     /**
@@ -56,17 +63,60 @@ class InviteService(
      * **매 로그인마다** 멱등하게 호출해, 계정 생성 후 적립 전 실패로 유실된 보상을 자가 복구한다
      * (가입 보상과 동일한 패턴). 멱등 키가 중복을 막아 실제 적립은 쌍당 각 1회다.
      *
-     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`. 스펙은 쌍 키 하나로 적지만, 원장 idempotency_key가
-     * 전역 유니크라 두 적립 행이 같은 키를 쓸 수 없어 수혜자를 접미사로 구분한다(쌍당 1회 보장은 유지).
-     * 두 적립은 한 트랜잭션이라 함께 커밋·롤백된다(반쪽 지급 방지).
+     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`(KNK-477). 원장 idempotency_key가 전역 유니크라
+     * 두 적립 행이 같은 키를 쓸 수 없어 수혜자 id를 접미사로 구분한다(쌍당 1회 보장은 유지).
+     * 초대자·피초대자의 월 상한은 [rewardIfUnderMonthlyCap]이 독립적으로 판정한다(한쪽만 초과해도 다른 쪽은 적립).
+     *
+     * 자가 복구 재시도는 **[inviteeCreatedAt](피초대자 가입)의 KST 월 안에서만** 유효하다. 그 월이 지나면 재시도하지
+     * 않으므로: (1) 상한 초과로 스킵된 건이 다음 달로 이월되지 않고 영구 스킵되고(스펙 "월 한도 초과분은 무시"),
+     * (2) 지급은 항상 가입 월 안에서 일어나 원장 `created_at` 기준 월 집계와 집계 창(가입 월)이 일치한다
+     * (창=가입월·카운트=created_at 불일치로 인한 상한 초과 방지, Codex P2). 지급된 건은 멱등 키가 막는다.
      */
     @Transactional
-    fun rewardInvitePair(inviterId: Long, inviteeId: Long) {
+    fun rewardInvitePair(inviterId: Long, inviteeId: Long, inviteeCreatedAt: Instant) {
         if (inviterId == inviteeId) return // 방어적: 영속 경로상 발생 불가하지만 자가 지급을 최종 차단한다.
 
-        val pair = "invite:$inviterId:$inviteeId"
-        creditWalletService.reward(inviterId, inviteReward, CreditReason.INVITE_REWARD, "$pair:inviter")
-        creditWalletService.reward(inviteeId, inviteReward, CreditReason.INVITE_REWARD, "$pair:invitee")
+        val (monthStart, monthEnd) = kstMonthRangeOf(inviteeCreatedAt)
+        // 가입 월이 지난 재시도는 건너뛴다(위 계약). 지급 시점을 가입 월로 한정해 집계 창과 created_at를 일치시킨다.
+        val now = clock.instant()
+        if (now < monthStart || now >= monthEnd) return
+        rewardIfUnderMonthlyCap(rewardedUserId = inviterId, inviterId = inviterId, inviteeId = inviteeId, monthStart, monthEnd)
+        rewardIfUnderMonthlyCap(rewardedUserId = inviteeId, inviterId = inviterId, inviteeId = inviteeId, monthStart, monthEnd)
+    }
+
+    /**
+     * [rewardedUserId]에게 초대 보상을 적립하되, 집계 구간([monthStart, monthEnd))의 INVITE_REWARD 건수가 상한
+     * ([inviteMonthlyCap]) 이상이면 건너뛴다(오류 아님 — 스펙 §4-3-7 "월 한도 초과분은 무시"). 멱등(쌍당 1회)과 월 상한
+     * 판정은 모두 지갑 행 락 안에서 수행돼(카운트·insert가 같은 락 구간), 같은 수령자 동시 적립이 경계에서 상한을 넘기지 못한다.
+     */
+    private fun rewardIfUnderMonthlyCap(
+        rewardedUserId: Long,
+        inviterId: Long,
+        inviteeId: Long,
+        monthStart: Instant,
+        monthEnd: Instant,
+    ) {
+        val idempotencyKey = "invite:$inviterId:$inviteeId:$rewardedUserId"
+        creditWalletService.reward(
+            userId = rewardedUserId,
+            amount = inviteReward,
+            reason = CreditReason.INVITE_REWARD,
+            idempotencyKey = idempotencyKey,
+            monthlyCap = MonthlyRewardCap(
+                reason = CreditReason.INVITE_REWARD,
+                cap = inviteMonthlyCap,
+                windowStart = monthStart,
+                windowEnd = monthEnd,
+            ),
+        )
+    }
+
+    /** [instant]가 속한 KST 월의 [시작, 다음달 시작) 구간을 Instant로 반환한다(월 상한 집계 경계). */
+    private fun kstMonthRangeOf(instant: Instant): Pair<Instant, Instant> {
+        val date = instant.atZone(SEOUL_ZONE).toLocalDate()
+        val monthStart = date.withDayOfMonth(1).atStartOfDay(SEOUL_ZONE).toInstant()
+        val monthEnd = date.withDayOfMonth(1).plusMonths(1).atStartOfDay(SEOUL_ZONE).toInstant()
+        return monthStart to monthEnd
     }
 
     /** 유니크 제약을 최종 방어로 두고, 사전 존재 확인으로 충돌을 피해 코드를 생성한다. */
@@ -88,5 +138,6 @@ class InviteService(
         const val MAX_CODE_ATTEMPTS = 10
         const val CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         val secureRandom = SecureRandom()
+        val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
     }
 }

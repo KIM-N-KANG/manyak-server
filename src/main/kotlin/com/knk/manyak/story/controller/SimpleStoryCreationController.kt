@@ -1,6 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.error.ApiErrorResponse
+import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
@@ -78,7 +80,12 @@ class SimpleStoryCreationController(
             ),
             ApiResponse(
                 responseCode = "400",
-                description = "요청 값이 올바르지 않음",
+                description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "402",
+                description = "게스트 체험 한도 소진(스토리라인 생성·재생성 합산). AI 호출 전 동기 응답입니다.",
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
@@ -94,8 +101,10 @@ class SimpleStoryCreationController(
         @Valid @RequestBody request: GenerateSimpleStorylinesRequest,
         // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
         @CurrentUserId userId: Long?,
+        // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): GenerateSimpleStorylinesResponse =
-        simpleStoryCreationService.generateSimpleStorylines(request, userId)
+        simpleStoryCreationService.generateSimpleStorylines(request, userId, deviceId)
 
     @Operation(
         summary = "간편 제작 스토리 생성",
@@ -113,7 +122,12 @@ class SimpleStoryCreationController(
             ),
             ApiResponse(
                 responseCode = "400",
-                description = "요청 값이 올바르지 않음",
+                description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "402",
+                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. AI 호출 전 동기 응답입니다.",
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
@@ -139,8 +153,10 @@ class SimpleStoryCreationController(
         @Valid @RequestBody request: CreateSimpleStoryRequest,
         // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
         @CurrentUserId userId: Long?,
+        // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): SimpleStoryCreateResponse =
-        simpleStoryCreationService.createSimpleStory(request, userId)
+        simpleStoryCreationService.createSimpleStory(request, userId, deviceId)
 
     @Operation(
         summary = "스토리라인 평가 설정/변경",

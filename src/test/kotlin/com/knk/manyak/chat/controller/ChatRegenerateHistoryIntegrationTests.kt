@@ -130,6 +130,7 @@ class ChatRegenerateHistoryIntegrationTests {
     private fun regenerate(chatId: String, turnId: Long): String =
         restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/regenerate/stream")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"turnId":$turnId}""")

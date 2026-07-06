@@ -3,6 +3,7 @@ package com.knk.manyak.story.service
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
@@ -65,8 +66,9 @@ class SimpleStoryCreationService(
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
-    // 간편 제작 1회 소모 크레딧(스펙 §4-3-7). 금액 미확정이라 설정으로 두고 기본값 10을 적용한다(application.yml 미기재).
-    @param:Value("\${manyak.credit.story-creation-cost:10}")
+    private val guestTrialLimitService: GuestTrialLimitService,
+    // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
+    @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
     transactionManager: PlatformTransactionManager,
 ) {
@@ -93,9 +95,32 @@ class SimpleStoryCreationService(
                 )
             }
 
+    /**
+     * 스토리라인 생성(스펙 §4-3-7): 회원은 무료다. 게스트([userId] null)는 디바이스 ID별
+     * `storyline_generation` 카운터(생성·재생성 합산)를 AI 호출 전에 예약하고, 한도 소진이면 402를 반환한다.
+     * 3개 생성이 성공하지 못하면(AI 실패·저장 실패) 예약한 카운터를 복원한다.
+     */
     fun generateSimpleStorylines(
         request: GenerateSimpleStorylinesRequest,
         userId: Long? = null,
+        deviceId: String? = null,
+    ): GenerateSimpleStorylinesResponse {
+        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+            userId,
+            deviceId,
+            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+        )
+        try {
+            return doGenerateSimpleStorylines(request, userId)
+        } catch (throwable: Throwable) {
+            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+            throw throwable
+        }
+    }
+
+    private fun doGenerateSimpleStorylines(
+        request: GenerateSimpleStorylinesRequest,
+        userId: Long?,
     ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
@@ -179,11 +204,15 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Storyline creation transaction result is empty")
     }
 
-    fun createSimpleStory(request: CreateSimpleStoryRequest, userId: Long? = null): SimpleStoryCreateResponse {
+    fun createSimpleStory(
+        request: CreateSimpleStoryRequest,
+        userId: Long? = null,
+        deviceId: String? = null,
+    ): SimpleStoryCreateResponse {
         val startNanos = System.nanoTime()
         structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
         try {
-            val outcome = doCreateSimpleStory(request, userId)
+            val outcome = doCreateSimpleStory(request, userId, deviceId)
             structuredLogger.event(
                 "story_created",
                 "story_id" to outcome.response.id,
@@ -207,7 +236,7 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?): StoryCreationOutcome {
+    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?, deviceId: String?): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -247,8 +276,9 @@ class SimpleStoryCreationService(
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
         )
 
-        // 소모(스펙 §4-3-7): 회원만 compile 시작 전에 선차감한다. 게스트(attributedUserId == null)는 차감하지 않는다.
-        // 잔액 부족은 동기 402로 변환하고(SSE 없이 즉시 실패), 이후 compile/저장이 실패하면 전액 환불한다.
+        // 소모(스펙 §4-3-7): 회원만 compile 시작 전에 선차감한다. 게스트(attributedUserId == null)는 차감 대신
+        // 디바이스 ID별 story_creation 체험 한도를 예약한다(한도 소진 시 402, AI 호출 전 거절).
+        // 잔액 부족·한도 소진은 동기 402로 변환하고(SSE 없이 즉시 실패), 이후 compile/저장이 실패하면 전액 환불·카운터 복원한다.
         // refId는 compile 전에 확정돼 있는 세션 id(=simpleCreationId)를 쓴다(story.id는 저장 성공 후에야 생긴다).
         //
         // 환불 멱등 키는 이 호출(=차감 시도)마다 새로 만든다(chargeAttemptId). deduct는 멱등 키가 없어 시도마다 실제 차감되므로,
@@ -256,9 +286,19 @@ class SimpleStoryCreationService(
         // 세션 단위 고정 키를 쓰면 두 번째 환불이 첫 환불 키와 충돌해 미적립(rewarded=false)되어 크레딧이 유실된다(Codex P1).
         // 시도별 키면 각 시도의 차감·환불이 독립적으로 짝지어져 재시도에도 유실이 없다.
         val chargeAttemptId = UUID.randomUUID().toString()
+        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+            attributedUserId,
+            deviceId,
+            GuestTrialLimitService.Counter.STORY_CREATION,
+        )
         attributedUserId?.let { chargeStoryCreation(it, refId = session.id) }
 
-        return runWithRefundOnFailure(attributedUserId, refId = session.id, chargeAttemptId = chargeAttemptId) {
+        return runWithRefundOnFailure(
+            userId = attributedUserId,
+            guestDeviceId = guestDeviceId,
+            refId = session.id,
+            chargeAttemptId = chargeAttemptId,
+        ) {
             compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, aiRequest)
         }
     }
@@ -279,17 +319,25 @@ class SimpleStoryCreationService(
     }
 
     /**
-     * [block]이 성공하면 선차감을 유지하고, 실패(예외)하면 회원에게 전액 환불한 뒤 원래 예외를 다시 던진다.
+     * [block]이 성공하면 선차감·게스트 예약을 유지하고, 실패(예외)하면 회원은 전액 환불, 게스트는 예약한
+     * 체험 한도 카운터를 복원한 뒤 원래 예외를 다시 던진다(회원·게스트는 배타적이라 [userId]·[guestDeviceId] 중 하나만 채워짐).
      *
      * 환불 멱등 키(`refund:story:{chargeAttemptId}`)는 차감 시도별로 유일하므로, 같은 세션을 재시도해 여러 번 차감돼도
      * 각 차감이 자기 시도의 환불과만 짝지어진다(재시도 시 환불 유실 방지). 재시도 안전은 시도별 키가, 중복 실행 방지는
-     * 이 키의 유니크 제약이 함께 보장한다. 게스트([userId] null)는 선차감이 없으므로 환불도 하지 않는다.
+     * 이 키의 유니크 제약이 함께 보장한다.
      */
-    private fun <T> runWithRefundOnFailure(userId: Long?, refId: Long, chargeAttemptId: String, block: () -> T): T {
+    private fun <T> runWithRefundOnFailure(
+        userId: Long?,
+        guestDeviceId: String?,
+        refId: Long,
+        chargeAttemptId: String,
+        block: () -> T,
+    ): T {
         try {
             return block()
         } catch (throwable: Throwable) {
             userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
+            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORY_CREATION) }
             throw throwable
         }
     }
