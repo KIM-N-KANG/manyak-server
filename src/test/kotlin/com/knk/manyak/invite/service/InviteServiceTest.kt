@@ -14,8 +14,10 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
+import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 
 /**
@@ -37,18 +39,31 @@ class InviteServiceTest {
     private val inviteReward = 500L
     private val inviteMonthlyCap = 10L
     private val baseUrl = "https://test.example/invite"
+    // 피초대자 가입 시각(KST 2026-07-06 09:00 = UTC 00:00). 이 값이 속한 KST 월 [시작, 다음달 시작)이 상한 집계 구간이다.
+    private val inviteeCreatedAt = Instant.parse("2026-07-06T00:00:00Z")
+    // 기본 시계는 피초대자 가입 월(2026-07) 안이라 자가복구 재시도 게이트를 통과한다.
+    private val clockInSignupMonth = Clock.fixed(Instant.parse("2026-07-15T00:00:00Z"), ZoneOffset.UTC)
     private val service = InviteService(
         userRepository,
         creditWalletService,
         inviteReward,
         inviteMonthlyCap,
         baseUrl,
+        clockInSignupMonth,
     )
 
-    // 피초대자 가입 시각(KST 2026-07-06 09:00 = UTC 00:00). 이 값이 속한 KST 월 [시작, 다음달 시작)이 상한 집계 구간이다.
-    private val inviteeCreatedAt = Instant.parse("2026-07-06T00:00:00Z")
     private val monthStart = ZonedDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()
     private val monthEnd = ZonedDateTime.of(2026, 8, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()
+
+    /** 가입 월이 지난 시각의 시계로 만든 서비스(재시도 게이트가 스킵해야 하는 경우 검증용). */
+    private fun serviceAt(clockInstant: Instant): InviteService = InviteService(
+        userRepository,
+        creditWalletService,
+        inviteReward,
+        inviteMonthlyCap,
+        baseUrl,
+        Clock.fixed(clockInstant, ZoneOffset.UTC),
+    )
 
     @Test
     fun `이미 코드가 있으면 그대로 링크를 만들고 새로 발급하지 않는다`() {
@@ -133,5 +148,16 @@ class InviteServiceTest {
         assertThat(inviteeReward.getArgument<CreditReason>(2)).isEqualTo(CreditReason.INVITE_REWARD)
         assertThat(inviteeReward.getArgument<String>(3)).isEqualTo("invite:5:9:9")
         assertThat(inviteeReward.getArgument<MonthlyRewardCap>(6)).isEqualTo(expectedCap)
+    }
+
+    @Test
+    fun `피초대자 가입 월이 지난 재시도는 적립을 시도하지 않는다`() {
+        // 가입은 7월인데 로그인(now)이 8월이면, 재시도 게이트가 막아 어느 쪽도 적립하지 않는다.
+        // (상한 초과 스킵이 다음 달로 이월되지 않고, 지급 created_at이 항상 가입 월에 머물러 집계와 일치하도록 하는 계약)
+        val augustService = serviceAt(Instant.parse("2026-08-15T00:00:00Z"))
+
+        augustService.rewardInvitePair(inviterId = 5L, inviteeId = 9L, inviteeCreatedAt = inviteeCreatedAt)
+
+        verifyNoInteractions(creditWalletService)
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.security.SecureRandom
+import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 
@@ -28,6 +29,7 @@ class InviteService(
     @param:Value("\${manyak.credit.invite-reward:500}") private val inviteReward: Long,
     @param:Value("\${manyak.credit.invite-monthly-cap:10}") private val inviteMonthlyCap: Long,
     @param:Value("\${manyak.invite.base-url:https://manyak.app/invite}") private val inviteBaseUrl: String,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
     /**
@@ -65,15 +67,19 @@ class InviteService(
      * 두 적립 행이 같은 키를 쓸 수 없어 수혜자 id를 접미사로 구분한다(쌍당 1회 보장은 유지).
      * 초대자·피초대자의 월 상한은 [rewardIfUnderMonthlyCap]이 독립적으로 판정한다(한쪽만 초과해도 다른 쪽은 적립).
      *
-     * 월 상한 집계 구간은 **[inviteeCreatedAt](피초대자 가입)의 KST 월**로 고정한다("현재 월"이 아님). 초대 보상은
-     * 피초대자 가입 시점에 귀속되는 이벤트이고, 매 로그인 재시도가 항상 같은(고정) 월을 평가하므로 상한 초과 스킵이
-     * 다음 달로 이월되지 않고 영구히 유지된다(스펙 "월 한도 초과분은 무시" = 영구 스킵). 지급된 건은 멱등 키가 막는다.
+     * 자가 복구 재시도는 **[inviteeCreatedAt](피초대자 가입)의 KST 월 안에서만** 유효하다. 그 월이 지나면 재시도하지
+     * 않으므로: (1) 상한 초과로 스킵된 건이 다음 달로 이월되지 않고 영구 스킵되고(스펙 "월 한도 초과분은 무시"),
+     * (2) 지급은 항상 가입 월 안에서 일어나 원장 `created_at` 기준 월 집계와 집계 창(가입 월)이 일치한다
+     * (창=가입월·카운트=created_at 불일치로 인한 상한 초과 방지, Codex P2). 지급된 건은 멱등 키가 막는다.
      */
     @Transactional
     fun rewardInvitePair(inviterId: Long, inviteeId: Long, inviteeCreatedAt: Instant) {
         if (inviterId == inviteeId) return // 방어적: 영속 경로상 발생 불가하지만 자가 지급을 최종 차단한다.
 
         val (monthStart, monthEnd) = kstMonthRangeOf(inviteeCreatedAt)
+        // 가입 월이 지난 재시도는 건너뛴다(위 계약). 지급 시점을 가입 월로 한정해 집계 창과 created_at를 일치시킨다.
+        val now = clock.instant()
+        if (now < monthStart || now >= monthEnd) return
         rewardIfUnderMonthlyCap(rewardedUserId = inviterId, inviterId = inviterId, inviteeId = inviteeId, monthStart, monthEnd)
         rewardIfUnderMonthlyCap(rewardedUserId = inviteeId, inviterId = inviterId, inviteeId = inviteeId, monthStart, monthEnd)
     }
