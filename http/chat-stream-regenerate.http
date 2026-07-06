@@ -1,0 +1,251 @@
+### AI 응답 재생성 스트리밍(Regenerate, SSE) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### 위에서부터 순서대로 실행하면 스토리·채팅·첫 턴을 만든 뒤, 그 마지막 턴을 재생성해 본문·선택지가 교체되는지 확인합니다.
+###
+### [KNK-406] 재생성(스펙 §4-3-9): 마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체합니다(리롤이 아니라 재생성).
+###   - 새 턴을 추가하지 않고 마지막 턴의 aiOutput·choices만 바꿉니다. 사용자 입력·turnCount(current_turn)는 불변입니다.
+###   - 이전 본문은 보관하지 않습니다(버전 이력 없음). turnId는 제자리 교체이므로 그대로 유지됩니다.
+###   - 요청 {turnId}가 서버의 마지막 턴과 다르면 동기 409, 턴 0개·없는 채팅은 404, 엔딩 도달 채팅은 409입니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
+###
+### AI 연동 모드(이어쓰기와 동일):
+###   - 스텁(기본): manyak.ai.chat.stub=true — AI 없이 고정 응답을 스트리밍(마지막 사용자 입력을 본문에 에코).
+###   - 실연동: manyak.ai.chat.stub=false + MANYAK_AI_BASE_URL=<manyak-ai 주소>.
+###
+### 크레딧(스펙 §4-3-7)·소유권(스펙 §4-5)은 이어쓰기와 동일합니다(회원 1턴 선차감, 저장 전 실패 시 환불, 소유자만 가능).
+###   회원 경로 검증은 chat-stream.http의 9~13번과 같은 방식이며, 여기서는 게스트 해피 패스와 에러 케이스에 집중합니다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. 스토리라인 생성 (재생성용 스토리 준비 1/4)
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Content-Type: application/json
+Accept: application/json
+
+{
+  "customTags": [
+    { "name": "판타지", "category": "GENRE" },
+    { "name": "신중한", "category": "PROTAGONIST" }
+  ]
+}
+
+> {%
+    client.test("스토리라인 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("simpleCreationId", response.body.simpleCreationId);
+    client.global.set("storylineId", response.body.storylines[0].id);
+%}
+
+### 2. 최종 스토리 생성·저장 (재생성용 스토리 준비 2/4)
+POST {{baseUrl}}/api/v1/stories/simple
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": ["주인공은 무속성 판정을 받은 신입생이다"]
+}
+
+> {%
+    client.test("최종 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyId", response.body.id);
+%}
+
+### 3. 채팅 생성 (재생성용 채팅 준비 3/4)
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": {{storyId}}
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("chatId", response.body.id);
+%}
+
+### 4. 첫 턴 이어쓰기 스트리밍 (재생성 대상 턴 준비 4/4, SSE)
+# 재생성하려면 마지막 턴이 하나 있어야 합니다. 먼저 한 턴을 이어써 둡니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "다들 평범하게 속성을 발현한다. 나는 마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."
+}
+
+> {%
+    client.test("첫 턴 스트리밍이 200으로 시작한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. 마지막 턴 id 확보 — 상세 재조회로 turnId·원본 본문 저장
+# 4번이 completed까지 끝나면 턴 1건이 저장됩니다. 마지막 턴의 id를 재생성 요청의 turnId로 씁니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회가 성공하고 턴이 있다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(Array.isArray(response.body.turns) && response.body.turns.length >= 1,
+            `turns가 1건 이상이어야 합니다. actual=${JSON.stringify(response.body.turns)}`);
+    });
+    const last = response.body.turns[response.body.turns.length - 1];
+    client.global.set("lastTurnId", last.id);
+    client.global.set("originalAiOutput", last.aiOutput);
+    client.global.set("originalUserInput", last.userInput);
+    client.global.set("turnCountBefore", response.body.turns.length);
+%}
+
+### 6. AI 응답 재생성 스트리밍 (핵심 검증, SSE)
+# 5번을 먼저 실행해야 lastTurnId 변수가 설정됩니다.
+# started → token… → completed 순서로 SSE 전송. completed 시점에 마지막 턴의 aiOutput·choices만 교체하고
+# current_turn은 올리지 않습니다.
+#
+# ▶ IntelliJ HTTP Client 응답 패널에서 다음을 눈으로 확인하세요:
+#     - event: started   data: {"chatId":<chatId>}
+#     - event: token     data: {"text":"검"} … (여러 청크)
+#     - event: completed data: {"chatId":<chatId>,"turnId":<lastTurnId 그대로>,"aiOutput":"…(교체됨)","choices":[…]}
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": {{lastTurnId}}
+}
+
+> {%
+    client.test("재생성 스트리밍이 200으로 시작한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 7. 재생성 결과 확인 — 6번 직후 상세 재조회
+# 마지막 턴의 aiOutput은 바뀌고(원본과 다름), userInput과 turns 개수(turnCount)는 그대로여야 합니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    const last = b.turns[b.turns.length - 1];
+    client.test("마지막 턴 id는 재생성 후에도 그대로다", () => {
+        client.assert(String(last.id) === String(client.global.get("lastTurnId")),
+            `turnId가 바뀌었습니다. before=${client.global.get("lastTurnId")} after=${last.id}`);
+    });
+    client.test("마지막 턴 aiOutput은 재생성으로 교체됐다", () => {
+        client.assert(last.aiOutput !== client.global.get("originalAiOutput"),
+            `aiOutput이 그대로입니다(교체 안 됨). actual=${last.aiOutput}`);
+    });
+    client.test("사용자 입력은 불변이다", () => {
+        client.assert(last.userInput === client.global.get("originalUserInput"),
+            `userInput이 바뀌었습니다. actual=${last.userInput}`);
+    });
+    client.test("턴 개수(turnCount)는 늘지 않는다", () => {
+        client.assert(b.turns.length === client.global.get("turnCountBefore"),
+            `턴 개수가 바뀌었습니다. before=${client.global.get("turnCountBefore")} after=${b.turns.length}`);
+    });
+%}
+
+### 8. (에러) 낡은 turnId로 재생성 → 409
+# 서버의 마지막 턴과 다른 turnId(예: 1)를 보내면, 스트림을 열기 전에 동기 409(JSON)로 거절합니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": 1
+}
+
+> {%
+    client.test("낡은 turnId는 409다", () => {
+        client.assert(response.status === 409, `409가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. (에러) 턴이 0개인 새 채팅을 재생성 → 404
+# 재생성용으로 새 채팅을 하나 더 만들고(턴 없이), 바로 재생성하면 마지막 턴이 없어 404입니다.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": {{storyId}}
+}
+
+> {%
+    client.global.set("emptyChatId", response.body.id);
+%}
+
+POST {{baseUrl}}/api/v1/chats/{{emptyChatId}}/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": 1
+}
+
+> {%
+    client.test("턴 0개 재생성은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 10. (에러) 순차 정수 ID로 재생성 → 404 (IDOR 방지)
+POST {{baseUrl}}/api/v1/chats/999999999/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": 1
+}
+
+> {%
+    client.test("순차 정수는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 11. (에러) turnId 누락/비양수 → 400
+# turnId는 필수이며 양수여야 합니다(@Positive). 0이나 음수, 누락은 400입니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": 0
+}
+
+> {%
+    client.test("비양수 turnId는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 12. (자유 조회) 이미 알고 있는 chatId·turnId로 직접 재생성
+# 위 준비 흐름 없이 실제 DB의 chatId(public_id)와 마지막 턴 id를 직접 넣어 빠르게 확인할 때 사용합니다.
+POST {{baseUrl}}/api/v1/chats/ae578609-2e90-4923-af0e-64ba6a0a6f56/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "turnId": 1
+}

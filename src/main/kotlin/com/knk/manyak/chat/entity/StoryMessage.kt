@@ -39,8 +39,10 @@ class StoryMessage(
     @Column(nullable = false, length = 16)
     val role: MessageRole,
 
+    // 재생성(§4-3-9)은 마지막 ASSISTANT 본문을 같은 사용자 입력으로 다시 생성해 제자리 교체한다.
+    // 이전 본문은 보관하지 않으므로(버전 이력 없음) var로 두어 교체를 허용한다. USER 입력은 교체되지 않는다.
     @Column(nullable = false, columnDefinition = "TEXT")
-    val content: String,
+    var content: String,
 
     @Column(name = "message_order", nullable = false)
     val messageOrder: Int,
