@@ -50,12 +50,19 @@ class StoryEditService(
     /** 부분 갱신: 보낸(non-null) 필드만 교체하고 나머지는 유지한다. 리스트는 보내면 전체 교체다. */
     @Transactional
     fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest): StoryEditFormResponse {
-        val story = resolveStory(storyId)
+        // 쓰기 락으로 스토리 애그리거트를 잠가 동시 PATCH의 자식 리스트 교체 경합을 직렬화한다.
+        val story = resolveStoryForUpdate(storyId)
         requireOwnerOrAnonymous(story, userId)
 
-        // 기본 정보 — 보낸 필드만 교체.
-        request.title?.let { story.title = it }
-        request.oneLineIntro?.let { story.oneLineIntro = it }
+        // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
+        request.title?.let {
+            if (it.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목은 비어 있을 수 없습니다.")
+            story.title = it
+        }
+        request.oneLineIntro?.let {
+            if (it.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "한 줄 소개는 비어 있을 수 없습니다.")
+            story.oneLineIntro = it
+        }
         request.description?.let { story.description = it }
         request.genres?.let { story.genre = it.joinToString(separator = ", ").ifBlank { null } }
 
@@ -114,8 +121,8 @@ class StoryEditService(
         // 엔딩 전체 교체(sort_order 1-based). 레거시(enabled=false)까지 지워 유니크 충돌을 피한다.
         request.endings?.let { endings ->
             val ss = requireStartSetting(startSetting, "엔딩")
+            // 벌크 DELETE는 즉시 실행돼 재삽입과 유니크 충돌하지 않는다(엔티티 미로드로 레거시 NPE도 회피).
             storyEndingRepository.deleteByStartSettingId(ss.id)
-            storyEndingRepository.flush()
             storyEndingRepository.saveAll(
                 endings.mapIndexed { index, item ->
                     StoryEnding(
@@ -181,16 +188,22 @@ class StoryEditService(
             "시작 설정이 없어 ${field}을(를) 저장할 수 없습니다.",
         )
 
-    /** 공개 식별자(UUID 문자열)로 스토리를 조회한다. 형식 오류·없음·삭제는 모두 404로 통일한다(IDOR 차단). */
-    private fun resolveStory(publicId: String): Story {
-        val parsed = try {
+    /** 공개 식별자(UUID 문자열)로 스토리를 조회한다(조회용). 형식 오류·없음·삭제는 모두 404로 통일한다(IDOR 차단). */
+    private fun resolveStory(publicId: String): Story =
+        storyRepository.findByPublicIdAndDeletedAtIsNull(parsePublicId(publicId))
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+
+    /** 수정용 조회. 쓰기 락(PESSIMISTIC_WRITE)으로 동시 PATCH의 자식 리스트 교체 경합(유니크 충돌·유실)을 직렬화한다. */
+    private fun resolveStoryForUpdate(publicId: String): Story =
+        storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsePublicId(publicId))
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+
+    private fun parsePublicId(publicId: String): UUID =
+        try {
             UUID.fromString(publicId)
         } catch (ignored: IllegalArgumentException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         }
-        return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-    }
 
     private fun Story.toGenreNames(): List<String> =
         genre?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()

@@ -170,4 +170,16 @@ class StoryEditIntegrationTests {
             .exchange()
             .expectStatus().isBadRequest
     }
+
+    @Test
+    fun `빈 제목으로 수정하면 400이다`() {
+        val story = seedStory(userId = null)
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{ "title": "   " }""")
+            .exchange()
+            .expectStatus().isBadRequest
+    }
 }
