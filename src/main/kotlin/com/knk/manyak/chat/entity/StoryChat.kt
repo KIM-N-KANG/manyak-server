@@ -48,6 +48,12 @@ class StoryChat(
     @Column(name = "current_turn", nullable = false)
     var currentTurn: Int = 0,
 
+    // 재생성(§4-3-9)으로 마지막 턴을 교체한 완료 횟수. current_turn과 달리 재생성마다 증가한다.
+    // 크레딧 선차감 대사(KNK-448)가 완료 수 = current_turn + regeneratedCount로 세어, 유료 재생성이 성공했는데도
+    // 초과 환불되는 것을 막는다(재생성도 turn과 동일한 CHAT_TURN charge라 대사 버킷은 공유하되 완료 수만 보정).
+    @Column(name = "regenerated_count", nullable = false)
+    var regeneratedCount: Int = 0,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: ChatStatus = ChatStatus.ACTIVE,

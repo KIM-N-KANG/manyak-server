@@ -5,6 +5,7 @@ import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
+import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.client.ChatTurnStartSettings
 import com.knk.manyak.chat.client.ChatTurnStorySettings
 import com.knk.manyak.chat.dto.BatchChatRequest
@@ -18,6 +19,8 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.RegenerateChatRequest
+import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
@@ -275,19 +278,169 @@ class ChatService(
         // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
         val chat = resolveChat(chatId)
-        val chatPk = chat.id
         // 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓸 수 있다.
         // 토큰 누락·만료(요청 userId == null)나 타 회원이 owned 채팅에 이어쓰면 403으로 막는다.
         // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
         // 게스트 채팅(chat.userId == null)은 익명 허용이며 차감이 없다(기존 동작 유지).
-        if (chat.userId != null && chat.userId != userId) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 이어쓸 권한이 없습니다.")
-        }
+        requireChatOwner(chat, userId)
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyPublicId = story?.publicId?.toString().orEmpty()
         val aiRequest = assembleAiRequest(chat, story, request.userInput)
 
+        return streamTurnInternal(
+            chatId = chatId,
+            chat = chat,
+            storyPublicId = storyPublicId,
+            aiRequest = aiRequest,
+            userId = userId,
+            persist = { result ->
+                chatTurnPersister.persistTurn(
+                    chatId = chat.id,
+                    userInput = request.userInput,
+                    aiOutput = result.aiOutput,
+                    choices = result.choices,
+                )
+            },
+            onPersisted = { persistedTurn, aiCallLogId ->
+                structuredLogger.event(
+                    "user_message_saved",
+                    "chat_id" to chatId,
+                    "story_id" to storyPublicId,
+                    "turn_number" to persistedTurn.turnNumber,
+                    "message_length_bucket" to LengthBuckets.of(request.userInput.length),
+                )
+                structuredLogger.event(
+                    "ai_response_saved",
+                    "chat_id" to chatId,
+                    "story_id" to storyPublicId,
+                    "turn_number" to persistedTurn.turnNumber,
+                    "ai_call_log_id" to aiCallLogId,
+                )
+            },
+        )
+    }
+
+    /**
+     * 마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체한다(재생성, 스펙 §4-3-9). 이어쓰기와 동일 SSE 계약이다.
+     *
+     * 이어쓰기와 다른 점: (1) 새 USER 메시지를 만들지 않고 마지막 USER 입력을 그대로 재전송한다. (2) history에서 마지막 턴
+     * (USER·ASSISTANT 쌍)을 제외한다(1..N-1). (3) completed 시 새 턴을 추가하지 않고 마지막 ASSISTANT 본문·선택지만 교체하며
+     * current_turn을 늘리지 않는다. 요청 [RegenerateChatRequest.turnId]가 서버의 마지막 턴과 다르면 동기 409, 턴이 0개면 404.
+     * 엔딩에 도달한 채팅(status ENDED)은 재생성 대상에서 제외해 동기 409로 막는다(§4-3-10 도달 기록 확정 후이므로).
+     * 크레딧은 이어쓰기와 동일하게 1턴분을 선차감하고, 저장(교체) 전 실패·마지막 턴 변경 시 환불한다(§4-3-7).
+     */
+    fun regenerateChatTurn(
+        chatId: String,
+        request: RegenerateChatRequest,
+        userId: Long? = null,
+    ): SseEmitter {
+        val chat = resolveChat(chatId)
+        requireChatOwner(chat, userId)
+        // 엔딩 도달 턴은 재생성 대상이 아니다(§4-3-10 도달 기록 확정 후). 도달 기록이 채팅을 ENDED로 굳히므로 여기서 막는다.
+        if (chat.status == ChatStatus.ENDED) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
+        }
+        val story = storyRepository.findById(chat.storyId).orElse(null)
+        val storyPublicId = story?.publicId?.toString().orEmpty()
+        // 마지막 턴 검증(0개면 404, 낡은 turnId면 409)과 재생성용 history(마지막 턴 제외)·재전송 입력을 함께 확정한다.
+        val target = resolveRegenerateTarget(chat.id, request.turnId)
+        val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
+
+        return streamTurnInternal(
+            chatId = chatId,
+            chat = chat,
+            storyPublicId = storyPublicId,
+            aiRequest = aiRequest,
+            userId = userId,
+            persist = { result ->
+                chatTurnPersister.regenerateLastTurn(
+                    chatId = chat.id,
+                    expectedAssistantId = target.assistantId,
+                    aiOutput = result.aiOutput,
+                    choices = result.choices,
+                )
+            },
+            onPersisted = { persistedTurn, aiCallLogId ->
+                structuredLogger.event(
+                    "ai_response_regenerated",
+                    "chat_id" to chatId,
+                    "story_id" to storyPublicId,
+                    "turn_number" to persistedTurn.turnNumber,
+                    "ai_call_log_id" to aiCallLogId,
+                )
+            },
+        )
+    }
+
+    /**
+     * 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓰기·재생성할 수 있다.
+     * 게스트 채팅(chat.userId == null)은 익명 허용이다.
+     */
+    private fun requireChatOwner(chat: StoryChat, userId: Long?) {
+        if (chat.userId != null && chat.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 이어쓸 권한이 없습니다.")
+        }
+    }
+
+    /**
+     * 재생성 대상(마지막 턴)을 검증·확정한다.
+     *
+     * 마지막 ASSISTANT가 없으면(턴 0개) 404, [requestedTurnId]가 서버의 마지막 턴 id와 다르면(낡은 값·중간에 진행됨) 409.
+     * history는 마지막 턴(USER·ASSISTANT 쌍)을 제외한 1..N-1로 구성하고(SYSTEM 제외), userInput은 마지막 USER 입력을 그대로 둔다.
+     */
+    private fun resolveRegenerateTarget(chatPk: Long, requestedTurnId: Long): RegenerateTarget {
+        val all = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatPk)
+        // 완료된 마지막 턴 = 가장 큰 messageOrder의 ASSISTANT. 없으면 재생성할 턴이 없다(턴 0개).
+        val lastAssistant = all.lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "재생성할 턴이 없습니다.")
+        // 낙관적 동시성: 클라이언트가 본 마지막 턴과 서버의 마지막 턴이 다르면(그새 이어쓰기로 진행됨 등) 409.
+        if (lastAssistant.id != requestedTurnId) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 아니거나 이미 변경되었습니다.")
+        }
+        // 마지막 턴의 USER 입력(마지막 ASSISTANT 직전 USER). 그대로 재전송한다(AI 서버는 무상태).
+        val pairedUser = all.lastOrNull { it.role == MessageRole.USER && it.messageOrder < lastAssistant.messageOrder }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "재생성할 턴의 사용자 입력을 찾을 수 없습니다.")
+        // history: 마지막 턴(USER·ASSISTANT)을 제외한 이전 내역만. SYSTEM은 제외한다.
+        val history = all
+            .filter { it.messageOrder < pairedUser.messageOrder }
+            .mapNotNull { message ->
+                when (message.role) {
+                    MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)
+                    MessageRole.ASSISTANT -> ChatHistoryMessage(ChatMessageRole.ASSISTANT, message.content)
+                    MessageRole.SYSTEM -> null
+                }
+            }
+        return RegenerateTarget(assistantId = lastAssistant.id, userInput = pairedUser.content, history = history)
+    }
+
+    private data class RegenerateTarget(
+        val assistantId: Long,
+        val userInput: String,
+        val history: List<ChatHistoryMessage>,
+    )
+
+    /**
+     * 채팅 턴/재생성 공통 SSE 스트리밍. 검증(404/403/409)과 AI 요청 조립은 호출부에서 동기로 끝낸 뒤 여기로 넘긴다.
+     *
+     * 회원([userId] != null)이면 SseEmitter를 만들기 **전에** 동기로 1턴분을 선차감한다(잔액 부족 시 여기서
+     * InsufficientCreditException이 던져져 컨트롤러가 402로 변환, 스트림 미개시). 실제 토큰 스트리밍과 저장은
+     * [chatSseExecutor] 위에서 비동기로 처리한다. 저장([persist])이 completed 없이 끝나면(error·연결 끊김·미완료·
+     * 마지막 턴 변경) 선차감분을 전액 환불한다(정확히 1회, 멱등 키로 이중 방어).
+     *
+     * @param persist AI 결과를 원자적으로 저장(이어쓰기: 새 턴 추가 / 재생성: 마지막 턴 교체)하고 저장된 턴을 돌려준다.
+     * @param onPersisted 저장 확정 직후의 관측 로그(이벤트 이름·필드가 이어쓰기/재생성마다 달라 호출부가 주입한다).
+     */
+    private fun streamTurnInternal(
+        chatId: String,
+        chat: StoryChat,
+        storyPublicId: String,
+        aiRequest: ChatTurnAiRequest,
+        userId: Long?,
+        persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
+        onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
+    ): SseEmitter {
+        val chatPk = chat.id
         // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
         // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다. 게스트(null)는 차감하지 않는다.
         // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
@@ -296,7 +449,7 @@ class ChatService(
             creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
         }
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
-        // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persistTurn 성공 직후 세워, 이후 completed 전송 실패·연결
+        // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persist 성공 직후 세워, 이후 completed 전송 실패·연결
         // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
         val refundKey = "refund:chatturn:${UUID.randomUUID()}"
         val refundGate = AtomicBoolean(false)
@@ -311,7 +464,7 @@ class ChatService(
         }
         emitter.onCompletion {
             // 정리만 한다. 환불은 여기서 하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
-            // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persistTurn을 성공시킬 수 있다
+            // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persist를 성공시킬 수 있다
             // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
             // 아는 워커의 catch에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
             // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 catch에서 환불된다.
@@ -338,7 +491,7 @@ class ChatService(
                 )
                 // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
                 // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
-                // turn_number는 persistTurn이 DB에서 확정한 뒤 attachTurnNumber로 채운다(동시 요청 정합성).
+                // turn_number는 persist가 DB에서 확정한 뒤 attachTurnNumber로 채운다(동시 요청 정합성).
                 val recorded = aiCallRecorder.record(
                     AiCallContext(
                         feature = AiCallFeature.CHAT_RESPONSE,
@@ -367,32 +520,14 @@ class ChatService(
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
-                val persistedTurn = chatTurnPersister.persistTurn(
-                    chatId = chatPk,
-                    userInput = request.userInput,
-                    aiOutput = result.aiOutput,
-                    choices = result.choices,
-                )
+                val persistedTurn = persist(result)
                 // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                 // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                 persisted.set(true)
                 Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
-                // 실제 turn 번호는 persistTurn이 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
+                // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
-                structuredLogger.event(
-                    "user_message_saved",
-                    "chat_id" to chatId,
-                    "story_id" to storyPublicId,
-                    "turn_number" to persistedTurn.turnNumber,
-                    "message_length_bucket" to LengthBuckets.of(request.userInput.length),
-                )
-                structuredLogger.event(
-                    "ai_response_saved",
-                    "chat_id" to chatId,
-                    "story_id" to storyPublicId,
-                    "turn_number" to persistedTurn.turnNumber,
-                    "ai_call_log_id" to recorded.aiCallLogId,
-                )
+                onPersisted(persistedTurn, recorded.aiCallLogId)
                 emitter.send(
                     SseEmitter.event()
                         .name("completed")
@@ -412,7 +547,7 @@ class ChatService(
                 emitter.complete()
             } catch (exception: Exception) {
                 // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
-                // record가 성공 반환한 뒤의 실패(예: persistTurn DB·트랜잭션 오류, completed 전송 실패)는 GlobalExceptionHandler를
+                // record가 성공 반환한 뒤의 실패(예: persist DB·트랜잭션 오류·마지막 턴 변경, completed 전송 실패)는 GlobalExceptionHandler를
                 // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
                 succeededAiCallLogId?.let {
                     captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
@@ -481,7 +616,19 @@ class ChatService(
      * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
      * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
      */
-    private fun assembleAiRequest(chat: StoryChat, story: Story?, userInput: String): ChatTurnAiRequest {
+    private fun assembleAiRequest(chat: StoryChat, story: Story?, userInput: String): ChatTurnAiRequest =
+        buildAiRequest(chat, story, assembleHistory(chat.id), userInput)
+
+    /**
+     * 스토리 설정·시작 설정과 주어진 [history]·[userInput]으로 AI 채팅 턴 요청을 조립한다.
+     * 이어쓰기는 전체 내역을, 재생성(§4-3-9)은 마지막 턴을 제외한 내역을 [history]로 넘긴다.
+     */
+    private fun buildAiRequest(
+        chat: StoryChat,
+        story: Story?,
+        history: List<ChatHistoryMessage>,
+        userInput: String,
+    ): ChatTurnAiRequest {
         val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(chat.storyId)
         val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
@@ -499,7 +646,7 @@ class ChatService(
                 prologue = startSetting?.prologue.orEmpty(),
                 startSituation = startSetting?.startSituation.orEmpty(),
             ),
-            history = assembleHistory(chat.id),
+            history = history,
             userInput = userInput,
             summary = "",
         )

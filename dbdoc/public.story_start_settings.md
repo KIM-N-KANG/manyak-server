@@ -66,6 +66,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
 }
 "public.story_endings" {
   bigint id

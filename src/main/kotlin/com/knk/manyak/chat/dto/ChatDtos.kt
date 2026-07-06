@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
@@ -156,6 +157,17 @@ data class ContinueChatRequest(
         example = "다들 평범하게 속성을 발현한다. 나는 검사를 했지만 마법수정에서 아무런 빛이 나오지 않았다. 무속성 판정을 받고 단상 아래로 내려가는 중 마법수정에 금이 가더니 순식간에 깨져버렸다.",
     )
     val userInput: String,
+)
+
+@Schema(description = "AI 응답 재생성 요청")
+data class RegenerateChatRequest(
+    @field:Positive
+    @field:Schema(
+        description = "재생성할 마지막 턴 ID(공개 채팅 상세의 turns[].id). 서버가 보는 마지막 턴과 다르면 409로 거절합니다. " +
+            "재생성은 이 마지막 턴의 AI 출력과 선택지만 같은 사용자 입력으로 다시 생성해 교체하며, 이전 본문은 보관하지 않습니다.",
+        example = "3",
+    )
+    val turnId: Long,
 )
 
 @Schema(description = "SSE 스트리밍 시작 이벤트 예시")

@@ -27,9 +27,10 @@ data class ReconciliationResult(val groupsScanned: Int, val refundsEmitted: Int)
  * 모자란 만큼만 [CreditWalletService.reconcileRefunds]가 지갑 락 아래 발행한다(초과 환불 없음, 멱등).
  *
  * 완료 수 판정:
- * - CHAT: `chat.currentTurn`(저장된 턴 수). 게스트·회원이 섞인 채팅은 currentTurn이 회원 charge보다 클 수 있어
- *   완료 수가 과대평가되면 target이 음수→0이 되어 미환불된다(fail-safe: 서버가 절대 초과 환불하지 않음, 순수
- *   회원 채팅은 정확). 리소스가 사라졌으면(삭제) 완료로 간주해 환불하지 않는다.
+ * - CHAT: `chat.currentTurn + chat.regeneratedCount`(저장된 턴 수 + 완료된 재생성 수, KNK-406). 재생성은 유료
+ *   (CHAT_TURN) charge지만 current_turn을 올리지 않으므로 regeneratedCount를 더해야 성공한 재생성이 초과 환불되지
+ *   않는다. 게스트·회원이 섞인 채팅은 완료 수가 회원 charge보다 클 수 있어 과대평가되면 target이 음수→0이 되어
+ *   미환불된다(fail-safe: 서버가 절대 초과 환불하지 않음, 순수 회원 채팅은 정확). 리소스가 사라졌으면(삭제) 완료로 간주해 환불하지 않는다.
  * - STORY: 세션 status가 STORY_CREATED면 1, 아니면 0(세션은 charge보다 먼저 생기므로 유실 charge엔 항상 존재).
  */
 @Service
@@ -81,8 +82,12 @@ class CreditReconciliationService(
     /** 그룹의 완료 수. 판정 불가(리소스 삭제·미지원 refType)는 완료 과다로 처리해 환불하지 않는다(fail-safe). */
     private fun completedCount(refType: String, refId: Long): Long =
         when (refType) {
+            // 완료 수 = 완료 턴 수(current_turn) + 완료 재생성 수(regenerated_count). 재생성은 current_turn을 올리지
+            // 않는 유료 CHAT_TURN charge라, 재생성 완료분을 더하지 않으면 성공한 재생성이 초과 환불된다(KNK-406).
             CHAT_REF_TYPE ->
-                storyChatRepository.findById(refId).map { it.currentTurn.toLong() }.orElse(NEVER_REFUND)
+                storyChatRepository.findById(refId)
+                    .map { (it.currentTurn + it.regeneratedCount).toLong() }
+                    .orElse(NEVER_REFUND)
             STORY_REF_TYPE ->
                 storyCreationSessionRepository.findById(refId)
                     .map { if (it.status == StoryCreationSessionStatus.STORY_CREATED) 1L else 0L }

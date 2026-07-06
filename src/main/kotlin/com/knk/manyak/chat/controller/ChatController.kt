@@ -6,6 +6,7 @@ import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.global.security.CurrentUserId
@@ -214,6 +215,77 @@ class ChatController(
             // 회원 선차감은 streamChatTurn이 SseEmitter를 만들기 전에 동기로 수행하므로, 잔액 부족 예외는
             // 스트림이 열리기 전에 이 요청 스레드로 전파된다. 여기서 402로 변환해 동기 HTTP 응답으로 돌려준다
             // (스트림 안 error 이벤트가 아님, 스펙 §4-3-7). 공유 @ControllerAdvice를 추가하지 않고 컨트롤러에서 지역 변환한다.
+            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+        }
+    }
+
+    @Operation(
+        summary = "AI 응답 재생성 스트리밍",
+        description = "마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체하고 SSE로 스트리밍합니다(스펙 §4-3-9, 리롤이 아니라 재생성). " +
+            "이어쓰기와 동일하게 started, token, completed 순서로 전달되며, completed에는 교체된 aiOutput 전체와 선택지가 포함됩니다. " +
+            "새 턴을 추가하지 않고 마지막 턴의 본문·선택지만 교체하므로 사용자 입력과 턴 수(turnCount)는 변하지 않습니다. 이전 본문은 보관하지 않습니다. " +
+            "요청 turnId가 서버의 마지막 턴과 다르면 409로 거절합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "SSE 스트리밍 시작 성공",
+                content = [
+                    Content(
+                        mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
+                        schema = Schema(
+                            type = "string",
+                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\",\"choices\":[\"주변을 살핀다.\"]}\n\n",
+                        ),
+                    ),
+                ],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음(turnId 누락·비양수 등)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "402",
+                description = "크레딧 잔액 부족(회원). SSE를 열기 전 동기 JSON으로 응답합니다.",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원).",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "채팅을 찾을 수 없거나 재생성할 턴이 없음(턴 0개)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "409",
+                description = "요청 turnId가 서버의 마지막 턴과 다르거나(진행됨), 엔딩에 도달한 채팅",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @PostMapping(
+        "/chats/{chatId}/turns/regenerate/stream",
+        produces = [MediaType.TEXT_EVENT_STREAM_VALUE],
+    )
+    fun regenerateChatTurn(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+        @Valid @RequestBody request: RegenerateChatRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+        response: HttpServletResponse,
+    ): SseEmitter {
+        // 이어쓰기와 동일하게 SSE 본문 charset을 UTF-8로 고정한다(한글 깨짐 방지).
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return try {
+            chatService.regenerateChatTurn(chatId = chatId, request = request, userId = userId)
+        } catch (exception: InsufficientCreditException) {
+            // 선차감은 스트림을 열기 전에 동기로 수행되므로 잔액 부족은 여기로 전파된다. 402로 변환한다(§4-3-7).
             throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
         }
     }
