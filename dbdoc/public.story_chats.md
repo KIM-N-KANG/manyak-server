@@ -16,12 +16,14 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
+| regenerated_count | integer | 0 | false |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_story_chats_current_turn | CHECK | CHECK ((current_turn >= 0)) |
+| ck_story_chats_regenerated_count | CHECK | CHECK ((regenerated_count >= 0)) |
 | ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
@@ -60,6 +62,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
 }
 "public.story_messages" {
   bigint id

@@ -93,8 +93,10 @@ class CreditReconciliationIntegrationTests {
         )
     }
 
-    private fun seedChat(userId: Long, currentTurn: Int): Long =
-        storyChatRepository.save(StoryChat(userId = userId, storyId = 1L, currentTurn = currentTurn)).id
+    private fun seedChat(userId: Long, currentTurn: Int, regeneratedCount: Int = 0): Long =
+        storyChatRepository.save(
+            StoryChat(userId = userId, storyId = 1L, currentTurn = currentTurn, regeneratedCount = regeneratedCount),
+        ).id
 
     private fun seedSession(status: StoryCreationSessionStatus): Long =
         storyCreationSessionRepository.save(StoryCreationSession(status = status)).id
@@ -183,6 +185,38 @@ class CreditReconciliationIntegrationTests {
         val chatPk = seedChat(userId, currentTurn = 1) // 2차감 중 1턴만 완료
         chargeChat(userId, chatPk)
         chargeChat(userId, chatPk)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(1)
+        assertThat(refundCount(userId, "CHAT", chatPk)).isEqualTo(1)
+    }
+
+    @Test
+    fun `저장된 턴과 완료된 재생성만큼 차감된 채팅은 환불하지 않는다`() {
+        // KNK-406 회귀: 재생성은 CHAT_TURN을 차감하지만 current_turn을 올리지 않는다. 완료 수 = current_turn +
+        // regeneratedCount로 세야 성공한 재생성이 대사에서 미완료로 오인돼 초과 환불되지 않는다.
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 1, regeneratedCount = 1) // 1턴 + 1재생성 완료
+        chargeChat(userId, chatPk) // 턴 차감
+        chargeChat(userId, chatPk) // 재생성 차감
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(refundCount(userId, "CHAT", chatPk)).isEqualTo(0)
+    }
+
+    @Test
+    fun `완료된 재생성은 완료 수에 포함되어 미완료 재생성분만 환불한다`() {
+        // 완료 수(current_turn 1 + regeneratedCount 1 = 2)를 초과한 3번째 차감(유실된 재생성)만 환불한다.
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 1, regeneratedCount = 1)
+        chargeChat(userId, chatPk) // 턴
+        chargeChat(userId, chatPk) // 완료된 재생성
+        chargeChat(userId, chatPk) // 유실된 재생성(미완료)
 
         val result = serviceAsOf(future).reconcile()
 

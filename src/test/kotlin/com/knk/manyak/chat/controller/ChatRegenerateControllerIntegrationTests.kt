@@ -133,9 +133,11 @@ class ChatRegenerateControllerIntegrationTests {
         assertThat(choices.map { it.choiceText }).doesNotContain("원본 선택 A", "원본 선택 B")
         assertThat(choices.map { it.choiceOrder.toInt() }).startsWith(1)
 
-        // turn_number(current_turn)는 증가하지 않는다.
+        // turn_number(current_turn)는 증가하지 않지만, 완료된 재생성은 regeneratedCount로 누적된다
+        // (크레딧 대사가 완료 수 = current_turn + regeneratedCount로 세어 유료 재생성을 초과 환불하지 않게 함, KNK-406).
         val reloadedChat = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloadedChat.currentTurn).isEqualTo(2)
+        assertThat(reloadedChat.regeneratedCount).isEqualTo(1)
     }
 
     @Test

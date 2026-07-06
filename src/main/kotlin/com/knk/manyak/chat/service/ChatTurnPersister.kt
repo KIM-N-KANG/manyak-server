@@ -134,7 +134,10 @@ class ChatTurnPersister(
             )
         }
 
-        // current_turn은 증가시키지 않는다 — 같은 논리 턴의 재생성이다.
+        // current_turn은 증가시키지 않는다 — 같은 논리 턴의 재생성이다. 대신 regenerated_count를 올려, 유료(CHAT_TURN)
+        // 선차감이 완료된 재생성을 크레딧 대사(KNK-448)가 완료 수에 포함하게 한다(성공 재생성의 초과 환불 방지).
+        chat.regeneratedCount += 1
+        storyChatRepository.save(chat)
         return PersistedTurn(turnId = lastAssistant.id, turnNumber = chat.currentTurn)
     }
 

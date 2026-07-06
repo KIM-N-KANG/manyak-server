@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 12 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 13 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -147,6 +147,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
 }
 "public.story_messages" {
   bigint id
