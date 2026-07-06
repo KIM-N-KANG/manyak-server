@@ -28,17 +28,18 @@ class Story(
     @Column(name = "user_id")
     val userId: Long? = null,
 
+    // 스토리 수정(PATCH, KNK-404)으로 기본 정보를 갱신할 수 있어 var로 둔다.
     @Column(nullable = false, length = 100)
-    val title: String,
+    var title: String,
 
     @Column(name = "one_line_intro", length = 255)
-    val oneLineIntro: String? = null,
+    var oneLineIntro: String? = null,
 
     @Column(columnDefinition = "TEXT")
-    val description: String? = null,
+    var description: String? = null,
 
     @Column(length = 255)
-    val genre: String? = null,
+    var genre: String? = null,
 
     // 등록 상태(초안/발행). 일반 모드 초안 저장은 DRAFT로 시작하고, 발행 시 PUBLISHED가 된다(KNK-401).
     // 기존 행·간편 제작 스토리는 기본값 PUBLISHED다.
