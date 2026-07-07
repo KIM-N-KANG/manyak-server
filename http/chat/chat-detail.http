@@ -18,11 +18,18 @@
 @baseUrl = http://localhost:8080
 
 ### 0. 백엔드 상태 확인
+# [KNK-477] 게스트 체험 한도 대상 요청은 X-Manyak-Device-Id 헤더가 필수입니다.
+#   실행마다 새 deviceId를 발급해 재실행 시 한도(TTL 없음, Phase 1) 소진을 피합니다.
 GET {{baseUrl}}/actuator/health
 Accept: application/json
 
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
 ### 1. 스토리라인 생성 (상세 조회용 스토리 준비 1/3)
 POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -43,6 +50,7 @@ Accept: application/json
 
 ### 2. 최종 스토리 생성·저장 (상세 조회용 스토리 준비 2/3)
 POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -114,6 +122,7 @@ Accept: application/json
 # IntelliJ 응답 패널에서 started → token… → completed 순서를 확인하세요. completed 시점에 턴이 저장됩니다.
 # (채팅 AI 연동/스텁 모드 전환은 chat-stream.http 상단 안내 참고)
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: text/event-stream, application/json
 
