@@ -5,7 +5,7 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_message_versions_id_seq'::regclass) | false |  |  |  |
-| message_id | bigint |  | false |  |  |  |
+| message_id | bigint |  | false |  | [public.story_messages](public.story_messages.md) |  |
 | version_number | integer |  | false |  |  |  |
 | content | text |  | false |  |  |  |
 | choices | text |  | false |  |  |  |
@@ -15,6 +15,7 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| fk_story_message_versions_message | FOREIGN KEY | FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE |
 | story_message_versions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_story_message_versions | UNIQUE | UNIQUE (message_id, version_number) |
 
@@ -31,13 +32,22 @@
 ```mermaid
 erDiagram
 
+"public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 
 "public.story_message_versions" {
   bigint id
-  bigint message_id
+  bigint message_id FK
   integer version_number
   text content
   text choices
+  timestamp_with_time_zone created_at
+}
+"public.story_messages" {
+  bigint id
+  bigint chat_id FK
+  varchar_16_ role
+  text content
+  integer message_order
   timestamp_with_time_zone created_at
 }
 ```

@@ -13,7 +13,10 @@ CREATE TABLE story_message_versions (
     -- 보관 당시의 선택지 텍스트 목록(JSON 배열, choice_order 오름차순). 이력·분석용이라 정규화하지 않고 스냅샷으로 둔다.
     choices        TEXT NOT NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_story_message_versions UNIQUE (message_id, version_number)
+    CONSTRAINT uq_story_message_versions UNIQUE (message_id, version_number),
+    -- 부모 ASSISTANT 메시지가 물리 삭제되면 이력도 함께 정리한다(고아 행 방지·데이터 수명/프라이버시). story_choices와 동일 규칙.
+    CONSTRAINT fk_story_message_versions_message
+        FOREIGN KEY (message_id) REFERENCES story_messages (id) ON DELETE CASCADE
 );
 
 -- 한 메시지의 이력 조회·count(다음 version_number 계산)를 위한 인덱스.
