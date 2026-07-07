@@ -1,5 +1,9 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryRepository
@@ -30,12 +34,21 @@ class StoryDeleteControllerIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
     }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 
     @Test
     fun `스토리를 삭제하면 204와 함께 deletedAt이 기록되는 소프트 삭제다`() {
@@ -132,6 +145,48 @@ class StoryDeleteControllerIntegrationTests {
             .expectStatus().isNotFound
 
         // 삭제되지 않았다.
+        assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
+    fun `회원 소유 스토리를 소유자가 삭제하면 204다`() {
+        val owner = saveUser("스토리소유자")
+        val story = storyRepository.save(Story(userId = owner.id, title = "소유 스토리"))
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .exchange()
+            .expectStatus().isNoContent
+
+        assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNotNull()
+    }
+
+    @Test
+    fun `회원 소유 스토리를 타인이 삭제하면 403이고 삭제되지 않는다`() {
+        val owner = saveUser("스토리소유자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(userId = owner.id, title = "소유 스토리"))
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(other.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
+    fun `회원 소유 스토리를 미인증이 삭제하면 403이고 삭제되지 않는다`() {
+        val owner = saveUser("스토리소유자")
+        val story = storyRepository.save(Story(userId = owner.id, title = "소유 스토리"))
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isForbidden
+
         assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNull()
     }
 

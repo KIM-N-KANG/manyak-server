@@ -5,11 +5,21 @@
 ###
 ### [KNK-256] 스토리 식별자는 공개 식별자(UUID, public_id)입니다. 순차 정수 추측 삭제는 404로 차단됩니다(IDOR).
 ###
+### [KNK-69] 소유권(§4-5): 회원 소유(user_id 있는) 스토리는 소유자만 삭제할 수 있고, 타인·미인증 삭제는 403입니다.
+###   소유자 없는(게스트 제작) 스토리는 인증 없이 삭제할 수 있습니다. 9~13번이 소유권 케이스입니다.
+###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
+###   - 소유권 검증(9~13)은 서로 다른 두 계정의 access 토큰이 필요합니다.
+###     auth-login-google.http 5번으로 소유자 토큰을 받아 @accessToken 에, 다른 계정 토큰을 @otherAccessToken 에 넣으세요.
 
 @baseUrl = http://localhost:8080
+
+# 소유권 케이스(9~13)용. auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_OWNER_ACCESS_TOKEN_HERE
+# 소유자와 다른 계정의 토큰(타인 삭제 403 확인용).
+@otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
 GET {{baseUrl}}/actuator/health
@@ -128,7 +138,78 @@ DELETE {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
     });
 %}
 
-### 9. (자유 조회) 이미 아는 storyId(공개 식별자 UUID)를 직접 삭제
+### 9. [소유권] 회원 소유 스토리 준비 — 스토리라인 생성 (1/2)
+# 소유자 토큰으로 호출해 이후 최종 생성 시 소유자에게 귀속시킵니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "customTags": [
+    { "name": "다크 판타지", "category": "GENRE" },
+    { "name": "신중한", "category": "PROTAGONIST" }
+  ]
+}
+
+> {%
+    client.test("소유권 준비 스토리라인 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰 유효 확인). actual=${response.status}`);
+    });
+    client.global.set("ownedSimpleCreationId", response.body.simpleCreationId);
+    client.global.set("ownedStorylineId", response.body.storylines[0].id);
+%}
+
+### 10. [소유권] 회원 소유 스토리 최종 생성 (2/2) — 소유자 토큰으로 귀속
+# 9번을 먼저 실행해야 변수가 채워집니다. 최종 생성에 소유자 토큰을 실어 story.user_id 를 소유자로 박습니다.
+POST {{baseUrl}}/api/v1/stories/simple
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "simpleCreationId": {{ownedSimpleCreationId}},
+  "storylineId": {{ownedStorylineId}},
+  "additionalInfos": ["주인공은 복수보다 진실을 택한다"]
+}
+
+> {%
+    client.test("소유 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("ownedStoryId", response.body.id);
+%}
+
+### 11. [소유권] 미인증 삭제 → 403 (삭제되지 않음)
+DELETE {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+
+> {%
+    client.test("회원 소유 스토리의 미인증 삭제는 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 12. [소유권] 타인(다른 회원) 삭제 → 403 (삭제되지 않음)
+DELETE {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+Authorization: Bearer {{otherAccessToken}}
+
+> {%
+    client.test("회원 소유 스토리의 타인 삭제는 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(두 토큰이 서로 다른 계정인지 확인). actual=${response.status}`);
+    });
+%}
+
+### 13. [소유권] 소유자 삭제 → 204
+DELETE {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("소유자 본인 삭제는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 14. (자유 조회) 이미 아는 storyId(공개 식별자 UUID)를 직접 삭제
 # 위 생성 흐름(1~2) 없이, 실제 DB에 있는 public_id(UUID)를 직접 넣어 삭제를 확인할 때 사용합니다.
-# 자리표시 UUID를 실제 값으로 교체하세요. 어서션이 없으니 응답 상태(204/404)를 눈으로 확인하세요.
+# 자리표시 UUID를 실제 값으로 교체하세요. 어서션이 없으니 응답 상태(204/403/404)를 눈으로 확인하세요.
 DELETE {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301

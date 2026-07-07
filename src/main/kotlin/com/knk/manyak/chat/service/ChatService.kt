@@ -217,11 +217,16 @@ class ChatService(
     /**
      * 채팅을 소프트 삭제한다. 행을 물리 삭제하지 않고 deletedAt만 기록해 자식 데이터(메시지·선택지)를 보존한다.
      * 이미 삭제됐거나 존재하지 않으면(순차 정수·임의 값 포함) 404로 통일한다.
+     * 존재 여부를 노출하지 않도록 소유권 403은 404(없음·이미 삭제) 판정 뒤에 적용한다.
      */
     @Transactional
-    fun deleteChat(chatId: String) {
+    fun deleteChat(chatId: String, userId: Long?) {
         // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
         val chat = resolveChat(chatId)
+        // 소유권 게이트(§4-5): 소유자 없는(게스트) 채팅은 익명 허용, 소유자 있으면 본인만. 위반 시 403.
+        if (chat.userId != null && chat.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 삭제할 권한이 없습니다.")
+        }
         chat.deletedAt = Instant.now()
     }
 
