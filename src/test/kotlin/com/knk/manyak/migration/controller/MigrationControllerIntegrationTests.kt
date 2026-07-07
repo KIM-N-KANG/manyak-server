@@ -33,7 +33,8 @@ import java.util.UUID
  *
  * - 인증 필수: 토큰 없음·사용자 없음 → 401.
  * - 항목별 status(MIGRATED/ALREADY_OWNED/CONFLICT/NOT_FOUND)와 실제 소유권(user_id) 반영을 확인한다.
- * - 효과 멱등, 형식 오류·상한 초과 → 400.
+ * - 이관은 계정당 1회(≥1건 MIGRATED 시 잠금): 이후 호출은 평가 없이 migrationClosed=true로 닫힌다(스펙 §4-3-5).
+ * - 형식 오류·상한 초과 → 400.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -170,34 +171,41 @@ class MigrationControllerIntegrationTests {
     }
 
     @Test
-    fun `재호출하면 멱등하게 ALREADY_OWNED를 반환한다`() {
+    fun `이관에 성공하면 계정이 잠겨 2회차 호출은 평가 없이 migrationClosed로 닫힌다`() {
         val me = saveUser("me")
         val guest = saveStory(ownerId = null)
-        val body = """{"storyIds":["${guest.publicId}"],"chatIds":[]}"""
 
-        // 1회차: MIGRATED
+        // 1회차: MIGRATED, 아직 닫히지 않음
         restTestClient.post()
             .uri("/api/v1/auth/migrate")
             .header("Authorization", "Bearer ${accessTokenFor(me)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
+            .body("""{"storyIds":["${guest.publicId}"],"chatIds":[]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+            .jsonPath("$.migrationClosed").isEqualTo(false)
 
-        // 2회차: 소유권 불변, status만 ALREADY_OWNED
+        // 계정이 잠긴 뒤 새 게스트 스토리를 제출해도(2회차) 평가 없이 닫히고 빈 결과를 준다.
+        val secondGuest = saveStory(ownerId = null)
         restTestClient.post()
             .uri("/api/v1/auth/migrate")
             .header("Authorization", "Bearer ${accessTokenFor(me)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
+            .body("""{"storyIds":["${secondGuest.publicId}"],"chatIds":[]}""")
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.stories[0].status").isEqualTo("ALREADY_OWNED")
+            .jsonPath("$.migrationClosed").isEqualTo(true)
+            .jsonPath("$.stories").isEmpty
+            .jsonPath("$.chats").isEmpty
 
+        // 1회차 스토리는 요청자 소유로 이관됐고, 2회차 스토리는 잠금으로 평가되지 않아 게스트(NULL)로 남는다.
         assertThat(storyRepository.findByPublicIdAndDeletedAtIsNull(guest.publicId)!!.userId).isEqualTo(me.id)
+        assertThat(storyRepository.findByPublicIdAndDeletedAtIsNull(secondGuest.publicId)!!.userId).isNull()
+        // 이관 완료 시각이 기록돼 계정이 잠긴다.
+        assertThat(userRepository.findById(me.id).orElseThrow().migratedAt).isNotNull()
     }
 
     // ---- 검증 오류 ----

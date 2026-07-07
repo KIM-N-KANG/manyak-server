@@ -1,5 +1,6 @@
 package com.knk.manyak.migration.service
 
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
@@ -7,10 +8,12 @@ import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -31,14 +34,32 @@ class GuestDataMigrationService(
     private val storyRepository: StoryRepository,
     private val storyChatRepository: StoryChatRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val userRepository: UserRepository,
 ) {
 
     @Transactional
-    fun migrate(userId: Long, request: MigrationRequest): MigrationResponse =
-        MigrationResponse(
-            stories = claimStories(userId, parseUuids(request.storyIds)),
-            chats = claimChats(userId, parseUuids(request.chatIds)),
-        )
+    fun migrate(userId: Long, request: MigrationRequest): MigrationResponse {
+        // 이관 잠금 게이트(스펙 §4-3-5, KNK-480): 이관은 계정당 1회만 허용한다.
+        // migrated_at이 이미 있으면(과거에 ≥1건 이관 성공) 어떤 항목도 평가하지 않고 닫힌 응답을 돌려준다.
+        // userId는 컨트롤러에서 인증된 실 사용자 id이므로 조회는 항상 성공한다(방어적으로 없으면 401).
+        val user = userRepository.findByIdOrNull(userId)
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        if (user.migratedAt != null) {
+            return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
+        }
+
+        val stories = claimStories(userId, parseUuids(request.storyIds))
+        val chats = claimChats(userId, parseUuids(request.chatIds))
+
+        // 한 건이라도 이번 요청으로 소유권을 얻었으면 계정을 잠근다(관리 엔티티 변경 → 트랜잭션 커밋 시 UPDATE).
+        // 잠금은 기기를 갈아타며 반복 이관하는 어뷰징(순차 재호출)을 막는다. 동시 최초 이관 2건이 모두 잠가도 무해하다.
+        if (stories.any { it.status == MigrationStatus.MIGRATED } ||
+            chats.any { it.status == MigrationStatus.MIGRATED }
+        ) {
+            user.migratedAt = Instant.now()
+        }
+        return MigrationResponse(stories = stories, chats = chats)
+    }
 
     private fun claimStories(userId: Long, ids: List<UUID>): List<MigrationResult> {
         val storyByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
