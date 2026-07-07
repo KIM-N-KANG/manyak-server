@@ -1,5 +1,7 @@
 package com.knk.manyak.migration.service
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.migration.dto.MigrationRequest
@@ -10,6 +12,7 @@ import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyCollection
 import org.mockito.ArgumentMatchers.anyLong
@@ -17,8 +20,10 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -34,11 +39,21 @@ class GuestDataMigrationServiceTest {
     private val storyChatRepository: StoryChatRepository = mock(StoryChatRepository::class.java)
     private val storyCreationSessionRepository: StoryCreationSessionRepository =
         mock(StoryCreationSessionRepository::class.java)
+    private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val service =
-        GuestDataMigrationService(storyRepository, storyChatRepository, storyCreationSessionRepository)
+        GuestDataMigrationService(storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository)
 
     private val userId = 10L
     private val otherUserId = 99L
+
+    /** 기본은 아직 이관하지 않은(잠금 해제) 계정. 잠금 게이트 테스트는 이 stub을 잠긴 계정으로 덮어쓴다. */
+    @BeforeEach
+    fun stubUnlockedUser() {
+        // 게이트는 동시성 직렬화를 위해 비관적 락 조회(findByIdForUpdate)를 쓴다.
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(user(migratedAt = null))
+    }
+
+    private fun user(migratedAt: Instant?) = User(id = userId, nickname = "me", migratedAt = migratedAt)
 
     private fun story(publicId: UUID, ownerId: Long?) =
         Story(publicId = publicId, userId = ownerId, title = "제목")
@@ -205,5 +220,52 @@ class GuestDataMigrationServiceTest {
 
         assertThat(result.stories).isEmpty()
         assertThat(result.chats).isEmpty()
+        assertThat(result.migrationClosed).isFalse()
+    }
+
+    // ---- 이관 1회 잠금 게이트(스펙 §4-3-5, KNK-480) ----
+
+    @Test
+    fun `이미 이관한 계정은 평가 없이 migrationClosed와 빈 결과를 반환한다`() {
+        // migrated_at이 있으면(계정 잠김) 어떤 저장소도 건드리지 않고 닫힌 응답을 준다.
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(user(migratedAt = Instant.now()))
+        val pid = UUID.randomUUID()
+
+        val result = service.migrate(
+            userId,
+            MigrationRequest(storyIds = listOf(pid.toString()), chatIds = listOf(pid.toString())),
+        )
+
+        assertThat(result.migrationClosed).isTrue()
+        assertThat(result.stories).isEmpty()
+        assertThat(result.chats).isEmpty()
+        verifyNoInteractions(storyRepository, storyChatRepository, storyCreationSessionRepository)
+    }
+
+    @Test
+    fun `한 건이라도 MIGRATED면 계정을 잠근다(migratedAt 기록)`() {
+        val loaded = user(migratedAt = null)
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(loaded)
+        val pid = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
+        `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        assertThat(result.migrationClosed).isFalse()
+        assertThat(loaded.migratedAt).isNotNull()
+    }
+
+    @Test
+    fun `한 건도 MIGRATED가 아니면 계정을 잠그지 않는다(migratedAt 유지)`() {
+        val loaded = user(migratedAt = null)
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(loaded)
+        val pid = UUID.randomUUID()
+        // 이미 요청자 소유(ALREADY_OWNED)라 이번 요청으로 새로 얻은 소유권이 없다.
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, userId)))
+
+        service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
+
+        assertThat(loaded.migratedAt).isNull()
     }
 }
