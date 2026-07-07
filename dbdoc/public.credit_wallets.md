@@ -52,6 +52,7 @@ erDiagram
   timestamp_with_time_zone deleted_at
   varchar_16_ invite_code
   bigint inviter_user_id FK
+  timestamp_with_time_zone migrated_at
 }
 ```
 

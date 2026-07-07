@@ -15,6 +15,7 @@
 | deleted_at | timestamp with time zone |  | true |  |  |  |
 | invite_code | varchar(16) |  | true |  |  |  |
 | inviter_user_id | bigint |  | true |  | [public.users](public.users.md) |  |
+| migrated_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -56,6 +57,7 @@ erDiagram
   timestamp_with_time_zone deleted_at
   varchar_16_ invite_code
   bigint inviter_user_id FK
+  timestamp_with_time_zone migrated_at
 }
 "public.social_accounts" {
   bigint id

@@ -43,4 +43,10 @@ data class MigrationResult(
 data class MigrationResponse(
     val stories: List<MigrationResult>,
     val chats: List<MigrationResult>,
+
+    @Schema(
+        description = "이관이 계정당 1회 제한으로 닫혔는지 여부. true면 이미 이관을 완료한 계정이라 " +
+            "이번 요청은 어떤 항목도 평가하지 않았고 stories·chats는 빈 배열이다.",
+    )
+    val migrationClosed: Boolean = false,
 )
