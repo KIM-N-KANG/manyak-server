@@ -78,7 +78,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "storyId": {{storyId}}
+  "storyId": "{{storyId}}"
 }
 
 > {%
@@ -156,7 +156,7 @@ Accept: application/json
 Authorization: Bearer {{accessToken}}
 
 {
-  "storyId": {{storyId}}
+  "storyId": "{{storyId}}"
 }
 
 > {%

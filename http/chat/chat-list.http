@@ -68,7 +68,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "storyId": {{storyId}}
+  "storyId": "{{storyId}}"
 }
 
 > {%
@@ -86,7 +86,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "storyId": {{storyId}}
+  "storyId": "{{storyId}}"
 }
 
 > {%
