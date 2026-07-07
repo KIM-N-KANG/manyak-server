@@ -27,6 +27,15 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
     // 소프트 삭제된(deleted_at IS NOT NULL) 채팅은 조회에서 제외한다.
     fun findByPublicIdAndDeletedAtIsNull(publicId: UUID): StoryChat?
 
+    /**
+     * 채팅 행을 public_id로 비관적 쓰기 락으로 조회한다(미삭제만). 삭제의 소유권 검사와 deletedAt 기록 사이에
+     * 마이그레이션 클레임([claimByPublicId])이 끼어들어 방금 회원 소유가 된 채팅을 익명 삭제가 지우는 경쟁을 막는다
+     * — 소유권 판정과 삭제 쓰기를 채팅 행 단위로 직렬화한다(KNK-69).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM StoryChat c WHERE c.publicId = :publicId AND c.deletedAt IS NULL")
+    fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): StoryChat?
+
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<StoryChat>
 
     /**

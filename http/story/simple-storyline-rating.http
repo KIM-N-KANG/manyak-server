@@ -13,12 +13,19 @@
 
 ### -1. 백엔드 서버 상태 확인
 # 이 요청이 연결되지 않으면 백엔드가 8080 포트에서 실행 중이 아닙니다.
+# [KNK-477] 게스트 체험 한도 대상(스토리라인 생성)은 X-Manyak-Device-Id 헤더가 필수입니다.
+#   실행마다 새 deviceId를 발급해 재실행 시 한도(TTL 없음, Phase 1) 소진을 피합니다.
 GET {{baseUrl}}/actuator/health
 Accept: application/json
+
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
 
 ### 1. 평가 대상 스토리라인 생성 (AI 서버 필요)
 # 응답의 storylines[0].id를 평가 대상으로 전역 저장합니다.
 POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 

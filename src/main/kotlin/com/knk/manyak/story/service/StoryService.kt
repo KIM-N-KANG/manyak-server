@@ -131,10 +131,16 @@ class StoryService(
     /**
      * 스토리를 소프트 삭제한다. 행을 물리 삭제하지 않고 deletedAt만 기록해 자식 데이터(설정·시작 설정·추천 입력)를 보존한다.
      * 형식이 잘못됐거나 이미 삭제됐거나 존재하지 않으면 404로 통일한다.
+     * 존재 여부를 노출하지 않도록 소유권 403은 404(없음·이미 삭제) 판정 뒤에 적용한다.
      */
     @Transactional
-    fun deleteStory(storyId: String) {
-        val story = resolveStory(storyId)
+    fun deleteStory(storyId: String, userId: Long?) {
+        // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
+        val story = resolveStoryForUpdate(storyId)
+        // 소유권 게이트(§4-5): 소유자 없는(게스트) 스토리는 익명 허용, 소유자 있으면 본인만. 위반 시 403.
+        if (story.userId != null && story.userId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
+        }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
     }
@@ -147,6 +153,14 @@ class StoryService(
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+    }
+
+    /** [resolveStory]와 같으나 행에 비관적 쓰기 락을 걸어 조회한다(삭제 소유권 검사의 마이그레이션 클레임 경쟁 차단 — KNK-69). */
+    private fun resolveStoryForUpdate(publicId: String): Story {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        return storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 

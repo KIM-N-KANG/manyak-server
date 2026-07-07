@@ -133,11 +133,17 @@ class ChatController(
 
     @Operation(
         summary = "채팅 삭제",
-        description = "채팅을 소프트 삭제합니다. 삭제된 채팅은 목록·상세 조회에서 제외됩니다.",
+        description = "채팅을 소프트 삭제합니다. 삭제된 채팅은 목록·상세 조회에서 제외됩니다. " +
+            "인증은 선택이며 회원 소유 채팅은 소유자만(타인·미인증 403), 소유자 없는 게스트 채팅은 허용합니다.",
     )
     @ApiResponses(
         value = [
             ApiResponse(responseCode = "204", description = "삭제 성공"),
+            ApiResponse(
+                responseCode = "403",
+                description = "채팅 소유자가 아님",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음(이미 삭제됨 포함)",
@@ -150,7 +156,8 @@ class ChatController(
     fun deleteChat(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
-    ) = chatService.deleteChat(chatId)
+        @CurrentUserId userId: Long?,
+    ) = chatService.deleteChat(chatId, userId)
 
     @Operation(
         summary = "채팅 이어쓰기 스트리밍",
