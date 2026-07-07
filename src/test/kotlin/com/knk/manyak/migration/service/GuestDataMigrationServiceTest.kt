@@ -24,7 +24,6 @@ import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.util.Optional
 import java.util.UUID
 
 /**
@@ -50,7 +49,8 @@ class GuestDataMigrationServiceTest {
     /** 기본은 아직 이관하지 않은(잠금 해제) 계정. 잠금 게이트 테스트는 이 stub을 잠긴 계정으로 덮어쓴다. */
     @BeforeEach
     fun stubUnlockedUser() {
-        `when`(userRepository.findById(userId)).thenReturn(Optional.of(user(migratedAt = null)))
+        // 게이트는 동시성 직렬화를 위해 비관적 락 조회(findByIdForUpdate)를 쓴다.
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(user(migratedAt = null))
     }
 
     private fun user(migratedAt: Instant?) = User(id = userId, nickname = "me", migratedAt = migratedAt)
@@ -228,7 +228,7 @@ class GuestDataMigrationServiceTest {
     @Test
     fun `이미 이관한 계정은 평가 없이 migrationClosed와 빈 결과를 반환한다`() {
         // migrated_at이 있으면(계정 잠김) 어떤 저장소도 건드리지 않고 닫힌 응답을 준다.
-        `when`(userRepository.findById(userId)).thenReturn(Optional.of(user(migratedAt = Instant.now())))
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(user(migratedAt = Instant.now()))
         val pid = UUID.randomUUID()
 
         val result = service.migrate(
@@ -245,7 +245,7 @@ class GuestDataMigrationServiceTest {
     @Test
     fun `한 건이라도 MIGRATED면 계정을 잠근다(migratedAt 기록)`() {
         val loaded = user(migratedAt = null)
-        `when`(userRepository.findById(userId)).thenReturn(Optional.of(loaded))
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(loaded)
         val pid = UUID.randomUUID()
         `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, null)))
         `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
@@ -259,7 +259,7 @@ class GuestDataMigrationServiceTest {
     @Test
     fun `한 건도 MIGRATED가 아니면 계정을 잠그지 않는다(migratedAt 유지)`() {
         val loaded = user(migratedAt = null)
-        `when`(userRepository.findById(userId)).thenReturn(Optional.of(loaded))
+        `when`(userRepository.findByIdForUpdate(userId)).thenReturn(loaded)
         val pid = UUID.randomUUID()
         // 이미 요청자 소유(ALREADY_OWNED)라 이번 요청으로 새로 얻은 소유권이 없다.
         `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story(pid, userId)))

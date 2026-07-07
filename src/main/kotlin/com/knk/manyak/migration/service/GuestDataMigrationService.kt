@@ -8,7 +8,6 @@ import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -40,9 +39,11 @@ class GuestDataMigrationService(
     @Transactional
     fun migrate(userId: Long, request: MigrationRequest): MigrationResponse {
         // 이관 잠금 게이트(스펙 §4-3-5, KNK-480): 이관은 계정당 1회만 허용한다.
-        // migrated_at이 이미 있으면(과거에 ≥1건 이관 성공) 어떤 항목도 평가하지 않고 닫힌 응답을 돌려준다.
+        // 사용자 행에 비관적 쓰기 락(findByIdForUpdate)을 걸어 같은 계정의 동시 최초 이관을 직렬화한다.
+        // 락이 없으면 두 요청이 서로 다른 게스트 ID로 동시에 들어와 둘 다 migrated_at==null을 읽고 통과해
+        // 1회 상한을 우회할 수 있다(Codex P1). migrated_at이 이미 있으면 어떤 항목도 평가하지 않고 닫힌 응답을 돌려준다.
         // userId는 컨트롤러에서 인증된 실 사용자 id이므로 조회는 항상 성공한다(방어적으로 없으면 401).
-        val user = userRepository.findByIdOrNull(userId)
+        val user = userRepository.findByIdForUpdate(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         if (user.migratedAt != null) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
@@ -52,7 +53,7 @@ class GuestDataMigrationService(
         val chats = claimChats(userId, parseUuids(request.chatIds))
 
         // 한 건이라도 이번 요청으로 소유권을 얻었으면 계정을 잠근다(관리 엔티티 변경 → 트랜잭션 커밋 시 UPDATE).
-        // 잠금은 기기를 갈아타며 반복 이관하는 어뷰징(순차 재호출)을 막는다. 동시 최초 이관 2건이 모두 잠가도 무해하다.
+        // 잠금은 기기를 갈아타며 반복 이관하는 어뷰징을 막는다(순차 재호출은 migrated_at으로, 동시 요청은 위 행 락으로 직렬화).
         if (stories.any { it.status == MigrationStatus.MIGRATED } ||
             chats.any { it.status == MigrationStatus.MIGRATED }
         ) {
