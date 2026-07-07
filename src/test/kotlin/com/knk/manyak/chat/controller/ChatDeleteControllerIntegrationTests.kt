@@ -223,4 +223,20 @@ class ChatDeleteControllerIntegrationTests {
         val reloadedOther = storyChatRepository.findById(other.id).orElseThrow()
         assertThat(reloadedOther.deletedAt).isNull()
     }
+
+    @Test
+    fun `회원이 게스트(NULL) 소유 채팅을 삭제하면 403이고 삭제되지 않는다`() {
+        // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 채팅을 삭제할 수 없다.
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.delete()
+            .uri("/api/v1/chats/${guestChat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyChatRepository.findById(guestChat.id).orElseThrow().deletedAt).isNull()
+    }
 }

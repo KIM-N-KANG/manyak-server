@@ -199,6 +199,28 @@ class ChatTurnCreditIntegrationTests {
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
+    @Test
+    fun `회원이 게스트(NULL) 소유 채팅을 이어쓰면 403이고 아무것도 진행·차감되지 않는다`() {
+        // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 채팅에 이어쓸 수 없다(이관 후 접근).
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val member = saveUser("회원")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${guestChat.publicId}/turns/stream")
+            .header("Authorization", authHeaderFor(member))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"남의 게스트 채팅을 이어쓴다."}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        val reloaded = storyChatRepository.findById(guestChat.id).orElseThrow()
+        assertThat(reloaded.currentTurn).isZero()
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(100)
+    }
+
     private fun saveUser(nickname: String): User =
         userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 

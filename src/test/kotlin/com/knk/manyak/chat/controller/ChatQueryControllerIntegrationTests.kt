@@ -1,5 +1,9 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
@@ -49,6 +53,12 @@ class ChatQueryControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyChoiceRepository: StoryChoiceRepository
+
+    @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -309,6 +319,61 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$[0].id").isEqualTo(session.publicId.toString())
             .jsonPath("$[0].turnCount").isEqualTo(0)
     }
+
+    // ---- 소유권 게이트(§4-5, KNK-480): 채팅 상세 조회 ----
+
+    @Test
+    fun `회원 소유 채팅 상세는 소유자만 조회할 수 있다`() {
+        val owner = saveUser("소유자")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.id").isEqualTo(chat.publicId.toString())
+    }
+
+    @Test
+    fun `회원 소유 채팅 상세를 타인이나 미인증이 조회하면 403이다`() {
+        val owner = saveUser("소유자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        // 타인 회원: 403
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(other.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        // 미인증: 403
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    @Test
+    fun `회원이 게스트(NULL) 소유 채팅 상세를 조회하면 403이다`() {
+        // 교차 접근 차단: 인증 회원은 게스트가 만든 NULL 소유 채팅을 열람할 수 없다. 게스트(미인증)의 게스트 채팅 조회는 허용(다른 테스트).
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${guestChat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 
     private fun message(chatId: Long, role: MessageRole, content: String, order: Int): StoryMessage =
         storyMessageRepository.save(

@@ -116,6 +116,17 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `회원이 소유자 없는(게스트) 스토리의 수정 폼을 조회하면 403이다`() {
+        // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 스토리를 수정할 수 없다(이관 후 접근).
+        val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
+        val story = seedStory(userId = null)
+
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}/edit")
+            .header("Authorization", "Bearer ${tokenFor(member)}")
+            .exchange().expectStatus().isForbidden
+    }
+
+    @Test
     fun `없는 스토리의 수정 폼은 404다`() {
         restTestClient.get().uri("/api/v1/stories/00000000-0000-0000-0000-000000000000/edit")
             .exchange().expectStatus().isNotFound

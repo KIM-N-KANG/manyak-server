@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.StoryEditFormResponse
 import com.knk.manyak.story.dto.StoryEditSettingsResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
@@ -43,7 +44,7 @@ class StoryEditService(
     @Transactional(readOnly = true)
     fun getEditForm(storyId: String, userId: Long?): StoryEditFormResponse {
         val story = resolveStory(storyId)
-        requireOwnerOrAnonymous(story, userId)
+        requireOwnerAccess(story, userId)
         return buildEditForm(story)
     }
 
@@ -52,7 +53,7 @@ class StoryEditService(
     fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest): StoryEditFormResponse {
         // 쓰기 락으로 스토리 애그리거트를 잠가 동시 PATCH의 자식 리스트 교체 경합을 직렬화한다.
         val story = resolveStoryForUpdate(storyId)
-        requireOwnerOrAnonymous(story, userId)
+        requireOwnerAccess(story, userId)
 
         // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
         request.title?.let {
@@ -175,9 +176,12 @@ class StoryEditService(
         )
     }
 
-    /** 소유권 게이트(§4-5): 소유자 없는(게스트) 스토리는 익명 허용, 소유자 있으면 본인만. 위반 시 403. */
-    private fun requireOwnerOrAnonymous(story: Story, userId: Long?) {
-        if (story.userId != null && story.userId != userId) {
+    /**
+     * 소유권 게이트(§4-5, KNK-480): 게스트 스토리는 게스트만, 소유 스토리는 소유자만 수정할 수 있다.
+     * 회원의 NULL 소유(게스트) 스토리 수정도 차단한다(이관 후 접근). 위반 시 403.
+     */
+    private fun requireOwnerAccess(story: Story, userId: Long?) {
+        if (!isOwnerAccessAllowed(story.userId, userId)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 수정할 권한이 없습니다.")
         }
     }

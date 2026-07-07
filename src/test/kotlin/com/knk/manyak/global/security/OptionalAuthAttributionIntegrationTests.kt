@@ -213,7 +213,10 @@ class OptionalAuthAttributionIntegrationTests {
     @Test
     fun `유효 토큰으로 채팅을 생성하면 201과 함께 user_id가 귀속된다`() {
         val user = saveUser()
-        val story = storyRepository.save(Story(title = "스토리"))
+        // 교차 접근 차단(§4-5, KNK-480)으로 회원은 NULL 소유 스토리에 채팅을 만들 수 없다.
+        // 귀속(KNK-286)은 회원이 채팅을 만들 수 있는 스토리(소유자 있는 공개 발행 스토리)에서 검증한다.
+        val author = saveUser("author")
+        val story = storyRepository.save(Story(title = "스토리", userId = author.id))
 
         postChat(story.publicId, "Bearer ${validToken(user)}").expectStatus().isCreated
 
