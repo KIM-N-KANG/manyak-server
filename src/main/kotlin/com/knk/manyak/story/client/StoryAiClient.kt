@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.http.MediaType
 import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.http.client.SimpleClientHttpRequestFactory
@@ -132,7 +133,10 @@ data class AiStoryStartSettings(
     val prologue: String,
 )
 
+// 스텁을 쓰는 로컬(manyak.ai.story.stub=true)에서는 등록하지 않아 base-url·WebClient가 없어도 뜨게 한다.
+// [StubStoryAiClient]와 상호배타로 동작한다(채팅 [RestChatTurnAiClient]와 동일 패턴).
 @Component
+@ConditionalOnProperty(name = ["manyak.ai.story.stub"], havingValue = "false", matchIfMissing = true)
 class RestStoryAiClient(
     @Value("\${manyak.ai.base-url}") aiBaseUrl: String,
     connectTimeout: Duration = Duration.ofSeconds(5),
