@@ -67,10 +67,10 @@ manyak:
       # 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제).
       charge-age-threshold: ${MANYAK_CREDIT_RECONCILIATION_CHARGE_AGE_THRESHOLD:PT15M}
   guest-trial:
-    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정). 디바이스 ID별 Redis 카운터 3종, TTL 없음(Phase 1).
-    storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:10}
-    story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:3}
-    chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:15}
+    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정 → KNK-480 축소). 디바이스 ID별 Redis 카운터 3종, TTL 없음(Phase 1).
+    storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:5}
+    story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:1}
+    chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}

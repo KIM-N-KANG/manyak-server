@@ -19,11 +19,11 @@ import org.springframework.web.server.ResponseStatusException
 class GuestTrialLimitService(
     private val redisTemplate: StringRedisTemplate,
     private val deviceIdHasher: DeviceIdHasher,
-    @param:Value("\${manyak.guest-trial.storyline-generation-limit:10}")
+    @param:Value("\${manyak.guest-trial.storyline-generation-limit:5}")
     private val storylineGenerationLimit: Long,
-    @param:Value("\${manyak.guest-trial.story-creation-limit:3}")
+    @param:Value("\${manyak.guest-trial.story-creation-limit:1}")
     private val storyCreationLimit: Long,
-    @param:Value("\${manyak.guest-trial.chat-turn-limit:15}")
+    @param:Value("\${manyak.guest-trial.chat-turn-limit:5}")
     private val chatTurnLimit: Long,
 ) {
 
