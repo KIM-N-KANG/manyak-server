@@ -22,11 +22,18 @@
 @otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
+# [KNK-477] 게스트 체험 한도 대상(스토리라인 생성·스토리 등록)은 X-Manyak-Device-Id 헤더가 필수입니다.
+#   실행마다 새 deviceId를 발급해 재실행 시 한도(TTL 없음, Phase 1) 소진을 피합니다.
 GET {{baseUrl}}/actuator/health
 Accept: application/json
 
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
 ### 1. 스토리라인 생성 (삭제 대상 스토리 준비 1/2)
 POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -49,6 +56,7 @@ Accept: application/json
 # 1번을 먼저 실행해야 simpleCreationId / storylineId 변수가 설정됩니다.
 # 응답의 id(공개 식별자 UUID)를 전역 변수로 저장해 이후 삭제·조회에 사용합니다.
 POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
