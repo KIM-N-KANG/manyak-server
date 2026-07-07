@@ -27,6 +27,7 @@
 | [public.credit_wallets](public.credit_wallets.md) | 5 |  | BASE TABLE |
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
+| [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -54,6 +55,7 @@ erDiagram
 "public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -290,6 +292,14 @@ erDiagram
   smallint sort_order
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.story_message_versions" {
+  bigint id
+  bigint message_id FK
+  integer version_number
+  text content
+  text choices
+  timestamp_with_time_zone created_at
 }
 ```
 

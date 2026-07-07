@@ -11,6 +11,7 @@ import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
@@ -64,6 +65,9 @@ class ChatRegenerateControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyChoiceRepository: StoryChoiceRepository
+
+    @Autowired
+    private lateinit var storyMessageVersionRepository: StoryMessageVersionRepository
 
     @Autowired
     private lateinit var userRepository: UserRepository
@@ -138,6 +142,36 @@ class ChatRegenerateControllerIntegrationTests {
         val reloadedChat = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloadedChat.currentTurn).isEqualTo(2)
         assertThat(reloadedChat.regeneratedCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `재생성은 직전 활성 출력·선택지를 버전 이력으로 보관하고 활성본만 교체한다`() {
+        val story = seedStory()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 입력", messageOrder = 1))
+        val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
+        storyChoiceRepository.save(StoryChoice(chatId = chat.id, messageId = lastAssistant.id, choiceText = "원본 선택 A", choiceOrder = 1))
+        storyChoiceRepository.save(StoryChoice(chatId = chat.id, messageId = lastAssistant.id, choiceText = "원본 선택 B", choiceOrder = 2))
+
+        regenerate(chat.publicId.toString(), lastAssistant.id)
+
+        // 직전 활성본(원본 응답·선택지)이 버전 이력으로 1건 보관된다.
+        val versions = storyMessageVersionRepository.findByMessageIdOrderByVersionNumberAsc(lastAssistant.id)
+        assertThat(versions).hasSize(1)
+        assertThat(versions[0].versionNumber).isEqualTo(1)
+        assertThat(versions[0].content).isEqualTo("원본 응답")
+        assertThat(versions[0].choices).contains("원본 선택 A", "원본 선택 B")
+
+        // 활성본(story_messages)은 재생성된 새 값이라 원본과 다르다 — 상세·SSE는 이 활성본만 노출한다.
+        val firstRegenContent = storyMessageRepository.findById(lastAssistant.id).orElseThrow().content
+        assertThat(firstRegenContent).isNotEqualTo("원본 응답")
+
+        // 두 번째 재생성 → 직전 활성본(첫 재생성 결과)이 version 2로 추가된다(이력 누적).
+        regenerate(chat.publicId.toString(), lastAssistant.id)
+        val versions2 = storyMessageVersionRepository.findByMessageIdOrderByVersionNumberAsc(lastAssistant.id)
+        assertThat(versions2).hasSize(2)
+        assertThat(versions2[1].versionNumber).isEqualTo(2)
+        assertThat(versions2[1].content).isEqualTo(firstRegenContent)
     }
 
     @Test

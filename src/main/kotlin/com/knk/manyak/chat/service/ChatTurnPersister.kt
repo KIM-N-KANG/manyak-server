@@ -1,10 +1,13 @@
 package com.knk.manyak.chat.service
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
+import com.knk.manyak.chat.entity.StoryMessageVersion
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -23,7 +26,11 @@ class ChatTurnPersister(
     private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
+    private val storyMessageVersionRepository: StoryMessageVersionRepository,
 ) {
+
+    // 이력 선택지 스냅샷 직렬화용. 컨텍스트 ObjectMapper 빈에 의존하지 않도록 로컬 인스턴스를 둔다(List<String> 직렬화만 사용).
+    private val objectMapper = ObjectMapper()
 
     /**
      * 한 턴(USER 입력 + AI 출력 + 선택지)을 원자적으로 저장하고 current_turn을 1 증가시킨다.
@@ -90,7 +97,8 @@ class ChatTurnPersister(
      *
      * 교체 직전에 [expectedAssistantId]가 여전히 채팅의 마지막 턴(가장 큰 messageOrder의 ASSISTANT)인지 재확인한다.
      * 검증 시점과 저장 시점 사이에 일반 이어쓰기가 끼어들어 새 턴이 쌓였으면 마지막 턴이 바뀌므로 409로 폐기하고,
-     * 호출부(ChatService)가 선차감분을 환불한다. 버전 이력은 두지 않으므로 이전 본문·선택지는 보관하지 않고 덮어쓴다.
+     * 호출부(ChatService)가 선차감분을 환불한다. 덮어쓰기 직전 직전 활성 출력·선택지는 [StoryMessageVersion] 이력으로
+     * 보관한다(B11) — 활성본만 story_messages/story_choices에 남아 상세·SSE는 활성본만 노출한다(FE 계약 불변).
      * USER 입력·messageOrder·current_turn(turn_number)은 불변이다 — 같은 논리 턴의 AI 출력만 교체한다.
      *
      * @return 교체된 ASSISTANT 메시지 id(turnId, 제자리 교체이므로 불변)와 기존 턴 번호(turnNumber)
@@ -117,12 +125,23 @@ class ChatTurnPersister(
             throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 변경되어 재생성을 취소했습니다.")
         }
 
-        // AI 출력 제자리 교체(이전 본문 미보관). USER 입력·messageOrder는 그대로 둔다.
+        // 덮어쓰기 직전에 직전 활성 출력·선택지를 버전 이력으로 보관한다(B11). append-only라 다음 순번 = 기존 개수 + 1.
+        // 활성본은 story_messages/story_choices에 그대로 두므로 상세·SSE는 활성본만 노출한다(FE 계약 불변).
+        val existingChoices = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(lastAssistant.id)
+        storyMessageVersionRepository.save(
+            StoryMessageVersion(
+                messageId = lastAssistant.id,
+                versionNumber = storyMessageVersionRepository.countByMessageId(lastAssistant.id).toInt() + 1,
+                content = lastAssistant.content,
+                choices = objectMapper.writeValueAsString(existingChoices.map { it.choiceText }),
+            ),
+        )
+
+        // AI 출력 제자리 교체(활성본). USER 입력·messageOrder는 그대로 둔다.
         lastAssistant.content = aiOutput
         storyMessageRepository.save(lastAssistant)
 
-        // 선택지 전체 교체: 유니크 (message_id, choice_order) 충돌을 피하려 기존을 먼저 지우고 flush한 뒤 재삽입한다.
-        val existingChoices = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(lastAssistant.id)
+        // 활성 선택지 전체 교체: 유니크 (message_id, choice_order) 충돌을 피하려 기존을 먼저 지우고 flush한 뒤 재삽입한다.
         if (existingChoices.isNotEmpty()) {
             storyChoiceRepository.deleteAll(existingChoices)
             storyChoiceRepository.flush()

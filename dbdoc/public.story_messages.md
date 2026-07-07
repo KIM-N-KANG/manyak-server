@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_messages_id_seq'::regclass) | false | [public.story_choices](public.story_choices.md) |  |  |
+| id | bigint | nextval('story_messages_id_seq'::regclass) | false | [public.story_choices](public.story_choices.md) [public.story_message_versions](public.story_message_versions.md) |  |  |
 | chat_id | bigint |  | false |  | [public.story_chats](public.story_chats.md) |  |
 | role | varchar(16) |  | false |  |  |  |
 | content | text |  | false |  |  |  |
@@ -34,6 +34,7 @@
 erDiagram
 
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+"public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 
 "public.story_messages" {
@@ -52,6 +53,14 @@ erDiagram
   smallint choice_order
   boolean is_selected
   timestamp_with_time_zone selected_at
+  timestamp_with_time_zone created_at
+}
+"public.story_message_versions" {
+  bigint id
+  bigint message_id FK
+  integer version_number
+  text content
+  text choices
   timestamp_with_time_zone created_at
 }
 "public.story_chats" {
