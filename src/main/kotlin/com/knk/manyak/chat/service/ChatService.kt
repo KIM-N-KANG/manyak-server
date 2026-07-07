@@ -222,7 +222,8 @@ class ChatService(
     @Transactional
     fun deleteChat(chatId: String, userId: Long?) {
         // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
-        val chat = resolveChat(chatId)
+        // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
+        val chat = resolveChatForUpdate(chatId)
         // 소유권 게이트(§4-5): 소유자 없는(게스트) 채팅은 익명 허용, 소유자 있으면 본인만. 위반 시 403.
         if (chat.userId != null && chat.userId != userId) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 삭제할 권한이 없습니다.")
@@ -705,6 +706,14 @@ class ChatService(
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
         return storyChatRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+    }
+
+    /** [resolveChat]과 같으나 행에 비관적 쓰기 락을 걸어 조회한다(삭제 소유권 검사의 마이그레이션 클레임 경쟁 차단 — KNK-69). */
+    private fun resolveChatForUpdate(publicId: String): StoryChat {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+        return storyChatRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
     }
 

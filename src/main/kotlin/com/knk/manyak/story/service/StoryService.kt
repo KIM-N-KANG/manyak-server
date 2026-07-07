@@ -135,7 +135,8 @@ class StoryService(
      */
     @Transactional
     fun deleteStory(storyId: String, userId: Long?) {
-        val story = resolveStory(storyId)
+        // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
+        val story = resolveStoryForUpdate(storyId)
         // 소유권 게이트(§4-5): 소유자 없는(게스트) 스토리는 익명 허용, 소유자 있으면 본인만. 위반 시 403.
         if (story.userId != null && story.userId != userId) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
@@ -152,6 +153,14 @@ class StoryService(
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+    }
+
+    /** [resolveStory]와 같으나 행에 비관적 쓰기 락을 걸어 조회한다(삭제 소유권 검사의 마이그레이션 클레임 경쟁 차단 — KNK-69). */
+    private fun resolveStoryForUpdate(publicId: String): Story {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        return storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 
