@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
@@ -137,8 +138,8 @@ class StoryService(
     fun deleteStory(storyId: String, userId: Long?) {
         // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
         val story = resolveStoryForUpdate(storyId)
-        // 소유권 게이트(§4-5): 소유자 없는(게스트) 스토리는 익명 허용, 소유자 있으면 본인만. 위반 시 403.
-        if (story.userId != null && story.userId != userId) {
+        // 소유권 게이트(§4-5, KNK-480): 게스트 스토리는 게스트만, 소유 스토리는 소유자만. 회원의 NULL 소유 스토리 삭제도 차단. 위반 시 403.
+        if (!isOwnerAccessAllowed(story.userId, userId)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
         }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.

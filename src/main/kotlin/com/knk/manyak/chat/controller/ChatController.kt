@@ -119,6 +119,11 @@ class ChatController(
                 content = [Content(schema = Schema(implementation = ChatDetailResponse::class))],
             ),
             ApiResponse(
+                responseCode = "403",
+                description = "채팅 소유자가 아님(회원의 게스트 채팅 조회 포함)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
                 content = [Content(schema = Schema(hidden = true))],
@@ -129,7 +134,8 @@ class ChatController(
     fun getChatDetail(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
-    ): ChatDetailResponse = chatService.getChatDetail(chatId)
+        @CurrentUserId userId: Long?,
+    ): ChatDetailResponse = chatService.getChatDetail(chatId, userId)
 
     @Operation(
         summary = "채팅 삭제",

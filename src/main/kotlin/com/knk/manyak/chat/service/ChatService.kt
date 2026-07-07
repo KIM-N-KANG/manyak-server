@@ -35,6 +35,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
@@ -88,6 +89,11 @@ class ChatService(
         // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 채팅을 시작할 수 있다(KNK-401). 비공개·초안은 소유자 외엔 404.
         if (!story.isReadableBy(userId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
+        // 교차 접근 차단(§4-5, KNK-480): 게스트 소유(NULL) 스토리에는 인증 회원이 채팅을 시작할 수 없다(이관 후 접근).
+        // 소유자 있는(본인·공개 발행) 스토리 채팅 생성은 영향받지 않는다.
+        if (story.userId == null && userId != null) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "이 스토리로는 채팅을 시작할 수 없습니다.")
         }
         // 시작 설정은 내부 PK(story.id)로 조회한다.
         val startSetting = storyStartSettingRepository.findByStoryId(story.id)
@@ -173,8 +179,13 @@ class ChatService(
     }
 
     @Transactional(readOnly = true)
-    fun getChatDetail(chatId: String): ChatDetailResponse {
+    fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
         val chat = resolveChat(chatId)
+        // 소유권 게이트(§4-5, KNK-480): 소유 채팅은 소유자만, 게스트 채팅은 게스트만 조회한다.
+        // 존재 판정(resolveChat의 404) 뒤에 적용해, 회원의 게스트 채팅 열람·타인 소유 채팅 열람을 403으로 막는다.
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 조회할 권한이 없습니다.")
+        }
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyTitle = story?.title.orEmpty()
@@ -224,8 +235,8 @@ class ChatService(
         // 영속 상태 엔티티의 변경은 트랜잭션 커밋 시 더티 체킹으로 반영된다(명시적 save 불필요).
         // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
         val chat = resolveChatForUpdate(chatId)
-        // 소유권 게이트(§4-5): 소유자 없는(게스트) 채팅은 익명 허용, 소유자 있으면 본인만. 위반 시 403.
-        if (chat.userId != null && chat.userId != userId) {
+        // 소유권 게이트(§4-5, KNK-480): 게스트 채팅은 게스트만, 소유 채팅은 소유자만. 회원의 NULL 소유 채팅 삭제도 차단. 위반 시 403.
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 삭제할 권한이 없습니다.")
         }
         chat.deletedAt = Instant.now()
@@ -291,7 +302,7 @@ class ChatService(
         // 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓸 수 있다.
         // 토큰 누락·만료(요청 userId == null)나 타 회원이 owned 채팅에 이어쓰면 403으로 막는다.
         // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
-        // 게스트 채팅(chat.userId == null)은 익명 허용이며 차감이 없다(기존 동작 유지).
+        // 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용하며 차감이 없다(회원은 이관 후 접근, KNK-480).
         requireChatOwner(chat, userId)
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
@@ -387,11 +398,11 @@ class ChatService(
     }
 
     /**
-     * 소유권 강제(스펙 §4-5): 회원 소유 채팅(userId != null)은 소유자만 이어쓰기·재생성할 수 있다.
-     * 게스트 채팅(chat.userId == null)은 익명 허용이다.
+     * 소유권 강제(스펙 §4-5, KNK-480): 회원 소유 채팅(userId != null)은 소유자만 이어쓰기·재생성할 수 있고,
+     * 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용한다(인증 회원은 차단 — 이관 후 접근).
      */
     private fun requireChatOwner(chat: StoryChat, userId: Long?) {
-        if (chat.userId != null && chat.userId != userId) {
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 이어쓸 권한이 없습니다.")
         }
     }

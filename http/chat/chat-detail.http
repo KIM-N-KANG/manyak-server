@@ -5,6 +5,11 @@
 ### [KNK-178] 채팅 ID는 순차 정수가 아니라 추측 불가능한 공개 식별자(UUID, public_id)입니다.
 ###   순차 정수나 임의 값으로 상세를 시도하면 일관되게 404가 납니다(IDOR 방지).
 ###
+### [KNK-480] 소유권 게이트: 채팅 상세는 소유자만 조회합니다.
+###   - 회원 소유 채팅(생성 시 토큰을 실은 채팅)은 소유자 토큰으로만 200, 타인·미인증은 403.
+###   - 게스트 채팅(토큰 없이 만든 채팅)은 게스트(토큰 없음)만 200이고, 인증 회원이 조회하면 403입니다(10번 참고).
+###   - 존재 판정(404)이 소유권 판정(403)보다 먼저입니다: 없는 채팅은 소유권과 무관하게 404.
+###
 ### 채팅 상세 응답에는 suggestedInputs(추천 입력)가 포함됩니다(POST /chats 와 동일한 시작 추천 입력).
 ###   - turns가 비어 있으면(아직 한 번도 이어쓰지 않았으면): start_setting의 story_suggested_inputs를
 ###     input_order 오름차순으로 내려줍니다. 시작 설정이나 등록된 추천 입력이 없으면 빈 배열.
@@ -16,6 +21,8 @@
 ###   - 5번 이어쓰기 스트리밍은 채팅 AI 모드가 필요합니다(스텁 기본 on). 모드 전환은 chat-stream.http 상단 참고.
 
 @baseUrl = http://localhost:8080
+# 10번(소유권 403) 검증용 회원 토큰. auth-login-google.http 5번을 먼저 실행하면 전역 accessToken이 채워집니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
 # [KNK-477] 게스트 체험 한도 대상 요청은 X-Manyak-Device-Id 헤더가 필수입니다.
@@ -187,3 +194,16 @@ Accept: application/json
 # turns가 없는 채팅이면 suggestedInputs에 시작 추천 입력이, 있으면 빈 배열이 보입니다.
 GET {{baseUrl}}/api/v1/chats/ae578609-2e90-4923-af0e-64ba6a0a6f56
 Accept: application/json
+
+### 10. (소유권) 게스트 채팅을 회원 토큰으로 상세 조회 → 403 (교차 접근 차단, KNK-480)
+# 3번에서 토큰 없이 만든 게스트 채팅({{chatId}})을 인증 회원이 열람하려는 시도입니다.
+# {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요. 같은 채팅을 토큰 없이(4·6번) 조회하면 200입니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("회원이 게스트 채팅을 조회하면 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+%}

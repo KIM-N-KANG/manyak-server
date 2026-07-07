@@ -191,6 +191,21 @@ class StoryDeleteControllerIntegrationTests {
     }
 
     @Test
+    fun `회원이 게스트(NULL) 소유 스토리를 삭제하면 403이고 삭제되지 않는다`() {
+        // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 스토리를 삭제할 수 없다(이관 후 접근).
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "게스트 스토리"))
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyRepository.findById(story.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
     fun `삭제는 다른 스토리에 영향을 주지 않는다`() {
         val target = storyRepository.save(Story(title = "삭제 대상 스토리"))
         val other = storyRepository.save(Story(title = "보존 스토리"))
