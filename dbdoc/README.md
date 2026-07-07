@@ -27,6 +27,7 @@
 | [public.credit_wallets](public.credit_wallets.md) | 5 |  | BASE TABLE |
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
+| [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -290,6 +291,14 @@ erDiagram
   smallint sort_order
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.story_message_versions" {
+  bigint id
+  bigint message_id
+  integer version_number
+  text content
+  text choices
+  timestamp_with_time_zone created_at
 }
 ```
 
