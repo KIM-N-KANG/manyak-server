@@ -71,8 +71,15 @@ data class MeResponse(
     @field:Schema(description = "닉네임", example = "manyak_user")
     val nickname: String,
 
-    @field:Schema(description = "프로필 이미지 URL", example = "https://example.com/profile.png", nullable = true)
+    @field:Schema(description = "프로필 이미지 URL(원본 전체 해상도)", example = "https://example.com/profile.png", nullable = true)
     val profileImageUrl: String?,
+
+    @field:Schema(
+        description = "48×48 저해상도 인라인 썸네일(base64). 세션 복원 시 이미지 호스트 왕복 없이 헤더 아바타 첫 페인트용. " +
+            "미배정·미생성이면 null(스펙 §4-3-5 B17).",
+        nullable = true,
+    )
+    val profileThumbnailBase64: String?,
 
     @field:Schema(description = "계정 상태", example = "ACTIVE")
     val status: UserStatus,
