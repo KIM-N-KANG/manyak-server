@@ -112,7 +112,8 @@ class SecurityConfig {
         return BearerTokenResolver { request: HttpServletRequest ->
             if (
                 BEARER_SKIP_MATCHERS.any { it.matches(request) } ||
-                OPTIONAL_AUTH_MATCHERS.any { it.matches(request) }
+                OPTIONAL_AUTH_MATCHERS.any { it.matches(request) } ||
+                PUBLIC_STATIC_MATCHERS.any { it.matches(request) }
             ) {
                 // 공개 인증 경로(BEARER_SKIP) 또는 optional 인증 도메인 경로(OPTIONAL_AUTH)에서는
                 // RS 필터가 토큰을 resolve하지 않게 해 만료/위조 헤더로 401이 나지 않게 한다.
@@ -125,6 +126,12 @@ class SecurityConfig {
     }
 
     private companion object {
+        // 공개 정적 자산(프로필 프리셋 이미지, 스펙 §4-5 B7). permitAll이면서, 모바일 등이 자동 첨부한 만료/위조
+        // access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 토큰 resolve도 건너뛴다(공개 응답 author.profileImageUrl로 참조).
+        val PUBLIC_STATIC_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher("/profile-presets/**"),
+        )
+
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
