@@ -76,4 +76,10 @@ data class MeResponse(
 
     @field:Schema(description = "계정 상태", example = "ACTIVE")
     val status: UserStatus,
+
+    @field:Schema(description = "크레딧 잔액. 지갑이 없으면 0", example = "500")
+    val creditBalance: Long,
+
+    @field:Schema(description = "KST 자정 기준 당일 출석체크 적립 완료 여부", example = "false")
+    val attendedToday: Boolean,
 )

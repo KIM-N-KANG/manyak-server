@@ -54,6 +54,16 @@ class CreditWalletServiceIntegrationTest {
     }
 
     @Test
+    fun `hasTransaction은 멱등 키로 적립 여부를 확인하고 부수효과가 없다`() {
+        assertThat(service.hasTransaction("attendance:$userId:2026-07-08")).isFalse()
+
+        service.reward(userId, 250, CreditReason.ATTENDANCE_REWARD, "attendance:$userId:2026-07-08")
+
+        assertThat(service.hasTransaction("attendance:$userId:2026-07-08")).isTrue()
+        assertThat(walletRepository.findByUserId(userId)!!.balance).isEqualTo(250)
+    }
+
+    @Test
     fun `reward는 지갑을 만들고 잔액을 적립한다`() {
         val outcome = service.reward(userId, 100, CreditReason.SIGNUP_REWARD, "signup:$userId")
 

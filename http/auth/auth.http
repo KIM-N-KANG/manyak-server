@@ -84,6 +84,15 @@ Accept: application/json
         client.assert(["ACTIVE", "SUSPENDED", "DELETED"].indexOf(b.status) >= 0,
             `status가 허용 값이 아닙니다. actual=${b.status}`);
     });
+    // 세션 부트스트랩 확장(KNK-498, B17): 크레딧 잔액·당일 출석 여부를 동봉한다.
+    client.test("creditBalance는 0 이상 숫자다(지갑 없으면 0)", () => {
+        client.assert(typeof b.creditBalance === "number" && b.creditBalance >= 0,
+            `creditBalance가 0 이상 숫자가 아닙니다. actual=${JSON.stringify(b.creditBalance)}`);
+    });
+    client.test("attendedToday는 boolean이다", () => {
+        client.assert(typeof b.attendedToday === "boolean",
+            `attendedToday가 boolean이 아닙니다. actual=${JSON.stringify(b.attendedToday)}`);
+    });
 %}
 
 ### 5. (해피 패스) 유효한 access 토큰의 sub 가 /me 의 id 와 일치

@@ -43,6 +43,13 @@ class AttendanceRewardService(
         )
     }
 
+    /** 오늘(KST) 출석 적립을 이미 받았는지 조회한다. 적립과 같은 멱등 키를 확인만 할 뿐 적립을 유발하지 않는다(스펙 §4-3-5 B17). */
+    @Transactional(readOnly = true)
+    fun hasAttendedToday(userId: Long): Boolean {
+        val kstDate = LocalDate.now(clock.withZone(SEOUL_ZONE))
+        return creditWalletService.hasTransaction("attendance:$userId:$kstDate")
+    }
+
     private companion object {
         val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
     }

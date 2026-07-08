@@ -8,6 +8,9 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.AttendanceRewardService
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -61,6 +64,12 @@ class AuthControllerIntegrationTests {
 
     @Autowired
     private lateinit var properties: AuthProperties
+
+    @Autowired
+    private lateinit var creditWalletService: CreditWalletService
+
+    @Autowired
+    private lateinit var attendanceRewardService: AttendanceRewardService
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -137,6 +146,39 @@ class AuthControllerIntegrationTests {
             .jsonPath("$.nickname").isEqualTo("manyak_user")
             .jsonPath("$.profileImageUrl").isEqualTo("https://example.com/profile.png")
             .jsonPath("$.status").isEqualTo("ACTIVE")
+    }
+
+    @Test
+    fun `활동이 없는 사용자의 me 응답은 creditBalance 0, attendedToday false다`() {
+        val user = saveUser()
+        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
+
+        restTestClient.get()
+            .uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $accessToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(0)
+            .jsonPath("$.attendedToday").isEqualTo(false)
+    }
+
+    @Test
+    fun `크레딧 적립과 출석 후 me 응답에 잔액과 출석 여부가 반영된다`() {
+        val user = saveUser()
+        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
+        creditWalletService.reward(user.id, 500, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        attendanceRewardService.claimDailyAttendance(user.id)
+        val expectedBalance = creditWalletService.balanceOf(user.id)
+
+        restTestClient.get()
+            .uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $accessToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(expectedBalance)
+            .jsonPath("$.attendedToday").isEqualTo(true)
     }
 
     @Test
