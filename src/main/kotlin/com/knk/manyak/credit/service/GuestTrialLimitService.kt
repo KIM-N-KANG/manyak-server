@@ -101,17 +101,17 @@ class GuestTrialLimitService(
     }
 
     /**
-     * 가입(신규 계정 생성) 시 게스트 시절 디바이스 사용량을 회원 카운터로 옮긴다(스펙 §4-3-7 B13 — 게스트로 소진 후
-     * 가입해 체험을 초기화하는 파밍 차단). 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] — 스토리라인 생성은
-     * 회원 무료라 제외)만 다룬다.
+     * 가입 시 게스트 시절 디바이스 사용량을 회원 카운터로 옮긴다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해 체험을
+     * 초기화하는 파밍 차단). 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] — 스토리라인 생성은 회원 무료라 제외)만 다룬다.
      *
      * - [deviceId]가 있으면 디바이스 사용량을 시드한다(사용 없던 카운터는 미설정=full 체험으로 남긴다).
      * - [deviceId]가 없으면(헤더 누락 — 우회 시도) 한도값으로 시드해 소진 상태로 만든다(무료 체험 미부여, B13 우회 차단).
      *
-     * **미설정 시에만**(`SETNX`) 써서 동시 첫 로그인 경합에도 안전하다. 호출부([com.knk.manyak.auth.social.GoogleLoginService])가
-     * **신규 계정 생성 경로에서만** 호출하므로, 이후 로그인·기존 회원의 잔여 체험을 훼손하지 않는다(계정당 1회성은 호출부가 보장).
+     * **미설정 시에만**(`SETNX`) 써서 동시 첫 로그인 경합에도 안전하다. 완료하면 `true`를 반환하고, 호출부는 이때만
+     * 스냅샷 완료를 계정에 기록한다(1회성). Redis 장애면 시드하지 못하고 `false`를 반환하되 예외를 던지지 않아
+     * **로그인을 막지 않는다** — 완료 미기록으로 다음 로그인이 재시도한다(스펙 §4-3-7 회원 흐름 가용성).
      */
-    fun snapshotTrialAtSignup(userId: Long, deviceId: String?) {
+    fun snapshotTrialAtSignup(userId: Long, deviceId: String?): Boolean = try {
         for (counter in MEMBER_SHARED_COUNTERS) {
             val seed = if (deviceId.isNullOrBlank()) {
                 limitFor(counter).toString() // 디바이스 미증명 → 소진 시드(무료 체험 미부여)
@@ -120,6 +120,10 @@ class GuestTrialLimitService(
             }
             redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), seed)
         }
+        true
+    } catch (ex: DataAccessException) {
+        logger.warn("회원 체험 가입 스냅샷 실패(Redis) — 로그인은 진행, 다음 로그인에서 재시도: userId={}", userId, ex)
+        false
     }
 
     /**

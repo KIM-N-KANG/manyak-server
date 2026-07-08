@@ -73,6 +73,12 @@ class User(
     // 상한(5회) 도달 후 추가 호출은 평가 없이 닫힌 계정처럼 처리해 소유 상태 열거 오라클을 제한한다.
     @Column(name = "migration_attempts", nullable = false)
     var migrationAttempts: Int = 0,
+
+    // 회원 체험 스냅샷 완료 시각(스펙 §4-3-7 B13, KNK-504). NULL이면 미스냅샷(신규 가입) — 로그인이 게스트 디바이스
+    // 사용량을 회원 카운터로 1회 시드하고 이 값을 기록한다. Redis 장애로 실패하면 NULL로 남아 다음 로그인이 재시도한다.
+    // 기존(롤아웃 이전) 회원은 마이그레이션(V40)이 채워 스냅샷 대상에서 제외한다.
+    @Column(name = "member_trial_seeded_at")
+    var memberTrialSeededAt: Instant? = null,
 ) {
     @PreUpdate
     fun updateTimestamp() {

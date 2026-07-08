@@ -2,6 +2,7 @@ package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -43,18 +44,22 @@ class GoogleLoginService(
     private val creditWalletService: CreditWalletService,
     private val inviteService: InviteService,
     private val guestTrialLimitService: GuestTrialLimitService,
+    private val userRepository: UserRepository,
     // 가입 보상 지급량(스펙 §4-3-7, KNK-477 확정: 500).
     @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
 ) {
 
     fun login(idToken: String, inviteCode: String? = null, deviceId: String? = null): TokenResponse {
         val info = verifier.verify(idToken)
-        val (user, isNew) = findOrCreateUser(info, inviteCode)
-        // 신규 가입에서만 게스트 시절 디바이스 체험 사용량을 회원 계정으로 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진
-        // 후 가입해 체험을 초기화하는 파밍 차단). 기존 회원 재로그인은 스냅샷하지 않아 남은 회원 체험을 훼손하지 않는다.
-        // device 헤더가 없으면 소진 시드로 무료 체험을 부여하지 않는다(헤더를 빼고 가입하는 우회 차단).
-        if (isNew) {
+        val user = findOrCreateUser(info, inviteCode)
+        // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
+        // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
+        // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
+        // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
+        if (user.memberTrialSeededAt == null &&
             guestTrialLimitService.snapshotTrialAtSignup(user.id, deviceId)
+        ) {
+            userRepository.markMemberTrialSeeded(user.id, Instant.now())
         }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
@@ -77,18 +82,17 @@ class GoogleLoginService(
      * 이번엔 상대 요청이 커밋한 계정이 보이므로 그 User를 재사용한다(500 대신 정상 로그인).
      * 재조회로도 못 찾으면 일시적 경합이 아니라 실제 정합성 문제이므로 원 예외를 그대로 드러낸다.
      */
-    /** @return (해석된 User, 이번 호출이 새 계정을 생성했는지). 신규 여부는 가입 1회성 처리(체험 스냅샷)에 쓴다. */
-    private fun findOrCreateUser(info: SocialUserInfo, inviteCode: String?): Pair<User, Boolean> {
+    private fun findOrCreateUser(info: SocialUserInfo, inviteCode: String?): User {
         val now = Instant.now()
-        registrar.findExistingUser(info, now)?.let { return it to false }
+        registrar.findExistingUser(info, now)?.let { return it }
 
         val inviterUserId = inviteService.resolveInviterId(inviteCode)
         return try {
-            registrar.createUserAndAccount(info, now, inviterUserId) to true
+            registrar.createUserAndAccount(info, now, inviterUserId)
         } catch (ex: DataIntegrityViolationException) {
-            // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다(우리가 만든 게 아니므로 신규 아님).
+            // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
             // 재사용 계정의 초대자 관계는 실제로 생성한 쪽이 이미 영속했다(여기선 덮어쓰지 않는다).
-            (registrar.findExistingUser(info, Instant.now()) ?: throw ex) to false
+            registrar.findExistingUser(info, Instant.now()) ?: throw ex
         }
     }
 

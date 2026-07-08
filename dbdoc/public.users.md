@@ -17,6 +17,7 @@
 | inviter_user_id | bigint |  | true |  | [public.users](public.users.md) |  |
 | migrated_at | timestamp with time zone |  | true |  |  |  |
 | migration_attempts | integer | 0 | false |  |  |  |
+| member_trial_seeded_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -61,6 +62,7 @@ erDiagram
   bigint inviter_user_id FK
   timestamp_with_time_zone migrated_at
   integer migration_attempts
+  timestamp_with_time_zone member_trial_seeded_at
 }
 "public.social_accounts" {
   bigint id

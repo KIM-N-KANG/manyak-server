@@ -37,4 +37,10 @@ class GuestTrialLimitServiceRedisFallbackTest {
             serviceWithFailingRedis().restoreMember(1L, GuestTrialLimitService.Counter.CHAT_TURN)
         }.doesNotThrowAnyException()
     }
+
+    @Test
+    fun `Redis 장애 시 가입 스냅샷은 예외 없이 false를 반환한다`() {
+        // false면 호출부가 완료를 기록하지 않아 다음 로그인이 재시도한다(로그인 자체는 막지 않는다).
+        assertThat(serviceWithFailingRedis().snapshotTrialAtSignup(1L, "dev-x")).isFalse()
+    }
 }
