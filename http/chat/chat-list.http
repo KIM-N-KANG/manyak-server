@@ -11,6 +11,8 @@
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
 
 @baseUrl = http://localhost:8080
+# 8~9번(소유권 배치 필터) 검증용 회원 토큰. auth-login-google.http 5번을 먼저 실행하면 전역 accessToken이 채워집니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
 # [KNK-477] 게스트 체험 한도 대상 요청은 X-Manyak-Device-Id 헤더가 필수입니다.
@@ -197,7 +199,71 @@ Accept: application/json
     });
 %}
 
-### 7. (자유 조회) 이미 아는 chatId 목록으로 직접 조회
+### 7. (소유권) 회원 채팅 생성 — 배치 필터 검증 준비 (KNK-497, B16)
+# {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요. 2번의 storyId로 회원 소유 채팅을 만듭니다.
+POST {{baseUrl}}/api/v1/chats
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("회원 채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("memberChatId", response.body.id);
+%}
+
+### 8. (소유권) 회원 토큰으로 배치 조회 → 자신 소유만 포함, 게스트(NULL) 채팅은 제외 (KNK-497, B16)
+# 7번의 회원 소유 채팅(memberChatId)과 3번의 게스트 소유 채팅(chatId)을 함께 요청합니다.
+# 배치 조회는 항목 존재를 드러내지 않는 계약이라 열람 불가 항목은 403이 아니라 조용히 빠집니다.
+POST {{baseUrl}}/api/v1/chats/batch
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "chatIds": ["{{memberChatId}}", "{{chatId}}"]
+}
+
+> {%
+    client.test("배치 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("회원 소유 채팅만 포함되고 게스트 채팅은 제외된다", () => {
+        client.assert(Array.isArray(b) && b.length === 1, `1건이 아닙니다. actual=${JSON.stringify(b)}`);
+        client.assert(String(b[0].id) === String(client.global.get("memberChatId")),
+            `회원 소유 채팅이 아닙니다. actual=${JSON.stringify(b[0])}`);
+    });
+%}
+
+### 9. (소유권) 토큰 없이(게스트로) 같은 ID 목록을 배치 조회 → 게스트(NULL) 채팅만 포함, 회원 소유는 제외 (KNK-497, B16)
+# 8번과 같은 chatIds를 Authorization 헤더 없이 보냅니다. 8번과 정반대로 뒤집혀야 합니다.
+POST {{baseUrl}}/api/v1/chats/batch
+Content-Type: application/json
+Accept: application/json
+
+{
+  "chatIds": ["{{memberChatId}}", "{{chatId}}"]
+}
+
+> {%
+    client.test("배치 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("게스트 채팅만 포함되고 회원 소유 채팅은 제외된다", () => {
+        client.assert(Array.isArray(b) && b.length === 1, `1건이 아닙니다. actual=${JSON.stringify(b)}`);
+        client.assert(String(b[0].id) === String(client.global.get("chatId")),
+            `게스트 채팅이 아닙니다. actual=${JSON.stringify(b[0])}`);
+    });
+%}
+
+### 10. (자유 조회) 이미 아는 chatId 목록으로 직접 조회
 # 위 준비 흐름 없이 실제 DB에 있는 chatId만 빠르게 확인하고 싶을 때 사용합니다.
 # 아래 UUID를 실제 DB의 공개 식별자(public_id)로 바꿔 실행하세요.
 POST {{baseUrl}}/api/v1/chats/batch

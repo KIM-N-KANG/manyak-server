@@ -372,6 +372,47 @@ class ChatQueryControllerIntegrationTests {
             .expectStatus().isForbidden
     }
 
+    // ---- 소유권 게이트(§4-5, §4-8 B16, KNK-497): 채팅 배치 조회 열람 필터 ----
+
+    @Test
+    fun `회원이 배치 조회하면 타인 소유 채팅과 게스트(NULL) 소유 채팅은 결과에서 제외된다`() {
+        val requester = saveUser("요청자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val ownChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = requester.id))
+        val otherChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = other.id))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(requester.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${ownChat.publicId}","${otherChat.publicId}","${guestChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(ownChat.publicId.toString())
+    }
+
+    @Test
+    fun `게스트가 배치 조회하면 게스트(NULL) 소유 채팅만 포함되고 회원 소유 채팅은 제외된다`() {
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+        val memberChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${guestChat.publicId}","${memberChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(guestChat.publicId.toString())
+    }
+
     private fun saveUser(nickname: String): User =
         userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 

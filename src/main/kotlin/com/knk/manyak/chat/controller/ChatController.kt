@@ -105,7 +105,9 @@ class ChatController(
     @PostMapping("/chats/batch")
     fun getChatsByIds(
         @Valid @RequestBody request: BatchChatRequest,
-    ): List<ChatSummaryResponse> = chatService.getChatsByIds(request)
+        // optional 인증: 열람 불가 항목(회원 요청의 NULL 채팅·타인 소유)을 조용히 제외하는 데 쓴다(스펙 §4-5 B16).
+        @CurrentUserId userId: Long?,
+    ): List<ChatSummaryResponse> = chatService.getChatsByIds(request, userId)
 
     @Operation(
         summary = "채팅 상세 조회",
