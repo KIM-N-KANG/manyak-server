@@ -119,6 +119,19 @@ class SimpleStoryCreationCreditIntegrationTests {
     }
 
     @Test
+    fun `정지된 회원은 간편 제작이 403이고 compile이 호출되지 않으며 크레딧도 소모되지 않는다`() {
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+        val storyline = persistStorylineOwnedBy(suspended.id)
+
+        postSimpleStory(storyline, "Bearer ${validToken(suspended)}")
+            .expectStatus().isForbidden
+
+        assertThat(compileStoryCalls.get()).isZero()
+        assertThat(creditTransactionRepository.findAll()).isEmpty()
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
     fun `회원이 충분한 잔액으로 간편 제작하면 201과 함께 잔액이 비용만큼 줄고 STORY_CREATION 원장 행이 남는다`() {
         val user = saveUser()
         creditWalletService.reward(user.id, 100, CreditReason.SIGNUP_REWARD, "signup:${user.id}")

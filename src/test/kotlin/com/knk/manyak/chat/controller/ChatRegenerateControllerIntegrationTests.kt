@@ -256,6 +256,28 @@ class ChatRegenerateControllerIntegrationTests {
     }
 
     @Test
+    fun `정지된 회원은 재생성이 403이고 크레딧이 차감되지 않는다`() {
+        val story = seedStory()
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+        creditWalletService.reward(suspended.id, 100, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = suspended.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 입력", messageOrder = 1))
+        val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/regenerate/stream")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(suspended.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"turnId":${lastAssistant.id}}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(100)
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
+    @Test
     fun `회원 소유 채팅 재생성은 1턴분을 선차감하고 성공 시 환불하지 않는다`() {
         val story = seedStory()
         val member = saveUser("재생성회원")

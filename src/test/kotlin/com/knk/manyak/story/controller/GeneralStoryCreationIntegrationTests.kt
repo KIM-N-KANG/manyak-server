@@ -76,6 +76,21 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
+    fun `정지된 회원이 일반 제작을 등록하면 403이고 저장되지 않는다`() {
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(suspended.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body())
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
     fun `익명 등록은 소유자 없이 기본 PRIVATE로 저장되고 응답은 간편 제작과 동일하다`() {
         restTestClient.post()
             .uri("/api/v1/stories/general")

@@ -5,6 +5,7 @@ import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.security.isActiveAccessAllowed
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -64,6 +65,12 @@ class AuthTokenService(
                     // 회전은 성공했으나 매핑된 사용자가 사라진 경우(계정 삭제 등): 방금 발급된 토큰을 포함해 family를 폐기한다.
                     refreshTokenStore.revokeFamilyByToken(newHash)
                     throw unauthorized()
+                }
+                // 정지 계정 반응형 집행(스펙 §4-5 B20, KNK-499): 정지 트리거 이벤트가 없어(관리자 API 부재)
+                // 회전 시점에 상태를 확인한다. SUSPENDED면 방금 회전된 토큰을 포함해 family를 폐기해 재발급 경로를 닫는다.
+                if (!isActiveAccessAllowed(user.status)) {
+                    refreshTokenStore.revokeFamilyByToken(newHash)
+                    throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
                 }
                 tokenResponse(jwtTokenProvider.issueAccessToken(user.publicId), newRaw)
             }

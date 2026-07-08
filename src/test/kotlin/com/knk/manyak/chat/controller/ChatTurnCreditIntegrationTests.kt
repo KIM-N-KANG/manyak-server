@@ -65,6 +65,26 @@ class ChatTurnCreditIntegrationTests {
     }
 
     @Test
+    fun `정지된 회원은 채팅 턴 진행이 403이고 크레딧이 차감되지 않는다`() {
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+        creditWalletService.reward(suspended.id, 100, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = suspended.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", authHeaderFor(suspended))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"손을 올린다."}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(100)
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
+    @Test
     fun `회원이 충분한 잔액으로 이어쓰면 턴이 진행되고 CHAT_TURN 10이 차감된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("차감회원")
