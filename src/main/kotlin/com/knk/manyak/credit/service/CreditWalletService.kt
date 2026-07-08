@@ -38,6 +38,10 @@ class CreditWalletService(
     @Transactional(readOnly = true)
     fun balanceOf(userId: Long): Long = walletRepository.findByUserId(userId)?.balance ?: 0
 
+    /** 멱등 키로 이미 처리된 원장 행이 있는지 확인한다. 조회 전용이며 부수효과(적립)가 없다(스펙 §4-3-5 B17 attendedToday 판정용). */
+    @Transactional(readOnly = true)
+    fun hasTransaction(idempotencyKey: String): Boolean = transactionRepository.existsByIdempotencyKey(idempotencyKey)
+
     /**
      * 크레딧을 적립한다(양수). [idempotencyKey]가 이미 기록됐으면 적립하지 않고 `rewarded=false`를 반환한다(멱등).
      *

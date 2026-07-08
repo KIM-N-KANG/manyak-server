@@ -8,6 +8,8 @@ import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.GoogleLoginService
 import com.knk.manyak.auth.token.AuthTokenService
+import com.knk.manyak.credit.service.AttendanceRewardService
+import com.knk.manyak.credit.service.CreditWalletService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -35,6 +37,8 @@ class AuthController(
     private val authTokenService: AuthTokenService,
     private val userRepository: UserRepository,
     private val googleLoginService: GoogleLoginService,
+    private val creditWalletService: CreditWalletService,
+    private val attendanceRewardService: AttendanceRewardService,
 ) {
 
     @Operation(
@@ -100,6 +104,9 @@ class AuthController(
             nickname = user.nickname,
             profileImageUrl = user.profileImageUrl,
             status = user.status,
+            // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
+            creditBalance = creditWalletService.balanceOf(user.id),
+            attendedToday = attendanceRewardService.hasAttendedToday(user.id),
         )
     }
 

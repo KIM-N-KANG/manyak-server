@@ -46,4 +46,18 @@ class AttendanceRewardServiceTest {
         assertThat(outcome.amount).isEqualTo(0)
         assertThat(outcome.balance).isEqualTo(10)
     }
+
+    @Test
+    fun `hasAttendedToday는 KST 날짜 기준 멱등 키의 적립 여부를 그대로 반환한다`() {
+        `when`(creditWalletService.hasTransaction("attendance:1:2026-07-06")).thenReturn(true)
+
+        assertThat(service.hasAttendedToday(1L)).isTrue()
+    }
+
+    @Test
+    fun `오늘 출석하지 않았으면 hasAttendedToday는 false다`() {
+        `when`(creditWalletService.hasTransaction("attendance:1:2026-07-06")).thenReturn(false)
+
+        assertThat(service.hasAttendedToday(1L)).isFalse()
+    }
 }
