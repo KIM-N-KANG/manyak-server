@@ -1,14 +1,20 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.credit.InsufficientCreditException
+import com.knk.manyak.credit.entity.CreditLot
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
+import com.knk.manyak.credit.entity.CreditWallet
+import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.repository.CreditWalletRepository
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import kotlin.math.min
 
 /** 보상 적립 결과. [rewarded]가 false면 멱등 키 중복 또는 월 상한 초과로 이번 요청은 적립하지 않았다(잔액 불변). */
 data class RewardOutcome(val rewarded: Boolean, val balance: Long)
@@ -31,12 +37,17 @@ data class MonthlyRewardCap(val reason: CreditReason, val cap: Long, val windowS
 class CreditWalletService(
     private val walletRepository: CreditWalletRepository,
     private val transactionRepository: CreditTransactionRepository,
+    private val lotRepository: CreditLotRepository,
     private val walletProvisioner: CreditWalletProvisioner,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
-    /** 요청자의 현재 잔액. 지갑이 없으면 0. */
+    /**
+     * 요청자의 현재 잔액 = 미만료·잔여>0 적립 로트 잔여의 합(스펙 §4-3-7 만료, B12). 아직 EXPIRE 행으로
+     * 정리되지 않은 만료 로트도 제외되므로, 지갑 balance 캐시가 아닌 로트 합으로 계산한다. 지갑·로트가 없으면 0.
+     */
     @Transactional(readOnly = true)
-    fun balanceOf(userId: Long): Long = walletRepository.findByUserId(userId)?.balance ?: 0
+    fun balanceOf(userId: Long): Long = lotRepository.sumActiveRemaining(userId, clock.instant())
 
     /** 멱등 키로 이미 처리된 원장 행이 있는지 확인한다. 조회 전용이며 부수효과(적립)가 없다(스펙 §4-3-5 B17 attendedToday 판정용). */
     @Transactional(readOnly = true)
@@ -69,6 +80,9 @@ class CreditWalletService(
         ensureWallet(userId)
         val wallet = walletRepository.findByUserIdForUpdate(userId)
             ?: error("지갑을 보장한 뒤 조회에 실패했습니다: userId=$userId")
+        // 락 안에서 만료 로트를 먼저 정리해 반환 balance·월 상한 판정이 만료분을 제외한 최신 값을 보게 한다(스펙 §4-3-7).
+        val now = clock.instant()
+        sweepExpiredLots(userId, wallet, now)
         // 락 획득 후 재확인: 같은 키 동시 요청이 락을 기다리는 사이 먼저 커밋했을 수 있다(중복 insert·유니크 위반 방지, 멱등 보장).
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             return RewardOutcome(rewarded = false, balance = wallet.balance)
@@ -87,7 +101,7 @@ class CreditWalletService(
                 return RewardOutcome(rewarded = false, balance = wallet.balance)
             }
         }
-        transactionRepository.save(
+        val transaction = transactionRepository.save(
             CreditTransaction(
                 userId = userId,
                 amount = amount,
@@ -95,6 +109,17 @@ class CreditWalletService(
                 refType = refType,
                 refId = refId,
                 idempotencyKey = idempotencyKey,
+            ),
+        )
+        // 적립·환불 1건당 로트 1개. 무기한(PURCHASE)만 만료가 없고, 보상·환불은 적립 시점 + 30일에 만료된다(스펙 §4-3-7).
+        lotRepository.save(
+            CreditLot(
+                userId = userId,
+                transactionId = transaction.id,
+                originalAmount = amount,
+                remaining = amount,
+                expiresAt = expiryFor(reason, now),
+                createdAt = now,
             ),
         )
         wallet.balance += amount
@@ -129,9 +154,22 @@ class CreditWalletService(
         require(amount > 0) { "차감액은 양수여야 합니다: $amount" }
         val wallet = walletRepository.findByUserIdForUpdate(userId)
             ?: throw InsufficientCreditException(userId, required = amount, balance = 0)
+        // 만료 로트를 먼저 회수한 뒤 남은 활성 잔액으로 판정한다(만료분은 소진 대상이 아니다). balance는 sweep로 최신화된다.
+        val now = clock.instant()
+        val lots = sweepExpiredLots(userId, wallet, now)
         if (wallet.balance < amount) {
             throw InsufficientCreditException(userId, required = amount, balance = wallet.balance)
         }
+        // FIFO 소진: 만료 임박(무기한은 마지막)·먼저 적립된 로트부터 잔여를 깎는다. sweep 후 활성 잔액 ≥ amount라 정확히 소진된다.
+        var toConsume = amount
+        for (lot in lots) {
+            if (toConsume <= 0) break
+            if (lot.remaining <= 0) continue
+            val take = min(lot.remaining, toConsume)
+            lot.remaining -= take
+            toConsume -= take
+        }
+        check(toConsume == 0L) { "FIFO 소진 후 남은 차감량이 있습니다: userId=$userId, remaining=$toConsume" }
         transactionRepository.save(
             CreditTransaction(
                 userId = userId,
@@ -171,8 +209,9 @@ class CreditWalletService(
             .countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND)
         val missing = targetRefundCount - currentRefunds
         if (missing <= 0) return 0
+        val now = clock.instant()
         repeat(missing.toInt()) {
-            transactionRepository.save(
+            val transaction = transactionRepository.save(
                 CreditTransaction(
                     userId = userId,
                     amount = unitAmount,
@@ -181,8 +220,55 @@ class CreditWalletService(
                     refId = refId,
                 ),
             )
+            // 환불도 적립처럼 로트를 만들어 FIFO·만료 대상에 포함한다(환불 시점 + 30일).
+            lotRepository.save(
+                CreditLot(
+                    userId = userId,
+                    transactionId = transaction.id,
+                    originalAmount = unitAmount,
+                    remaining = unitAmount,
+                    expiresAt = expiryFor(CreditReason.REFUND, now),
+                    createdAt = now,
+                ),
+            )
             wallet.balance += unitAmount
         }
         return missing.toInt()
+    }
+
+    /**
+     * 지갑 락 안에서 만료 로트(유효기간 경과·잔여>0)를 EXPIRE 원장 행으로 회수하고 잔여를 0으로 만든다(스펙 §4-3-7).
+     * balance = SUM(amount) 불변식을 유지하려 만료를 음수 행으로 실현한다. 잠근 활성 로트 목록(FIFO 정렬)을 그대로
+     * 반환해 차감 호출부가 재조회 없이 이어서 소진하게 한다.
+     */
+    private fun sweepExpiredLots(userId: Long, wallet: CreditWallet, now: Instant): List<CreditLot> {
+        val lots = lotRepository.findActiveForUpdate(userId)
+        for (lot in lots) {
+            val expiresAt = lot.expiresAt ?: continue
+            if (expiresAt.isAfter(now)) continue
+            val expiredAmount = lot.remaining
+            if (expiredAmount <= 0) continue
+            transactionRepository.save(
+                CreditTransaction(
+                    userId = userId,
+                    amount = -expiredAmount,
+                    reason = CreditReason.EXPIRE,
+                    refType = "CREDIT_LOT",
+                    refId = lot.id,
+                ),
+            )
+            lot.remaining = 0
+            wallet.balance -= expiredAmount
+        }
+        return lots
+    }
+
+    /** 로트 만료 시각. 무기한(PURCHASE)은 NULL, 그 외 보상·환불은 적립 시점 + [REWARD_VALIDITY]. */
+    private fun expiryFor(reason: CreditReason, now: Instant): Instant? =
+        if (reason == CreditReason.PURCHASE) null else now.plus(REWARD_VALIDITY)
+
+    private companion object {
+        // 보상·환불 크레딧 유효기간(스펙 §4-3-7 B12, 2026-07-07 결정): 적립 30일.
+        val REWARD_VALIDITY: Duration = Duration.ofDays(30)
     }
 }

@@ -28,6 +28,7 @@
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
 | [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
+| [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
 
 ## Relations
 
@@ -56,6 +57,8 @@ erDiagram
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+"public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -300,6 +303,15 @@ erDiagram
   integer version_number
   text content
   text choices
+  timestamp_with_time_zone created_at
+}
+"public.credit_lots" {
+  bigint id
+  bigint user_id FK
+  bigint transaction_id FK
+  bigint original_amount
+  bigint remaining
+  timestamp_with_time_zone expires_at
   timestamp_with_time_zone created_at
 }
 ```
