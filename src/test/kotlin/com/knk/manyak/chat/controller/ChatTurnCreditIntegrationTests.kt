@@ -120,6 +120,23 @@ class ChatTurnCreditIntegrationTests {
     }
 
     @Test
+    fun `회원이 체험 잔여가 있으면 크레딧 대신 체험으로 무료 처리된다`() {
+        // B13(스펙 §4-3-7): 회원 소모 2단(체험 잔여 → 크레딧). saveUser는 체험을 소진시키므로,
+        // 체험 잔여가 있는 신규 회원은 직접 생성해 체험 우선 소진을 검증한다.
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val member = userRepository.save(User(nickname = "체험회원", status = UserStatus.ACTIVE))
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+
+        val body = streamAsMember(chat.publicId.toString(), member, "체험으로 진행한다.")
+
+        assertThat(body).contains("completed")
+        // 크레딧은 차감되지 않고(잔액 유지), CHAT_TURN 소모 원장도 남지 않는다(체험 잔여로 무료 처리).
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(100)
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
+    @Test
     fun `회원 잔액이 부족하면 SSE를 열기 전에 동기 402로 응답하고 아무것도 차감되지 않는다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("빈지갑회원")
@@ -241,8 +258,14 @@ class ChatTurnCreditIntegrationTests {
         assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(100)
     }
 
+    @Autowired
+    private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    // B13(스펙 §4-3-7): 회원도 잔여 체험을 크레딧보다 먼저 소진한다. 크레딧 경로를 검증하려면 회원 체험을 미리 소진시킨다.
     private fun saveUser(nickname: String): User =
-        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE)).also { member ->
+            while (b13GuestTrialLimitService.reserveMember(member.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_TURN)) { /* drain */ }
+        }
 
     private fun authHeaderFor(user: User): String =
         "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}"

@@ -137,6 +137,12 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
         assertThat(all.none { it.reason == CreditReason.REFUND }).isTrue()
     }
 
+    @Autowired
+    private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    // B13(스펙 §4-3-7): 회원 체험을 먼저 소진해 크레딧 경로(선차감·환불 없음)를 검증한다.
     private fun saveUser(nickname: String): User =
-        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE)).also { member ->
+            while (b13GuestTrialLimitService.reserveMember(member.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_TURN)) { /* drain */ }
+        }
 }

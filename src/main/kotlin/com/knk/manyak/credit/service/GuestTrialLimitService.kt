@@ -13,7 +13,10 @@ import org.springframework.web.server.ResponseStatusException
  *
  * AI 호출·스트림 시작 **전에** [reserve]로 1회 예약하고(한도 소진이면 예약 없이 false → 호출부가 402로 변환),
  * 실패·미완료 트리거를 만나면 [restore]로 되돌린다(크레딧 환불과 대응되는 카운터 복원).
- * 카운터는 TTL·일일 리셋을 두지 않는다(스펙 명시, Phase 1). 회원 요청은 이 서비스를 거치지 않는다(무료 또는 크레딧 소모).
+ * 카운터는 TTL·일일 리셋을 두지 않는다(스펙 명시, Phase 1).
+ *
+ * B13(스펙 §4-3-7): 회원도 잔여 체험을 크레딧보다 먼저 소진한다. 회원 카운터는 userId 기반([reserveMember]·
+ * [restoreMember])이며, 가입 시 디바이스 사용량을 스냅샷한다([syncTrialFromDeviceAtSignup]).
  */
 @Service
 class GuestTrialLimitService(
@@ -63,6 +66,38 @@ class GuestTrialLimitService(
     }
 
     /**
+     * 회원 체험 잔여를 1 예약한다(스펙 §4-3-7 B13). 회원도 잔여 체험을 크레딧보다 먼저 소진한다 — 성공(true)이면
+     * 무료로 처리하고, 소진(false)이면 호출부가 크레딧으로 차감한다. 게스트 카운터와 같은 Lua로 원자 실행하되
+     * 키는 userId 기반이라 디바이스 헤더 없이도 동작한다(가입 시 [syncTrialFromDeviceAtSignup]로 시드).
+     */
+    fun reserveMember(userId: Long, counter: Counter): Boolean {
+        val result = redisTemplate.execute(
+            RESERVE_SCRIPT,
+            listOf(memberKeyFor(userId, counter)),
+            limitFor(counter).toString(),
+        )
+        return result == 1L
+    }
+
+    /** 회원 요청이 실패·미완료로 끝나면 예약한 체험 잔여를 되돌린다(크레딧 환불에 대응). 0 아래로 내려가지 않는다. */
+    fun restoreMember(userId: Long, counter: Counter) {
+        redisTemplate.execute(RESTORE_SCRIPT, listOf(memberKeyFor(userId, counter)))
+    }
+
+    /**
+     * 가입(신규 회원) 시 디바이스의 체험 사용량을 회원 카운터로 스냅샷해, 게스트 시절 소진분이 회원에게 이어지게 한다
+     * (스펙 §4-3-7 B13 — 게스트로 소진 후 가입해 체험을 초기화하는 파밍 차단). 회원이 소비하는 카운터
+     * ([MEMBER_SHARED_COUNTERS] — 스토리라인 생성은 회원 무료라 제외)만 복사한다. 신규 가입 1회만 호출한다
+     * (재호출하면 회원이 가입 후 소진한 잔여를 디바이스 값으로 덮어써 어긋난다).
+     */
+    fun syncTrialFromDeviceAtSignup(userId: Long, deviceId: String) {
+        for (counter in MEMBER_SHARED_COUNTERS) {
+            val deviceUsed = redisTemplate.opsForValue().get(keyFor(deviceId, counter)) ?: continue
+            redisTemplate.opsForValue().set(memberKeyFor(userId, counter), deviceUsed)
+        }
+    }
+
+    /**
      * [userId]가 없으면(게스트) [deviceId]를 검증하고([requireDeviceId]) [counter]를 예약한다.
      * 한도 소진이면 402. 예약에 성공하면 실패 시 [restore]에 쓸 디바이스 id를 반환하고,
      * 회원([userId] != null)이면 이 카운터를 쓰지 않으므로 아무것도 하지 않고 null을 반환한다.
@@ -85,7 +120,14 @@ class GuestTrialLimitService(
     private fun keyFor(deviceId: String, counter: Counter): String =
         "guest_trial:${deviceIdHasher.hash(deviceId)}:${counter.key}"
 
+    // 회원 카운터는 userId 기반(디바이스 해시 아님) — 가입 시 디바이스에서 스냅샷된 계정 귀속 체험 잔여.
+    private fun memberKeyFor(userId: Long, counter: Counter): String =
+        "member_trial:$userId:${counter.key}"
+
     private companion object {
+        // 회원이 크레딧 대신 소비하는 체험 카운터. 스토리라인 생성은 회원 무료라 제외한다.
+        val MEMBER_SHARED_COUNTERS = listOf(Counter.STORY_CREATION, Counter.CHAT_TURN)
+
         // 한도 미만이면 INCR 후 1(예약 성공), 이상이면 그대로 0(예약 거절). ARGV[1]=한도.
         val RESERVE_SCRIPT = DefaultRedisScript<Long>().apply {
             setResultType(Long::class.java)

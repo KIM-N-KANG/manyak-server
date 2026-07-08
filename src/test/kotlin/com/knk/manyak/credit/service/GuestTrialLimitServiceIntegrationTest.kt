@@ -84,6 +84,52 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
+    fun `회원 예약도 한도까지 되고 소진하면 거절한다`() {
+        repeat(3) {
+            assertThat(service.reserveMember(100L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+        }
+        assertThat(service.reserveMember(100L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
+    }
+
+    @Test
+    fun `회원 복원하면 다시 예약할 수 있다`() {
+        repeat(3) { service.reserveMember(200L, GuestTrialLimitService.Counter.STORY_CREATION) }
+        assertThat(service.reserveMember(200L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
+
+        service.restoreMember(200L, GuestTrialLimitService.Counter.STORY_CREATION)
+
+        assertThat(service.reserveMember(200L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue()
+    }
+
+    @Test
+    fun `회원 카운터는 디바이스 카운터와 독립적이다`() {
+        // 같은 식별 문자열이라도 게스트(device)와 회원(userId) 키가 분리돼 서로의 잔여에 영향을 주지 않는다.
+        repeat(3) { service.reserve("300", GuestTrialLimitService.Counter.CHAT_TURN) }
+        assertThat(service.reserve("300", GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
+
+        // 디바이스가 소진돼도 회원 카운터는 그대로 한도까지 예약된다.
+        repeat(3) {
+            assertThat(service.reserveMember(300L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+        }
+    }
+
+    @Test
+    fun `가입 동기화는 디바이스 사용량을 회원 카운터로 옮긴다`() {
+        // 디바이스로 story_creation 2회, chat_turn 1회 사용한 뒤 가입한다.
+        repeat(2) { service.reserve("dev-sync", GuestTrialLimitService.Counter.STORY_CREATION) }
+        service.reserve("dev-sync", GuestTrialLimitService.Counter.CHAT_TURN)
+
+        service.syncTrialFromDeviceAtSignup(700L, "dev-sync")
+
+        // 회원은 남은 만큼만 예약할 수 있다: story_creation 3-2=1, chat_turn 3-1=2.
+        assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue()
+        assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
+        assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+        assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+        assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
+    }
+
+    @Test
     fun `예약한 적 없어도 복원은 0 아래로 내려가지 않는다`() {
         service.restore("device-D", GuestTrialLimitService.Counter.STORYLINE_GENERATION)
 

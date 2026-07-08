@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.invite.service.InviteService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -42,11 +43,14 @@ class GoogleLoginServiceTest {
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
     private val inviteService: InviteService = mock(InviteService::class.java)
+    private val guestTrialLimitService: GuestTrialLimitService = mock(GuestTrialLimitService::class.java)
 
     private val signupReward = 100L
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
-        GoogleLoginService(verifier, registrar, authTokenService, creditWalletService, inviteService, signupReward)
+        GoogleLoginService(
+            verifier, registrar, authTokenService, creditWalletService, inviteService, guestTrialLimitService, signupReward,
+        )
 
     private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
         GoogleIdTokenVerifier { SocialUserInfo(providerUserId = providerUserId) }
