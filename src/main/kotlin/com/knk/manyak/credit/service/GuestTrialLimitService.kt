@@ -1,7 +1,9 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.global.observability.DeviceIdHasher
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataAccessException
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.http.HttpStatus
@@ -29,6 +31,8 @@ class GuestTrialLimitService(
     @param:Value("\${manyak.guest-trial.chat-turn-limit:5}")
     private val chatTurnLimit: Long,
 ) {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     enum class Counter(val key: String) {
         STORYLINE_GENERATION("storyline_generation"),
@@ -69,19 +73,31 @@ class GuestTrialLimitService(
      * 회원 체험 잔여를 1 예약한다(스펙 §4-3-7 B13). 회원도 잔여 체험을 크레딧보다 먼저 소진한다 — 성공(true)이면
      * 무료로 처리하고, 소진(false)이면 호출부가 크레딧으로 차감한다. 게스트 카운터와 같은 Lua로 원자 실행하되
      * 키는 userId 기반이라 디바이스 헤더 없이도 동작한다(가입 시 [snapshotTrialAtSignup]로 시드).
+     *
+     * **체험 카운터 Redis 장애는 예약 실패(false)로 폴백해 크레딧 결제 경로를 막지 않는다**: B13 이전 회원 흐름은
+     * Redis에 의존하지 않았으므로, 잔여 조회 불가가 크레딧 보유 회원의 유료 사용을 5xx로 막으면 가용성 회귀다.
      */
-    fun reserveMember(userId: Long, counter: Counter): Boolean {
-        val result = redisTemplate.execute(
+    fun reserveMember(userId: Long, counter: Counter): Boolean = try {
+        redisTemplate.execute(
             RESERVE_SCRIPT,
             listOf(memberKeyFor(userId, counter)),
             limitFor(counter).toString(),
-        )
-        return result == 1L
+        ) == 1L
+    } catch (ex: DataAccessException) {
+        logger.warn("회원 체험 예약 실패(Redis) — 크레딧 경로로 폴백: userId={}, counter={}", userId, counter, ex)
+        false
     }
 
-    /** 회원 요청이 실패·미완료로 끝나면 예약한 체험 잔여를 되돌린다(크레딧 환불에 대응). 0 아래로 내려가지 않는다. */
+    /**
+     * 회원 요청이 실패·미완료로 끝나면 예약한 체험 잔여를 되돌린다(크레딧 환불에 대응). 0 아래로 내려가지 않는다.
+     * 복원은 best-effort다 — Redis 장애는 삼켜 SSE 종료·응답을 막지 않는다(예약이 성공했던 카운터라 사후 정합은 별개).
+     */
     fun restoreMember(userId: Long, counter: Counter) {
-        redisTemplate.execute(RESTORE_SCRIPT, listOf(memberKeyFor(userId, counter)))
+        try {
+            redisTemplate.execute(RESTORE_SCRIPT, listOf(memberKeyFor(userId, counter)))
+        } catch (ex: DataAccessException) {
+            logger.warn("회원 체험 복원 실패(Redis) — 무시: userId={}, counter={}", userId, counter, ex)
+        }
     }
 
     /**
