@@ -11,7 +11,7 @@ import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 
-/** 크레딧 증감 사유. 적립·환불은 양수 amount, 소모는 음수 amount로 기록한다(balance = SUM(amount)). */
+/** 크레딧 증감 사유. 적립·환불은 양수 amount, 소모·만료는 음수 amount로 기록한다(balance = SUM(amount)). */
 enum class CreditReason {
     SIGNUP_REWARD,
     INVITE_REWARD,
@@ -20,6 +20,9 @@ enum class CreditReason {
     CHAT_TURN,
     REFUND,
     PURCHASE,
+
+    // 보상·환불 로트가 30일 유효기간을 넘겨 만료된 잔여를 회수하는 음수 행(스펙 §4-3-7 만료, B12).
+    EXPIRE,
 }
 
 /**

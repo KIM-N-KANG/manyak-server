@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | amount | bigint |  | false |  |  |  |
 | reason | varchar(30) |  | false |  |  |  |
@@ -18,7 +18,7 @@
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_credit_transactions_amount | CHECK | CHECK ((amount <> 0)) |
-| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying])::text[]))) |
+| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying])::text[]))) |
 | credit_transactions_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | credit_transactions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_credit_transactions_idempotency | UNIQUE | UNIQUE (idempotency_key) |
@@ -37,6 +37,7 @@
 ```mermaid
 erDiagram
 
+"public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.credit_transactions" {
@@ -47,6 +48,15 @@ erDiagram
   varchar_30_ ref_type
   bigint ref_id
   varchar_255_ idempotency_key
+  timestamp_with_time_zone created_at
+}
+"public.credit_lots" {
+  bigint id
+  bigint user_id FK
+  bigint transaction_id FK
+  bigint original_amount
+  bigint remaining
+  timestamp_with_time_zone expires_at
   timestamp_with_time_zone created_at
 }
 "public.users" {
