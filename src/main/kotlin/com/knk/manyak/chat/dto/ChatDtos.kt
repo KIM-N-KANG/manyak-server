@@ -164,7 +164,7 @@ data class RegenerateChatRequest(
     @field:Positive
     @field:Schema(
         description = "재생성할 마지막 턴 ID(공개 채팅 상세의 turns[].id). 서버가 보는 마지막 턴과 다르면 409로 거절합니다. " +
-            "재생성은 이 마지막 턴의 AI 출력과 선택지만 같은 사용자 입력으로 다시 생성해 교체하며, 이전 본문은 보관하지 않습니다.",
+            "재생성은 이 마지막 턴의 AI 출력과 선택지만 같은 사용자 입력으로 다시 생성해 교체하며, 이전 출력·선택지는 버전 이력(V37)에 보존됩니다.",
         example = "3",
     )
     val turnId: Long,
