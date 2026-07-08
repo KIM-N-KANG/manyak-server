@@ -26,6 +26,7 @@ class GoogleAccountRegistrar(
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
     private val nicknameGenerator: NicknameGenerator,
+    private val profileImagePresetService: ProfileImagePresetService,
 ) {
 
     /**
@@ -59,12 +60,14 @@ class GoogleAccountRegistrar(
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun createUserAndAccount(info: SocialUserInfo, now: Instant, inviterUserId: Long?): User {
+        // 실명·외부 사진 노출을 피하기 위해 Google `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
+        val nickname = nicknameGenerator.generate()
         val user = userRepository.save(
             User(
-                // 실명 노출을 피하기 위해 Google `name` 대신 랜덤 닉네임을 발급한다(스펙 §4-5, B7).
-                nickname = nicknameGenerator.generate(),
-                // 프로필 이미지 프리셋 랜덤 배정은 KNK-388 범위. 현재는 Google `picture`를 유지한다.
-                profileImageUrl = info.picture,
+                nickname = nickname.text,
+                // 닉네임 명사에 1:1 매핑된 팀 제작 프리셋을 배정한다(KNK-388). 매핑 없으면 null → 클라이언트 기본 아바타.
+                profileImageUrl = profileImagePresetService.imageUrlFor(nickname.noun),
+                profileThumbnailBase64 = profileImagePresetService.thumbnailBase64For(nickname.noun),
                 status = UserStatus.ACTIVE,
                 inviterUserId = inviterUserId,
             ),

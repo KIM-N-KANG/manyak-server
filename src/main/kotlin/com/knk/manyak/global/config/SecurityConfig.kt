@@ -41,6 +41,9 @@ class SecurityConfig {
                         "/swagger-ui/**",
                         "/swagger-ui.html",
                         "/error",
+                        // 프로필 프리셋 이미지(static/profile-presets)는 공개 자산이다(스펙 §4-5 B7). 공개 스토리
+                        // author.profileImageUrl로 무인증 조회에 노출되므로 인증 없이 서빙해야 한다.
+                        "/profile-presets/**",
                     ).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/batch")).permitAll()

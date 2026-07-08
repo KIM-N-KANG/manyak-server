@@ -1,0 +1,59 @@
+### 프로필 프리셋 이미지 수동 검증 (스펙 §4-5 B7, KNK-388)
+#
+# 목적: 닉네임 명사에 1:1 매핑된 프리셋 이미지가 인증 없이 정적 서빙되는지(공개 스토리 author.profileImageUrl
+#       무인증 노출 대상), 한글 파일명이 실제 리소스로 해소되는지 눈으로 확인한다.
+#
+# 사전 준비:
+#   - docker compose up -d postgres   (실 DB)
+#   - ./gradlew bootRun               (로컬 서버, 8080)
+# 실행 순서: 위에서부터 순서대로.
+#
+# 참고: 가입 시 배정(로그인 → GET /auth/me의 profileImageUrl이 아래 preset URL 형태)은 실제 Google ID 토큰이
+#       필요해 http/auth/auth.http의 로그인 흐름으로 확인한다. 이 파일은 정적 서빙 자체를 검증한다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 헬스 체크 — 서버 기동 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버가 떠 있다", () => {
+        client.assert(response.status === 200, `health 200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 1. 프리셋 이미지 서빙(한글 명사) — 인증 없이 200 + image/png
+# 명사 "이야기꾼"은 닉네임 명사 풀 40종 중 하나이며 static/profile-presets/이야기꾼.png 로 서빙된다.
+GET {{baseUrl}}/profile-presets/이야기꾼.png
+
+> {%
+    client.test("인증 없이 프리셋 이미지가 서빙된다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(보안 permitAll 확인). actual=${response.status}`);
+    });
+    client.test("PNG로 서빙된다", () => {
+        client.assert(response.contentType.mimeType === "image/png",
+            `image/png이 아닙니다. actual=${response.contentType.mimeType}`);
+    });
+%}
+
+### 2. 다른 명사 프리셋도 서빙된다(예: 마법사)
+GET {{baseUrl}}/profile-presets/마법사.png
+
+> {%
+    client.test("마법사 프리셋이 서빙된다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. 매핑에 없는 이름은 404 (기본 아바타 폴백 대상)
+GET {{baseUrl}}/profile-presets/존재하지않는명사.png
+
+> {%
+    client.test("없는 프리셋은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (자유 확인) 임의 명사로 직접 눌러보기 — 명사 풀 40종 중 아무거나 바꿔 확인
+# 예: 현자 · 요정 · 검객 · 음유시인 · 연금술사 …
+GET {{baseUrl}}/profile-presets/현자.png
