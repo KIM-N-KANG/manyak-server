@@ -119,7 +119,7 @@ class GuestTrialLimitServiceIntegrationTest {
         repeat(2) { service.reserve("dev-sync", GuestTrialLimitService.Counter.STORY_CREATION) }
         service.reserve("dev-sync", GuestTrialLimitService.Counter.CHAT_TURN)
 
-        service.syncTrialFromDeviceAtSignup(700L, "dev-sync")
+        service.syncTrialFromDeviceIfUnset(700L, "dev-sync")
 
         // 회원은 남은 만큼만 예약할 수 있다: story_creation 3-2=1, chat_turn 3-1=2.
         assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue()
@@ -127,6 +127,20 @@ class GuestTrialLimitServiceIntegrationTest {
         assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
         assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
         assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
+    }
+
+    @Test
+    fun `가입 동기화는 미설정 시에만 시드해 재시도해도 소진 잔여를 덮어쓰지 않는다`() {
+        // 디바이스로 story_creation 2회 사용 후 첫 스냅샷 → 회원은 1회 남는다.
+        repeat(2) { service.reserve("dev-idem", GuestTrialLimitService.Counter.STORY_CREATION) }
+        service.syncTrialFromDeviceIfUnset(800L, "dev-idem")
+        assertThat(service.reserveMember(800L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue() // 남은 1회 소진 → 회원 카운터 설정됨
+
+        // 디바이스를 더 쓰고 재동기화해도, 이미 설정된 회원 카운터는 덮어쓰지 않는다(SETNX). 회원은 여전히 소진 상태.
+        service.reserve("dev-idem", GuestTrialLimitService.Counter.STORY_CREATION)
+        service.syncTrialFromDeviceIfUnset(800L, "dev-idem")
+
+        assertThat(service.reserveMember(800L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
     }
 
     @Test
