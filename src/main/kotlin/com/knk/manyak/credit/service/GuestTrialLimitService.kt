@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException
  * 카운터는 TTL·일일 리셋을 두지 않는다(스펙 명시, Phase 1).
  *
  * B13(스펙 §4-3-7): 회원도 잔여 체험을 크레딧보다 먼저 소진한다. 회원 카운터는 userId 기반([reserveMember]·
- * [restoreMember])이며, 가입 시 디바이스 사용량을 스냅샷한다([syncTrialFromDeviceIfUnset]).
+ * [restoreMember])이며, 가입 시 디바이스 사용량을 계정당 1회 스냅샷한다([snapshotTrialAtSignup]).
  */
 @Service
 class GuestTrialLimitService(
@@ -68,7 +68,7 @@ class GuestTrialLimitService(
     /**
      * 회원 체험 잔여를 1 예약한다(스펙 §4-3-7 B13). 회원도 잔여 체험을 크레딧보다 먼저 소진한다 — 성공(true)이면
      * 무료로 처리하고, 소진(false)이면 호출부가 크레딧으로 차감한다. 게스트 카운터와 같은 Lua로 원자 실행하되
-     * 키는 userId 기반이라 디바이스 헤더 없이도 동작한다(가입 시 [syncTrialFromDeviceIfUnset]로 시드).
+     * 키는 userId 기반이라 디바이스 헤더 없이도 동작한다(가입 시 [snapshotTrialAtSignup]로 시드).
      */
     fun reserveMember(userId: Long, counter: Counter): Boolean {
         val result = redisTemplate.execute(
@@ -85,31 +85,30 @@ class GuestTrialLimitService(
     }
 
     /**
-     * 디바이스의 체험 사용량을 회원 카운터로 스냅샷해, 게스트 시절 소진분이 회원에게 이어지게 한다(스펙 §4-3-7 B13 —
-     * 게스트로 소진 후 가입해 체험을 초기화하는 파밍 차단). 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] —
-     * 스토리라인 생성은 회원 무료라 제외)만 복사한다.
+     * 가입 스냅샷을 **계정당 1회만** 수행한다(스펙 §4-3-7 B13). 게스트 시절 디바이스 사용량을 회원 카운터로 옮겨,
+     * 게스트로 소진 후 가입해 체험을 초기화하는 파밍을 막는다. 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] —
+     * 스토리라인 생성은 회원 무료라 제외)만 다룬다.
      *
-     * **미설정 시에만**(`SETNX`) 시드하므로 멱등·재시도 안전하다: 가입 직후 Redis/프로세스 실패로 스냅샷을 놓쳐도
-     * 다음 로그인이 다시 시도하고(회원 카운터가 아직 없으므로), 이미 시드됐거나 회원이 소진해 카운터가 생긴 뒤에는
-     * 덮어쓰지 않는다. 매 로그인에서 호출해도 안전하다(신규 여부에 묶지 않는다).
+     * - [deviceId]가 있으면 디바이스 사용량을 시드한다(사용 없던 카운터는 미설정=만료 없이 full 체험으로 남긴다).
+     * - [deviceId]가 없으면(헤더 누락 — 우회 시도) 한도값으로 시드해 소진 상태로 만든다(무료 체험 미부여).
+     *
+     * **센티널 키로 1회성과 재시도 안전을 함께 보장한다**: 최초 로그인(센티널 없음)만 시드하고 센티널을 세운 뒤,
+     * 이후 로그인은 건드리지 않는다 — 다른 디바이스·헤더 누락 재로그인이 기존 회원의 잔여 체험을 훼손하지 못한다.
+     * 최초 시도가 센티널 설정 전에 실패하면 다음 로그인이 재시도한다. 센티널은 회원 카운터와 같은 Redis에 살아,
+     * flush로 함께 사라지면 재스냅샷도 정합하다. 매 로그인에서 호출해도 안전하다(신규 여부 판정 불필요).
      */
-    fun syncTrialFromDeviceIfUnset(userId: Long, deviceId: String) {
+    fun snapshotTrialAtSignup(userId: Long, deviceId: String?) {
+        val sentinelKey = "member_trial_synced:$userId"
+        if (redisTemplate.opsForValue().get(sentinelKey) != null) return
         for (counter in MEMBER_SHARED_COUNTERS) {
-            val deviceUsed = redisTemplate.opsForValue().get(keyFor(deviceId, counter)) ?: continue
-            redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), deviceUsed)
+            val seed = if (deviceId.isNullOrBlank()) {
+                limitFor(counter).toString() // 디바이스 미증명 → 소진 시드(무료 체험 미부여)
+            } else {
+                redisTemplate.opsForValue().get(keyFor(deviceId, counter)) ?: continue // 사용 없던 카운터는 full로 남김
+            }
+            redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), seed)
         }
-    }
-
-    /**
-     * 디바이스를 증명하지 못한 로그인(device 헤더 없음)은 회원 체험을 부여하지 않는다(스펙 §4-3-7 B13 — 게스트로
-     * 소진 후 헤더를 빼고 가입해 체험을 초기화하는 우회 차단). 회원 카운터를 **미설정 시에만**(`SETNX`) 한도값으로
-     * 시드해 소진 상태로 만든다. 정상 클라이언트는 항상 device 헤더를 보내므로 이 경로는 우회 시도에만 걸린다.
-     * 나중에 헤더를 포함해 재로그인해도 이미 설정된 카운터는 [syncTrialFromDeviceIfUnset]이 덮어쓰지 않는다.
-     */
-    fun denyMemberTrialIfUnset(userId: Long) {
-        for (counter in MEMBER_SHARED_COUNTERS) {
-            redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), limitFor(counter).toString())
-        }
+        redisTemplate.opsForValue().set(sentinelKey, "1")
     }
 
     /**

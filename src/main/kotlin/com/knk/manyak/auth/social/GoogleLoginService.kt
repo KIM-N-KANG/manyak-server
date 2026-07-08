@@ -50,16 +50,10 @@ class GoogleLoginService(
     fun login(idToken: String, inviteCode: String? = null, deviceId: String? = null): TokenResponse {
         val info = verifier.verify(idToken)
         val user = findOrCreateUser(info, inviteCode)
-        // 디바이스 체험 사용량을 회원 계정으로 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해 체험을 초기화하는
-        // 파밍 차단). 미설정 시에만 시드하는 멱등 연산이라 매 로그인에서 호출해도 안전하다: 가입 직후 실패로 놓쳐도
-        // 다음 로그인이 재시도하고, 이미 시드/소진된 계정은 덮어쓰지 않는다(신규 여부에 묶지 않아 유실을 자가 복구).
-        if (!deviceId.isNullOrBlank()) {
-            guestTrialLimitService.syncTrialFromDeviceIfUnset(user.id, deviceId)
-        } else {
-            // device 헤더가 없으면 소진 상태로 시드해 무료 체험을 부여하지 않는다 — 헤더를 빼고 가입해 체험을
-            // 초기화하는 우회를 막는다(스펙 §4-3-7 B13). 정상 클라이언트는 항상 헤더를 보낸다.
-            guestTrialLimitService.denyMemberTrialIfUnset(user.id)
-        }
+        // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
+        // 체험을 초기화하는 파밍 차단). 센티널로 계정당 1회만 수행하되 최초 실패 시 재시도되며, device 헤더가 없으면
+        // 소진 시드로 무료 체험을 부여하지 않는다. 이후 로그인은 기존 잔여를 건드리지 않는다(서비스가 판정).
+        guestTrialLimitService.snapshotTrialAtSignup(user.id, deviceId)
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
         // 초대 보상: 영속된 초대자 관계가 있으면 매 로그인 멱등 재적립한다(가입 보상과 동일한 자가 복구).

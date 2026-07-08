@@ -114,12 +114,12 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
-    fun `가입 동기화는 디바이스 사용량을 회원 카운터로 옮긴다`() {
+    fun `가입 스냅샷은 디바이스 사용량을 회원 카운터로 옮긴다`() {
         // 디바이스로 story_creation 2회, chat_turn 1회 사용한 뒤 가입한다.
         repeat(2) { service.reserve("dev-sync", GuestTrialLimitService.Counter.STORY_CREATION) }
         service.reserve("dev-sync", GuestTrialLimitService.Counter.CHAT_TURN)
 
-        service.syncTrialFromDeviceIfUnset(700L, "dev-sync")
+        service.snapshotTrialAtSignup(700L, "dev-sync")
 
         // 회원은 남은 만큼만 예약할 수 있다: story_creation 3-2=1, chat_turn 3-1=2.
         assertThat(service.reserveMember(700L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue()
@@ -130,22 +130,8 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
-    fun `가입 동기화는 미설정 시에만 시드해 재시도해도 소진 잔여를 덮어쓰지 않는다`() {
-        // 디바이스로 story_creation 2회 사용 후 첫 스냅샷 → 회원은 1회 남는다.
-        repeat(2) { service.reserve("dev-idem", GuestTrialLimitService.Counter.STORY_CREATION) }
-        service.syncTrialFromDeviceIfUnset(800L, "dev-idem")
-        assertThat(service.reserveMember(800L, GuestTrialLimitService.Counter.STORY_CREATION)).isTrue() // 남은 1회 소진 → 회원 카운터 설정됨
-
-        // 디바이스를 더 쓰고 재동기화해도, 이미 설정된 회원 카운터는 덮어쓰지 않는다(SETNX). 회원은 여전히 소진 상태.
-        service.reserve("dev-idem", GuestTrialLimitService.Counter.STORY_CREATION)
-        service.syncTrialFromDeviceIfUnset(800L, "dev-idem")
-
-        assertThat(service.reserveMember(800L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
-    }
-
-    @Test
-    fun `디바이스 미증명 로그인은 회원 체험을 소진 상태로 시드해 부여하지 않는다`() {
-        service.denyMemberTrialIfUnset(900L)
+    fun `디바이스 미증명 가입은 회원 체험을 소진 상태로 시드해 부여하지 않는다`() {
+        service.snapshotTrialAtSignup(900L, deviceId = null)
 
         // 회원 카운터가 한도값으로 차 있어 무료 예약이 되지 않는다(크레딧 경로로 넘어감).
         assertThat(service.reserveMember(900L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
@@ -153,14 +139,20 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
-    fun `이미 체험이 시드된 회원은 디바이스 미증명 재로그인에도 잔여가 유지된다`() {
-        // 정상 가입으로 회원 체험이 아직 미사용(미설정)인 상태.
-        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue() // 1 사용 → 카운터 설정됨
+    fun `가입 스냅샷은 계정당 1회만 수행되고 이후 로그인이 잔여를 훼손하지 않는다`() {
+        // 깨끗한 디바이스로 가입: 디바이스 사용 0 → 회원 카운터 미설정(full 체험), 센티널 설정.
+        service.snapshotTrialAtSignup(950L, "clean-device")
 
-        // 이후 헤더 없는 로그인이 와도 SETNX라 기존 잔여를 소진 상태로 덮어쓰지 않는다.
-        service.denyMemberTrialIfUnset(950L)
+        // 이후 소진된 다른 디바이스로 재로그인해도, 헤더 없는 재로그인이어도 스냅샷은 1회뿐이라 무시된다.
+        repeat(3) { service.reserve("used-device", GuestTrialLimitService.Counter.CHAT_TURN) }
+        service.snapshotTrialAtSignup(950L, "used-device")
+        service.snapshotTrialAtSignup(950L, deviceId = null)
 
-        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue() // 2회차도 예약 가능(한도 3)
+        // 회원은 여전히 full 체험을 갖는다(한도 3까지 예약 가능).
+        repeat(3) {
+            assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+        }
+        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
     }
 
     @Test
