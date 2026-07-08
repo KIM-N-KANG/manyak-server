@@ -101,6 +101,18 @@ class GuestTrialLimitService(
     }
 
     /**
+     * 디바이스를 증명하지 못한 로그인(device 헤더 없음)은 회원 체험을 부여하지 않는다(스펙 §4-3-7 B13 — 게스트로
+     * 소진 후 헤더를 빼고 가입해 체험을 초기화하는 우회 차단). 회원 카운터를 **미설정 시에만**(`SETNX`) 한도값으로
+     * 시드해 소진 상태로 만든다. 정상 클라이언트는 항상 device 헤더를 보내므로 이 경로는 우회 시도에만 걸린다.
+     * 나중에 헤더를 포함해 재로그인해도 이미 설정된 카운터는 [syncTrialFromDeviceIfUnset]이 덮어쓰지 않는다.
+     */
+    fun denyMemberTrialIfUnset(userId: Long) {
+        for (counter in MEMBER_SHARED_COUNTERS) {
+            redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), limitFor(counter).toString())
+        }
+    }
+
+    /**
      * [userId]가 없으면(게스트) [deviceId]를 검증하고([requireDeviceId]) [counter]를 예약한다.
      * 한도 소진이면 402. 예약에 성공하면 실패 시 [restore]에 쓸 디바이스 id를 반환하고,
      * 회원([userId] != null)이면 이 카운터를 쓰지 않으므로 아무것도 하지 않고 null을 반환한다.

@@ -144,6 +144,26 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
+    fun `디바이스 미증명 로그인은 회원 체험을 소진 상태로 시드해 부여하지 않는다`() {
+        service.denyMemberTrialIfUnset(900L)
+
+        // 회원 카운터가 한도값으로 차 있어 무료 예약이 되지 않는다(크레딧 경로로 넘어감).
+        assertThat(service.reserveMember(900L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
+        assertThat(service.reserveMember(900L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
+    }
+
+    @Test
+    fun `이미 체험이 시드된 회원은 디바이스 미증명 재로그인에도 잔여가 유지된다`() {
+        // 정상 가입으로 회원 체험이 아직 미사용(미설정)인 상태.
+        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue() // 1 사용 → 카운터 설정됨
+
+        // 이후 헤더 없는 로그인이 와도 SETNX라 기존 잔여를 소진 상태로 덮어쓰지 않는다.
+        service.denyMemberTrialIfUnset(950L)
+
+        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue() // 2회차도 예약 가능(한도 3)
+    }
+
+    @Test
     fun `예약한 적 없어도 복원은 0 아래로 내려가지 않는다`() {
         service.restore("device-D", GuestTrialLimitService.Counter.STORYLINE_GENERATION)
 

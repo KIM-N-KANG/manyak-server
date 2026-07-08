@@ -55,6 +55,10 @@ class GoogleLoginService(
         // 다음 로그인이 재시도하고, 이미 시드/소진된 계정은 덮어쓰지 않는다(신규 여부에 묶지 않아 유실을 자가 복구).
         if (!deviceId.isNullOrBlank()) {
             guestTrialLimitService.syncTrialFromDeviceIfUnset(user.id, deviceId)
+        } else {
+            // device 헤더가 없으면 소진 상태로 시드해 무료 체험을 부여하지 않는다 — 헤더를 빼고 가입해 체험을
+            // 초기화하는 우회를 막는다(스펙 §4-3-7 B13). 정상 클라이언트는 항상 헤더를 보낸다.
+            guestTrialLimitService.denyMemberTrialIfUnset(user.id)
         }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
