@@ -19,7 +19,7 @@
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
-| [public.users](public.users.md) | 12 |  | BASE TABLE |
+| [public.users](public.users.md) | 13 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
@@ -222,6 +222,7 @@ erDiagram
   varchar_16_ invite_code
   bigint inviter_user_id FK
   timestamp_with_time_zone migrated_at
+  integer migration_attempts
 }
 "public.social_accounts" {
   bigint id

@@ -68,6 +68,11 @@ class User(
     // 평가 없이 migrationClosed=true로 닫는다. null이면 아직 이관하지 않음(최초 이관 가능).
     @Column(name = "migrated_at")
     var migratedAt: Instant? = null,
+
+    // 이관 시도(POST /api/v1/auth/migrate 호출) 누적 횟수(스펙 §4-3-5 B19, KNK-500). 성공 0건 호출도 포함해 세며,
+    // 상한(5회) 도달 후 추가 호출은 평가 없이 닫힌 계정처럼 처리해 소유 상태 열거 오라클을 제한한다.
+    @Column(name = "migration_attempts", nullable = false)
+    var migrationAttempts: Int = 0,
 ) {
     @PreUpdate
     fun updateTimestamp() {

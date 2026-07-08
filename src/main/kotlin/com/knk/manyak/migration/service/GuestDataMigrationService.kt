@@ -37,6 +37,11 @@ class GuestDataMigrationService(
     private val userRepository: UserRepository,
 ) {
 
+    private companion object {
+        // 이관 시도(성공 0건 포함) 계정당 상한(스펙 §4-3-5 B19, 2026-07-08 결정: 5).
+        const val MAX_MIGRATION_ATTEMPTS = 5
+    }
+
     @Transactional
     fun migrate(userId: Long, request: MigrationRequest): MigrationResponse {
         // 이관 잠금 게이트(스펙 §4-3-5, KNK-480): 이관은 계정당 1회만 허용한다.
@@ -53,6 +58,13 @@ class GuestDataMigrationService(
         if (user.migratedAt != null) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
         }
+        // 이관 시도 상한(스펙 §4-3-5 B19, KNK-500): 성공 0건 호출도 포함해 계정당 5회까지만 평가한다.
+        // 상한을 넘으면 닫힌 계정과 동일하게 처리해(평가·클레임 없이 200) 소유 상태 열거 오라클을 제한한다.
+        // 이미 사용자 행을 락으로 잡은 뒤 판정하므로 동시 호출도 상한을 우회하지 못한다.
+        if (user.migrationAttempts >= MAX_MIGRATION_ATTEMPTS) {
+            return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
+        }
+        user.migrationAttempts += 1
 
         val stories = claimStories(userId, parseUuids(request.storyIds))
         val chats = claimChats(userId, parseUuids(request.chatIds))

@@ -118,6 +118,45 @@ class MigrationControllerIntegrationTests {
         assertThat(storyRepository.findById(guestStory.id).orElseThrow().userId).isNull()
     }
 
+    // ---- 이관 시도 상한(§4-3-5 B19, KNK-500) ----
+
+    @Test
+    fun `이관 시도가 상한(5회)을 넘으면 클레임 가능한 항목이 있어도 평가 없이 닫힌 응답을 반환한다`() {
+        val me = saveUser("공격자")
+        val token = accessTokenFor(me)
+        // 상한(5회)까지는 빈 배열로 호출해도 시도로 집힌다(0건 성공).
+        repeat(5) {
+            restTestClient.post()
+                .uri("/api/v1/auth/migrate")
+                .header("Authorization", "Bearer $token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"storyIds":[],"chatIds":[]}""")
+                .exchange()
+                .expectStatus().isOk
+                .expectBody()
+                .jsonPath("$.migrationClosed").isEqualTo(false)
+        }
+
+        val guestStory = saveStory(ownerId = null)
+
+        // 6번째 호출은 클레임 가능한 게스트 스토리를 포함해도 평가 없이 닫힌 응답이어야 한다.
+        restTestClient.post()
+            .uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer $token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":["${guestStory.publicId}"],"chatIds":[]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.migrationClosed").isEqualTo(true)
+            .jsonPath("$.stories").isArray()
+            .jsonPath("$.stories").isEmpty()
+
+        val reloaded = storyRepository.findById(guestStory.id).orElseThrow()
+        assertThat(reloaded.userId).isNull()
+        assertThat(userRepository.findById(me.id).orElseThrow().migratedAt).isNull()
+    }
+
     // ---- 소유권 판정 ----
 
     @Test
