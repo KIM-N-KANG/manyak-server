@@ -84,6 +84,7 @@ class AuthControllerIntegrationTests {
             User(
                 nickname = "manyak_user",
                 profileImageUrl = "https://example.com/profile.png",
+                profileThumbnailBase64 = "dGh1bWJuYWls",
                 status = UserStatus.ACTIVE,
             ),
         )
@@ -145,6 +146,8 @@ class AuthControllerIntegrationTests {
             .jsonPath("$.id").isEqualTo(user.publicId.toString())
             .jsonPath("$.nickname").isEqualTo("manyak_user")
             .jsonPath("$.profileImageUrl").isEqualTo("https://example.com/profile.png")
+            // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17).
+            .jsonPath("$.profileThumbnailBase64").isEqualTo("dGh1bWJuYWls")
             .jsonPath("$.status").isEqualTo("ACTIVE")
     }
 

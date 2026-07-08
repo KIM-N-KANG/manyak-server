@@ -107,6 +107,8 @@ class AuthController(
             id = user.publicId.toString(),
             nickname = user.nickname,
             profileImageUrl = user.profileImageUrl,
+            // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17). 값은 프리셋 배정(KNK-388) 시 생성되며, 미배정·미생성이면 null.
+            profileThumbnailBase64 = user.profileThumbnailBase64,
             status = user.status,
             // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
             creditBalance = creditWalletService.balanceOf(user.id),

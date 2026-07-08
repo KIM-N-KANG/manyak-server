@@ -81,6 +81,8 @@ Accept: application/json
     client.test("프로필 필드와 상태가 내려온다", () => {
         client.assert(typeof b.nickname === "string" && b.nickname.length > 0, "nickname이 없습니다.");
         client.assert("profileImageUrl" in b, "profileImageUrl 필드가 없습니다.");
+        // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17). 프리셋 배정(KNK-388)된 신규 가입 회원이면 base64 문자열, 아니면 null.
+        client.assert("profileThumbnailBase64" in b, "profileThumbnailBase64 필드가 없습니다.");
         client.assert(["ACTIVE", "SUSPENDED", "DELETED"].indexOf(b.status) >= 0,
             `status가 허용 값이 아닙니다. actual=${b.status}`);
     });

@@ -43,6 +43,10 @@ manyak:
       client-ids: ${MANYAK_GOOGLE_CLIENT_IDS:}
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
+  asset:
+    # 프로필 프리셋 이미지(static/profile-presets/{명사}.png) 서빙 base URL(스펙 §4-5 B7).
+    # profile_image_url = base-url + "/profile-presets/{명사}.png". 후속 S3/CDN 전환은 이 값 치환만으로 된다.
+    profile-preset-base-url: ${MANYAK_ASSET_BASE_URL:https://api.manyak.app}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   invite:

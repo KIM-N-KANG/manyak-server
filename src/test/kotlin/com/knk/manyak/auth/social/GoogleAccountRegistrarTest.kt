@@ -33,8 +33,11 @@ class GoogleAccountRegistrarTest {
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
 
     // 닉네임 발급은 결정적 고정값으로 스텁해, 레지스트라가 생성기 결과를 그대로 쓰는지만 검증한다.
-    private val nicknameGenerator = NicknameGenerator { GENERATED_NICKNAME }
-    private val registrar = GoogleAccountRegistrar(userRepository, socialAccountRepository, nicknameGenerator)
+    private val nicknameGenerator = NicknameGenerator { GeneratedNickname(GENERATED_NICKNAME, GENERATED_NOUN) }
+    private val profileImagePresetService: ProfileImagePresetService = mock(ProfileImagePresetService::class.java)
+    private val registrar = GoogleAccountRegistrar(
+        userRepository, socialAccountRepository, nicknameGenerator, profileImagePresetService,
+    )
 
     @Test
     fun `findExistingUser는 연동이 있으면 lastLoginAt을 갱신하고 User를 반환한다`() {
@@ -79,8 +82,10 @@ class GoogleAccountRegistrarTest {
     }
 
     @Test
-    fun `createUserAndAccount는 생성기가 만든 닉네임으로 User와 SocialAccount를 생성한다`() {
+    fun `createUserAndAccount는 닉네임과 명사 매핑 프리셋 이미지로 User와 SocialAccount를 생성한다`() {
         `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
+        `when`(profileImagePresetService.imageUrlFor(GENERATED_NOUN)).thenReturn(PRESET_URL)
+        `when`(profileImagePresetService.thumbnailBase64For(GENERATED_NOUN)).thenReturn(PRESET_THUMBNAIL)
 
         registrar.createUserAndAccount(
             SocialUserInfo(
@@ -97,7 +102,9 @@ class GoogleAccountRegistrarTest {
         verify(userRepository).save(userCaptor.capture())
         // Google `name`("Alice")이 아니라 생성기가 발급한 닉네임을 써야 한다(실명 노출 방지).
         assertThat(userCaptor.value.nickname).isEqualTo(GENERATED_NICKNAME)
-        assertThat(userCaptor.value.profileImageUrl).isEqualTo("https://example.com/alice.png")
+        // Google `picture`가 아니라 닉네임 명사에 매핑된 프리셋 URL·썸네일을 써야 한다(외부 사진 노출 방지, B7).
+        assertThat(userCaptor.value.profileImageUrl).isEqualTo(PRESET_URL)
+        assertThat(userCaptor.value.profileThumbnailBase64).isEqualTo(PRESET_THUMBNAIL)
         assertThat(userCaptor.value.status).isEqualTo(UserStatus.ACTIVE)
         // 초대자 관계를 생성 트랜잭션에 함께 영속한다(초대 보상 자가 복구 근거).
         assertThat(userCaptor.value.inviterUserId).isEqualTo(5L)
@@ -114,6 +121,9 @@ class GoogleAccountRegistrarTest {
         SocialUserInfo(providerUserId = providerUserId, email = null, name = null, picture = null)
 
     private companion object {
-        const val GENERATED_NICKNAME = "랜덤닉네임"
+        const val GENERATED_NOUN = "이야기꾼"
+        const val GENERATED_NICKNAME = "몽환적인 이야기꾼"
+        const val PRESET_URL = "https://api.manyak.app/profile-presets/%EC%9D%B4%EC%95%BC%EA%B8%B0%EA%BE%BC.png"
+        const val PRESET_THUMBNAIL = "iVBORw0KGgo="
     }
 }

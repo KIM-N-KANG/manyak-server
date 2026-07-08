@@ -3,12 +3,18 @@ package com.knk.manyak.auth.social
 import org.springframework.stereotype.Component
 
 /**
+ * 발급된 닉네임. [text]는 표시 닉네임(형용사+명사)이고, [noun]은 프로필 프리셋 이미지 매핑에 쓰는 명사다
+ * (스펙 §4-5 B7 — 명사에 1:1 매핑된 프리셋 배정). 조합에서 명사를 문자열로 재파싱하지 않도록 함께 반환한다.
+ */
+data class GeneratedNickname(val text: String, val noun: String)
+
+/**
  * 회원가입 시 부여할 표시 닉네임을 만든다.
  *
  * 랜덤 발급을 구현체 뒤로 감춰, 사용하는 쪽([GoogleAccountRegistrar])은 값의 출처(랜덤·유도 등)에 의존하지 않는다.
  */
 fun interface NicknameGenerator {
-    fun generate(): String
+    fun generate(): GeneratedNickname
 }
 
 /**
@@ -21,8 +27,11 @@ fun interface NicknameGenerator {
 @Component
 class RandomNicknameGenerator : NicknameGenerator {
 
-    override fun generate(): String =
-        "${ADJECTIVES.random()} ${NOUNS.random()}".take(MAX_NICKNAME_LENGTH)
+    override fun generate(): GeneratedNickname {
+        val noun = NOUNS.random()
+        // 명사는 프리셋 이미지 매핑 키다. text는 컬럼 길이 방어로 절단하되(실제 조합은 훨씬 짧음), noun은 매핑용 원본을 그대로 반환한다.
+        return GeneratedNickname(text = "${ADJECTIVES.random()} $noun".take(MAX_NICKNAME_LENGTH), noun = noun)
+    }
 
     companion object {
         /** `users.nickname`은 VARCHAR(50). 조합이 이보다 길어질 일은 없지만 컬럼 길이를 넘지 않도록 방어한다. */
