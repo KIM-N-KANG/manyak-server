@@ -139,20 +139,17 @@ class GuestTrialLimitServiceIntegrationTest {
     }
 
     @Test
-    fun `가입 스냅샷은 계정당 1회만 수행되고 이후 로그인이 잔여를 훼손하지 않는다`() {
-        // 깨끗한 디바이스로 가입: 디바이스 사용 0 → 회원 카운터 미설정(full 체험), 센티널 설정.
-        service.snapshotTrialAtSignup(950L, "clean-device")
+    fun `가입 스냅샷은 미설정 시에만 시드해 사용 없던 카운터는 full로 남긴다`() {
+        // 디바이스로 story_creation만 소진하고 chat_turn은 쓰지 않은 채 가입한다.
+        repeat(3) { service.reserve("dev-partial", GuestTrialLimitService.Counter.STORY_CREATION) }
 
-        // 이후 소진된 다른 디바이스로 재로그인해도, 헤더 없는 재로그인이어도 스냅샷은 1회뿐이라 무시된다.
-        repeat(3) { service.reserve("used-device", GuestTrialLimitService.Counter.CHAT_TURN) }
-        service.snapshotTrialAtSignup(950L, "used-device")
-        service.snapshotTrialAtSignup(950L, deviceId = null)
+        service.snapshotTrialAtSignup(950L, "dev-partial")
 
-        // 회원은 여전히 full 체험을 갖는다(한도 3까지 예약 가능).
+        // story_creation은 소진 시드되고, 사용 없던 chat_turn은 미설정이라 회원이 full(3회)로 쓴다.
+        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
         repeat(3) {
             assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
         }
-        assertThat(service.reserveMember(950L, GuestTrialLimitService.Counter.CHAT_TURN)).isFalse()
     }
 
     @Test

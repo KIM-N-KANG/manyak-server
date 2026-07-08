@@ -49,11 +49,13 @@ class GoogleLoginService(
 
     fun login(idToken: String, inviteCode: String? = null, deviceId: String? = null): TokenResponse {
         val info = verifier.verify(idToken)
-        val user = findOrCreateUser(info, inviteCode)
-        // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
-        // 체험을 초기화하는 파밍 차단). 센티널로 계정당 1회만 수행하되 최초 실패 시 재시도되며, device 헤더가 없으면
-        // 소진 시드로 무료 체험을 부여하지 않는다. 이후 로그인은 기존 잔여를 건드리지 않는다(서비스가 판정).
-        guestTrialLimitService.snapshotTrialAtSignup(user.id, deviceId)
+        val (user, isNew) = findOrCreateUser(info, inviteCode)
+        // 신규 가입에서만 게스트 시절 디바이스 체험 사용량을 회원 계정으로 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진
+        // 후 가입해 체험을 초기화하는 파밍 차단). 기존 회원 재로그인은 스냅샷하지 않아 남은 회원 체험을 훼손하지 않는다.
+        // device 헤더가 없으면 소진 시드로 무료 체험을 부여하지 않는다(헤더를 빼고 가입하는 우회 차단).
+        if (isNew) {
+            guestTrialLimitService.snapshotTrialAtSignup(user.id, deviceId)
+        }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
         // 초대 보상: 영속된 초대자 관계가 있으면 매 로그인 멱등 재적립한다(가입 보상과 동일한 자가 복구).
@@ -75,17 +77,18 @@ class GoogleLoginService(
      * 이번엔 상대 요청이 커밋한 계정이 보이므로 그 User를 재사용한다(500 대신 정상 로그인).
      * 재조회로도 못 찾으면 일시적 경합이 아니라 실제 정합성 문제이므로 원 예외를 그대로 드러낸다.
      */
-    private fun findOrCreateUser(info: SocialUserInfo, inviteCode: String?): User {
+    /** @return (해석된 User, 이번 호출이 새 계정을 생성했는지). 신규 여부는 가입 1회성 처리(체험 스냅샷)에 쓴다. */
+    private fun findOrCreateUser(info: SocialUserInfo, inviteCode: String?): Pair<User, Boolean> {
         val now = Instant.now()
-        registrar.findExistingUser(info, now)?.let { return it }
+        registrar.findExistingUser(info, now)?.let { return it to false }
 
         val inviterUserId = inviteService.resolveInviterId(inviteCode)
         return try {
-            registrar.createUserAndAccount(info, now, inviterUserId)
+            registrar.createUserAndAccount(info, now, inviterUserId) to true
         } catch (ex: DataIntegrityViolationException) {
-            // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
+            // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다(우리가 만든 게 아니므로 신규 아님).
             // 재사용 계정의 초대자 관계는 실제로 생성한 쪽이 이미 영속했다(여기선 덮어쓰지 않는다).
-            registrar.findExistingUser(info, Instant.now()) ?: throw ex
+            (registrar.findExistingUser(info, Instant.now()) ?: throw ex) to false
         }
     }
 

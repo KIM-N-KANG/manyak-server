@@ -37,8 +37,7 @@ class DatabaseCleaner(
         } finally {
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE")
         }
-        // member_trial* 는 회원 카운터(member_trial:*)와 스냅샷 센티널(member_trial_synced:*)을 모두 덮는다.
-        val trialKeys = redisTemplate.keys("guest_trial:*").orEmpty() + redisTemplate.keys("member_trial*").orEmpty()
+        val trialKeys = redisTemplate.keys("guest_trial:*").orEmpty() + redisTemplate.keys("member_trial:*").orEmpty()
         if (trialKeys.isNotEmpty()) {
             redisTemplate.delete(trialKeys)
         }

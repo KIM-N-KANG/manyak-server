@@ -85,21 +85,17 @@ class GuestTrialLimitService(
     }
 
     /**
-     * 가입 스냅샷을 **계정당 1회만** 수행한다(스펙 §4-3-7 B13). 게스트 시절 디바이스 사용량을 회원 카운터로 옮겨,
-     * 게스트로 소진 후 가입해 체험을 초기화하는 파밍을 막는다. 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] —
-     * 스토리라인 생성은 회원 무료라 제외)만 다룬다.
+     * 가입(신규 계정 생성) 시 게스트 시절 디바이스 사용량을 회원 카운터로 옮긴다(스펙 §4-3-7 B13 — 게스트로 소진 후
+     * 가입해 체험을 초기화하는 파밍 차단). 회원이 소비하는 카운터([MEMBER_SHARED_COUNTERS] — 스토리라인 생성은
+     * 회원 무료라 제외)만 다룬다.
      *
-     * - [deviceId]가 있으면 디바이스 사용량을 시드한다(사용 없던 카운터는 미설정=만료 없이 full 체험으로 남긴다).
-     * - [deviceId]가 없으면(헤더 누락 — 우회 시도) 한도값으로 시드해 소진 상태로 만든다(무료 체험 미부여).
+     * - [deviceId]가 있으면 디바이스 사용량을 시드한다(사용 없던 카운터는 미설정=full 체험으로 남긴다).
+     * - [deviceId]가 없으면(헤더 누락 — 우회 시도) 한도값으로 시드해 소진 상태로 만든다(무료 체험 미부여, B13 우회 차단).
      *
-     * **센티널 키로 1회성과 재시도 안전을 함께 보장한다**: 최초 로그인(센티널 없음)만 시드하고 센티널을 세운 뒤,
-     * 이후 로그인은 건드리지 않는다 — 다른 디바이스·헤더 누락 재로그인이 기존 회원의 잔여 체험을 훼손하지 못한다.
-     * 최초 시도가 센티널 설정 전에 실패하면 다음 로그인이 재시도한다. 센티널은 회원 카운터와 같은 Redis에 살아,
-     * flush로 함께 사라지면 재스냅샷도 정합하다. 매 로그인에서 호출해도 안전하다(신규 여부 판정 불필요).
+     * **미설정 시에만**(`SETNX`) 써서 동시 첫 로그인 경합에도 안전하다. 호출부([com.knk.manyak.auth.social.GoogleLoginService])가
+     * **신규 계정 생성 경로에서만** 호출하므로, 이후 로그인·기존 회원의 잔여 체험을 훼손하지 않는다(계정당 1회성은 호출부가 보장).
      */
     fun snapshotTrialAtSignup(userId: Long, deviceId: String?) {
-        val sentinelKey = "member_trial_synced:$userId"
-        if (redisTemplate.opsForValue().get(sentinelKey) != null) return
         for (counter in MEMBER_SHARED_COUNTERS) {
             val seed = if (deviceId.isNullOrBlank()) {
                 limitFor(counter).toString() // 디바이스 미증명 → 소진 시드(무료 체험 미부여)
@@ -108,7 +104,6 @@ class GuestTrialLimitService(
             }
             redisTemplate.opsForValue().setIfAbsent(memberKeyFor(userId, counter), seed)
         }
-        redisTemplate.opsForValue().set(sentinelKey, "1")
     }
 
     /**

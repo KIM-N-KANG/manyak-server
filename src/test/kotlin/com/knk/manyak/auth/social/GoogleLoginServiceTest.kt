@@ -91,6 +91,29 @@ class GoogleLoginServiceTest {
     }
 
     @Test
+    fun `신규 가입에서만 체험 스냅샷을 수행한다`() {
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = "dev-1")
+
+        // 신규 계정 생성 경로에서만 디바이스 체험 사용량을 회원 계정으로 스냅샷한다(B13).
+        verify(guestTrialLimitService).snapshotTrialAtSignup(7L, "dev-1")
+    }
+
+    @Test
+    fun `기존 사용자 재로그인은 체험 스냅샷을 수행하지 않는다`() {
+        // 롤아웃 이전 가입한 회원 등 기존 계정은 재로그인해도 스냅샷하지 않아 남은 회원 체험을 훼손하지 않는다(B13).
+        val user = User(id = 42L, nickname = "기존닉")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = "dev-1")
+
+        verifyNoInteractions(guestTrialLimitService)
+    }
+
+    @Test
     fun `신규 사용자면 signup 멱등 키로 가입 보상을 적립한다`() {
         val created = User(id = 7L, nickname = "신규")
         `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
