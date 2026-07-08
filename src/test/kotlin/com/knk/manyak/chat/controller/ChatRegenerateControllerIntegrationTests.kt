@@ -344,8 +344,14 @@ class ChatRegenerateControllerIntegrationTests {
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
 
+    @Autowired
+    private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    // B13(스펙 §4-3-7): 회원도 잔여 체험을 크레딧보다 먼저 소진한다. 재생성 크레딧 경로를 검증하려면 회원 체험을 미리 소진시킨다.
     private fun saveUser(nickname: String): User =
-        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE)).also { member ->
+            while (b13GuestTrialLimitService.reserveMember(member.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_TURN)) { /* drain */ }
+        }
 
     private fun seedStory(): Story {
         val story = storyRepository.save(

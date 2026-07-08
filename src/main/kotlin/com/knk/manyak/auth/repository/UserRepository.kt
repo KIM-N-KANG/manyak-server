@@ -4,8 +4,11 @@ import com.knk.manyak.auth.entity.User
 import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 import java.util.UUID
 
 interface UserRepository : JpaRepository<User, Long> {
@@ -25,4 +28,13 @@ interface UserRepository : JpaRepository<User, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): User?
+
+    /**
+     * 회원 체험 스냅샷 완료를 기록한다(스펙 §4-3-7 B13, KNK-504). 아직 미스냅샷(NULL)인 계정만 채워, 동시 첫
+     * 로그인 경합·재시도에도 최초 1회만 유효하게 남는다(이미 채워진 값은 덮지 않는다). 갱신 행 수를 반환한다.
+     */
+    @Transactional
+    @Modifying
+    @Query("UPDATE User u SET u.memberTrialSeededAt = :seededAt WHERE u.id = :id AND u.memberTrialSeededAt IS NULL")
+    fun markMemberTrialSeeded(@Param("id") id: Long, @Param("seededAt") seededAt: Instant): Int
 }

@@ -477,7 +477,10 @@ class ChatService(
         // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다.
         // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
         // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
-        if (userId != null) {
+        // 회원 소모 2단(스펙 §4-3-7 B13): 계정 귀속 체험 잔여가 있으면 먼저 무료로 소진하고, 없으면 크레딧을 선차감한다.
+        val memberTrialCovered =
+            userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
+        if (userId != null && !memberTrialCovered) {
             creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
         }
         // 게스트(userId == null)는 크레딧 대신 디바이스 ID별 chat_turn 체험 한도를 예약한다(스펙 §4-3-7, KNK-477).
@@ -598,7 +601,7 @@ class ChatService(
                 // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 if (!persisted.get()) {
-                    refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
+                    refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
                 }
             }
         }, chatSseExecutor)
@@ -606,7 +609,7 @@ class ChatService(
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
-            refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
+            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
                 "chat_turn_schedule_rejected",
@@ -624,7 +627,7 @@ class ChatService(
         // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
         future.whenComplete { _, _ ->
             if (!workerStarted.get()) {
-                refundChatTurn(userId, guestDeviceId, chatPk, refundKey, refundGate)
+                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             }
         }
 
@@ -639,11 +642,21 @@ class ChatService(
      * 안전망(onCompletion)이 겹쳐도 원장에 REFUND 행은 정확히 1건만 남는다. 환불·복원 실패가 SSE 종료를 막지 않도록
      * 예외는 삼키고 로그만 남긴다(회원은 선차감이 원장에 있어 사후 정산·재시도로 복구 가능).
      */
-    private fun refundChatTurn(userId: Long?, guestDeviceId: String?, chatPk: Long, refundKey: String, gate: AtomicBoolean) {
+    private fun refundChatTurn(
+        userId: Long?,
+        guestDeviceId: String?,
+        memberTrialCovered: Boolean,
+        chatPk: Long,
+        refundKey: String,
+        gate: AtomicBoolean,
+    ) {
         if (userId == null && guestDeviceId == null) return
         if (!gate.compareAndSet(false, true)) return
         try {
-            if (userId != null) {
+            if (memberTrialCovered && userId != null) {
+                // 이 턴이 체험 잔여로 무료 처리됐으면 크레딧이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
+                guestTrialLimitService.restoreMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
+            } else if (userId != null) {
                 creditWalletService.reward(
                     userId = userId,
                     amount = chatTurnCost,

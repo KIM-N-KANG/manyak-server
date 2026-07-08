@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.invite.service.InviteService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -42,11 +43,17 @@ class GoogleLoginServiceTest {
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
     private val inviteService: InviteService = mock(InviteService::class.java)
+    private val guestTrialLimitService: GuestTrialLimitService = mock(GuestTrialLimitService::class.java)
+    private val userRepository: com.knk.manyak.auth.repository.UserRepository =
+        mock(com.knk.manyak.auth.repository.UserRepository::class.java)
 
     private val signupReward = 100L
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
-        GoogleLoginService(verifier, registrar, authTokenService, creditWalletService, inviteService, signupReward)
+        GoogleLoginService(
+            verifier, registrar, authTokenService, creditWalletService, inviteService, guestTrialLimitService,
+            userRepository, signupReward,
+        )
 
     private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
         GoogleIdTokenVerifier { SocialUserInfo(providerUserId = providerUserId) }
@@ -84,6 +91,48 @@ class GoogleLoginServiceTest {
 
         verify(registrar).createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())
         verify(authTokenService).issueTokens(created)
+    }
+
+    @Test
+    fun `미스냅샷 계정은 체험을 스냅샷하고 완료를 기록한다`() {
+        val created = User(id = 7L, nickname = "신규") // memberTrialSeededAt = null
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, "dev-1")).thenReturn(true)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = "dev-1")
+
+        // 디바이스 체험 사용량을 회원 계정으로 스냅샷하고(B13), 성공했으므로 완료 시각을 기록한다.
+        verify(guestTrialLimitService).snapshotTrialAtSignup(7L, "dev-1")
+        val mark = mockingDetails(userRepository).invocations.single { it.method.name == "markMemberTrialSeeded" }
+        assertThat(mark.getArgument<Long>(0)).isEqualTo(7L)
+    }
+
+    @Test
+    fun `이미 스냅샷된 계정은 체험 스냅샷을 수행하지 않는다`() {
+        // 롤아웃 이전 회원(마이그레이션이 seeded_at을 채움) 등 이미 스냅샷된 계정은 재로그인해도 스냅샷하지 않아
+        // 남은 회원 체험을 훼손하지 않는다(B13).
+        val user = User(id = 42L, nickname = "기존닉", memberTrialSeededAt = Instant.parse("2026-07-01T00:00:00Z"))
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(user)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = "dev-1")
+
+        verifyNoInteractions(guestTrialLimitService)
+        assertThat(mockingDetails(userRepository).invocations.none { it.method.name == "markMemberTrialSeeded" }).isTrue()
+    }
+
+    @Test
+    fun `스냅샷이 Redis 장애로 실패하면 완료를 기록하지 않아 다음 로그인에 재시도된다`() {
+        val created = User(id = 7L, nickname = "신규") // memberTrialSeededAt = null
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant(), anyInviterId())).thenReturn(created)
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, null)).thenReturn(false) // Redis 장애
+
+        serviceWith(fakeVerifier("sub")).login("dummy")
+
+        // 스냅샷을 시도하되 실패하면 완료를 기록하지 않아, seeded_at이 NULL로 남아 다음 로그인이 재시도한다.
+        verify(guestTrialLimitService).snapshotTrialAtSignup(7L, null)
+        assertThat(mockingDetails(userRepository).invocations.none { it.method.name == "markMemberTrialSeeded" }).isTrue()
     }
 
     @Test

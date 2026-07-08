@@ -12,9 +12,9 @@ import org.springframework.stereotype.Component
  * 부모 테이블 삭제가 FK 위반으로 실패한다. 테이블 목록을 information_schema에서 읽어
  * 참조 무결성을 잠시 끄고 전부 TRUNCATE하므로, 엔티티가 늘어도 정리 순서를 관리할 필요가 없다.
  *
- * 게스트 체험 한도 카운터(`guest_trial:*`, 스펙 §4-3-7)는 TTL이 없어(Phase 1 명시) 로컬 개발 Redis에
- * 그대로 누적된다. 같은 디바이스 id를 재사용하는 여러 테스트가 순서에 따라 한도를 소진해 서로
- * 간섭하지 않도록 DB 정리와 함께 지운다.
+ * 체험 한도 카운터(게스트 `guest_trial:*`·회원 `member_trial:*`, 스펙 §4-3-7)는 TTL이 없어(Phase 1 명시)
+ * Redis에 그대로 누적된다. TRUNCATE로 user id가 재사용되면 이전 테스트가 소진한 회원 카운터를 다음
+ * 테스트가 물려받아 순서 의존이 생기므로(B13), 같은 디바이스 id 재사용과 함께 두 접두사를 DB 정리와 함께 지운다.
  */
 @Component
 class DatabaseCleaner(
@@ -37,9 +37,9 @@ class DatabaseCleaner(
         } finally {
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE")
         }
-        val guestTrialKeys = redisTemplate.keys("guest_trial:*")
-        if (!guestTrialKeys.isNullOrEmpty()) {
-            redisTemplate.delete(guestTrialKeys)
+        val trialKeys = redisTemplate.keys("guest_trial:*").orEmpty() + redisTemplate.keys("member_trial:*").orEmpty()
+        if (trialKeys.isNotEmpty()) {
+            redisTemplate.delete(trialKeys)
         }
     }
 }

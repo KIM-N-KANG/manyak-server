@@ -238,8 +238,14 @@ class SimpleStoryCreationCreditIntegrationTests {
         assertThat(storyRepository.findAll().first().userId).isNull()
     }
 
+    @Autowired
+    private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    // B13(스펙 §4-3-7): 회원도 잔여 체험을 크레딧보다 먼저 소진한다. 크레딧 경로를 검증하려면 회원 체험을 미리 소진시킨다.
     private fun saveUser(nickname: String = "manyak_user"): User =
-        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE)).also { member ->
+            while (b13GuestTrialLimitService.reserveMember(member.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION)) { /* drain */ }
+        }
 
     private fun validToken(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
 

@@ -10,6 +10,7 @@ import com.knk.manyak.auth.social.GoogleLoginService
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.RequestCorrelationFilter
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -24,6 +25,7 @@ import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
@@ -70,7 +72,9 @@ class AuthController(
     @PostMapping("/login/google")
     fun loginWithGoogle(
         @Valid @RequestBody request: GoogleLoginRequest,
-    ): TokenResponse = googleLoginService.login(request.idToken, request.inviteCode)
+        // 신규 가입 시 디바이스 체험 사용량을 계정으로 스냅샷하는 데 쓴다(스펙 §4-3-7 B13). 게스트 요청과 같은 헤더이며, 없으면 스냅샷 생략.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+    ): TokenResponse = googleLoginService.login(request.idToken, request.inviteCode, deviceId)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",

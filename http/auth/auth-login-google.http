@@ -90,9 +90,14 @@ Accept: application/json
 # @googleIdToken 을 실제 ID 토큰으로 교체한 뒤 실행하세요. 첫 호출은 사용자를 생성하고,
 # 같은 sub로 다시 호출하면 같은 사용자를 재사용합니다(둘 다 200).
 # 응답의 accessToken/refreshToken 을 전역 변수에 저장해 곧바로 /me·/token/refresh 검증에 쓸 수 있습니다.
+#
+# [KNK-504/B13] X-Manyak-Device-Id 헤더(선택): 신규 가입(첫 호출) 시에만 이 디바이스의 남은 체험 횟수를
+# 회원 계정으로 스냅샷합니다. 게스트로 체험을 소진한 디바이스로 가입하면 회원 체험도 그만큼 줄어듭니다(파밍 차단).
+# 재로그인(기존 사용자)에는 스냅샷하지 않습니다. 헤더가 없으면 스냅샷을 생략합니다(가입 자체는 정상).
 POST {{baseUrl}}/api/v1/auth/login/google
 Content-Type: application/json
 Accept: application/json
+X-Manyak-Device-Id: test-device-signup
 
 { "idToken": "{{googleIdToken}}" }
 

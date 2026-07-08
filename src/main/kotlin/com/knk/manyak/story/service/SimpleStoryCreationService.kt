@@ -294,11 +294,17 @@ class SimpleStoryCreationService(
             deviceId,
             GuestTrialLimitService.Counter.STORY_CREATION,
         )
-        attributedUserId?.let { chargeStoryCreation(it, refId = session.id) }
+        // 회원 소모 2단(스펙 §4-3-7 B13): 계정 귀속 체험 잔여가 있으면 먼저 무료로 소진하고, 없으면 크레딧을 선차감한다.
+        val memberTrialCovered = attributedUserId != null &&
+            guestTrialLimitService.reserveMember(attributedUserId, GuestTrialLimitService.Counter.STORY_CREATION)
+        if (attributedUserId != null && !memberTrialCovered) {
+            chargeStoryCreation(attributedUserId, refId = session.id)
+        }
 
         return runWithRefundOnFailure(
             userId = attributedUserId,
             guestDeviceId = guestDeviceId,
+            memberTrialCovered = memberTrialCovered,
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
         ) {
@@ -332,6 +338,7 @@ class SimpleStoryCreationService(
     private fun <T> runWithRefundOnFailure(
         userId: Long?,
         guestDeviceId: String?,
+        memberTrialCovered: Boolean,
         refId: Long,
         chargeAttemptId: String,
         block: () -> T,
@@ -339,7 +346,12 @@ class SimpleStoryCreationService(
         try {
             return block()
         } catch (throwable: Throwable) {
-            userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
+            if (memberTrialCovered) {
+                // 체험 잔여로 무료 처리됐으면 크레딧 환불이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
+                userId?.let { guestTrialLimitService.restoreMember(it, GuestTrialLimitService.Counter.STORY_CREATION) }
+            } else {
+                userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
+            }
             guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORY_CREATION) }
             throw throwable
         }

@@ -2,9 +2,11 @@ package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.invite.service.InviteService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
@@ -41,13 +43,24 @@ class GoogleLoginService(
     private val authTokenService: AuthTokenService,
     private val creditWalletService: CreditWalletService,
     private val inviteService: InviteService,
+    private val guestTrialLimitService: GuestTrialLimitService,
+    private val userRepository: UserRepository,
     // 가입 보상 지급량(스펙 §4-3-7, KNK-477 확정: 500).
     @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
 ) {
 
-    fun login(idToken: String, inviteCode: String? = null): TokenResponse {
+    fun login(idToken: String, inviteCode: String? = null, deviceId: String? = null): TokenResponse {
         val info = verifier.verify(idToken)
         val user = findOrCreateUser(info, inviteCode)
+        // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
+        // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
+        // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
+        // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
+        if (user.memberTrialSeededAt == null &&
+            guestTrialLimitService.snapshotTrialAtSignup(user.id, deviceId)
+        ) {
+            userRepository.markMemberTrialSeeded(user.id, Instant.now())
+        }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
         // 초대 보상: 영속된 초대자 관계가 있으면 매 로그인 멱등 재적립한다(가입 보상과 동일한 자가 복구).
