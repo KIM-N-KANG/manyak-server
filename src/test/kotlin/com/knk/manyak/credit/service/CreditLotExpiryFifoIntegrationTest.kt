@@ -126,15 +126,18 @@ class CreditLotExpiryFifoIntegrationTest {
     }
 
     @Test
-    fun `만료로 활성 잔액이 부족하면 deduct는 InsufficientCreditException이다`() {
+    fun `만료로 활성 잔액이 부족하면 deduct는 InsufficientCreditException이고 만료 정리를 쓰지 않는다`() {
         seedWallet(100)
-        seedLot(remaining = 100, expiresAt = Instant.now().minus(Duration.ofDays(1)))
+        val expired = seedLot(remaining = 100, expiresAt = Instant.now().minus(Duration.ofDays(1)))
 
         assertThatThrownBy { service.deduct(userId, 30, CreditReason.CHAT_TURN) }
             .isInstanceOf(InsufficientCreditException::class.java)
 
         // 만료 크레딧은 소진 대상이 아니라 활성 잔액은 0이다.
         assertThat(service.balanceOf(userId)).isEqualTo(0)
+        // 부족 판정은 만료 정리(쓰기) 이전에 던지므로, 롤백될 EXPIRE 행을 남기지 않고 로트 잔여도 그대로다(반복 재처리 방지).
+        assertThat(transactionRepository.findAll().none { it.reason == CreditReason.EXPIRE }).isTrue()
+        assertThat(lotRepository.findById(expired.id).get().remaining).isEqualTo(100)
     }
 
     @Test

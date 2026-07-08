@@ -82,7 +82,7 @@ class CreditWalletService(
             ?: error("지갑을 보장한 뒤 조회에 실패했습니다: userId=$userId")
         // 락 안에서 만료 로트를 먼저 정리해 반환 balance·월 상한 판정이 만료분을 제외한 최신 값을 보게 한다(스펙 §4-3-7).
         val now = clock.instant()
-        sweepExpiredLots(userId, wallet, now)
+        expireLots(userId, wallet, lotRepository.findActiveForUpdate(userId), now)
         // 락 획득 후 재확인: 같은 키 동시 요청이 락을 기다리는 사이 먼저 커밋했을 수 있다(중복 insert·유니크 위반 방지, 멱등 보장).
         if (transactionRepository.existsByIdempotencyKey(idempotencyKey)) {
             return RewardOutcome(rewarded = false, balance = wallet.balance)
@@ -154,13 +154,16 @@ class CreditWalletService(
         require(amount > 0) { "차감액은 양수여야 합니다: $amount" }
         val wallet = walletRepository.findByUserIdForUpdate(userId)
             ?: throw InsufficientCreditException(userId, required = amount, balance = 0)
-        // 만료 로트를 먼저 회수한 뒤 남은 활성 잔액으로 판정한다(만료분은 소진 대상이 아니다). balance는 sweep로 최신화된다.
         val now = clock.instant()
-        val lots = sweepExpiredLots(userId, wallet, now)
-        if (wallet.balance < amount) {
-            throw InsufficientCreditException(userId, required = amount, balance = wallet.balance)
+        val lots = lotRepository.findActiveForUpdate(userId)
+        // 부족 판정을 만료 정리(쓰기) 이전에 활성(미만료) 잔여로 수행한다. 부족하면 아무것도 쓰지 않고 던져, 실패한 차감이
+        // 같은 트랜잭션의 EXPIRE 정리를 롤백시켜 만료분을 반복 재처리하는 것을 막는다(balanceOf와 같은 시간 기준).
+        val available = lots.filter { lot -> lot.expiresAt?.isAfter(now) ?: true }.sumOf { it.remaining }
+        if (available < amount) {
+            throw InsufficientCreditException(userId, required = amount, balance = available)
         }
-        // FIFO 소진: 만료 임박(무기한은 마지막)·먼저 적립된 로트부터 잔여를 깎는다. sweep 후 활성 잔액 ≥ amount라 정확히 소진된다.
+        // 성공 확정 후에만 만료 로트를 EXPIRE 행으로 회수하고(감사·캐시 정합), 만료 임박(무기한은 마지막)·먼저 적립된 로트부터 소진한다.
+        expireLots(userId, wallet, lots, now)
         var toConsume = amount
         for (lot in lots) {
             if (toConsume <= 0) break
@@ -237,12 +240,11 @@ class CreditWalletService(
     }
 
     /**
-     * 지갑 락 안에서 만료 로트(유효기간 경과·잔여>0)를 EXPIRE 원장 행으로 회수하고 잔여를 0으로 만든다(스펙 §4-3-7).
-     * balance = SUM(amount) 불변식을 유지하려 만료를 음수 행으로 실현한다. 잠근 활성 로트 목록(FIFO 정렬)을 그대로
-     * 반환해 차감 호출부가 재조회 없이 이어서 소진하게 한다.
+     * 잠근 활성 로트([lots]) 중 만료된 것(유효기간 경과·잔여>0)을 EXPIRE 원장 행으로 회수하고 잔여를 0으로 만든다
+     * (스펙 §4-3-7). balance = SUM(amount) 불변식을 유지하려 만료를 음수 행으로 실현한다. 호출부가 지갑 락 안에서
+     * 이미 조회·판정을 마친 로트 목록을 넘겨, 성공 확정 경로에서만 정리가 커밋되도록 한다(실패 차감은 정리 전에 던짐).
      */
-    private fun sweepExpiredLots(userId: Long, wallet: CreditWallet, now: Instant): List<CreditLot> {
-        val lots = lotRepository.findActiveForUpdate(userId)
+    private fun expireLots(userId: Long, wallet: CreditWallet, lots: List<CreditLot>, now: Instant) {
         for (lot in lots) {
             val expiresAt = lot.expiresAt ?: continue
             if (expiresAt.isAfter(now)) continue
@@ -260,7 +262,6 @@ class CreditWalletService(
             lot.remaining = 0
             wallet.balance -= expiredAmount
         }
-        return lots
     }
 
     /** 로트 만료 시각. 무기한(PURCHASE)은 NULL, 그 외 보상·환불은 적립 시점 + [REWARD_VALIDITY]. */
