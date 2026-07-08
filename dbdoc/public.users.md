@@ -16,6 +16,7 @@
 | invite_code | varchar(16) |  | true |  |  |  |
 | inviter_user_id | bigint |  | true |  | [public.users](public.users.md) |  |
 | migrated_at | timestamp with time zone |  | true |  |  |  |
+| migration_attempts | integer | 0 | false |  |  |  |
 
 ## Constraints
 
@@ -58,6 +59,7 @@ erDiagram
   varchar_16_ invite_code
   bigint inviter_user_id FK
   timestamp_with_time_zone migrated_at
+  integer migration_attempts
 }
 "public.social_accounts" {
   bigint id

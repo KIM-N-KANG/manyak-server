@@ -150,6 +150,23 @@ Accept: application/json
     });
 %}
 
+### 5-1. (시도 상한, KNK-500) 성공 0건 호출을 5회 반복한 뒤 6번째는 평가 없이 닫힌다
+# "아직 이관하지 않은 새 계정"의 토큰을 @accessToken 에 채운 뒤, 이 요청을 그대로 6번 연속 실행하세요.
+# 존재하지 않는 UUID(성공 0건)라 계정이 잠기지 않지만, 시도 자체는 계정당 5회까지만 평가됩니다.
+# 1~5번째 실행은 migrationClosed=false + NOT_FOUND, 6번째부터는 migrationClosed=true + 빈 결과로 바뀌어야 합니다.
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": ["00000000-0000-4000-8000-000000000000"], "chatIds": [] }
+
+> {%
+    client.test("호출은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
 ### 6. (자유 조회) 임의의 공개 ID 로 직접 확인 — 미이관 계정에서만 항목별 status 관찰
 # 위 4·5 흐름 없이 특정 ID 만 빠르게 눌러보고 싶을 때. 존재하지 않는 UUID 는 NOT_FOUND, 타인 소유는 CONFLICT.
 # 주의: 이미 이관한(잠긴) 계정이면 항목과 무관하게 migrationClosed=true + 빈 결과로 닫힙니다.
