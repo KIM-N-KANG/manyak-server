@@ -124,7 +124,7 @@ class ChatService(
     }
 
     @Transactional(readOnly = true)
-    fun getChatsByIds(request: BatchChatRequest): List<ChatSummaryResponse> {
+    fun getChatsByIds(request: BatchChatRequest, userId: Long?): List<ChatSummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.chatIds.mapNotNull { parsePublicIdOrNull(it) }
         // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
@@ -134,7 +134,10 @@ class ChatService(
         // 존재하고 삭제되지 않은 채팅만 마지막 진행 시각(updatedAt) 내림차순으로 노출한다.
         // updatedAt이 같으면 id 내림차순으로 결정적 순서를 보장한다. 존재하지 않거나 형식이
         // 잘못된 채팅 ID는 조회되지 않으므로 자연히 제외된다.
+        // 열람 규칙(스펙 §4-5 B16): 요청자가 열람할 수 없는 채팅(회원 요청의 NULL 채팅·타인 소유)은
+        // 배치 조회 계약상 항목 존재를 드러내지 않으므로 403이 아니라 결과에서 조용히 제외한다.
         val chats = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
+            .filter { isOwnerAccessAllowed(it.userId, userId) }
             .sortedWith(compareByDescending<StoryChat> { it.updatedAt }.thenByDescending { it.id })
         return toSummaryResponses(chats)
     }
