@@ -199,15 +199,40 @@ Accept: application/json
     });
 %}
 
+### 6-2. (소유권) 회원 소유 스토리 생성 — 배치 필터 검증 준비 (KNK-497, B16)
+# {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요.
+# 2번의 storyId는 익명(게스트 소유)이라 회원이 그 스토리로 채팅을 만들면 교차 접근 차단(KNK-435)으로 403이 납니다.
+# 따라서 7번의 회원 채팅에는 회원 소유 스토리가 필요하므로, 여기서 일반 제작(단발, AI 비호출)으로 하나 만듭니다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "회원 소유 스토리",
+  "oneLineIntro": "배치 필터 검증용",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSetting": { "name": "시작", "prologue": "p", "startSituation": "s" },
+  "suggestedInputs": ["하나", "둘", "셋"]
+}
+
+> {%
+    client.test("회원 소유 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("memberStoryId", response.body.id);
+%}
+
 ### 7. (소유권) 회원 채팅 생성 — 배치 필터 검증 준비 (KNK-497, B16)
-# {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요. 2번의 storyId로 회원 소유 채팅을 만듭니다.
+# 6-2번의 회원 소유 스토리(memberStoryId)로 회원 소유 채팅을 만듭니다(자신 소유 스토리라 403이 나지 않습니다).
 POST {{baseUrl}}/api/v1/chats
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 Accept: application/json
 
 {
-  "storyId": "{{storyId}}"
+  "storyId": "{{memberStoryId}}"
 }
 
 > {%
