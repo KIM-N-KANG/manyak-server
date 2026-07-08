@@ -306,6 +306,25 @@ Authorization: Bearer {{otherAccessToken}}
     });
 %}
 
+### 13-1. (정지 계정, KNK-499) 정지된 회원이 이어쓰면 403이고 크레딧이 차감되지 않는다
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정(자신 소유 채팅이어야 함, memberChatId)의 토큰을 @suspendedAccessToken 에 채우세요.
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+POST {{baseUrl}}/api/v1/chats/{{memberChatId}}/turns/stream
+Content-Type: application/json
+Accept: text/event-stream, application/json
+Authorization: Bearer {{suspendedAccessToken}}
+
+{
+  "userInput": "정지된 계정으로 이어쓴다."
+}
+
+> {%
+    client.test("정지된 회원의 이어쓰기는 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}
+
 ### 14. [KNK-477] 게스트 요청에 X-Manyak-Device-Id 헤더가 없으면 400
 # 3번의 게스트 채팅(chatId)을 device 헤더 없이 이어쓰면 SSE를 열기 전에 동기 400입니다.
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream

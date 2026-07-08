@@ -5,6 +5,7 @@ import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
@@ -67,6 +68,7 @@ class SimpleStoryCreationService(
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
+    private val suspensionGuard: SuspensionGuard,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -209,6 +211,7 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val startNanos = System.nanoTime()
         structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
         try {

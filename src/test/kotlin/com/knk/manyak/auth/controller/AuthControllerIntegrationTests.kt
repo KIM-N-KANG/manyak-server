@@ -196,6 +196,21 @@ class AuthControllerIntegrationTests {
     // ---- POST /api/v1/auth/token/refresh ----
 
     @Test
+    fun `정지된 계정은 refresh 회전이 403이고 토큰 계열이 폐기된다`() {
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+        user.status = UserStatus.SUSPENDED
+        userRepository.save(user)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    @Test
     fun `유효한 refresh로 회전하면 200과 새 토큰을 반환한다`() {
         val user = saveUser()
         val issued = authTokenService.issueTokens(user)

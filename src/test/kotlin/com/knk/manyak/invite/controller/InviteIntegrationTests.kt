@@ -67,6 +67,15 @@ class InviteIntegrationTests {
     }
 
     @Test
+    fun `정지된 회원은 초대 코드 조회가 403이고 코드가 발급되지 않는다`() {
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+
+        getInvite(jwtTokenProvider.issueAccessToken(suspended.publicId)).expectStatus().isForbidden
+
+        assertThat(userRepository.findById(suspended.id).orElseThrow().inviteCode).isNull()
+    }
+
+    @Test
     fun `최초 조회는 코드와 링크를 발급한다`() {
         val user = saveUser()
 

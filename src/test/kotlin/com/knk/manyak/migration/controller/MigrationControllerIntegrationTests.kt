@@ -100,6 +100,24 @@ class MigrationControllerIntegrationTests {
             .expectStatus().isUnauthorized
     }
 
+    // ---- 정지 계정(§4-5 B20, KNK-499) ----
+
+    @Test
+    fun `정지된 회원은 이관 요청이 403이고 평가되지 않는다`() {
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+        val guestStory = saveStory(ownerId = null)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(suspended)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":["${guestStory.publicId}"],"chatIds":[]}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyRepository.findById(guestStory.id).orElseThrow().userId).isNull()
+    }
+
     // ---- 소유권 판정 ----
 
     @Test

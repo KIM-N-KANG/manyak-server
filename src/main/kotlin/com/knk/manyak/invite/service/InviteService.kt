@@ -2,12 +2,15 @@ package com.knk.manyak.invite.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.global.security.isActiveAccessAllowed
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.server.ResponseStatusException
 import java.security.SecureRandom
 import java.time.Clock
 import java.time.Instant
@@ -42,6 +45,10 @@ class InviteService(
     fun getOrCreateInvite(userId: Long): InviteResponse {
         val user = userRepository.findByIdForUpdate(userId)
             ?: error("초대 코드를 발급할 사용자를 찾지 못했습니다: userId=$userId")
+        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 사용자 행을 이미 로드했으므로 추가 조회 없이 판정한다.
+        if (!isActiveAccessAllowed(user.status)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
+        }
         val code = user.inviteCode ?: generateUniqueCode().also { user.inviteCode = it }
         return InviteResponse(inviteCode = code, inviteUrl = "$inviteBaseUrl/$code")
     }

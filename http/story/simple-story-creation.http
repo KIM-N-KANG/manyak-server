@@ -428,6 +428,27 @@ Accept: application/json
     });
 %}
 
+### 9-2. (정지 계정, KNK-499) 정지된 회원이 간편 제작하면 403이고 compile이 호출되지 않는다
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정의 토큰을 @suspendedAccessToken 에 채우세요. 9번을 먼저 실행해 creditCreationId·creditStorylineId를 준비합니다.
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{suspendedAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{creditCreationId}},
+  "storylineId": {{creditStorylineId}},
+  "additionalInfos": []
+}
+
+> {%
+    client.test("정지된 회원의 간편 제작은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}
+
 ### 10. [KNK-477] 게스트 요청에 X-Manyak-Device-Id 헤더가 없으면 400
 # 체험 한도 대상 엔드포인트(스토리라인 생성·간편 제작·채팅 턴)는 게스트 요청에 이 헤더를 강제합니다(스펙 §4-3-7).
 POST {{baseUrl}}/api/v1/stories/simple/storylines

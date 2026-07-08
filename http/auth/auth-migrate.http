@@ -48,6 +48,23 @@ Accept: application/json
     });
 %}
 
+### 1-1. (정지 계정, KNK-499) 정지된 회원이 이관 요청하면 403이고 평가되지 않는다
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정의 토큰을 @suspendedAccessToken 에 채워 실행하세요.
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{suspendedAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": [], "chatIds": [] }
+
+> {%
+    client.test("정지된 회원의 이관 요청은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}
+
 ### 2. (에러) 공개 ID 가 UUID 형식이 아니면 → 400
 # 유효 토큰이 있어야 본문 검증까지 도달합니다(없으면 401). 형식 오류는 요청 전체를 400으로 봅니다.
 # 단, 이미 이관한(잠긴) 계정은 형식 검증 전에 migrationClosed=true(200)로 닫히므로, 미이관 계정으로 확인하세요.

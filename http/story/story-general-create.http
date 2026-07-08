@@ -137,3 +137,27 @@ Authorization: Bearer {{accessToken}}
         client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
     });
 %}
+
+### 6. (정지 계정, KNK-499) 정지된 회원이 등록하면 403이고 저장되지 않는다
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정의 토큰을 @suspendedAccessToken 에 채워 실행하세요(로그인 후 DB만 바꿔도 기존 토큰은 그대로 유효).
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{suspendedAccessToken}}
+
+{
+  "title": "정지 계정 등록 시도",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSetting": { "name": "시작", "prologue": "p", "startSituation": "s" },
+  "suggestedInputs": ["하나", "둘", "셋"],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("정지된 회원의 등록은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}

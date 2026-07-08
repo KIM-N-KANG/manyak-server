@@ -35,6 +35,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
@@ -75,6 +76,7 @@ class ChatService(
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
+    private val suspensionGuard: SuspensionGuard,
     // 채팅 턴 1회 소모량(스펙 §4-3-7, KNK-477 확정: 10. 재생성도 동일 값·사유를 공유).
     @param:Value("\${manyak.credit.chat-turn-cost:10}")
     private val chatTurnCost: Long,
@@ -299,6 +301,7 @@ class ChatService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SseEmitter {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
         val chat = resolveChat(chatId)
@@ -361,6 +364,7 @@ class ChatService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SseEmitter {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val chat = resolveChat(chatId)
         requireChatOwner(chat, userId)
         // 엔딩 도달 턴은 재생성 대상이 아니다(§4-3-10 도달 기록 확정 후). 도달 기록이 채팅을 ENDED로 굳히므로 여기서 막는다.
