@@ -81,6 +81,12 @@ data class ChatSummaryResponse(
     @field:Schema(description = "이 채팅에서 사용자가 이어쓴 횟수(완료된 턴 수)", example = "2")
     val turnCount: Int,
 
+    @field:ArraySchema(
+        schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
+        arraySchema = Schema(description = "이 채팅에서 도달한 엔딩 이름(도달 전이면 빈 배열). 프론트가 스토리별로 합산합니다."),
+    )
+    val reachedEndings: List<String>,
+
     @field:Schema(description = "마지막 진행 시각", example = "2026-06-12T12:10:00Z")
     val updatedAt: Instant,
 )
@@ -199,17 +205,9 @@ data class ChatStreamCompletedEvent(
     )
     val choices: List<String>,
 
-    @field:Schema(description = "이번 턴에 도달한 엔딩(엔딩 응답이 아니면 null)", nullable = true)
-    val reachedEnding: ReachedEndingResponse? = null,
-)
-
-@Schema(description = "도달한 엔딩")
-data class ReachedEndingResponse(
-    @field:Schema(description = "엔딩 ID", example = "12")
-    val id: Long,
-
-    @field:Schema(description = "엔딩 이름", example = "왕좌를 되찾다")
-    val name: String,
+    // 엔딩은 이름으로 식별한다(KNK-462). 순차 PK는 노출하지 않으므로 도달 엔딩도 이름으로 싣는다.
+    @field:Schema(description = "이번 턴에 도달한 엔딩 이름(엔딩 응답이 아니면 null)", nullable = true, example = "왕좌를 되찾다")
+    val reachedEnding: String? = null,
 )
 
 @Schema(description = "SSE 오류 이벤트 예시")

@@ -121,6 +121,7 @@ class StoryEditService(
 
         // 엔딩 전체 교체(sort_order 1-based). 레거시(enabled=false)까지 지워 유니크 충돌을 피한다.
         request.endings?.let { endings ->
+            requireDistinctEndingNames(endings.map { it.name })
             val ss = requireStartSetting(startSetting, "엔딩")
             // 벌크 DELETE는 즉시 실행돼 재삽입과 유니크 충돌하지 않는다(엔티티 미로드로 레거시 NPE도 회피).
             storyEndingRepository.deleteByStartSettingId(ss.id)

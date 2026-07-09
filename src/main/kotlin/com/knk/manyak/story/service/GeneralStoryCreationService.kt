@@ -99,6 +99,8 @@ class GeneralStoryCreationService(
                 },
             )
         }
+        // 엔딩 이름은 시작 설정 내에서 유니크해야 한다(이름 기반 식별, 표시 모호성 방지 — KNK-523).
+        requireDistinctEndingNames(request.endings.map { it.name })
         // 엔딩은 시작 설정 스코프(sort_order 1-based, ck_story_endings_order > 0). 없으면 저장 생략.
         if (request.endings.isNotEmpty()) {
             storyEndingRepository.saveAll(

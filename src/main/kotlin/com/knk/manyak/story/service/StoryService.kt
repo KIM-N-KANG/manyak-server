@@ -19,6 +19,7 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -36,6 +37,7 @@ class StoryService(
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
+    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
 ) {
 
     @Transactional(readOnly = true)
@@ -100,6 +102,9 @@ class StoryService(
             ?: emptyList()
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
+        // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
+        // 저장은 ending id 기준이라 무모호하며, 노출은 이름으로 한다(엔딩 목록과 이름으로 상관, KNK-462).
+        val reachedEndings = resolveReachedEndingNames(userId, story.id)
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
@@ -125,8 +130,21 @@ class StoryService(
             lorebooks = lorebooks,
             endings = endings,
             mainEvents = mainEvents,
+            reachedEndings = reachedEndings,
             createdAt = story.createdAt,
         )
+    }
+
+    /** 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서(sort_order)로 반환한다. 게스트는 빈 목록. */
+    private fun resolveReachedEndingNames(userId: Long?, storyId: Long): List<String> {
+        if (userId == null) {
+            return emptyList()
+        }
+        val reachedIds = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId).map { it.endingId }
+        if (reachedIds.isEmpty()) {
+            return emptyList()
+        }
+        return storyEndingRepository.findAllById(reachedIds).sortedBy { it.sortOrder }.map { it.name }
     }
 
     /**

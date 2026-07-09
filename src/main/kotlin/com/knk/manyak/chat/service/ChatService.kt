@@ -14,7 +14,6 @@ import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
-import com.knk.manyak.chat.dto.ReachedEndingResponse
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
 import com.knk.manyak.chat.dto.ChatStreamStartedEvent
 import com.knk.manyak.chat.dto.ChatStreamTokenEvent
@@ -182,6 +181,10 @@ class ChatService(
         val lastPreviewByChatId = storyMessageRepository
             .findLatestMessagesByChatIdsAndRole(chats.map { it.id }, MessageRole.ASSISTANT)
             .associate { it.chatId to it.content }
+        // 채팅이 도달한 엔딩 이름을 한 번에 조회한다(엔딩은 이름으로 노출, KNK-462). 채팅당 최대 1개.
+        val endingNameById = storyEndingRepository
+            .findAllById(chats.mapNotNull { it.reachedEndingId })
+            .associate { it.id to it.name }
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
             ChatSummaryResponse(
@@ -191,6 +194,7 @@ class ChatService(
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
+                reachedEndings = chat.reachedEndingId?.let { id -> endingNameById[id]?.let(::listOf) }.orEmpty(),
                 updatedAt = chat.updatedAt,
             )
         }
@@ -608,8 +612,7 @@ class ChatService(
                                 turnId = persistedTurn.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
-                                reachedEnding = persistedTurn.reachedEnding
-                                    ?.let { ReachedEndingResponse(id = it.id, name = it.name) },
+                                reachedEnding = persistedTurn.reachedEnding?.name,
                             ),
                         ),
                 )
