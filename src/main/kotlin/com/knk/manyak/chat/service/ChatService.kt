@@ -109,8 +109,8 @@ class ChatService(
         if (story.userId == null && userId != null) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "이 스토리로는 채팅을 시작할 수 없습니다.")
         }
-        // 시작 설정은 내부 PK(story.id)로 조회한다.
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
+        // 시작 설정 복수화(KNK-515): startSettingId 미지정이면 첫 시작 설정을 쓴다(POST /chats startSettingId 지정은 후속).
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
 
         val chat = storyChatRepository.save(
             StoryChat(
@@ -212,7 +212,7 @@ class ChatService(
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyTitle = story?.title.orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
-        val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
+        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
         val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
         val turns = pairTurns(messages)
@@ -751,7 +751,7 @@ class ChatService(
     ): ChatTurnAiRequest {
         val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(chat.storyId)
-        val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
+        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
         // 주요 사건·엔딩 런타임 재료(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(chat.storyId)

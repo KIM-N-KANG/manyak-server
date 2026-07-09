@@ -11,6 +11,7 @@
 | start_situation | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| public_id | uuid |  | false |  |  |  |
 
 ## Constraints
 
@@ -18,14 +19,15 @@
 | ---- | ---- | ---------- |
 | story_start_settings_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_start_settings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_start_settings_story | UNIQUE | UNIQUE (story_id) |
+| uq_story_start_settings_public_id | UNIQUE | UNIQUE (public_id) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | story_start_settings_pkey | CREATE UNIQUE INDEX story_start_settings_pkey ON public.story_start_settings USING btree (id) |
-| uq_story_start_settings_story | CREATE UNIQUE INDEX uq_story_start_settings_story ON public.story_start_settings USING btree (story_id) |
+| idx_story_start_settings_story | CREATE INDEX idx_story_start_settings_story ON public.story_start_settings USING btree (story_id) |
+| uq_story_start_settings_public_id | CREATE UNIQUE INDEX uq_story_start_settings_public_id ON public.story_start_settings USING btree (public_id) |
 
 ## Relations
 
@@ -35,7 +37,7 @@ erDiagram
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
-"public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_start_settings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_start_settings" {
   bigint id
@@ -45,6 +47,7 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid public_id
 }
 "public.story_suggested_inputs" {
   bigint id

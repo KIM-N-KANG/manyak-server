@@ -88,7 +88,8 @@ class StoryService(
         }
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
+        // 복수화(KNK-515) 스키마이나 상세 응답 배열화는 후속. 현재는 첫 시작 설정으로 기존 응답 형태 유지.
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
         val suggestedInputs = startSetting
             ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
             ?.map { it.inputText }

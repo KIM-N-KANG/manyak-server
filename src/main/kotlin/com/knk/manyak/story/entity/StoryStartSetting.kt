@@ -7,11 +7,16 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
-import jakarta.persistence.OneToOne
+import jakarta.persistence.ManyToOne
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
+import java.util.UUID
 
+/**
+ * 시작 설정. 스토리당 1:N(KNK-515). 외부에는 [publicId](UUID)로만 노출하고 순차 PK는 API에 노출하지 않는다(IDOR 방지).
+ * 추천 입력·엔딩은 이 시작 설정에 스코프된다.
+ */
 @Entity
 @Table(name = "story_start_settings")
 class StoryStartSetting(
@@ -19,8 +24,12 @@ class StoryStartSetting(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "story_id", nullable = false, unique = true)
+    // 외부 노출 식별자. POST /chats의 startSettingId·상세 startSettings[].id가 이 값이다.
+    @Column(name = "public_id", nullable = false, unique = true, updatable = false)
+    val publicId: UUID = UUID.randomUUID(),
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "story_id", nullable = false)
     val story: Story,
 
     @Column(nullable = false, length = 100)

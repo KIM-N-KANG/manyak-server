@@ -79,14 +79,14 @@ class StoryEditService(
 
         // 시작 설정 — 없으면 생성, 있으면 교체.
         request.startSetting?.let { input ->
-            val startSetting = storyStartSettingRepository.findByStoryId(story.id) ?: StoryStartSetting(story = story)
+            val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id) ?: StoryStartSetting(story = story)
             startSetting.name = input.name
             startSetting.prologue = input.prologue
             startSetting.startSituation = input.startSituation
             storyStartSettingRepository.save(startSetting)
         }
 
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
 
         // 추천 입력 전체 교체(inputOrder 1-based). 시작 설정이 없으면 저장 대상이 없어 400.
         request.suggestedInputs?.let { inputs ->
@@ -145,7 +145,7 @@ class StoryEditService(
 
     private fun buildEditForm(story: Story): StoryEditFormResponse {
         val setting = storySettingRepository.findByStoryId(story.id)
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
         val suggestedInputs = startSetting
             ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
             ?.map { it.inputText }
