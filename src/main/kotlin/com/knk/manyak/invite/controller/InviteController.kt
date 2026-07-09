@@ -26,8 +26,8 @@ class InviteController(
 
     @Operation(
         summary = "내 초대 코드·링크 조회",
-        description = "요청자의 고유 초대 코드와 공유 링크를 반환합니다. 코드가 없으면 최초 조회 시 발급하며, " +
-            "이후에는 같은 코드를 반환합니다. 인증 필수입니다.",
+        description = "요청자의 고유 초대 코드와 공유 링크, 이번 KST 월 초대 보상 진행(monthlyRewardCount·monthlyRewardLimit)을 " +
+            "반환합니다. 코드가 없으면 최초 조회 시 발급하며, 이후에는 같은 코드를 반환합니다. 인증 필수입니다.",
     )
     @ApiResponses(
         value = [

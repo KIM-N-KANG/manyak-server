@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.GoogleIdTokenVerifier
@@ -58,6 +59,7 @@ class InviteRewardIntegrationTests {
     @Autowired private lateinit var socialAccountRepository: SocialAccountRepository
     @Autowired private lateinit var creditTransactionRepository: CreditTransactionRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -122,6 +124,25 @@ class InviteRewardIntegrationTests {
         // 2회 로그인이어도 초대 보상은 신규 생성 1회만: 각 수혜자당 1건.
         assertThat(inviteRewards(inviterId)).hasSize(1)
         assertThat(inviteRewards(inviteeId)).hasSize(1)
+    }
+
+    @Test
+    fun `초대 보상을 받은 요청자는 GET invite에 이번 달 진행 카운트가 반영된다`() {
+        val inviterId = seedInviter("PROGRES1")
+
+        // 실제 로그인으로 초대 보상을 적립하면 원장 행 created_at이 현재(=이번 KST 월)라 진행 집계에 잡힌다.
+        loginWith("prog-invitee-sub", "PROGRES1")
+        assertThat(inviteRewards(inviterId)).hasSize(1)
+
+        val inviterPublicId = userRepository.findById(inviterId).orElseThrow().publicId
+        restTestClient.get()
+            .uri("/api/v1/users/me/invite")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(inviterPublicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.monthlyRewardCount").isEqualTo(1)
+            .jsonPath("$.monthlyRewardLimit").isEqualTo(10)
     }
 
     @Test

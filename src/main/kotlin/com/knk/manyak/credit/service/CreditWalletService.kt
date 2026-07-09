@@ -54,6 +54,20 @@ class CreditWalletService(
     fun hasTransaction(idempotencyKey: String): Boolean = transactionRepository.existsByIdempotencyKey(idempotencyKey)
 
     /**
+     * [userId]가 [reason] 사유로 집계 구간 [windowStart, windowEnd)에 수령한 원장 건수를 센다(조회 전용).
+     * [reward]의 [MonthlyRewardCap] 판정과 **같은 카운트**라, 초대 보상 월 진행 표시가 상한 스킵 경계와 정확히 일치한다
+     * (스펙 §4-3-7 초대 상한 진행 표시, B22).
+     */
+    @Transactional(readOnly = true)
+    fun countRewardsInWindow(userId: Long, reason: CreditReason, windowStart: Instant, windowEnd: Instant): Long =
+        transactionRepository.countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            userId,
+            reason,
+            windowStart,
+            windowEnd,
+        )
+
+    /**
      * 크레딧을 적립한다(양수). [idempotencyKey]가 이미 기록됐으면 적립하지 않고 `rewarded=false`를 반환한다(멱등).
      *
      * 동시 같은 키 요청은 원장 유니크 제약이 최종 방어한다(드문 경합은 오류로 드러나며, 재시도 시 키가 존재해 멱등).
