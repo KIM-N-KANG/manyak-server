@@ -15,6 +15,10 @@
 ###     input_order 오름차순으로 내려줍니다. 시작 설정이나 등록된 추천 입력이 없으면 빈 배열.
 ###   - turns가 있으면(이미 이어쓰기를 시작했으면): 다음 행동은 마지막 턴의 choices로 안내하므로 빈 배열.
 ###
+### [§4-3-3·§4-3-10] 각 턴(turns[])에는 reachedEnding(이번 턴에 도달한 엔딩 이름, string|null)이 포함됩니다.
+###   - 엔딩에 도달한 턴이면 엔딩 이름(순차 PK가 아니라 이름으로 노출, KNK-462), 도달하지 않은 턴이면 null.
+###   - 스텁 AI(manyak.ai.chat.stub=true)는 엔딩을 도달시키지 않으므로 이어쓰기 턴의 reachedEnding은 항상 null입니다.
+###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
@@ -118,6 +122,11 @@ Accept: application/json
         client.assert(b.turns.every(t => Array.isArray(t.choices)),
             `choices가 배열이 아닌 턴이 있습니다. actual=${JSON.stringify(b.turns)}`);
     });
+    client.test("각 턴의 reachedEnding은 문자열이거나 null이다", () => {
+        // 도달 엔딩은 이름(문자열)으로 노출하거나 미도달이면 null이다(§4-3-3·§4-3-10, KNK-462).
+        client.assert(b.turns.every(t => t.reachedEnding === null || typeof t.reachedEnding === "string"),
+            `reachedEnding이 문자열/ null이 아닌 턴이 있습니다. actual=${JSON.stringify(b.turns)}`);
+    });
     client.test("새 채팅은 turns가 비어 있고 suggestedInputs가 시작 추천 입력 자리다", () => {
         // 준비 흐름으로 갓 만든 채팅이므로 turns는 비어 있어야 한다(이 경우에만 suggestedInputs가 채워진다).
         client.assert(b.turns.length === 0, `새 채팅의 turns가 비어 있어야 합니다. actual=${JSON.stringify(b.turns)}`);
@@ -161,6 +170,11 @@ Accept: application/json
     client.test("진행 턴이 있으면 suggestedInputs는 빈 배열이다", () => {
         client.assert(Array.isArray(b.suggestedInputs) && b.suggestedInputs.length === 0,
             `suggestedInputs가 빈 배열이어야 합니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+    });
+    client.test("스텁 AI로 이어쓴 미도달 턴의 reachedEnding은 null이다", () => {
+        // 스텁은 엔딩을 도달시키지 않으므로 5번으로 저장된 턴의 reachedEnding은 null이어야 한다.
+        client.assert(b.turns.every(t => t.reachedEnding === null),
+            `미도달 턴의 reachedEnding이 null이 아닙니다. actual=${JSON.stringify(b.turns)}`);
     });
 %}
 

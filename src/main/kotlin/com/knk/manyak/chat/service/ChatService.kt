@@ -227,6 +227,12 @@ class ChatService(
                 .mapValues { (_, choices) -> choices.map { it.choiceText } }
         }
 
+        // 도달 엔딩은 이름으로 노출한다(순차 PK 노출 금지, KNK-462). 이 상세에 등장하는 도달 턴들의 엔딩 id를 한 번에
+        // 조회해 이름으로 매핑한다(toSummaryResponses와 동일 패턴, N+1 방지). 도달 턴이 없으면 조회를 생략한다.
+        val endingNameById = storyEndingRepository
+            .findAllById(turns.mapNotNull { it.reachedEndingId })
+            .associate { it.id to it.name }
+
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
         val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
@@ -242,6 +248,7 @@ class ChatService(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
+                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
                     createdAt = assistant.createdAt,
                 )
             },
@@ -282,6 +289,8 @@ class ChatService(
                             id = message.id,
                             userInput = user.content,
                             content = message.content,
+                            // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id). 상세에서 이름으로 해소한다.
+                            reachedEndingId = message.reachedEndingId,
                             createdAt = message.createdAt,
                         )
                     }
@@ -297,6 +306,7 @@ class ChatService(
         val id: Long,
         val userInput: String,
         val content: String,
+        val reachedEndingId: Long?,
         val createdAt: Instant,
     )
 

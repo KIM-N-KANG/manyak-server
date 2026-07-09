@@ -159,6 +159,10 @@ data class ChatTurnResponse(
     )
     val choices: List<String>,
 
+    // 엔딩은 이름으로 식별한다(KNK-462). 순차 PK는 노출하지 않으므로 도달 엔딩도 이름으로 싣는다. SSE completed와 같은 계약.
+    @field:Schema(description = "이번 턴에 도달한 엔딩 이름(도달 아니면 null)", nullable = true, example = "왕좌를 되찾다")
+    val reachedEnding: String? = null,
+
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:10:00Z")
     val createdAt: Instant,
 )
