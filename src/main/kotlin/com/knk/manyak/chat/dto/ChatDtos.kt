@@ -12,6 +12,15 @@ import java.time.Instant
 data class CreateChatRequest(
     @field:Schema(description = "채팅을 시작할 스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val storyId: String,
+
+    // 시작 설정 복수화(KNK-515): 어느 시작 설정으로 시작할지 선택한다. 생략하면 스토리의 첫(기본) 시작 설정을 쓴다.
+    // 지정한 값이 이 스토리에 속하지 않으면 404다(조용한 폴백 금지).
+    @field:Schema(
+        description = "채팅을 시작할 시작 설정 ID(공개 식별자). 생략하면 스토리의 첫 시작 설정을 사용한다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val startSettingId: String? = null,
 )
 
 @Schema(description = "채팅 생성 응답")

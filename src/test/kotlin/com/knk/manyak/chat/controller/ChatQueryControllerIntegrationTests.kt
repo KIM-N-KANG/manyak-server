@@ -71,7 +71,7 @@ class ChatQueryControllerIntegrationTests {
     @Test
     fun `채팅 상세는 USER+ASSISTANT를 턴으로 페어링하고 턴별 선택지를 포함한다`() {
         val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
-        storyStartSettingRepository.save(
+        val startSetting = storyStartSettingRepository.save(
             StoryStartSetting(
                 story = story,
                 name = "입학 적성 검사",
@@ -79,7 +79,7 @@ class ChatQueryControllerIntegrationTests {
                 startSituation = "적성 검사 직전의 검사장.",
             ),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
 
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         val assistant1 = message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
@@ -150,7 +150,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
 
         restTestClient.get()
             .uri("/api/v1/chats/${session.publicId}")
@@ -178,7 +178,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
 

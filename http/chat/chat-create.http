@@ -14,6 +14,9 @@
 ###   start_setting의 story_suggested_inputs를 input_order 순으로 내려주며,
 ###   시작 설정이나 등록된 추천 입력이 없으면 빈 배열입니다.
 ###
+### [KNK-515] 시작 설정 복수화: 요청 body에 startSettingId(공개 식별자, 선택)를 넣어 특정 시작 설정으로 시작할 수 있습니다(3-3번).
+###   생략하면 스토리의 첫(기본) 시작 설정을 씁니다. 지정 값이 이 스토리에 속하지 않으면 404입니다(조용한 폴백 없음).
+###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
@@ -107,6 +110,35 @@ Accept: application/json
         client.assert(typeof b.storyId === "string" && uuidRe.test(b.storyId), `storyId가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.storyId)}`);
     });
     client.global.set("chatId", b.id);
+%}
+
+### 3-3. [KNK-515] startSettingId를 지정해 특정 시작 설정으로 채팅 시작 → 201
+# 3번의 storyId로 상세를 조회해 startSettings[0].id를 얻고, 그 값을 startSettingId로 넘겨 채팅을 시작한다.
+GET {{baseUrl}}/api/v1/stories/{{storyId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회 200·시작 설정 존재", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.startSettings.length >= 1, "startSettings가 비었습니다.");
+    });
+    client.global.set("startSettingId", response.body.startSettings[0].id);
+%}
+
+###
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}",
+  "startSettingId": "{{startSettingId}}"
+}
+
+> {%
+    client.test("startSettingId 지정 채팅 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
 %}
 
 ### 3-2. (소유권) 게스트(NULL) 소유 스토리에 회원이 채팅 생성 → 403 (교차 접근 차단, KNK-480)

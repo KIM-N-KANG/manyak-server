@@ -27,6 +27,7 @@ import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
+import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationStoryline
@@ -490,7 +491,7 @@ class SimpleStoryCreationService(
                     startSituation = aiResponse.storyStartSettings.startSituation,
                 ),
             )
-            storySuggestedInputRepository.saveAll(
+            val savedSuggestedInputs = storySuggestedInputRepository.saveAll(
                 aiResponse.storySuggestedInputs.mapIndexed { index, inputText ->
                     StorySuggestedInput(
                         startSetting = startSetting,
@@ -498,7 +499,7 @@ class SimpleStoryCreationService(
                         inputOrder = (index + 1).toShort(),
                     )
                 },
-            )
+            ).map { it.inputText }
 
             // 전달한 로어북을 스토리에 연결한다(sort_order 1-based, ck_story_lorebooks_sort_order > 0).
             if (selectedLorebooks.isNotEmpty()) {
@@ -535,7 +536,9 @@ class SimpleStoryCreationService(
             }
 
             // 컴파일 산출물의 엔딩(시작 설정 스코프, sort_order 1-based, ck_story_endings_order > 0)을 저장한다.
-            if (aiResponse.storyEndings.isNotEmpty()) {
+            val savedEndings = if (aiResponse.storyEndings.isEmpty()) {
+                emptyList()
+            } else {
                 // 저장 이름(방어적 절단 후)이 시작 설정 안에서 유니크여야 이름 기반 도달 매칭이 무모호하다(제작·수정과 동일 불변식).
                 // 중복은 사용자 입력이 아니라 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다.
                 val endingNames = aiResponse.storyEndings.map { it.name.take(STORY_ENDING_NAME_MAX_LENGTH) }
@@ -553,7 +556,7 @@ class SimpleStoryCreationService(
                             sortOrder = (index + 1).toShort(),
                         )
                     },
-                )
+                ).toList()
             }
 
             // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
@@ -570,10 +573,16 @@ class SimpleStoryCreationService(
                     oneLineIntro = story.oneLineIntro,
                     description = story.description,
                     genres = genreTags.map { it.name },
-                    startSetting = StoryStartSettingResponse(
-                        name = aiResponse.storyStartSettings.name,
-                        prologue = aiResponse.storyStartSettings.prologue,
-                        startSituation = aiResponse.storyStartSettings.startSituation,
+                    // 간편 제작은 시작 설정 1개다(KNK-515 복수화). 추천 입력·엔딩을 그 시작 설정에 종속시킨다.
+                    startSettings = listOf(
+                        StoryStartSettingResponse(
+                            id = startSetting.publicId.toString(),
+                            name = startSetting.name,
+                            prologue = startSetting.prologue,
+                            startSituation = startSetting.startSituation,
+                            suggestedInputs = savedSuggestedInputs,
+                            endings = savedEndings.map { it.toEndingResponse() },
+                        ),
                     ),
                 ),
                 aiCallLogId = recorded.aiCallLogId,

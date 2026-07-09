@@ -172,6 +172,55 @@ class ChatCreateControllerIntegrationTests {
     }
 
     @Test
+    fun `startSettingId를 지정하면 그 시작 설정으로 채팅이 시작된다`() {
+        // 시작 설정 복수화(KNK-515): 첫 시작 설정이 기본이지만, startSettingId를 주면 그 시작 설정으로 시작한다.
+        val story = storyRepository.save(Story(title = "복수 시작 설정", genre = "판타지"))
+        storyStartSettingRepository.save(
+            StoryStartSetting(story = story, name = "첫 시작", prologue = "첫 프롤로그", startSituation = "첫 상황"),
+        )
+        val second = storyStartSettingRepository.save(
+            StoryStartSetting(story = story, name = "둘째 시작", prologue = "둘째 프롤로그", startSituation = "둘째 상황"),
+        )
+        storySuggestedInputRepository.save(
+            StorySuggestedInput(startSetting = second, inputText = "둘째의 추천", inputOrder = 1),
+        )
+
+        val response = restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}","startSettingId":"${second.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(CreateChatResponse::class.java)
+            .returnResult()
+            .responseBody!!
+
+        assertThat(response.prologue).isEqualTo("둘째 프롤로그")
+        assertThat(response.suggestedInputs).containsExactly("둘째의 추천")
+        assertThat(storyChatRepository.findAll().single().startSettingId).isEqualTo(second.id)
+    }
+
+    @Test
+    fun `이 스토리에 속하지 않는 startSettingId로 채팅을 생성하면 404다`() {
+        // 조용한 폴백 금지(KNK-515): 지정한 시작 설정이 이 스토리 소속이 아니면 404다.
+        val story = storyRepository.save(Story(title = "스토리 A"))
+        storyStartSettingRepository.save(StoryStartSetting(story = story, name = "A의 시작"))
+        val otherStory = storyRepository.save(Story(title = "스토리 B"))
+        val foreign = storyStartSettingRepository.save(StoryStartSetting(story = otherStory, name = "B의 시작"))
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}","startSettingId":"${foreign.publicId}"}""")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.message").isEqualTo("시작 설정을 찾을 수 없습니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
     fun `존재하지 않는 스토리로 채팅을 생성하면 404로 응답한다`() {
         val missing = java.util.UUID.randomUUID()
         restTestClient.post()

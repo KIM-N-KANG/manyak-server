@@ -92,7 +92,8 @@ Accept: application/json
         client.assert(Boolean(item.title), "title이 없습니다.");
         client.assert(typeof item.oneLineIntro === "string", "oneLineIntro가 없습니다.");
         client.assert(Array.isArray(item.genres) && item.genres.indexOf("다크 판타지") >= 0, `genres에 '다크 판타지'가 없습니다. actual=${JSON.stringify(item.genres)}`);
-        client.assert(item.chatCount === 0 && item.likeCount === 0, "chatCount/likeCount는 0이어야 합니다.");
+        // [KNK-515] chatCount→turnCount(스토리 채팅 current_turn 합, 채팅 없으면 0).
+        client.assert(item.turnCount === 0 && item.likeCount === 0, "turnCount/likeCount는 채팅 없으면 0이어야 합니다.");
         client.assert(item.status === "PUBLISHED", "status는 PUBLISHED여야 합니다.");
     });
 %}

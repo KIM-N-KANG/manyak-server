@@ -96,13 +96,15 @@ class StoryLorebookEndingControllerIntegrationTests {
             .jsonPath("$.lorebooks[0].genre").isEqualTo("다크 판타지")
             .jsonPath("$.lorebooks[0].content").isEqualTo("아르덴: 몰락한 왕국")
             .jsonPath("$.lorebooks[1].name").isEqualTo("마법 용어집")
-            .jsonPath("$.endings.length()").isEqualTo(2)
-            .jsonPath("$.endings[0].name").isEqualTo("해피 엔딩")
-            .jsonPath("$.endings[0].requirement.minTurns").isEqualTo(10)
-            .jsonPath("$.endings[0].requirement.achievementCondition").isEqualTo("왕좌를 되찾는다")
-            .jsonPath("$.endings[0].epilogue").isEqualTo("대관식을 연다")
-            .jsonPath("$.endings[1].name").isEqualTo("배드 엔딩")
-            .jsonPath("$.endings[1].requirement.minTurns").isEqualTo(5)
+            // 엔딩은 시작 설정 스코프로 중첩된다(KNK-515 복수화). 로어북은 스토리 스코프로 top-level 유지.
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings.length()").isEqualTo(2)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("해피 엔딩")
+            .jsonPath("$.startSettings[0].endings[0].requirement.minTurns").isEqualTo(10)
+            .jsonPath("$.startSettings[0].endings[0].requirement.achievementCondition").isEqualTo("왕좌를 되찾는다")
+            .jsonPath("$.startSettings[0].endings[0].epilogue").isEqualTo("대관식을 연다")
+            .jsonPath("$.startSettings[0].endings[1].name").isEqualTo("배드 엔딩")
+            .jsonPath("$.startSettings[0].endings[1].requirement.minTurns").isEqualTo(5)
     }
 
     @Test
@@ -115,7 +117,8 @@ class StoryLorebookEndingControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.lorebooks.length()").isEqualTo(0)
-            .jsonPath("$.endings.length()").isEqualTo(0)
+            // 시작 설정이 없으면 엔딩을 담을 시작 설정도 없다(엔딩은 시작 설정 스코프, KNK-515).
+            .jsonPath("$.startSettings.length()").isEqualTo(0)
     }
 
     @Test

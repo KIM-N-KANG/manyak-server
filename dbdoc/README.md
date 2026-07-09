@@ -11,7 +11,7 @@
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
 | [public.stories](public.stories.md) | 12 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
-| [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
+| [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 16 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
@@ -42,7 +42,7 @@ erDiagram
 "public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_storyline_recommended_infos" }o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_start_settings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
@@ -141,6 +141,7 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid public_id
 }
 "public.story_suggested_inputs" {
   bigint id

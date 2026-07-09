@@ -90,22 +90,24 @@ Accept: application/json
         client.assert(b.genres.indexOf("다크 판타지") >= 0, `genres에 '다크 판타지'가 없습니다. actual=${JSON.stringify(b.genres)}`);
         client.assert(b.genres.indexOf("정치극") >= 0, `genres에 '정치극'이 없습니다. actual=${JSON.stringify(b.genres)}`);
     });
-    client.test("시작 정보와 추천 입력이 있다", () => {
-        client.assert(b.startSetting && Boolean(b.startSetting.name), "startSetting.name이 없습니다.");
-        client.assert(Array.isArray(b.suggestedInputs) && b.suggestedInputs.length > 0, "suggestedInputs가 비어 있습니다.");
+    client.test("시작 정보와 추천 입력이 있다(KNK-515 복수화: 추천 입력은 시작 설정에 중첩)", () => {
+        client.assert(Array.isArray(b.startSettings) && b.startSettings.length > 0, "startSettings가 비어 있습니다.");
+        client.assert(Boolean(b.startSettings[0].name), "startSettings[0].name이 없습니다.");
+        client.assert(Array.isArray(b.startSettings[0].suggestedInputs) && b.startSettings[0].suggestedInputs.length > 0, "startSettings[0].suggestedInputs가 비어 있습니다.");
     });
     client.test("MVP 기본값이 계약대로다", () => {
-        client.assert(b.coverImageUrl === null, "coverImageUrl은 null이어야 합니다.");
+        // [KNK-515] coverImageUrl→thumbnailUrl(값 null 유지), chatCount→turnCount(채팅 없으면 0).
+        client.assert(b.thumbnailUrl === null, "thumbnailUrl은 null이어야 합니다.");
         client.assert(b.author === null, "author는 null이어야 합니다.");
-        client.assert(b.chatCount === 0 && b.likeCount === 0, "chatCount/likeCount는 0이어야 합니다.");
+        client.assert(b.turnCount === 0 && b.likeCount === 0, "turnCount/likeCount는 채팅 없으면 0이어야 합니다.");
         client.assert(b.visibility === "PRIVATE", "visibility는 PRIVATE이어야 합니다.");
         client.assert(b.status === "PUBLISHED", "status는 PUBLISHED여야 합니다.");
     });
-    // [KNK-355] 로어북·엔딩은 항상 배열로 응답한다(없으면 빈 배열). 간편 제작 스토리는 참조 로어북·엔딩이
-    // 없으므로 여기서는 빈 배열이다. 값이 채워진 응답은 일반 제작(쓰기 API, 후속) 또는 수동 시드 후 확인한다.
-    client.test("lorebooks와 endings가 배열로 응답된다", () => {
+    // [KNK-355] 로어북은 스토리 스코프로 top-level 배열이다(없으면 빈 배열).
+    // [KNK-515] 엔딩은 시작 설정 스코프로 중첩된다(startSettings[].endings). 각 시작 설정마다 배열이다.
+    client.test("lorebooks는 top-level 배열, endings는 시작 설정에 중첩된 배열이다", () => {
         client.assert(Array.isArray(b.lorebooks), `lorebooks가 배열이 아닙니다. actual=${JSON.stringify(b.lorebooks)}`);
-        client.assert(Array.isArray(b.endings), `endings가 배열이 아닙니다. actual=${JSON.stringify(b.endings)}`);
+        client.assert(Array.isArray(b.startSettings[0].endings), `startSettings[0].endings가 배열이 아닙니다. actual=${JSON.stringify(b.startSettings[0].endings)}`);
     });
 
     // [KNK-523] reachedEndings: 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(엔딩은 이름으로 식별). 게스트·미도달이면 빈 배열.

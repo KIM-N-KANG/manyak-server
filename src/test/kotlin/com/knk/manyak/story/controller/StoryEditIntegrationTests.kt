@@ -90,11 +90,14 @@ class StoryEditIntegrationTests {
             .jsonPath("$.genres.length()").isEqualTo(2)
             .jsonPath("$.storySettings.worldSetting").isEqualTo("몰락한 왕국")
             .jsonPath("$.storySettings.ruleSetting").isEqualTo("규칙")
-            .jsonPath("$.startSetting.name").isEqualTo("장례식 날")
-            .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
+            // 시작 설정 복수화(KNK-515): 추천 입력·엔딩은 각 시작 설정에 중첩된다. 주요 사건은 스토리 스코프로 top-level.
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].id").isNotEmpty
+            .jsonPath("$.startSettings[0].name").isEqualTo("장례식 날")
+            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(3)
             .jsonPath("$.mainEvents[0].name").isEqualTo("편지 발견")
-            .jsonPath("$.endings[0].name").isEqualTo("왕좌를 되찾다")
-            .jsonPath("$.endings[0].requirement.minTurns").isEqualTo(10)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("왕좌를 되찾다")
+            .jsonPath("$.startSettings[0].endings[0].requirement.minTurns").isEqualTo(10)
     }
 
     @Test
@@ -133,26 +136,115 @@ class StoryEditIntegrationTests {
     }
 
     @Test
-    fun `부분 갱신은 보낸 필드만 교체하고 나머지는 유지한다`() {
+    fun `부분 갱신은 보낸 필드만 교체하고 id 매칭 시작 설정은 identity 보존 후 자식 전체 교체한다`() {
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        val internalIdBefore = startSetting.id
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "title": "새 제목",
+                  "startSettings": [
+                    {
+                      "id": "${startSetting.publicId}",
+                      "name": "장례식 날",
+                      "prologue": "비가 내린다",
+                      "startSituation": "늦은 밤",
+                      "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
+                      "endings": [ {"name":"새 엔딩","requirement":{"minTurns":3,"achievementCondition":"조건"},"epilogue":"에필로그"} ]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.title").isEqualTo("새 제목")
+            // 보내지 않은 스토리 설정은 유지된다.
+            .jsonPath("$.storySettings.worldSetting").isEqualTo("몰락한 왕국")
+            // id 매칭이면 같은 시작 설정을 in-place 갱신하고, 추천 입력·엔딩은 전체 교체된다.
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].id").isEqualTo(startSetting.publicId.toString())
+            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(3)
+            .jsonPath("$.startSettings[0].endings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("새 엔딩")
+            .jsonPath("$.startSettings[0].endings[0].requirement.minTurns").isEqualTo(3)
+
+        assertEquals("새 제목", storyRepository.findById(story.id).get().title)
+        // id 매칭 in-place 갱신이므로 시작 설정 행 identity(내부 id)가 보존된다(진행 중 채팅의 start_setting_id 참조 유지).
+        val afterSync = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        assertEquals(internalIdBefore, afterSync.id)
+    }
+
+    @Test
+    fun `id 없는 시작 설정은 신규 추가되고 요청에서 빠진 기존은 삭제된다`() {
+        val story = seedStory(userId = null)
+        val existing = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+
+        // 기존(id 지정) 대신 id 없는 새 시작 설정 하나만 보내면: 기존은 삭제, 새것 1개만 남는다.
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "startSettings": [
+                    {
+                      "name": "새 시작",
+                      "prologue": "새 프롤로그",
+                      "startSituation": "새 상황",
+                      "suggestedInputs": ["가", "나", "다"],
+                      "endings": []
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].name").isEqualTo("새 시작")
+
+        val remaining = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id)
+        assertEquals(1, remaining.size)
+        // 기존 시작 설정 행은 삭제되고 새 행으로 교체됐다(내부 id·publicId 모두 달라짐).
+        assertEquals(false, remaining.single().publicId == existing.publicId)
+        // 삭제된 시작 설정의 자식(추천 입력·엔딩)도 함께 정리된다.
+        assertEquals(0, storyEndingRepository.findAll().count { it.startSetting.id == existing.id })
+        assertEquals(0, storySuggestedInputRepository.findAll().count { it.startSetting.id == existing.id })
+    }
+
+    @Test
+    fun `이 스토리에 속하지 않는 시작 설정 id로 수정하면 400이다`() {
         val story = seedStory(userId = null)
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{ "title": "새 제목", "endings": [ {"name":"새 엔딩","requirement":{"minTurns":3,"achievementCondition":"조건"},"epilogue":"에필로그"} ] }""")
+            .body(
+                """
+                {
+                  "startSettings": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000000",
+                      "name": "남의 시작",
+                      "prologue": "p",
+                      "startSituation": "s",
+                      "suggestedInputs": ["가", "나", "다"],
+                      "endings": []
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
             .exchange()
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.title").isEqualTo("새 제목")
-            // 보내지 않은 필드는 유지된다.
-            .jsonPath("$.storySettings.worldSetting").isEqualTo("몰락한 왕국")
-            .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
-            // 엔딩은 전체 교체된다.
-            .jsonPath("$.endings.length()").isEqualTo(1)
-            .jsonPath("$.endings[0].name").isEqualTo("새 엔딩")
-            .jsonPath("$.endings[0].requirement.minTurns").isEqualTo(3)
-
-        assertEquals("새 제목", storyRepository.findById(story.id).get().title)
+            .expectStatus().isBadRequest
     }
 
     @Test
@@ -171,13 +263,41 @@ class StoryEditIntegrationTests {
     }
 
     @Test
-    fun `추천 입력을 3개가 아닌 값으로 보내면 400이다`() {
+    fun `요청 내 시작 설정 id가 중복되면 400이고 저장되지 않는다`() {
+        // 전체 교체 계약에서 중복 id는 같은 행을 두 번 덮어 하나를 조용히 잃으므로 400으로 거부한다(silent wipe 방지).
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "startSettings": [
+                    { "id": "${startSetting.publicId}", "name": "A", "prologue": "p", "startSituation": "s", "suggestedInputs": ["가","나","다"], "endings": [] },
+                    { "id": "${startSetting.publicId}", "name": "B", "prologue": "p", "startSituation": "s", "suggestedInputs": ["가","나","다"], "endings": [] }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+
+        // 원본 시작 설정은 그대로 보존된다.
+        assertEquals("장례식 날", storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single().name)
+    }
+
+    @Test
+    fun `시작 설정의 추천 입력을 3개가 아닌 값으로 보내면 400이다`() {
         val story = seedStory(userId = null)
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{ "suggestedInputs": ["하나", "둘"] }""")
+            .body(
+                """{ "startSettings": [ {"name":"n","prologue":"p","startSituation":"s","suggestedInputs":["하나","둘"],"endings":[]} ] }""",
+            )
             .exchange()
             .expectStatus().isBadRequest
     }

@@ -48,8 +48,8 @@ data class StorySummaryResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
@@ -66,8 +66,8 @@ data class StoryDetailResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "커버 이미지 URL", example = "https://example.com/covers/moon-contract.png")
-    val coverImageUrl: String?,
+    @field:Schema(description = "썸네일 이미지 URL(§4-3-9). 소스가 없으면 null.", example = "https://example.com/thumbnails/moon-contract.png", nullable = true)
+    val thumbnailUrl: String?,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
@@ -93,20 +93,20 @@ data class StoryDetailResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
 
-    @field:Schema(description = "스토리 시작 설정. 시작 설정이 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
-    val startSetting: StoryStartSettingResponse?,
-
     @field:ArraySchema(
-        schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
-        arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
+        schema = Schema(implementation = StoryStartSettingResponse::class),
+        arraySchema = Schema(
+            description = "스토리 시작 설정 목록(등록 순서, KNK-515 복수화). 각 시작 설정에 추천 입력·엔딩이 종속된다. " +
+                "시작 설정이 없는 스토리는 빈 배열입니다.",
+        ),
     )
-    val suggestedInputs: List<String>,
+    val startSettings: List<StoryStartSettingResponse>,
 
     @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,
@@ -119,12 +119,6 @@ data class StoryDetailResponse(
         arraySchema = Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전) 목록. 없으면 빈 배열입니다."),
     )
     val lorebooks: List<LorebookResponse>,
-
-    @field:ArraySchema(
-        schema = Schema(implementation = StoryEndingResponse::class),
-        arraySchema = Schema(description = "스토리 엔딩 목록. 없으면 빈 배열입니다."),
-    )
-    val endings: List<StoryEndingResponse>,
 
     @field:ArraySchema(
         schema = Schema(implementation = StoryMainEventResponse::class),
@@ -202,14 +196,35 @@ data class StoryAuthorResponse(
     val profileImageUrl: String?,
 )
 
-@Schema(description = "스토리 시작 설정")
+@Schema(description = "스토리 시작 설정. 추천 입력·엔딩이 이 시작 설정에 종속된다(KNK-515 복수화).")
 data class StoryStartSettingResponse(
+    @field:Schema(
+        description = "시작 설정 ID(공개 식별자). POST /chats의 startSettingId로 이 값을 넘겨 특정 시작 설정으로 채팅을 시작한다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    )
+    val id: String,
+
     @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
     val name: String,
 
-    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...")
+    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...", nullable = true)
     val prologue: String?,
 
-    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
+    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...", nullable = true)
     val startSituation: String?,
+
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
+        arraySchema = Schema(
+            description = "이 시작 설정의 추천 입력 목록. 등록된 추천 입력이 없으면 빈 배열입니다.",
+            example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]""",
+        ),
+    )
+    val suggestedInputs: List<String>,
+
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryEndingResponse::class),
+        arraySchema = Schema(description = "이 시작 설정의 엔딩 목록. 없으면 빈 배열입니다."),
+    )
+    val endings: List<StoryEndingResponse>,
 )

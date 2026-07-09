@@ -1,11 +1,10 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.story.dto.GeneralStartSettingInput
 import com.knk.manyak.story.dto.StoryEditFormResponse
 import com.knk.manyak.story.dto.StoryEditSettingsResponse
-import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.UpdateStoryRequest
-import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
@@ -39,6 +38,7 @@ class StoryEditService(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    private val startSettingResponseAssembler: StartSettingResponseAssembler,
 ) {
 
     @Transactional(readOnly = true)
@@ -77,31 +77,7 @@ class StoryEditService(
             storySettingRepository.save(setting)
         }
 
-        // 시작 설정 — 없으면 생성, 있으면 교체.
-        request.startSetting?.let { input ->
-            val startSetting = storyStartSettingRepository.findByStoryId(story.id) ?: StoryStartSetting(story = story)
-            startSetting.name = input.name
-            startSetting.prologue = input.prologue
-            startSetting.startSituation = input.startSituation
-            storyStartSettingRepository.save(startSetting)
-        }
-
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
-
-        // 추천 입력 전체 교체(inputOrder 1-based). 시작 설정이 없으면 저장 대상이 없어 400.
-        request.suggestedInputs?.let { inputs ->
-            val ss = requireStartSetting(startSetting, "추천 입력")
-            val existing = storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(ss.id)
-            storySuggestedInputRepository.deleteAll(existing)
-            storySuggestedInputRepository.flush()
-            storySuggestedInputRepository.saveAll(
-                inputs.mapIndexed { index, text ->
-                    StorySuggestedInput(startSetting = ss, inputText = text, inputOrder = (index + 1).toShort())
-                },
-            )
-        }
-
-        // 주요 사건 전체 교체(sort_order 0-based).
+        // 주요 사건 전체 교체(sort_order 0-based, 스토리 스코프).
         request.mainEvents?.let { events ->
             requireDistinctMainEventNames(events.map { it.name })
             val existing = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
@@ -120,16 +96,77 @@ class StoryEditService(
             )
         }
 
-        // 엔딩 전체 교체(sort_order 1-based). 레거시(enabled=false)까지 지워 유니크 충돌을 피한다.
-        request.endings?.let { endings ->
-            requireDistinctEndingNames(endings.map { it.name })
-            val ss = requireStartSetting(startSetting, "엔딩")
-            // 벌크 DELETE는 즉시 실행돼 재삽입과 유니크 충돌하지 않는다(엔티티 미로드로 레거시 NPE도 회피).
-            storyEndingRepository.deleteByStartSettingId(ss.id)
+        // 시작 설정 전체 교체(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정에 종속되므로 함께 동기화한다.
+        request.startSettings?.let { inputs -> syncStartSettings(story, inputs) }
+
+        return buildEditForm(story)
+    }
+
+    /**
+     * 시작 설정 컬렉션을 요청과 동기화한다(전체 교체). 각 원소의 id(공개 식별자)가 기존과 일치하면 in-place 갱신해
+     * 시작 설정 행 identity를 보존하고(진행 중 채팅의 start_setting_id 참조 유지), 없으면 신규 추가, 요청에서 빠진
+     * 기존은 자식(추천 입력·엔딩)과 함께 삭제한다. 삭제된 시작 설정을 참조하던 채팅은 FK(ON DELETE SET NULL)로 해제된다.
+     * 존재하지 않거나 이 스토리 소속이 아닌 id를 지목하면 400이다(조용한 무시 금지).
+     */
+    private fun syncStartSettings(story: Story, inputs: List<GeneralStartSettingInput>) {
+        val existing = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id)
+        val existingByPublicId = existing.associateBy { it.publicId }
+
+        // 요청 내 시작 설정 id 중복은 전체 교체를 모호하게 만든다: 같은 행을 두 번 덮어 뒤엣것만 남고 앞엣것이 조용히 유실된다.
+        // 엔딩·주요 사건 이름 유니크와 같은 불변식으로, 중복 id는 저장하지 않고 400으로 거부한다(silent wipe 방지).
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parseStartSettingPublicIdOrNull) }
+        if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "시작 설정 ID는 요청 내에서 중복될 수 없습니다.")
+        }
+
+        // 각 입력을 기존 시작 설정(id 매칭) 또는 신규(null)로 해소한다. 매칭 안 되는 id는 400(없거나 이 스토리 소속 아님).
+        val resolved = inputs.map { input ->
+            val match = input.id?.let { raw ->
+                val publicId = parseStartSettingPublicIdOrNull(raw)
+                existingByPublicId[publicId]
+                    ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리에 속하지 않는 시작 설정 ID입니다.")
+            }
+            input to match
+        }
+        val keptIds = resolved.mapNotNull { it.second?.id }.toSet()
+
+        // 요청에서 빠진 기존 시작 설정은 자식(추천 입력·엔딩)까지 삭제한다.
+        existing.filter { it.id !in keptIds }.forEach { removed ->
+            storySuggestedInputRepository.deleteByStartSettingId(removed.id)
+            storyEndingRepository.deleteByStartSettingId(removed.id)
+            storyStartSettingRepository.delete(removed)
+        }
+        storyStartSettingRepository.flush()
+
+        // upsert: 매칭이면 in-place 갱신, 없으면 신규. 각 시작 설정의 추천 입력·엔딩은 전체 교체한다.
+        resolved.forEach { (input, match) ->
+            val startSetting = (match ?: StoryStartSetting(story = story)).apply {
+                name = input.name
+                prologue = input.prologue
+                startSituation = input.startSituation
+            }
+            val saved = storyStartSettingRepository.save(startSetting)
+            replaceStartSettingChildren(saved, input)
+        }
+    }
+
+    /** 시작 설정 하나의 추천 입력·엔딩을 전체 교체한다. 벌크 DELETE는 즉시 실행돼 재삽입과 유니크 충돌하지 않는다. */
+    private fun replaceStartSettingChildren(startSetting: StoryStartSetting, input: GeneralStartSettingInput) {
+        // 추천 입력 전체 교체(input_order 1-based).
+        storySuggestedInputRepository.deleteByStartSettingId(startSetting.id)
+        storySuggestedInputRepository.saveAll(
+            input.suggestedInputs.mapIndexed { index, text ->
+                StorySuggestedInput(startSetting = startSetting, inputText = text, inputOrder = (index + 1).toShort())
+            },
+        )
+        // 엔딩 전체 교체(sort_order 1-based). 이름 유니크(시작 설정 내). 레거시(enabled=false)까지 지워 유니크 충돌을 피한다.
+        requireDistinctEndingNames(input.endings.map { it.name })
+        storyEndingRepository.deleteByStartSettingId(startSetting.id)
+        if (input.endings.isNotEmpty()) {
             storyEndingRepository.saveAll(
-                endings.mapIndexed { index, item ->
+                input.endings.mapIndexed { index, item ->
                     StoryEnding(
-                        startSetting = ss,
+                        startSetting = startSetting,
                         name = item.name,
                         minTurns = item.requirement.minTurns,
                         achievementCondition = item.requirement.achievementCondition,
@@ -139,24 +176,22 @@ class StoryEditService(
                 },
             )
         }
-
-        return buildEditForm(story)
     }
+
+    /** 시작 설정 공개 식별자(UUID 문자열)를 파싱한다. 형식 오류는 null로 반환해 호출부에서 400 처리한다. */
+    private fun parseStartSettingPublicIdOrNull(raw: String): UUID? =
+        try {
+            UUID.fromString(raw)
+        } catch (ignored: IllegalArgumentException) {
+            null
+        }
 
     private fun buildEditForm(story: Story): StoryEditFormResponse {
         val setting = storySettingRepository.findByStoryId(story.id)
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
-        val suggestedInputs = startSetting
-            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
-            ?.map { it.inputText }
-            ?: emptyList()
+        // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
+        val startSettings = startSettingResponseAssembler.assemble(story.id)
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
-        // 활성 엔딩만 노출한다(레거시 enabled=false 제외 — §4-3-8).
-        val endings = startSetting
-            ?.let { storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(it.id) }
-            ?.map { it.toEndingResponse() }
-            ?: emptyList()
 
         return StoryEditFormResponse(
             title = story.title,
@@ -169,12 +204,8 @@ class StoryEditService(
                 userRoleSetting = setting?.userRoleSetting,
                 ruleSetting = setting?.ruleSetting,
             ),
-            startSetting = startSetting?.let {
-                StoryStartSettingResponse(name = it.name, prologue = it.prologue, startSituation = it.startSituation)
-            },
-            suggestedInputs = suggestedInputs,
+            startSettings = startSettings,
             mainEvents = mainEvents,
-            endings = endings,
         )
     }
 
@@ -187,12 +218,6 @@ class StoryEditService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 수정할 권한이 없습니다.")
         }
     }
-
-    private fun requireStartSetting(startSetting: StoryStartSetting?, field: String): StoryStartSetting =
-        startSetting ?: throw ResponseStatusException(
-            HttpStatus.BAD_REQUEST,
-            "시작 설정이 없어 ${field}을(를) 저장할 수 없습니다.",
-        )
 
     /** 공개 식별자(UUID 문자열)로 스토리를 조회한다(조회용). 형식 오류·없음·삭제는 모두 404로 통일한다(IDOR 차단). */
     private fun resolveStory(publicId: String): Story =

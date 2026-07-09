@@ -59,17 +59,19 @@ class GeneralStoryCreationIntegrationTests {
                 "userRoleSetting": "과거를 쫓는 추적자",
                 "ruleSetting": "마법은 대가를 요구한다"
               },
-              "startSetting": {
-                "name": "선왕의 장례식 날",
-                "prologue": "잿빛 비가 사흘째 왕성을 적신다",
-                "startSituation": "장례식이 끝난 늦은 밤"
-              },
-              "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"],
+              "startSettings": [
+                {
+                  "name": "선왕의 장례식 날",
+                  "prologue": "잿빛 비가 사흘째 왕성을 적신다",
+                  "startSituation": "장례식이 끝난 늦은 밤",
+                  "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"],
+                  "endings": [
+                    {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "반란군을 규합해 왕좌를 되찾는다"}, "epilogue": "대관식을 장엄하게 묘사한다"}
+                  ]
+                }
+              ],
               "mainEvents": [
                 {"name": "편지 발견", "description": "다락방에서 봉인된 편지를 찾는다", "keySentence": "봉인된 편지를 연다"}
-              ],
-              "endings": [
-                {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "반란군을 규합해 왕좌를 되찾는다"}, "epilogue": "대관식을 장엄하게 묘사한다"}
               ]
             }
         """.trimIndent()
@@ -102,8 +104,12 @@ class GeneralStoryCreationIntegrationTests {
             .jsonPath("$.id").isNotEmpty
             .jsonPath("$.title").isEqualTo("달빛 아래의 계약")
             .jsonPath("$.genres.length()").isEqualTo(2)
-            .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
-            .jsonPath("$.startSetting.startSituation").isEqualTo("장례식이 끝난 늦은 밤")
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].id").isNotEmpty
+            .jsonPath("$.startSettings[0].name").isEqualTo("선왕의 장례식 날")
+            .jsonPath("$.startSettings[0].startSituation").isEqualTo("장례식이 끝난 늦은 밤")
+            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(3)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("왕좌를 되찾다")
 
         val story = storyRepository.findAll().single()
         assertNull(story.userId)
@@ -137,11 +143,13 @@ class GeneralStoryCreationIntegrationTests {
             .expectBody()
             .jsonPath("$.mainEvents.length()").isEqualTo(1)
             .jsonPath("$.mainEvents[0].name").isEqualTo("편지 발견")
-            .jsonPath("$.endings.length()").isEqualTo(1)
-            .jsonPath("$.endings[0].name").isEqualTo("왕좌를 되찾다")
-            .jsonPath("$.endings[0].requirement.minTurns").isEqualTo(10)
-            .jsonPath("$.endings[0].requirement.achievementCondition").isEqualTo("반란군을 규합해 왕좌를 되찾는다")
-            .jsonPath("$.endings[0].epilogue").isEqualTo("대관식을 장엄하게 묘사한다")
+            // 엔딩은 시작 설정 스코프로 중첩된다(KNK-515 복수화). 주요 사건은 스토리 스코프로 top-level 유지.
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("왕좌를 되찾다")
+            .jsonPath("$.startSettings[0].endings[0].requirement.minTurns").isEqualTo(10)
+            .jsonPath("$.startSettings[0].endings[0].requirement.achievementCondition").isEqualTo("반란군을 규합해 왕좌를 되찾는다")
+            .jsonPath("$.startSettings[0].endings[0].epilogue").isEqualTo("대관식을 장엄하게 묘사한다")
     }
 
     @Test
@@ -205,6 +213,29 @@ class GeneralStoryCreationIntegrationTests {
             .body(invalid)
             .exchange()
             .expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `시작 설정이 비어 있으면 400이다`() {
+        // 시작 설정 복수화(KNK-515): 최소 1개 이상이어야 한다(빈 배열 400).
+        val invalid = """
+            {
+              "title": "제목",
+              "oneLineIntro": "소개",
+              "genres": ["판타지"],
+              "storySettings": {"worldSetting":"w","characterSetting":"c","userRoleSetting":"u","ruleSetting":"r"},
+              "startSettings": []
+            }
+        """.trimIndent()
+
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(invalid)
+            .exchange()
+            .expectStatus().isBadRequest
+
+        assertEquals(0, storyRepository.findAll().size)
     }
 
     @Test

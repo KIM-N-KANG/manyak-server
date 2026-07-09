@@ -384,8 +384,10 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.genres.length()").isEqualTo(2)
             .jsonPath("$.genres[0]").isEqualTo("다크 판타지")
             .jsonPath("$.genres[1]").isEqualTo("정치극")
-            .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].name").isEqualTo("선왕의 장례식 날")
             .jsonPath("$.settings").doesNotExist()
+            // 추천 입력은 최상위가 아니라 시작 설정에 중첩된다(KNK-515 복수화).
             .jsonPath("$.suggestedInputs").doesNotExist()
 
         val compileRequest = storyAiClient.lastCompileRequest

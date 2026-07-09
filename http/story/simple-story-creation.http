@@ -349,9 +349,11 @@ Accept: application/json
         client.assert(response.body.storyId === undefined, "storyId는 id로 통일되어 제거되어야 합니다.");
         client.assert(Boolean(response.body.title), "title이 없습니다.");
         client.assert(Array.isArray(response.body.genres), "genres 배열이 없습니다.");
-        client.assert(Boolean(response.body.startSetting && response.body.startSetting.name), "startSetting.name이 없습니다.");
+        // [KNK-515] 시작 설정 복수화: 응답은 startSettings[](간편 제작은 1개). 추천 입력은 그 시작 설정에 중첩된다.
+        client.assert(Array.isArray(response.body.startSettings) && response.body.startSettings.length === 1, "startSettings가 1개가 아닙니다.");
+        client.assert(Boolean(response.body.startSettings[0].name), "startSettings[0].name이 없습니다.");
         client.assert(response.body.settings === undefined, "settings는 응답에서 제거되어야 합니다.");
-        client.assert(response.body.suggestedInputs === undefined, "suggestedInputs는 응답에서 제거되어야 합니다.");
+        client.assert(response.body.suggestedInputs === undefined, "top-level suggestedInputs는 제거되고 시작 설정에 중첩되어야 합니다.");
     });
 
     if (response.status === 201 && response.body.id) {
@@ -378,12 +380,14 @@ Accept: application/json
         client.assert(Boolean(response.body.mainEvents[0].keySentence), "주요 사건 keySentence가 없습니다.");
     });
 
-    client.test("컴파일 엔딩이 상세에 반영된다", () => {
-        client.assert(Array.isArray(response.body.endings), "endings 배열이 없습니다.");
-        client.assert(response.body.endings.length === 3, `스텁 기준 엔딩은 3개여야 합니다. actual=${response.body.endings.length}`);
-        client.assert(Boolean(response.body.endings[0].name), "엔딩 name이 없습니다.");
-        client.assert(typeof response.body.endings[0].requirement.minTurns === "number", "엔딩 requirement.minTurns가 없습니다.");
-        client.assert(Boolean(response.body.endings[0].epilogue), "엔딩 epilogue가 없습니다.");
+    client.test("컴파일 엔딩이 상세의 시작 설정에 중첩돼 반영된다(KNK-515)", () => {
+        client.assert(Array.isArray(response.body.startSettings) && response.body.startSettings.length === 1, "startSettings가 1개가 아닙니다.");
+        const endings = response.body.startSettings[0].endings;
+        client.assert(Array.isArray(endings), "startSettings[0].endings 배열이 없습니다.");
+        client.assert(endings.length === 3, `스텁 기준 엔딩은 3개여야 합니다. actual=${endings.length}`);
+        client.assert(Boolean(endings[0].name), "엔딩 name이 없습니다.");
+        client.assert(typeof endings[0].requirement.minTurns === "number", "엔딩 requirement.minTurns가 없습니다.");
+        client.assert(Boolean(endings[0].epilogue), "엔딩 epilogue가 없습니다.");
     });
 
     client.test("로어북 필드는 배열이다(시드 없으면 빈 배열)", () => {

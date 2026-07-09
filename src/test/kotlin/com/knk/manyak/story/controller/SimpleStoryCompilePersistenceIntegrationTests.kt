@@ -160,7 +160,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(savedEvents.map { it.sortOrder.toInt() }).containsExactly(0, 1, 2)
 
         // 엔딩은 시작 설정 스코프, sort_order 1-based(ck_story_endings_order > 0).
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)!!
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)!!
         val savedEndings = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
         assertThat(savedEndings.map { it.name }).containsExactly("해피", "노말", "배드")
         assertThat(savedEndings.map { it.minTurns }).containsExactly(5, 4, 3)
