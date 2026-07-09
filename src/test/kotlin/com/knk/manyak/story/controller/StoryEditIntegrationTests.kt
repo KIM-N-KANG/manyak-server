@@ -263,6 +263,32 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `요청 내 시작 설정 id가 중복되면 400이고 저장되지 않는다`() {
+        // 전체 교체 계약에서 중복 id는 같은 행을 두 번 덮어 하나를 조용히 잃으므로 400으로 거부한다(silent wipe 방지).
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "startSettings": [
+                    { "id": "${startSetting.publicId}", "name": "A", "prologue": "p", "startSituation": "s", "suggestedInputs": ["가","나","다"], "endings": [] },
+                    { "id": "${startSetting.publicId}", "name": "B", "prologue": "p", "startSituation": "s", "suggestedInputs": ["가","나","다"], "endings": [] }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+
+        // 원본 시작 설정은 그대로 보존된다.
+        assertEquals("장례식 날", storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single().name)
+    }
+
+    @Test
     fun `시작 설정의 추천 입력을 3개가 아닌 값으로 보내면 400이다`() {
         val story = seedStory(userId = null)
 

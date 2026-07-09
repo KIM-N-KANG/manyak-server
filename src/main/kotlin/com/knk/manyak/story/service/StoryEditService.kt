@@ -112,6 +112,13 @@ class StoryEditService(
         val existing = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id)
         val existingByPublicId = existing.associateBy { it.publicId }
 
+        // 요청 내 시작 설정 id 중복은 전체 교체를 모호하게 만든다: 같은 행을 두 번 덮어 뒤엣것만 남고 앞엣것이 조용히 유실된다.
+        // 엔딩·주요 사건 이름 유니크와 같은 불변식으로, 중복 id는 저장하지 않고 400으로 거부한다(silent wipe 방지).
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parseStartSettingPublicIdOrNull) }
+        if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "시작 설정 ID는 요청 내에서 중복될 수 없습니다.")
+        }
+
         // 각 입력을 기존 시작 설정(id 매칭) 또는 신규(null)로 해소한다. 매칭 안 되는 id는 400(없거나 이 스토리 소속 아님).
         val resolved = inputs.map { input ->
             val match = input.id?.let { raw ->
