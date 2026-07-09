@@ -13,10 +13,9 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
-import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -38,7 +37,7 @@ class ChatTurnPersister(
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
-    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    private val endingReachRecorder: EndingReachRecorder,
 ) {
 
     // 이력 선택지 스냅샷 직렬화용. 컨텍스트 ObjectMapper 빈에 의존하지 않도록 로컬 인스턴스를 둔다(List<String> 직렬화만 사용).
@@ -116,6 +115,10 @@ class ChatTurnPersister(
     /**
      * AI가 이름으로 지목한 도달 엔딩을 채팅의 시작 설정 스코프에서 id로 해소한다.
      * 시작 설정이 없거나 이미 도달한 채팅이면 null(최초 1회 가드는 요청 단계에서 후보를 비워 이미 걸리지만 방어적으로 재확인).
+     *
+     * 최소 턴 수는 백엔드가 결정적으로 판정하는 하드 조건이다(§4-3-10). loadEligibleEndings가 요청 후보를 거르지만
+     * 권위 있는 write-side 가드가 아니므로, AI가 아직 문턱을 넘지 않은 엔딩 이름을 잘못/앞질러 보내도 여기서 재확인해
+     * 이번 턴(current_turn + 1)이 min_turns를 충족할 때만 도달로 인정한다(환각·stale로 조기 ENDED·도달 기록 방지).
      */
     private fun resolveReachedEnding(chat: StoryChat, endingName: String?): ReachedEnding? {
         val startSettingId = chat.startSettingId
@@ -125,6 +128,9 @@ class ChatTurnPersister(
         val ending = storyEndingRepository
             .findFirstByStartSettingIdAndNameAndEnabledTrue(startSettingId, endingName)
             ?: return null
+        if (ending.minTurns > chat.currentTurn + 1) {
+            return null
+        }
         return ReachedEnding(id = ending.id, name = ending.name)
     }
 
@@ -153,20 +159,20 @@ class ChatTurnPersister(
         }
     }
 
-    /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계 upsert. 게스트는 집계하지 않는다. */
+    /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계. 게스트는 집계하지 않는다. */
     private fun applyEndingReach(chat: StoryChat, reachedEnding: ReachedEnding?) {
         if (reachedEnding == null) {
             return
         }
         chat.reachedEndingId = reachedEnding.id
         chat.status = ChatStatus.ENDED
-        val userId = chat.userId
-        if (userId != null &&
-            !userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, reachedEnding.id)
-        ) {
-            userStoryEndingReachRepository.save(
-                UserStoryEndingReach(userId = userId, storyId = chat.storyId, endingId = reachedEnding.id),
-            )
+        val userId = chat.userId ?: return
+        // 회원 도달 집계는 독립 트랜잭션에서 기록한다. 동시 도달로 유니크 위반이 나도 그 트랜잭션만 롤백되고
+        // 이 턴 저장은 유지된다. 위반은 다른 트랜잭션이 이미 같은 도달을 기록한 것이므로 멱등 결과로 흡수한다.
+        try {
+            endingReachRecorder.record(userId, chat.storyId, reachedEnding.id)
+        } catch (_: DataIntegrityViolationException) {
+            // 동시 도달로 (회원, 스토리, 엔딩)이 이미 기록됨 — 무시.
         }
     }
 

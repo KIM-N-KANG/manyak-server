@@ -180,6 +180,22 @@ class ChatTurnEndingMainEventIntegrationTests {
     }
 
     @Test
+    fun `AI가 min_turns 미충족 엔딩 이름을 보내도 도달로 인정하지 않는다`() {
+        // '머나먼'은 min_turns=5. 첫 턴(생성 턴=1)엔 백엔드 결정 문턱을 넘지 못하므로 write-side에서 도달을 거절한다.
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "아직 끝이 아니다.", choices = listOf("계속"), endingName = "머나먼")
+
+        streamGuest(chat.publicId.toString(), "먼 길을 떠난다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.reachedEndingId).isNull()
+        assertThat(updated.status).isEqualTo(ChatStatus.ACTIVE)
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        assertThat(assistant.reachedEndingId).isNull()
+    }
+
+    @Test
     fun `회원 엔딩 도달은 user_story_ending_reaches에 최초 1회 집계된다`() {
         val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
         creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")

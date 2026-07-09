@@ -522,11 +522,17 @@ class SimpleStoryCreationService(
 
             // 컴파일 산출물의 엔딩(시작 설정 스코프, sort_order 1-based, ck_story_endings_order > 0)을 저장한다.
             if (aiResponse.storyEndings.isNotEmpty()) {
+                // 저장 이름(방어적 절단 후)이 시작 설정 안에서 유니크여야 이름 기반 도달 매칭이 무모호하다(제작·수정과 동일 불변식).
+                // 중복은 사용자 입력이 아니라 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다.
+                val endingNames = aiResponse.storyEndings.map { it.name.take(STORY_ENDING_NAME_MAX_LENGTH) }
+                if (endingNames.size != endingNames.toSet().size) {
+                    throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 엔딩 이름이 중복됩니다.")
+                }
                 storyEndingRepository.saveAll(
                     aiResponse.storyEndings.mapIndexed { index, item ->
                         StoryEnding(
                             startSetting = startSetting,
-                            name = item.name.take(STORY_ENDING_NAME_MAX_LENGTH),
+                            name = endingNames[index],
                             minTurns = item.minTurns,
                             achievementCondition = item.achievementCondition,
                             epilogue = item.epilogue,

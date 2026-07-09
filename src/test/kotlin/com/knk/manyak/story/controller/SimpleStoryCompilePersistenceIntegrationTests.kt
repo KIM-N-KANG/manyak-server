@@ -70,6 +70,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             AiStoryEnding("노말", 4, "일상으로 돌아간다", "잔잔한 에필로그"),
             AiStoryEnding("배드", 3, "돌이킬 수 없는 파국을 맞는다", "비극적 에필로그"),
         )
+
+        // 특정 테스트가 엔딩 응답을 덮어쓸 수 있게 한다(이름 중복 케이스 등).
+        @Volatile
+        var endingsOverride: List<AiStoryEnding>? = null
     }
 
     @TestConfiguration
@@ -88,7 +92,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storyStartSettings = AiStoryStartSettings("시작", "상황", "프롤로그"),
                     storySuggestedInputs = listOf("추천1", "추천2", "추천3"),
                     storyMainEvents = mainEvents,
-                    storyEndings = endings,
+                    storyEndings = endingsOverride ?: endings,
                     meta = AiResponseMeta(),
                 )
             }
@@ -111,6 +115,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @BeforeEach
     fun setUp() {
         capturedRequest = null
+        endingsOverride = null
         databaseCleaner.cleanAll()
     }
 
@@ -161,6 +166,21 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             "돌이킬 수 없는 파국을 맞는다",
         )
         assertThat(savedEndings.map { it.sortOrder.toInt() }).containsExactly(1, 2, 3)
+    }
+
+    @Test
+    fun `컴파일 응답의 엔딩 이름이 중복되면 502이고 스토리가 저장되지 않는다`() {
+        // 이름 기반 도달 매칭의 모호성을 막기 위해, 시작 설정 내 이름 중복 컴파일 응답은 불완전 AI 응답(502)으로 거부한다.
+        endingsOverride = listOf(
+            AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+            AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+            AiStoryEnding("다른엔딩", 3, "조건 C", "에필로그 C"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyRepository.findAll()).isEmpty()
     }
 
     private fun persistStorylineWithGenre(genre: String): StoryCreationStoryline {
