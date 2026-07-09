@@ -14,6 +14,8 @@ import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.TestPropertySource
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
 import org.springframework.web.server.ResponseStatusException
 import redis.embedded.RedisServer
 import java.net.ServerSocket
@@ -71,6 +73,20 @@ class GuestTrialLimitServiceIntegrationTest {
         }
 
         assertThat(service.reserve("device-B", GuestTrialLimitService.Counter.STORY_CREATION)).isFalse()
+    }
+
+    @Test
+    fun `게스트 한도를 소진하면 GUEST_TRIAL_LIMIT_EXCEEDED code로 402를 던진다`() {
+        // 크레딧 부족(INSUFFICIENT_CREDIT)과 같은 402지만 바디 code로 사유를 구분한다(KNK-524).
+        repeat(3) {
+            service.reserveForGuestOrNull(null, "device-limit", GuestTrialLimitService.Counter.STORY_CREATION)
+        }
+
+        val exception = org.junit.jupiter.api.assertThrows<CodedResponseStatusException> {
+            service.reserveForGuestOrNull(null, "device-limit", GuestTrialLimitService.Counter.STORY_CREATION)
+        }
+        assertThat(exception.statusCode.value()).isEqualTo(402)
+        assertThat(exception.errorCode).isEqualTo(ApiErrorCodes.GUEST_TRIAL_LIMIT_EXCEEDED)
     }
 
     @Test

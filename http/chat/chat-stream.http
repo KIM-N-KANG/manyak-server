@@ -263,11 +263,12 @@ Authorization: Bearer {{accessToken}}
 }
 
 > {%
-    // 잔액이 있으면 200, 없으면 402. 402일 때 계약(동기 JSON, code=PAYMENT_REQUIRED)을 검증합니다.
+    // 잔액이 있으면 200, 없으면 402. 402일 때 계약(동기 JSON, code=INSUFFICIENT_CREDIT)을 검증합니다.
+    // [KNK-524] 크레딧 부족은 게스트 한도(GUEST_TRIAL_LIMIT_EXCEEDED)와 구분되는 body code로 옵니다(둘 다 HTTP 402).
     if (response.status === 402) {
         client.test("잔액 부족은 동기 402 JSON 이다", () => {
             client.assert(response.body.status === 402, `status가 402가 아닙니다. actual=${JSON.stringify(response.body)}`);
-            client.assert(response.body.code === "PAYMENT_REQUIRED", `code가 PAYMENT_REQUIRED가 아닙니다. actual=${response.body.code}`);
+            client.assert(response.body.code === "INSUFFICIENT_CREDIT", `code가 INSUFFICIENT_CREDIT가 아닙니다. actual=${response.body.code}`);
         });
     } else {
         client.test("잔액이 남아 있으면 200으로 스트리밍한다", () => {

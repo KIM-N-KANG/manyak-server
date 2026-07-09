@@ -41,7 +41,8 @@ class GlobalExceptionHandler {
             .body(
                 ApiErrorResponse(
                     status = status.value(),
-                    code = status.name,
+                    // CodedResponseStatusException이면 앱 코드로 사유를 구분한다(같은 402라도 다른 code). 아니면 status.name.
+                    code = (exception as? CodedResponseStatusException)?.errorCode ?: status.name,
                     message = exception.reason ?: status.reasonPhrase,
                     path = request.requestURI,
                 ),

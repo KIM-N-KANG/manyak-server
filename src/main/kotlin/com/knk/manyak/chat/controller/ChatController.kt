@@ -9,6 +9,8 @@ import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
@@ -234,7 +236,12 @@ class ChatController(
             // 회원 선차감은 streamChatTurn이 SseEmitter를 만들기 전에 동기로 수행하므로, 잔액 부족 예외는
             // 스트림이 열리기 전에 이 요청 스레드로 전파된다. 여기서 402로 변환해 동기 HTTP 응답으로 돌려준다
             // (스트림 안 error 이벤트가 아님, 스펙 §4-3-7). 공유 @ControllerAdvice를 추가하지 않고 컨트롤러에서 지역 변환한다.
-            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "크레딧이 부족합니다.",
+                exception,
+            )
         }
     }
 
@@ -308,7 +315,12 @@ class ChatController(
             chatService.regenerateChatTurn(chatId = chatId, request = request, userId = userId, deviceId = deviceId)
         } catch (exception: InsufficientCreditException) {
             // 선차감은 스트림을 열기 전에 동기로 수행되므로 잔액 부족은 여기로 전파된다. 402로 변환한다(§4-3-7).
-            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "크레딧이 부족합니다.",
+                exception,
+            )
         }
     }
 }
