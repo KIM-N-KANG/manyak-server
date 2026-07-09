@@ -103,6 +103,7 @@ class StoryEditService(
 
         // 주요 사건 전체 교체(sort_order 0-based).
         request.mainEvents?.let { events ->
+            requireDistinctMainEventNames(events.map { it.name })
             val existing = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             storyMainEventRepository.deleteAll(existing)
             storyMainEventRepository.flush()

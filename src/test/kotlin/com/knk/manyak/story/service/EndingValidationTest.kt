@@ -15,9 +15,18 @@ class EndingValidationTest {
     }
 
     @Test
-    fun `이름이 중복되면 400을 던진다`() {
+    fun `엔딩 이름이 중복되면 400을 던진다`() {
         val ex = assertThrows<ResponseStatusException> {
             requireDistinctEndingNames(listOf("해피", "해피"))
+        }
+        assertEquals(400, ex.statusCode.value())
+    }
+
+    @Test
+    fun `주요 사건 이름이 중복되면 400을 던진다`() {
+        requireDistinctMainEventNames(listOf("발단", "전개", "절정"))
+        val ex = assertThrows<ResponseStatusException> {
+            requireDistinctMainEventNames(listOf("발단", "발단"))
         }
         assertEquals(400, ex.statusCode.value())
     }

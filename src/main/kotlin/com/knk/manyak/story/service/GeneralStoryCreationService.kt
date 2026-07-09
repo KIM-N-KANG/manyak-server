@@ -85,6 +85,8 @@ class GeneralStoryCreationService(
                 )
             },
         )
+        // 주요 사건 이름은 스토리 내에서 유니크해야 한다(이름 기반 런타임 식별, 완결·목표 매칭 모호성 방지 — KNK-523).
+        requireDistinctMainEventNames(request.mainEvents.map { it.name })
         // 주요 사건은 스토리 소유(sort_order 0-based). 없으면 저장 생략.
         if (request.mainEvents.isNotEmpty()) {
             storyMainEventRepository.saveAll(

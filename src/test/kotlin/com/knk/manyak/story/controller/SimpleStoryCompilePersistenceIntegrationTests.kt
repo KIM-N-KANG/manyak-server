@@ -71,9 +71,12 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             AiStoryEnding("배드", 3, "돌이킬 수 없는 파국을 맞는다", "비극적 에필로그"),
         )
 
-        // 특정 테스트가 엔딩 응답을 덮어쓸 수 있게 한다(이름 중복 케이스 등).
+        // 특정 테스트가 엔딩·주요 사건 응답을 덮어쓸 수 있게 한다(이름 중복 케이스 등).
         @Volatile
         var endingsOverride: List<AiStoryEnding>? = null
+
+        @Volatile
+        var mainEventsOverride: List<AiStoryMainEvent>? = null
     }
 
     @TestConfiguration
@@ -91,7 +94,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storySettings = AiStorySettings("세계관", "캐릭터", "역할", "규칙"),
                     storyStartSettings = AiStoryStartSettings("시작", "상황", "프롤로그"),
                     storySuggestedInputs = listOf("추천1", "추천2", "추천3"),
-                    storyMainEvents = mainEvents,
+                    storyMainEvents = mainEventsOverride ?: mainEvents,
                     storyEndings = endingsOverride ?: endings,
                     meta = AiResponseMeta(),
                 )
@@ -116,6 +119,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     fun setUp() {
         capturedRequest = null
         endingsOverride = null
+        mainEventsOverride = null
         databaseCleaner.cleanAll()
     }
 
@@ -175,6 +179,20 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
             AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
             AiStoryEnding("다른엔딩", 3, "조건 C", "에필로그 C"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
+    fun `컴파일 응답의 주요 사건 이름이 중복되면 502이고 스토리가 저장되지 않는다`() {
+        mainEventsOverride = listOf(
+            AiStoryMainEvent("같은사건", "설명 A", "키 문장 A"),
+            AiStoryMainEvent("같은사건", "설명 B", "키 문장 B"),
+            AiStoryMainEvent("다른사건", "설명 C", "키 문장 C"),
         )
         val storyline = persistStorylineWithGenre("로맨스")
 

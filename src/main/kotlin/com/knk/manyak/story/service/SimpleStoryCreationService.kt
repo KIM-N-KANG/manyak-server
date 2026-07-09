@@ -507,11 +507,17 @@ class SimpleStoryCreationService(
 
             // 컴파일 산출물의 주요 사건(스토리 소유, sort_order 0-based)을 저작 경로와 같은 테이블에 저장한다.
             if (aiResponse.storyMainEvents.isNotEmpty()) {
+                // 저장 이름(방어적 절단 후)이 스토리 안에서 유니크여야 이름 기반 완결·목표 매칭이 무모호하다.
+                // 중복은 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다(엔딩과 동일).
+                val mainEventNames = aiResponse.storyMainEvents.map { it.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH) }
+                if (mainEventNames.size != mainEventNames.toSet().size) {
+                    throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 주요 사건 이름이 중복됩니다.")
+                }
                 storyMainEventRepository.saveAll(
                     aiResponse.storyMainEvents.mapIndexed { index, item ->
                         StoryMainEvent(
                             story = story,
-                            name = item.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH),
+                            name = mainEventNames[index],
                             description = item.description,
                             keySentence = item.keySentence,
                             sortOrder = index.toShort(),
