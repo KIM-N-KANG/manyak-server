@@ -36,6 +36,10 @@ class Feedback(
     @Column(name = "app_version", length = 50)
     val appVersion: String? = null,
 
+    // 클라이언트 제보 platform enum 을 보완해 서버가 요청 User-Agent 헤더 원문을 추가 저장한다(분석용, nullable).
+    @Column(name = "user_agent", length = 512)
+    val userAgent: String? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

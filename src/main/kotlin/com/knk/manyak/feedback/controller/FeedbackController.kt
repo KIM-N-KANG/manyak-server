@@ -7,11 +7,13 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
@@ -34,8 +36,10 @@ class FeedbackController(
         @Valid @RequestBody request: CreateFeedbackRequest,
         // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
         @CurrentUserId userId: Long?,
+        // 클라이언트 body 가 아니라 요청 헤더에서 서버가 읽는 분석용 메타. 미전송 시 null.
+        @RequestHeader(HttpHeaders.USER_AGENT, required = false) userAgent: String?,
     ): ResponseEntity<Void> {
-        feedbackService.createFeedback(request, userId)
+        feedbackService.createFeedback(request, userId, userAgent)
         // Unit 반환은 Jackson 이 빈 객체 {} 로 직렬화할 수 있어, 본문 없는 201 을 명시한다.
         return ResponseEntity.status(HttpStatus.CREATED).build()
     }

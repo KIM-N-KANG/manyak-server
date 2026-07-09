@@ -17,7 +17,7 @@
 | [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
-| [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
+| [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
 | [public.users](public.users.md) | 14 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
@@ -202,6 +202,7 @@ erDiagram
   varchar_20_ platform
   varchar_50_ app_version
   timestamp_with_time_zone created_at
+  varchar_512_ user_agent
 }
 "public.ai_call_logs" {
   bigint id
