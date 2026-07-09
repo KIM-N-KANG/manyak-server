@@ -81,12 +81,12 @@ class SimpleStoryCreationController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "402",
                 description = "게스트 체험 한도 소진(스토리라인 생성·재생성 합산). AI 호출 전 동기 응답입니다.",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "502",
@@ -123,17 +123,17 @@ class SimpleStoryCreationController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "402",
                 description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. AI 호출 전 동기 응답입니다.",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "간편 제작 진행 정보 또는 스토리라인을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "409",
@@ -173,12 +173,12 @@ class SimpleStoryCreationController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "스토리라인을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -201,7 +201,7 @@ class SimpleStoryCreationController(
             ApiResponse(
                 responseCode = "404",
                 description = "스토리라인을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
