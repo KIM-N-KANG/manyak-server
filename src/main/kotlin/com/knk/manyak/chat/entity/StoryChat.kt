@@ -54,6 +54,18 @@ class StoryChat(
     @Column(name = "regenerated_count", nullable = false)
     var regeneratedCount: Int = 0,
 
+    // 목표 사건 런타임 상태(스펙 §4-3-10, D11). 판정은 AI가 하고 백엔드는 매 턴 요청에 되돌려 싣는다.
+    // 현재 향해 진행 중인 주요 사건(story_main_events.id)과 그 진행 턴 수(채팅당 최대 1개).
+    @Column(name = "target_main_event_id")
+    var targetMainEventId: Long? = null,
+
+    @Column(name = "target_progress_turns", nullable = false)
+    var targetProgressTurns: Int = 0,
+
+    // 최초 도달 엔딩(story_endings.id). 값이 있으면 이후 턴 요청에 엔딩 후보를 싣지 않아 채팅당 최초 1회를 보장한다.
+    @Column(name = "reached_ending_id")
+    var reachedEndingId: Long? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: ChatStatus = ChatStatus.ACTIVE,

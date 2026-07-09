@@ -11,6 +11,24 @@ class StoryAiClientSerializationTests {
 
     private val objectMapper = JsonMapper.builder().build()
 
+    // 실제 compile 응답은 story_main_events(항상 3~5)·story_endings(항상 존재)를 포함한다(AI 계약 §5-3-3).
+    private val COMPILE_RESPONSE_JSON =
+        """
+        {
+          "stories": {"title": "제목", "one_line_intro": "소개", "description": "설명"},
+          "story_settings": {"world_setting": "w", "character_setting": "c", "user_role_setting": "u", "rule_setting": "r"},
+          "story_start_settings": {"name": "n", "start_situation": "s", "prologue": "p"},
+          "story_suggested_inputs": ["a"],
+          "story_main_events": [
+            {"name": "발단", "description": "이야기가 시작된다", "key_sentence": "주인공이 길을 나선다"}
+          ],
+          "story_endings": [
+            {"name": "해피", "min_turns": 5, "achievement_condition": "적을 물리친다", "epilogue": "따뜻한 에필로그"}
+          ],
+          "meta": {"model": "deepseek-v4-pro", "prompt_versions": {"COMPILE": 2}}
+        }
+        """.trimIndent()
+
     @Test
     fun `AI 스토리라인 요청은 snake case 필드명으로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(
@@ -104,21 +122,26 @@ class StoryAiClientSerializationTests {
 
     @Test
     fun `compile 응답의 meta를 역직렬화한다`() {
-        val response = objectMapper.readValue(
-            """
-            {
-              "stories": {"title": "제목", "one_line_intro": "소개", "description": "설명"},
-              "story_settings": {"world_setting": "w", "character_setting": "c", "user_role_setting": "u", "rule_setting": "r"},
-              "story_start_settings": {"name": "n", "start_situation": "s", "prologue": "p"},
-              "story_suggested_inputs": ["a"],
-              "meta": {"model": "deepseek-v4-pro", "prompt_versions": {"COMPILE": 2}}
-            }
-            """.trimIndent(),
-            AiStoryCompileResponse::class.java,
-        )
+        val response = objectMapper.readValue(COMPILE_RESPONSE_JSON, AiStoryCompileResponse::class.java)
 
         assertEquals("deepseek-v4-pro", response.meta?.model)
         assertEquals(mapOf("COMPILE" to 2), response.meta?.promptVersions)
+    }
+
+    @Test
+    fun `compile 응답의 주요 사건과 엔딩을 snake case 필드로 역직렬화한다`() {
+        val response = objectMapper.readValue(COMPILE_RESPONSE_JSON, AiStoryCompileResponse::class.java)
+
+        val event = response.storyMainEvents.single()
+        assertEquals("발단", event.name)
+        assertEquals("이야기가 시작된다", event.description)
+        assertEquals("주인공이 길을 나선다", event.keySentence)
+
+        val ending = response.storyEndings.single()
+        assertEquals("해피", ending.name)
+        assertEquals(5, ending.minTurns)
+        assertEquals("적을 물리친다", ending.achievementCondition)
+        assertEquals("따뜻한 에필로그", ending.epilogue)
     }
 
     @Test

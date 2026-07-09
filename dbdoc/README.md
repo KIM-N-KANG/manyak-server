@@ -13,8 +13,8 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 7 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 13 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 6 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 16 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 7 |  | BASE TABLE |
@@ -29,6 +29,8 @@
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
 | [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
 | [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
+| [public.story_chat_main_events](public.story_chat_main_events.md) | 4 |  | BASE TABLE |
+| [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
 
 ## Relations
 
@@ -44,7 +46,10 @@ erDiagram
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
@@ -59,6 +64,11 @@ erDiagram
 "public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
+"public.story_chat_main_events" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_chat_main_events" }o--|| "public.story_main_events" : "FOREIGN KEY (main_event_id) REFERENCES story_main_events(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -153,6 +163,9 @@ erDiagram
   timestamp_with_time_zone deleted_at
   uuid public_id
   integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
 }
 "public.story_messages" {
   bigint id
@@ -161,6 +174,7 @@ erDiagram
   text content
   integer message_order
   timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
 }
 "public.story_choices" {
   bigint id
@@ -313,6 +327,19 @@ erDiagram
   bigint original_amount
   bigint remaining
   timestamp_with_time_zone expires_at
+  timestamp_with_time_zone created_at
+}
+"public.story_chat_main_events" {
+  bigint id
+  bigint chat_id FK
+  bigint main_event_id FK
+  timestamp_with_time_zone created_at
+}
+"public.user_story_ending_reaches" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  bigint ending_id FK
   timestamp_with_time_zone created_at
 }
 ```

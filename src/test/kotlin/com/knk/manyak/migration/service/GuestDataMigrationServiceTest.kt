@@ -40,11 +40,14 @@ class GuestDataMigrationServiceTest {
     private val storyCreationSessionRepository: StoryCreationSessionRepository =
         mock(StoryCreationSessionRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
+    private val userStoryEndingReachRepository: com.knk.manyak.story.repository.UserStoryEndingReachRepository =
+        mock(com.knk.manyak.story.repository.UserStoryEndingReachRepository::class.java)
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
         mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
     private val service =
         GuestDataMigrationService(
-            storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository, serverAnalytics,
+            storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
+            userStoryEndingReachRepository, serverAnalytics,
         )
 
     private val userId = 10L

@@ -107,6 +107,12 @@ Accept: application/json
         client.assert(Array.isArray(b.lorebooks), `lorebooks가 배열이 아닙니다. actual=${JSON.stringify(b.lorebooks)}`);
         client.assert(Array.isArray(b.endings), `endings가 배열이 아닙니다. actual=${JSON.stringify(b.endings)}`);
     });
+
+    // [KNK-523] reachedEndings: 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(엔딩은 이름으로 식별). 게스트·미도달이면 빈 배열.
+    // 값이 채워지려면 실제 AI 판정으로 엔딩에 도달한 채팅이 있어야 하므로(스텁 불가) 여기서는 빈 배열이며, 런타임은 통합 테스트로 검증한다.
+    client.test("reachedEndings가 배열로 응답된다", () => {
+        client.assert(Array.isArray(b.reachedEndings), `reachedEndings가 배열이 아닙니다. actual=${JSON.stringify(b.reachedEndings)}`);
+    });
 %}
 
 ### 4. 순차 정수 id로 조회 → 404 (IDOR 차단)

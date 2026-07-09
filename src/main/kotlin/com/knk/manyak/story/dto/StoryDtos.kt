@@ -132,6 +132,12 @@ data class StoryDetailResponse(
     )
     val mainEvents: List<StoryMainEventResponse>,
 
+    @field:ArraySchema(
+        schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
+        arraySchema = Schema(description = "요청 회원이 이 스토리에서 도달한 엔딩 이름 목록(엔딩은 이름으로 식별). 게스트는 빈 배열입니다."),
+    )
+    val reachedEndings: List<String>,
+
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
 )

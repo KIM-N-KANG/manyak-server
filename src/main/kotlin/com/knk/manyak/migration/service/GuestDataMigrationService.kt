@@ -1,6 +1,7 @@
 package com.knk.manyak.migration.service
 
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
@@ -9,8 +10,10 @@ import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
+import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -39,6 +42,7 @@ class GuestDataMigrationService(
     private val storyChatRepository: StoryChatRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val userRepository: UserRepository,
+    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val serverAnalytics: ServerAnalytics,
 ) {
 
@@ -148,8 +152,9 @@ class GuestDataMigrationService(
     }
 
     private fun claimChats(userId: Long, ids: List<UUID>): List<MigrationResult> {
-        val ownerByPublicId = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
-            .associate { it.publicId to it.userId }
+        val chatByPublicId = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
+            .associateBy { it.publicId }
+        val ownerByPublicId = chatByPublicId.mapValues { it.value.userId }
         val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
             val status = status(
@@ -157,7 +162,21 @@ class GuestDataMigrationService(
                 claim = { storyChatRepository.claimByPublicId(id, userId) },
                 currentOwner = { storyChatRepository.findUserIdByPublicId(id) },
             )
+            // 새로 클레임한 게스트 채팅이 엔딩에 도달했었다면 회원 도달 집계에 백필한다(스펙 §4-3-10 이관 백필).
+            if (status == MigrationStatus.MIGRATED) {
+                backfillEndingReach(userId, chatByPublicId.getValue(id))
+            }
             MigrationResult(id.toString(), status)
+        }
+    }
+
+    /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 upsert한다. 도달 전이면 아무것도 하지 않는다. */
+    private fun backfillEndingReach(userId: Long, chat: StoryChat) {
+        val endingId = chat.reachedEndingId ?: return
+        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, endingId)) {
+            userStoryEndingReachRepository.save(
+                UserStoryEndingReach(userId = userId, storyId = chat.storyId, endingId = endingId),
+            )
         }
     }
 
