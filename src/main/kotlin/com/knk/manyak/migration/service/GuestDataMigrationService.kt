@@ -14,6 +14,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
@@ -99,14 +101,31 @@ class GuestDataMigrationService(
     private fun publishMigrationSucceeded(userId: Long, stories: List<MigrationResult>, chats: List<MigrationResult>) {
         if (stories.isEmpty() && chats.isEmpty()) return
         val all = stories + chats
-        serverAnalytics.migrationSucceeded(
-            userId = userId,
-            migratedStoryCount = stories.count { it.status == MigrationStatus.MIGRATED },
-            migratedChatCount = chats.count { it.status == MigrationStatus.MIGRATED },
-            alreadyOwnedCount = all.count { it.status == MigrationStatus.ALREADY_OWNED },
-            conflictCount = all.count { it.status == MigrationStatus.CONFLICT },
-            notFoundCount = all.count { it.status == MigrationStatus.NOT_FOUND },
-        )
+        val migratedStoryCount = stories.count { it.status == MigrationStatus.MIGRATED }
+        val migratedChatCount = chats.count { it.status == MigrationStatus.MIGRATED }
+        val alreadyOwnedCount = all.count { it.status == MigrationStatus.ALREADY_OWNED }
+        val conflictCount = all.count { it.status == MigrationStatus.CONFLICT }
+        val notFoundCount = all.count { it.status == MigrationStatus.NOT_FOUND }
+        // 성공 이벤트는 커밋 후에만 발행한다(Codex P2): 이 메서드는 @Transactional migrate 안에서 호출되므로,
+        // 커밋 단계 실패로 롤백되면 클레임이 반영되지 않는데 성공 이벤트만 남는 false success가 생긴다. 롤백 시 afterCommit은 실행되지 않는다.
+        val emit = {
+            serverAnalytics.migrationSucceeded(
+                userId = userId,
+                migratedStoryCount = migratedStoryCount,
+                migratedChatCount = migratedChatCount,
+                alreadyOwnedCount = alreadyOwnedCount,
+                conflictCount = conflictCount,
+                notFoundCount = notFoundCount,
+            )
+        }
+        // 트랜잭션 동기화가 활성일 때만 커밋 후로 미룬다. 트랜잭션 밖 호출(단위 테스트 등)에서는 곧바로 발행한다.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCommit() = emit()
+            })
+        } else {
+            emit()
+        }
     }
 
     private fun claimStories(userId: Long, ids: List<UUID>): List<MigrationResult> {

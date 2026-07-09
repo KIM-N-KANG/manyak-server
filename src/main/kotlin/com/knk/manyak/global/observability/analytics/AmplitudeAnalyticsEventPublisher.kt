@@ -26,7 +26,8 @@ class AmplitudeAnalyticsEventPublisher(
 ) : AnalyticsEventPublisher {
 
     private val log = LoggerFactory.getLogger(AmplitudeAnalyticsEventPublisher::class.java)
-    private val webClient = WebClient.builder().baseUrl(baseUrl).build()
+    // 빈 값이 주입돼도(예: .env에 빈 변수로 설정) 요청 URL이 깨지지 않도록 기본 엔드포인트로 폴백한다(Codex P2).
+    private val webClient = WebClient.builder().baseUrl(baseUrl.ifBlank { DEFAULT_BASE_URL }).build()
 
     override fun publish(event: AnalyticsEvent) {
         if (!enabled || apiKey.isBlank()) return
@@ -62,5 +63,9 @@ class AmplitudeAnalyticsEventPublisher(
             "api_key" to apiKey,
             "events" to listOf(amplitudeEvent),
         )
+    }
+
+    private companion object {
+        const val DEFAULT_BASE_URL = "https://api2.amplitude.com"
     }
 }
