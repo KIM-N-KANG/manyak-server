@@ -90,6 +90,15 @@ data class AiStoryCompileRequest(
 
     @JsonProperty("additional_info")
     val additionalInfo: String,
+
+    // 장르 공용 로어북(선택). 백엔드가 스토리 장르로 선별해 세계관·용어 확장 재료로 전달한다(스펙 §5-3-3).
+    // 빈 배열이면 AI가 프롬프트에 주입하지 않는다(하위호환).
+    val lorebooks: List<AiLorebookItem> = emptyList(),
+)
+
+data class AiLorebookItem(
+    val name: String,
+    val content: String,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -105,7 +114,33 @@ data class AiStoryCompileResponse(
     @JsonProperty("story_suggested_inputs")
     val storySuggestedInputs: List<String>,
 
+    // 컴파일 산출물의 주요 사건(항상 3~5개)·엔딩(0개 폴백 또는 3개). 저작 경로와 같은 테이블에 저장한다(스펙 §5-3-3, KNK-417·465).
+    // 기본값 emptyList로 두어 이 필드를 채우지 않는 기존 테스트/스텁도 그대로 컴파일된다.
+    @JsonProperty("story_main_events")
+    val storyMainEvents: List<AiStoryMainEvent> = emptyList(),
+
+    @JsonProperty("story_endings")
+    val storyEndings: List<AiStoryEnding> = emptyList(),
+
     val meta: AiResponseMeta? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiStoryMainEvent(
+    val name: String,
+    val description: String,
+    @JsonProperty("key_sentence")
+    val keySentence: String,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiStoryEnding(
+    val name: String,
+    @JsonProperty("min_turns")
+    val minTurns: Int,
+    @JsonProperty("achievement_condition")
+    val achievementCondition: String,
+    val epilogue: String,
 )
 
 data class AiStoryMeta(

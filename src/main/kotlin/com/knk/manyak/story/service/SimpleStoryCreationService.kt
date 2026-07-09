@@ -11,6 +11,7 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.StoryAiClient
@@ -24,6 +25,7 @@ import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
+import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
@@ -32,6 +34,9 @@ import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.StoryEnding
+import com.knk.manyak.story.entity.StoryLorebook
+import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
@@ -41,6 +46,10 @@ import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
+import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryLorebookRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -65,6 +74,10 @@ class SimpleStoryCreationService(
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    private val lorebookRepository: LorebookRepository,
+    private val storyLorebookRepository: StoryLorebookRepository,
+    private val storyMainEventRepository: StoryMainEventRepository,
+    private val storyEndingRepository: StoryEndingRepository,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
@@ -83,6 +96,10 @@ class SimpleStoryCreationService(
         // AI 응답이 컬럼 길이를 초과해도 트랜잭션이 실패하지 않도록 방어적으로 자른다. (stories 컬럼 정의와 일치)
         const val STORY_TITLE_MAX_LENGTH = 100
         const val STORY_ONE_LINE_INTRO_MAX_LENGTH = 255
+
+        // 주요 사건·엔딩 이름 컬럼(VARCHAR(100)) 초과를 방어적으로 자른다.
+        const val STORY_MAIN_EVENT_NAME_MAX_LENGTH = 100
+        const val STORY_ENDING_NAME_MAX_LENGTH = 100
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
@@ -293,12 +310,16 @@ class SimpleStoryCreationService(
         val genreTags = sessionTags
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+        // 스토리 장르로 로어북을 선별해 compile 요청에 세계관·용어 확장 재료로 싣는다(스펙 §4-3-6·§5-3-3).
+        // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
+        val selectedLorebooks = selectLorebooksForGenres(genreTags)
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
             protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
             supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
             selectedStoryline = selectedStoryline.storylineText,
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
+            lorebooks = selectedLorebooks.map { AiLorebookItem(name = it.name, content = it.content) },
         )
 
         // 소모(스펙 §4-3-7): 회원만 compile 시작 전에 선차감한다. 게스트(attributedUserId == null)는 차감 대신
@@ -330,8 +351,17 @@ class SimpleStoryCreationService(
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
         ) {
-            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, aiRequest)
+            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest)
         }
+    }
+
+    /** 스토리 장르 태그와 일치하는 활성 로어북을 선별한다. 장르 태그가 없으면 빈 목록. */
+    private fun selectLorebooksForGenres(genreTags: List<StoryCreationTag>): List<Lorebook> {
+        val genres = genreTags.map { it.name }.distinct()
+        if (genres.isEmpty()) {
+            return emptyList()
+        }
+        return lorebookRepository.findByGenreInAndIsActiveTrueOrderByGenreAscSortOrderAscIdAsc(genres)
     }
 
     /** 회원 선차감. 잔액 부족([InsufficientCreditException])은 동기 402로 변환한다. */
@@ -396,6 +426,8 @@ class SimpleStoryCreationService(
         attributedUserId: Long?,
         selectedStoryline: StoryCreationStoryline,
         genreTags: List<StoryCreationTag>,
+        // compile 요청에 실어 보낸 선별 로어북. 저장 성공 시 story_lorebooks에 연결한다(전달분과 저장분 일치).
+        selectedLorebooks: List<Lorebook>,
         aiRequest: AiStoryCompileRequest,
     ): StoryCreationOutcome {
         val recorded = try {
@@ -459,6 +491,50 @@ class SimpleStoryCreationService(
                     )
                 },
             )
+
+            // 전달한 로어북을 스토리에 연결한다(sort_order 1-based, ck_story_lorebooks_sort_order > 0).
+            if (selectedLorebooks.isNotEmpty()) {
+                storyLorebookRepository.saveAll(
+                    selectedLorebooks.mapIndexed { index, lorebook ->
+                        StoryLorebook(
+                            story = story,
+                            lorebook = lorebook,
+                            sortOrder = (index + 1).toShort(),
+                        )
+                    },
+                )
+            }
+
+            // 컴파일 산출물의 주요 사건(스토리 소유, sort_order 0-based)을 저작 경로와 같은 테이블에 저장한다.
+            if (aiResponse.storyMainEvents.isNotEmpty()) {
+                storyMainEventRepository.saveAll(
+                    aiResponse.storyMainEvents.mapIndexed { index, item ->
+                        StoryMainEvent(
+                            story = story,
+                            name = item.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH),
+                            description = item.description,
+                            keySentence = item.keySentence,
+                            sortOrder = index.toShort(),
+                        )
+                    },
+                )
+            }
+
+            // 컴파일 산출물의 엔딩(시작 설정 스코프, sort_order 1-based, ck_story_endings_order > 0)을 저장한다.
+            if (aiResponse.storyEndings.isNotEmpty()) {
+                storyEndingRepository.saveAll(
+                    aiResponse.storyEndings.mapIndexed { index, item ->
+                        StoryEnding(
+                            startSetting = startSetting,
+                            name = item.name.take(STORY_ENDING_NAME_MAX_LENGTH),
+                            minTurns = item.minTurns,
+                            achievementCondition = item.achievementCondition,
+                            epilogue = item.epilogue,
+                            sortOrder = (index + 1).toShort(),
+                        )
+                    },
+                )
+            }
 
             // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
             // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).

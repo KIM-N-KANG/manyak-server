@@ -50,6 +50,16 @@ class StubStoryAiClient : StoryAiClient {
                 "한 걸음 앞으로 나선다.",
                 "상황을 지켜본다.",
             ),
+            storyMainEvents = listOf(
+                AiStoryMainEvent("발단", "이야기가 시작되는 스텁 사건입니다.", "주인공이 첫 걸음을 뗀다."),
+                AiStoryMainEvent("전개", "갈등이 깊어지는 스텁 사건입니다.", "예상치 못한 벽에 부딪힌다."),
+                AiStoryMainEvent("절정", "위기가 최고조에 달하는 스텁 사건입니다.", "결정적 선택의 순간을 맞는다."),
+            ),
+            storyEndings = listOf(
+                AiStoryEnding("스텁 해피 엔딩", 5, "위기를 극복하고 목적을 이룬다.", "따뜻한 마무리 가이드입니다."),
+                AiStoryEnding("스텁 노말 엔딩", 4, "무난히 일상으로 돌아간다.", "잔잔한 마무리 가이드입니다."),
+                AiStoryEnding("스텁 배드 엔딩", 3, "돌이킬 수 없는 결말에 이른다.", "비극적 마무리 가이드입니다."),
+            ),
             meta = stubMeta(),
         )
 
