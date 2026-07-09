@@ -76,7 +76,8 @@ class EndingReachExposureIntegrationTests {
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.reachedEndings").isEqualTo("해피")
+            .jsonPath("$.reachedEndings.length()").isEqualTo(1)
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}")
