@@ -22,7 +22,7 @@ class FeedbackService(
     private val serverAnalytics: ServerAnalytics,
 ) {
     @Transactional
-    fun createFeedback(request: CreateFeedbackRequest, userId: Long? = null) {
+    fun createFeedback(request: CreateFeedbackRequest, userId: Long? = null, userAgent: String? = null) {
         // 분석 이벤트를 커밋 결과에 묶는다(Codex P2): 커밋 후에만 성공, 롤백이면 실패. 저장·flush·커밋 어느 단계 실패든
         // afterCompletion이 한 번 처리하므로, 커밋 단계 실패로 인한 false success나 실패 이벤트 누락이 없다. Slack 알림도 AFTER_COMMIT이다.
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
@@ -43,6 +43,9 @@ class FeedbackService(
                 // @Pattern 으로 이미 검증된 값이므로 안전하게 enum 으로 변환한다.
                 platform = request.platform?.let { Platform.valueOf(it) },
                 appVersion = request.appVersion?.takeIf { it.isNotBlank() },
+                // 공백 헤더는 null 로 정규화하고, 컬럼 상한(512)에 맞춰 방어적으로 자른다.
+                // (비인증 공개 쓰기 경로라 임의 길이 User-Agent 로 인한 저장 실패를 막는다.)
+                userAgent = userAgent?.takeIf { it.isNotBlank() }?.take(512),
             ),
         )
         // 저장이 커밋된 뒤 비동기로 Slack 알림을 보낸다(리스너가 AFTER_COMMIT 으로 수신).
