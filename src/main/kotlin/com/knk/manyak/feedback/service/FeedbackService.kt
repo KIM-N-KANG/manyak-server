@@ -6,18 +6,34 @@ import com.knk.manyak.feedback.entity.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Service
 class FeedbackService(
     private val feedbackRepository: FeedbackRepository,
     private val eventPublisher: ApplicationEventPublisher,
     private val structuredLogger: StructuredLogger,
+    private val serverAnalytics: ServerAnalytics,
 ) {
     @Transactional
     fun createFeedback(request: CreateFeedbackRequest, userId: Long? = null) {
+        // 분석 이벤트를 커밋 결과에 묶는다(Codex P2): 커밋 후에만 성공, 롤백이면 실패. 저장·flush·커밋 어느 단계 실패든
+        // afterCompletion이 한 번 처리하므로, 커밋 단계 실패로 인한 false success나 실패 이벤트 누락이 없다. Slack 알림도 AFTER_COMMIT이다.
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCompletion(status: Int) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    serverAnalytics.feedbackSubmissionSucceeded(userId)
+                } else {
+                    serverAnalytics.feedbackSubmissionFailed(userId, AnalyticsErrorType.SERVER)
+                }
+            }
+        })
         val feedback = feedbackRepository.save(
             Feedback(
                 userId = userId,

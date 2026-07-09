@@ -9,6 +9,8 @@ import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.StoryAiClient
@@ -69,6 +71,7 @@ class SimpleStoryCreationService(
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
+    private val serverAnalytics: ServerAnalytics,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -146,10 +149,17 @@ class SimpleStoryCreationService(
                 storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest())
             }.result
         } catch (exception: Exception) {
+            // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
+            serverAnalytics.storylineGenerationFailed(
+                userId = userId,
+                creationId = null,
+                errorType = AnalyticsErrorType.fromThrowable(exception),
+            )
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리라인 생성 요청에 실패했습니다.", exception)
         }
 
-        return transactionTemplate.execute {
+        val response = try {
+            transactionTemplate.execute {
             val customTags = findOrCreateCustomTags(customTagDrafts)
             val tags = predefinedTags + customTags
             val creationSession = storyCreationSessionRepository.save(
@@ -203,7 +213,19 @@ class SimpleStoryCreationService(
                 selectedTags = tags.map { it.toTagResponse() },
                 storylines = storylineResponses,
             )
-        } ?: throw IllegalStateException("Storyline creation transaction result is empty")
+            } ?: throw IllegalStateException("Storyline creation transaction result is empty")
+        } catch (exception: Exception) {
+            // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
+            serverAnalytics.storylineGenerationFailed(
+                userId = userId,
+                creationId = null,
+                errorType = AnalyticsErrorType.fromThrowable(exception),
+            )
+            throw exception
+        }
+        // 스토리라인 생성 성공 분석 이벤트(스펙 §6-4-2-3). 세션 저장으로 확정된 creation_id를 싣는다.
+        serverAnalytics.storylineGenerationSucceeded(userId = userId, creationId = response.simpleCreationId)
+        return response
     }
 
     fun createSimpleStory(

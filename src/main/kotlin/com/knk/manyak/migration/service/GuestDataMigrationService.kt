@@ -2,6 +2,8 @@ package com.knk.manyak.migration.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.isActiveAccessAllowed
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
@@ -12,6 +14,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
@@ -35,6 +39,7 @@ class GuestDataMigrationService(
     private val storyChatRepository: StoryChatRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val userRepository: UserRepository,
+    private val serverAnalytics: ServerAnalytics,
 ) {
 
     private companion object {
@@ -66,8 +71,17 @@ class GuestDataMigrationService(
         }
         user.migrationAttempts += 1
 
-        val stories = claimStories(userId, parseUuids(request.storyIds))
-        val chats = claimChats(userId, parseUuids(request.chatIds))
+        val (stories, chats) = try {
+            claimStories(userId, parseUuids(request.storyIds)) to claimChats(userId, parseUuids(request.chatIds))
+        } catch (e: ResponseStatusException) {
+            // 요청 UUID 형식 오류(400)는 요청 자체 실패로 분류한다(스펙 §6-4-2-8 마이그레이션 실패 = validation).
+            if (e.statusCode == HttpStatus.BAD_REQUEST) serverAnalytics.migrationFailed(userId, AnalyticsErrorType.VALIDATION)
+            else serverAnalytics.migrationFailed(userId, AnalyticsErrorType.SERVER)
+            throw e
+        } catch (e: Exception) {
+            serverAnalytics.migrationFailed(userId, AnalyticsErrorType.SERVER)
+            throw e
+        }
 
         // 한 건이라도 이번 요청으로 소유권을 얻었으면 계정을 잠근다(관리 엔티티 변경 → 트랜잭션 커밋 시 UPDATE).
         // 잠금은 기기를 갈아타며 반복 이관하는 어뷰징을 막는다(순차 재호출은 migrated_at으로, 동시 요청은 위 행 락으로 직렬화).
@@ -76,7 +90,42 @@ class GuestDataMigrationService(
         ) {
             user.migratedAt = Instant.now()
         }
+        publishMigrationSucceeded(userId, stories, chats)
         return MigrationResponse(stories = stories, chats = chats)
+    }
+
+    /**
+     * 마이그레이션 처리 완료 이벤트를 발행한다(스펙 §6-4-2-8, 부분 성공 포함). 제출 배열이 스토리·채팅 모두 비어
+     * 평가 항목이 없으면 0건 노이즈 방지를 위해 발행하지 않는다. 카운트 합은 제출 총수와 일치한다(정합 검증용).
+     */
+    private fun publishMigrationSucceeded(userId: Long, stories: List<MigrationResult>, chats: List<MigrationResult>) {
+        if (stories.isEmpty() && chats.isEmpty()) return
+        val all = stories + chats
+        val migratedStoryCount = stories.count { it.status == MigrationStatus.MIGRATED }
+        val migratedChatCount = chats.count { it.status == MigrationStatus.MIGRATED }
+        val alreadyOwnedCount = all.count { it.status == MigrationStatus.ALREADY_OWNED }
+        val conflictCount = all.count { it.status == MigrationStatus.CONFLICT }
+        val notFoundCount = all.count { it.status == MigrationStatus.NOT_FOUND }
+        // 성공 이벤트는 커밋 후에만 발행한다(Codex P2): 이 메서드는 @Transactional migrate 안에서 호출되므로,
+        // 커밋 단계 실패로 롤백되면 클레임이 반영되지 않는데 성공 이벤트만 남는 false success가 생긴다. 롤백 시 afterCommit은 실행되지 않는다.
+        val emit = {
+            serverAnalytics.migrationSucceeded(
+                userId = userId,
+                migratedStoryCount = migratedStoryCount,
+                migratedChatCount = migratedChatCount,
+                alreadyOwnedCount = alreadyOwnedCount,
+                conflictCount = conflictCount,
+                notFoundCount = notFoundCount,
+            )
+        }
+        // 트랜잭션 동기화가 활성일 때만 커밋 후로 미룬다. 트랜잭션 밖 호출(단위 테스트 등)에서는 곧바로 발행한다.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCommit() = emit()
+            })
+        } else {
+            emit()
+        }
     }
 
     private fun claimStories(userId: Long, ids: List<UUID>): List<MigrationResult> {
