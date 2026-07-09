@@ -1,5 +1,7 @@
 package com.knk.manyak.credit.service
 
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.DeviceIdHasher
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -135,7 +137,12 @@ class GuestTrialLimitService(
         if (userId != null) return null
         val validDeviceId = requireDeviceId(deviceId)
         if (!reserve(validDeviceId, counter)) {
-            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "게스트 체험 한도를 모두 사용했습니다.")
+            // 크레딧 부족(INSUFFICIENT_CREDIT)과 같은 402지만 바디 code로 사유를 구분한다(프론트 분기, KNK-524).
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.GUEST_TRIAL_LIMIT_EXCEEDED,
+                "게스트 체험 한도를 모두 사용했습니다.",
+            )
         }
         return validDeviceId
     }

@@ -158,6 +158,8 @@ class SimpleStoryCreationCreditIntegrationTests {
 
         postSimpleStory(storyline, "Bearer ${validToken(user)}")
             .expectStatus().isEqualTo(402)
+            // 크레딧 부족은 게스트 한도와 구분되는 code로 온다(KNK-524).
+            .expectBody().jsonPath("$.code").isEqualTo("INSUFFICIENT_CREDIT")
 
         assertThat(compileStoryCalls.get()).isZero()
         assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(5)

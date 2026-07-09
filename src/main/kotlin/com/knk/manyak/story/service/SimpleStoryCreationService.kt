@@ -4,6 +4,8 @@ import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -375,7 +377,13 @@ class SimpleStoryCreationService(
                 refId = refId,
             )
         } catch (exception: InsufficientCreditException) {
-            throw ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "크레딧이 부족합니다.", exception)
+            // 게스트 체험 한도(GUEST_TRIAL_LIMIT_EXCEEDED)와 같은 402지만 바디 code로 사유를 구분한다(KNK-524).
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "크레딧이 부족합니다.",
+                exception,
+            )
         }
     }
 

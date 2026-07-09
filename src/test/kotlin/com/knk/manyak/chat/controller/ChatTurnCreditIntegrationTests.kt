@@ -155,7 +155,8 @@ class ChatTurnCreditIntegrationTests {
             .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
             .expectBody()
             .jsonPath("$.status").isEqualTo(402)
-            .jsonPath("$.code").isEqualTo("PAYMENT_REQUIRED")
+            // 크레딧 부족은 게스트 한도와 구분되는 code로 온다(KNK-524).
+            .jsonPath("$.code").isEqualTo("INSUFFICIENT_CREDIT")
 
         // 스트림이 열리지 않았으므로 턴이 저장되지 않고, 소모 원장도 남지 않는다.
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()

@@ -460,6 +460,8 @@ Accept: application/json
             client.log("지갑 잔액이 비용 이상이라 402가 아니라 201(차감 성공)입니다. 402 재현에는 잔액을 비용 미만으로 두세요.");
         } else {
             client.assert(response.status === 402, `402(또는 잔액 충분 시 201)가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+            // [KNK-524] 크레딧 부족은 게스트 한도(GUEST_TRIAL_LIMIT_EXCEEDED)와 구분되는 body code로 온다(둘 다 HTTP 402).
+            client.assert(response.body.code === "INSUFFICIENT_CREDIT", `code가 INSUFFICIENT_CREDIT가 아닙니다. actual=${response.body.code}`);
         }
     });
 %}
