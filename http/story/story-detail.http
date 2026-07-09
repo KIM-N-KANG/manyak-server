@@ -95,9 +95,10 @@ Accept: application/json
         client.assert(Array.isArray(b.suggestedInputs) && b.suggestedInputs.length > 0, "suggestedInputs가 비어 있습니다.");
     });
     client.test("MVP 기본값이 계약대로다", () => {
-        client.assert(b.coverImageUrl === null, "coverImageUrl은 null이어야 합니다.");
+        // [KNK-515] coverImageUrl→thumbnailUrl(값 null 유지), chatCount→turnCount(채팅 없으면 0).
+        client.assert(b.thumbnailUrl === null, "thumbnailUrl은 null이어야 합니다.");
         client.assert(b.author === null, "author는 null이어야 합니다.");
-        client.assert(b.chatCount === 0 && b.likeCount === 0, "chatCount/likeCount는 0이어야 합니다.");
+        client.assert(b.turnCount === 0 && b.likeCount === 0, "turnCount/likeCount는 채팅 없으면 0이어야 합니다.");
         client.assert(b.visibility === "PRIVATE", "visibility는 PRIVATE이어야 합니다.");
         client.assert(b.status === "PUBLISHED", "status는 PUBLISHED여야 합니다.");
     });

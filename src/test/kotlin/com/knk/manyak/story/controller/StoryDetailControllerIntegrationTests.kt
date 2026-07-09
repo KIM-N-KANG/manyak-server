@@ -1,5 +1,7 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
@@ -7,6 +9,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import java.time.Instant
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -33,11 +36,30 @@ class StoryDetailControllerIntegrationTests {
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
+    private lateinit var storyChatRepository: StoryChatRepository
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+    }
+
+    @Test
+    fun `turnCount는 스토리의 미삭제 채팅 current_turn 합이다`() {
+        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC, status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2))
+        // 소프트 삭제된 채팅은 합산에서 제외한다.
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 5, deletedAt = Instant.now()))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turnCount").isEqualTo(5)
     }
 
     @Test
@@ -85,10 +107,10 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
             .jsonPath("$.suggestedInputs[0]").isEqualTo("레이에게 문을 열어준다")
             .jsonPath("$.suggestedInputs[2]").isEqualTo("침묵한다")
-            .jsonPath("$.coverImageUrl").isEmpty
+            .jsonPath("$.thumbnailUrl").isEmpty
             .jsonPath("$.author").isEmpty
             .jsonPath("$.hashtags.length()").isEqualTo(0)
-            .jsonPath("$.chatCount").isEqualTo(0)
+            .jsonPath("$.turnCount").isEqualTo(0)
             .jsonPath("$.likeCount").isEqualTo(0)
             .jsonPath("$.visibility").isEqualTo("PUBLIC")
             .jsonPath("$.status").isEqualTo("PUBLISHED")

@@ -76,7 +76,7 @@ class StoryController(
                         array = ArraySchema(
                             schema = Schema(implementation = StorySummaryResponse::class),
                             arraySchema = Schema(
-                                example = """[{"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","title":"달빛 아래의 계약","oneLineIntro":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"author":null,"chatCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":"9c5b94b1-35ad-49bb-b118-8e8fc24abf80","title":"왕국의 마지막 편지","oneLineIntro":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"author":null,"chatCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
+                                example = """[{"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","title":"달빛 아래의 계약","oneLineIntro":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"author":null,"turnCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":"9c5b94b1-35ad-49bb-b118-8e8fc24abf80","title":"왕국의 마지막 편지","oneLineIntro":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"author":null,"turnCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
                             ),
                         ),
                     ),

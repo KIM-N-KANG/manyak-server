@@ -48,8 +48,8 @@ data class StorySummaryResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
@@ -66,8 +66,8 @@ data class StoryDetailResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "커버 이미지 URL", example = "https://example.com/covers/moon-contract.png")
-    val coverImageUrl: String?,
+    @field:Schema(description = "썸네일 이미지 URL(§4-3-9). 소스가 없으면 null.", example = "https://example.com/thumbnails/moon-contract.png", nullable = true)
+    val thumbnailUrl: String?,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
@@ -93,8 +93,8 @@ data class StoryDetailResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,

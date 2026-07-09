@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
@@ -38,6 +39,7 @@ class StoryService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    private val storyChatRepository: StoryChatRepository,
 ) {
 
     @Transactional(readOnly = true)
@@ -63,7 +65,7 @@ class StoryService(
         // 요청 순서를 보존한다. 존재하지 않거나 삭제된 스토리는 자연히 제외된다.
         return requestedPublicIds
             .mapNotNull { storiesByPublicId[it] }
-            .map { it.toSummaryResponse() }
+            .toSummaryResponses()
     }
 
     /**
@@ -74,7 +76,7 @@ class StoryService(
     fun getMyStories(userId: Long, limit: Int): List<StorySummaryResponse> =
         storyRepository
             .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, limit))
-            .map { it.toSummaryResponse() }
+            .toSummaryResponses()
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
@@ -108,14 +110,15 @@ class StoryService(
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
-            coverImageUrl = null,
+            // 썸네일 소스 배선은 별도 범위(KNK-515은 필드명만 확정). 현재는 null.
+            thumbnailUrl = null,
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
             genres = story.toGenreNames(),
             hashtags = emptyList(),
             author = null,
-            chatCount = 0,
+            turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
             likeCount = 0,
             startSetting = startSetting?.let {
                 StoryStartSettingResponse(
@@ -208,14 +211,24 @@ class StoryService(
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    private fun Story.toSummaryResponse(): StorySummaryResponse =
+    /** 스토리 목록을 카드 응답으로 매핑한다. turnCount는 한 번의 배치 집계로 채운다(N+1 방지). */
+    private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
+        if (isEmpty()) {
+            return emptyList()
+        }
+        val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
+            .associate { it.storyId to it.turnCount }
+        return map { it.toSummaryResponse(turnCount = turnCountByStoryId[it.id] ?: 0) }
+    }
+
+    private fun Story.toSummaryResponse(turnCount: Long): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),
             author = null,
-            chatCount = 0,
+            turnCount = turnCount,
             likeCount = 0,
             status = this.status,
             createdAt = createdAt,
