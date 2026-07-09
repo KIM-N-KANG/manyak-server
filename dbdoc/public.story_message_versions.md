@@ -49,6 +49,7 @@ erDiagram
   text content
   integer message_order
   timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
 }
 ```
 

@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_main_events_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('story_main_events_id_seq'::regclass) | false | [public.story_chats](public.story_chats.md) [public.story_chat_main_events](public.story_chat_main_events.md) |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | name | varchar(100) |  | false |  |  |  |
 | description | text |  | false |  |  |  |
@@ -34,6 +34,8 @@
 ```mermaid
 erDiagram
 
+"public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
+"public.story_chat_main_events" }o--|| "public.story_main_events" : "FOREIGN KEY (main_event_id) REFERENCES story_main_events(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_main_events" {
@@ -45,6 +47,30 @@ erDiagram
   smallint sort_order
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.story_chats" {
+  bigint id
+  bigint user_id
+  bigint story_id FK
+  bigint start_setting_id FK
+  varchar_100_ title
+  text summary
+  integer current_turn
+  varchar_20_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+  integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
+}
+"public.story_chat_main_events" {
+  bigint id
+  bigint chat_id FK
+  bigint main_event_id FK
+  timestamp_with_time_zone created_at
 }
 "public.stories" {
   bigint id

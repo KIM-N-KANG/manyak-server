@@ -47,6 +47,10 @@ class StoryMessage(
     @Column(name = "message_order", nullable = false)
     val messageOrder: Int,
 
+    // 이 ASSISTANT 메시지가 엔딩 응답이면 도달한 엔딩(story_endings.id). 도달 턴에만 채워지고 이후 재생성은 409로 막힌다.
+    @Column(name = "reached_ending_id")
+    val reachedEndingId: Long? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )
