@@ -6,11 +6,15 @@ import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
+import com.knk.manyak.chat.client.ChatTurnEnding
+import com.knk.manyak.chat.client.ChatTurnMainEvent
 import com.knk.manyak.chat.client.ChatTurnStartSettings
 import com.knk.manyak.chat.client.ChatTurnStorySettings
+import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
+import com.knk.manyak.chat.dto.ReachedEndingResponse
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
 import com.knk.manyak.chat.dto.ChatStreamStartedEvent
 import com.knk.manyak.chat.dto.ChatStreamTokenEvent
@@ -24,6 +28,7 @@ import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatMainEventRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -39,6 +44,9 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryMainEvent
+import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -68,6 +76,9 @@ class ChatService(
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    private val storyMainEventRepository: StoryMainEventRepository,
+    private val storyEndingRepository: StoryEndingRepository,
+    private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -331,6 +342,7 @@ class ChatService(
                     userInput = request.userInput,
                     aiOutput = result.aiOutput,
                     choices = result.choices,
+                    judgment = result.toTurnJudgment(),
                 )
             },
             onPersisted = { persistedTurn, aiCallLogId ->
@@ -378,6 +390,10 @@ class ChatService(
         val storyPublicId = story?.publicId?.toString().orEmpty()
         // 마지막 턴 검증(0개면 404, 낡은 turnId면 409)과 재생성용 history(마지막 턴 제외)·재전송 입력을 함께 확정한다.
         val target = resolveRegenerateTarget(chat.id, request.turnId)
+        // 재생성 요청은 현재 채팅 상태(목표·거쳐온 사건·엔딩 후보)를 그대로 싣고, 판정 메타는 재적용하지 않는다
+        // (regenerateLastTurn은 judgment를 받지 않음). 스펙 §4-3-9/§4-3-10의 "직전 턴까지 상태로 재구성 후 새 메타로
+        // 재기록"은 턴별 메타 델타 이력이 있어야 정확한데 현 스키마엔 없어 Phase 1 범위 밖으로 둔다. 엔딩 도달 턴은 위에서
+        // 409로 막으므로 도달 불변식(채팅당 최초 1회)은 유지된다.
         val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
 
         return streamTurnInternal(
@@ -575,12 +591,13 @@ class ChatService(
                 // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
                 onPersisted(persistedTurn, recorded.aiCallLogId)
-                // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 반영(ending_id)은 B5 런타임 구현 후 추가한다.
+                // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 턴이면 도달 엔딩 id를 함께 싣는다(B5).
                 serverAnalytics.chatAiMessageSucceeded(
                     userId = userId,
                     chatId = chatId,
                     turnNumber = persistedTurn.turnNumber,
                     isRegenerated = isRegenerated,
+                    endingId = persistedTurn.reachedEnding?.id?.toString(),
                 )
                 emitter.send(
                     SseEmitter.event()
@@ -591,6 +608,8 @@ class ChatService(
                                 turnId = persistedTurn.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
+                                reachedEnding = persistedTurn.reachedEnding
+                                    ?.let { ReachedEndingResponse(id = it.id, name = it.name) },
                             ),
                         ),
                 )
@@ -731,6 +750,13 @@ class ChatService(
         val setting = storySettingRepository.findByStoryId(chat.storyId)
         val startSetting = storyStartSettingRepository.findByStoryId(chat.storyId)
 
+        // 주요 사건·엔딩 런타임 재료(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
+        val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(chat.storyId)
+        val targetMainEvent = chat.targetMainEventId?.let { targetId ->
+            mainEvents.firstOrNull { it.id == targetId }
+                ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
+        }
+
         return ChatTurnAiRequest(
             genre = genre,
             storySettings = ChatTurnStorySettings(
@@ -747,8 +773,43 @@ class ChatService(
             history = history,
             userInput = userInput,
             summary = "",
+            mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
+            targetMainEvent = targetMainEvent,
+            occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
+            endings = loadEligibleEndings(chat),
         )
     }
+
+    /** 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료). */
+    private fun resolveOccurredMainEventNames(chatId: Long, mainEvents: List<StoryMainEvent>): List<String> {
+        if (mainEvents.isEmpty()) {
+            return emptyList()
+        }
+        val occurredIds = storyChatMainEventRepository.findByChatId(chatId).map { it.mainEventId }.toSet()
+        return mainEvents.filter { it.id in occurredIds }.map { it.name }
+    }
+
+    /**
+     * 이번 턴 도달 후보 엔딩만 싣는다: 이미 도달한 채팅(reached_ending_id != null)이면 빈 목록(재판정 차단),
+     * 그 외엔 이번 턴(current_turn + 1)이 최소 턴 수를 충족하는 활성 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
+     */
+    private fun loadEligibleEndings(chat: StoryChat): List<ChatTurnEnding> {
+        if (chat.reachedEndingId != null) {
+            return emptyList()
+        }
+        val startSettingId = chat.startSettingId ?: return emptyList()
+        val turnBeingGenerated = chat.currentTurn + 1
+        return storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSettingId)
+            .filter { it.minTurns <= turnBeingGenerated }
+            .map { ChatTurnEnding(name = it.name, achievementCondition = it.achievementCondition, epilogue = it.epilogue) }
+    }
+
+    /** AI completed 결과의 판정 필드를 저장 트랜잭션용 [TurnJudgment]로 변환한다. */
+    private fun ChatTurnAiResult.toTurnJudgment(): TurnJudgment = TurnJudgment(
+        targetMainEvent = targetMainEvent?.let { TargetMainEventJudgment(it.name, it.progressTurns) },
+        occurredMainEventName = occurredMainEventName,
+        endingName = endingName,
+    )
 
     /**
      * 시작 설정에 연결된 추천 입력을 input_order 오름차순으로 조회한다.

@@ -198,6 +198,18 @@ data class ChatStreamCompletedEvent(
         arraySchema = Schema(description = "이번 턴에서 AI가 제안한 다음 행동 선택지 목록"),
     )
     val choices: List<String>,
+
+    @field:Schema(description = "이번 턴에 도달한 엔딩(엔딩 응답이 아니면 null)", nullable = true)
+    val reachedEnding: ReachedEndingResponse? = null,
+)
+
+@Schema(description = "도달한 엔딩")
+data class ReachedEndingResponse(
+    @field:Schema(description = "엔딩 ID", example = "12")
+    val id: Long,
+
+    @field:Schema(description = "엔딩 이름", example = "왕좌를 되찾다")
+    val name: String,
 )
 
 @Schema(description = "SSE 오류 이벤트 예시")

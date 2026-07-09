@@ -12,6 +12,9 @@ interface StoryEndingRepository : JpaRepository<StoryEnding, Long> {
     // 엔티티로 실체화하면 NPE가 나므로 조회 단계에서 제외한다(§4-3-10 레거시 비활성 보존).
     fun findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSettingId: Long): List<StoryEnding>
 
+    // 채팅 런타임: AI가 이름으로 지목한 도달 엔딩을 id로 해소한다(이름은 엔딩 식별자, §4-3-10).
+    fun findFirstByStartSettingIdAndNameAndEnabledTrue(startSettingId: Long, name: String): StoryEnding?
+
     // 수정(PATCH)의 엔딩 전체 교체에서 기존 엔딩을 지운다. 레거시(enabled=false)까지 함께 지워
     // (start_setting_id, sort_order) 유니크 충돌을 피한다 — 사용자가 새 엔딩을 재등록하면 레거시는 대체된다(§4-3-8).
     //

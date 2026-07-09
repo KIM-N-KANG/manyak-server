@@ -1,14 +1,22 @@
 package com.knk.manyak.chat.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryChatMainEvent
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryMessageVersion
+import com.knk.manyak.chat.repository.StoryChatMainEventRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.story.entity.UserStoryEndingReach
+import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
+import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -27,6 +35,10 @@ class ChatTurnPersister(
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val storyMessageVersionRepository: StoryMessageVersionRepository,
+    private val storyChatMainEventRepository: StoryChatMainEventRepository,
+    private val storyMainEventRepository: StoryMainEventRepository,
+    private val storyEndingRepository: StoryEndingRepository,
+    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
 ) {
 
     // 이력 선택지 스냅샷 직렬화용. 컨텍스트 ObjectMapper 빈에 의존하지 않도록 로컬 인스턴스를 둔다(List<String> 직렬화만 사용).
@@ -44,12 +56,17 @@ class ChatTurnPersister(
         userInput: String,
         aiOutput: String,
         choices: List<String>,
+        // AI 판정 결과(목표 사건·완결 사건·도달 엔딩). 턴 저장과 같은 트랜잭션에서 채팅 상태에 반영한다(§4-3-10, D11).
+        judgment: TurnJudgment = TurnJudgment(),
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
         // 행을 못 봐(READ COMMITTED) 낡은 마지막 턴을 교체·과금하고 append가 뒤이어 커밋될 수 있다(Codex P2).
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+
+        // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
+        val reachedEnding = resolveReachedEnding(chat, judgment.endingName)
 
         val lastOrder = storyMessageRepository
             .findFirstByChatIdOrderByMessageOrderDesc(chatId)
@@ -70,6 +87,7 @@ class ChatTurnPersister(
                 role = MessageRole.ASSISTANT,
                 content = aiOutput,
                 messageOrder = user.messageOrder + 1,
+                reachedEndingId = reachedEnding?.id,
             ),
         )
 
@@ -86,10 +104,70 @@ class ChatTurnPersister(
             )
         }
 
+        applyMainEventState(chat, judgment)
+        applyEndingReach(chat, reachedEnding)
+
         chat.currentTurn += 1
         storyChatRepository.save(chat)
 
-        return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn)
+        return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn, reachedEnding = reachedEnding)
+    }
+
+    /**
+     * AI가 이름으로 지목한 도달 엔딩을 채팅의 시작 설정 스코프에서 id로 해소한다.
+     * 시작 설정이 없거나 이미 도달한 채팅이면 null(최초 1회 가드는 요청 단계에서 후보를 비워 이미 걸리지만 방어적으로 재확인).
+     */
+    private fun resolveReachedEnding(chat: StoryChat, endingName: String?): ReachedEnding? {
+        val startSettingId = chat.startSettingId
+        if (endingName == null || startSettingId == null || chat.reachedEndingId != null) {
+            return null
+        }
+        val ending = storyEndingRepository
+            .findFirstByStartSettingIdAndNameAndEnabledTrue(startSettingId, endingName)
+            ?: return null
+        return ReachedEnding(id = ending.id, name = ending.name)
+    }
+
+    /** 목표 사건 상태(선정·교체·해제)와 이번 턴 완결 사건 기록을 반영한다. 이름은 사건 id로 해소한다. */
+    private fun applyMainEventState(chat: StoryChat, judgment: TurnJudgment) {
+        // 완결 사건 기록(최초 1회 upsert). 같은 채팅에서 같은 사건은 유니크로 한 번만 남는다.
+        judgment.occurredMainEventName?.let { name ->
+            storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.let { event ->
+                if (!storyChatMainEventRepository.existsByChatIdAndMainEventId(chat.id, event.id)) {
+                    storyChatMainEventRepository.save(
+                        StoryChatMainEvent(chatId = chat.id, mainEventId = event.id),
+                    )
+                }
+            }
+        }
+
+        // 목표 사건: AI가 지목하면 그 사건·진행 턴 수로, null이면 목표 해제(진행 0).
+        val target = judgment.targetMainEvent
+        val targetEvent = target?.let { storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, it.name) }
+        if (target != null && targetEvent != null) {
+            chat.targetMainEventId = targetEvent.id
+            chat.targetProgressTurns = target.progressTurns.coerceAtLeast(0)
+        } else {
+            chat.targetMainEventId = null
+            chat.targetProgressTurns = 0
+        }
+    }
+
+    /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계 upsert. 게스트는 집계하지 않는다. */
+    private fun applyEndingReach(chat: StoryChat, reachedEnding: ReachedEnding?) {
+        if (reachedEnding == null) {
+            return
+        }
+        chat.reachedEndingId = reachedEnding.id
+        chat.status = ChatStatus.ENDED
+        val userId = chat.userId
+        if (userId != null &&
+            !userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, reachedEnding.id)
+        ) {
+            userStoryEndingReachRepository.save(
+                UserStoryEndingReach(userId = userId, storyId = chat.storyId, endingId = reachedEnding.id),
+            )
+        }
     }
 
     /**
@@ -166,5 +244,21 @@ class ChatTurnPersister(
         return PersistedTurn(turnId = lastAssistant.id, turnNumber = chat.currentTurn)
     }
 
-    data class PersistedTurn(val turnId: Long, val turnNumber: Int)
+    data class PersistedTurn(
+        val turnId: Long,
+        val turnNumber: Int,
+        // 이번 턴에 도달한 엔딩(엔딩 응답이 아니면 null). SSE completed·분석 이벤트에 싣는다. 재생성은 항상 null.
+        val reachedEnding: ReachedEnding? = null,
+    )
+
+    data class ReachedEnding(val id: Long, val name: String)
 }
+
+/** 채팅 턴 저장 트랜잭션에 반영할 AI 판정 결과(§4-3-10). 전부 선택이며, 재료가 없으면 상태 변화가 없다. */
+data class TurnJudgment(
+    val targetMainEvent: TargetMainEventJudgment? = null,
+    val occurredMainEventName: String? = null,
+    val endingName: String? = null,
+)
+
+data class TargetMainEventJudgment(val name: String, val progressTurns: Int)

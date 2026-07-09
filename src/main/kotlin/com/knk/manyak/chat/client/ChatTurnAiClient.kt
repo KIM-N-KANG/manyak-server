@@ -37,6 +37,37 @@ data class ChatTurnAiRequest(
     @JsonProperty("user_input")
     val userInput: String,
     val summary: String,
+
+    // 주요 사건·엔딩 런타임 재료(스펙 §5-3-4, D11). 전부 선택 필드이며, 재료가 없으면 빈 값으로 하위호환된다.
+    // main_events: 스토리의 주요 사건 전체. target_main_event: 현재 목표 사건 상태(백엔드가 되돌려 실음).
+    // occurred_main_event_names: 이미 완결된 사건 이름들. endings: min_turns 충족·미도달 엔딩 후보만.
+    @JsonProperty("main_events")
+    val mainEvents: List<ChatTurnMainEvent> = emptyList(),
+    @JsonProperty("target_main_event")
+    val targetMainEvent: ChatTurnTargetMainEvent? = null,
+    @JsonProperty("occurred_main_event_names")
+    val occurredMainEventNames: List<String> = emptyList(),
+    val endings: List<ChatTurnEnding> = emptyList(),
+)
+
+data class ChatTurnMainEvent(
+    val name: String,
+    val description: String,
+    @JsonProperty("key_sentence")
+    val keySentence: String,
+)
+
+data class ChatTurnTargetMainEvent(
+    val name: String,
+    @JsonProperty("progress_turns")
+    val progressTurns: Int,
+)
+
+data class ChatTurnEnding(
+    val name: String,
+    @JsonProperty("achievement_condition")
+    val achievementCondition: String,
+    val epilogue: String,
 )
 
 data class ChatTurnStorySettings(
@@ -78,4 +109,16 @@ data class ChatTurnAiResult(
     val aiOutput: String,
     val choices: List<String>,
     val meta: AiCallMeta? = null,
+
+    // AI 판정 결과(스펙 §5-3-4). 백엔드가 턴 저장 트랜잭션에서 채팅 상태에 반영한다(D11).
+    // targetMainEvent: 이번 턴 이후 목표 사건 상태(없거나 완결 직후는 null). occurredMainEventName: 이번 턴 완결된 사건 1건.
+    // endingName: 이번 턴이 엔딩 응답이면 도달한 엔딩 이름.
+    val targetMainEvent: ChatTurnTargetMainEventResult? = null,
+    val occurredMainEventName: String? = null,
+    val endingName: String? = null,
+)
+
+data class ChatTurnTargetMainEventResult(
+    val name: String,
+    val progressTurns: Int,
 )
