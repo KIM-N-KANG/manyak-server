@@ -35,6 +35,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.entity.Story
@@ -77,6 +78,7 @@ class ChatService(
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
+    private val serverAnalytics: ServerAnalytics,
     // 채팅 턴 1회 소모량(스펙 §4-3-7, KNK-477 확정: 10. 재생성도 동일 값·사유를 공유).
     @param:Value("\${manyak.credit.chat-turn-cost:10}")
     private val chatTurnCost: Long,
@@ -322,6 +324,7 @@ class ChatService(
             aiRequest = aiRequest,
             userId = userId,
             deviceId = deviceId,
+            isRegenerated = false,
             persist = { result ->
                 chatTurnPersister.persistTurn(
                     chatId = chat.id,
@@ -384,6 +387,7 @@ class ChatService(
             aiRequest = aiRequest,
             userId = userId,
             deviceId = deviceId,
+            isRegenerated = true,
             persist = { result ->
                 chatTurnPersister.regenerateLastTurn(
                     chatId = chat.id,
@@ -469,6 +473,7 @@ class ChatService(
         aiRequest: ChatTurnAiRequest,
         userId: Long?,
         deviceId: String?,
+        isRegenerated: Boolean,
         persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
@@ -570,6 +575,13 @@ class ChatService(
                 // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
                 onPersisted(persistedTurn, recorded.aiCallLogId)
+                // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 반영(ending_id)은 B5 런타임 구현 후 추가한다.
+                serverAnalytics.chatAiMessageSucceeded(
+                    userId = userId,
+                    chatId = chatId,
+                    turnNumber = persistedTurn.turnNumber,
+                    isRegenerated = isRegenerated,
+                )
                 emitter.send(
                     SseEmitter.event()
                         .name("completed")
@@ -586,6 +598,14 @@ class ChatService(
             } catch (exception: ChatTurnAiException) {
                 // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
                 sendErrorQuietly(emitter, exception.code, exception.message)
+                // AI 응답 생성 실패 분석 이벤트(스펙 §6-4-2-6): 구조화 오류 code를 error_type으로 매핑한다. 저장 전이라 turn_number 미확정.
+                serverAnalytics.chatAiMessageFailed(
+                    userId = userId,
+                    chatId = chatId,
+                    turnNumber = null,
+                    errorCode = exception.code,
+                    isRegenerated = isRegenerated,
+                )
                 emitter.complete()
             } catch (exception: Exception) {
                 // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
@@ -595,6 +615,17 @@ class ChatService(
                     captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
                 }
                 sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
+                // 저장 성공 후 실패(completed 전송 실패 등)는 이미 성공 이벤트를 발행했으므로 중복 실패를 내지 않는다.
+                // 저장 전 실패(AI 호출 실패·persist 실패)만 실패 이벤트로 발행한다(스펙 §6-4-2-6).
+                if (!persisted.get()) {
+                    serverAnalytics.chatAiMessageFailed(
+                        userId = userId,
+                        chatId = chatId,
+                        turnNumber = null,
+                        errorCode = "AI_STREAM_FAILED",
+                        isRegenerated = isRegenerated,
+                    )
+                }
                 emitter.complete()
             } finally {
                 // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,

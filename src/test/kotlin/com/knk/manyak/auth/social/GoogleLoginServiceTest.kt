@@ -46,13 +46,15 @@ class GoogleLoginServiceTest {
     private val guestTrialLimitService: GuestTrialLimitService = mock(GuestTrialLimitService::class.java)
     private val userRepository: com.knk.manyak.auth.repository.UserRepository =
         mock(com.knk.manyak.auth.repository.UserRepository::class.java)
+    private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
+        mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
 
     private val signupReward = 100L
 
     private fun serviceWith(verifier: GoogleIdTokenVerifier): GoogleLoginService =
         GoogleLoginService(
             verifier, registrar, authTokenService, creditWalletService, inviteService, guestTrialLimitService,
-            userRepository, signupReward,
+            userRepository, serverAnalytics, signupReward,
         )
 
     private fun fakeVerifier(providerUserId: String = "sub"): GoogleIdTokenVerifier =
