@@ -89,9 +89,15 @@ class GoogleLoginService(
         }
     }
 
-    /** 토큰 검증 예외를 분석용 error_type으로 분류한다(스펙 §6-6-7): 401 검증 실패는 validation, 그 외(연결·timeout)는 network. */
-    private fun classifyVerifyError(e: Exception): AnalyticsErrorType =
-        if (e is ResponseStatusException) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.NETWORK
+    /**
+     * 토큰 검증 예외를 분석용 error_type으로 분류한다(스펙 §6-6-7). verifier는 잘못된 토큰과 **Google JWK 조회 네트워크
+     * 실패를 모두 401(ResponseStatusException)로 감싸므로**, 원인 체인을 먼저 훑어 연결·소켓·원격 키 소스 실패면 network로 본다
+     * (Codex P2). 그 외 401은 서명·만료·audience 검증 실패라 validation, ResponseStatusException이 아니면 외부 호출 성격상 network.
+     */
+    private fun classifyVerifyError(e: Exception): AnalyticsErrorType {
+        if (AnalyticsErrorType.fromThrowable(e) == AnalyticsErrorType.NETWORK) return AnalyticsErrorType.NETWORK
+        return if (e is ResponseStatusException) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.NETWORK
+    }
 
     /**
      * 연동을 찾으면 그 User를, 없으면 새로 만들어 반환한다(find-or-create).

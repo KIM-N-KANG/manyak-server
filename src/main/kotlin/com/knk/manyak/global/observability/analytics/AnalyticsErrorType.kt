@@ -36,15 +36,18 @@ enum class AnalyticsErrorType(val wireValue: String) {
             val seen = HashSet<Throwable>()
             while (cause != null && seen.add(cause)) {
                 val name = cause.javaClass.simpleName
-                if (name.contains("Timeout", ignoreCase = true) ||
-                    name.contains("Connect", ignoreCase = true) ||
-                    name.contains("WebClientRequest", ignoreCase = true)
-                ) {
+                if (NETWORK_HINTS.any { name.contains(it, ignoreCase = true) }) {
                     return NETWORK
                 }
                 cause = cause.cause
             }
             return SERVER
         }
+
+        // 예외 클래스명에 이 조각이 보이면 연결·전송 계층 실패로 본다. Google JWK 조회 실패(원격 키 소스·소켓·호스트 해석)도
+        // verifier가 401로 감싸므로, 원인 체인을 훑어 network로 분류하기 위한 힌트다(그 외 토큰 검증 실패는 validation으로 남는다).
+        private val NETWORK_HINTS = listOf(
+            "Timeout", "Connect", "WebClientRequest", "IOException", "SocketException", "UnknownHost", "RemoteKeySource",
+        )
     }
 }

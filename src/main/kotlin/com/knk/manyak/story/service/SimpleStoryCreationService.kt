@@ -158,7 +158,8 @@ class SimpleStoryCreationService(
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리라인 생성 요청에 실패했습니다.", exception)
         }
 
-        val response = transactionTemplate.execute {
+        val response = try {
+            transactionTemplate.execute {
             val customTags = findOrCreateCustomTags(customTagDrafts)
             val tags = predefinedTags + customTags
             val creationSession = storyCreationSessionRepository.save(
@@ -212,7 +213,16 @@ class SimpleStoryCreationService(
                 selectedTags = tags.map { it.toTagResponse() },
                 storylines = storylineResponses,
             )
-        } ?: throw IllegalStateException("Storyline creation transaction result is empty")
+            } ?: throw IllegalStateException("Storyline creation transaction result is empty")
+        } catch (exception: Exception) {
+            // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
+            serverAnalytics.storylineGenerationFailed(
+                userId = userId,
+                creationId = null,
+                errorType = AnalyticsErrorType.fromThrowable(exception),
+            )
+            throw exception
+        }
         // 스토리라인 생성 성공 분석 이벤트(스펙 §6-4-2-3). 세션 저장으로 확정된 creation_id를 싣는다.
         serverAnalytics.storylineGenerationSucceeded(userId = userId, creationId = response.simpleCreationId)
         return response

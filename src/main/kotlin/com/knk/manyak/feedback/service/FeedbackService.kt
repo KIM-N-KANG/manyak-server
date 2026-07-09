@@ -11,6 +11,8 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Service
 class FeedbackService(
@@ -21,23 +23,28 @@ class FeedbackService(
 ) {
     @Transactional
     fun createFeedback(request: CreateFeedbackRequest, userId: Long? = null) {
-        val feedback = try {
-            feedbackRepository.save(
-                Feedback(
-                    userId = userId,
-                    body = request.body,
-                    // 공백뿐인 선택 입력은 null 로 정규화해 데이터 일관성을 유지한다.
-                    email = request.email?.takeIf { it.isNotBlank() },
-                    // @Pattern 으로 이미 검증된 값이므로 안전하게 enum 으로 변환한다.
-                    platform = request.platform?.let { Platform.valueOf(it) },
-                    appVersion = request.appVersion?.takeIf { it.isNotBlank() },
-                ),
-            )
-        } catch (e: Exception) {
-            // 저장 실패는 서버 내부 처리 실패로 분석 이벤트를 남긴다(입력 검증은 컨트롤러에서 이미 400으로 걸러짐).
-            serverAnalytics.feedbackSubmissionFailed(userId, AnalyticsErrorType.SERVER)
-            throw e
-        }
+        // 분석 이벤트를 커밋 결과에 묶는다(Codex P2): 커밋 후에만 성공, 롤백이면 실패. 저장·flush·커밋 어느 단계 실패든
+        // afterCompletion이 한 번 처리하므로, 커밋 단계 실패로 인한 false success나 실패 이벤트 누락이 없다. Slack 알림도 AFTER_COMMIT이다.
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCompletion(status: Int) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    serverAnalytics.feedbackSubmissionSucceeded(userId)
+                } else {
+                    serverAnalytics.feedbackSubmissionFailed(userId, AnalyticsErrorType.SERVER)
+                }
+            }
+        })
+        val feedback = feedbackRepository.save(
+            Feedback(
+                userId = userId,
+                body = request.body,
+                // 공백뿐인 선택 입력은 null 로 정규화해 데이터 일관성을 유지한다.
+                email = request.email?.takeIf { it.isNotBlank() },
+                // @Pattern 으로 이미 검증된 값이므로 안전하게 enum 으로 변환한다.
+                platform = request.platform?.let { Platform.valueOf(it) },
+                appVersion = request.appVersion?.takeIf { it.isNotBlank() },
+            ),
+        )
         // 저장이 커밋된 뒤 비동기로 Slack 알림을 보낸다(리스너가 AFTER_COMMIT 으로 수신).
         eventPublisher.publishEvent(
             FeedbackCreatedEvent(
@@ -54,6 +61,5 @@ class FeedbackService(
             "content_length" to feedback.body.length,
             "has_email" to (feedback.email != null),
         )
-        serverAnalytics.feedbackSubmissionSucceeded(userId)
     }
 }

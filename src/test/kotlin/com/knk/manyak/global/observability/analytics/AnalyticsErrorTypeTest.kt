@@ -48,6 +48,9 @@ class AnalyticsErrorTypeTest {
         // 원인 체인에 timeout이 섞여 있어도 찾아낸다.
         assertThat(AnalyticsErrorType.fromThrowable(RuntimeException(java.util.concurrent.TimeoutException("t"))))
             .isEqualTo(AnalyticsErrorType.NETWORK)
+        // Google JWK 조회 실패(원인 체인 깊숙한 IOException)도 network로 본다(Codex P2).
+        assertThat(AnalyticsErrorType.fromThrowable(RuntimeException(java.io.IOException("jwk down"))))
+            .isEqualTo(AnalyticsErrorType.NETWORK)
         assertThat(AnalyticsErrorType.fromThrowable(IllegalStateException("boom")))
             .isEqualTo(AnalyticsErrorType.SERVER)
         assertThat(AnalyticsErrorType.fromThrowable(null)).isEqualTo(AnalyticsErrorType.SERVER)
