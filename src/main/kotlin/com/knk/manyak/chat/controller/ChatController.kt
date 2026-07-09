@@ -10,6 +10,7 @@ import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.CurrentUserId
@@ -60,12 +61,12 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "스토리를 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -100,7 +101,7 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -125,12 +126,12 @@ class ChatController(
             ApiResponse(
                 responseCode = "403",
                 description = "채팅 소유자가 아님(회원의 게스트 채팅 조회 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -152,12 +153,12 @@ class ChatController(
             ApiResponse(
                 responseCode = "403",
                 description = "채팅 소유자가 아님",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음(이미 삭제됨 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -191,22 +192,23 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                // SSE 엔드포인트(produces=text/event-stream)지만 에러는 동기 application/json 바디로 나가므로 mediaType을 명시한다.
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "402",
                 description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "403",
                 description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원). 소유자만 이어쓸 수 있습니다.",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -271,27 +273,28 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음(turnId 누락·비양수, 게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                // SSE 엔드포인트(produces=text/event-stream)지만 에러는 동기 application/json 바디로 나가므로 mediaType을 명시한다.
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "402",
                 description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "403",
                 description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원).",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없거나 재생성할 턴이 없음(턴 0개)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "409",
                 description = "요청 turnId가 서버의 마지막 턴과 다르거나(진행됨), 엔딩에 도달한 채팅",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
