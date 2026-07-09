@@ -220,6 +220,9 @@ data class SimpleStoryCreateResponse(
     )
     val genres: List<String>,
 
-    @field:Schema(description = "스토리 시작 설정")
-    val startSetting: StoryStartSettingResponse,
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryStartSettingResponse::class),
+        arraySchema = Schema(description = "스토리 시작 설정 목록(KNK-515 복수화). 간편 제작은 1개다."),
+    )
+    val startSettings: List<StoryStartSettingResponse>,
 )

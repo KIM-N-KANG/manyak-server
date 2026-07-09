@@ -2,8 +2,10 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
+import com.knk.manyak.story.dto.GeneralStartSettingInput
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
+import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
@@ -67,27 +69,9 @@ class GeneralStoryCreationService(
                 ruleSetting = request.storySettings.ruleSetting,
             ),
         )
-        val startSetting = storyStartSettingRepository.save(
-            StoryStartSetting(
-                story = story,
-                name = request.startSetting.name,
-                prologue = request.startSetting.prologue,
-                startSituation = request.startSetting.startSituation,
-            ),
-        )
-        // 추천 입력은 시작 설정별 목록(1-based order). 채팅 시작 화면 계약과 동일하게 정확히 3개다.
-        storySuggestedInputRepository.saveAll(
-            request.suggestedInputs.mapIndexed { index, text ->
-                StorySuggestedInput(
-                    startSetting = startSetting,
-                    inputText = text,
-                    inputOrder = (index + 1).toShort(),
-                )
-            },
-        )
-        // 주요 사건 이름은 스토리 내에서 유니크해야 한다(이름 기반 런타임 식별, 완결·목표 매칭 모호성 방지 — KNK-523).
+        // 주요 사건은 스토리 스코프(sort_order 0-based). 이름은 스토리 내에서 유니크해야 한다
+        // (이름 기반 런타임 식별, 완결·목표 매칭 모호성 방지 — KNK-523). 없으면 저장 생략.
         requireDistinctMainEventNames(request.mainEvents.map { it.name })
-        // 주요 사건은 스토리 소유(sort_order 0-based). 없으면 저장 생략.
         if (request.mainEvents.isNotEmpty()) {
             storyMainEventRepository.saveAll(
                 request.mainEvents.mapIndexed { index, item ->
@@ -101,12 +85,48 @@ class GeneralStoryCreationService(
                 },
             )
         }
+
+        // 시작 설정별로 저장한다(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정 스코프다.
+        val startSettingResponses = request.startSettings.map { input -> persistStartSetting(story, input) }
+
+        return SimpleStoryCreateResponse(
+            id = story.publicId.toString(),
+            title = story.title,
+            oneLineIntro = story.oneLineIntro,
+            description = story.description,
+            genres = request.genres,
+            startSettings = startSettingResponses,
+        )
+    }
+
+    /** 시작 설정 하나와 그 스코프의 추천 입력·엔딩을 저장하고 응답 객체로 만든다(KNK-515 복수화). */
+    private fun persistStartSetting(story: Story, input: GeneralStartSettingInput): StoryStartSettingResponse {
+        val startSetting = storyStartSettingRepository.save(
+            StoryStartSetting(
+                story = story,
+                name = input.name,
+                prologue = input.prologue,
+                startSituation = input.startSituation,
+            ),
+        )
+        // 추천 입력은 시작 설정별 목록(1-based order). 채팅 시작 화면 계약과 동일하게 정확히 3개다.
+        val suggestedInputs = storySuggestedInputRepository.saveAll(
+            input.suggestedInputs.mapIndexed { index, text ->
+                StorySuggestedInput(
+                    startSetting = startSetting,
+                    inputText = text,
+                    inputOrder = (index + 1).toShort(),
+                )
+            },
+        ).map { it.inputText }
         // 엔딩 이름은 시작 설정 내에서 유니크해야 한다(이름 기반 식별, 표시 모호성 방지 — KNK-523).
-        requireDistinctEndingNames(request.endings.map { it.name })
+        requireDistinctEndingNames(input.endings.map { it.name })
         // 엔딩은 시작 설정 스코프(sort_order 1-based, ck_story_endings_order > 0). 없으면 저장 생략.
-        if (request.endings.isNotEmpty()) {
+        val endings = if (input.endings.isEmpty()) {
+            emptyList()
+        } else {
             storyEndingRepository.saveAll(
-                request.endings.mapIndexed { index, item ->
+                input.endings.mapIndexed { index, item ->
                     StoryEnding(
                         startSetting = startSetting,
                         name = item.name,
@@ -116,20 +136,15 @@ class GeneralStoryCreationService(
                         sortOrder = (index + 1).toShort(),
                     )
                 },
-            )
+            ).map { it.toEndingResponse() }
         }
-
-        return SimpleStoryCreateResponse(
-            id = story.publicId.toString(),
-            title = story.title,
-            oneLineIntro = story.oneLineIntro,
-            description = story.description,
-            genres = request.genres,
-            startSetting = StoryStartSettingResponse(
-                name = startSetting.name,
-                prologue = startSetting.prologue,
-                startSituation = startSetting.startSituation,
-            ),
+        return StoryStartSettingResponse(
+            id = startSetting.publicId.toString(),
+            name = startSetting.name,
+            prologue = startSetting.prologue,
+            startSituation = startSetting.startSituation,
+            suggestedInputs = suggestedInputs,
+            endings = endings,
         )
     }
 }

@@ -6,9 +6,7 @@ import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
-import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
@@ -18,8 +16,6 @@ import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
@@ -32,8 +28,7 @@ import java.util.UUID
 @Service
 class StoryService(
     private val storyRepository: StoryRepository,
-    private val storyStartSettingRepository: StoryStartSettingRepository,
-    private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    private val startSettingResponseAssembler: StartSettingResponseAssembler,
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyEndingRepository: StoryEndingRepository,
@@ -88,21 +83,11 @@ class StoryService(
         }
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
-        // 복수화(KNK-515) 스키마이나 상세 응답 배열화는 후속. 현재는 첫 시작 설정으로 기존 응답 형태 유지.
-        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
-        val suggestedInputs = startSetting
-            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
-            ?.map { it.inputText }
-            ?: emptyList()
+        // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
+        val startSettings = startSettingResponseAssembler.assemble(story.id)
 
         val lorebooks = storyLorebookRepository.findByStoryIdOrderBySortOrderAscIdAsc(story.id)
             .map { it.toLorebookResponse() }
-        // 엔딩은 시작 설정(start_setting) 하위다. 시작 설정이 없으면 매달린 엔딩도 없으므로 빈 배열.
-        // 활성 엔딩만 노출한다(레거시 enabled=false 행 제외 — §4-3-10).
-        val endings = startSetting
-            ?.let { storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(it.id) }
-            ?.map { it.toEndingResponse() }
-            ?: emptyList()
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
@@ -121,18 +106,10 @@ class StoryService(
             author = null,
             turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
             likeCount = 0,
-            startSetting = startSetting?.let {
-                StoryStartSettingResponse(
-                    name = it.name,
-                    prologue = it.prologue,
-                    startSituation = it.startSituation,
-                )
-            },
-            suggestedInputs = suggestedInputs,
+            startSettings = startSettings,
             visibility = story.visibility,
             status = story.status,
             lorebooks = lorebooks,
-            endings = endings,
             mainEvents = mainEvents,
             reachedEndings = reachedEndings,
             createdAt = story.createdAt,

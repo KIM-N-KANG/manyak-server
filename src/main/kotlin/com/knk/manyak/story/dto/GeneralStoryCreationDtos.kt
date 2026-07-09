@@ -42,28 +42,16 @@ data class CreateGeneralStoryRequest(
     @field:Schema(description = "스토리 설정 통글 4필드")
     val storySettings: GeneralStorySettingsInput,
 
+    // 시작 설정 복수화(KNK-515): 추천 입력·엔딩은 각 시작 설정에 종속된다. 최소 1개 이상이어야 한다(빈 배열 400).
     @field:Valid
-    @field:NotNull(message = "시작 설정은 필수입니다.")
-    @field:Schema(description = "시작 설정 3필드")
-    val startSetting: GeneralStartSettingInput,
-
-    @field:Size(
-        min = GENERAL_SUGGESTED_INPUTS_SIZE,
-        max = GENERAL_SUGGESTED_INPUTS_SIZE,
-        message = "추천 입력은 정확히 ${GENERAL_SUGGESTED_INPUTS_SIZE}개여야 합니다.",
-    )
-    @field:Schema(description = "추천 입력(정확히 3개)")
-    val suggestedInputs: List<@NotBlank(message = "추천 입력은 비어 있을 수 없습니다.") String>,
+    @field:Size(min = 1, message = "시작 설정은 1개 이상이어야 합니다.")
+    @field:Schema(description = "시작 설정 목록(최소 1개). 각 시작 설정에 추천 입력(정확히 3개)·엔딩(최대 10)이 종속된다.")
+    val startSettings: List<@NotNull GeneralStartSettingInput>,
 
     @field:Valid
     @field:Size(max = MAX_MAIN_EVENTS, message = "주요 사건은 최대 ${MAX_MAIN_EVENTS}개까지 등록할 수 있습니다.")
-    @field:Schema(description = "주요 사건 목록(최대 10, 선택). 배열 순서가 표시 순서가 된다.")
+    @field:Schema(description = "주요 사건 목록(최대 10, 선택). 스토리 스코프이며 배열 순서가 표시 순서가 된다.")
     val mainEvents: List<@NotNull MainEventItem> = emptyList(),
-
-    @field:Valid
-    @field:Size(max = MAX_ENDINGS, message = "엔딩은 최대 ${MAX_ENDINGS}개까지 등록할 수 있습니다.")
-    @field:Schema(description = "엔딩 목록(최대 10, 선택). 배열 순서가 표시 순서가 된다.")
-    val endings: List<@NotNull GeneralEndingItem> = emptyList(),
 
     @field:Schema(description = "공개 범위. 생략하면 PRIVATE.", example = "PRIVATE", defaultValue = "PRIVATE")
     val visibility: StoryVisibility = StoryVisibility.PRIVATE,
@@ -88,8 +76,17 @@ data class GeneralStorySettingsInput(
     val ruleSetting: String,
 )
 
-@Schema(description = "시작 설정 3필드(모두 필수)")
+@Schema(description = "시작 설정. 추천 입력·엔딩이 이 시작 설정에 종속된다(KNK-515 복수화).")
 data class GeneralStartSettingInput(
+    // 수정(PATCH)에서만 쓰는 매칭 키(공개 식별자 UUID). 기존 시작 설정을 지목해 in-place 갱신하고,
+    // 없으면(null) 새 시작 설정으로 추가한다. 제작(POST)에서는 서버가 식별자를 생성하므로 무시된다.
+    @field:Schema(
+        description = "시작 설정 ID(공개 식별자). 수정 시 기존 시작 설정 매칭 키로만 사용하며, 제작 시에는 무시된다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val id: String? = null,
+
     @field:NotBlank(message = "시작 장면 이름은 비어 있을 수 없습니다.")
     @field:Size(max = 100, message = "시작 장면 이름은 100자를 넘을 수 없습니다.")
     @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
@@ -102,6 +99,19 @@ data class GeneralStartSettingInput(
     @field:NotBlank(message = "시작 상황은 비어 있을 수 없습니다.")
     @field:Schema(description = "시작 상황")
     val startSituation: String,
+
+    @field:Size(
+        min = GENERAL_SUGGESTED_INPUTS_SIZE,
+        max = GENERAL_SUGGESTED_INPUTS_SIZE,
+        message = "추천 입력은 정확히 ${GENERAL_SUGGESTED_INPUTS_SIZE}개여야 합니다.",
+    )
+    @field:Schema(description = "추천 입력(정확히 3개)")
+    val suggestedInputs: List<@NotBlank(message = "추천 입력은 비어 있을 수 없습니다.") String>,
+
+    @field:Valid
+    @field:Size(max = MAX_ENDINGS, message = "엔딩은 시작 설정당 최대 ${MAX_ENDINGS}개까지 등록할 수 있습니다.")
+    @field:Schema(description = "엔딩 목록(시작 설정당 최대 10, 선택). 배열 순서가 표시 순서가 된다.")
+    val endings: List<@NotNull GeneralEndingItem> = emptyList(),
 )
 
 @Schema(description = "엔딩 입력 항목(유형 없이 이름으로 식별)")

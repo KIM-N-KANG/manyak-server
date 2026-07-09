@@ -44,6 +44,7 @@ import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryMainEvent
+import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -109,8 +110,9 @@ class ChatService(
         if (story.userId == null && userId != null) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "이 스토리로는 채팅을 시작할 수 없습니다.")
         }
-        // 시작 설정 복수화(KNK-515): startSettingId 미지정이면 첫 시작 설정을 쓴다(POST /chats startSettingId 지정은 후속).
-        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(story.id)
+        // 시작 설정 복수화(KNK-515): startSettingId를 지정하면 그 시작 설정으로, 미지정이면 스토리의 첫(기본) 시작 설정으로 시작한다.
+        // 지정 값이 형식 오류거나 이 스토리에 속하지 않으면 404로 통일한다(존재 노출 최소화·조용한 폴백 금지).
+        val startSetting = resolveStartSetting(story.id, request.startSettingId)
 
         val chat = storyChatRepository.save(
             StoryChat(
@@ -813,6 +815,24 @@ class ChatService(
         occurredMainEventName = occurredMainEventName,
         endingName = endingName,
     )
+
+    /**
+     * 채팅을 시작할 시작 설정을 해소한다(KNK-515 복수화). [startSettingPublicId] 미지정이면 스토리의 첫(기본) 시작 설정을,
+     * 지정하면 그 공개 식별자로 조회하되 반드시 이 스토리 소속이어야 한다. 형식 오류·미존재·타 스토리 소속은 모두 404다
+     * (존재 노출 최소화·조용한 폴백 금지). 시작 설정이 하나도 없는 스토리는(미지정 경로) null을 반환해 빈 프롤로그·추천 입력으로 시작한다.
+     */
+    private fun resolveStartSetting(storyId: Long, startSettingPublicId: String?): StoryStartSetting? {
+        if (startSettingPublicId == null) {
+            return storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(storyId)
+        }
+        val publicId = parsePublicIdOrNull(startSettingPublicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "시작 설정을 찾을 수 없습니다.")
+        val startSetting = storyStartSettingRepository.findByPublicId(publicId)
+        if (startSetting == null || startSetting.story.id != storyId) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "시작 설정을 찾을 수 없습니다.")
+        }
+        return startSetting
+    }
 
     /**
      * 시작 설정에 연결된 추천 입력을 input_order 오름차순으로 조회한다.

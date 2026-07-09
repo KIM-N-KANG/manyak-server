@@ -213,8 +213,7 @@ Accept: application/json
   "oneLineIntro": "배치 필터 검증용",
   "genres": ["판타지"],
   "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
-  "startSetting": { "name": "시작", "prologue": "p", "startSituation": "s" },
-  "suggestedInputs": ["하나", "둘", "셋"]
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ]
 }
 
 > {%

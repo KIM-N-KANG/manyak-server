@@ -28,17 +28,16 @@ data class StoryEditFormResponse(
     @field:Schema(description = "스토리 설정 통글 4필드")
     val storySettings: StoryEditSettingsResponse,
 
-    @field:Schema(description = "시작 설정. 없으면 null", nullable = true)
-    val startSetting: StoryStartSettingResponse?,
-
-    @field:Schema(description = "추천 입력 목록")
-    val suggestedInputs: List<String>,
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryStartSettingResponse::class),
+        arraySchema = Schema(
+            description = "시작 설정 목록(등록 순서, KNK-515 복수화). 각 시작 설정에 추천 입력·엔딩이 종속된다. 없으면 빈 배열.",
+        ),
+    )
+    val startSettings: List<StoryStartSettingResponse>,
 
     @field:ArraySchema(schema = Schema(implementation = StoryMainEventResponse::class))
     val mainEvents: List<StoryMainEventResponse>,
-
-    @field:ArraySchema(schema = Schema(implementation = StoryEndingResponse::class))
-    val endings: List<StoryEndingResponse>,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -71,21 +70,14 @@ data class UpdateStoryRequest(
     @field:Valid
     val storySettings: GeneralStorySettingsInput? = null,
 
+    // 시작 설정 복수화(KNK-515): 보내면 전체 컬렉션을 교체(동기화)한다. 각 원소의 id(공개 식별자)가 기존과
+    // 일치하면 in-place 갱신(채팅이 참조하는 시작 설정 행 identity 보존), 없으면 신규 추가, 요청에서 빠진 기존은 삭제한다.
+    // 추천 입력·엔딩은 각 시작 설정에 종속되며(정확히 3개·최대 10개), 보내면 최소 1개 이상이어야 한다.
     @field:Valid
-    val startSetting: GeneralStartSettingInput? = null,
-
-    @field:Size(
-        min = GENERAL_SUGGESTED_INPUTS_SIZE,
-        max = GENERAL_SUGGESTED_INPUTS_SIZE,
-        message = "추천 입력은 정확히 ${GENERAL_SUGGESTED_INPUTS_SIZE}개여야 합니다.",
-    )
-    val suggestedInputs: List<@NotBlank(message = "추천 입력은 비어 있을 수 없습니다.") String>? = null,
+    @field:Size(min = 1, message = "시작 설정은 1개 이상이어야 합니다.")
+    val startSettings: List<@NotNull GeneralStartSettingInput>? = null,
 
     @field:Valid
     @field:Size(max = MAX_MAIN_EVENTS, message = "주요 사건은 최대 ${MAX_MAIN_EVENTS}개까지 등록할 수 있습니다.")
     val mainEvents: List<@NotNull MainEventItem>? = null,
-
-    @field:Valid
-    @field:Size(max = MAX_ENDINGS, message = "엔딩은 최대 ${MAX_ENDINGS}개까지 등록할 수 있습니다.")
-    val endings: List<@NotNull GeneralEndingItem>? = null,
 )

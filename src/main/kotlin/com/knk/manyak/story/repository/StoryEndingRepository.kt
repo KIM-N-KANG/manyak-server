@@ -12,6 +12,11 @@ interface StoryEndingRepository : JpaRepository<StoryEnding, Long> {
     // 엔티티로 실체화하면 NPE가 나므로 조회 단계에서 제외한다(§4-3-10 레거시 비활성 보존).
     fun findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSettingId: Long): List<StoryEnding>
 
+    // 여러 시작 설정의 활성 엔딩을 한 번에 조회한다(상세 응답 복수화 N+1 방지, KNK-515). 호출부가 시작 설정별로 그룹핑한다.
+    fun findByStartSettingIdInAndEnabledTrueOrderByStartSettingIdAscSortOrderAsc(
+        startSettingIds: Collection<Long>,
+    ): List<StoryEnding>
+
     // 채팅 런타임: AI가 이름으로 지목한 도달 엔딩을 id로 해소한다(이름은 엔딩 식별자, §4-3-10).
     fun findFirstByStartSettingIdAndNameAndEnabledTrue(startSettingId: Long, name: String): StoryEnding?
 

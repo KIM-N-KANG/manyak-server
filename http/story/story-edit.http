@@ -4,6 +4,7 @@
 ### [KNK-404] GET /api/v1/stories/{id}/edit · PATCH /api/v1/stories/{id} (스펙 §4-3-8).
 ###   - GET /edit : 수정 폼 조회(통글 4필드 포함). 인증 선택 — 회원 소유는 소유자만(타인·미인증 403), 게스트 스토리는 게스트(토큰 없음)만(회원 403, KNK-480 이관 후 접근).
 ###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
+###   - [KNK-515] 시작 설정 복수화: startSettings[]로 전체 교체(동기화). 각 원소 id(공개 식별자)가 기존과 일치하면 in-place 갱신(행 identity 보존), 없으면 추가, 빠진 기존은 삭제. 추천 입력·엔딩은 각 시작 설정에 중첩.
 ###
 ### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
 
@@ -22,10 +23,16 @@ Content-Type: application/json
   "oneLineIntro": "몰락한 왕국의 이야기",
   "genres": ["다크 판타지", "미스터리"],
   "storySettings": { "worldSetting": "몰락한 왕국 아르덴", "characterSetting": "기사", "userRoleSetting": "추적자", "ruleSetting": "규칙" },
-  "startSetting": { "name": "장례식 날", "prologue": "잿빛 비가 내린다", "startSituation": "늦은 밤" },
-  "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
-  "mainEvents": [ {"name": "편지 발견", "description": "편지를 찾는다", "keySentence": "편지를 연다"} ],
-  "endings": [ {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "왕좌를 되찾는다"}, "epilogue": "대관식"} ]
+  "startSettings": [
+    {
+      "name": "장례식 날",
+      "prologue": "잿빛 비가 내린다",
+      "startSituation": "늦은 밤",
+      "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
+      "endings": [ {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "왕좌를 되찾는다"}, "epilogue": "대관식"} ]
+    }
+  ],
+  "mainEvents": [ {"name": "편지 발견", "description": "편지를 찾는다", "keySentence": "편지를 연다"} ]
 }
 
 > {%
@@ -39,36 +46,51 @@ Accept: application/json
 
 > {%
     client.test("폼 조회 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
-    client.test("통글 4필드·엔딩 포함", () => {
+    client.test("통글 4필드·시작 설정 중첩(추천 입력·엔딩) 포함", () => {
         client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "worldSetting 불일치");
-        client.assert(response.body.endings[0].name === "왕좌를 되찾다", "endings 불일치");
-        client.assert(response.body.suggestedInputs.length === 3, "suggestedInputs 개수 불일치");
+        client.assert(response.body.startSettings.length === 1, "startSettings 개수 불일치");
+        client.assert(response.body.startSettings[0].endings[0].name === "왕좌를 되찾다", "endings 불일치");
+        client.assert(response.body.startSettings[0].suggestedInputs.length === 3, "suggestedInputs 개수 불일치");
     });
+    // E3에서 id 매칭 in-place 갱신을 검증하려고 시작 설정 공개 식별자를 저장한다.
+    client.global.set("editStartSettingId", response.body.startSettings[0].id);
 %}
 
-### E3. (해피 패스) 제목·엔딩만 부분 갱신 → 보낸 필드 교체, 나머지 유지
+### E3. (해피 패스) 제목 + id 매칭 시작 설정 갱신 → 제목 교체·미전송 스토리 설정 유지·시작 설정 identity 보존·엔딩 전체 교체
 PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
 Content-Type: application/json
 
 {
   "title": "새 제목",
-  "endings": [ {"name": "새 엔딩", "requirement": {"minTurns": 3, "achievementCondition": "조건"}, "epilogue": "에필로그"} ]
+  "startSettings": [
+    {
+      "id": "{{editStartSettingId}}",
+      "name": "장례식 날",
+      "prologue": "잿빛 비가 내린다",
+      "startSituation": "늦은 밤",
+      "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
+      "endings": [ {"name": "새 엔딩", "requirement": {"minTurns": 3, "achievementCondition": "조건"}, "epilogue": "에필로그"} ]
+    }
+  ]
 }
 
 > {%
     client.test("수정 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
-    client.test("보낸 필드 교체·나머지 유지", () => {
+    client.test("보낸 필드 교체·미전송 유지·시작 설정 identity 보존·엔딩 교체", () => {
         client.assert(response.body.title === "새 제목", "title 미교체");
         client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "미전송 필드가 바뀜");
-        client.assert(response.body.endings.length === 1 && response.body.endings[0].name === "새 엔딩", "엔딩 교체 실패");
+        client.assert(response.body.startSettings.length === 1, "startSettings 개수 불일치");
+        client.assert(response.body.startSettings[0].id === client.global.get("editStartSettingId"), "id 매칭 in-place 실패(행 identity 미보존)");
+        client.assert(response.body.startSettings[0].suggestedInputs.length === 3, "추천 입력 유지 실패");
+        client.assert(response.body.startSettings[0].endings.length === 1 && response.body.startSettings[0].endings[0].name === "새 엔딩", "엔딩 교체 실패");
     });
 %}
 
-### E4. (에러) 추천 입력을 3개가 아닌 값으로 → 400
+### E4. (에러) 시작 설정의 추천 입력을 3개가 아닌 값으로 → 400
 PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
 Content-Type: application/json
 
-{ "suggestedInputs": ["하나", "둘"] }
+{ "startSettings": [ {"name": "n", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘"], "endings": []} ] }
 
 > {%
     client.test("검증 실패 400", () => { client.assert(response.status === 400, `actual=${response.status}`); });
