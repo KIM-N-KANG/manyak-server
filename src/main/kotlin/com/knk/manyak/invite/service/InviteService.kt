@@ -50,7 +50,22 @@ class InviteService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
         }
         val code = user.inviteCode ?: generateUniqueCode().also { user.inviteCode = it }
-        return InviteResponse(inviteCode = code, inviteUrl = "$inviteBaseUrl/$code")
+        // 이번 KST 월의 초대 보상 진행을 함께 내려, 상한 도달 후 보상 없는 초대 공유의 혼란을 줄인다(스펙 §4-3-7 B22).
+        // 집계 창은 월 상한 판정과 같은 [현재 KST 월 시작, 다음달 시작)이라, 지급이 항상 가입 월에 머무는 규칙과 맞물려
+        // "이번 달 수령 건수"가 상한 스킵 경계와 정확히 일치한다.
+        val (monthStart, monthEnd) = kstMonthRangeOf(clock.instant())
+        val monthlyRewardCount = creditWalletService.countRewardsInWindow(
+            userId = userId,
+            reason = CreditReason.INVITE_REWARD,
+            windowStart = monthStart,
+            windowEnd = monthEnd,
+        )
+        return InviteResponse(
+            inviteCode = code,
+            inviteUrl = "$inviteBaseUrl/$code",
+            monthlyRewardCount = monthlyRewardCount,
+            monthlyRewardLimit = inviteMonthlyCap,
+        )
     }
 
     /**

@@ -89,6 +89,18 @@ class InviteIntegrationTests {
     }
 
     @Test
+    fun `초대 조회는 이번 달 보상 진행과 월 상한을 함께 내려준다`() {
+        val user = saveUser()
+
+        // 보상을 받은 적 없는 신규 사용자는 진행 0, 상한은 정책 기본값(10).
+        getInvite(jwtTokenProvider.issueAccessToken(user.publicId))
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.monthlyRewardCount").isEqualTo(0)
+            .jsonPath("$.monthlyRewardLimit").isEqualTo(10)
+    }
+
+    @Test
     fun `재조회는 같은 코드를 돌려준다`() {
         val user = saveUser()
         val token = jwtTokenProvider.issueAccessToken(user.publicId)

@@ -7,6 +7,10 @@
 ###     미해결·자기 코드·이미 가입된 계정의 제출은 오류 없이 무시.
 ###   - [KNK-477] 초대 보상은 보상 수령 계정별 KST 월 10회 상한입니다(초대자·피초대자 독립 판정). 월 한도를 넘으면
 ###     적립 없이 조용히 무시됩니다(오류 아님) — 같은 계정으로 11번째 신규 피초대자를 초대해도 그 달은 늘지 않습니다.
+###   - [KNK-513, B22] GET /users/me/invite 응답에 이번 KST 월 초대 보상 진행이 함께 옵니다:
+###     monthlyRewardCount(이번 달 요청자가 수령한 INVITE_REWARD 건수) · monthlyRewardLimit(월 상한, 기본 10).
+###     보상을 한 번도 못 받았으면 count=0, 상한 도달 시 count == limit. 4번(초대 보상)을 실행한 뒤 초대자 토큰으로
+###     2번을 다시 조회하면 monthlyRewardCount 가 1 늘어난 것을 확인할 수 있습니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
@@ -47,7 +51,7 @@ Accept: application/json
     });
 %}
 
-### 2. (해피 패스) 내 초대 코드·링크 조회 → 200, {inviteCode, inviteUrl}
+### 2. (해피 패스) 내 초대 코드·링크·이번 달 보상 진행 조회 → 200, {inviteCode, inviteUrl, monthlyRewardCount, monthlyRewardLimit}
 # 최초 조회면 코드를 발급합니다. 이후 조회는 같은 코드를 돌려줍니다.
 GET {{baseUrl}}/api/v1/users/me/invite
 Authorization: Bearer {{accessToken}}
@@ -66,7 +70,21 @@ Accept: application/json
         client.assert(typeof b.inviteUrl === "string" && b.inviteUrl.indexOf(b.inviteCode) >= 0,
             `inviteUrl 이 코드를 포함하지 않습니다. actual=${b.inviteUrl}`);
     });
+    // [KNK-513, B22] 이번 달 보상 진행: count 는 0 이상, limit 은 상한(기본 10), count <= limit.
+    client.test("monthlyRewardCount 가 0 이상 정수다", () => {
+        client.assert(Number.isInteger(b.monthlyRewardCount) && b.monthlyRewardCount >= 0,
+            `monthlyRewardCount 가 0 이상 정수가 아닙니다. actual=${b.monthlyRewardCount}`);
+    });
+    client.test("monthlyRewardLimit 가 양의 정수다", () => {
+        client.assert(Number.isInteger(b.monthlyRewardLimit) && b.monthlyRewardLimit > 0,
+            `monthlyRewardLimit 가 양의 정수가 아닙니다. actual=${b.monthlyRewardLimit}`);
+    });
+    client.test("monthlyRewardCount 가 상한을 넘지 않는다", () => {
+        client.assert(b.monthlyRewardCount <= b.monthlyRewardLimit,
+            `count 가 limit 를 초과했습니다. count=${b.monthlyRewardCount} limit=${b.monthlyRewardLimit}`);
+    });
     client.global.set("myInviteCode", b.inviteCode);
+    client.global.set("inviteRewardCountBefore", b.monthlyRewardCount);
 %}
 
 ### 3. (안정성) 다시 조회하면 같은 코드가 나온다
@@ -100,5 +118,23 @@ Content-Type: application/json
 > {%
     client.test("초대 코드와 함께 로그인해도 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다(idToken 이 유효한지 확인). actual=${response.status}`);
+    });
+%}
+
+### 5. (B22 진행 반영) 4번으로 보상을 받은 뒤 초대자가 다시 조회 → monthlyRewardCount 가 1 증가
+# 순서대로 2 → 4 → 5 를 실행하세요. accessToken 은 4번에서 코드를 공유한 초대자(=2번 조회 계정)의 것이어야 합니다.
+# 2번이 inviteRewardCountBefore 를 저장하고, 4번이 그 초대자에게 INVITE_REWARD 를 적립하므로 여기서 정확히 +1 이어야 합니다.
+GET {{baseUrl}}/api/v1/users/me/invite
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("재조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("초대 보상 후 monthlyRewardCount 가 1 증가했다", () => {
+        const before = client.global.get("inviteRewardCountBefore");
+        client.assert(response.body.monthlyRewardCount === before + 1,
+            `카운트가 1 증가하지 않았습니다(2→4→5 순서·초대자 토큰 확인). before=${before} actual=${response.body.monthlyRewardCount}`);
     });
 %}

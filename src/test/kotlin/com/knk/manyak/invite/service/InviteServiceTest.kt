@@ -92,6 +92,21 @@ class InviteServiceTest {
     }
 
     @Test
+    fun `초대 조회는 이번 KST 월 초대 보상 건수와 월 상한을 함께 반환한다`() {
+        val user = User(id = 7L, nickname = "진행", inviteCode = "PROG7777")
+        `when`(userRepository.findByIdForUpdate(7L)).thenReturn(user)
+        // 집계 구간은 시계(2026-07-15)가 속한 KST 월 [7/1, 8/1)이어야 한다(월 상한 판정과 같은 창).
+        `when`(
+            creditWalletService.countRewardsInWindow(7L, CreditReason.INVITE_REWARD, monthStart, monthEnd),
+        ).thenReturn(3L)
+
+        val response = service.getOrCreateInvite(7L)
+
+        assertThat(response.monthlyRewardCount).isEqualTo(3L)
+        assertThat(response.monthlyRewardLimit).isEqualTo(inviteMonthlyCap)
+    }
+
+    @Test
     fun `초대 코드가 없으면(미제출) 초대자를 해석하지 않는다`() {
         assertThat(service.resolveInviterId(null)).isNull()
         verifyNoInteractions(creditWalletService)
