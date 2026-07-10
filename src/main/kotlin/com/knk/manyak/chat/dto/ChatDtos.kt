@@ -171,6 +171,12 @@ data class ChatTurnResponse(
     @field:Schema(description = "이번 턴에 도달한 엔딩 이름(도달 아니면 null)", nullable = true, example = "왕좌를 되찾다")
     val reachedEnding: String? = null,
 
+    // 저장본이 아니라 본문 마커에서 재구성한다(§4-3-9). 그 턴의 확정 시각 기준이라 completed와 결과가 같다.
+    @field:ArraySchema(
+        arraySchema = Schema(description = "이 턴 본문에 삽입된 검증된 이미지 목록(없으면 빈 배열)"),
+    )
+    val images: List<ChatImageResponse> = emptyList(),
+
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:10:00Z")
     val createdAt: Instant,
 )

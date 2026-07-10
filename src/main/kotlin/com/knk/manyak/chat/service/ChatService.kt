@@ -238,6 +238,12 @@ class ChatService(
             .findAllById(turns.mapNotNull { it.reachedEndingId })
             .associate { it.id to it.name }
 
+        // images[]는 저장하지 않는다. 본문 마커에서 다시 만들되 턴별 확정 시각 기준으로 판정해
+        // completed가 내려준 결과와 같아지게 한다(§4-3-9). 카탈로그는 한 번의 IN 조회로 모아 온다.
+        val imagesByTurnId = chatImageBundler.reconstruct(
+            turns.map { ConfirmedTurnContent(it.id, it.content, it.contentConfirmedAt) },
+        )
+
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
         val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
@@ -254,6 +260,7 @@ class ChatService(
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
                     reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    images = imagesByTurnId[assistant.id].orEmpty(),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -297,6 +304,7 @@ class ChatService(
                             // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id). 상세에서 이름으로 해소한다.
                             reachedEndingId = message.reachedEndingId,
                             createdAt = message.createdAt,
+                            contentConfirmedAt = message.contentConfirmedAt,
                         )
                     }
                     pendingUser = null
@@ -313,6 +321,8 @@ class ChatService(
         val content: String,
         val reachedEndingId: Long?,
         val createdAt: Instant,
+        // images[] 재구성은 이 시각 기준으로 카탈로그 상태를 판정한다(§4-3-9). 재생성이 본문과 함께 갱신한다.
+        val contentConfirmedAt: Instant,
     )
 
     /**
