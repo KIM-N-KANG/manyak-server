@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_creation_tags_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) |  |  |
+| id | bigint | nextval('story_creation_tags_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.image_preset_genres](public.image_preset_genres.md) |  |  |
 | tag_type | varchar(50) |  | false |  |  |  |
 | name | varchar(30) |  | false |  |  |  |
 | tag_source | varchar(20) |  | false |  |  |  |
@@ -37,6 +37,7 @@
 erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+"public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -53,6 +54,10 @@ erDiagram
   bigint creation_session_id FK
   bigint tag_id FK
   timestamp_with_time_zone created_at
+}
+"public.image_preset_genres" {
+  bigint image_preset_id FK
+  bigint tag_id FK
 }
 ```
 

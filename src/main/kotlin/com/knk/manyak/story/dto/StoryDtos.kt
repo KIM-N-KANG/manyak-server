@@ -33,6 +33,13 @@ data class StorySummaryResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
+    @field:Schema(
+        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null.",
+        example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
+        nullable = true,
+    )
+    val thumbnailUrlSm: String?,
+
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
 

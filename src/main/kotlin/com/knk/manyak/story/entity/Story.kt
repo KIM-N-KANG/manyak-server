@@ -41,6 +41,11 @@ class Story(
     @Column(length = 255)
     var genre: String? = null,
 
+    // 대표 이미지(표지)의 카탈로그 키. 등록 시 장르 매칭으로 1회 확정하며, 이후 수정으로 장르가 바뀌어도
+    // 재연결하지 않는다(스펙 §4-3-9). 서빙 URL은 저장하지 않고 ImageUrlResolver가 조합한다.
+    @Column(name = "thumbnail_image_key", length = 64)
+    val thumbnailImageKey: String? = null,
+
     // 등록 상태(초안/발행). 일반 모드 초안 저장은 DRAFT로 시작하고, 발행 시 PUBLISHED가 된다(KNK-401).
     // 기존 행·간편 제작 스토리는 기본값 PUBLISHED다.
     @Enumerated(EnumType.STRING)

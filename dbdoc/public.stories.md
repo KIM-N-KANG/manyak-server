@@ -16,6 +16,7 @@
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | status | varchar(20) | 'PUBLISHED'::character varying | false |  |  |  |
 | visibility | varchar(20) | 'PUBLIC'::character varying | false |  |  |  |
+| thumbnail_image_key | varchar(64) |  | true |  | [public.image_presets](public.image_presets.md) |  |
 
 ## Constraints
 
@@ -25,6 +26,7 @@
 | ck_stories_visibility | CHECK | CHECK (((visibility)::text = ANY ((ARRAY['PUBLIC'::character varying, 'PRIVATE'::character varying])::text[]))) |
 | stories_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_stories_public_id | UNIQUE | UNIQUE (public_id) |
+| fk_stories_thumbnail_image_key | FOREIGN KEY | FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key) |
 
 ## Indexes
 
@@ -45,6 +47,7 @@ erDiagram
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
 
 "public.stories" {
   bigint id
@@ -59,6 +62,7 @@ erDiagram
   uuid public_id
   varchar_20_ status
   varchar_20_ visibility
+  varchar_64_ thumbnail_image_key FK
 }
 "public.story_settings" {
   bigint id
@@ -120,6 +124,16 @@ erDiagram
   bigint user_id FK
   bigint story_id FK
   bigint ending_id FK
+  timestamp_with_time_zone created_at
+}
+"public.image_presets" {
+  bigint id
+  varchar_64_ image_key
+  varchar_20_ type
+  varchar_50_ mood
+  varchar_50_ subject
+  varchar_50_ prop
+  timestamp_with_time_zone deactivated_at
   timestamp_with_time_zone created_at
 }
 ```

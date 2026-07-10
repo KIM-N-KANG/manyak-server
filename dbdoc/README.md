@@ -9,7 +9,7 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 12 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 13 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
@@ -31,6 +31,8 @@
 | [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
 | [public.story_chat_main_events](public.story_chat_main_events.md) | 4 |  | BASE TABLE |
 | [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
+| [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
+| [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
 
 ## Relations
 
@@ -41,6 +43,7 @@ erDiagram
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_storyline_recommended_infos" }o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
+"public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
 "public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_start_settings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
@@ -69,6 +72,8 @@ erDiagram
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+"public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -122,6 +127,7 @@ erDiagram
   uuid public_id
   varchar_20_ status
   varchar_20_ visibility
+  varchar_64_ thumbnail_image_key FK
 }
 "public.story_settings" {
   bigint id
@@ -343,6 +349,20 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+}
+"public.image_presets" {
+  bigint id
+  varchar_64_ image_key
+  varchar_20_ type
+  varchar_50_ mood
+  varchar_50_ subject
+  varchar_50_ prop
+  timestamp_with_time_zone deactivated_at
+  timestamp_with_time_zone created_at
+}
+"public.image_preset_genres" {
+  bigint image_preset_id FK
+  bigint tag_id FK
 }
 ```
 

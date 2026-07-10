@@ -42,6 +42,7 @@ import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryStartSetting
@@ -73,6 +74,7 @@ class ChatService(
     @Qualifier("chatSseExecutor")
     private val chatSseExecutor: Executor,
     private val storyRepository: StoryRepository,
+    private val imageUrlResolver: ImageUrlResolver,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
@@ -193,6 +195,8 @@ class ChatService(
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
                 storyTitle = story?.title.orEmpty(),
+                // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
+                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(story?.thumbnailImageKey),
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,

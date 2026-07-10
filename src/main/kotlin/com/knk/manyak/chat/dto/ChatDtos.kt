@@ -84,6 +84,13 @@ data class ChatSummaryResponse(
     @field:Schema(description = "스토리 제목", example = "호아킨 아카데미의 무속성 신입생")
     val storyTitle: String,
 
+    @field:Schema(
+        description = "참조 스토리 썸네일의 축소 변형 URL(§4-3-9 반응형 변형). 소스가 없으면 null.",
+        example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
+        nullable = true,
+    )
+    val thumbnailUrlSm: String?,
+
     @field:Schema(description = "마지막으로 생성된 이야기 일부", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
     val lastStoryPreview: String,
 
