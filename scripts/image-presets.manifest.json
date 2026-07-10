@@ -1,0 +1,2544 @@
+[
+  {
+    "imageKey": "thumb_0001",
+    "type": "THUMBNAIL",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "네온",
+    "subject": "던전로비",
+    "prop": "부서진컨트롤러",
+    "sourceFile": "thumbnail/thumbnail_게임_네온_던전로비_부서진컨트롤러__02.png",
+    "objectKey": "thumbnails/thumb_0001.png"
+  },
+  {
+    "imageKey": "thumb_0002",
+    "type": "THUMBNAIL",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "발랄한",
+    "subject": "던전시장",
+    "prop": "아이콘스튜",
+    "sourceFile": "thumbnail/thumbnail_게임_발랄한_던전시장_아이콘스튜__10.png",
+    "objectKey": "thumbnails/thumb_0002.png"
+  },
+  {
+    "imageKey": "thumb_0003",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지",
+      "재벌물"
+    ],
+    "mood": "설렘",
+    "subject": "노을옥상",
+    "prop": "장미꽃잎",
+    "sourceFile": "thumbnail/thumbnail_로맨스-재벌_설렘_노을옥상_장미꽃잎__30.png",
+    "objectKey": "thumbnails/thumb_0003.png"
+  },
+  {
+    "imageKey": "thumb_0004",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지",
+      "재벌물"
+    ],
+    "mood": "설렘",
+    "subject": "사무실탕비실",
+    "prop": "눈창",
+    "sourceFile": "thumbnail/thumbnail_로맨스-재벌_설렘_사무실탕비실_눈창__01.png",
+    "objectKey": "thumbnails/thumb_0004.png"
+  },
+  {
+    "imageKey": "thumb_0005",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지",
+      "재벌물"
+    ],
+    "mood": "우수",
+    "subject": "빗속승강장",
+    "prop": "우산",
+    "sourceFile": "thumbnail/thumbnail_로맨스-재벌_우수_빗속승강장_우산__23.png",
+    "objectKey": "thumbnails/thumb_0005.png"
+  },
+  {
+    "imageKey": "thumb_0006",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지",
+      "재벌물"
+    ],
+    "mood": "화려",
+    "subject": "재즈클럽",
+    "prop": "피아노",
+    "sourceFile": "thumbnail/thumbnail_로맨스-재벌_화려_재즈클럽_피아노__25.png",
+    "objectKey": "thumbnails/thumb_0006.png"
+  },
+  {
+    "imageKey": "thumb_0007",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "신비",
+    "subject": "달빛정원",
+    "prop": "하트퀘스트",
+    "sourceFile": "thumbnail/thumbnail_로맨스_신비_달빛정원_하트퀘스트__09.png",
+    "objectKey": "thumbnails/thumb_0007.png"
+  },
+  {
+    "imageKey": "thumb_0008",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "애틋",
+    "subject": "빈티지방",
+    "prop": "린넨셔츠",
+    "sourceFile": "thumbnail/thumbnail_로맨스_애틋_빈티지방_린넨셔츠__11.png",
+    "objectKey": "thumbnails/thumb_0008.png"
+  },
+  {
+    "imageKey": "thumb_0009",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "청량",
+    "subject": "해안등대",
+    "prop": "등대",
+    "sourceFile": "thumbnail/thumbnail_로맨스_청량_해안등대_등대__29.png",
+    "objectKey": "thumbnails/thumb_0009.png"
+  },
+  {
+    "imageKey": "thumb_0010",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "치유",
+    "subject": "온실",
+    "prop": "펜던트",
+    "sourceFile": "thumbnail/thumbnail_로맨스_치유_온실_펜던트__06.png",
+    "objectKey": "thumbnails/thumb_0010.png"
+  },
+  {
+    "imageKey": "thumb_0011",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "아포칼립스"
+    ],
+    "mood": "고독",
+    "subject": "사막전장",
+    "prop": "검은망토",
+    "sourceFile": "thumbnail/thumbnail_무협-아포칼립스_고독_사막전장_검은망토__07.png",
+    "objectKey": "thumbnails/thumb_0011.png"
+  },
+  {
+    "imageKey": "thumb_0012",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "아포칼립스",
+      "현대 판타지"
+    ],
+    "mood": "음울",
+    "subject": "달밤산촌",
+    "prop": "초가집",
+    "sourceFile": "thumbnail/thumbnail_무협-판타지-아포칼립스_음울_달밤산촌_초가집__13.png",
+    "objectKey": "thumbnails/thumb_0012.png"
+  },
+  {
+    "imageKey": "thumb_0013",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "현대 판타지"
+    ],
+    "mood": "비장",
+    "subject": "월야궁궐",
+    "prop": "붉은도포",
+    "sourceFile": "thumbnail/thumbnail_무협-판타지_비장_월야궁궐_붉은도포__02.png",
+    "objectKey": "thumbnails/thumb_0013.png"
+  },
+  {
+    "imageKey": "thumb_0014",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "현대 판타지"
+    ],
+    "mood": "신비",
+    "subject": "비밀약초원",
+    "prop": "약솥",
+    "sourceFile": "thumbnail/thumbnail_무협-판타지_신비_비밀약초원_약솥__18.png",
+    "objectKey": "thumbnails/thumb_0014.png"
+  },
+  {
+    "imageKey": "thumb_0015",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "현대 판타지"
+    ],
+    "mood": "신비",
+    "subject": "월야연못",
+    "prop": "달빛검기",
+    "sourceFile": "thumbnail/thumbnail_무협-판타지_신비_월야연못_달빛검기__10.png",
+    "objectKey": "thumbnails/thumb_0015.png"
+  },
+  {
+    "imageKey": "thumb_0016",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "현대 판타지"
+    ],
+    "mood": "청량",
+    "subject": "설산창가",
+    "prop": "펼친화첩",
+    "sourceFile": "thumbnail/thumbnail_무협-판타지_청량_설산창가_펼친화첩__08.png",
+    "objectKey": "thumbnails/thumb_0016.png"
+  },
+  {
+    "imageKey": "thumb_0017",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협",
+      "헌터물"
+    ],
+    "mood": "살벌",
+    "subject": "야시장골목",
+    "prop": "붉은등",
+    "sourceFile": "thumbnail/thumbnail_무협-헌터_살벌_야시장골목_붉은등__17.png",
+    "objectKey": "thumbnails/thumb_0017.png"
+  },
+  {
+    "imageKey": "thumb_0018",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "고요한",
+    "subject": "산문파",
+    "prop": "약선탕",
+    "sourceFile": "thumbnail/thumbnail_무협_고요한_산문파_약선탕__04.png",
+    "objectKey": "thumbnails/thumb_0018.png"
+  },
+  {
+    "imageKey": "thumb_0019",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "긴장",
+    "subject": "빗속객잔",
+    "prop": "삿갓",
+    "sourceFile": "thumbnail/thumbnail_무협_긴장_빗속객잔_삿갓__09.png",
+    "objectKey": "thumbnails/thumb_0019.png"
+  },
+  {
+    "imageKey": "thumb_0020",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "비장",
+    "subject": "먹빛대숲",
+    "prop": "검은도포",
+    "sourceFile": "thumbnail/thumbnail_무협_비장_먹빛대숲_검은도포__16.png",
+    "objectKey": "thumbnails/thumb_0020.png"
+  },
+  {
+    "imageKey": "thumb_0021",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "여운",
+    "subject": "산중목교",
+    "prop": "검집",
+    "sourceFile": "thumbnail/thumbnail_무협_여운_산중목교_검집__19.png",
+    "objectKey": "thumbnails/thumb_0021.png"
+  },
+  {
+    "imageKey": "thumb_0022",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "은밀",
+    "subject": "황혼문간",
+    "prop": "검집",
+    "sourceFile": "thumbnail/thumbnail_무협_은밀_황혼문간_검집__04.png",
+    "objectKey": "thumbnails/thumb_0022.png"
+  },
+  {
+    "imageKey": "thumb_0023",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "장엄",
+    "subject": "폭포동굴",
+    "prop": "퀘스트비급",
+    "sourceFile": "thumbnail/thumbnail_무협_장엄_폭포동굴_퀘스트비급__04.png",
+    "objectKey": "thumbnails/thumb_0023.png"
+  },
+  {
+    "imageKey": "thumb_0024",
+    "type": "THUMBNAIL",
+    "genres": [
+      "시스템",
+      "아포칼립스",
+      "현대 판타지"
+    ],
+    "mood": "초현실",
+    "subject": "오페라홀",
+    "prop": "샹들리에",
+    "sourceFile": "thumbnail/thumbnail_시스템-판타지-아포칼립스_초현실_오페라홀_샹들리에__05.png",
+    "objectKey": "thumbnails/thumb_0024.png"
+  },
+  {
+    "imageKey": "thumb_0025",
+    "type": "THUMBNAIL",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "영리한",
+    "subject": "푸른던전",
+    "prop": "레시피창",
+    "sourceFile": "thumbnail/thumbnail_시스템_영리한_푸른던전_레시피창__05.png",
+    "objectKey": "thumbnails/thumb_0025.png"
+  },
+  {
+    "imageKey": "thumb_0026",
+    "type": "THUMBNAIL",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "초월",
+    "subject": "서버성당",
+    "prop": "홀로그램창",
+    "sourceFile": "thumbnail/thumbnail_시스템_초월_서버성당_홀로그램창__01.png",
+    "objectKey": "thumbnails/thumb_0026.png"
+  },
+  {
+    "imageKey": "thumb_0027",
+    "type": "THUMBNAIL",
+    "genres": [
+      "시스템",
+      "아포칼립스"
+    ],
+    "mood": "압도",
+    "subject": "궤도붕괴도시",
+    "prop": "우주고리",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-시스템_압도_궤도붕괴도시_우주고리__27.png",
+    "objectKey": "thumbnails/thumb_0027.png"
+  },
+  {
+    "imageKey": "thumb_0028",
+    "type": "THUMBNAIL",
+    "genres": [
+      "시스템",
+      "아포칼립스",
+      "현대 판타지"
+    ],
+    "mood": "장엄",
+    "subject": "부유폐허",
+    "prop": "중력균열",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-판타지-시스템_장엄_부유폐허_중력균열__26.png",
+    "objectKey": "thumbnails/thumb_0028.png"
+  },
+  {
+    "imageKey": "thumb_0029",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스",
+      "현대 판타지"
+    ],
+    "mood": "냉혹",
+    "subject": "금속숲",
+    "prop": "검은비",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-판타지_냉혹_금속숲_검은비__22.png",
+    "objectKey": "thumbnails/thumb_0029.png"
+  },
+  {
+    "imageKey": "thumb_0030",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스",
+      "현대 판타지"
+    ],
+    "mood": "암흑",
+    "subject": "일식궁전",
+    "prop": "붉은일식",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-판타지_암흑_일식궁전_붉은일식__28.png",
+    "objectKey": "thumbnails/thumb_0030.png"
+  },
+  {
+    "imageKey": "thumb_0031",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스",
+      "헌터물"
+    ],
+    "mood": "냉랭",
+    "subject": "빙결도시",
+    "prop": "온실돔",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-헌터_냉랭_빙결도시_온실돔__14.png",
+    "objectKey": "thumbnails/thumb_0031.png"
+  },
+  {
+    "imageKey": "thumb_0032",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스",
+      "헌터물"
+    ],
+    "mood": "음산",
+    "subject": "생체지하터널",
+    "prop": "발광포자",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스-헌터_음산_생체지하터널_발광포자__03.png",
+    "objectKey": "thumbnails/thumb_0032.png"
+  },
+  {
+    "imageKey": "thumb_0033",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "쓸쓸",
+    "subject": "침수도시",
+    "prop": "폐허고층",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스_쓸쓸_침수도시_폐허고층__20.png",
+    "objectKey": "thumbnails/thumb_0033.png"
+  },
+  {
+    "imageKey": "thumb_0034",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "절망",
+    "subject": "침수도시",
+    "prop": "붉은알림창",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스_절망_침수도시_붉은알림창__07.png",
+    "objectKey": "thumbnails/thumb_0034.png"
+  },
+  {
+    "imageKey": "thumb_0035",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "황량",
+    "subject": "사막폐허",
+    "prop": "수레",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스_황량_사막폐허_수레__12.png",
+    "objectKey": "thumbnails/thumb_0035.png"
+  },
+  {
+    "imageKey": "thumb_0036",
+    "type": "THUMBNAIL",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "희망적인",
+    "subject": "지하철쉼터",
+    "prop": "환생씨앗",
+    "sourceFile": "thumbnail/thumbnail_아포칼립스_희망적인_지하철쉼터_환생씨앗__08.png",
+    "objectKey": "thumbnails/thumb_0036.png"
+  },
+  {
+    "imageKey": "thumb_0037",
+    "type": "THUMBNAIL",
+    "genres": [
+      "요리"
+    ],
+    "mood": "불타는",
+    "subject": "화산던전",
+    "prop": "불꽃국수",
+    "sourceFile": "thumbnail/thumbnail_요리_불타는_화산던전_불꽃국수__03.png",
+    "objectKey": "thumbnails/thumb_0037.png"
+  },
+  {
+    "imageKey": "thumb_0038",
+    "type": "THUMBNAIL",
+    "genres": [
+      "육아물"
+    ],
+    "mood": "따뜻",
+    "subject": "마법놀이방",
+    "prop": "미니상태창",
+    "sourceFile": "thumbnail/thumbnail_육아_따뜻_마법놀이방_미니상태창__10.png",
+    "objectKey": "thumbnails/thumb_0038.png"
+  },
+  {
+    "imageKey": "thumb_0039",
+    "type": "THUMBNAIL",
+    "genres": [
+      "육아물"
+    ],
+    "mood": "따뜻한",
+    "subject": "던전",
+    "prop": "랜턴",
+    "sourceFile": "thumbnail/thumbnail_육아_따뜻한_던전_랜턴__02.png",
+    "objectKey": "thumbnails/thumb_0039.png"
+  },
+  {
+    "imageKey": "thumb_0040",
+    "type": "THUMBNAIL",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "냉정",
+    "subject": "유리타워",
+    "prop": "계약패널",
+    "sourceFile": "thumbnail/thumbnail_재벌_냉정_유리타워_계약패널__08.png",
+    "objectKey": "thumbnails/thumb_0040.png"
+  },
+  {
+    "imageKey": "thumb_0041",
+    "type": "THUMBNAIL",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "호화로운",
+    "subject": "펜트하우스",
+    "prop": "수정디저트",
+    "sourceFile": "thumbnail/thumbnail_재벌_호화로운_펜트하우스_수정디저트__09.png",
+    "objectKey": "thumbnails/thumb_0041.png"
+  },
+  {
+    "imageKey": "thumb_0042",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "몽환",
+    "subject": "궁정정원",
+    "prop": "왕관",
+    "sourceFile": "thumbnail/thumbnail_판타지-로맨스_몽환_궁정정원_왕관__06.png",
+    "objectKey": "thumbnails/thumb_0042.png"
+  },
+  {
+    "imageKey": "thumb_0043",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "몽환",
+    "subject": "궤도온실",
+    "prop": "지구창",
+    "sourceFile": "thumbnail/thumbnail_판타지-로맨스_몽환_궤도온실_지구창__15.png",
+    "objectKey": "thumbnails/thumb_0043.png"
+  },
+  {
+    "imageKey": "thumb_0044",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "애틋",
+    "subject": "사막유적",
+    "prop": "고대문",
+    "sourceFile": "thumbnail/thumbnail_판타지-로맨스_애틋_사막유적_고대문__24.png",
+    "objectKey": "thumbnails/thumb_0044.png"
+  },
+  {
+    "imageKey": "thumb_0045",
+    "type": "THUMBNAIL",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "몽환",
+    "subject": "공중도서관",
+    "prop": "레벨오브",
+    "sourceFile": "thumbnail/thumbnail_판타지_몽환_공중도서관_레벨오브__05.png",
+    "objectKey": "thumbnails/thumb_0045.png"
+  },
+  {
+    "imageKey": "thumb_0046",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지",
+      "학원물"
+    ],
+    "mood": "청춘",
+    "subject": "벚꽃정원",
+    "prop": "벚꽃",
+    "sourceFile": "thumbnail/thumbnail_학원-로맨스_청춘_벚꽃정원_벚꽃__21.png",
+    "objectKey": "thumbnails/thumb_0046.png"
+  },
+  {
+    "imageKey": "thumb_0047",
+    "type": "THUMBNAIL",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "명랑한",
+    "subject": "마법학원",
+    "prop": "불사조요리모자",
+    "sourceFile": "thumbnail/thumbnail_학원_명랑한_마법학원_불사조요리모자__07.png",
+    "objectKey": "thumbnails/thumb_0047.png"
+  },
+  {
+    "imageKey": "thumb_0048",
+    "type": "THUMBNAIL",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "청량",
+    "subject": "가상교실",
+    "prop": "스탯팔찌",
+    "sourceFile": "thumbnail/thumbnail_학원_청량_가상교실_스탯팔찌__06.png",
+    "objectKey": "thumbnails/thumb_0048.png"
+  },
+  {
+    "imageKey": "thumb_0049",
+    "type": "THUMBNAIL",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "긴박",
+    "subject": "도시폐허",
+    "prop": "랭크카드",
+    "sourceFile": "thumbnail/thumbnail_헌터_긴박_도시폐허_랭크카드__03.png",
+    "objectKey": "thumbnails/thumb_0049.png"
+  },
+  {
+    "imageKey": "thumb_0050",
+    "type": "THUMBNAIL",
+    "genres": [
+      "환생"
+    ],
+    "mood": "신비로운",
+    "subject": "궁전",
+    "prop": "요람",
+    "sourceFile": "thumbnail/thumbnail_환생_신비로운_궁전_요람__01.png",
+    "objectKey": "thumbnails/thumb_0050.png"
+  },
+  {
+    "imageKey": "bg_0001",
+    "type": "BACKGROUND",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "긴장",
+    "subject": "던전로비",
+    "prop": "포탈",
+    "sourceFile": "bg/bg__게임_긴장_던전로비_포탈__02.png",
+    "objectKey": "backgrounds/bg_0001.png"
+  },
+  {
+    "imageKey": "bg_0002",
+    "type": "BACKGROUND",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "네온감성",
+    "subject": "미래오락실",
+    "prop": "빛콘솔",
+    "sourceFile": "bg/bg__게임_네온감성_미래오락실_빛콘솔__18.png",
+    "objectKey": "backgrounds/bg_0002.png"
+  },
+  {
+    "imageKey": "bg_0003",
+    "type": "BACKGROUND",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "발랄한",
+    "subject": "가상정원",
+    "prop": "세이브분수",
+    "sourceFile": "bg/bg__게임_발랄한_가상정원_세이브분수__06.png",
+    "objectKey": "backgrounds/bg_0003.png"
+  },
+  {
+    "imageKey": "bg_0004",
+    "type": "BACKGROUND",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "청량",
+    "subject": "공중섬허브",
+    "prop": "세이브크리스탈",
+    "sourceFile": "bg/bg__게임_청량_공중섬허브_세이브크리스탈__12.png",
+    "objectKey": "backgrounds/bg_0004.png"
+  },
+  {
+    "imageKey": "bg_0005",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "겨울감성",
+    "subject": "산장외부",
+    "prop": "빨간스카프",
+    "sourceFile": "bg/bg__로맨스_겨울감성_산장외부_빨간스카프__13.png",
+    "objectKey": "backgrounds/bg_0005.png"
+  },
+  {
+    "imageKey": "bg_0006",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "몽환",
+    "subject": "축제발코니",
+    "prop": "뮤직박스",
+    "sourceFile": "bg/bg__로맨스_몽환_축제발코니_뮤직박스__08.png",
+    "objectKey": "backgrounds/bg_0006.png"
+  },
+  {
+    "imageKey": "bg_0007",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "비밀스러운",
+    "subject": "심야카페",
+    "prop": "튤립꽃다발",
+    "sourceFile": "bg/bg__로맨스_비밀스러운_심야카페_튤립꽃다발__12.png",
+    "objectKey": "backgrounds/bg_0007.png"
+  },
+  {
+    "imageKey": "bg_0008",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "비오는밤",
+    "subject": "호텔입구",
+    "prop": "빨간우산",
+    "sourceFile": "bg/bg__로맨스_비오는밤_호텔입구_빨간우산__01.png",
+    "objectKey": "backgrounds/bg_0008.png"
+  },
+  {
+    "imageKey": "bg_0009",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "서약",
+    "subject": "해변의식장",
+    "prop": "조개반지",
+    "sourceFile": "bg/bg__로맨스_서약_해변의식장_조개반지__14.png",
+    "objectKey": "backgrounds/bg_0009.png"
+  },
+  {
+    "imageKey": "bg_0010",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "애틋",
+    "subject": "비내리는역",
+    "prop": "유리우산",
+    "sourceFile": "bg/bg__로맨스_애틋_비내리는역_유리우산__18.png",
+    "objectKey": "backgrounds/bg_0010.png"
+  },
+  {
+    "imageKey": "bg_0011",
+    "type": "BACKGROUND",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "애틋한",
+    "subject": "한옥마당",
+    "prop": "노리개",
+    "sourceFile": "bg/bg__로맨스_애틋한_한옥마당_노리개__17.png",
+    "objectKey": "backgrounds/bg_0011.png"
+  },
+  {
+    "imageKey": "bg_0012",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "고요",
+    "subject": "대나무수련장",
+    "prop": "옥패",
+    "sourceFile": "bg/bg__무협_고요_대나무수련장_옥패__03.png",
+    "objectKey": "backgrounds/bg_0012.png"
+  },
+  {
+    "imageKey": "bg_0013",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "고요한",
+    "subject": "대나무수련장",
+    "prop": "목검거치대",
+    "sourceFile": "bg/bg__무협_고요한_대나무수련장_목검거치대__05.png",
+    "objectKey": "backgrounds/bg_0013.png"
+  },
+  {
+    "imageKey": "bg_0014",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "고요한",
+    "subject": "대나무정자",
+    "prop": "옥검",
+    "sourceFile": "bg/bg__무협_고요한_대나무정자_옥검__08.png",
+    "objectKey": "backgrounds/bg_0014.png"
+  },
+  {
+    "imageKey": "bg_0015",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "긴장된",
+    "subject": "비오는골목",
+    "prop": "검은우산",
+    "sourceFile": "bg/bg__무협_긴장된_비오는골목_검은우산__12.png",
+    "objectKey": "backgrounds/bg_0015.png"
+  },
+  {
+    "imageKey": "bg_0016",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "뜨거운",
+    "subject": "용광검방",
+    "prop": "담금통",
+    "sourceFile": "bg/bg__무협_뜨거운_용광검방_담금통__15.png",
+    "objectKey": "backgrounds/bg_0016.png"
+  },
+  {
+    "imageKey": "bg_0017",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "몽환적",
+    "subject": "연꽃호수",
+    "prop": "옥피리",
+    "sourceFile": "bg/bg__무협_몽환적_연꽃호수_옥피리__11.png",
+    "objectKey": "backgrounds/bg_0017.png"
+  },
+  {
+    "imageKey": "bg_0018",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "몽환적",
+    "subject": "운무산",
+    "prop": "석등",
+    "sourceFile": "bg/bg__무협_몽환적_운무산_석등__02.png",
+    "objectKey": "backgrounds/bg_0018.png"
+  },
+  {
+    "imageKey": "bg_0019",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "비장한",
+    "subject": "절벽",
+    "prop": "검흔바위",
+    "sourceFile": "bg/bg__무협_비장한_절벽_검흔바위__01.png",
+    "objectKey": "backgrounds/bg_0019.png"
+  },
+  {
+    "imageKey": "bg_0020",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "서늘한",
+    "subject": "설산사찰",
+    "prop": "빙결종",
+    "sourceFile": "bg/bg__무협_서늘한_설산사찰_빙결종__07.png",
+    "objectKey": "backgrounds/bg_0020.png"
+  },
+  {
+    "imageKey": "bg_0021",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "설원",
+    "subject": "산중제단",
+    "prop": "옥륜",
+    "sourceFile": "bg/bg__무협_설원_산중제단_옥륜__13.png",
+    "objectKey": "backgrounds/bg_0021.png"
+  },
+  {
+    "imageKey": "bg_0022",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "신비한",
+    "subject": "동굴서고",
+    "prop": "봉인석함",
+    "sourceFile": "bg/bg__무협_신비한_동굴서고_봉인석함__19.png",
+    "objectKey": "backgrounds/bg_0022.png"
+  },
+  {
+    "imageKey": "bg_0023",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "쓸쓸한",
+    "subject": "가을산길",
+    "prop": "낙엽계단",
+    "sourceFile": "bg/bg__무협_쓸쓸한_가을산길_낙엽계단__16.png",
+    "objectKey": "backgrounds/bg_0023.png"
+  },
+  {
+    "imageKey": "bg_0024",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "엄숙한",
+    "subject": "장문인서재",
+    "prop": "봉인서책",
+    "sourceFile": "bg/bg__무협_엄숙한_장문인서재_봉인서책__14.png",
+    "objectKey": "backgrounds/bg_0024.png"
+  },
+  {
+    "imageKey": "bg_0025",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "영험한",
+    "subject": "동굴석실",
+    "prop": "옥좌",
+    "sourceFile": "bg/bg__무협_영험한_동굴석실_옥좌__17.png",
+    "objectKey": "backgrounds/bg_0025.png"
+  },
+  {
+    "imageKey": "bg_0026",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "은밀한",
+    "subject": "밤강나루",
+    "prop": "낡은등불",
+    "sourceFile": "bg/bg__무협_은밀한_밤강나루_낡은등불__08.png",
+    "objectKey": "backgrounds/bg_0026.png"
+  },
+  {
+    "imageKey": "bg_0027",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "은밀한",
+    "subject": "약재시장",
+    "prop": "약재상자",
+    "sourceFile": "bg/bg__무협_은밀한_약재시장_약재상자__04.png",
+    "objectKey": "backgrounds/bg_0027.png"
+  },
+  {
+    "imageKey": "bg_0028",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "음산한",
+    "subject": "폐객잔",
+    "prop": "깨진술독",
+    "sourceFile": "bg/bg__무협_음산한_폐객잔_깨진술독__09.png",
+    "objectKey": "backgrounds/bg_0028.png"
+  },
+  {
+    "imageKey": "bg_0029",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "장엄한",
+    "subject": "문파연무장",
+    "prop": "청동향로",
+    "sourceFile": "bg/bg__무협_장엄한_문파연무장_청동향로__06.png",
+    "objectKey": "backgrounds/bg_0029.png"
+  },
+  {
+    "imageKey": "bg_0030",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "청량한",
+    "subject": "폭포협곡",
+    "prop": "돌다리",
+    "sourceFile": "bg/bg__무협_청량한_폭포협곡_돌다리__10.png",
+    "objectKey": "backgrounds/bg_0030.png"
+  },
+  {
+    "imageKey": "bg_0031",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "평화로운",
+    "subject": "계곡온천",
+    "prop": "목욕통",
+    "sourceFile": "bg/bg__무협_평화로운_계곡온천_목욕통__18.png",
+    "objectKey": "backgrounds/bg_0031.png"
+  },
+  {
+    "imageKey": "bg_0032",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "폭풍전야",
+    "subject": "해안절벽",
+    "prop": "낡은검집",
+    "sourceFile": "bg/bg__무협_폭풍전야_해안절벽_낡은검집__20.png",
+    "objectKey": "backgrounds/bg_0032.png"
+  },
+  {
+    "imageKey": "bg_0033",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "활기찬",
+    "subject": "장터",
+    "prop": "홍등",
+    "sourceFile": "bg/bg__무협_활기찬_장터_홍등__03.png",
+    "objectKey": "backgrounds/bg_0033.png"
+  },
+  {
+    "imageKey": "bg_0034",
+    "type": "BACKGROUND",
+    "genres": [
+      "무협"
+    ],
+    "mood": "황량한",
+    "subject": "사막관문",
+    "prop": "녹슨표창",
+    "sourceFile": "bg/bg__무협_황량한_사막관문_녹슨표창__13.png",
+    "objectKey": "backgrounds/bg_0034.png"
+  },
+  {
+    "imageKey": "bg_0035",
+    "type": "BACKGROUND",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "고요",
+    "subject": "성역아카이브",
+    "prop": "코어",
+    "sourceFile": "bg/bg__시스템_고요_성역아카이브_코어__01.png",
+    "objectKey": "backgrounds/bg_0035.png"
+  },
+  {
+    "imageKey": "bg_0036",
+    "type": "BACKGROUND",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "신비로운",
+    "subject": "미래아파트",
+    "prop": "반지상자",
+    "sourceFile": "bg/bg__시스템_신비로운_미래아파트_반지상자__10.png",
+    "objectKey": "backgrounds/bg_0036.png"
+  },
+  {
+    "imageKey": "bg_0037",
+    "type": "BACKGROUND",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "암흑",
+    "subject": "서버성당",
+    "prop": "블랙큐브",
+    "sourceFile": "bg/bg__시스템_암흑_서버성당_블랙큐브__11.png",
+    "objectKey": "backgrounds/bg_0037.png"
+  },
+  {
+    "imageKey": "bg_0038",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "고립",
+    "subject": "옥상정원",
+    "prop": "빗물탱크",
+    "sourceFile": "bg/bg__아포칼립스_고립_옥상정원_빗물탱크__07.png",
+    "objectKey": "backgrounds/bg_0038.png"
+  },
+  {
+    "imageKey": "bg_0039",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "고요",
+    "subject": "폐허도시",
+    "prop": "녹슨버스",
+    "sourceFile": "bg/bg__아포칼립스_고요_폐허도시_녹슨버스__01.png",
+    "objectKey": "backgrounds/bg_0039.png"
+  },
+  {
+    "imageKey": "bg_0040",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "기계적",
+    "subject": "드론격납고",
+    "prop": "꺼진드론",
+    "sourceFile": "bg/bg__아포칼립스_기계적_드론격납고_꺼진드론__16.png",
+    "objectKey": "backgrounds/bg_0040.png"
+  },
+  {
+    "imageKey": "bg_0041",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "기괴",
+    "subject": "오염숲",
+    "prop": "형광버섯",
+    "sourceFile": "bg/bg__아포칼립스_기괴_오염숲_형광버섯__06.png",
+    "objectKey": "backgrounds/bg_0041.png"
+  },
+  {
+    "imageKey": "bg_0042",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "긴박",
+    "subject": "침수지하철",
+    "prop": "비상등",
+    "sourceFile": "bg/bg__아포칼립스_긴박_침수지하철_비상등__02.png",
+    "objectKey": "backgrounds/bg_0042.png"
+  },
+  {
+    "imageKey": "bg_0043",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "몽환",
+    "subject": "해안폐항",
+    "prop": "난파선",
+    "sourceFile": "bg/bg__아포칼립스_몽환_해안폐항_난파선__09.png",
+    "objectKey": "backgrounds/bg_0043.png"
+  },
+  {
+    "imageKey": "bg_0044",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "방사능",
+    "subject": "검문소",
+    "prop": "깨진계측기",
+    "sourceFile": "bg/bg__아포칼립스_방사능_검문소_깨진계측기__17.png",
+    "objectKey": "backgrounds/bg_0044.png"
+  },
+  {
+    "imageKey": "bg_0045",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "불길",
+    "subject": "산업지대",
+    "prop": "붕괴굴뚝",
+    "sourceFile": "bg/bg__아포칼립스_불길_산업지대_붕괴굴뚝__04.png",
+    "objectKey": "backgrounds/bg_0045.png"
+  },
+  {
+    "imageKey": "bg_0046",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "불안",
+    "subject": "병원복도",
+    "prop": "넘어진휠체어",
+    "sourceFile": "bg/bg__아포칼립스_불안_병원복도_넘어진휠체어__08.png",
+    "objectKey": "backgrounds/bg_0046.png"
+  },
+  {
+    "imageKey": "bg_0047",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "비현실",
+    "subject": "거울호수",
+    "prop": "가라앉은타워",
+    "sourceFile": "bg/bg__아포칼립스_비현실_거울호수_가라앉은타워__20.png",
+    "objectKey": "backgrounds/bg_0047.png"
+  },
+  {
+    "imageKey": "bg_0048",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "서늘",
+    "subject": "놀이공원",
+    "prop": "멈춘관람차",
+    "sourceFile": "bg/bg__아포칼립스_서늘_놀이공원_멈춘관람차__11.png",
+    "objectKey": "backgrounds/bg_0048.png"
+  },
+  {
+    "imageKey": "bg_0049",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "신비",
+    "subject": "성당폐허",
+    "prop": "깨진스테인드글라스",
+    "sourceFile": "bg/bg__아포칼립스_신비_성당폐허_깨진스테인드글라스__12.png",
+    "objectKey": "backgrounds/bg_0049.png"
+  },
+  {
+    "imageKey": "bg_0050",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "쓸쓸한",
+    "subject": "폐허지하철",
+    "prop": "하얀베일",
+    "sourceFile": "bg/bg__아포칼립스_쓸쓸한_폐허지하철_하얀베일__07.png",
+    "objectKey": "backgrounds/bg_0050.png"
+  },
+  {
+    "imageKey": "bg_0051",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "암울",
+    "subject": "지하벙커",
+    "prop": "깜빡이는모니터",
+    "sourceFile": "bg/bg__아포칼립스_암울_지하벙커_깜빡이는모니터__10.png",
+    "objectKey": "backgrounds/bg_0051.png"
+  },
+  {
+    "imageKey": "bg_0052",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "압도",
+    "subject": "분화구도심",
+    "prop": "거대한균열",
+    "sourceFile": "bg/bg__아포칼립스_압도_분화구도심_거대한균열__13.png",
+    "objectKey": "backgrounds/bg_0052.png"
+  },
+  {
+    "imageKey": "bg_0053",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "음산",
+    "subject": "학교운동장",
+    "prop": "녹슨스피커",
+    "sourceFile": "bg/bg__아포칼립스_음산_학교운동장_녹슨스피커__14.png",
+    "objectKey": "backgrounds/bg_0053.png"
+  },
+  {
+    "imageKey": "bg_0054",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "적막",
+    "subject": "옥상정원",
+    "prop": "위성비콘",
+    "sourceFile": "bg/bg__아포칼립스_적막_옥상정원_위성비콘__16.png",
+    "objectKey": "backgrounds/bg_0054.png"
+  },
+  {
+    "imageKey": "bg_0055",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "차가움",
+    "subject": "설원마을",
+    "prop": "얼어붙은라디오탑",
+    "sourceFile": "bg/bg__아포칼립스_차가움_설원마을_얼어붙은라디오탑__05.png",
+    "objectKey": "backgrounds/bg_0055.png"
+  },
+  {
+    "imageKey": "bg_0056",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "침묵",
+    "subject": "도서관폐허",
+    "prop": "흩어진책",
+    "sourceFile": "bg/bg__아포칼립스_침묵_도서관폐허_흩어진책__19.png",
+    "objectKey": "backgrounds/bg_0056.png"
+  },
+  {
+    "imageKey": "bg_0057",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "폭풍",
+    "subject": "해일도시",
+    "prop": "기울어진신호등",
+    "sourceFile": "bg/bg__아포칼립스_폭풍_해일도시_기울어진신호등__18.png",
+    "objectKey": "backgrounds/bg_0057.png"
+  },
+  {
+    "imageKey": "bg_0058",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "황량",
+    "subject": "사막화고속도로",
+    "prop": "뒤집힌트럭",
+    "sourceFile": "bg/bg__아포칼립스_황량_사막화고속도로_뒤집힌트럭__03.png",
+    "objectKey": "backgrounds/bg_0058.png"
+  },
+  {
+    "imageKey": "bg_0059",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "희망",
+    "subject": "온실쉘터",
+    "prop": "작은새싹",
+    "sourceFile": "bg/bg__아포칼립스_희망_온실쉘터_작은새싹__15.png",
+    "objectKey": "backgrounds/bg_0059.png"
+  },
+  {
+    "imageKey": "bg_0060",
+    "type": "BACKGROUND",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "희망",
+    "subject": "폐허검문소",
+    "prop": "보급상자",
+    "sourceFile": "bg/bg__아포칼립스_희망_폐허검문소_보급상자__06.png",
+    "objectKey": "backgrounds/bg_0060.png"
+  },
+  {
+    "imageKey": "bg_0061",
+    "type": "BACKGROUND",
+    "genres": [
+      "육아물"
+    ],
+    "mood": "따뜻",
+    "subject": "아기방",
+    "prop": "나무블록",
+    "sourceFile": "bg/bg__육아_따뜻_아기방_나무블록__10.png",
+    "objectKey": "backgrounds/bg_0061.png"
+  },
+  {
+    "imageKey": "bg_0062",
+    "type": "BACKGROUND",
+    "genres": [
+      "육아물"
+    ],
+    "mood": "포근한",
+    "subject": "아기방",
+    "prop": "달별모빌",
+    "sourceFile": "bg/bg__육아_포근한_아기방_달별모빌__09.png",
+    "objectKey": "backgrounds/bg_0062.png"
+  },
+  {
+    "imageKey": "bg_0063",
+    "type": "BACKGROUND",
+    "genres": [
+      "육아물"
+    ],
+    "mood": "환희",
+    "subject": "놀이방",
+    "prop": "성장나무",
+    "sourceFile": "bg/bg__육아_환희_놀이방_성장나무__20.png",
+    "objectKey": "backgrounds/bg_0063.png"
+  },
+  {
+    "imageKey": "bg_0064",
+    "type": "BACKGROUND",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "고급스러운",
+    "subject": "펜트하우스정원",
+    "prop": "샴페인잔",
+    "sourceFile": "bg/bg__재벌_고급스러운_펜트하우스정원_샴페인잔__04.png",
+    "objectKey": "backgrounds/bg_0064.png"
+  },
+  {
+    "imageKey": "bg_0065",
+    "type": "BACKGROUND",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "냉정",
+    "subject": "펜트하우스오피스",
+    "prop": "금고상자",
+    "sourceFile": "bg/bg__재벌_냉정_펜트하우스오피스_금고상자__09.png",
+    "objectKey": "backgrounds/bg_0065.png"
+  },
+  {
+    "imageKey": "bg_0066",
+    "type": "BACKGROUND",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "노을빛",
+    "subject": "루프탑수영장",
+    "prop": "진주비녀",
+    "sourceFile": "bg/bg__재벌_노을빛_루프탑수영장_진주비녀__19.png",
+    "objectKey": "backgrounds/bg_0066.png"
+  },
+  {
+    "imageKey": "bg_0067",
+    "type": "BACKGROUND",
+    "genres": [
+      "재벌물"
+    ],
+    "mood": "음모",
+    "subject": "지하금고",
+    "prop": "황금키",
+    "sourceFile": "bg/bg__재벌_음모_지하금고_황금키__19.png",
+    "objectKey": "backgrounds/bg_0067.png"
+  },
+  {
+    "imageKey": "bg_0068",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "경이",
+    "subject": "세계수유적",
+    "prop": "씨앗수정",
+    "sourceFile": "bg/bg__판타지_경이_세계수유적_씨앗수정__04.png",
+    "objectKey": "backgrounds/bg_0068.png"
+  },
+  {
+    "imageKey": "bg_0069",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "몽환",
+    "subject": "달빛온실",
+    "prop": "수정장미",
+    "sourceFile": "bg/bg__판타지_몽환_달빛온실_수정장미__02.png",
+    "objectKey": "backgrounds/bg_0069.png"
+  },
+  {
+    "imageKey": "bg_0070",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "물빛몽환",
+    "subject": "수족관터널",
+    "prop": "벨벳반지함",
+    "sourceFile": "bg/bg__판타지_물빛몽환_수족관터널_벨벳반지함__15.png",
+    "objectKey": "backgrounds/bg_0070.png"
+  },
+  {
+    "imageKey": "bg_0071",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "비밀스러운",
+    "subject": "마법도서관",
+    "prop": "수정문진",
+    "sourceFile": "bg/bg__판타지_비밀스러운_마법도서관_수정문진__16.png",
+    "objectKey": "backgrounds/bg_0071.png"
+  },
+  {
+    "imageKey": "bg_0072",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "왕실풍",
+    "subject": "성발코니",
+    "prop": "푸른장미",
+    "sourceFile": "bg/bg__판타지_왕실풍_성발코니_푸른장미__11.png",
+    "objectKey": "backgrounds/bg_0072.png"
+  },
+  {
+    "imageKey": "bg_0073",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "운명적인",
+    "subject": "마법기차역",
+    "prop": "회중시계",
+    "sourceFile": "bg/bg__판타지_운명적인_마법기차역_회중시계__20.png",
+    "objectKey": "backgrounds/bg_0073.png"
+  },
+  {
+    "imageKey": "bg_0074",
+    "type": "BACKGROUND",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "장엄",
+    "subject": "하늘성채",
+    "prop": "수정문",
+    "sourceFile": "bg/bg__판타지_장엄_하늘성채_수정문__14.png",
+    "objectKey": "backgrounds/bg_0074.png"
+  },
+  {
+    "imageKey": "bg_0075",
+    "type": "BACKGROUND",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "불안",
+    "subject": "심야교실",
+    "prop": "시험진",
+    "sourceFile": "bg/bg__학원_불안_심야교실_시험진__07.png",
+    "objectKey": "backgrounds/bg_0075.png"
+  },
+  {
+    "imageKey": "bg_0076",
+    "type": "BACKGROUND",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "첫사랑",
+    "subject": "방과후복도",
+    "prop": "리본꽃다발",
+    "sourceFile": "bg/bg__학원_첫사랑_방과후복도_리본꽃다발__03.png",
+    "objectKey": "backgrounds/bg_0076.png"
+  },
+  {
+    "imageKey": "bg_0077",
+    "type": "BACKGROUND",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "활기",
+    "subject": "마법복도",
+    "prop": "던전문",
+    "sourceFile": "bg/bg__학원_활기_마법복도_던전문__17.png",
+    "objectKey": "backgrounds/bg_0077.png"
+  },
+  {
+    "imageKey": "bg_0078",
+    "type": "BACKGROUND",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "압박",
+    "subject": "지하철역",
+    "prop": "균열",
+    "sourceFile": "bg/bg__헌터_압박_지하철역_균열__05.png",
+    "objectKey": "backgrounds/bg_0078.png"
+  },
+  {
+    "imageKey": "bg_0079",
+    "type": "BACKGROUND",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "위기",
+    "subject": "벙커상황실",
+    "prop": "게이트코어",
+    "sourceFile": "bg/bg__헌터_위기_벙커상황실_게이트코어__15.png",
+    "objectKey": "backgrounds/bg_0079.png"
+  },
+  {
+    "imageKey": "bg_0080",
+    "type": "BACKGROUND",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "위태로운",
+    "subject": "도시옥상",
+    "prop": "푸른포털",
+    "sourceFile": "bg/bg__헌터_위태로운_도시옥상_푸른포털__05.png",
+    "objectKey": "backgrounds/bg_0080.png"
+  },
+  {
+    "imageKey": "char_0001",
+    "type": "CHARACTER",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "교활한",
+    "subject": "논바이너리",
+    "prop": "자물쇠따개-단검",
+    "sourceFile": "character/character__게임_교활한_논바이너리_자물쇠따개-단검__03.png",
+    "objectKey": "characters/char_0001.png"
+  },
+  {
+    "imageKey": "char_0002",
+    "type": "CHARACTER",
+    "genres": [
+      "게임 판타지"
+    ],
+    "mood": "화려한",
+    "subject": "여성",
+    "prop": "흑요석-카드",
+    "sourceFile": "character/character__게임_화려한_여성_흑요석-카드__16.png",
+    "objectKey": "characters/char_0002.png"
+  },
+  {
+    "imageKey": "char_0003",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "격정적인",
+    "subject": "여성",
+    "prop": "철제-건틀릿",
+    "sourceFile": "character/character__로맨스_격정적인_여성_철제-건틀릿__19.png",
+    "objectKey": "characters/char_0003.png"
+  },
+  {
+    "imageKey": "char_0004",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "결연한",
+    "subject": "여성",
+    "prop": "테니스-라켓",
+    "sourceFile": "character/character__로맨스_결연한_여성_테니스-라켓__19.png",
+    "objectKey": "characters/char_0004.png"
+  },
+  {
+    "imageKey": "char_0005",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "냉담한",
+    "subject": "여성",
+    "prop": "월장석-목걸이",
+    "sourceFile": "character/character__로맨스_냉담한_여성_월장석-목걸이__13.png",
+    "objectKey": "characters/char_0005.png"
+  },
+  {
+    "imageKey": "char_0006",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "눈부신",
+    "subject": "여성",
+    "prop": "진주-마이크",
+    "sourceFile": "character/character__로맨스_눈부신_여성_진주-마이크__15.png",
+    "objectKey": "characters/char_0006.png"
+  },
+  {
+    "imageKey": "char_0007",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "다정한",
+    "subject": "남성",
+    "prop": "압화-책갈피",
+    "sourceFile": "character/character__로맨스_다정한_남성_압화-책갈피__14.png",
+    "objectKey": "characters/char_0007.png"
+  },
+  {
+    "imageKey": "char_0008",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "단정한",
+    "subject": "여성",
+    "prop": "에스프레소-잔",
+    "sourceFile": "character/character__로맨스_단정한_여성_에스프레소-잔__07.png",
+    "objectKey": "characters/char_0008.png"
+  },
+  {
+    "imageKey": "char_0009",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "따뜻한",
+    "subject": "남성",
+    "prop": "나무숟가락",
+    "sourceFile": "character/character__로맨스_따뜻한_남성_나무숟가락__20.png",
+    "objectKey": "characters/char_0009.png"
+  },
+  {
+    "imageKey": "char_0010",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "매력적인",
+    "subject": "남성",
+    "prop": "필름카메라",
+    "sourceFile": "character/character__로맨스_매력적인_남성_필름카메라__12.png",
+    "objectKey": "characters/char_0010.png"
+  },
+  {
+    "imageKey": "char_0011",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "몽상적인",
+    "subject": "여성",
+    "prop": "난초-브로치",
+    "sourceFile": "character/character__로맨스_몽상적인_여성_난초-브로치__09.png",
+    "objectKey": "characters/char_0011.png"
+  },
+  {
+    "imageKey": "char_0012",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "몽환적인",
+    "subject": "남성",
+    "prop": "월장석-하프",
+    "sourceFile": "character/character__로맨스_몽환적인_남성_월장석-하프__04.png",
+    "objectKey": "characters/char_0012.png"
+  },
+  {
+    "imageKey": "char_0013",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "부드러운",
+    "subject": "남성",
+    "prop": "흰장미",
+    "sourceFile": "character/character__로맨스_부드러운_남성_흰장미__08.png",
+    "objectKey": "characters/char_0013.png"
+  },
+  {
+    "imageKey": "char_0014",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "비밀스러운",
+    "subject": "여성",
+    "prop": "뼈-열쇠",
+    "sourceFile": "character/character__로맨스_비밀스러운_여성_뼈-열쇠__17.png",
+    "objectKey": "characters/char_0014.png"
+  },
+  {
+    "imageKey": "char_0015",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "사려깊은",
+    "subject": "여성",
+    "prop": "붓",
+    "sourceFile": "character/character__로맨스_사려깊은_여성_붓__11.png",
+    "objectKey": "characters/char_0015.png"
+  },
+  {
+    "imageKey": "char_0016",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "수수께끼같은",
+    "subject": "남성",
+    "prop": "골동품-열쇠",
+    "sourceFile": "character/character__로맨스_수수께끼같은_남성_골동품-열쇠__18.png",
+    "objectKey": "characters/char_0016.png"
+  },
+  {
+    "imageKey": "char_0017",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "신비로운",
+    "subject": "남성",
+    "prop": "만년필",
+    "sourceFile": "character/character__로맨스_신비로운_남성_만년필__10.png",
+    "objectKey": "characters/char_0017.png"
+  },
+  {
+    "imageKey": "char_0018",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "신비로운",
+    "subject": "남성",
+    "prop": "황금-모래시계",
+    "sourceFile": "character/character__로맨스_신비로운_남성_황금-모래시계__10.png",
+    "objectKey": "characters/char_0018.png"
+  },
+  {
+    "imageKey": "char_0019",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "아련한",
+    "subject": "여성",
+    "prop": "투명우산",
+    "sourceFile": "character/character__로맨스_아련한_여성_투명우산__03.png",
+    "objectKey": "characters/char_0019.png"
+  },
+  {
+    "imageKey": "char_0020",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "엄숙한",
+    "subject": "남성",
+    "prop": "옥패",
+    "sourceFile": "character/character__로맨스_엄숙한_남성_옥패__04.png",
+    "objectKey": "characters/char_0020.png"
+  },
+  {
+    "imageKey": "char_0021",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "자신감있는",
+    "subject": "여성",
+    "prop": "비단부채",
+    "sourceFile": "character/character__로맨스_자신감있는_여성_비단부채__05.png",
+    "objectKey": "characters/char_0021.png"
+  },
+  {
+    "imageKey": "char_0022",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "장난스러운",
+    "subject": "남성",
+    "prop": "헤드폰",
+    "sourceFile": "character/character__로맨스_장난스러운_남성_헤드폰__06.png",
+    "objectKey": "characters/char_0022.png"
+  },
+  {
+    "imageKey": "char_0023",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "차분한",
+    "subject": "남성",
+    "prop": "청진기",
+    "sourceFile": "character/character__로맨스_차분한_남성_청진기__16.png",
+    "objectKey": "characters/char_0023.png"
+  },
+  {
+    "imageKey": "char_0024",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "침착한",
+    "subject": "남성",
+    "prop": "인장반지",
+    "sourceFile": "character/character__로맨스_침착한_남성_인장반지__02.png",
+    "objectKey": "characters/char_0024.png"
+  },
+  {
+    "imageKey": "char_0025",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "평온한",
+    "subject": "여성",
+    "prop": "은장미",
+    "sourceFile": "character/character__로맨스_평온한_여성_은장미__01.png",
+    "objectKey": "characters/char_0025.png"
+  },
+  {
+    "imageKey": "char_0026",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "평온한",
+    "subject": "여성",
+    "prop": "진주-비녀",
+    "sourceFile": "character/character__로맨스_평온한_여성_진주-비녀__01.png",
+    "objectKey": "characters/char_0026.png"
+  },
+  {
+    "imageKey": "char_0027",
+    "type": "CHARACTER",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "품위있는",
+    "subject": "여성",
+    "prop": "붉은실-팔찌",
+    "sourceFile": "character/character__로맨스_품위있는_여성_붉은실-팔찌__17.png",
+    "objectKey": "characters/char_0027.png"
+  },
+  {
+    "imageKey": "char_0028",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "거친",
+    "subject": "남성",
+    "prop": "단조망치",
+    "sourceFile": "character/character__무협_거친_남성_단조망치__13.png",
+    "objectKey": "characters/char_0028.png"
+  },
+  {
+    "imageKey": "char_0029",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "격정적인",
+    "subject": "여성",
+    "prop": "도",
+    "sourceFile": "character/character__무협_격정적인_여성_도__02.png",
+    "objectKey": "characters/char_0029.png"
+  },
+  {
+    "imageKey": "char_0030",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "그을린",
+    "subject": "여성",
+    "prop": "줄표창",
+    "sourceFile": "character/character__무협_그을린_여성_줄표창__12.png",
+    "objectKey": "characters/char_0030.png"
+  },
+  {
+    "imageKey": "char_0031",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "금욕적인",
+    "subject": "남성",
+    "prop": "염주",
+    "sourceFile": "character/character__무협_금욕적인_남성_염주__03.png",
+    "objectKey": "characters/char_0031.png"
+  },
+  {
+    "imageKey": "char_0032",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "몽환적인",
+    "subject": "여성",
+    "prop": "얼음검",
+    "sourceFile": "character/character__무협_몽환적인_여성_얼음검__19.png",
+    "objectKey": "characters/char_0032.png"
+  },
+  {
+    "imageKey": "char_0033",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "수도자같은",
+    "subject": "남성",
+    "prop": "쇠사슬",
+    "sourceFile": "character/character__무협_수도자같은_남성_쇠사슬__18.png",
+    "objectKey": "characters/char_0033.png"
+  },
+  {
+    "imageKey": "char_0034",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "신비로운",
+    "subject": "여성",
+    "prop": "은침",
+    "sourceFile": "character/character__무협_신비로운_여성_은침__04.png",
+    "objectKey": "characters/char_0034.png"
+  },
+  {
+    "imageKey": "char_0035",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "엄격한",
+    "subject": "여성",
+    "prop": "청동거울",
+    "sourceFile": "character/character__무협_엄격한_여성_청동거울__16.png",
+    "objectKey": "characters/char_0035.png"
+  },
+  {
+    "imageKey": "char_0036",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "우울한",
+    "subject": "여성",
+    "prop": "눈가림-검",
+    "sourceFile": "character/character__무협_우울한_여성_눈가림-검__14.png",
+    "objectKey": "characters/char_0036.png"
+  },
+  {
+    "imageKey": "char_0037",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "유쾌한",
+    "subject": "남성",
+    "prop": "술항아리",
+    "sourceFile": "character/character__무협_유쾌한_남성_술항아리__20.png",
+    "objectKey": "characters/char_0037.png"
+  },
+  {
+    "imageKey": "char_0038",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "음산한",
+    "subject": "여성",
+    "prop": "고리칼날",
+    "sourceFile": "character/character__무협_음산한_여성_고리칼날__10.png",
+    "objectKey": "characters/char_0038.png"
+  },
+  {
+    "imageKey": "char_0039",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "장난스러운",
+    "subject": "남성",
+    "prop": "대나무-지팡이",
+    "sourceFile": "character/character__무협_장난스러운_남성_대나무-지팡이__05.png",
+    "objectKey": "characters/char_0039.png"
+  },
+  {
+    "imageKey": "char_0040",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "장난스러운",
+    "subject": "여성",
+    "prop": "달빛-비파",
+    "sourceFile": "character/character__무협_장난스러운_여성_달빛-비파__08.png",
+    "objectKey": "characters/char_0040.png"
+  },
+  {
+    "imageKey": "char_0041",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "장엄한",
+    "subject": "여성",
+    "prop": "지휘-부채",
+    "sourceFile": "character/character__무협_장엄한_여성_지휘-부채__06.png",
+    "objectKey": "characters/char_0041.png"
+  },
+  {
+    "imageKey": "char_0042",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "차가운",
+    "subject": "남성",
+    "prop": "창",
+    "sourceFile": "character/character__무협_차가운_남성_창__09.png",
+    "objectKey": "characters/char_0042.png"
+  },
+  {
+    "imageKey": "char_0043",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "치유적인",
+    "subject": "남성",
+    "prop": "약호리병",
+    "sourceFile": "character/character__무협_치유적인_남성_약호리병__11.png",
+    "objectKey": "characters/char_0043.png"
+  },
+  {
+    "imageKey": "char_0044",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "침울한",
+    "subject": "남성",
+    "prop": "단검",
+    "sourceFile": "character/character__무협_침울한_남성_단검__07.png",
+    "objectKey": "characters/char_0044.png"
+  },
+  {
+    "imageKey": "char_0045",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "평온한",
+    "subject": "남성",
+    "prop": "옥피리",
+    "sourceFile": "character/character__무협_평온한_남성_옥피리__01.png",
+    "objectKey": "characters/char_0045.png"
+  },
+  {
+    "imageKey": "char_0046",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "화려한",
+    "subject": "남성",
+    "prop": "쌍검",
+    "sourceFile": "character/character__무협_화려한_남성_쌍검__15.png",
+    "objectKey": "characters/char_0046.png"
+  },
+  {
+    "imageKey": "char_0047",
+    "type": "CHARACTER",
+    "genres": [
+      "무협"
+    ],
+    "mood": "희망찬",
+    "subject": "여성",
+    "prop": "활",
+    "sourceFile": "character/character__무협_희망찬_여성_활__17.png",
+    "objectKey": "characters/char_0047.png"
+  },
+  {
+    "imageKey": "char_0048",
+    "type": "CHARACTER",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "결연한",
+    "subject": "남성",
+    "prop": "층-열쇠",
+    "sourceFile": "character/character__시스템_결연한_남성_층-열쇠__07.png",
+    "objectKey": "characters/char_0048.png"
+  },
+  {
+    "imageKey": "char_0049",
+    "type": "CHARACTER",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "반항적인",
+    "subject": "남성",
+    "prop": "데이터-조각",
+    "sourceFile": "character/character__시스템_반항적인_남성_데이터-조각__20.png",
+    "objectKey": "characters/char_0049.png"
+  },
+  {
+    "imageKey": "char_0050",
+    "type": "CHARACTER",
+    "genres": [
+      "시스템"
+    ],
+    "mood": "분석적인",
+    "subject": "여성",
+    "prop": "수정-태블릿",
+    "sourceFile": "character/character__시스템_분석적인_여성_수정-태블릿__02.png",
+    "objectKey": "characters/char_0050.png"
+  },
+  {
+    "imageKey": "char_0051",
+    "type": "CHARACTER",
+    "genres": [
+      "아포칼립스"
+    ],
+    "mood": "강인한",
+    "subject": "여성",
+    "prop": "수통",
+    "sourceFile": "character/character__아포칼립스_강인한_여성_수통__08.png",
+    "objectKey": "characters/char_0051.png"
+  },
+  {
+    "imageKey": "char_0052",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "고귀한",
+    "subject": "여성",
+    "prop": "방패-파편",
+    "sourceFile": "character/character__판타지_고귀한_여성_방패-파편__10.png",
+    "objectKey": "characters/char_0052.png"
+  },
+  {
+    "imageKey": "char_0053",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "고귀한",
+    "subject": "여성",
+    "prop": "월계-홀",
+    "sourceFile": "character/character__판타지_고귀한_여성_월계-홀__13.png",
+    "objectKey": "characters/char_0053.png"
+  },
+  {
+    "imageKey": "char_0054",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "굳건한",
+    "subject": "논바이너리",
+    "prop": "대장간-망치",
+    "sourceFile": "character/character__판타지_굳건한_논바이너리_대장간-망치__18.png",
+    "objectKey": "characters/char_0054.png"
+  },
+  {
+    "imageKey": "char_0055",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "그늘진",
+    "subject": "여성",
+    "prop": "까마귀-가면",
+    "sourceFile": "character/character__판타지_그늘진_여성_까마귀-가면__03.png",
+    "objectKey": "characters/char_0055.png"
+  },
+  {
+    "imageKey": "char_0056",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "기품있는",
+    "subject": "남성",
+    "prop": "흑요석-왕관",
+    "sourceFile": "character/character__판타지_기품있는_남성_흑요석-왕관__02.png",
+    "objectKey": "characters/char_0056.png"
+  },
+  {
+    "imageKey": "char_0057",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "눈부신",
+    "subject": "남성",
+    "prop": "해바라기-로켓",
+    "sourceFile": "character/character__판타지_눈부신_남성_해바라기-로켓__20.png",
+    "objectKey": "characters/char_0057.png"
+  },
+  {
+    "imageKey": "char_0058",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "반항적인",
+    "subject": "여성",
+    "prop": "태양-성배",
+    "sourceFile": "character/character__판타지_반항적인_여성_태양-성배__07.png",
+    "objectKey": "characters/char_0058.png"
+  },
+  {
+    "imageKey": "char_0059",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "부드러운",
+    "subject": "남성",
+    "prop": "유리등",
+    "sourceFile": "character/character__판타지_부드러운_남성_유리등__14.png",
+    "objectKey": "characters/char_0059.png"
+  },
+  {
+    "imageKey": "char_0060",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "불길한",
+    "subject": "남성",
+    "prop": "해골-반지",
+    "sourceFile": "character/character__판타지_불길한_남성_해골-반지__05.png",
+    "objectKey": "characters/char_0060.png"
+  },
+  {
+    "imageKey": "char_0061",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "빛나는",
+    "subject": "여성",
+    "prop": "별-나침반",
+    "sourceFile": "character/character__판타지_빛나는_여성_별-나침반__05.png",
+    "objectKey": "characters/char_0061.png"
+  },
+  {
+    "imageKey": "char_0062",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "사나운",
+    "subject": "여성",
+    "prop": "용알",
+    "sourceFile": "character/character__판타지_사나운_여성_용알__11.png",
+    "objectKey": "characters/char_0062.png"
+  },
+  {
+    "imageKey": "char_0063",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "수수께끼같은",
+    "subject": "논바이너리",
+    "prop": "소환-구슬",
+    "sourceFile": "character/character__판타지_수수께끼같은_논바이너리_소환-구슬__11.png",
+    "objectKey": "characters/char_0063.png"
+  },
+  {
+    "imageKey": "char_0064",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "아련한",
+    "subject": "남성",
+    "prop": "진주조개",
+    "sourceFile": "character/character__판타지_아련한_남성_진주조개__08.png",
+    "objectKey": "characters/char_0064.png"
+  },
+  {
+    "imageKey": "char_0065",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "야성적인",
+    "subject": "남성",
+    "prop": "뼈피리",
+    "sourceFile": "character/character__판타지_야성적인_남성_뼈피리__09.png",
+    "objectKey": "characters/char_0065.png"
+  },
+  {
+    "imageKey": "char_0066",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "영리한",
+    "subject": "남성",
+    "prop": "수은-플라스크",
+    "sourceFile": "character/character__판타지_영리한_남성_수은-플라스크__13.png",
+    "objectKey": "characters/char_0066.png"
+  },
+  {
+    "imageKey": "char_0067",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "우아한",
+    "subject": "남성",
+    "prop": "인장반지",
+    "sourceFile": "character/character__판타지_우아한_남성_인장반지__16.png",
+    "objectKey": "characters/char_0067.png"
+  },
+  {
+    "imageKey": "char_0068",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "우아한",
+    "subject": "여성",
+    "prop": "오팔-거울",
+    "sourceFile": "character/character__판타지_우아한_여성_오팔-거울__15.png",
+    "objectKey": "characters/char_0068.png"
+  },
+  {
+    "imageKey": "char_0069",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "우울한",
+    "subject": "여성",
+    "prop": "모래시계",
+    "sourceFile": "character/character__판타지_우울한_여성_모래시계__19.png",
+    "objectKey": "characters/char_0069.png"
+  },
+  {
+    "imageKey": "char_0070",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "음산한",
+    "subject": "남성",
+    "prop": "마도서",
+    "sourceFile": "character/character__판타지_음산한_남성_마도서__15.png",
+    "objectKey": "characters/char_0070.png"
+  },
+  {
+    "imageKey": "char_0071",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "차가운",
+    "subject": "남성",
+    "prop": "수정검",
+    "sourceFile": "character/character__판타지_차가운_남성_수정검__06.png",
+    "objectKey": "characters/char_0071.png"
+  },
+  {
+    "imageKey": "char_0072",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "창의적인",
+    "subject": "남성",
+    "prop": "구리-회중시계",
+    "sourceFile": "character/character__판타지_창의적인_남성_구리-회중시계__12.png",
+    "objectKey": "characters/char_0072.png"
+  },
+  {
+    "imageKey": "char_0073",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "창의적인",
+    "subject": "여성",
+    "prop": "태엽-큐브",
+    "sourceFile": "character/character__판타지_창의적인_여성_태엽-큐브__06.png",
+    "objectKey": "characters/char_0073.png"
+  },
+  {
+    "imageKey": "char_0074",
+    "type": "CHARACTER",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "침울한",
+    "subject": "남성",
+    "prop": "검은난초",
+    "sourceFile": "character/character__판타지_침울한_남성_검은난초__18.png",
+    "objectKey": "characters/char_0074.png"
+  },
+  {
+    "imageKey": "char_0075",
+    "type": "CHARACTER",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "성실한",
+    "subject": "남성",
+    "prop": "계급장",
+    "sourceFile": "character/character__학원_성실한_남성_계급장__17.png",
+    "objectKey": "characters/char_0075.png"
+  },
+  {
+    "imageKey": "char_0076",
+    "type": "CHARACTER",
+    "genres": [
+      "학원물"
+    ],
+    "mood": "영리한",
+    "subject": "여성",
+    "prop": "호박색-약병",
+    "sourceFile": "character/character__학원_영리한_여성_호박색-약병__09.png",
+    "objectKey": "characters/char_0076.png"
+  },
+  {
+    "imageKey": "char_0077",
+    "type": "CHARACTER",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "음울한",
+    "subject": "남성",
+    "prop": "흑요석-나침반",
+    "sourceFile": "character/character__헌터_음울한_남성_흑요석-나침반__01.png",
+    "objectKey": "characters/char_0077.png"
+  },
+  {
+    "imageKey": "char_0078",
+    "type": "CHARACTER",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "정밀한",
+    "subject": "여성",
+    "prop": "렌즈-조준경",
+    "sourceFile": "character/character__헌터_정밀한_여성_렌즈-조준경__14.png",
+    "objectKey": "characters/char_0078.png"
+  },
+  {
+    "imageKey": "char_0079",
+    "type": "CHARACTER",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "치명적인",
+    "subject": "여성",
+    "prop": "유리침",
+    "sourceFile": "character/character__헌터_치명적인_여성_유리침__12.png",
+    "objectKey": "characters/char_0079.png"
+  },
+  {
+    "imageKey": "char_0080",
+    "type": "CHARACTER",
+    "genres": [
+      "헌터물"
+    ],
+    "mood": "희망찬",
+    "subject": "여성",
+    "prop": "유리-약병",
+    "sourceFile": "character/character__헌터_희망찬_여성_유리-약병__04.png",
+    "objectKey": "characters/char_0080.png"
+  }
+]

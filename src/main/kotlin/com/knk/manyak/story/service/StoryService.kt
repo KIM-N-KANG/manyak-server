@@ -2,6 +2,8 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
@@ -35,6 +37,7 @@ class StoryService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyChatRepository: StoryChatRepository,
+    private val imageUrlResolver: ImageUrlResolver,
 ) {
 
     @Transactional(readOnly = true)
@@ -96,8 +99,7 @@ class StoryService(
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
-            // 썸네일 소스 배선은 별도 범위(KNK-515은 필드명만 확정). 현재는 null.
-            thumbnailUrl = null,
+            thumbnailUrl = imageUrlResolver.urlFor(story.thumbnailImageKey, ImagePresetType.THUMBNAIL),
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
@@ -202,6 +204,7 @@ class StoryService(
     private fun Story.toSummaryResponse(turnCount: Long): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
+            thumbnailUrl = imageUrlResolver.urlFor(thumbnailImageKey, ImagePresetType.THUMBNAIL),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),

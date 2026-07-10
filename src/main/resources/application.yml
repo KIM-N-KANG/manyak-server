@@ -47,6 +47,10 @@ manyak:
     # 프로필 프리셋 이미지(static/profile-presets/{명사}.png) 서빙 base URL(스펙 §4-5 B7).
     # profile_image_url = base-url + "/profile-presets/{명사}.png". 후속 S3/CDN 전환은 이 값 치환만으로 된다.
     profile-preset-base-url: ${MANYAK_ASSET_BASE_URL:https://api.manyak.app}
+    # 스토리 썸네일·채팅 이미지 CDN base URL(스펙 §4-3-9). URL = base-url + "/{prefix}/{imageKey}.png".
+    # 프로필 프리셋(서버 static)과 달리 S3 + CloudFront라 저장소·정본이 다르다.
+    # 미주입 시 빈 값 → 썸네일 URL은 null(프론트엔드가 placeholder 표시). 인프라 구성 전에도 서버는 뜬다.
+    image-base-url: ${MANYAK_IMAGE_BASE_URL:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   invite:

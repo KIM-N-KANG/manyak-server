@@ -88,6 +88,7 @@ class SimpleStoryCreationService(
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
+    private val storyThumbnailLinker: StoryThumbnailLinker,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -470,6 +471,8 @@ class SimpleStoryCreationService(
                     oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                     description = aiResponse.stories.description,
                     genre = genre,
+                    // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
+                    thumbnailImageKey = storyThumbnailLinker.linkFor(genreTags.map { it.name }),
                     // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
                     visibility = StoryVisibility.PRIVATE,
                 ),

@@ -1,0 +1,149 @@
+### 스토리 썸네일 자동 연결(Story Thumbnail Auto Link) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-409] 스토리 등록 시 팀 이미지 카탈로그에서 표지를 자동 연결한다(§4-3-9).
+###   - 규칙: 첫 번째 장르와 일치하는 썸네일 중 랜덤 1개 → 없으면 장르 무관 랜덤 1개 → 하나도 없으면 null.
+###   - 등록 시 1회 확정. 이후 수정으로 장르가 바뀌어도 재연결하지 않는다(story-edit.http로 확인 가능).
+###   - 응답 필드는 상세·목록 모두 thumbnailUrl(string·null). DB에는 imageKey만 저장하고 URL은 서버가 조합한다.
+###
+### 사전 준비:
+###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V46 적용 → image_presets 210행 시드
+###   - 서버 실행: ./gradlew bootRun (기본 포트 8080)
+###   - (선택) MANYAK_IMAGE_BASE_URL 주입. 미설정이면 thumbnailUrl 은 정상적으로 null 이다
+###     (인프라 미구성 상태에서도 조회가 실패하지 않아야 하므로 의도된 동작).
+###
+### 위에서부터 순서대로 실행하세요. 1번 응답의 id 를 뒤 요청이 사용합니다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (해피 패스) 장르 '무협'으로 등록 → 201. 표지가 확정되고 id 를 전역에 저장한다.
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "visibility": "PUBLIC",
+  "title": "달빛 아래의 계약",
+  "oneLineIntro": "기억을 잃은 검객이 사문의 비밀을 좇는 이야기",
+  "genres": ["무협", "미스터리"],
+  "storySettings": {
+    "worldSetting": "무너진 구파일방",
+    "characterSetting": "기억을 잃은 검객",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "내공은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "사문이 불타던 밤",
+      "prologue": "잿빛 비가 사흘째 산문을 적신다",
+      "startSituation": "장례가 끝난 늦은 밤",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 서찰을 읽는다", "사형에게 말을 건다"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyId", response.body.id);
+%}
+
+### 2. 상세 조회 → thumbnailUrl 확인. 카탈로그가 시드돼 있으면 무협 썸네일이 붙는다.
+GET {{baseUrl}}/api/v1/stories/{{storyId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+
+    const url = response.body.thumbnailUrl;
+    client.global.set("detailThumbnailUrl", String(url));
+
+    client.test("thumbnailUrl 은 null 이거나 thumbnails 경로의 png 다", () => {
+        const ok = url === null || (typeof url === "string" && /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url));
+        client.assert(ok, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+    });
+
+    // MANYAK_IMAGE_BASE_URL 미설정이면 null 이 정상이다. 이 경우 아래 안내만 남긴다.
+    if (url === null) {
+        client.log("thumbnailUrl 이 null 입니다. MANYAK_IMAGE_BASE_URL 미설정이거나 카탈로그가 비어 있습니다.");
+    }
+%}
+
+### 3. 목록 항목(batch) 조회 → 상세와 같은 thumbnailUrl 이 실린다(같은 imageKey 에서 조합).
+POST {{baseUrl}}/api/v1/stories/batch
+Content-Type: application/json
+
+{ "storyIds": ["{{storyId}}"] }
+
+> {%
+    client.test("batch 조회는 200이고 1건이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.length === 1, `1건이 아닙니다. actual=${response.body.length}`);
+    });
+    client.test("목록의 thumbnailUrl 이 상세와 같다", () => {
+        const listUrl = String(response.body[0].thumbnailUrl);
+        const detailUrl = client.global.get("detailThumbnailUrl");
+        client.assert(listUrl === detailUrl, `상세(${detailUrl})와 목록(${listUrl})이 다릅니다.`);
+    });
+%}
+
+### 4. (폴백) 카탈로그에 없는 장르로 등록 → 장르 무관 썸네일이 붙는다(카탈로그가 비었으면 null).
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "visibility": "PRIVATE",
+  "title": "존재하지 않는 장르",
+  "oneLineIntro": "장르 매칭이 0건이어야 한다",
+  "genres": ["이런장르는없다"],
+  "storySettings": {
+    "worldSetting": "세계",
+    "characterSetting": "인물",
+    "userRoleSetting": "역할",
+    "ruleSetting": "규칙"
+  },
+  "startSettings": [
+    {
+      "name": "시작",
+      "prologue": "프롤로그",
+      "startSituation": "상황",
+      "suggestedInputs": ["하나", "둘", "셋"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("fallbackStoryId", response.body.id);
+%}
+
+### 5. 폴백 스토리 상세 → 장르가 맞는 이미지가 없어도 표지는 붙는다(장르 무관 랜덤 1장).
+GET {{baseUrl}}/api/v1/stories/{{fallbackStoryId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("thumbnailUrl 형식은 동일하다(또는 카탈로그가 비어 null)", () => {
+        const url = response.body.thumbnailUrl;
+        const ok = url === null || /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url);
+        client.assert(ok, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+    });
+%}
+
+### 6. (자유 조회) 실제 DB의 스토리 id 를 직접 넣어 눈으로 확인한다. 위 어서션과 무관하다.
+GET {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
+Accept: application/json
