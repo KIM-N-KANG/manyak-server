@@ -27,6 +27,10 @@ class ImageUrlResolver(
      *
      * `_sm`은 저장하지 않고 URL 조합 시 파생한다(`imageKey` 불변). 변형은 썸네일에만 존재하며
      * 배경·캐릭터는 단일 원본뿐이라 이 함수를 쓰지 않는다.
+     *
+     * `_sm` 객체 자체의 생성·업로드는 인프라 소유다(`manyak-terraform`, KNK-548). 서버 레포의
+     * `scripts/image-presets.rename.tsv`는 원본 객체만 담으므로, 그 파일만으로 버킷을 재구성하면
+     * 축소본이 빠져 목록·채팅 카드가 404가 된다.
      */
     fun thumbnailSmUrlFor(imageKey: String?): String? =
         urlFor(imageKey?.let { "${it}$SM_SUFFIX" }, ImagePresetType.THUMBNAIL)

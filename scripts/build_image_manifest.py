@@ -6,6 +6,11 @@
 
 흐름: 파일명 파싱 → 장르 매핑 → imageKey 부여 → 매니페스트 JSON + 시드 SQL + S3 리네임 매핑.
 
+리네임 매핑은 **원본(canonical) 객체 전용**이다. 썸네일의 축소 변형 `thumbnails/{imageKey}_sm.png`는
+여기서 만들지 않는다 — 변형 생성·업로드는 인프라 소유이며 `manyak-terraform`이 담당한다(KNK-548).
+서버는 `_sm` URL을 조합만 하므로(ImageUrlResolver), 이 파일만 보고 업로드하면 목록·채팅 카드용
+축소본이 빠진다. 버킷을 재구성할 때는 반드시 `manyak-terraform`의 업로드 절차를 함께 밟아야 한다.
+
 런타임 매칭의 정본은 DB 메타이며 파일명이 아니다(스펙 §4-3-9). 파일명은 이 도구의 입력일 뿐이고,
 사람이 큐레이션한 장르 매핑을 거쳐야만 마스터 태그명이 된다 — 실물 파일명의 장르 표기(`재벌`·`헌터`)가
 GENRE 마스터(`재벌물`·`헌터물`)와 달라 기계 파싱만으로는 매칭이 조용히 0건이 되기 때문이다.
@@ -241,7 +246,8 @@ def main() -> None:
     print(f"자산 {len(entries)}장 등재 — {by_type}")
     print(f"  매니페스트: {MANIFEST_PATH.relative_to(REPO_ROOT)}")
     print(f"  시드 SQL:   {SEED_SQL_PATH.relative_to(REPO_ROOT)}")
-    print(f"  리네임 맵:  {RENAME_MAP_PATH.relative_to(REPO_ROOT)} (S3 업로드용)")
+    print(f"  리네임 맵:  {RENAME_MAP_PATH.relative_to(REPO_ROOT)} (S3 업로드용 — 원본 전용)")
+    print("  주의: 썸네일 축소 변형(_sm)은 이 맵에 없다. 생성·업로드는 manyak-terraform 소유(KNK-548).")
 
 
 if __name__ == "__main__":
