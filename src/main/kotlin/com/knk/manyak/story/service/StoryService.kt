@@ -204,7 +204,8 @@ class StoryService(
     private fun Story.toSummaryResponse(turnCount: Long): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
-            thumbnailUrl = imageUrlResolver.urlFor(thumbnailImageKey, ImagePresetType.THUMBNAIL),
+            // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형).
+            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageKey),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),

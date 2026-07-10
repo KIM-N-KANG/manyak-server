@@ -126,6 +126,12 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
                 continue
 
             image_key = f"{key_prefix}_{index:04d}"
+            # 썸네일 축소 변형의 파생 객체 키가 {imageKey}_sm.png라, 원본 키가 _sm으로 끝나면 서로 충돌한다
+            # (스펙 §4-3-9 매니페스트 검증, KNK-548). 현재 키 형식상 발생할 수 없지만 규칙을 여기서 잠근다.
+            if image_key.endswith("_sm"):
+                errors.append(f"{dir_name}/{stem}.png — imageKey가 _sm으로 끝납니다: {image_key}")
+                continue
+
             entries.append(
                 {
                     "imageKey": image_key,

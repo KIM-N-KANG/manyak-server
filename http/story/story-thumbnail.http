@@ -4,7 +4,8 @@
 ### [KNK-409] 스토리 등록 시 팀 이미지 카탈로그에서 표지를 자동 연결한다(§4-3-9).
 ###   - 규칙: 첫 번째 장르와 일치하는 썸네일 중 랜덤 1개 → 없으면 장르 무관 랜덤 1개 → 하나도 없으면 null.
 ###   - 등록 시 1회 확정. 이후 수정으로 장르가 바뀌어도 재연결하지 않는다(story-edit.http로 확인 가능).
-###   - 응답 필드는 상세·목록 모두 thumbnailUrl(string·null). DB에는 imageKey만 저장하고 URL은 서버가 조합한다.
+###   - [KNK-548] 반응형 변형: 상세는 원본 thumbnailUrl, 목록·채팅 카드는 축소 thumbnailUrlSm(파생 키 {imageKey}_sm.png).
+###     imageKey 는 카탈로그 그대로이고 _sm 은 URL 조합 시에만 파생된다(DB 미저장). 변형은 썸네일에만 있다.
 ###
 ### 사전 준비:
 ###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V46 적용 → image_presets 210행 시드
@@ -77,7 +78,7 @@ Accept: application/json
     }
 %}
 
-### 3. 목록 항목(batch) 조회 → 상세와 같은 thumbnailUrl 이 실린다(같은 imageKey 에서 조합).
+### 3. 목록 항목(batch) 조회 → 축소 변형 thumbnailUrlSm 이 실린다(상세의 원본에 _sm 을 붙인 파생 키).
 POST {{baseUrl}}/api/v1/stories/batch
 Content-Type: application/json
 
@@ -88,10 +89,53 @@ Content-Type: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
         client.assert(response.body.length === 1, `1건이 아닙니다. actual=${response.body.length}`);
     });
-    client.test("목록의 thumbnailUrl 이 상세와 같다", () => {
-        const listUrl = String(response.body[0].thumbnailUrl);
+
+    const smUrl = response.body[0].thumbnailUrlSm;
+    client.global.set("listThumbnailUrlSm", String(smUrl));
+
+    client.test("목록에는 thumbnailUrl 이 아니라 thumbnailUrlSm 이 실린다", () => {
+        client.assert(response.body[0].thumbnailUrl === undefined,
+            "목록에 thumbnailUrl 이 남아 있습니다(계약은 thumbnailUrlSm).");
+    });
+    client.test("thumbnailUrlSm 은 상세의 원본 URL 에 _sm 을 붙인 값이다", () => {
         const detailUrl = client.global.get("detailThumbnailUrl");
-        client.assert(listUrl === detailUrl, `상세(${detailUrl})와 목록(${listUrl})이 다릅니다.`);
+        if (detailUrl === "null") {
+            client.assert(smUrl === null, `상세가 null 인데 목록은 ${JSON.stringify(smUrl)} 입니다.`);
+            return;
+        }
+        const expected = detailUrl.replace(/\.png$/, "_sm.png");
+        client.assert(smUrl === expected, `기대=${expected} actual=${JSON.stringify(smUrl)}`);
+    });
+%}
+
+### 3-1. 채팅 카드 → 목록과 같은 축소 변형을 공유한다(채팅 카드 46×62).
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+
+{ "storyId": "{{storyId}}" }
+
+> {%
+    client.test("채팅 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("chatId", response.body.id);
+%}
+
+### 3-2. 채팅 카드(batch) 조회 → thumbnailUrlSm 이 스토리 목록과 동일하다.
+POST {{baseUrl}}/api/v1/chats/batch
+Content-Type: application/json
+
+{ "chatIds": ["{{chatId}}"] }
+
+> {%
+    client.test("채팅 batch 조회는 200이고 1건이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.length === 1, `1건이 아닙니다. actual=${response.body.length}`);
+    });
+    client.test("채팅 카드의 thumbnailUrlSm 이 스토리 목록과 같다", () => {
+        const cardUrl = String(response.body[0].thumbnailUrlSm);
+        const listUrl = client.global.get("listThumbnailUrlSm");
+        client.assert(cardUrl === listUrl, `목록(${listUrl})과 채팅 카드(${cardUrl})가 다릅니다.`);
     });
 %}
 

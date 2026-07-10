@@ -74,8 +74,9 @@ class StoryThumbnailWiringIntegrationTests {
             .jsonPath("$.thumbnailUrl").isEqualTo("https://cdn.test/thumbnails/thumb_0001.png")
     }
 
+    /** 목록 카드는 축소 변형(`_sm`)을 쓴다 — 상세만 원본이다(스펙 §4-3-9 반응형 변형, KNK-548). */
     @Test
-    fun `목록 항목 응답에도 썸네일 URL이 실린다`() {
+    fun `목록 항목 응답에는 축소 변형 썸네일 URL이 실린다`() {
         val storyId = createStory(visibility = "PUBLIC")
 
         restTestClient.post()
@@ -85,7 +86,35 @@ class StoryThumbnailWiringIntegrationTests {
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$[0].thumbnailUrl").isEqualTo("https://cdn.test/thumbnails/thumb_0001.png")
+            .jsonPath("$[0].thumbnailUrlSm").isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
+            .jsonPath("$[0].thumbnailUrl").doesNotExist()
+    }
+
+    /** 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9). */
+    @Test
+    fun `채팅 카드 응답에도 축소 변형 썸네일 URL이 실린다`() {
+        val storyId = createStory(visibility = "PUBLIC")
+
+        val chatId = restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId": "$storyId"}""")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .returnResult()
+            .let { String(it.responseBody!!) }
+            .substringAfter("\"id\":\"")
+            .substringBefore("\"")
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds": ["$chatId"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].thumbnailUrlSm").isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
     }
 
     /** 카탈로그에 후보가 없으면 연결하지 않는다 — 무관한 이미지를 임의로 붙이지 않는다. */

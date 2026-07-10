@@ -21,4 +21,17 @@ class ImageUrlResolver(
         }
         return "${baseUrl.trimEnd('/')}/${type.prefix}/$imageKey.png"
     }
+
+    /**
+     * 썸네일의 축소 변형(`_sm`) URL. 목록·채팅 카드가 쓴다(스펙 §4-3-9 반응형 변형, KNK-548).
+     *
+     * `_sm`은 저장하지 않고 URL 조합 시 파생한다(`imageKey` 불변). 변형은 썸네일에만 존재하며
+     * 배경·캐릭터는 단일 원본뿐이라 이 함수를 쓰지 않는다.
+     */
+    fun thumbnailSmUrlFor(imageKey: String?): String? =
+        urlFor(imageKey?.let { "${it}$SM_SUFFIX" }, ImagePresetType.THUMBNAIL)
+
+    private companion object {
+        const val SM_SUFFIX = "_sm"
+    }
 }
