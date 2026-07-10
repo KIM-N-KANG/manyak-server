@@ -48,6 +48,31 @@ data class ChatTurnAiRequest(
     @JsonProperty("occurred_main_event_names")
     val occurredMainEventNames: List<String> = emptyList(),
     val endings: List<ChatTurnEnding> = emptyList(),
+
+    // 채팅 이미지 재료(스펙 §4-3-9, KNK-544). 주요 사건·엔딩과 같이 선택 필드라 AI가 아직 읽지 않아도 하위호환이다.
+    // background_image_candidates: 등록 시 확정한 배경 후보. AI가 어울리는 장면에서만 1장 골라 마커로 삽입한다.
+    // character_images: 컴파일이 확정한 인물↔이미지 매핑. AI는 고르지 않고 그 키를 이름표로만 쓴다.
+    // 비활성 이미지는 백엔드가 전달에서 제외한다.
+    @JsonProperty("background_image_candidates")
+    val backgroundImageCandidates: List<ChatTurnBackgroundImage> = emptyList(),
+    @JsonProperty("character_images")
+    val characterImages: List<ChatTurnCharacterImage> = emptyList(),
+)
+
+/** 배경 후보 — AI가 고를 대상. 의미 태그는 카탈로그의 축을 그대로 옮긴다. */
+data class ChatTurnBackgroundImage(
+    @JsonProperty("image_key")
+    val imageKey: String,
+    val mood: String?,
+    val place: String?,
+    val prop: String?,
+)
+
+/** 인물↔이미지 매핑 — AI는 고르지 않고 이름표로만 쓴다(같은 인물 = 같은 이미지 보장). */
+data class ChatTurnCharacterImage(
+    val name: String,
+    @JsonProperty("image_key")
+    val imageKey: String,
 )
 
 data class ChatTurnMainEvent(

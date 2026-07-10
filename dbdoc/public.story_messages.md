@@ -11,6 +11,7 @@
 | message_order | integer |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
+| content_confirmed_at | timestamp with time zone | now() | false |  |  |  |
 
 ## Constraints
 
@@ -48,6 +49,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  timestamp_with_time_zone content_confirmed_at
 }
 "public.story_choices" {
   bigint id

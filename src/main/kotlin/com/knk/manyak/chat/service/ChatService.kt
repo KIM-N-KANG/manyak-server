@@ -87,6 +87,7 @@ class ChatService(
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
     private val chatImageBundler: ChatImageBundler,
+    private val chatImageMaterialProvider: ChatImageMaterialProvider,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
@@ -825,6 +826,10 @@ class ChatService(
             targetMainEvent = targetMainEvent,
             occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
             endings = loadEligibleEndings(chat),
+            // 배경 후보는 등록 시 확정된 목록을 매 턴 같은 순서로 싣는다(프롬프트 prefix 안정 → 캐싱 유리).
+            // 인물 매핑은 컴파일 산출물을 되돌려 실어 같은 인물이 항상 같은 이미지를 갖게 한다(§4-3-9).
+            backgroundImageCandidates = chatImageMaterialProvider.backgroundCandidates(chat.storyId),
+            characterImages = chatImageMaterialProvider.characterImages(chat.storyId),
         )
     }
 

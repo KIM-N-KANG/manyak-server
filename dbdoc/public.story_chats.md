@@ -83,6 +83,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  timestamp_with_time_zone content_confirmed_at
 }
 "public.story_choices" {
   bigint id

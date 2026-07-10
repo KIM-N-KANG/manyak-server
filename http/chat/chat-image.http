@@ -1,0 +1,138 @@
+### 채팅 이미지(마커·images[]) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-544] 채팅 이미지 마커·응답 배선(스펙 §4-3-9).
+###   - AI가 본문에 `[[image:<imageKey>]]` 마커를 삽입하고, 백엔드가 검증된 목록 images[]를 동봉합니다.
+###   - 백엔드 검증 3겹: 카탈로그 키 필터 · 비활성 제외 · 타입별 턴당 1장 상한(등장 순서상 첫 장).
+###   - 본문은 손대지 않습니다. images[]에 없는 마커는 프론트엔드가 텍스트째 숨깁니다.
+###   - token 스트림에는 마커가 실리지 않습니다(서버가 이중 방어로 걸러냅니다).
+###   - 상세 조회의 images[]는 저장본이 아니라 재구성입니다: 등록 시각 <= 확정 시각 AND
+###     (deactivated_at IS NULL OR deactivated_at > 확정 시각). 그래서 completed 결과와 같습니다.
+###
+### 사전 준비:
+###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V47 적용 → image_presets 210행 시드
+###   - 서버 실행: ./gradlew bootRun (기본 포트 8080)
+###   - AI 서버는 아직 마커를 삽입하지 않습니다(AI 스펙 정렬 대기). 그래서 실 AI로는 images[]가 항상
+###     빈 배열입니다. 마커 경로를 눈으로 보려면 AI 스텁을 켜고(MANYAK_AI_STUB 계열 토글) 스텁 본문에
+###     마커를 넣거나, 아래 6번처럼 DB를 직접 확인하세요.
+###
+### 위에서부터 순서대로 실행하세요. 1번 응답의 id를 뒤 요청이 사용합니다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. 배경 후보가 붙는 장르로 스토리 등록 → 201. 등록 시 story_images가 확정된다.
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "visibility": "PUBLIC",
+  "title": "달빛 아래의 계약",
+  "oneLineIntro": "기억을 잃은 검객이 사문의 비밀을 좇는 이야기",
+  "genres": ["무협"],
+  "storySettings": {
+    "worldSetting": "무너진 구파일방",
+    "characterSetting": "기억을 잃은 검객",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "내공은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "사문이 불타던 밤",
+      "prologue": "잿빛 비가 사흘째 산문을 적신다",
+      "startSituation": "장례가 끝난 늦은 밤",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 서찰을 읽는다", "사형에게 말을 건다"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyId", response.body.id);
+%}
+
+### 2. 채팅 생성 → 201.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+
+{ "storyId": "{{storyId}}" }
+
+> {%
+    client.test("채팅 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("chatId", response.body.id);
+%}
+
+### 3. 턴 진행(SSE). token 스트림에 마커가 새지 않아야 하고, completed에 images[]가 실린다.
+### IntelliJ는 SSE 본문을 그대로 보여줍니다. 눈으로 확인할 것:
+###   - `event: token` 데이터에 `[[image:` 문자열이 단 한 번도 나오지 않는다.
+###   - `event: completed` 데이터에 images 배열이 있다(AI가 마커를 안 넣으면 빈 배열).
+###   - completed의 aiOutput에는 마커가 있어도 그대로 남아 있다(본문 무변경).
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{ "userInput": "사형의 방으로 향한다." }
+
+### 4. 채팅 상세 조회 → 턴 항목의 images[]가 재구성된다.
+### completed에서 본 것과 같은 목록이어야 한다(재구성 불변).
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("턴 항목에 images 배열이 있다", () => {
+        const turns = response.body.turns;
+        client.assert(Array.isArray(turns) && turns.length >= 1, "턴이 없습니다.");
+        client.assert(Array.isArray(turns[0].images), `images가 배열이 아닙니다. actual=${JSON.stringify(turns[0].images)}`);
+    });
+    client.test("images 항목은 imageKey·type·url을 갖는다", () => {
+        const images = response.body.turns[0].images;
+        images.forEach((img) => {
+            client.assert(typeof img.imageKey === "string", "imageKey가 없습니다.");
+            client.assert(img.type === "BACKGROUND" || img.type === "CHARACTER",
+                `type은 BACKGROUND·CHARACTER만 허용됩니다. actual=${img.type}`);
+            client.assert(/\/(backgrounds|characters)\/[a-z0-9_]{1,64}\.png$/.test(img.url),
+                `url 형식이 어긋납니다. actual=${img.url}`);
+        });
+    });
+    client.test("본문의 마커는 지워지지 않는다", () => {
+        const turn = response.body.turns[0];
+        const markerCount = (turn.aiOutput.match(/\[\[image:/g) || []).length;
+        client.assert(markerCount >= turn.images.length,
+            `본문 마커(${markerCount})가 images(${turn.images.length})보다 적습니다 — 본문이 변경됐습니다.`);
+    });
+%}
+
+### 5. 재생성 → 본문과 함께 확정 시각이 갱신되고 images[]도 새 본문 기준으로 다시 구성된다.
+### 4번 응답의 turns[0].id를 turnId에 넣어 실행하세요(마지막 턴만 재생성 가능).
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{ "turnId": 1 }
+
+### 6. (자유 조회) 배경 후보가 실제로 붙었는지 DB로 확인한다.
+### 아래는 요청이 아니라 참고용 SQL입니다. 서버 API로는 노출되지 않습니다.
+###
+###   select si.image_key, p.mood, p.subject, p.prop
+###     from story_images si join image_presets p on p.image_key = si.image_key
+###    where si.story_id = (select id from stories order by id desc limit 1)
+###    order by si.id;
+###
+###   -- 재구성 컷오프 확인: 이 턴의 확정 시각과 프리셋의 등록/비활성 시각
+###   select m.id, m.content_confirmed_at from story_messages m order by m.id desc limit 5;
+
+### 7. (자유 조회) 실제 DB의 채팅 id를 직접 넣어 눈으로 확인한다. 위 어서션과 무관하다.
+GET {{baseUrl}}/api/v1/chats/00000000-0000-0000-0000-000000000000
+Accept: application/json

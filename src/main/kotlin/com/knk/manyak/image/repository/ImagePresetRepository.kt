@@ -39,6 +39,23 @@ interface ImagePresetRepository : JpaRepository<ImagePreset, Long> {
      */
     fun findByImageKeyIn(imageKeys: Collection<String>): List<ImagePreset>
 
+    /**
+     * 스토리에 연결된 배경 후보 중 지금 활성인 것만 연결 순서로 반환한다(매 턴 AI 요청 재료).
+     *
+     * 비활성 이미지는 전달에서 제외한다 — 내린 다음 턴부터 즉시 노출이 멈춰야 하기 때문이다(§4-3-9 비활성 적용 범위).
+     */
+    @Query(
+        """
+        select p from StoryImage si, ImagePreset p
+        where si.imageKey = p.imageKey
+          and si.storyId = :storyId
+          and p.type = com.knk.manyak.image.entity.ImagePresetType.BACKGROUND
+          and p.deactivatedAt is null
+        order by si.id
+        """,
+    )
+    fun findActiveBackgroundCandidates(@Param("storyId") storyId: Long): List<ImagePreset>
+
     /** 장르를 가리지 않는 활성 이미지의 키를 등재 순서로 반환한다(장르 매칭 실패 시 폴백). */
     @Query(
         """
