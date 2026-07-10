@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.dto
 
+import com.knk.manyak.image.entity.ImagePresetType
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
@@ -228,6 +229,24 @@ data class ChatStreamCompletedEvent(
     // 엔딩은 이름으로 식별한다(KNK-462). 순차 PK는 노출하지 않으므로 도달 엔딩도 이름으로 싣는다.
     @field:Schema(description = "이번 턴에 도달한 엔딩 이름(엔딩 응답이 아니면 null)", nullable = true, example = "왕좌를 되찾다")
     val reachedEnding: String? = null,
+
+    // 본문 마커 중 검증을 통과한 것만 실린다(§4-3-9). 여기에 없는 마커는 프론트엔드가 텍스트째 숨긴다.
+    @field:ArraySchema(
+        arraySchema = Schema(description = "이번 턴 본문에 삽입된 검증된 이미지 목록(없으면 빈 배열)"),
+    )
+    val images: List<ChatImageResponse> = emptyList(),
+)
+
+@Schema(description = "채팅 본문에 삽입된 이미지")
+data class ChatImageResponse(
+    @field:Schema(description = "이미지 카탈로그 키(본문 마커 `[[image:...]]`와 동일)", example = "bg_0007")
+    val imageKey: String,
+
+    @field:Schema(description = "이미지 종류. 렌더 레이아웃을 이 값으로 가른다.", example = "BACKGROUND")
+    val type: ImagePresetType,
+
+    @field:Schema(description = "서빙 URL", example = "https://cdn.manyak.app/backgrounds/bg_0007.png")
+    val url: String,
 )
 
 @Schema(description = "SSE 오류 이벤트 예시")

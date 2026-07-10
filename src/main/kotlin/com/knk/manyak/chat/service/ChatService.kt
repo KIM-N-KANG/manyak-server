@@ -86,6 +86,7 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
+    private val chatImageBundler: ChatImageBundler,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
@@ -590,16 +591,32 @@ class ChatService(
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
                 ) {
-                    chatTurnAiClient.streamTurn(aiRequest) { token ->
+                    // AI가 실수로 스트림에 마커를 흘려도 사용자에게 원문이 보이면 안 된다(§4-3-9 이중 방어).
+                    // 마커는 청크 경계에 걸쳐 쪼개져 올 수 있어 상태를 들고 걸러낸다. completed의 확정본은 무변경이다.
+                    val tokenStream = MarkerStrippingTokenStream()
+                    val aiResult = chatTurnAiClient.streamTurn(aiRequest) { token ->
                         if (Thread.currentThread().isInterrupted) {
+                            return@streamTurn
+                        }
+                        val visible = tokenStream.accept(token)
+                        if (visible.isEmpty()) {
                             return@streamTurn
                         }
                         emitter.send(
                             SseEmitter.event()
                                 .name("token")
-                                .data(ChatStreamTokenEvent(token)),
+                                .data(ChatStreamTokenEvent(visible)),
                         )
                     }
+                    // 붙들려 있던 꼬리(미완성 마커 후보)는 본문이었으므로 흘려보낸다.
+                    tokenStream.flush().takeIf { it.isNotEmpty() }?.let { tail ->
+                        emitter.send(
+                            SseEmitter.event()
+                                .name("token")
+                                .data(ChatStreamTokenEvent(tail)),
+                        )
+                    }
+                    aiResult
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
@@ -629,6 +646,8 @@ class ChatService(
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
                                 reachedEnding = persistedTurn.reachedEnding?.name,
+                                // 본문은 마커가 박힌 그대로 싣고, 검증을 통과한 마커만 images[]로 동봉한다(§4-3-9).
+                                images = chatImageBundler.bundle(result.aiOutput),
                             ),
                         ),
                 )

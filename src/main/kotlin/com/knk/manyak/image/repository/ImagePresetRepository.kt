@@ -28,6 +28,9 @@ interface ImagePresetRepository : JpaRepository<ImagePreset, Long> {
         @Param("genreName") genreName: String,
     ): List<String>
 
+    /** 주어진 키 중 활성인 프리셋만 반환한다. 카탈로그에 없거나 비활성인 키는 결과에서 빠진다. */
+    fun findByImageKeyInAndDeactivatedAtIsNull(imageKeys: Collection<String>): List<ImagePreset>
+
     /** 장르를 가리지 않는 활성 이미지의 키를 등재 순서로 반환한다(장르 매칭 실패 시 폴백). */
     @Query(
         """
