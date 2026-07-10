@@ -38,6 +38,7 @@ class GeneralStoryCreationService(
     private val storyEndingRepository: StoryEndingRepository,
     private val suspensionGuard: SuspensionGuard,
     private val storyThumbnailLinker: StoryThumbnailLinker,
+    private val storyBackgroundImageLinker: StoryBackgroundImageLinker,
 ) {
 
     /**
@@ -63,6 +64,8 @@ class GeneralStoryCreationService(
                 visibility = request.visibility,
             ),
         )
+        // 채팅 배경 후보도 등록 시 1회 확정한다(§4-3-9). 일반 제작은 컴파일이 없어 인물 매핑은 생기지 않는다.
+        storyBackgroundImageLinker.linkFor(story.id, request.genres)
         storySettingRepository.save(
             StorySetting(
                 story = story,

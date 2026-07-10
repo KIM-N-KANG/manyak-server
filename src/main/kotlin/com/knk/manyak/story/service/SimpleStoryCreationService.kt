@@ -89,6 +89,7 @@ class SimpleStoryCreationService(
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
     private val storyThumbnailLinker: StoryThumbnailLinker,
+    private val storyBackgroundImageLinker: StoryBackgroundImageLinker,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -477,6 +478,8 @@ class SimpleStoryCreationService(
                     visibility = StoryVisibility.PRIVATE,
                 ),
             )
+            // 채팅 배경 후보도 등록 시 1회 확정한다(§4-3-9). 인물 매핑은 컴파일 응답 정렬 후 별도 배선.
+            storyBackgroundImageLinker.linkFor(story.id, genreTags.map { it.name })
             storySettingRepository.save(
                 StorySetting(
                     story = story,
