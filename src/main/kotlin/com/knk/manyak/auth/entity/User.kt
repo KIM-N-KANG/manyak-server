@@ -45,10 +45,10 @@ class User(
     @Column(name = "invite_code", unique = true, length = 16)
     var inviteCode: String? = null,
 
-    // 이 회원을 초대한 사용자(최초 가입 시 제출한 유효 초대 코드의 주인). 초대 없이 가입했으면 null.
-    // 계정 생성 트랜잭션에 함께 커밋해, 초대 보상 유실 시 매 로그인 멱등 재적립으로 자가 복구하는 근거로 쓴다.
+    // 이 회원을 초대한 사용자(초대 코드 입력 성공 시 저장 — 스펙 §4-3-7, KNK-567). 입력한 적 없으면 null.
+    // redeem 트랜잭션에서 양측 적립과 원자적으로 커밋되며, non-null이면 평생 1회 자격을 소진한 것으로 본다.
     @Column(name = "inviter_user_id")
-    val inviterUserId: Long? = null,
+    var inviterUserId: Long? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

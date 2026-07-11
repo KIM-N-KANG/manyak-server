@@ -76,14 +76,15 @@ class InviteIntegrationTests {
     }
 
     @Test
-    fun `최초 조회는 코드와 링크를 발급한다`() {
+    fun `최초 조회는 혼동 문자를 제외한 대문자+숫자 8자 코드를 발급한다`() {
         val user = saveUser()
 
+        // KNK-567: 사람이 타이핑하는 값이라 O·0, I·1·L 등 혼동 문자를 제외한 대문자+숫자만 쓴다. inviteUrl은 폐기됐다.
         getInvite(jwtTokenProvider.issueAccessToken(user.publicId))
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.inviteCode").value<String> { assertThat(it).isNotBlank() }
-            .jsonPath("$.inviteUrl").value<String> { assertThat(it).contains("/") }
+            .jsonPath("$.inviteCode").value<String> { assertThat(it).matches("[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}") }
+            .jsonPath("$.inviteUrl").doesNotExist()
 
         assertThat(userRepository.findById(user.id).orElseThrow().inviteCode).isNotBlank()
     }
@@ -110,7 +111,7 @@ class InviteIntegrationTests {
         val second = getInvite(token).expectStatus().isOk
             .expectBody(String::class.java).returnResult().responseBody!!
 
-        // 응답 본문(코드·링크)이 결정적이므로, 재발급되면 두 본문이 달라진다. 안정적이어야 공유 링크가 계속 유효하다.
+        // 응답 본문(코드)이 결정적이므로, 재발급되면 두 본문이 달라진다. 안정적이어야 공유한 코드가 계속 유효하다.
         assertThat(first).contains("inviteCode")
         assertThat(second).isEqualTo(first)
     }

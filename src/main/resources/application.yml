@@ -55,10 +55,6 @@ manyak:
     image-base-url: ${MANYAK_IMAGE_BASE_URL:https://cdn.manyak.app}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
-  invite:
-    # 초대 공유 링크의 웹 베이스 URL. inviteUrl = base-url + "/" + inviteCode 로 만든다(GET /users/me/invite).
-    # 운영은 env(MANYAK_INVITE_BASE_URL)로 웹 도메인을 주입한다. 미설정 시 기본값을 쓴다.
-    base-url: ${MANYAK_INVITE_BASE_URL:https://manyak.app/invite}
   credit:
     # 적립·소모 정책값(스펙 §4-3-7, KNK-477 확정 · KNK-449). 서비스 @Value 기본값과 같은 수치를 명시해 운영 조정 경로를 남긴다.
     signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:500}

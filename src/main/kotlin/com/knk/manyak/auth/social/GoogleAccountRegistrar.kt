@@ -54,12 +54,9 @@ class GoogleAccountRegistrar(
      * 독립 트랜잭션([Propagation.REQUIRES_NEW]): 동시 요청이 같은 계정을 둘 다 insert하면
      * 한쪽이 `social_accounts (provider, provider_user_id)` 유니크 위반으로 실패하는데,
      * 그 실패(rollback-only)를 이 트랜잭션 안에 가둬 바깥 로그인 트랜잭션이 재조회로 복구할 수 있게 한다.
-     *
-     * [inviterUserId]가 있으면 초대자 관계를 이 생성 트랜잭션에 함께 커밋한다(KNK-393). 계정만 커밋되고
-     * 초대 보상 적립 전에 실패해도, 관계가 계정과 원자적으로 남아 다음 로그인이 보상을 자가 복구할 수 있다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun createUserAndAccount(info: SocialUserInfo, now: Instant, inviterUserId: Long?): User {
+    fun createUserAndAccount(info: SocialUserInfo, now: Instant): User {
         // 실명·외부 사진 노출을 피하기 위해 Google `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
         val nickname = nicknameGenerator.generate()
         val user = userRepository.save(
@@ -69,7 +66,6 @@ class GoogleAccountRegistrar(
                 profileImageUrl = profileImagePresetService.imageUrlFor(nickname.noun),
                 profileThumbnailBase64 = profileImagePresetService.thumbnailBase64For(nickname.noun),
                 status = UserStatus.ACTIVE,
-                inviterUserId = inviterUserId,
             ),
         )
         socialAccountRepository.save(

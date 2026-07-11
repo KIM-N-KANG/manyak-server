@@ -9,7 +9,6 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.invite.service.InviteService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -24,10 +23,10 @@ import java.time.Instant
  *    - 있으면: 연결된 [User]를 재사용하고 `lastLoginAt`을 갱신한다.
  *    - 없으면: [User](nickname=name→email local-part→"사용자", 50자 제한, ACTIVE)와 [SocialAccount]를 생성한다.
  * 3) 해석된 [User]에 가입 보상 크레딧을 **멱등하게** 적립한다(KNK-392, 스펙 §4-3-7. 별도 API 없음).
- * 3-1) 초대 보상(KNK-393): 신규 생성 시 `inviteCode`의 초대자를 해석해 **생성 트랜잭션에 함께 영속**하고,
- *      영속된 초대자 관계가 있으면 초대자·피초대자 양쪽에 **매 로그인 멱등하게** 적립한다. 관계는 생성 경로에서만
- *      세팅되므로 "이미 가입된 계정의 코드 제출은 무시"가 보장되고, 매 로그인 재적립이 유실을 자가 복구한다.
- * 4) [AuthTokenService.issueTokens]로 access+refresh를 발급해 반환한다.
+ * 4) [AuthTokenService.issueTokens]로 access+refresh를 발급하고 신규 가입 여부(isNewUser)를 실어 반환한다.
+ *
+ * 초대 보상은 이 경로와 무관하다 — 코드 입력(POST /users/me/invite/redeem)에서 동기·원자적으로 적립한다
+ * (KNK-567 개편. 구 링크 방식의 로그인 inviteCode 제출·self-heal 재적립(KNK-393)은 폐기).
  *
  * 트랜잭션은 [GoogleAccountRegistrar]가 가진다(이 빈은 트랜잭션 밖에서 오케스트레이션만 한다).
  * 그래서 동시 첫 로그인으로 생성이 유니크 위반([DataIntegrityViolationException])이면,
@@ -45,7 +44,6 @@ class GoogleLoginService(
     private val registrar: GoogleAccountRegistrar,
     private val authTokenService: AuthTokenService,
     private val creditWalletService: CreditWalletService,
-    private val inviteService: InviteService,
     private val guestTrialLimitService: GuestTrialLimitService,
     private val userRepository: UserRepository,
     private val serverAnalytics: ServerAnalytics,
@@ -53,7 +51,7 @@ class GoogleLoginService(
     @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
 ) {
 
-    fun login(idToken: String, inviteCode: String? = null, deviceId: String? = null): TokenResponse {
+    fun login(idToken: String, deviceId: String? = null): TokenResponse {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
         // validation, Google 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
         val info = try {
@@ -63,7 +61,7 @@ class GoogleLoginService(
             throw e
         }
         return try {
-            val (user, isNewUser) = findOrCreateUser(info, inviteCode)
+            val (user, isNewUser) = findOrCreateUser(info)
             // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
             // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
             // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
@@ -75,11 +73,8 @@ class GoogleLoginService(
             }
             // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
             rewardSignup(user)
-            // 초대 보상: 영속된 초대자 관계가 있으면 매 로그인 멱등 재적립한다(가입 보상과 동일한 자가 복구).
-            // 관계는 신규 생성 경로에서만 세팅되므로 "이미 가입된 계정의 코드 제출은 무시"가 보장된다.
-            // 월 상한 집계는 피초대자 가입 월(user.createdAt) 기준으로 고정돼, 재시도가 상한 초과를 다음 달로 이월하지 않는다.
-            user.inviterUserId?.let { inviterId -> inviteService.rewardInvitePair(inviterId, user.id, user.createdAt) }
-            val tokens = authTokenService.issueTokens(user)
+            // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.
+            val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
             serverAnalytics.googleLoginSucceeded(user.publicId.toString(), isNewUser)
             tokens
         } catch (e: Exception) {
@@ -102,25 +97,20 @@ class GoogleLoginService(
     /**
      * 연동을 찾으면 그 User를, 없으면 새로 만들어 반환한다(find-or-create).
      *
-     * 신규 생성 시 [inviteCode]의 초대자를 지금 해석해 생성 트랜잭션에 함께 영속한다. 코드가 유효할 때만
-     * 관계가 남고, 기존 사용자 로그인은 조회에서 바로 반환하므로 코드를 해석하지 않는다(관계 세팅 없음 → 무시).
-     *
      * 동시 첫 로그인 경합: 두 요청이 모두 조회에서 놓치고 둘 다 생성을 시도하면, 한쪽은
      * 유니크 위반으로 실패한다. 이때 [GoogleAccountRegistrar.createUserAndAccount]는 독립 트랜잭션이라
      * 그 실패가 여기(트랜잭션 밖)로 전파돼도 우리는 rollback-only에 걸리지 않는다. 한 번 더 조회하면
      * 이번엔 상대 요청이 커밋한 계정이 보이므로 그 User를 재사용한다(500 대신 정상 로그인).
      * 재조회로도 못 찾으면 일시적 경합이 아니라 실제 정합성 문제이므로 원 예외를 그대로 드러낸다.
      */
-    private fun findOrCreateUser(info: SocialUserInfo, inviteCode: String?): Pair<User, Boolean> {
+    private fun findOrCreateUser(info: SocialUserInfo): Pair<User, Boolean> {
         val now = Instant.now()
         registrar.findExistingUser(info, now)?.let { return it to false }
 
-        val inviterUserId = inviteService.resolveInviterId(inviteCode)
         return try {
-            registrar.createUserAndAccount(info, now, inviterUserId) to true
+            registrar.createUserAndAccount(info, now) to true
         } catch (ex: DataIntegrityViolationException) {
             // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
-            // 재사용 계정의 초대자 관계는 실제로 생성한 쪽이 이미 영속했다(여기선 덮어쓰지 않는다).
             // 이 경로는 상대가 만든 기존 계정 재사용이므로 신규 아님(is_new_user=false).
             (registrar.findExistingUser(info, Instant.now()) ?: throw ex) to false
         }
