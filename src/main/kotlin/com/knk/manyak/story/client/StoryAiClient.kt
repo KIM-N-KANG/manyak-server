@@ -175,8 +175,8 @@ data class AiStoryStartSettings(
 class RestStoryAiClient(
     @Value("\${manyak.ai.base-url}") aiBaseUrl: String,
     connectTimeout: Duration = Duration.ofSeconds(5),
-    storylineReadTimeout: Duration = Duration.ofSeconds(30),
-    compileReadTimeout: Duration = Duration.ofSeconds(120),
+    storylineReadTimeout: Duration = Duration.ofSeconds(90),
+    compileReadTimeout: Duration = Duration.ofSeconds(180),
 ) : StoryAiClient {
     private val validatedAiBaseUrl = validateAiBaseUrl(aiBaseUrl)
 
