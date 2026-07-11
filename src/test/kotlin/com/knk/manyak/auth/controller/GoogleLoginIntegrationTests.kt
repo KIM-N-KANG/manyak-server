@@ -136,6 +136,48 @@ class GoogleLoginIntegrationTests {
     }
 
     @Test
+    fun `신규 가입 로그인은 isNewUser true, 재로그인은 false다`() {
+        // 프론트엔드 신규 가입 온보딩(초대 코드 입력 스텝, KNK-567)의 판정 신호. 서버만 신규/기존을 구분할 수 있다.
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"new-user-flag-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isNewUser").isEqualTo(true)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"new-user-flag-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isNewUser").isEqualTo(false)
+    }
+
+    @Test
+    fun `refresh 회전 응답의 isNewUser는 항상 false다`() {
+        val refreshToken = restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"refresh-flag-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["refreshToken"] as String
+
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"$refreshToken"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isNewUser").isEqualTo(false)
+    }
+
+    @Test
     fun `같은 idToken으로 두 번 로그인해도 사용자는 하나만 생성된다`() {
         repeat(2) {
             restTestClient.post()
@@ -223,6 +265,56 @@ class GoogleLoginIntegrationTests {
         assertThat(rewards.first().idempotencyKey).isEqualTo("signup:${user.id}")
         // 새 사용자를 만들지 않았다(기존 계정 재사용).
         assertThat(userRepository.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `로그인 요청의 inviteCode는 폐기된 필드라 무시된다`() {
+        // KNK-567 개편: 초대 보상은 POST /users/me/invite/redeem에서만 적립한다.
+        // 구 링크 방식 클라이언트가 inviteCode를 보내와도 초대 관계·보상이 생기지 않아야 한다.
+        val inviter = userRepository.save(User(nickname = "구초대자", status = UserStatus.ACTIVE, inviteCode = "OLDLINK7"))
+
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"legacy-invite-sub","inviteCode":"OLDLINK7"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val social = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "legacy-invite-sub")
+        val invitee = userRepository.findById(social!!.userId).orElseThrow()
+        assertThat(invitee.inviterUserId).isNull()
+        val inviteRewards = creditTransactionRepository.findAll().filter { it.reason == CreditReason.INVITE_REWARD }
+        assertThat(inviteRewards).isEmpty()
+        // 초대자 잔액도 불변(적립 없음). 피초대자 가입 보상만 적립된다.
+        assertThat(creditWalletService.balanceOf(inviter.id)).isEqualTo(0)
+    }
+
+    @Test
+    fun `초대 관계가 있는 회원의 재로그인은 초대 보상을 재적립하지 않는다`() {
+        // KNK-567 개편: 로그인 self-heal 재적립(KNK-393)은 폐기됐다. redeem이 동기·원자적이라 유실 복구가 필요 없다.
+        val inviter = userRepository.save(User(nickname = "초대자", status = UserStatus.ACTIVE))
+        val invitee = userRepository.save(User(nickname = "피초대자", status = UserStatus.ACTIVE, inviterUserId = inviter.id))
+        val now = Instant.now()
+        socialAccountRepository.save(
+            SocialAccount(
+                userId = invitee.id,
+                provider = SocialProvider.GOOGLE,
+                providerUserId = "no-selfheal-sub",
+                email = "user@example.com",
+                connectedAt = now,
+                lastLoginAt = now,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"no-selfheal-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val inviteRewards = creditTransactionRepository.findAll().filter { it.reason == CreditReason.INVITE_REWARD }
+        assertThat(inviteRewards).isEmpty()
     }
 
     @Test

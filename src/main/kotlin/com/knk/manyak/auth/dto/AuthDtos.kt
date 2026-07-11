@@ -23,6 +23,13 @@ data class TokenResponse(
 
     @field:Schema(description = "토큰 타입. 항상 Bearer.", example = "Bearer")
     val tokenType: String = "Bearer",
+
+    @field:Schema(
+        description = "이번 로그인으로 계정이 새로 생성됐는지(신규 가입 여부). 프론트엔드 신규 가입 온보딩" +
+            "(초대 코드 입력 스텝, KNK-567)의 판정 신호다. 기존 계정 로그인과 refresh 회전은 항상 false.",
+        example = "false",
+    )
+    val isNewUser: Boolean = false,
 )
 
 @Schema(description = "Google 로그인 요청")
@@ -33,14 +40,6 @@ data class GoogleLoginRequest(
         example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
     )
     val idToken: String,
-
-    @field:Schema(
-        description = "초대 코드(선택). 최초 가입 시 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립한다. " +
-            "미해결·자기 코드·이미 가입된 계정의 제출은 오류 없이 무시된다.",
-        example = "Ab3Xk9Qz",
-        nullable = true,
-    )
-    val inviteCode: String? = null,
 )
 
 @Schema(description = "refresh 토큰 회전 요청")

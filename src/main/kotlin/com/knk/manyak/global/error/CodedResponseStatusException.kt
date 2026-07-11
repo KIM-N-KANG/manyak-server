@@ -23,4 +23,10 @@ object ApiErrorCodes {
 
     /** 게스트 체험 한도 소진(402). 크레딧 부족과 구분한다. */
     const val GUEST_TRIAL_LIMIT_EXCEEDED = "GUEST_TRIAL_LIMIT_EXCEEDED"
+
+    /** 초대 코드 입력(409): 자기 자신의 코드를 제출했다. 재제출과 구분한다(스펙 §4-3-7, KNK-567). */
+    const val INVITE_SELF_CODE = "INVITE_SELF_CODE"
+
+    /** 초대 코드 입력(409): 계정당 평생 1회 자격을 이미 소진한 재제출이다(스펙 §4-3-7, KNK-567). */
+    const val INVITE_ALREADY_REDEEMED = "INVITE_ALREADY_REDEEMED"
 }
