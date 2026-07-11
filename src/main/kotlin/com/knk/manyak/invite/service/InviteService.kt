@@ -94,6 +94,11 @@ class InviteService(
         if (!CODE_FORMAT.matches(code)) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "초대 코드 형식이 올바르지 않습니다.")
         }
+        // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 주의(Codex P2, 잠재 결함): 이 컬럼은 초대자 자기참조
+        // FK가 ON DELETE SET NULL(V27)이라, 초대자 행이 물리 삭제되면 NULL로 되돌아가 소진 표식이 사라진다. 현재는
+        // 회원을 물리 삭제하는 경로가 없어(soft delete만: UserStatus.DELETED·deleted_at) 도달 불가하지만, 하드 삭제를
+        // 도입하면 이 계정이 재제출로 보상을 또 받을 수 있다. 그때는 삭제 안정적인 별도 소진 표식(예: invite_redeemed_at)을
+        // 두고 그 값으로 게이트해야 한다(관계 FK와 소진 플래그의 삭제 안정성 요구가 다름).
         if (redeemer.inviterUserId != null) {
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
