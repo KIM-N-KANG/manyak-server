@@ -63,6 +63,10 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
 }
 "public.story_messages" {
   bigint id
@@ -71,6 +75,7 @@ erDiagram
   text content
   integer message_order
   timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
 }
 ```
 

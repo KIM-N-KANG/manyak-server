@@ -8,11 +8,15 @@ import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.GoogleLoginService
 import com.knk.manyak.auth.token.AuthTokenService
+import com.knk.manyak.credit.service.AttendanceRewardService
+import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.RequestCorrelationFilter
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -21,6 +25,7 @@ import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
@@ -34,11 +39,15 @@ class AuthController(
     private val authTokenService: AuthTokenService,
     private val userRepository: UserRepository,
     private val googleLoginService: GoogleLoginService,
+    private val creditWalletService: CreditWalletService,
+    private val attendanceRewardService: AttendanceRewardService,
 ) {
 
     @Operation(
         summary = "Google 로그인",
         description = "Google ID 토큰을 검증해 사용자를 find-or-create하고 access+refresh 토큰을 발급합니다. " +
+            "선택 필드 inviteCode를 최초 가입과 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립합니다" +
+            "(미해결·자기 코드·이미 가입된 계정의 제출은 무시). " +
             "토큰이 유효하지 않으면(서명·만료·issuer·audience 불일치) 401, 본문이 올바르지 않으면 400으로 응답합니다.",
     )
     @ApiResponses(
@@ -63,7 +72,9 @@ class AuthController(
     @PostMapping("/login/google")
     fun loginWithGoogle(
         @Valid @RequestBody request: GoogleLoginRequest,
-    ): TokenResponse = googleLoginService.login(request.idToken)
+        // 신규 가입 시 디바이스 체험 사용량을 계정으로 스냅샷하는 데 쓴다(스펙 §4-3-7 B13). 게스트 요청과 같은 헤더이며, 없으면 스냅샷 생략.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+    ): TokenResponse = googleLoginService.login(request.idToken, request.inviteCode, deviceId)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",
@@ -84,6 +95,7 @@ class AuthController(
             ),
         ],
     )
+    @SecurityRequirement(name = "bearerAuth") // /me만 인증 필수(login·refresh·logout은 공개). 스킴은 OpenApiConfig.SECURITY_SCHEME_NAME.
     @GetMapping("/me")
     fun me(
         @AuthenticationPrincipal jwt: Jwt,
@@ -95,7 +107,12 @@ class AuthController(
             id = user.publicId.toString(),
             nickname = user.nickname,
             profileImageUrl = user.profileImageUrl,
+            // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17). 값은 프리셋 배정(KNK-388) 시 생성되며, 미배정·미생성이면 null.
+            profileThumbnailBase64 = user.profileThumbnailBase64,
             status = user.status,
+            // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
+            creditBalance = creditWalletService.balanceOf(user.id),
+            attendedToday = attendanceRewardService.hasAttendedToday(user.id),
         )
     }
 

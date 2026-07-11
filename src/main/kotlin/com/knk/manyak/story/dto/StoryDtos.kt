@@ -1,22 +1,12 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
 import java.time.Instant
-
-@Schema(description = "스토리 공개 상태")
-enum class StoryVisibility {
-    PUBLIC,
-    PRIVATE,
-}
-
-@Schema(description = "스토리 등록 상태")
-enum class StoryStatus {
-    DRAFT,
-    PUBLISHED,
-}
 
 @Schema(description = "스토리 ID 목록 조회 요청")
 data class BatchStoryRequest(
@@ -43,6 +33,13 @@ data class StorySummaryResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
+    @field:Schema(
+        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null.",
+        example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
+        nullable = true,
+    )
+    val thumbnailUrlSm: String?,
+
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
 
@@ -58,8 +55,8 @@ data class StorySummaryResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
@@ -76,8 +73,8 @@ data class StoryDetailResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "커버 이미지 URL", example = "https://example.com/covers/moon-contract.png")
-    val coverImageUrl: String?,
+    @field:Schema(description = "썸네일 이미지 URL(§4-3-9). 소스가 없으면 null.", example = "https://example.com/thumbnails/moon-contract.png", nullable = true)
+    val thumbnailUrl: String?,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
     val title: String,
@@ -103,20 +100,20 @@ data class StoryDetailResponse(
     @field:Schema(description = "작성자 정보. 작성자가 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
     val author: StoryAuthorResponse?,
 
-    @field:Schema(description = "채팅 수", example = "128")
-    val chatCount: Long,
+    @field:Schema(description = "누적 사용자 입력 턴 수(스토리의 모든 채팅 완료 턴 합)", example = "128")
+    val turnCount: Long,
 
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
 
-    @field:Schema(description = "스토리 시작 설정. 시작 설정이 없는 스토리는 비어 있을 수 있습니다.", nullable = true)
-    val startSetting: StoryStartSettingResponse?,
-
     @field:ArraySchema(
-        schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
-        arraySchema = Schema(description = "추천 입력", example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]"""),
+        schema = Schema(implementation = StoryStartSettingResponse::class),
+        arraySchema = Schema(
+            description = "스토리 시작 설정 목록(등록 순서, KNK-515 복수화). 각 시작 설정에 추천 입력·엔딩이 종속된다. " +
+                "시작 설정이 없는 스토리는 빈 배열입니다.",
+        ),
     )
-    val suggestedInputs: List<String>,
+    val startSettings: List<StoryStartSettingResponse>,
 
     @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,
@@ -131,10 +128,16 @@ data class StoryDetailResponse(
     val lorebooks: List<LorebookResponse>,
 
     @field:ArraySchema(
-        schema = Schema(implementation = StoryEndingResponse::class),
-        arraySchema = Schema(description = "스토리 엔딩 목록. 없으면 빈 배열입니다."),
+        schema = Schema(implementation = StoryMainEventResponse::class),
+        arraySchema = Schema(description = "스토리 주요 사건 목록(표시 순서). 없으면 빈 배열입니다."),
     )
-    val endings: List<StoryEndingResponse>,
+    val mainEvents: List<StoryMainEventResponse>,
+
+    @field:ArraySchema(
+        schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
+        arraySchema = Schema(description = "요청 회원이 이 스토리에서 도달한 엔딩 이름 목록(엔딩은 이름으로 식별). 게스트는 빈 배열입니다."),
+    )
+    val reachedEndings: List<String>,
 
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
@@ -155,22 +158,25 @@ data class LorebookResponse(
     val content: String,
 )
 
-@Schema(description = "스토리 엔딩")
+@Schema(description = "스토리 엔딩(유형 없이 이름으로 식별). 표시 순서는 배열 순서를 따른다.")
 data class StoryEndingResponse(
-    @field:Schema(description = "엔딩 제목", example = "왕좌를 되찾다")
-    val title: String,
+    @field:Schema(description = "엔딩 이름", example = "왕좌를 되찾다")
+    val name: String,
 
-    @field:Schema(description = "엔딩 내용", example = "주인공은 잃어버린 왕좌를 되찾고 새 시대를 연다.")
-    val content: String,
+    @field:Schema(description = "도달 조건(최소 턴 수 + 달성 조건)")
+    val requirement: StoryEndingRequirementResponse,
 
-    @field:Schema(description = "도달 조건(자유 텍스트). 없을 수 있습니다.", example = "신뢰도 100 이상", nullable = true)
-    val conditionText: String?,
+    @field:Schema(description = "도달 시 엔딩 응답 생성을 위한 출력 가이드", example = "주인공이 왕좌에 오르는 대관식을 장엄하게 묘사한다.")
+    val epilogue: String,
+)
 
-    @field:Schema(description = "정렬 순서", example = "1")
-    val sortOrder: Int,
+@Schema(description = "엔딩 도달 조건(2파라미터). 최소 턴 수와 달성 조건을 모두 충족(AND)해야 도달한다.")
+data class StoryEndingRequirementResponse(
+    @field:Schema(description = "최소 턴 수(백엔드 결정적 판정)", example = "10")
+    val minTurns: Int,
 
-    @field:Schema(description = "활성화 여부", example = "true")
-    val enabled: Boolean,
+    @field:Schema(description = "달성 조건(자연어, AI 정성 판정). 목적·거쳐온 주요 사건을 한 문장에 서술한다.", example = "주인공이 반란군을 규합해 왕좌를 되찾는다.")
+    val achievementCondition: String,
 )
 
 @Schema(description = "로어북 카탈로그 목록 항목")
@@ -197,14 +203,35 @@ data class StoryAuthorResponse(
     val profileImageUrl: String?,
 )
 
-@Schema(description = "스토리 시작 설정")
+@Schema(description = "스토리 시작 설정. 추천 입력·엔딩이 이 시작 설정에 종속된다(KNK-515 복수화).")
 data class StoryStartSettingResponse(
+    @field:Schema(
+        description = "시작 설정 ID(공개 식별자). POST /chats의 startSettingId로 이 값을 넘겨 특정 시작 설정으로 채팅을 시작한다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    )
+    val id: String,
+
     @field:Schema(description = "시작 장면 이름", example = "선왕의 장례식 날")
     val name: String,
 
-    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...")
+    @field:Schema(description = "도입부 내레이션", example = "잿빛 비가 사흘째 왕성을 적신다...", nullable = true)
     val prologue: String?,
 
-    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...")
+    @field:Schema(description = "시작 상황", example = "장례식이 끝난 늦은 밤, 기사단 숙소...", nullable = true)
     val startSituation: String?,
+
+    @field:ArraySchema(
+        schema = Schema(description = "추천 입력", example = "편지를 열어본다"),
+        arraySchema = Schema(
+            description = "이 시작 설정의 추천 입력 목록. 등록된 추천 입력이 없으면 빈 배열입니다.",
+            example = """["편지를 열어본다","창밖의 인기척을 확인한다","여관 주인을 찾아간다"]""",
+        ),
+    )
+    val suggestedInputs: List<String>,
+
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryEndingResponse::class),
+        arraySchema = Schema(description = "이 시작 설정의 엔딩 목록. 없으면 빈 배열입니다."),
+    )
+    val endings: List<StoryEndingResponse>,
 )

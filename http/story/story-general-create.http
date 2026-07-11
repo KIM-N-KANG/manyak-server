@@ -1,0 +1,165 @@
+### 일반 제작 단발 등록(General Story Creation) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-464] POST /api/v1/stories/general — 폼 입력을 한 번에 검증·저장(AI 비호출, 임시저장 없음, §4-3-8).
+###   - 인증 선택: 유효 access 토큰이면 생성자 소유, 없으면 소유자 없는(게스트) 스토리.
+###   - 기본 공개 범위 PRIVATE(요청 visibility로 선택). 크레딧 소모·게스트 한도 카운트 없음.
+###   - 응답은 간편 제작과 동일: {id, title, oneLineIntro, description, genres, startSettings[]}.
+###   - [KNK-515] 시작 설정 복수화: startSettings[](최소 1개). 추천 입력(정확히 3)·엔딩(최대 10)은 각 시작 설정에 중첩. 주요 사건은 스토리 스코프.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun (기본 포트 8080), Postgres 기동(docker compose up -d)
+###   - (선택) access 토큰: auth-login-google.http 해피 패스 실행 시 전역 accessToken 이 채워집니다.
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (해피 패스, 익명) 단발 등록 → 201, 소유자 없이 기본 PRIVATE. 응답 id를 전역에 저장한다.
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "달빛 아래의 계약",
+  "oneLineIntro": "기억을 잃은 마법사가 금지된 숲에서 과거를 추적하는 이야기",
+  "description": "주요 내용",
+  "genres": ["판타지", "미스터리"],
+  "storySettings": {
+    "worldSetting": "몰락한 왕국 아르덴",
+    "characterSetting": "기억을 잃은 마법사",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "마법은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "선왕의 장례식 날",
+      "prologue": "잿빛 비가 사흘째 왕성을 적신다",
+      "startSituation": "장례식이 끝난 늦은 밤",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"],
+      "endings": [
+        { "name": "왕좌를 되찾다", "requirement": { "minTurns": 10, "achievementCondition": "반란군을 규합해 왕좌를 되찾는다" }, "epilogue": "대관식을 장엄하게 묘사한다" }
+      ]
+    }
+  ],
+  "mainEvents": [
+    { "name": "편지 발견", "description": "다락방에서 봉인된 편지를 찾는다", "keySentence": "봉인된 편지를 연다" }
+  ]
+}
+
+> {%
+    client.test("등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.test("응답이 간편 제작과 동일한 계약을 지킨다", () => {
+        client.assert(typeof response.body.id === "string" && response.body.id.length > 0, "id가 없습니다.");
+        client.assert(response.body.title === "달빛 아래의 계약", `title 불일치. actual=${response.body.title}`);
+        client.assert(Array.isArray(response.body.genres) && response.body.genres.length === 2, "genres가 2개가 아닙니다.");
+        client.assert(response.body.startSettings.length === 1, "startSettings가 1개가 아닙니다.");
+        client.assert(typeof response.body.startSettings[0].id === "string", "startSettings[0].id가 없습니다.");
+        client.assert(response.body.startSettings[0].name === "선왕의 장례식 날", "startSettings[0].name 불일치.");
+        client.assert(response.body.startSettings[0].suggestedInputs.length === 3, "startSettings[0].suggestedInputs가 3개가 아닙니다.");
+    });
+    client.global.set("createdStoryId", response.body.id);
+%}
+
+### 2. (왕복) 소유자 없는 스토리는 UUID로 상세 조회된다 — 엔딩은 이름기반 2파라미터
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("엔딩이 시작 설정 스코프로 중첩돼 이름기반 2파라미터로 왕복된다", () => {
+        const e = response.body.startSettings[0].endings[0];
+        client.assert(e.name === "왕좌를 되찾다", `엔딩 name 불일치. actual=${JSON.stringify(e)}`);
+        client.assert(e.requirement.minTurns === 10, `minTurns 불일치. actual=${JSON.stringify(e.requirement)}`);
+        client.assert(typeof e.requirement.achievementCondition === "string", "achievementCondition이 없습니다.");
+        client.assert(typeof e.epilogue === "string", "epilogue가 없습니다.");
+    });
+    client.test("주요 사건이 포함된다", () => {
+        client.assert(response.body.mainEvents[0].name === "편지 발견", "mainEvents 불일치.");
+    });
+%}
+
+### 3. (에러) 추천 입력이 정확히 3개가 아니면 400
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "검증 실패 케이스",
+  "oneLineIntro": "추천 입력 2개",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘"], "endings": [] } ]
+}
+
+> {%
+    client.test("추천 입력 개수 위반은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (에러) 필수 스토리 설정 필드가 비면 400 (details에 필드별 사유)
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "검증 실패 케이스",
+  "oneLineIntro": "세계관 비어 있음",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ]
+}
+
+> {%
+    client.test("필수 필드 누락은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (인증 귀속) 유효 토큰으로 등록 → 생성자 소유·PUBLIC 선택
+# auth-login-google.http 해피 패스를 먼저 실행해 전역 accessToken 을 채우거나 @accessToken 에 직접 넣으세요.
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "title": "회원 소유 스토리",
+  "oneLineIntro": "토큰 귀속 확인",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("회원 등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6. (정지 계정, KNK-499) 정지된 회원이 등록하면 403이고 저장되지 않는다
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정의 토큰을 @suspendedAccessToken 에 채워 실행하세요(로그인 후 DB만 바꿔도 기존 토큰은 그대로 유효).
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{suspendedAccessToken}}
+
+{
+  "title": "정지 계정 등록 시도",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("정지된 회원의 등록은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}

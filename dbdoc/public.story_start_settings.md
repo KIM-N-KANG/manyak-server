@@ -4,13 +4,14 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_start_settings_id_seq'::regclass) | false | [public.story_suggested_inputs](public.story_suggested_inputs.md) [public.story_chats](public.story_chats.md) |  |  |
+| id | bigint | nextval('story_start_settings_id_seq'::regclass) | false | [public.story_suggested_inputs](public.story_suggested_inputs.md) [public.story_chats](public.story_chats.md) [public.story_endings](public.story_endings.md) |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | name | varchar(100) |  | false |  |  |  |
 | prologue | text |  | true |  |  |  |
 | start_situation | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| public_id | uuid |  | false |  |  |  |
 
 ## Constraints
 
@@ -18,14 +19,15 @@
 | ---- | ---- | ---------- |
 | story_start_settings_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_start_settings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_start_settings_story | UNIQUE | UNIQUE (story_id) |
+| uq_story_start_settings_public_id | UNIQUE | UNIQUE (public_id) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | story_start_settings_pkey | CREATE UNIQUE INDEX story_start_settings_pkey ON public.story_start_settings USING btree (id) |
-| uq_story_start_settings_story | CREATE UNIQUE INDEX uq_story_start_settings_story ON public.story_start_settings USING btree (story_id) |
+| idx_story_start_settings_story | CREATE INDEX idx_story_start_settings_story ON public.story_start_settings USING btree (story_id) |
+| uq_story_start_settings_public_id | CREATE UNIQUE INDEX uq_story_start_settings_public_id ON public.story_start_settings USING btree (public_id) |
 
 ## Relations
 
@@ -34,7 +36,8 @@ erDiagram
 
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
-"public.story_start_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
+"public.story_start_settings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_start_settings" {
   bigint id
@@ -44,6 +47,7 @@ erDiagram
   text start_situation
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid public_id
 }
 "public.story_suggested_inputs" {
   bigint id
@@ -65,6 +69,25 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
+}
+"public.story_endings" {
+  bigint id
+  varchar_100_ title
+  text content
+  text condition_text
+  smallint sort_order
+  boolean enabled
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  bigint start_setting_id FK
+  varchar_100_ name
+  integer min_turns
+  text achievement_condition
+  text epilogue
 }
 "public.stories" {
   bigint id
@@ -77,6 +100,9 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
+  varchar_64_ thumbnail_image_key FK
 }
 ```
 

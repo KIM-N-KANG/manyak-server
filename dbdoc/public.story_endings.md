@@ -4,42 +4,50 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_endings_id_seq'::regclass) | false |  |  |  |
-| story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
-| title | varchar(100) |  | false |  |  |  |
-| content | text |  | false |  |  |  |
+| id | bigint | nextval('story_endings_id_seq'::regclass) | false | [public.story_chats](public.story_chats.md) [public.story_messages](public.story_messages.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) |  |  |
+| title | varchar(100) |  | true |  |  |  |
+| content | text |  | true |  |  |  |
 | condition_text | text |  | true |  |  |  |
 | sort_order | smallint |  | false |  |  |  |
 | enabled | boolean | true | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| start_setting_id | bigint |  | false |  | [public.story_start_settings](public.story_start_settings.md) |  |
+| name | varchar(100) |  | true |  |  |  |
+| min_turns | integer |  | true |  |  |  |
+| achievement_condition | text |  | true |  |  |  |
+| epilogue | text |  | true |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_story_endings_min_turns | CHECK | CHECK (((min_turns IS NULL) OR (min_turns >= 0))) |
 | ck_story_endings_order | CHECK | CHECK ((sort_order > 0)) |
-| story_endings_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
+| fk_story_endings_start_setting | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE |
 | story_endings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_endings_order | UNIQUE | UNIQUE (story_id, sort_order) |
+| uq_story_endings_order | UNIQUE | UNIQUE (start_setting_id, sort_order) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | story_endings_pkey | CREATE UNIQUE INDEX story_endings_pkey ON public.story_endings USING btree (id) |
-| uq_story_endings_order | CREATE UNIQUE INDEX uq_story_endings_order ON public.story_endings USING btree (story_id, sort_order) |
+| uq_story_endings_order | CREATE UNIQUE INDEX uq_story_endings_order ON public.story_endings USING btree (start_setting_id, sort_order) |
+| idx_story_endings_start_setting | CREATE INDEX idx_story_endings_start_setting ON public.story_endings USING btree (start_setting_id) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
-"public.story_endings" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 
 "public.story_endings" {
   bigint id
-  bigint story_id FK
   varchar_100_ title
   text content
   text condition_text
@@ -47,17 +55,54 @@ erDiagram
   boolean enabled
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint start_setting_id FK
+  varchar_100_ name
+  integer min_turns
+  text achievement_condition
+  text epilogue
 }
-"public.stories" {
+"public.story_chats" {
   bigint id
   bigint user_id
+  bigint story_id FK
+  bigint start_setting_id FK
   varchar_100_ title
-  varchar_255_ one_line_intro
-  text description
-  varchar_255_ genre
+  text summary
+  integer current_turn
+  varchar_20_ status
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  uuid public_id
+  integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
+}
+"public.story_messages" {
+  bigint id
+  bigint chat_id FK
+  varchar_16_ role
+  text content
+  integer message_order
+  timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
+}
+"public.user_story_ending_reaches" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  bigint ending_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_start_settings" {
+  bigint id
+  bigint story_id FK
+  varchar_100_ name
+  text prologue
+  text start_situation
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
   uuid public_id
 }
 ```

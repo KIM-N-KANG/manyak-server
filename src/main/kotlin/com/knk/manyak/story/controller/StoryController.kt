@@ -1,9 +1,13 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
+import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
+import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
+import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -32,7 +36,31 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/stories")
 class StoryController(
     private val storyService: StoryService,
+    private val generalStoryCreationService: GeneralStoryCreationService,
 ) {
+
+    @Operation(
+        summary = "일반 제작 스토리 등록",
+        description = "폼에 직접 입력한 스토리 구성 항목을 한 번에 등록합니다(단발, 임시저장 없음). 인증은 선택이며 " +
+            "유효 토큰이면 생성자 소유가 됩니다. AI를 호출하지 않아 크레딧 소모·게스트 한도 카운트가 없습니다. " +
+            "응답은 간편 제작과 동일합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "201",
+                description = "등록 성공",
+                content = [Content(schema = Schema(implementation = SimpleStoryCreateResponse::class))],
+            ),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음", content = [Content(schema = Schema(hidden = true))]),
+        ],
+    )
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/general")
+    fun createGeneralStory(
+        @CurrentUserId userId: Long?,
+        @Valid @RequestBody request: CreateGeneralStoryRequest,
+    ): SimpleStoryCreateResponse = generalStoryCreationService.createGeneralStory(request, userId)
 
     @Operation(
         summary = "스토리 ID 목록으로 스토리 목록 조회",
@@ -48,7 +76,7 @@ class StoryController(
                         array = ArraySchema(
                             schema = Schema(implementation = StorySummaryResponse::class),
                             arraySchema = Schema(
-                                example = """[{"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","title":"달빛 아래의 계약","oneLineIntro":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"author":null,"chatCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":"9c5b94b1-35ad-49bb-b118-8e8fc24abf80","title":"왕국의 마지막 편지","oneLineIntro":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"author":null,"chatCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
+                                example = """[{"id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","title":"달빛 아래의 계약","oneLineIntro":"기억을 잃은 마법사가 금지된 숲에서 자신의 과거를 추적하는 이야기","genres":["판타지","미스터리"],"author":null,"turnCount":128,"likeCount":32,"status":"PUBLISHED","createdAt":"2026-06-10T12:00:00Z"},{"id":"9c5b94b1-35ad-49bb-b118-8e8fc24abf80","title":"왕국의 마지막 편지","oneLineIntro":"비밀스러운 조력자가 남긴 편지를 따라 사라진 왕국의 진실에 다가가는 이야기","genres":["미스터리","스릴러"],"author":null,"turnCount":84,"likeCount":19,"status":"PUBLISHED","createdAt":"2026-06-10T12:10:00Z"}]""",
                             ),
                         ),
                     ),
@@ -64,7 +92,8 @@ class StoryController(
     @PostMapping("/batch")
     fun getStoriesByIds(
         @Valid @RequestBody request: BatchStoryRequest,
-    ): List<StorySummaryResponse> = storyService.getStoriesByIds(request)
+        @CurrentUserId userId: Long?,
+    ): List<StorySummaryResponse> = storyService.getStoriesByIds(request, userId)
 
     @Operation(
         summary = "로어북 카탈로그 조회",
@@ -115,11 +144,13 @@ class StoryController(
     fun getStoryDetail(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ): StoryDetailResponse = storyService.getStoryDetail(storyId)
+        @CurrentUserId userId: Long?,
+    ): StoryDetailResponse = storyService.getStoryDetail(storyId, userId)
 
     @Operation(
         summary = "스토리 삭제 (소프트 삭제)",
         description = "스토리를 소프트 삭제합니다. 행을 물리 삭제하지 않고 삭제 시각만 기록하며, 이후 목록·상세 조회에서 제외됩니다. " +
+            "인증은 선택이며 회원 소유 스토리는 소유자만(타인·미인증 403), 소유자 없는 게스트 스토리는 허용합니다. " +
             "존재하지 않거나 이미 삭제된 스토리는 404로 응답합니다.",
     )
     @ApiResponses(
@@ -127,6 +158,11 @@ class StoryController(
             ApiResponse(
                 responseCode = "204",
                 description = "삭제 성공",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "스토리 소유자가 아님",
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
@@ -141,5 +177,6 @@ class StoryController(
     fun deleteStory(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
-    ) = storyService.deleteStory(storyId)
+        @CurrentUserId userId: Long?,
+    ) = storyService.deleteStory(storyId, userId)
 }

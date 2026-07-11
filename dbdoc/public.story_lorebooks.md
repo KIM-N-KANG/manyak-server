@@ -53,6 +53,9 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
+  varchar_64_ thumbnail_image_key FK
 }
 "public.lorebooks" {
   bigint id

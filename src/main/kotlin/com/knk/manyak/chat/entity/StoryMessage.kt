@@ -39,11 +39,17 @@ class StoryMessage(
     @Column(nullable = false, length = 16)
     val role: MessageRole,
 
+    // 재생성(§4-3-9)은 마지막 ASSISTANT 활성본을 같은 사용자 입력으로 다시 생성해 제자리 교체한다(var로 교체 허용).
+    // 덮어쓰기 직전 이전 본문·선택지는 [StoryMessageVersion] 이력으로 보관한다(B11). USER 입력은 교체되지 않는다.
     @Column(nullable = false, columnDefinition = "TEXT")
-    val content: String,
+    var content: String,
 
     @Column(name = "message_order", nullable = false)
     val messageOrder: Int,
+
+    // 이 ASSISTANT 메시지가 엔딩 응답이면 도달한 엔딩(story_endings.id). 도달 턴에만 채워지고 이후 재생성은 409로 막힌다.
+    @Column(name = "reached_ending_id")
+    val reachedEndingId: Long? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

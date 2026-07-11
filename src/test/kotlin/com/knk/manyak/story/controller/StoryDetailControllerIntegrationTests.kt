@@ -1,12 +1,17 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import java.time.Instant
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -33,11 +38,33 @@ class StoryDetailControllerIntegrationTests {
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
+    private lateinit var storyEndingRepository: StoryEndingRepository
+
+    @Autowired
+    private lateinit var storyChatRepository: StoryChatRepository
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+    }
+
+    @Test
+    fun `turnCount는 스토리의 미삭제 채팅 current_turn 합이다`() {
+        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC, status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2))
+        // 소프트 삭제된 채팅은 합산에서 제외한다.
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 5, deletedAt = Instant.now()))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turnCount").isEqualTo(5)
     }
 
     @Test
@@ -79,18 +106,20 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.genres.length()").isEqualTo(2)
             .jsonPath("$.genres[0]").isEqualTo("다크 판타지")
             .jsonPath("$.genres[1]").isEqualTo("정치극")
-            .jsonPath("$.startSetting.name").isEqualTo("선왕의 장례식 날")
-            .jsonPath("$.startSetting.prologue").isEqualTo("잿빛 비가 사흘째 왕성을 적신다.")
-            .jsonPath("$.startSetting.startSituation").isEqualTo("장례식이 끝난 늦은 밤, 기사단 숙소.")
-            .jsonPath("$.suggestedInputs.length()").isEqualTo(3)
-            .jsonPath("$.suggestedInputs[0]").isEqualTo("레이에게 문을 열어준다")
-            .jsonPath("$.suggestedInputs[2]").isEqualTo("침묵한다")
-            .jsonPath("$.coverImageUrl").isEmpty
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].id").isEqualTo(startSetting.publicId.toString())
+            .jsonPath("$.startSettings[0].name").isEqualTo("선왕의 장례식 날")
+            .jsonPath("$.startSettings[0].prologue").isEqualTo("잿빛 비가 사흘째 왕성을 적신다.")
+            .jsonPath("$.startSettings[0].startSituation").isEqualTo("장례식이 끝난 늦은 밤, 기사단 숙소.")
+            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(3)
+            .jsonPath("$.startSettings[0].suggestedInputs[0]").isEqualTo("레이에게 문을 열어준다")
+            .jsonPath("$.startSettings[0].suggestedInputs[2]").isEqualTo("침묵한다")
+            .jsonPath("$.thumbnailUrl").isEmpty
             .jsonPath("$.author").isEmpty
             .jsonPath("$.hashtags.length()").isEqualTo(0)
-            .jsonPath("$.chatCount").isEqualTo(0)
+            .jsonPath("$.turnCount").isEqualTo(0)
             .jsonPath("$.likeCount").isEqualTo(0)
-            .jsonPath("$.visibility").isEqualTo("PRIVATE")
+            .jsonPath("$.visibility").isEqualTo("PUBLIC")
             .jsonPath("$.status").isEqualTo("PUBLISHED")
     }
 
@@ -141,7 +170,48 @@ class StoryDetailControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.title").isEqualTo("설정 미완 스토리")
             .jsonPath("$.genres.length()").isEqualTo(0)
-            .jsonPath("$.startSetting").isEmpty
-            .jsonPath("$.suggestedInputs.length()").isEqualTo(0)
+            .jsonPath("$.startSettings.length()").isEqualTo(0)
+    }
+
+    @Test
+    fun `시작 설정이 여러 개면 등록 순서로 싣고 추천 입력·엔딩을 각 시작 설정에 종속시킨다`() {
+        val story = storyRepository.save(
+            Story(
+                title = "복수 시작 설정",
+                genre = "판타지",
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+            ),
+        )
+        val first = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "첫 시작", prologue = "프롤로그1"))
+        val second = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "둘째 시작", prologue = "프롤로그2"))
+        storySuggestedInputRepository.saveAll(
+            listOf(
+                StorySuggestedInput(startSetting = first, inputText = "가", inputOrder = 1.toShort()),
+                StorySuggestedInput(startSetting = second, inputText = "나", inputOrder = 1.toShort()),
+                StorySuggestedInput(startSetting = second, inputText = "다", inputOrder = 2.toShort()),
+            ),
+        )
+        storyEndingRepository.save(
+            StoryEnding(startSetting = second, name = "둘째의 엔딩", minTurns = 3, achievementCondition = "조건", epilogue = "에필로그", sortOrder = 1),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            // 등록 순서(id 오름차순)로 실린다.
+            .jsonPath("$.startSettings.length()").isEqualTo(2)
+            .jsonPath("$.startSettings[0].id").isEqualTo(first.publicId.toString())
+            .jsonPath("$.startSettings[0].name").isEqualTo("첫 시작")
+            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings.length()").isEqualTo(0)
+            .jsonPath("$.startSettings[1].id").isEqualTo(second.publicId.toString())
+            .jsonPath("$.startSettings[1].name").isEqualTo("둘째 시작")
+            // 추천 입력·엔딩은 각 시작 설정 스코프로 정확히 매핑된다.
+            .jsonPath("$.startSettings[1].suggestedInputs.length()").isEqualTo(2)
+            .jsonPath("$.startSettings[1].endings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[1].endings[0].name").isEqualTo("둘째의 엔딩")
     }
 }

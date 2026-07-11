@@ -1,5 +1,9 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
@@ -37,6 +41,12 @@ class ChatDeleteControllerIntegrationTests {
     private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -45,6 +55,9 @@ class ChatDeleteControllerIntegrationTests {
         // 자식(start_settings·settings 등)이 남아 있으면 stories 삭제가 FK 위반으로 실패한다.
         databaseCleaner.cleanAll()
     }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 
     @Test
     fun `채팅을 삭제하면 204와 함께 deletedAt이 기록되는 소프트 삭제다`() {
@@ -147,6 +160,51 @@ class ChatDeleteControllerIntegrationTests {
     }
 
     @Test
+    fun `회원 소유 채팅을 소유자가 삭제하면 204다`() {
+        val owner = saveUser("채팅소유자")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.delete()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .exchange()
+            .expectStatus().isNoContent
+
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().deletedAt).isNotNull()
+    }
+
+    @Test
+    fun `회원 소유 채팅을 타인이 삭제하면 403이고 삭제되지 않는다`() {
+        val owner = saveUser("채팅소유자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.delete()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(other.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
+    fun `회원 소유 채팅을 미인증이 삭제하면 403이고 삭제되지 않는다`() {
+        val owner = saveUser("채팅소유자")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.delete()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
     fun `삭제는 같은 스토리의 다른 채팅에 영향을 주지 않는다`() {
         val story = storyRepository.save(Story(title = "삭제 대상 스토리"))
         val target = storyChatRepository.save(StoryChat(storyId = story.id))
@@ -164,5 +222,21 @@ class ChatDeleteControllerIntegrationTests {
 
         val reloadedOther = storyChatRepository.findById(other.id).orElseThrow()
         assertThat(reloadedOther.deletedAt).isNull()
+    }
+
+    @Test
+    fun `회원이 게스트(NULL) 소유 채팅을 삭제하면 403이고 삭제되지 않는다`() {
+        // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 채팅을 삭제할 수 없다.
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.delete()
+            .uri("/api/v1/chats/${guestChat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyChatRepository.findById(guestChat.id).orElseThrow().deletedAt).isNull()
     }
 }

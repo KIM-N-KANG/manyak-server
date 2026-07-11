@@ -6,6 +6,8 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
@@ -135,12 +137,21 @@ class OptionalAuthAttributionIntegrationTests {
     private lateinit var creationStorylineRepository: StoryCreationStorylineRepository
 
     @Autowired
+    private lateinit var creditWalletService: CreditWalletService
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
     fun setUp() {
         compileStoryCalls.set(0)
         databaseCleaner.cleanAll()
+    }
+
+    // 회원이 유효 토큰으로 간편 스토리를 완료하면 KNK-398 선차감이 걸린다. 이 클래스는 귀속(KNK-286)을 검증하므로,
+    // 차감이 성공하도록 넉넉히 충전해 둔다(잔액 부족 402는 SimpleStoryCreationCreditIntegrationTests가 별도로 검증).
+    private fun fundWallet(user: User) {
+        creditWalletService.reward(user.id, 1_000, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
     }
 
     private fun saveUser(nickname: String = "manyak_user"): User =
@@ -202,7 +213,10 @@ class OptionalAuthAttributionIntegrationTests {
     @Test
     fun `유효 토큰으로 채팅을 생성하면 201과 함께 user_id가 귀속된다`() {
         val user = saveUser()
-        val story = storyRepository.save(Story(title = "스토리"))
+        // 교차 접근 차단(§4-5, KNK-480)으로 회원은 NULL 소유 스토리에 채팅을 만들 수 없다.
+        // 귀속(KNK-286)은 회원이 채팅을 만들 수 있는 스토리(소유자 있는 공개 발행 스토리)에서 검증한다.
+        val author = saveUser("author")
+        val story = storyRepository.save(Story(title = "스토리", userId = author.id))
 
         postChat(story.publicId, "Bearer ${validToken(user)}").expectStatus().isCreated
 
@@ -250,6 +264,7 @@ class OptionalAuthAttributionIntegrationTests {
     @Test
     fun `유효 토큰으로 간편 스토리를 생성하면 201과 함께 story user_id가 귀속된다`() {
         val user = saveUser()
+        fundWallet(user)
         val storyline = persistStoryline()
 
         postSimpleStory(storyline, "Bearer ${validToken(user)}").expectStatus().isCreated
@@ -280,6 +295,7 @@ class OptionalAuthAttributionIntegrationTests {
     @Test
     fun `소유 세션을 같은 사용자가 완료하면 201과 함께 owner에 귀속된다`() {
         val owner = saveUser()
+        fundWallet(owner)
         val storyline = persistStorylineOwnedBy(owner.id)
 
         postSimpleStory(storyline, "Bearer ${validToken(owner)}").expectStatus().isCreated
@@ -340,6 +356,7 @@ class OptionalAuthAttributionIntegrationTests {
     @Test
     fun `익명 세션을 로그인 사용자가 완료하면 세션 소유자가 그 사용자가 되어 이후 평가가 보호된다`() {
         val owner = saveUser("owner")
+        fundWallet(owner)
         val storyline = persistStoryline() // 익명 세션
 
         // 익명 세션을 owner가 완료(claim)
@@ -379,6 +396,8 @@ class OptionalAuthAttributionIntegrationTests {
     private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
+            // 게스트 요청에 필요한 헤더(스펙 §4-3-7). 회원 요청에는 무해하다(회원은 이 헤더를 쓰지 않음).
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
         authorization?.let { spec.header("Authorization", it) }
         return spec

@@ -88,6 +88,7 @@ class ChatStreamErrorRelayIntegrationTests {
 
         val body = restTestClient.post()
             .uri("/api/v1/chats/${session.publicId}/turns/stream")
+            .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"userInput":"손을 올린다."}""")

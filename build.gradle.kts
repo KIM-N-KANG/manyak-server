@@ -50,7 +50,8 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.github.codemonstur:embedded-redis:1.4.3")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // LauncherSessionListener(EmbeddedRedisLauncherSessionListener)를 컴파일·구현하려면 launcher가 컴파일 클래스패스에 필요하다.
+    testImplementation("org.junit.platform:junit-platform-launcher")
 }
 
 kotlin {

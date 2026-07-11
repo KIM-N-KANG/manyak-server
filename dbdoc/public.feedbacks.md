@@ -11,6 +11,7 @@
 | platform | varchar(20) |  | true |  |  |  |
 | app_version | varchar(50) |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| user_agent | varchar(512) |  | true |  |  |  |
 
 ## Constraints
 
@@ -41,6 +42,7 @@ erDiagram
   varchar_20_ platform
   varchar_50_ app_version
   timestamp_with_time_zone created_at
+  varchar_512_ user_agent
 }
 ```
 

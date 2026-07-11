@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN migration_attempts INT NOT NULL DEFAULT 0;

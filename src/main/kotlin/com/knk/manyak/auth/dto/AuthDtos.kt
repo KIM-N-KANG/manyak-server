@@ -33,6 +33,14 @@ data class GoogleLoginRequest(
         example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
     )
     val idToken: String,
+
+    @field:Schema(
+        description = "초대 코드(선택). 최초 가입 시 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립한다. " +
+            "미해결·자기 코드·이미 가입된 계정의 제출은 오류 없이 무시된다.",
+        example = "Ab3Xk9Qz",
+        nullable = true,
+    )
+    val inviteCode: String? = null,
 )
 
 @Schema(description = "refresh 토큰 회전 요청")
@@ -63,9 +71,22 @@ data class MeResponse(
     @field:Schema(description = "닉네임", example = "manyak_user")
     val nickname: String,
 
-    @field:Schema(description = "프로필 이미지 URL", example = "https://example.com/profile.png", nullable = true)
+    @field:Schema(description = "프로필 이미지 URL(원본 전체 해상도)", example = "https://example.com/profile.png", nullable = true)
     val profileImageUrl: String?,
+
+    @field:Schema(
+        description = "48×48 저해상도 인라인 썸네일(base64). 세션 복원 시 이미지 호스트 왕복 없이 헤더 아바타 첫 페인트용. " +
+            "미배정·미생성이면 null(스펙 §4-3-5 B17).",
+        nullable = true,
+    )
+    val profileThumbnailBase64: String?,
 
     @field:Schema(description = "계정 상태", example = "ACTIVE")
     val status: UserStatus,
+
+    @field:Schema(description = "크레딧 잔액. 지갑이 없으면 0", example = "500")
+    val creditBalance: Long,
+
+    @field:Schema(description = "KST 자정 기준 당일 출석체크 적립 완료 여부", example = "false")
+    val attendedToday: Boolean,
 )

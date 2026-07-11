@@ -4,10 +4,12 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
+import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -34,6 +36,9 @@ class StoryLorebookEndingControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyLorebookRepository: StoryLorebookRepository
+
+    @Autowired
+    private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
     private lateinit var storyEndingRepository: StoryEndingRepository
@@ -64,14 +69,21 @@ class StoryLorebookEndingControllerIntegrationTests {
     @Test
     fun `스토리 상세에 참조 로어북과 엔딩이 순서대로 포함된다`() {
         val story = storyRepository.save(Story(title = "잿빛 왕관", genre = "다크 판타지"))
+        val startSetting = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "시작 설정"))
         val worldGlossary = lorebookRepository.save(Lorebook(name = "왕국 용어집", genre = "다크 판타지", content = "아르덴: 몰락한 왕국"))
         val magicGlossary = lorebookRepository.save(Lorebook(name = "마법 용어집", genre = "다크 판타지", content = "계약술: 피로 맺는 마법"))
         // 삽입 역순으로 저장해 sort_order 정렬을 검증한다.
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = magicGlossary, sortOrder = 2))
         storyLorebookRepository.save(StoryLorebook(story = story, lorebook = worldGlossary, sortOrder = 1))
-        storyEndingRepository.save(StoryEnding(story = story, title = "배드 엔딩", content = "왕국은 무너진다", sortOrder = 2))
         storyEndingRepository.save(
-            StoryEnding(story = story, title = "해피 엔딩", content = "왕좌를 되찾는다", conditionText = "신뢰도 100 이상", sortOrder = 1),
+            StoryEnding(startSetting = startSetting, name = "배드 엔딩", minTurns = 5, achievementCondition = "왕국은 무너진다", epilogue = "잿더미 위에 홀로 선다", sortOrder = 2),
+        )
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "해피 엔딩", minTurns = 10, achievementCondition = "왕좌를 되찾는다", epilogue = "대관식을 연다", sortOrder = 1),
+        )
+        // 비활성(레거시 보존) 엔딩은 상세 조회에 나타나지 않는다(§4-3-10).
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "레거시", minTurns = 0, achievementCondition = "-", epilogue = "-", sortOrder = 3, enabled = false),
         )
 
         restTestClient.get()
@@ -84,12 +96,15 @@ class StoryLorebookEndingControllerIntegrationTests {
             .jsonPath("$.lorebooks[0].genre").isEqualTo("다크 판타지")
             .jsonPath("$.lorebooks[0].content").isEqualTo("아르덴: 몰락한 왕국")
             .jsonPath("$.lorebooks[1].name").isEqualTo("마법 용어집")
-            .jsonPath("$.endings.length()").isEqualTo(2)
-            .jsonPath("$.endings[0].title").isEqualTo("해피 엔딩")
-            .jsonPath("$.endings[0].conditionText").isEqualTo("신뢰도 100 이상")
-            .jsonPath("$.endings[0].enabled").isEqualTo(true)
-            .jsonPath("$.endings[1].title").isEqualTo("배드 엔딩")
-            .jsonPath("$.endings[1].conditionText").isEmpty
+            // 엔딩은 시작 설정 스코프로 중첩된다(KNK-515 복수화). 로어북은 스토리 스코프로 top-level 유지.
+            .jsonPath("$.startSettings.length()").isEqualTo(1)
+            .jsonPath("$.startSettings[0].endings.length()").isEqualTo(2)
+            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("해피 엔딩")
+            .jsonPath("$.startSettings[0].endings[0].requirement.minTurns").isEqualTo(10)
+            .jsonPath("$.startSettings[0].endings[0].requirement.achievementCondition").isEqualTo("왕좌를 되찾는다")
+            .jsonPath("$.startSettings[0].endings[0].epilogue").isEqualTo("대관식을 연다")
+            .jsonPath("$.startSettings[0].endings[1].name").isEqualTo("배드 엔딩")
+            .jsonPath("$.startSettings[0].endings[1].requirement.minTurns").isEqualTo(5)
     }
 
     @Test
@@ -102,7 +117,8 @@ class StoryLorebookEndingControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.lorebooks.length()").isEqualTo(0)
-            .jsonPath("$.endings.length()").isEqualTo(0)
+            // 시작 설정이 없으면 엔딩을 담을 시작 설정도 없다(엔딩은 시작 설정 스코프, KNK-515).
+            .jsonPath("$.startSettings.length()").isEqualTo(0)
     }
 
     @Test

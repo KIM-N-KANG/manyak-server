@@ -41,6 +41,9 @@ class SecurityConfig {
                         "/swagger-ui/**",
                         "/swagger-ui.html",
                         "/error",
+                        // 프로필 프리셋 이미지(static/profile-presets)는 공개 자산이다(스펙 §4-5 B7). 공개 스토리
+                        // author.profileImageUrl로 무인증 조회에 노출되므로 인증 없이 서빙해야 한다.
+                        "/profile-presets/**",
                     ).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/batch")).permitAll()
@@ -49,12 +52,18 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream")).permitAll()
                     // 로어북 카탈로그는 인증 없이 조회하는 공개 목록이다(일반 제작 참조용). {storyId} 매처보다 앞에 둬 명시적으로 허용한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks")).permitAll()
                     // 스토리 ID도 추측 불가능한 공개 식별자(UUID)다(KNK-256). 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}")).permitAll()
+                    // 일반 제작 등록은 인증 선택(익명 허용, 유효 토큰이면 user_id 귀속). 간편 제작과 동일 계층이다(§4-3-8).
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general")).permitAll()
+                    // 스토리 수정(§4-3-8): 수정 폼 조회·부분 갱신은 인증 선택. 소유권 검증(403)은 서비스가 처리한다.
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PATCH, "/api/v1/stories/{storyId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple")).permitAll()
@@ -103,7 +112,8 @@ class SecurityConfig {
         return BearerTokenResolver { request: HttpServletRequest ->
             if (
                 BEARER_SKIP_MATCHERS.any { it.matches(request) } ||
-                OPTIONAL_AUTH_MATCHERS.any { it.matches(request) }
+                OPTIONAL_AUTH_MATCHERS.any { it.matches(request) } ||
+                PUBLIC_STATIC_MATCHERS.any { it.matches(request) }
             ) {
                 // 공개 인증 경로(BEARER_SKIP) 또는 optional 인증 도메인 경로(OPTIONAL_AUTH)에서는
                 // RS 필터가 토큰을 resolve하지 않게 해 만료/위조 헤더로 401이 나지 않게 한다.
@@ -116,6 +126,12 @@ class SecurityConfig {
     }
 
     private companion object {
+        // 공개 정적 자산(프로필 프리셋 이미지, 스펙 §4-5 B7). permitAll이면서, 모바일 등이 자동 첨부한 만료/위조
+        // access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 토큰 resolve도 건너뛴다(공개 응답 author.profileImageUrl로 참조).
+        val PUBLIC_STATIC_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher("/profile-presets/**"),
+        )
+
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
@@ -133,9 +149,13 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PATCH, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple"),
@@ -153,7 +173,7 @@ class SecurityConfig {
     ): CorsConfigurationSource {
         val configuration = CorsConfiguration().apply {
             this.allowedOrigins = allowedOrigins.split(",").map { it.trim() }
-            allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
+            allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
             allowedHeaders = listOf("*")
             // 응답에 echo한 request_id를 브라우저 JS가 읽을 수 있게 노출한다.
             // (커스텀 헤더는 CORS-safelisted가 아니라 exposedHeaders 없이는 cross-origin에서 읽히지 않는다.)

@@ -43,8 +43,44 @@ manyak:
       client-ids: ${MANYAK_GOOGLE_CLIENT_IDS:}
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
+  asset:
+    # 프로필 프리셋 이미지(static/profile-presets/{명사}.png) 서빙 base URL(스펙 §4-5 B7).
+    # profile_image_url = base-url + "/profile-presets/{명사}.png". 후속 S3/CDN 전환은 이 값 치환만으로 된다.
+    profile-preset-base-url: ${MANYAK_ASSET_BASE_URL:https://api.manyak.app}
+    # 스토리 썸네일·채팅 이미지 CDN base URL(스펙 §4-3-9). URL = base-url + "/{prefix}/{imageKey}.png".
+    # 프로필 프리셋(서버 static)과 달리 S3 + CloudFront라 저장소·정본이 다르다.
+    # 운영 기본값을 굽는다(프로필 프리셋과 같은 관례). 이 값이 user-data env로 주입될 필요가 없어져
+    # 인프라 쪽 인스턴스 교체 apply가 불필요하다. 전제: 자산 업로드가 main 릴리스보다 선행해야 한다.
+    # 빈 값으로 덮으면 썸네일 URL은 null이 되고 프론트엔드가 placeholder를 표시한다(서버는 정상 기동).
+    image-base-url: ${MANYAK_IMAGE_BASE_URL:https://cdn.manyak.app}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
+  invite:
+    # 초대 공유 링크의 웹 베이스 URL. inviteUrl = base-url + "/" + inviteCode 로 만든다(GET /users/me/invite).
+    # 운영은 env(MANYAK_INVITE_BASE_URL)로 웹 도메인을 주입한다. 미설정 시 기본값을 쓴다.
+    base-url: ${MANYAK_INVITE_BASE_URL:https://manyak.app/invite}
+  credit:
+    # 적립·소모 정책값(스펙 §4-3-7, KNK-477 확정 · KNK-449). 서비스 @Value 기본값과 같은 수치를 명시해 운영 조정 경로를 남긴다.
+    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:500}
+    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:500}
+    invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:20}
+    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:10}
+    reconciliation:
+      # 선차감 대사 배치 on/off(스펙 §4-3-7, KNK-448). 유실 환불을 사후 보정한다. 테스트 프로파일은 끈다.
+      enabled: ${MANYAK_CREDIT_RECONCILIATION_ENABLED:true}
+      # 실행 주기(ms, fixedDelay). 기본 15분.
+      interval-ms: ${MANYAK_CREDIT_RECONCILIATION_INTERVAL_MS:900000}
+      # 부팅 후 첫 실행까지 지연(ms). 기동 직후 부하를 피한다.
+      initial-delay-ms: ${MANYAK_CREDIT_RECONCILIATION_INITIAL_DELAY_MS:60000}
+      # 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제).
+      charge-age-threshold: ${MANYAK_CREDIT_RECONCILIATION_CHARGE_AGE_THRESHOLD:PT15M}
+  guest-trial:
+    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정 → KNK-480 축소). 디바이스 ID별 Redis 카운터 3종, TTL 없음(Phase 1).
+    storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:5}
+    story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:1}
+    chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
@@ -52,6 +88,14 @@ manyak:
     # device_id 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
     # 전환기(KNK-317): 새 env가 없으면 구 MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER로 fallback. 롤아웃 완료 후 fallback 제거.
     device-id-pepper: ${MANYAK_ANALYTICS_DEVICE_ID_PEPPER:${MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER:}}
+    amplitude:
+      # 서버 분석 이벤트(server_*) Amplitude 발행 스위치(스펙 §4-7 B1, KNK-514). 기본 off — 켜고 api-key가 있어야 발행한다.
+      # 미설정/off면 발행 파사드는 정상 동작하되 싱크가 no-op이라 운영·로컬·테스트에서 조용히 꺼진다.
+      enabled: ${MANYAK_ANALYTICS_AMPLITUDE_ENABLED:false}
+      # Amplitude 프로젝트 API 키. 운영은 env/secret(MANYAK_AMPLITUDE_API_KEY)로 주입한다. 빈 값이면 발행하지 않는다.
+      api-key: ${MANYAK_AMPLITUDE_API_KEY:}
+      # HTTP V2 API 베이스 URL. 리전에 따라 api2.amplitude.com(US) 또는 api.eu.amplitude.com(EU).
+      base-url: ${MANYAK_AMPLITUDE_BASE_URL:https://api2.amplitude.com}
 
 sentry:
   # DSN 미설정(빈 값)이면 Sentry는 비활성(no-op)이다. 운영에서 SENTRY_DSN으로 주입한다.

@@ -1,5 +1,9 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
@@ -8,8 +12,10 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -39,6 +45,9 @@ class ChatQueryControllerIntegrationTests {
     private lateinit var storyStartSettingRepository: StoryStartSettingRepository
 
     @Autowired
+    private lateinit var storyEndingRepository: StoryEndingRepository
+
+    @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
     @Autowired
@@ -51,6 +60,12 @@ class ChatQueryControllerIntegrationTests {
     private lateinit var storyChoiceRepository: StoryChoiceRepository
 
     @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -61,7 +76,7 @@ class ChatQueryControllerIntegrationTests {
     @Test
     fun `채팅 상세는 USER+ASSISTANT를 턴으로 페어링하고 턴별 선택지를 포함한다`() {
         val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
-        storyStartSettingRepository.save(
+        val startSetting = storyStartSettingRepository.save(
             StoryStartSetting(
                 story = story,
                 name = "입학 적성 검사",
@@ -69,7 +84,7 @@ class ChatQueryControllerIntegrationTests {
                 startSituation = "적성 검사 직전의 검사장.",
             ),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
 
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         val assistant1 = message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
@@ -101,6 +116,49 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$.turns[1].aiOutput").isEqualTo("검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
             .jsonPath("$.turns[1].choices.length()").isEqualTo(1)
             .jsonPath("$.turns[1].choices[0]").isEqualTo("자리를 벗어난다.")
+    }
+
+    @Test
+    fun `채팅 상세 턴은 도달 엔딩이 있으면 엔딩 이름을, 미도달 턴은 null을 노출한다`() {
+        // 엔딩은 이름으로만 노출한다(순차 PK 노출 금지, KNK-462). SSE completed와 같은 계약을 상세 턴에도 채운다(§4-3-3·§4-3-10).
+        val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
+        val startSetting = storyStartSettingRepository.save(
+            StoryStartSetting(
+                story = story,
+                name = "입학 적성 검사",
+                prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.",
+                startSituation = "적성 검사 직전의 검사장.",
+            ),
+        )
+        val ending = storyEndingRepository.save(
+            StoryEnding(
+                startSetting = startSetting,
+                name = "각성한 무속성",
+                minTurns = 1,
+                achievementCondition = "숨어 있던 힘을 각성한다",
+                epilogue = "전설의 시작이었다.",
+                sortOrder = 1,
+            ),
+        )
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+
+        // 1턴: 엔딩 미도달(reachedEndingId 없음)
+        message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
+        val assistant1 = message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
+        // 2턴: 엔딩 도달(도달 턴의 ASSISTANT 메시지에 reachedEndingId 저장)
+        message(session.id, MessageRole.USER, "깨진 수정에 손을 뻗는다.", 3)
+        val assistant2 = messageWithEnding(session.id, "깨진 수정 위로 무속성의 빛이 폭발했다.", 4, ending.id)
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${session.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(2)
+            .jsonPath("$.turns[0].id").isEqualTo(assistant1.id)
+            .jsonPath("$.turns[0].reachedEnding").isEmpty()
+            .jsonPath("$.turns[1].id").isEqualTo(assistant2.id)
+            .jsonPath("$.turns[1].reachedEnding").isEqualTo("각성한 무속성")
     }
 
     @Test
@@ -140,7 +198,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
 
         restTestClient.get()
             .uri("/api/v1/chats/${session.publicId}")
@@ -168,7 +226,7 @@ class ChatQueryControllerIntegrationTests {
         storySuggestedInputRepository.save(
             StorySuggestedInput(startSetting = startSetting, inputText = "검사장을 둘러본다.", inputOrder = 1),
         )
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
         message(session.id, MessageRole.USER, "이름은 강진우야.", 1)
         message(session.id, MessageRole.ASSISTANT, "강진우라는 이름이 기록판에 새겨졌다.", 2)
 
@@ -310,6 +368,102 @@ class ChatQueryControllerIntegrationTests {
             .jsonPath("$[0].turnCount").isEqualTo(0)
     }
 
+    // ---- 소유권 게이트(§4-5, KNK-480): 채팅 상세 조회 ----
+
+    @Test
+    fun `회원 소유 채팅 상세는 소유자만 조회할 수 있다`() {
+        val owner = saveUser("소유자")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.id").isEqualTo(chat.publicId.toString())
+    }
+
+    @Test
+    fun `회원 소유 채팅 상세를 타인이나 미인증이 조회하면 403이다`() {
+        val owner = saveUser("소유자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
+
+        // 타인 회원: 403
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(other.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+
+        // 미인증: 403
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    @Test
+    fun `회원이 게스트(NULL) 소유 채팅 상세를 조회하면 403이다`() {
+        // 교차 접근 차단: 인증 회원은 게스트가 만든 NULL 소유 채팅을 열람할 수 없다. 게스트(미인증)의 게스트 채팅 조회는 허용(다른 테스트).
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.get()
+            .uri("/api/v1/chats/${guestChat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    // ---- 소유권 게이트(§4-5, §4-8 B16, KNK-497): 채팅 배치 조회 열람 필터 ----
+
+    @Test
+    fun `회원이 배치 조회하면 타인 소유 채팅과 게스트(NULL) 소유 채팅은 결과에서 제외된다`() {
+        val requester = saveUser("요청자")
+        val other = saveUser("타인")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val ownChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = requester.id))
+        val otherChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = other.id))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(requester.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${ownChat.publicId}","${otherChat.publicId}","${guestChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(ownChat.publicId.toString())
+    }
+
+    @Test
+    fun `게스트가 배치 조회하면 게스트(NULL) 소유 채팅만 포함되고 회원 소유 채팅은 제외된다`() {
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "스토리"))
+        val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
+        val memberChat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${guestChat.publicId}","${memberChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(1)
+            .jsonPath("$[0].id").isEqualTo(guestChat.publicId.toString())
+    }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+
     private fun message(chatId: Long, role: MessageRole, content: String, order: Int): StoryMessage =
         storyMessageRepository.save(
             StoryMessage(
@@ -317,6 +471,17 @@ class ChatQueryControllerIntegrationTests {
                 role = role,
                 content = content,
                 messageOrder = order,
+            ),
+        )
+
+    private fun messageWithEnding(chatId: Long, content: String, order: Int, endingId: Long): StoryMessage =
+        storyMessageRepository.save(
+            StoryMessage(
+                chatId = chatId,
+                role = MessageRole.ASSISTANT,
+                content = content,
+                messageOrder = order,
+                reachedEndingId = endingId,
             ),
         )
 

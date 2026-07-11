@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.social_accounts](public.social_accounts.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -13,14 +13,21 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
+| invite_code | varchar(16) |  | true |  |  |  |
+| inviter_user_id | bigint |  | true |  | [public.users](public.users.md) |  |
+| migrated_at | timestamp with time zone |  | true |  |  |  |
+| migration_attempts | integer | 0 | false |  |  |  |
+| member_trial_seeded_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_users_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'SUSPENDED'::character varying, 'DELETED'::character varying])::text[]))) |
+| fk_users_inviter_user_id | FOREIGN KEY | FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL |
 | users_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_users_public_id | UNIQUE | UNIQUE (public_id) |
+| uq_users_invite_code | UNIQUE | UNIQUE (invite_code) |
 
 ## Indexes
 
@@ -28,13 +35,19 @@
 | ---- | ---------- |
 | users_pkey | CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id) |
 | uq_users_public_id | CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id) |
+| uq_users_invite_code | CREATE UNIQUE INDEX uq_users_invite_code ON public.users USING btree (invite_code) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
+"public.users" }o--o| "public.users" : "FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE SET NULL"
 "public.social_accounts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_wallets" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.users" {
   bigint id
@@ -46,6 +59,11 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  varchar_16_ invite_code
+  bigint inviter_user_id FK
+  timestamp_with_time_zone migrated_at
+  integer migration_attempts
+  timestamp_with_time_zone member_trial_seeded_at
 }
 "public.social_accounts" {
   bigint id
@@ -57,6 +75,39 @@ erDiagram
   timestamp_with_time_zone last_login_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.credit_wallets" {
+  bigint id
+  bigint user_id FK
+  bigint balance
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.credit_transactions" {
+  bigint id
+  bigint user_id FK
+  bigint amount
+  varchar_30_ reason
+  varchar_30_ ref_type
+  bigint ref_id
+  varchar_255_ idempotency_key
+  timestamp_with_time_zone created_at
+}
+"public.credit_lots" {
+  bigint id
+  bigint user_id FK
+  bigint transaction_id FK
+  bigint original_amount
+  bigint remaining
+  timestamp_with_time_zone expires_at
+  timestamp_with_time_zone created_at
+}
+"public.user_story_ending_reaches" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  bigint ending_id FK
+  timestamp_with_time_zone created_at
 }
 ```
 

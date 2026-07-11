@@ -4,12 +4,13 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_messages_id_seq'::regclass) | false | [public.story_choices](public.story_choices.md) |  |  |
+| id | bigint | nextval('story_messages_id_seq'::regclass) | false | [public.story_choices](public.story_choices.md) [public.story_message_versions](public.story_message_versions.md) |  |  |
 | chat_id | bigint |  | false |  | [public.story_chats](public.story_chats.md) |  |
 | role | varchar(16) |  | false |  |  |  |
 | content | text |  | false |  |  |  |
 | message_order | integer |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 
 ## Constraints
 
@@ -19,6 +20,7 @@
 | ck_story_messages_role | CHECK | CHECK (((role)::text = ANY ((ARRAY['USER'::character varying, 'ASSISTANT'::character varying, 'SYSTEM'::character varying])::text[]))) |
 | story_messages_chat_id_fkey | FOREIGN KEY | FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE |
 | story_messages_pkey | PRIMARY KEY | PRIMARY KEY (id) |
+| fk_story_messages_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | uq_story_messages_order | UNIQUE | UNIQUE (chat_id, message_order) |
 
 ## Indexes
@@ -34,7 +36,9 @@
 erDiagram
 
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+"public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 
 "public.story_messages" {
   bigint id
@@ -43,6 +47,7 @@ erDiagram
   text content
   integer message_order
   timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
 }
 "public.story_choices" {
   bigint id
@@ -52,6 +57,14 @@ erDiagram
   smallint choice_order
   boolean is_selected
   timestamp_with_time_zone selected_at
+  timestamp_with_time_zone created_at
+}
+"public.story_message_versions" {
+  bigint id
+  bigint message_id FK
+  integer version_number
+  text content
+  text choices
   timestamp_with_time_zone created_at
 }
 "public.story_chats" {
@@ -67,6 +80,25 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
   uuid public_id
+  integer regenerated_count
+  bigint target_main_event_id FK
+  integer target_progress_turns
+  bigint reached_ending_id FK
+}
+"public.story_endings" {
+  bigint id
+  varchar_100_ title
+  text content
+  text condition_text
+  smallint sort_order
+  boolean enabled
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  bigint start_setting_id FK
+  varchar_100_ name
+  integer min_turns
+  text achievement_condition
+  text epilogue
 }
 ```
 

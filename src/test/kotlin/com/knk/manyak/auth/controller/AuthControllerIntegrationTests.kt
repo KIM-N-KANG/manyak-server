@@ -8,6 +8,9 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.AttendanceRewardService
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -63,6 +66,12 @@ class AuthControllerIntegrationTests {
     private lateinit var properties: AuthProperties
 
     @Autowired
+    private lateinit var creditWalletService: CreditWalletService
+
+    @Autowired
+    private lateinit var attendanceRewardService: AttendanceRewardService
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -75,6 +84,7 @@ class AuthControllerIntegrationTests {
             User(
                 nickname = "manyak_user",
                 profileImageUrl = "https://example.com/profile.png",
+                profileThumbnailBase64 = "dGh1bWJuYWls",
                 status = UserStatus.ACTIVE,
             ),
         )
@@ -136,7 +146,42 @@ class AuthControllerIntegrationTests {
             .jsonPath("$.id").isEqualTo(user.publicId.toString())
             .jsonPath("$.nickname").isEqualTo("manyak_user")
             .jsonPath("$.profileImageUrl").isEqualTo("https://example.com/profile.png")
+            // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17).
+            .jsonPath("$.profileThumbnailBase64").isEqualTo("dGh1bWJuYWls")
             .jsonPath("$.status").isEqualTo("ACTIVE")
+    }
+
+    @Test
+    fun `활동이 없는 사용자의 me 응답은 creditBalance 0, attendedToday false다`() {
+        val user = saveUser()
+        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
+
+        restTestClient.get()
+            .uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $accessToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(0)
+            .jsonPath("$.attendedToday").isEqualTo(false)
+    }
+
+    @Test
+    fun `크레딧 적립과 출석 후 me 응답에 잔액과 출석 여부가 반영된다`() {
+        val user = saveUser()
+        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
+        creditWalletService.reward(user.id, 500, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        attendanceRewardService.claimDailyAttendance(user.id)
+        val expectedBalance = creditWalletService.balanceOf(user.id)
+
+        restTestClient.get()
+            .uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $accessToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(expectedBalance)
+            .jsonPath("$.attendedToday").isEqualTo(true)
     }
 
     @Test
@@ -152,6 +197,21 @@ class AuthControllerIntegrationTests {
     }
 
     // ---- POST /api/v1/auth/token/refresh ----
+
+    @Test
+    fun `정지된 계정은 refresh 회전이 403이고 토큰 계열이 폐기된다`() {
+        val user = saveUser()
+        val issued = authTokenService.issueTokens(user)
+        user.status = UserStatus.SUSPENDED
+        userRepository.save(user)
+
+        restTestClient.post()
+            .uri("/api/v1/auth/token/refresh")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"${issued.refreshToken}"}""")
+            .exchange()
+            .expectStatus().isForbidden
+    }
 
     @Test
     fun `유효한 refresh로 회전하면 200과 새 토큰을 반환한다`() {

@@ -1,24 +1,25 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
-import com.knk.manyak.story.dto.StoryEndingResponse
-import com.knk.manyak.story.dto.StoryStartSettingResponse
-import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -29,11 +30,14 @@ import java.util.UUID
 @Service
 class StoryService(
     private val storyRepository: StoryRepository,
-    private val storyStartSettingRepository: StoryStartSettingRepository,
-    private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    private val startSettingResponseAssembler: StartSettingResponseAssembler,
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    private val storyMainEventRepository: StoryMainEventRepository,
+    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    private val storyChatRepository: StoryChatRepository,
+    private val imageUrlResolver: ImageUrlResolver,
 ) {
 
     @Transactional(readOnly = true)
@@ -45,71 +49,100 @@ class StoryService(
     }
 
     @Transactional(readOnly = true)
-    fun getStoriesByIds(request: BatchStoryRequest): List<StorySummaryResponse> {
+    fun getStoriesByIds(request: BatchStoryRequest, userId: Long?): List<StorySummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.storyIds.mapNotNull { parsePublicIdOrNull(it) }.distinct()
         // 유효한 식별자가 하나도 없으면 DB 조회 없이 즉시 빈 목록을 반환한다.
         if (requestedPublicIds.isEmpty()) {
             return emptyList()
         }
+        // 공개 목록은 공개(PUBLISHED∧PUBLIC) 스토리만, 단 요청자가 소유자면 자신의 비공개·초안도 노출한다(KNK-401).
         val storiesByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
+            .filter { it.isReadableBy(userId) }
             .associateBy { it.publicId }
         // 요청 순서를 보존한다. 존재하지 않거나 삭제된 스토리는 자연히 제외된다.
         return requestedPublicIds
             .mapNotNull { storiesByPublicId[it] }
-            .map { it.toSummaryResponse() }
+            .toSummaryResponses()
     }
 
+    /**
+     * 회원 서재(KNK-447): 요청자가 소유한 스토리 카드를 생성 최신순으로 반환한다. 소프트 삭제는 제외한다.
+     * 카드 스키마는 [getStoriesByIds](/stories/batch)와 동일하다([Story.toSummaryResponse]).
+     */
     @Transactional(readOnly = true)
-    fun getStoryDetail(storyId: String): StoryDetailResponse {
+    fun getMyStories(userId: Long, limit: Int): List<StorySummaryResponse> =
+        storyRepository
+            .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, limit))
+            .toSummaryResponses()
+
+    @Transactional(readOnly = true)
+    fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
         val story = resolveStory(storyId)
+        // 공개 상세 조회는 공개(PUBLISHED∧PUBLIC) 스토리만, 단 소유자는 자신의 비공개·초안도 볼 수 있다(KNK-401).
+        // 존재 노출 최소화를 위해 접근 불가면 존재하지 않는 것과 동일하게 404로 통일한다.
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
-        val startSetting = storyStartSettingRepository.findByStoryId(story.id)
-        val suggestedInputs = startSetting
-            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it.id) }
-            ?.map { it.inputText }
-            ?: emptyList()
+        // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
+        val startSettings = startSettingResponseAssembler.assemble(story.id)
 
         val lorebooks = storyLorebookRepository.findByStoryIdOrderBySortOrderAscIdAsc(story.id)
             .map { it.toLorebookResponse() }
-        val endings = storyEndingRepository.findByStoryIdOrderBySortOrderAsc(story.id)
-            .map { it.toEndingResponse() }
+        val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+            .map { it.toMainEventResponse() }
+        // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
+        // 저장은 ending id 기준이라 무모호하며, 노출은 이름으로 한다(엔딩 목록과 이름으로 상관, KNK-462).
+        val reachedEndings = resolveReachedEndingNames(userId, story.id)
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
-            coverImageUrl = null,
+            thumbnailUrl = imageUrlResolver.urlFor(story.thumbnailImageKey, ImagePresetType.THUMBNAIL),
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
             genres = story.toGenreNames(),
             hashtags = emptyList(),
             author = null,
-            chatCount = 0,
+            turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
             likeCount = 0,
-            startSetting = startSetting?.let {
-                StoryStartSettingResponse(
-                    name = it.name,
-                    prologue = it.prologue,
-                    startSituation = it.startSituation,
-                )
-            },
-            suggestedInputs = suggestedInputs,
-            visibility = StoryVisibility.PRIVATE,
-            status = StoryStatus.PUBLISHED,
+            startSettings = startSettings,
+            visibility = story.visibility,
+            status = story.status,
             lorebooks = lorebooks,
-            endings = endings,
+            mainEvents = mainEvents,
+            reachedEndings = reachedEndings,
             createdAt = story.createdAt,
         )
+    }
+
+    /** 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서(sort_order)로 반환한다. 게스트는 빈 목록. */
+    private fun resolveReachedEndingNames(userId: Long?, storyId: Long): List<String> {
+        if (userId == null) {
+            return emptyList()
+        }
+        val reachedIds = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId).map { it.endingId }
+        if (reachedIds.isEmpty()) {
+            return emptyList()
+        }
+        return storyEndingRepository.findAllById(reachedIds).sortedBy { it.sortOrder }.map { it.name }
     }
 
     /**
      * 스토리를 소프트 삭제한다. 행을 물리 삭제하지 않고 deletedAt만 기록해 자식 데이터(설정·시작 설정·추천 입력)를 보존한다.
      * 형식이 잘못됐거나 이미 삭제됐거나 존재하지 않으면 404로 통일한다.
+     * 존재 여부를 노출하지 않도록 소유권 403은 404(없음·이미 삭제) 판정 뒤에 적용한다.
      */
     @Transactional
-    fun deleteStory(storyId: String) {
-        val story = resolveStory(storyId)
+    fun deleteStory(storyId: String, userId: Long?) {
+        // 소유권 검사와 deletedAt 기록 사이에 마이그레이션 클레임이 끼어드는 경쟁을 막으려 행에 비관적 쓰기 락을 건다(KNK-69).
+        val story = resolveStoryForUpdate(storyId)
+        // 소유권 게이트(§4-5, KNK-480): 게스트 스토리는 게스트만, 소유 스토리는 소유자만. 회원의 NULL 소유 스토리 삭제도 차단. 위반 시 403.
+        if (!isOwnerAccessAllowed(story.userId, userId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
+        }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
     }
@@ -122,6 +155,14 @@ class StoryService(
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+    }
+
+    /** [resolveStory]와 같으나 행에 비관적 쓰기 락을 걸어 조회한다(삭제 소유권 검사의 마이그레이션 클레임 경쟁 차단 — KNK-69). */
+    private fun resolveStoryForUpdate(publicId: String): Story {
+        val parsed = parsePublicIdOrNull(publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        return storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 
@@ -143,15 +184,6 @@ class StoryService(
             content = lorebook.content,
         )
 
-    private fun StoryEnding.toEndingResponse(): StoryEndingResponse =
-        StoryEndingResponse(
-            title = title,
-            content = content,
-            conditionText = conditionText,
-            sortOrder = sortOrder.toInt(),
-            enabled = enabled,
-        )
-
     private fun Story.toGenreNames(): List<String> =
         genre
             ?.split(",")
@@ -159,16 +191,28 @@ class StoryService(
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    private fun Story.toSummaryResponse(): StorySummaryResponse =
+    /** 스토리 목록을 카드 응답으로 매핑한다. turnCount는 한 번의 배치 집계로 채운다(N+1 방지). */
+    private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
+        if (isEmpty()) {
+            return emptyList()
+        }
+        val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
+            .associate { it.storyId to it.turnCount }
+        return map { it.toSummaryResponse(turnCount = turnCountByStoryId[it.id] ?: 0) }
+    }
+
+    private fun Story.toSummaryResponse(turnCount: Long): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
+            // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형).
+            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageKey),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),
             author = null,
-            chatCount = 0,
+            turnCount = turnCount,
             likeCount = 0,
-            status = StoryStatus.PUBLISHED,
+            status = this.status,
             createdAt = createdAt,
         )
 }

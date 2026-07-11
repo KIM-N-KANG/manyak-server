@@ -68,6 +68,10 @@ class RestChatTurnAiClient(
                                 aiOutput = data.aiOutput,
                                 choices = data.choices ?: emptyList(),
                                 meta = data.meta?.toAiCallMeta(),
+                                targetMainEvent = data.targetMainEvent
+                                    ?.let { ChatTurnTargetMainEventResult(it.name, it.progressTurns) },
+                                occurredMainEventName = data.occurredMainEventName,
+                                endingName = data.endingName,
                             )
                         }
                         EVENT_ERROR -> {
@@ -102,6 +106,16 @@ class RestChatTurnAiClient(
         val aiOutput: String,
         val choices: List<String>? = null,
         val meta: ChatCompletedMeta? = null,
+        // AI 판정 결과. 와이어 키는 camelCase(targetMainEvent{name, progressTurns}·occurredMainEventName·endingName)다.
+        val targetMainEvent: CompletedTargetMainEvent? = null,
+        val occurredMainEventName: String? = null,
+        val endingName: String? = null,
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class CompletedTargetMainEvent(
+        val name: String,
+        val progressTurns: Int,
     )
 
     /**

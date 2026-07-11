@@ -6,7 +6,13 @@ import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
+import com.knk.manyak.credit.InsufficientCreditException
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.ApiErrorResponse
+import com.knk.manyak.global.error.CodedResponseStatusException
+import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -26,9 +32,11 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @Tag(name = "Chats", description = "채팅 API")
@@ -53,12 +61,12 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "스토리를 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -93,14 +101,16 @@ class ChatController(
             ApiResponse(
                 responseCode = "400",
                 description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
     @PostMapping("/chats/batch")
     fun getChatsByIds(
         @Valid @RequestBody request: BatchChatRequest,
-    ): List<ChatSummaryResponse> = chatService.getChatsByIds(request)
+        // optional 인증: 열람 불가 항목(회원 요청의 NULL 채팅·타인 소유)을 조용히 제외하는 데 쓴다(스펙 §4-5 B16).
+        @CurrentUserId userId: Long?,
+    ): List<ChatSummaryResponse> = chatService.getChatsByIds(request, userId)
 
     @Operation(
         summary = "채팅 상세 조회",
@@ -114,9 +124,14 @@ class ChatController(
                 content = [Content(schema = Schema(implementation = ChatDetailResponse::class))],
             ),
             ApiResponse(
+                responseCode = "403",
+                description = "채팅 소유자가 아님(회원의 게스트 채팅 조회 포함)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -124,19 +139,26 @@ class ChatController(
     fun getChatDetail(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
-    ): ChatDetailResponse = chatService.getChatDetail(chatId)
+        @CurrentUserId userId: Long?,
+    ): ChatDetailResponse = chatService.getChatDetail(chatId, userId)
 
     @Operation(
         summary = "채팅 삭제",
-        description = "채팅을 소프트 삭제합니다. 삭제된 채팅은 목록·상세 조회에서 제외됩니다.",
+        description = "채팅을 소프트 삭제합니다. 삭제된 채팅은 목록·상세 조회에서 제외됩니다. " +
+            "인증은 선택이며 회원 소유 채팅은 소유자만(타인·미인증 403), 소유자 없는 게스트 채팅은 허용합니다.",
     )
     @ApiResponses(
         value = [
             ApiResponse(responseCode = "204", description = "삭제 성공"),
             ApiResponse(
+                responseCode = "403",
+                description = "채팅 소유자가 아님",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음(이미 삭제됨 포함)",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -145,7 +167,8 @@ class ChatController(
     fun deleteChat(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
-    ) = chatService.deleteChat(chatId)
+        @CurrentUserId userId: Long?,
+    ) = chatService.deleteChat(chatId, userId)
 
     @Operation(
         summary = "채팅 이어쓰기 스트리밍",
@@ -168,13 +191,24 @@ class ChatController(
             ),
             ApiResponse(
                 responseCode = "400",
-                description = "요청 값이 올바르지 않음",
-                content = [Content(schema = Schema(hidden = true))],
+                description = "요청 값이 올바르지 않음(게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
+                // SSE 엔드포인트(produces=text/event-stream)지만 에러는 동기 application/json 바디로 나가므로 mediaType을 명시한다.
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "402",
+                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원). 소유자만 이어쓸 수 있습니다.",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
                 responseCode = "404",
                 description = "채팅을 찾을 수 없음",
-                content = [Content(schema = Schema(hidden = true))],
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
         ],
     )
@@ -186,6 +220,10 @@ class ChatController(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
         @Valid @RequestBody request: ContinueChatRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+        // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
         response: HttpServletResponse,
     ): SseEmitter {
         // SSE 본문은 UTF-8 한글을 포함한다. SseEmitter는 Content-Type을 charset 없는
@@ -194,6 +232,98 @@ class ChatController(
         // 디코딩해 한글이 깨진다. (세션 404는 아래 호출에서 동기로 던져지며, 에러 응답은
         // 메시지 컨버터가 application/json으로 Content-Type을 다시 덮어쓴다.)
         response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
-        return chatService.streamChatTurn(chatId = chatId, request = request)
+        return try {
+            chatService.streamChatTurn(chatId = chatId, request = request, userId = userId, deviceId = deviceId)
+        } catch (exception: InsufficientCreditException) {
+            // 회원 선차감은 streamChatTurn이 SseEmitter를 만들기 전에 동기로 수행하므로, 잔액 부족 예외는
+            // 스트림이 열리기 전에 이 요청 스레드로 전파된다. 여기서 402로 변환해 동기 HTTP 응답으로 돌려준다
+            // (스트림 안 error 이벤트가 아님, 스펙 §4-3-7). 공유 @ControllerAdvice를 추가하지 않고 컨트롤러에서 지역 변환한다.
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "크레딧이 부족합니다.",
+                exception,
+            )
+        }
+    }
+
+    @Operation(
+        summary = "AI 응답 재생성 스트리밍",
+        description = "마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체하고 SSE로 스트리밍합니다(스펙 §4-3-9, 리롤이 아니라 재생성). " +
+            "이어쓰기와 동일하게 started, token, completed 순서로 전달되며, completed에는 교체된 aiOutput 전체와 선택지가 포함됩니다. " +
+            "새 턴을 추가하지 않고 마지막 턴의 본문·선택지만 교체하므로 사용자 입력과 턴 수(turnCount)는 변하지 않습니다. " +
+            "이전 출력·선택지는 덮어쓰기 직전 버전 이력(story_message_versions, V37)에 보존되며, 상세 조회·completed에는 활성본만 실립니다. " +
+            "요청 turnId가 서버의 마지막 턴과 다르면 409로 거절합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "SSE 스트리밍 시작 성공",
+                content = [
+                    Content(
+                        mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
+                        schema = Schema(
+                            type = "string",
+                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\",\"choices\":[\"주변을 살핀다.\"]}\n\n",
+                        ),
+                    ),
+                ],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음(turnId 누락·비양수, 게스트의 X-Manyak-Device-Id 헤더 누락 포함)",
+                // SSE 엔드포인트(produces=text/event-stream)지만 에러는 동기 application/json 바디로 나가므로 mediaType을 명시한다.
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "402",
+                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원).",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "채팅을 찾을 수 없거나 재생성할 턴이 없음(턴 0개)",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "409",
+                description = "요청 turnId가 서버의 마지막 턴과 다르거나(진행됨), 엔딩에 도달한 채팅",
+                content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+        ],
+    )
+    @PostMapping(
+        "/chats/{chatId}/turns/regenerate/stream",
+        produces = [MediaType.TEXT_EVENT_STREAM_VALUE],
+    )
+    fun regenerateChatTurn(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+        @Valid @RequestBody request: RegenerateChatRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+        // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+        response: HttpServletResponse,
+    ): SseEmitter {
+        // 이어쓰기와 동일하게 SSE 본문 charset을 UTF-8로 고정한다(한글 깨짐 방지).
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return try {
+            chatService.regenerateChatTurn(chatId = chatId, request = request, userId = userId, deviceId = deviceId)
+        } catch (exception: InsufficientCreditException) {
+            // 선차감은 스트림을 열기 전에 동기로 수행되므로 잔액 부족은 여기로 전파된다. 402로 변환한다(§4-3-7).
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "크레딧이 부족합니다.",
+                exception,
+            )
+        }
     }
 }

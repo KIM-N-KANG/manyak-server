@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
@@ -11,6 +12,15 @@ import java.time.Instant
 data class CreateChatRequest(
     @field:Schema(description = "채팅을 시작할 스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val storyId: String,
+
+    // 시작 설정 복수화(KNK-515): 어느 시작 설정으로 시작할지 선택한다. 생략하면 스토리의 첫(기본) 시작 설정을 쓴다.
+    // 지정한 값이 이 스토리에 속하지 않으면 404다(조용한 폴백 금지).
+    @field:Schema(
+        description = "채팅을 시작할 시작 설정 ID(공개 식별자). 생략하면 스토리의 첫 시작 설정을 사용한다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val startSettingId: String? = null,
 )
 
 @Schema(description = "채팅 생성 응답")
@@ -74,11 +84,24 @@ data class ChatSummaryResponse(
     @field:Schema(description = "스토리 제목", example = "호아킨 아카데미의 무속성 신입생")
     val storyTitle: String,
 
+    @field:Schema(
+        description = "참조 스토리 썸네일의 축소 변형 URL(§4-3-9 반응형 변형). 소스가 없으면 null.",
+        example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
+        nullable = true,
+    )
+    val thumbnailUrlSm: String?,
+
     @field:Schema(description = "마지막으로 생성된 이야기 일부", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
     val lastStoryPreview: String,
 
     @field:Schema(description = "이 채팅에서 사용자가 이어쓴 횟수(완료된 턴 수)", example = "2")
     val turnCount: Int,
+
+    @field:ArraySchema(
+        schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
+        arraySchema = Schema(description = "이 채팅에서 도달한 엔딩 이름(도달 전이면 빈 배열). 프론트가 스토리별로 합산합니다."),
+    )
+    val reachedEndings: List<String>,
 
     @field:Schema(description = "마지막 진행 시각", example = "2026-06-12T12:10:00Z")
     val updatedAt: Instant,
@@ -143,6 +166,10 @@ data class ChatTurnResponse(
     )
     val choices: List<String>,
 
+    // 엔딩은 이름으로 식별한다(KNK-462). 순차 PK는 노출하지 않으므로 도달 엔딩도 이름으로 싣는다. SSE completed와 같은 계약.
+    @field:Schema(description = "이번 턴에 도달한 엔딩 이름(도달 아니면 null)", nullable = true, example = "왕좌를 되찾다")
+    val reachedEnding: String? = null,
+
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:10:00Z")
     val createdAt: Instant,
 )
@@ -156,6 +183,17 @@ data class ContinueChatRequest(
         example = "다들 평범하게 속성을 발현한다. 나는 검사를 했지만 마법수정에서 아무런 빛이 나오지 않았다. 무속성 판정을 받고 단상 아래로 내려가는 중 마법수정에 금이 가더니 순식간에 깨져버렸다.",
     )
     val userInput: String,
+)
+
+@Schema(description = "AI 응답 재생성 요청")
+data class RegenerateChatRequest(
+    @field:Positive
+    @field:Schema(
+        description = "재생성할 마지막 턴 ID(공개 채팅 상세의 turns[].id). 서버가 보는 마지막 턴과 다르면 409로 거절합니다. " +
+            "재생성은 이 마지막 턴의 AI 출력과 선택지만 같은 사용자 입력으로 다시 생성해 교체하며, 이전 출력·선택지는 버전 이력(V37)에 보존됩니다.",
+        example = "3",
+    )
+    val turnId: Long,
 )
 
 @Schema(description = "SSE 스트리밍 시작 이벤트 예시")
@@ -186,6 +224,10 @@ data class ChatStreamCompletedEvent(
         arraySchema = Schema(description = "이번 턴에서 AI가 제안한 다음 행동 선택지 목록"),
     )
     val choices: List<String>,
+
+    // 엔딩은 이름으로 식별한다(KNK-462). 순차 PK는 노출하지 않으므로 도달 엔딩도 이름으로 싣는다.
+    @field:Schema(description = "이번 턴에 도달한 엔딩 이름(엔딩 응답이 아니면 null)", nullable = true, example = "왕좌를 되찾다")
+    val reachedEnding: String? = null,
 )
 
 @Schema(description = "SSE 오류 이벤트 예시")

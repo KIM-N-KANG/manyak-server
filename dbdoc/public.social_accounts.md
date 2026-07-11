@@ -59,6 +59,11 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+  varchar_16_ invite_code
+  bigint inviter_user_id FK
+  timestamp_with_time_zone migrated_at
+  integer migration_attempts
+  timestamp_with_time_zone member_trial_seeded_at
 }
 ```
 

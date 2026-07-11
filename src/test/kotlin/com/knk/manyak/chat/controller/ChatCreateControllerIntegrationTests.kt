@@ -1,5 +1,9 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -44,6 +48,12 @@ class ChatCreateControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyMessageRepository: StoryMessageRepository
+
+    @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -162,6 +172,55 @@ class ChatCreateControllerIntegrationTests {
     }
 
     @Test
+    fun `startSettingId를 지정하면 그 시작 설정으로 채팅이 시작된다`() {
+        // 시작 설정 복수화(KNK-515): 첫 시작 설정이 기본이지만, startSettingId를 주면 그 시작 설정으로 시작한다.
+        val story = storyRepository.save(Story(title = "복수 시작 설정", genre = "판타지"))
+        storyStartSettingRepository.save(
+            StoryStartSetting(story = story, name = "첫 시작", prologue = "첫 프롤로그", startSituation = "첫 상황"),
+        )
+        val second = storyStartSettingRepository.save(
+            StoryStartSetting(story = story, name = "둘째 시작", prologue = "둘째 프롤로그", startSituation = "둘째 상황"),
+        )
+        storySuggestedInputRepository.save(
+            StorySuggestedInput(startSetting = second, inputText = "둘째의 추천", inputOrder = 1),
+        )
+
+        val response = restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}","startSettingId":"${second.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(CreateChatResponse::class.java)
+            .returnResult()
+            .responseBody!!
+
+        assertThat(response.prologue).isEqualTo("둘째 프롤로그")
+        assertThat(response.suggestedInputs).containsExactly("둘째의 추천")
+        assertThat(storyChatRepository.findAll().single().startSettingId).isEqualTo(second.id)
+    }
+
+    @Test
+    fun `이 스토리에 속하지 않는 startSettingId로 채팅을 생성하면 404다`() {
+        // 조용한 폴백 금지(KNK-515): 지정한 시작 설정이 이 스토리 소속이 아니면 404다.
+        val story = storyRepository.save(Story(title = "스토리 A"))
+        storyStartSettingRepository.save(StoryStartSetting(story = story, name = "A의 시작"))
+        val otherStory = storyRepository.save(Story(title = "스토리 B"))
+        val foreign = storyStartSettingRepository.save(StoryStartSetting(story = otherStory, name = "B의 시작"))
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}","startSettingId":"${foreign.publicId}"}""")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.message").isEqualTo("시작 설정을 찾을 수 없습니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
     fun `존재하지 않는 스토리로 채팅을 생성하면 404로 응답한다`() {
         val missing = java.util.UUID.randomUUID()
         restTestClient.post()
@@ -216,4 +275,57 @@ class ChatCreateControllerIntegrationTests {
 
         assertThat(storyChatRepository.count()).isZero()
     }
+
+    // ---- 소유권 게이트(§4-5, KNK-480): 회원-게스트 교차 접근 ----
+
+    @Test
+    fun `회원이 게스트(NULL) 소유 스토리로 채팅을 생성하면 403이다`() {
+        // 교차 접근 차단: 인증 회원은 게스트가 만든 NULL 소유 스토리에 채팅을 시작할 수 없다(이관 후 접근).
+        val member = saveUser("회원")
+        val story = storyRepository.save(Story(title = "게스트 스토리")) // userId null, 기본 PUBLISHED·PUBLIC
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
+    fun `회원이 본인 소유 스토리로 채팅을 생성하면 201이다`() {
+        // 소유자 있는 스토리 채팅 생성은 교차 접근 차단의 영향을 받지 않는다(회귀 가드).
+        val member = saveUser("작가")
+        val story = storyRepository.save(Story(title = "내 스토리", userId = member.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+    }
+
+    @Test
+    fun `회원이 공개 발행된 타인 스토리로 채팅을 생성하면 201이다`() {
+        // 소유자가 있는 공개 스토리는 다른 회원도 채팅을 시작할 수 있다(공개 플레이 유지).
+        val author = saveUser("작가")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(Story(title = "공개작", userId = author.id)) // 기본 PUBLISHED·PUBLIC
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(reader.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+    }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 }

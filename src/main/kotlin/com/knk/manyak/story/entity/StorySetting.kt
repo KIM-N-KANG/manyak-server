@@ -23,17 +23,18 @@ class StorySetting(
     @JoinColumn(name = "story_id", nullable = false, unique = true)
     val story: Story,
 
-    @Column(name = "world_setting", nullable = false, columnDefinition = "TEXT")
-    val worldSetting: String,
+    // 초안은 탭별로 부분 저장하므로 world/character가 아직 비어 있을 수 있다(KNK-401, DB NOT NULL 완화).
+    @Column(name = "world_setting", columnDefinition = "TEXT")
+    var worldSetting: String? = null,
 
-    @Column(name = "character_setting", nullable = false, columnDefinition = "TEXT")
-    val characterSetting: String,
+    @Column(name = "character_setting", columnDefinition = "TEXT")
+    var characterSetting: String? = null,
 
     @Column(name = "user_role_setting", columnDefinition = "TEXT")
-    val userRoleSetting: String? = null,
+    var userRoleSetting: String? = null,
 
     @Column(name = "rule_setting", columnDefinition = "TEXT")
-    val ruleSetting: String? = null,
+    var ruleSetting: String? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

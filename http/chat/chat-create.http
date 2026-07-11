@@ -1,0 +1,232 @@
+### 채팅 생성(Create Chat) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### 위에서부터 순서대로 실행하면 스토리를 하나 생성한 뒤 그 storyId로 채팅을 시작합니다.
+###
+### [KNK-178] 채팅 ID는 순차 정수가 아니라 추측 불가능한 공개 식별자(UUID, public_id)입니다.
+### [KNK-256] 스토리 식별자도 공개 식별자(UUID, public_id)로 전환됐습니다.
+###   요청 body의 storyId는 UUID 문자열이므로 반드시 따옴표로 감쌉니다. 순차 정수 추측은 404로 차단됩니다.
+### [KNK-257] 소프트 삭제된 스토리로는 채팅을 생성할 수 없습니다(404).
+###
+### [KNK-480] 교차 접근 차단: 인증 회원은 게스트(NULL) 소유 스토리에 채팅을 시작할 수 없습니다(403, 3-2번).
+###   소유자 있는(본인·공개 발행) 스토리 채팅 생성은 허용되며, 게스트(토큰 없음)의 게스트 스토리 채팅 생성도 허용됩니다.
+###
+### [KNK-185] 채팅 생성 응답에 suggestedInputs(추천 입력) 배열이 포함됩니다.
+###   start_setting의 story_suggested_inputs를 input_order 순으로 내려주며,
+###   시작 설정이나 등록된 추천 입력이 없으면 빈 배열입니다.
+###
+### [KNK-515] 시작 설정 복수화: 요청 body에 startSettingId(공개 식별자, 선택)를 넣어 특정 시작 설정으로 시작할 수 있습니다(3-3번).
+###   생략하면 스토리의 첫(기본) 시작 설정을 씁니다. 지정 값이 이 스토리에 속하지 않으면 404입니다(조용한 폴백 없음).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
+
+@baseUrl = http://localhost:8080
+# 3-2번(소유권 403) 검증용 회원 토큰. auth-login-google.http 5번을 먼저 실행하면 전역 accessToken이 채워집니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+# [KNK-477] 게스트 체험 한도 대상 요청은 X-Manyak-Device-Id 헤더가 필수입니다.
+#   실행마다 새 deviceId를 발급해 재실행 시 한도(TTL 없음, Phase 1) 소진을 피합니다.
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
+### 1. 스토리라인 생성 (채팅 시작용 스토리 준비 1/2)
+# simpleCreationId / storylineId를 전역 변수로 저장해 2번에서 사용합니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "customTags": [
+    { "name": "판타지", "category": "GENRE" },
+    { "name": "신중한", "category": "PROTAGONIST" }
+  ]
+}
+
+> {%
+    client.test("스토리라인 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("simpleCreationId", response.body.simpleCreationId);
+    client.global.set("storylineId", response.body.storylines[0].id);
+%}
+
+### 2. 최종 스토리 생성·저장 (채팅 시작용 스토리 준비 2/2)
+# 1번을 먼저 실행해야 simpleCreationId / storylineId 변수가 설정됩니다.
+# 응답의 id(공개 식별자 UUID)를 전역 변수 storyId로 저장해 3번에서 사용합니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": ["주인공은 무속성 판정을 받은 신입생이다"]
+}
+
+> {%
+    client.test("최종 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+        client.assert(Boolean(response.body.id), "id가 없습니다.");
+    });
+    client.global.set("storyId", response.body.id);
+%}
+
+### 3. 채팅 생성 (핵심 검증)
+# 2번을 먼저 실행해야 storyId 변수가 설정됩니다. storyId는 UUID 문자열이므로 따옴표로 감쌉니다.
+# story 존재 검증 → story_chats(status=ACTIVE) 생성 → start_setting의 prologue 반환.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    const uuidRe = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    client.test("응답 계약이 맞다", () => {
+        client.assert(Boolean(b.id), "id가 없습니다.");
+        client.assert(Boolean(b.storyId), "storyId가 없습니다.");
+        client.assert(typeof b.prologue === "string", `prologue가 문자열이 아닙니다. actual=${JSON.stringify(b.prologue)}`);
+        client.assert(Array.isArray(b.suggestedInputs), `suggestedInputs가 배열이 아닙니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+        client.assert(b.suggestedInputs.every(s => typeof s === "string"),
+            `suggestedInputs 원소가 문자열이 아닙니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+        client.assert(Boolean(b.createdAt), "createdAt이 없습니다.");
+    });
+    client.test("채팅 id와 storyId 모두 공개 식별자(UUID)다", () => {
+        client.assert(typeof b.id === "string" && uuidRe.test(b.id), `id가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.id)}`);
+        client.assert(typeof b.storyId === "string" && uuidRe.test(b.storyId), `storyId가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.storyId)}`);
+    });
+    client.global.set("chatId", b.id);
+%}
+
+### 3-3. [KNK-515] startSettingId를 지정해 특정 시작 설정으로 채팅 시작 → 201
+# 3번의 storyId로 상세를 조회해 startSettings[0].id를 얻고, 그 값을 startSettingId로 넘겨 채팅을 시작한다.
+GET {{baseUrl}}/api/v1/stories/{{storyId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회 200·시작 설정 존재", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.startSettings.length >= 1, "startSettings가 비었습니다.");
+    });
+    client.global.set("startSettingId", response.body.startSettings[0].id);
+%}
+
+###
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}",
+  "startSettingId": "{{startSettingId}}"
+}
+
+> {%
+    client.test("startSettingId 지정 채팅 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3-2. (소유권) 게스트(NULL) 소유 스토리에 회원이 채팅 생성 → 403 (교차 접근 차단, KNK-480)
+# 1~2번을 토큰 없이(게스트로) 실행해 만든 NULL 소유 스토리({{storyId}})에 인증 회원이 채팅을 시작하려는 시도입니다.
+# 회원은 먼저 이관(POST /api/v1/auth/migrate)해야 합니다. {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요.
+# (같은 스토리를 3번처럼 토큰 없이 만들면 게스트라 201입니다. 소유자 있는 스토리 생성도 회원에게 201입니다.)
+POST {{baseUrl}}/api/v1/chats
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("회원이 게스트 스토리로 채팅을 만들면 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+%}
+
+### 4. 형식은 올바르나 존재하지 않는 스토리 UUID로 채팅 생성 → 404
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "00000000-0000-0000-0000-000000000000"
+}
+
+> {%
+    client.test("없는 스토리는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 5. 순차 정수/비-UUID storyId로 채팅 생성 → 404 (IDOR 차단)
+# 스토리 식별자는 공개 UUID이므로 순차 정수를 추측해도 채팅을 시작할 수 없습니다.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "1"
+}
+
+> {%
+    client.test("순차 정수/비-UUID storyId는 404로 통일된다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 6. [KNK-257] 소프트 삭제된 스토리로 채팅 생성 → 404
+# 3번에서 만든 스토리(storyId)를 삭제한 뒤, 같은 스토리로 채팅 생성을 시도하면 404여야 합니다.
+# (소프트 삭제 후에도 시작 설정 등 자식 행은 보존되지만, 채팅 생성은 거부됩니다.)
+DELETE {{baseUrl}}/api/v1/stories/{{storyId}}
+
+> {%
+    client.test("준비: 스토리 삭제는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+###
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("삭제된 스토리로는 채팅을 생성할 수 없다 (404)", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "스토리를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 7. (자유 조회) 이미 알고 있는 storyId(공개 식별자 UUID)로 직접 채팅 생성
+# 위 준비 흐름 없이 실제 DB에 있는 public_id(UUID)만 빠르게 확인하고 싶을 때 사용합니다.
+# 자리표시 UUID를 실제 값으로 교체하세요.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+}
