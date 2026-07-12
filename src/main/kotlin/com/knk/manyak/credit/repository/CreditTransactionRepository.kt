@@ -29,6 +29,27 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
     ): Long
 
     /**
+     * 위 구간 집계에 멱등 키 접두 필터를 더한 판정(스펙 §4-6, KNK-581). 초대 보상 월 상한은 초대자 몫에만
+     * 적용되는데, 원장에 역할 컬럼이 없어 초대자 역할 행을 키 접두(`invite:{초대자userId}:`)로 식별한다.
+     * 접두 뒤 콜론까지 포함해 매칭하므로 userId의 십진 접두 충돌(1 vs 12)이 없다.
+     */
+    @Query(
+        """
+        SELECT COUNT(t) FROM CreditTransaction t
+        WHERE t.userId = :userId AND t.reason = :reason
+          AND t.idempotencyKey LIKE CONCAT(:idempotencyKeyPrefix, '%')
+          AND t.createdAt >= :start AND t.createdAt < :end
+        """,
+    )
+    fun countByReasonAndKeyPrefixInWindow(
+        @Param("userId") userId: Long,
+        @Param("reason") reason: CreditReason,
+        @Param("idempotencyKeyPrefix") idempotencyKeyPrefix: String,
+        @Param("start") start: Instant,
+        @Param("end") end: Instant,
+    ): Long
+
+    /**
      * 대사(reconciliation) 후보 그룹을 찾는다(스펙 §4-3-7, KNK-448).
      *
      * 소모 행([reasons]=STORY_CREATION·CHAT_TURN)을 (userId, refType, refId)로 묶어 charge 수와 최소 차감액을 낸다.

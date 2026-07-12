@@ -95,7 +95,6 @@ class GoogleAccountRegistrarTest {
                 picture = "https://example.com/alice.png",
             ),
             Instant.now(),
-            inviterUserId = 5L,
         )
 
         val userCaptor = ArgumentCaptor.forClass(User::class.java)
@@ -106,8 +105,8 @@ class GoogleAccountRegistrarTest {
         assertThat(userCaptor.value.profileImageUrl).isEqualTo(PRESET_URL)
         assertThat(userCaptor.value.profileThumbnailBase64).isEqualTo(PRESET_THUMBNAIL)
         assertThat(userCaptor.value.status).isEqualTo(UserStatus.ACTIVE)
-        // 초대자 관계를 생성 트랜잭션에 함께 영속한다(초대 보상 자가 복구 근거).
-        assertThat(userCaptor.value.inviterUserId).isEqualTo(5L)
+        // 초대 관계는 가입이 아니라 코드 입력(redeem)에서 저장된다(KNK-567). 생성 시점엔 비어 있어야 한다.
+        assertThat(userCaptor.value.inviterUserId).isNull()
 
         val socialCaptor = ArgumentCaptor.forClass(SocialAccount::class.java)
         verify(socialAccountRepository).save(socialCaptor.capture())

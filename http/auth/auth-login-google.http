@@ -112,6 +112,10 @@ X-Manyak-Device-Id: test-device-signup
         client.assert(b.tokenType === "Bearer", `tokenType이 Bearer가 아닙니다. actual=${b.tokenType}`);
         client.assert(typeof b.expiresIn === "number" && b.expiresIn > 0, `expiresIn이 양수가 아닙니다. actual=${b.expiresIn}`);
     });
+    // [KNK-565/KNK-567] 신규 가입 온보딩(초대 코드 입력 스텝) 판정 신호. 첫 가입 호출만 true, 재로그인·refresh 는 false.
+    client.test("isNewUser 가 boolean 으로 내려온다", () => {
+        client.assert(typeof b.isNewUser === "boolean", `isNewUser 가 없습니다. actual=${b.isNewUser}`);
+    });
     // 발급받은 토큰을 저장해 후속 검증(예: auth.http 의 /me, /token/refresh)에 재사용한다.
     client.global.set("accessToken", b.accessToken);
     client.global.set("refreshToken", b.refreshToken);

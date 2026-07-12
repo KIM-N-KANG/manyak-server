@@ -46,8 +46,8 @@ class AuthController(
     @Operation(
         summary = "Google 로그인",
         description = "Google ID 토큰을 검증해 사용자를 find-or-create하고 access+refresh 토큰을 발급합니다. " +
-            "선택 필드 inviteCode를 최초 가입과 함께 보내면 초대자·피초대자 양쪽에 크레딧을 적립합니다" +
-            "(미해결·자기 코드·이미 가입된 계정의 제출은 무시). " +
+            "응답의 isNewUser로 신규 가입 여부를 알 수 있습니다(신규 가입 온보딩 판정 신호 — KNK-567). " +
+            "초대 보상 적립은 이 API가 아니라 POST /users/me/invite/redeem에서 합니다. " +
             "토큰이 유효하지 않으면(서명·만료·issuer·audience 불일치) 401, 본문이 올바르지 않으면 400으로 응답합니다.",
     )
     @ApiResponses(
@@ -74,7 +74,7 @@ class AuthController(
         @Valid @RequestBody request: GoogleLoginRequest,
         // 신규 가입 시 디바이스 체험 사용량을 계정으로 스냅샷하는 데 쓴다(스펙 §4-3-7 B13). 게스트 요청과 같은 헤더이며, 없으면 스냅샷 생략.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
-    ): TokenResponse = googleLoginService.login(request.idToken, request.inviteCode, deviceId)
+    ): TokenResponse = googleLoginService.login(request.idToken, deviceId)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",
