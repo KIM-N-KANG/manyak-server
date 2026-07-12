@@ -123,26 +123,39 @@ class InviteService(
         val (monthStart, monthEnd) = kstMonthRangeOf(clock.instant())
         // 초대자 몫: 초대자 역할 수령분(멱등 키 접두로 식별)만 세는 월 상한 안에서 적립한다(KNK-581). 멱등(쌍당 1회)과
         // 월 상한 판정은 모두 지갑 행 락 안에서 수행돼(카운트·insert가 같은 락 구간), 동시 적립이 경계에서 상한을 넘기지 못한다.
-        creditWalletService.reward(
-            userId = inviter.id,
-            amount = inviteReward,
-            reason = CreditReason.INVITE_REWARD,
-            idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = inviter.id),
-            monthlyCap = MonthlyRewardCap(
+        val rewardInviter = {
+            creditWalletService.reward(
+                userId = inviter.id,
+                amount = inviteReward,
                 reason = CreditReason.INVITE_REWARD,
-                cap = inviteMonthlyCap,
-                windowStart = monthStart,
-                windowEnd = monthEnd,
-                idempotencyKeyPrefix = inviterRoleKeyPrefix(inviter.id),
-            ),
-        )
+                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = inviter.id),
+                monthlyCap = MonthlyRewardCap(
+                    reason = CreditReason.INVITE_REWARD,
+                    cap = inviteMonthlyCap,
+                    windowStart = monthStart,
+                    windowEnd = monthEnd,
+                    idempotencyKeyPrefix = inviterRoleKeyPrefix(inviter.id),
+                ),
+            )
+        }
         // 제출자 몫: 월 상한 없이 적립한다(KNK-581 — 평생 1회 자격이 유일한 제한).
-        val outcome = creditWalletService.reward(
-            userId = redeemer.id,
-            amount = inviteReward,
-            reason = CreditReason.INVITE_REWARD,
-            idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = redeemer.id),
-        )
+        val rewardRedeemer = {
+            creditWalletService.reward(
+                userId = redeemer.id,
+                amount = inviteReward,
+                reason = CreditReason.INVITE_REWARD,
+                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = redeemer.id),
+            )
+        }
+        // 두 적립은 user id 오름차순으로 실행한다(Codex P2 데드락 방지). reward가 잡는 지갑 행 락은 이 트랜잭션
+        // 커밋까지 유지되므로, "초대자 먼저" 고정 순서면 서로의 코드를 동시에 제출한 두 요청이 상대 지갑을 잡은 채
+        // 자기 지갑을 교차 대기(A: 지갑B→A, B: 지갑A→B)해 DB 데드락으로 한쪽이 실패한다. id 순서로 전역 결정화한다.
+        val outcome = if (inviter.id < redeemer.id) {
+            rewardInviter()
+            rewardRedeemer()
+        } else {
+            rewardRedeemer().also { rewardInviter() }
+        }
         return InviteRedeemResponse(
             amount = if (outcome.rewarded) inviteReward else 0,
             balance = outcome.balance,

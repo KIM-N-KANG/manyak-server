@@ -155,6 +155,26 @@ class InviteServiceTest {
     }
 
     @Test
+    fun `redeem은 두 적립을 user id 오름차순으로 실행한다(상호 제출 데드락 방지)`() {
+        // Codex P2: reward의 지갑 행 락은 트랜잭션 커밋까지 유지된다. 초대자 우선 고정 순서면 서로의 코드를
+        // 동시에 제출하는 두 요청이 지갑을 교차 대기(A: B→A, B: A→B)해 데드락이 난다. 초대자 id가 더 커도
+        // 오름차순(제출자 먼저)으로 실행되는지 검증해 락 획득 순서를 전역 결정적으로 고정한다.
+        val redeemer = User(id = 5L, nickname = "제출자")
+        val inviter = User(id = 9L, nickname = "초대자", inviteCode = "GOOD9999")
+        `when`(userRepository.findByIdForUpdate(5L)).thenReturn(redeemer)
+        `when`(userRepository.findByInviteCode("GOOD9999")).thenReturn(inviter)
+        stubReward(RewardOutcome(rewarded = true, balance = 500L))
+
+        val response = service.redeem(5L, "GOOD9999")
+
+        val rewardedUserIds = rewardInvocations().map { it.getArgument<Long>(0) }
+        assertThat(rewardedUserIds).containsExactly(5L, 9L)
+        // 실행 순서가 바뀌어도 응답은 제출자 적립 결과여야 한다.
+        assertThat(response.amount).isEqualTo(inviteReward)
+        assertThat(response.balance).isEqualTo(500L)
+    }
+
+    @Test
     fun `redeem의 월 상한 집계 구간은 적립 시점의 KST 월이다`() {
         // KNK-567: 월 귀속은 가입 월이 아니라 적립(redeem) 시점의 KST 월이다. 8월에 제출하면 창은 [8/1, 9/1)이어야 한다.
         val redeemer = User(id = 9L, nickname = "제출자")
