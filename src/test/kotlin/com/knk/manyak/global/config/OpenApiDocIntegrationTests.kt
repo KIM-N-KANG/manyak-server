@@ -43,6 +43,17 @@ class OpenApiDocIntegrationTests {
     }
 
     @Test
+    fun `TokenResponse 스키마는 런타임 직렬화와 같은 isNewUser 필드명으로 문서화된다`() {
+        // springdoc 인트로스펙션(Jackson 2 빈 규약)은 is 접두를 떼고 newUser로 만들지만, 런타임(Jackson 3
+        // Kotlin 모듈)은 isNewUser로 직렬화한다. @Schema(name)으로 실제 와이어 필드명을 고정했는지 검증한다.
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.TokenResponse.properties.isNewUser").exists()
+            .jsonPath("$.components.schemas.TokenResponse.properties.newUser").doesNotExist()
+    }
+
+    @Test
     fun `인증 필수 엔드포인트는 bearerAuth security를 갖고 공개 엔드포인트는 갖지 않는다`() {
         restTestClient.get().uri("/v3/api-docs").exchange()
             .expectStatus().isOk
