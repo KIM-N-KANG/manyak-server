@@ -8,10 +8,11 @@
 ###     제출 자격은 계정당 평생 1회(기존 회원도 가능). 코드는 trim·대문자 정규화 후 비교합니다.
 ###     오류 계약: 빈 값·형식 위반 400 / 매칭 없음 404 / 자기 코드 409(code=INVITE_SELF_CODE) /
 ###     재제출 409(code=INVITE_ALREADY_REDEEMED) / 정지 계정 403.
-###   - [KNK-477] 초대 보상은 보상 수령 계정별 KST 월 10회 상한(초대자·제출자 독립 판정, 적립 시점 월 귀속).
-###     초대자가 상한이면 초대자 적립만 건너뛰고 제출자는 적립하며 응답은 200입니다.
-###   - [KNK-513] GET /users/me/invite 응답의 monthlyRewardCount(이번 KST 월 수령 건수)·monthlyRewardLimit(상한, 기본 10).
-###     2 → 4 → 5 순서로 실행하면 초대자의 카운트가 +1 되는 것을 확인할 수 있습니다.
+###   - [KNK-581] KST 월 10회 상한은 초대자 몫에만 적용(적립 시점 월 귀속). 초대자가 상한이면 초대자 적립만
+###     건너뛰고 제출자는 적립하며 응답은 200입니다. 제출자 몫은 평생 1회 자격이 유일한 제한이라 상한이 없습니다.
+###   - [KNK-513·581] GET /users/me/invite 응답의 monthlyRewardCount(이번 KST 월에 초대자 역할로 수령한 건수 —
+###     코드 입력으로 받은 제출자 몫은 세지 않음)·monthlyRewardLimit(상한, 기본 10).
+###     2 → 4 → 5 순서로 실행하면 초대자의 카운트만 +1 되고 제출자의 카운트는 불변임을 확인할 수 있습니다(4-0·5-1).
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
@@ -107,6 +108,19 @@ Accept: application/json
     });
 %}
 
+### 4-0. (KNK-581 준비) 제출 전에 제출자의 진행 카운트를 저장 — 5-1 에서 불변을 검증
+# @redeemerAccessToken 을 채운 뒤 실행하세요.
+GET {{baseUrl}}/api/v1/users/me/invite
+Authorization: Bearer {{redeemerAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("제출자 초대 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(제출자 토큰 확인). actual=${response.status}`);
+    });
+    client.global.set("redeemerRewardCountBefore", response.body.monthlyRewardCount);
+%}
+
 ### 4. (해피 패스) 제출자가 초대자의 코드를 입력 → 200, 양쪽 각 500 적립
 # 2번을 먼저 실행해 myInviteCode 를 채우고, @redeemerAccessToken 에 아직 코드를 입력한 적 없는
 # 다른 계정의 토큰을 넣은 뒤 실행하세요. 적립 상세는 credits.http 의 잔액 조회로도 확인할 수 있습니다.
@@ -122,8 +136,9 @@ Content-Type: application/json
             `200이 아닙니다(제출자 토큰·코드 확인, 이미 입력한 계정이면 409). actual=${response.status}`);
     });
     const b = response.body;
+    // [KNK-581] 제출자 몫에는 월 상한이 없어 첫 제출의 amount 는 항상 500입니다.
     client.test("amount 는 제출자 적립액(500)이다", () => {
-        client.assert(b.amount === 500, `amount 가 500이 아닙니다(제출자가 월 상한이면 0). actual=${b.amount}`);
+        client.assert(b.amount === 500, `amount 가 500이 아닙니다. actual=${b.amount}`);
     });
     client.test("balance 는 적립 후 잔액(양수)이다", () => {
         client.assert(Number.isInteger(b.balance) && b.balance >= b.amount,
@@ -145,6 +160,23 @@ Accept: application/json
         const before = client.global.get("inviteRewardCountBefore");
         client.assert(response.body.monthlyRewardCount === before + 1,
             `카운트가 1 증가하지 않았습니다(2→4→5 순서·초대자 토큰 확인, 초대자가 월 상한이면 불변). before=${before} actual=${response.body.monthlyRewardCount}`);
+    });
+%}
+
+### 5-1. (KNK-581) 제출자가 다시 조회 → 제출자 몫 수령분은 카운트에 반영되지 않아 불변
+# 순서대로 4-0 → 4 → 5-1 을 실행하세요. monthlyRewardCount 는 초대자 역할 수령분만 셉니다.
+GET {{baseUrl}}/api/v1/users/me/invite
+Authorization: Bearer {{redeemerAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("제출자 재조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("제출자의 monthlyRewardCount 는 코드 입력 전과 같다", () => {
+        const before = client.global.get("redeemerRewardCountBefore");
+        client.assert(response.body.monthlyRewardCount === before,
+            `제출자 카운트가 변했습니다(4-0→4→5-1 순서 확인). before=${before} actual=${response.body.monthlyRewardCount}`);
     });
 %}
 
