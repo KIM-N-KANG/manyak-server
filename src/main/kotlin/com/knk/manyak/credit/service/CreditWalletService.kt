@@ -21,9 +21,16 @@ data class RewardOutcome(val rewarded: Boolean, val balance: Long)
 
 /**
  * 사유별 월 상한(스펙 §4-3-7 초대 보상 월 한도). [cap]회 미만일 때만 적립하고, 집계 구간은 KST 월 등 호출부가 정한 [windowStart, windowEnd)다.
+ * [idempotencyKeyPrefix]를 주면 그 접두의 원장 행만 집계한다(KNK-581 — 초대자 역할 행만 세는 초대 월 상한).
  * 판정은 지갑 행 락 안에서 수행되므로(같은 사용자 동시 적립이 직렬화됨) 경계에서의 초과 적립을 막는다.
  */
-data class MonthlyRewardCap(val reason: CreditReason, val cap: Long, val windowStart: Instant, val windowEnd: Instant)
+data class MonthlyRewardCap(
+    val reason: CreditReason,
+    val cap: Long,
+    val windowStart: Instant,
+    val windowEnd: Instant,
+    val idempotencyKeyPrefix: String? = null,
+)
 
 /**
  * 크레딧 지갑·원장의 기반 연산(스펙 §4-3-7 원장과 동시성). 적립/차감은 원장 행 추가와 지갑 balance 캐시 갱신을 한 트랜잭션에서 수행한다.
@@ -55,17 +62,36 @@ class CreditWalletService(
 
     /**
      * [userId]가 [reason] 사유로 집계 구간 [windowStart, windowEnd)에 수령한 원장 건수를 센다(조회 전용).
+     * [idempotencyKeyPrefix]를 주면 그 접두의 행만 센다(KNK-581 — 초대자 역할 수령분만 세는 진행 표시).
      * [reward]의 [MonthlyRewardCap] 판정과 **같은 카운트**라, 초대 보상 월 진행 표시가 상한 스킵 경계와 정확히 일치한다
      * (스펙 §4-3-7 초대 상한 진행 표시, B22).
      */
     @Transactional(readOnly = true)
-    fun countRewardsInWindow(userId: Long, reason: CreditReason, windowStart: Instant, windowEnd: Instant): Long =
-        transactionRepository.countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
-            userId,
-            reason,
-            windowStart,
-            windowEnd,
-        )
+    fun countRewardsInWindow(
+        userId: Long,
+        reason: CreditReason,
+        windowStart: Instant,
+        windowEnd: Instant,
+        idempotencyKeyPrefix: String? = null,
+    ): Long = countInWindow(userId, reason, windowStart, windowEnd, idempotencyKeyPrefix)
+
+    private fun countInWindow(
+        userId: Long,
+        reason: CreditReason,
+        windowStart: Instant,
+        windowEnd: Instant,
+        idempotencyKeyPrefix: String?,
+    ): Long =
+        if (idempotencyKeyPrefix != null) {
+            transactionRepository.countByReasonAndKeyPrefixInWindow(userId, reason, idempotencyKeyPrefix, windowStart, windowEnd)
+        } else {
+            transactionRepository.countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+                userId,
+                reason,
+                windowStart,
+                windowEnd,
+            )
+        }
 
     /**
      * 크레딧을 적립한다(양수). [idempotencyKey]가 이미 기록됐으면 적립하지 않고 `rewarded=false`를 반환한다(멱등).
@@ -104,13 +130,13 @@ class CreditWalletService(
         // 월 상한 판정을 락 안에서 수행한다. 같은 사용자 동시 적립은 지갑 행 락으로 직렬화되므로, 여기서 세는 구간 집계가
         // 직전 적립까지 반영해 경계 초과를 막는다(스펙 §4-3-7 초대 보상 월 한도). 상한 이상이면 적립 없이 rewarded=false.
         if (monthlyCap != null) {
-            val countInWindow = transactionRepository
-                .countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
-                    userId,
-                    monthlyCap.reason,
-                    monthlyCap.windowStart,
-                    monthlyCap.windowEnd,
-                )
+            val countInWindow = countInWindow(
+                userId,
+                monthlyCap.reason,
+                monthlyCap.windowStart,
+                monthlyCap.windowEnd,
+                monthlyCap.idempotencyKeyPrefix,
+            )
             if (countInWindow >= monthlyCap.cap) {
                 return RewardOutcome(rewarded = false, balance = wallet.balance)
             }

@@ -182,14 +182,20 @@ class InviteRedeemIntegrationTests {
             .jsonPath("$.code").isEqualTo("INVITE_ALREADY_REDEEMED")
     }
 
+    /** 이번 달 초대자 역할 보상 [count]건을 실제 키 형식(invite:{초대자}:{피초대자}:{초대자})으로 미리 적립한다. */
+    private fun seedInviterRoleRewards(userId: Long, count: Int) {
+        repeat(count) { i ->
+            val fakeInviteeId = 900_000L + i
+            creditWalletService.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:$userId:$fakeInviteeId:$userId")
+        }
+    }
+
     @Test
     fun `초대자가 월 상한에 도달했으면 제출자만 적립하고 200이다`() {
         val inviter = saveUser("상한초대자", inviteCode = "CAPPED77")
         val redeemer = saveUser("제출자")
-        // 이번 달 초대 보상 10건(상한)을 미리 적립해 상한 도달 상태를 만든다.
-        repeat(10) { i ->
-            creditWalletService.reward(inviter.id, 500, CreditReason.INVITE_REWARD, "seed:${inviter.id}:$i")
-        }
+        // 이번 달 초대자 역할 보상 10건(상한)을 미리 적립해 상한 도달 상태를 만든다.
+        seedInviterRoleRewards(inviter.id, 10)
 
         redeem(tokenOf(redeemer), "CAPPED77")
             .expectStatus().isOk
@@ -200,6 +206,40 @@ class InviteRedeemIntegrationTests {
         assertThat(inviteRewards(inviter.id)).hasSize(10)
         assertThat(inviteRewards(redeemer.id)).hasSize(1)
         assertThat(userRepository.findById(redeemer.id).orElseThrow().inviterUserId).isEqualTo(inviter.id)
+    }
+
+    @Test
+    fun `제출자가 초대자 역할 월 상한을 채운 상태여도 제출 보상은 적립한다`() {
+        // KNK-581: 월 상한은 초대자 몫에만 적용된다. 제출자 몫은 평생 1회 자격이 유일한 제한이라,
+        // 그 달 초대자로 상한을 채운 계정의 코드 입력도 500을 적립해야 한다(자격만 소진되는 영구 손실 방지).
+        val inviter = saveUser("초대자", inviteCode = "GIVER777")
+        val redeemer = saveUser("바쁜초대자겸제출자")
+        seedInviterRoleRewards(redeemer.id, 10)
+
+        redeem(tokenOf(redeemer), "GIVER777")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.amount").isEqualTo(500)
+
+        assertThat(inviteRewards(redeemer.id)).hasSize(11)
+        assertThat(inviteRewards(inviter.id)).hasSize(1)
+    }
+
+    @Test
+    fun `제출자 몫 수령분은 제출자의 GET invite 진행 카운트에 반영되지 않는다`() {
+        // KNK-581: monthlyRewardCount는 초대자 역할 수령분만 센다. 코드를 입력만 한 계정의 진행은 0이어야 한다.
+        saveUser("초대자", inviteCode = "COUNTER7")
+        val redeemer = saveUser("제출자")
+
+        redeem(tokenOf(redeemer), "COUNTER7").expectStatus().isOk
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/invite")
+            .header("Authorization", "Bearer ${tokenOf(redeemer)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.monthlyRewardCount").isEqualTo(0)
     }
 
     @Test
