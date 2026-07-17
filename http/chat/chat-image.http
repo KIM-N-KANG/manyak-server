@@ -10,7 +10,7 @@
 ###     (deactivated_at IS NULL OR deactivated_at > 확정 시각). 그래서 completed 결과와 같습니다.
 ###
 ### 사전 준비:
-###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V47 적용 → image_presets 210행 시드
+###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V48 적용 → image_presets 210행 시드
 ###   - 서버 실행: ./gradlew bootRun (기본 포트 8080)
 ###   - AI 서버는 아직 마커를 삽입하지 않습니다(AI 스펙 정렬 대기). 그래서 실 AI로는 images[]가 항상
 ###     빈 배열입니다. 마커 경로를 눈으로 보려면 AI 스텁을 켜고(MANYAK_AI_STUB 계열 토글) 스텁 본문에
