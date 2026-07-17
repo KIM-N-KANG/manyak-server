@@ -79,6 +79,12 @@ tasks.withType<Test> {
     environment("MANYAK_DB_URL", "")
     environment("MANYAK_DB_USERNAME", "")
     environment("MANYAK_DB_PASSWORD", "")
+    // 3) Spring Boot 표준 env도 차단: SPRING_DATASOURCE_*는 relaxed binding으로 application-test.yml의
+    //    H2 설정보다 우선하므로, export돼 있으면 test 프로파일이어도 테스트가 외부 DB로 붙는다.
+    //    ""로 비우면 spring.datasource.url=""가 test yml을 덮어쓰니(빈 값도 유효한 override) remove로 아예 제거한다.
+    listOf("SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD").forEach {
+        environment.remove(it)
+    }
 }
 
 tasks.bootJar {
