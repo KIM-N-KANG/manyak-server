@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 
 /**
  * 채팅 턴 완료 시점의 원자적 저장 책임만 가진다.
@@ -223,6 +224,9 @@ class ChatTurnPersister(
 
         // AI 출력 제자리 교체(활성본). USER 입력·messageOrder는 그대로 둔다.
         lastAssistant.content = aiOutput
+        // 본문이 바뀌었으므로 확정 시각도 함께 갱신한다 — images[] 재구성이 이 시각의 카탈로그 상태를 보고
+        // completed와 같은 결과를 내야 한다(스펙 §4-3-9). 원 생성 시각으로 자르면 둘이 어긋난다.
+        lastAssistant.contentConfirmedAt = Instant.now()
         storyMessageRepository.save(lastAssistant)
 
         // 활성 선택지 전체 교체: 유니크 (message_id, choice_order) 충돌을 피하려 기존을 먼저 지우고 flush한 뒤 재삽입한다.

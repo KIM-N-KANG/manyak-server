@@ -53,4 +53,10 @@ class StoryMessage(
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
+
+    // 본문 확정 시각 — 지난 턴 images[] 재구성의 컷오프 앵커(스펙 §4-3-9).
+    // 최초 생성 시 createdAt과 같고, 재생성으로 본문이 교체되면 그 시각으로 갱신한다(var).
+    // created_at을 앵커로 쓰면 재생성 completed와 상세 조회 재구성이 어긋난다 — 재생성은 그 시점 카탈로그로 재검증하므로.
+    @Column(name = "content_confirmed_at", nullable = false)
+    var contentConfirmedAt: Instant = Instant.now(),
 )

@@ -5,7 +5,7 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('image_presets_id_seq'::regclass) | false | [public.image_preset_genres](public.image_preset_genres.md) |  |  |
-| image_key | varchar(64) |  | false | [public.stories](public.stories.md) |  |  |
+| image_key | varchar(64) |  | false | [public.stories](public.stories.md) [public.story_images](public.story_images.md) [public.story_characters](public.story_characters.md) |  |  |
 | type | varchar(20) |  | false |  |  |  |
 | mood | varchar(50) |  | true |  |  |  |
 | subject | varchar(50) |  | true |  |  |  |
@@ -37,6 +37,8 @@ erDiagram
 
 "public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
 "public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
+"public.story_images" }o--|| "public.image_presets" : "FOREIGN KEY (image_key) REFERENCES image_presets(image_key)"
+"public.story_characters" }o--o| "public.image_presets" : "FOREIGN KEY (image_key) REFERENCES image_presets(image_key)"
 
 "public.image_presets" {
   bigint id
@@ -66,6 +68,19 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+}
+"public.story_images" {
+  bigint id
+  bigint story_id FK
+  varchar_64_ image_key FK
+  timestamp_with_time_zone created_at
+}
+"public.story_characters" {
+  bigint id
+  bigint story_id FK
+  varchar_50_ name
+  varchar_64_ image_key FK
+  timestamp_with_time_zone created_at
 }
 ```
 

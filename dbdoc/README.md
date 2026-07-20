@@ -14,7 +14,7 @@
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 16 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 8 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -33,6 +33,8 @@
 | [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
+| [public.story_images](public.story_images.md) | 4 |  | BASE TABLE |
+| [public.story_characters](public.story_characters.md) | 5 |  | BASE TABLE |
 
 ## Relations
 
@@ -74,6 +76,10 @@ erDiagram
 "public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
 "public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
+"public.story_images" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_images" }o--|| "public.image_presets" : "FOREIGN KEY (image_key) REFERENCES image_presets(image_key)"
+"public.story_characters" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_characters" }o--o| "public.image_presets" : "FOREIGN KEY (image_key) REFERENCES image_presets(image_key)"
 
 "public.story_creation_tags" {
   bigint id
@@ -182,6 +188,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  timestamp_with_time_zone content_confirmed_at
 }
 "public.story_choices" {
   bigint id
@@ -363,6 +370,19 @@ erDiagram
 "public.image_preset_genres" {
   bigint image_preset_id FK
   bigint tag_id FK
+}
+"public.story_images" {
+  bigint id
+  bigint story_id FK
+  varchar_64_ image_key FK
+  timestamp_with_time_zone created_at
+}
+"public.story_characters" {
+  bigint id
+  bigint story_id FK
+  varchar_50_ name
+  varchar_64_ image_key FK
+  timestamp_with_time_zone created_at
 }
 ```
 

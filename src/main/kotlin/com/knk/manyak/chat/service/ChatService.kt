@@ -86,6 +86,8 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
+    private val chatImageBundler: ChatImageBundler,
+    private val chatImageMaterialProvider: ChatImageMaterialProvider,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
@@ -237,6 +239,12 @@ class ChatService(
             .findAllById(turns.mapNotNull { it.reachedEndingId })
             .associate { it.id to it.name }
 
+        // images[]는 저장하지 않는다. 본문 마커에서 다시 만들되 턴별 확정 시각 기준으로 판정해
+        // completed가 내려준 결과와 같아지게 한다(§4-3-9). 카탈로그는 한 번의 IN 조회로 모아 온다.
+        val imagesByTurnId = chatImageBundler.reconstruct(
+            turns.map { ConfirmedTurnContent(it.id, it.content, it.contentConfirmedAt) },
+        )
+
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
         val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
@@ -253,6 +261,7 @@ class ChatService(
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
                     reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    images = imagesByTurnId[assistant.id].orEmpty(),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -296,6 +305,7 @@ class ChatService(
                             // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id). 상세에서 이름으로 해소한다.
                             reachedEndingId = message.reachedEndingId,
                             createdAt = message.createdAt,
+                            contentConfirmedAt = message.contentConfirmedAt,
                         )
                     }
                     pendingUser = null
@@ -312,6 +322,8 @@ class ChatService(
         val content: String,
         val reachedEndingId: Long?,
         val createdAt: Instant,
+        // images[] 재구성은 이 시각 기준으로 카탈로그 상태를 판정한다(§4-3-9). 재생성이 본문과 함께 갱신한다.
+        val contentConfirmedAt: Instant,
     )
 
     /**
@@ -590,16 +602,32 @@ class ChatService(
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
                 ) {
-                    chatTurnAiClient.streamTurn(aiRequest) { token ->
+                    // AI가 실수로 스트림에 마커를 흘려도 사용자에게 원문이 보이면 안 된다(§4-3-9 이중 방어).
+                    // 마커는 청크 경계에 걸쳐 쪼개져 올 수 있어 상태를 들고 걸러낸다. completed의 확정본은 무변경이다.
+                    val tokenStream = MarkerStrippingTokenStream()
+                    val aiResult = chatTurnAiClient.streamTurn(aiRequest) { token ->
                         if (Thread.currentThread().isInterrupted) {
+                            return@streamTurn
+                        }
+                        val visible = tokenStream.accept(token)
+                        if (visible.isEmpty()) {
                             return@streamTurn
                         }
                         emitter.send(
                             SseEmitter.event()
                                 .name("token")
-                                .data(ChatStreamTokenEvent(token)),
+                                .data(ChatStreamTokenEvent(visible)),
                         )
                     }
+                    // 붙들려 있던 꼬리(미완성 마커 후보)는 본문이었으므로 흘려보낸다.
+                    tokenStream.flush().takeIf { it.isNotEmpty() }?.let { tail ->
+                        emitter.send(
+                            SseEmitter.event()
+                                .name("token")
+                                .data(ChatStreamTokenEvent(tail)),
+                        )
+                    }
+                    aiResult
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
                 val result = recorded.result
@@ -629,6 +657,8 @@ class ChatService(
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
                                 reachedEnding = persistedTurn.reachedEnding?.name,
+                                // 본문은 마커가 박힌 그대로 싣고, 검증을 통과한 마커만 images[]로 동봉한다(§4-3-9).
+                                images = chatImageBundler.bundle(result.aiOutput),
                             ),
                         ),
                 )
@@ -796,6 +826,10 @@ class ChatService(
             targetMainEvent = targetMainEvent,
             occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
             endings = loadEligibleEndings(chat),
+            // 배경 후보는 등록 시 확정된 목록을 매 턴 같은 순서로 싣는다(프롬프트 prefix 안정 → 캐싱 유리).
+            // 인물 매핑은 컴파일 산출물을 되돌려 실어 같은 인물이 항상 같은 이미지를 갖게 한다(§4-3-9).
+            backgroundImageCandidates = chatImageMaterialProvider.backgroundCandidates(chat.storyId),
+            characterImages = chatImageMaterialProvider.characterImages(chat.storyId),
         )
     }
 
