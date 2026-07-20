@@ -213,6 +213,41 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `다른 단계에서 쓴 requestId를 재사용하면 409`() {
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+
+        // 같은 requestId를 스토리 완성 단계에 재사용하면 단계 불일치로 409(저장된 응답을 다른 타입으로 역직렬화하는 500 방지).
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", deviceA)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","simpleCreationId":1,"storylineId":1,"additionalInfos":[]}""")
+            .exchange()
+            .expectStatus().isEqualTo(409)
+    }
+
+    @Test
+    fun `device 없는 게스트 요청은 요청 행을 남기지 않고 올바른 device로 재시도하면 생성된다`() {
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        // device 헤더 없는 게스트 요청은 400이고, 소유자 없는 요청 행을 남기지 않는다(재시도가 409로 막히지 않도록).
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .exchange()
+            .expectStatus().isBadRequest
+        assertThat(requestRepository.findByRequestId(requestId)).isNull()
+
+        // 같은 requestId를 올바른 device로 재시도하면 409로 막히지 않고 정상 생성된다.
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+    }
+
+    @Test
     fun `실패한 요청은 같은 requestId로 재실행된다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()

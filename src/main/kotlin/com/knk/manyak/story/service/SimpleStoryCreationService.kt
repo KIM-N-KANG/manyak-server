@@ -138,15 +138,8 @@ class SimpleStoryCreationService(
         request: GenerateSimpleStorylinesRequest,
         userId: Long? = null,
         deviceId: String? = null,
-    ): GenerateSimpleStorylinesResponse =
-        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
-        storyCreationRequestRecorder.execute(
-            request.requestId,
-            StoryCreationStage.STORYLINE_GENERATION,
-            ownerUserId = userId,
-            ownerDeviceId = ownerDeviceId(userId, deviceId),
-            responseType = GenerateSimpleStorylinesResponse::class.java,
-        ) {
+    ): GenerateSimpleStorylinesResponse {
+        val generate: () -> GenerateSimpleStorylinesResponse = {
             val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
                 userId,
                 deviceId,
@@ -159,9 +152,39 @@ class SimpleStoryCreationService(
                 throw throwable
             }
         }
+        return recordOrRun(
+            request.requestId,
+            StoryCreationStage.STORYLINE_GENERATION,
+            userId,
+            deviceId,
+            GenerateSimpleStorylinesResponse::class.java,
+            generate,
+        )
+    }
 
-    /** 생성 요청 소유 주체의 게스트 디바이스 ID. 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
-    private fun ownerDeviceId(userId: Long?, deviceId: String?): String? = if (userId == null) deviceId else null
+    /**
+     * 소유자를 특정할 수 있으면 [storyCreationRequestRecorder]로 감싸 백그라운드 복구·멱등(스펙 §4-3-8)을 적용한다.
+     * 단 소유자를 특정할 수 없는 게스트(디바이스 헤더 없음)는 요청 행을 기록하지 않고 그대로 실행해 문서화된 400을 낸다 —
+     * 소유자 없는 요청 행을 남기면 아무도 소유할 수 없어, 올바른 디바이스로 재시도해도 409로 영구히 막힌다(Codex P2).
+     */
+    private fun <T : Any> recordOrRun(
+        requestId: UUID,
+        stage: StoryCreationStage,
+        userId: Long?,
+        deviceId: String?,
+        responseType: Class<T>,
+        block: () -> T,
+    ): T {
+        val ownerDeviceId = ownerDeviceId(userId, deviceId)
+        if (userId == null && ownerDeviceId == null) {
+            return block()
+        }
+        return storyCreationRequestRecorder.execute(requestId, stage, userId, ownerDeviceId, responseType, block)
+    }
+
+    /** 생성 요청 소유 주체의 게스트 디바이스 ID(공백은 미소유로 취급). 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
+    private fun ownerDeviceId(userId: Long?, deviceId: String?): String? =
+        if (userId == null) deviceId?.takeIf { it.isNotBlank() } else null
 
     /**
      * 백그라운드 생성 복구 조회(스펙 §4-3-8). 소유 주체(회원 [userId] 또는 게스트 [deviceId])만 조회할 수 있고,
@@ -294,14 +317,7 @@ class SimpleStoryCreationService(
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
-        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
-        return storyCreationRequestRecorder.execute(
-            request.requestId,
-            StoryCreationStage.STORY_COMPLETION,
-            ownerUserId = userId,
-            ownerDeviceId = ownerDeviceId(userId, deviceId),
-            responseType = SimpleStoryCreateResponse::class.java,
-        ) {
+        val create: () -> SimpleStoryCreateResponse = {
             val startNanos = System.nanoTime()
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
@@ -322,6 +338,15 @@ class SimpleStoryCreationService(
                 throw exception
             }
         }
+        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
+        return recordOrRun(
+            request.requestId,
+            StoryCreationStage.STORY_COMPLETION,
+            userId,
+            deviceId,
+            SimpleStoryCreateResponse::class.java,
+            create,
+        )
     }
 
     private fun storyErrorCode(exception: Exception): String = when (exception) {
