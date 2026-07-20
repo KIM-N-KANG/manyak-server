@@ -49,6 +49,8 @@ class FeedbackSlackNotificationIntegrationTests {
         @DynamicPropertySource
         fun registerWebhookUrl(registry: DynamicPropertyRegistry) {
             registry.add("manyak.slack.feedback-webhook-url") { slackServer.url("/hook").toString() }
+            // env(MANYAK_GOOGLE_FORM_FEEDBACK_ID) 오염까지 막아 실 구글 폼으로 발송하지 않도록 강제한다.
+            registry.add("manyak.google-form.feedback.form-id") { "" }
         }
     }
 
