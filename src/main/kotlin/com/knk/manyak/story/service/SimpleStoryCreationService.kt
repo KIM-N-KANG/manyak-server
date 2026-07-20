@@ -26,6 +26,7 @@ import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
+import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -35,8 +36,10 @@ import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
+import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.entity.StoryMainEvent
@@ -44,6 +47,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
@@ -64,6 +68,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
+import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
 @Service
@@ -89,6 +94,9 @@ class SimpleStoryCreationService(
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
     private val storyThumbnailLinker: StoryThumbnailLinker,
+    private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
+    private val storyCreationRequestRepository: StoryCreationRequestRepository,
+    private val objectMapper: ObjectMapper,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -130,18 +138,49 @@ class SimpleStoryCreationService(
         request: GenerateSimpleStorylinesRequest,
         userId: Long? = null,
         deviceId: String? = null,
-    ): GenerateSimpleStorylinesResponse {
-        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
-            userId,
-            deviceId,
-            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-        )
-        try {
-            return doGenerateSimpleStorylines(request, userId)
-        } catch (throwable: Throwable) {
-            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
-            throw throwable
+    ): GenerateSimpleStorylinesResponse =
+        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
+        storyCreationRequestRecorder.execute(
+            request.requestId,
+            StoryCreationStage.STORYLINE_GENERATION,
+            ownerUserId = userId,
+            ownerDeviceId = ownerDeviceId(userId, deviceId),
+            responseType = GenerateSimpleStorylinesResponse::class.java,
+        ) {
+            val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+                userId,
+                deviceId,
+                GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+            )
+            try {
+                doGenerateSimpleStorylines(request, userId)
+            } catch (throwable: Throwable) {
+                guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                throw throwable
+            }
         }
+
+    /** 생성 요청 소유 주체의 게스트 디바이스 ID. 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
+    private fun ownerDeviceId(userId: Long?, deviceId: String?): String? = if (userId == null) deviceId else null
+
+    /**
+     * 백그라운드 생성 복구 조회(스펙 §4-3-8). 소유 주체(회원 [userId] 또는 게스트 [deviceId])만 조회할 수 있고,
+     * 미존재·타인 요청은 404다. [StoryCreationRequestStatusResponse.result]는 COMPLETED일 때 원 POST 응답 본문과 동일하다.
+     */
+    @Transactional(readOnly = true)
+    fun getCreationRequest(
+        requestId: UUID,
+        userId: Long? = null,
+        deviceId: String? = null,
+    ): StoryCreationRequestStatusResponse {
+        val row = storyCreationRequestRepository.findByRequestId(requestId)
+            ?.takeIf { it.isOwnedBy(userId, deviceId) }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "생성 요청을 찾을 수 없습니다.")
+        return StoryCreationRequestStatusResponse(
+            stage = row.stage,
+            status = row.status,
+            result = row.resultJson?.let { objectMapper.readTree(it) },
+        )
     }
 
     private fun doGenerateSimpleStorylines(
@@ -254,25 +293,34 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
-        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
-        val startNanos = System.nanoTime()
-        structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
-        try {
-            val outcome = doCreateSimpleStory(request, userId, deviceId)
-            structuredLogger.event(
-                "story_created",
-                "story_id" to outcome.response.id,
-                "ai_call_log_id" to outcome.aiCallLogId,
-                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
-            )
-            return outcome.response
-        } catch (exception: Exception) {
-            structuredLogger.event(
-                "story_create_failed",
-                "error_code" to storyErrorCode(exception),
-                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
-            )
-            throw exception
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
+        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
+        return storyCreationRequestRecorder.execute(
+            request.requestId,
+            StoryCreationStage.STORY_COMPLETION,
+            ownerUserId = userId,
+            ownerDeviceId = ownerDeviceId(userId, deviceId),
+            responseType = SimpleStoryCreateResponse::class.java,
+        ) {
+            val startNanos = System.nanoTime()
+            structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
+            try {
+                val outcome = doCreateSimpleStory(request, userId, deviceId)
+                structuredLogger.event(
+                    "story_created",
+                    "story_id" to outcome.response.id,
+                    "ai_call_log_id" to outcome.aiCallLogId,
+                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                )
+                outcome.response
+            } catch (exception: Exception) {
+                structuredLogger.event(
+                    "story_create_failed",
+                    "error_code" to storyErrorCode(exception),
+                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                )
+                throw exception
+            }
         }
     }
 

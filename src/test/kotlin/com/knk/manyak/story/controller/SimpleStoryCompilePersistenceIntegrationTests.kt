@@ -230,7 +230,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
-                """{"simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
             )
             .exchange()
 }
