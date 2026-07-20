@@ -5,9 +5,10 @@
 CREATE TABLE story_creation_requests (
     id BIGSERIAL PRIMARY KEY,
     request_id UUID NOT NULL,
-    -- 소유 주체: 회원은 user_id, 게스트는 device_id(둘 중 하나). 복구 조회 소유 게이트에 쓴다.
+    -- 소유 주체: 회원은 user_id, 게스트는 device_id_hash(둘 중 하나). 복구 조회 소유 게이트에 쓴다.
+    -- 게스트 식별자는 원문 대신 해시로 저장한다(DeviceIdHasher, ai_call_logs.device_id_hash와 동일 관례).
     user_id BIGINT,
-    device_id VARCHAR(255),
+    device_id_hash VARCHAR(64),
     stage VARCHAR(32) NOT NULL,
     status VARCHAR(16) NOT NULL,
     -- 성공 시 원 POST 응답 본문(JSON 직렬화)을 그대로 보관해 복구·멱등 replay에 재사용한다.

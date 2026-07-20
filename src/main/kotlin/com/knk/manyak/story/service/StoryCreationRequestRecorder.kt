@@ -42,11 +42,11 @@ class StoryCreationRequestRecorder(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
-        ownerDeviceId: String?,
+        ownerDeviceIdHash: String?,
         responseType: Class<T>,
         block: () -> T,
     ): T =
-        when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceId)) {
+        when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash)) {
             is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
             is Claim.Run -> {
                 val result = try {
@@ -71,13 +71,13 @@ class StoryCreationRequestRecorder(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
-        ownerDeviceId: String?,
+        ownerDeviceIdHash: String?,
     ): Claim {
-        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceId)
+        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash)
         if (insertedId != null) {
             return Claim.Run(insertedId)
         }
-        return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceId)
+        return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
     }
 
     /** PENDING 행을 삽입하고 새 id를 돌려준다. 유니크 제약 위반(동시 삽입 경합의 패자)이면 null(행이 이미 존재). */
@@ -85,7 +85,7 @@ class StoryCreationRequestRecorder(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
-        ownerDeviceId: String?,
+        ownerDeviceIdHash: String?,
     ): Long? =
         try {
             txTemplate.execute {
@@ -93,7 +93,7 @@ class StoryCreationRequestRecorder(
                     StoryCreationRequest(
                         requestId = requestId,
                         userId = ownerUserId,
-                        deviceId = ownerDeviceId,
+                        deviceIdHash = ownerDeviceIdHash,
                         stage = stage,
                         status = StoryCreationRequestStatus.PENDING,
                     ),
@@ -105,15 +105,15 @@ class StoryCreationRequestRecorder(
         }
 
     /** 기존 요청 행을 비관적 락으로 조회해 상태별로 해석한다(동시 FAILED 재실행 직렬화). */
-    private fun resolveExistingLocked(requestId: UUID, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceId: String?): Claim =
+    private fun resolveExistingLocked(requestId: UUID, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?): Claim =
         txTemplate.execute {
             val row = repository.findByRequestIdForUpdate(requestId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
-            resolveExisting(row, stage, ownerUserId, ownerDeviceId)
+            resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
         } ?: error("Story creation request claim transaction result is empty")
 
-    private fun resolveExisting(row: StoryCreationRequest, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceId: String?): Claim {
-        if (!row.isOwnedBy(ownerUserId, ownerDeviceId)) {
+    private fun resolveExisting(row: StoryCreationRequest, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?): Claim {
+        if (!row.isOwnedBy(ownerUserId, ownerDeviceIdHash)) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
         }
         // 다른 생성 단계에서 쓴 requestId 재사용을 막는다. 안 그러면 replay가 저장된 응답을 다른 단계의 타입으로 역직렬화해 500이 난다.

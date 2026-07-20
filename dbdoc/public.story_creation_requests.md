@@ -7,7 +7,7 @@
 | id | bigint | nextval('story_creation_requests_id_seq'::regclass) | false |  |  |  |
 | request_id | uuid |  | false |  |  |  |
 | user_id | bigint |  | true |  |  |  |
-| device_id | varchar(255) |  | true |  |  |  |
+| device_id_hash | varchar(64) |  | true |  |  |  |
 | stage | varchar(32) |  | false |  |  |  |
 | status | varchar(16) |  | false |  |  |  |
 | result_json | text |  | true |  |  |  |
@@ -40,7 +40,7 @@ erDiagram
   bigint id
   uuid request_id
   bigint user_id
-  varchar_255_ device_id
+  varchar_64_ device_id_hash
   varchar_32_ stage
   varchar_16_ status
   text result_json

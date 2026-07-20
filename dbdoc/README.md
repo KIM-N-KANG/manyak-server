@@ -369,7 +369,7 @@ erDiagram
   bigint id
   uuid request_id
   bigint user_id
-  varchar_255_ device_id
+  varchar_64_ device_id_hash
   varchar_32_ stage
   varchar_16_ status
   text result_json

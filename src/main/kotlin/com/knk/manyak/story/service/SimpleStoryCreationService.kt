@@ -6,6 +6,7 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
+import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -97,6 +98,7 @@ class SimpleStoryCreationService(
     private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
     private val storyCreationRequestRepository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
+    private val deviceIdHasher: DeviceIdHasher,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -175,16 +177,20 @@ class SimpleStoryCreationService(
         responseType: Class<T>,
         block: () -> T,
     ): T {
-        val ownerDeviceId = ownerDeviceId(userId, deviceId)
-        if (userId == null && ownerDeviceId == null) {
+        val ownerDeviceIdHash = ownerDeviceIdHash(userId, deviceId)
+        if (userId == null && ownerDeviceIdHash == null) {
             return block()
         }
-        return storyCreationRequestRecorder.execute(requestId, stage, userId, ownerDeviceId, responseType, block)
+        return storyCreationRequestRecorder.execute(requestId, stage, userId, ownerDeviceIdHash, responseType, block)
     }
 
-    /** 생성 요청 소유 주체의 게스트 디바이스 ID(공백은 미소유로 취급). 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
-    private fun ownerDeviceId(userId: Long?, deviceId: String?): String? =
-        if (userId == null) deviceId?.takeIf { it.isNotBlank() } else null
+    /** 생성 요청 소유 주체의 게스트 디바이스 해시. 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
+    private fun ownerDeviceIdHash(userId: Long?, deviceId: String?): String? =
+        if (userId == null) deviceIdHashOrNull(deviceId) else null
+
+    /** 게스트 디바이스 헤더를 소유 판정용 해시로 변환한다(원문 저장·비교 금지 — DeviceIdHasher). 공백·null은 미소유(null). */
+    private fun deviceIdHashOrNull(deviceId: String?): String? =
+        deviceId?.takeIf { it.isNotBlank() }?.let(deviceIdHasher::hash)
 
     /**
      * 백그라운드 생성 복구 조회(스펙 §4-3-8). 소유 주체(회원 [userId] 또는 게스트 [deviceId])만 조회할 수 있고,
@@ -196,8 +202,9 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): StoryCreationRequestStatusResponse {
+        val deviceIdHash = deviceIdHashOrNull(deviceId)
         val row = storyCreationRequestRepository.findByRequestId(requestId)
-            ?.takeIf { it.isOwnedBy(userId, deviceId) }
+            ?.takeIf { it.isOwnedBy(userId, deviceIdHash) }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "생성 요청을 찾을 수 없습니다.")
         return StoryCreationRequestStatusResponse(
             stage = row.stage,

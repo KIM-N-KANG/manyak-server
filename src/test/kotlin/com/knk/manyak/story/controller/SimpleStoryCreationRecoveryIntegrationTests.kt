@@ -103,6 +103,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var sessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var storylineRepository: StoryCreationStorylineRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
 
     private val deviceA = "device-a"
     private val deviceB = "device-b"
@@ -201,7 +202,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         requestRepository.saveAndFlush(
             StoryCreationRequest(
                 requestId = requestId,
-                deviceId = deviceA,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
                 stage = StoryCreationStage.STORYLINE_GENERATION,
                 status = StoryCreationRequestStatus.PENDING,
             ),

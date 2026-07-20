@@ -39,12 +39,12 @@ class StoryCreationRequest(
     @Column(name = "request_id", nullable = false, unique = true)
     val requestId: UUID,
 
-    // 소유 주체: 회원 요청은 user_id, 게스트 요청은 device_id(원문). 복구 조회 소유 게이트에 쓴다.
+    // 소유 주체: 회원 요청은 user_id, 게스트 요청은 device_id_hash(원문 대신 해시 — DeviceIdHasher). 복구 조회 소유 게이트에 쓴다.
     @Column(name = "user_id")
     val userId: Long? = null,
 
-    @Column(name = "device_id")
-    val deviceId: String? = null,
+    @Column(name = "device_id_hash", length = 64)
+    val deviceIdHash: String? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "stage", nullable = false, length = 32)
@@ -72,8 +72,8 @@ class StoryCreationRequest(
 
 /**
  * 복구 조회·재요청 소유 게이트. 회원 소유 행은 요청 userId가 일치해야 하고, 게스트 소유 행은
- * 요청 deviceId가 (둘 다 non-null로) 일치해야 한다. 소유자가 식별되지 않는 행(둘 다 null)은 누구에게도 열리지 않는다.
+ * 요청 디바이스 해시가 (둘 다 non-null로) 일치해야 한다. 소유자가 식별되지 않는 행(둘 다 null)은 누구에게도 열리지 않는다.
  */
-fun StoryCreationRequest.isOwnedBy(userId: Long?, deviceId: String?): Boolean =
+fun StoryCreationRequest.isOwnedBy(userId: Long?, deviceIdHash: String?): Boolean =
     if (this.userId != null) this.userId == userId
-    else this.deviceId != null && this.deviceId == deviceId
+    else this.deviceIdHash != null && this.deviceIdHash == deviceIdHash
