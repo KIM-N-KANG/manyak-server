@@ -10,6 +10,7 @@ import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
+import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -97,6 +98,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var simpleStoryCreationService: com.knk.manyak.story.service.SimpleStoryCreationService
     @Autowired private lateinit var requestRepository: StoryCreationRequestRepository
     @Autowired private lateinit var sessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var storylineRepository: StoryCreationStorylineRepository
@@ -226,6 +228,44 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         assertThat(createStorylinesCalls.get()).isEqualTo(2)
         assertThat(requestRepository.findByRequestId(requestId)?.status)
             .isEqualTo(StoryCreationRequestStatus.COMPLETED)
+    }
+
+    @Test
+    fun `같은 requestId 동시 요청은 한 번만 생성하고 이중 실행되지 않는다`() {
+        // Codex P2: 동시 삽입 경합·동시 FAILED 재실행이 이중 생성으로 새지 않는지 검증한다(스케줄링과 무관한 불변식).
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+        val threads = 8
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        val startGate = java.util.concurrent.CountDownLatch(1)
+        val successIds = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        val conflicts = java.util.concurrent.atomic.AtomicInteger(0)
+
+        val futures = (1..threads).map {
+            pool.submit {
+                startGate.await()
+                try {
+                    val response = simpleStoryCreationService.generateSimpleStorylines(
+                        GenerateSimpleStorylinesRequest(requestId = requestId, selectedTagIds = listOf(genre.id)),
+                        userId = null,
+                        deviceId = deviceA,
+                    )
+                    successIds.add(response.simpleCreationId)
+                } catch (exception: org.springframework.web.server.ResponseStatusException) {
+                    if (exception.statusCode.value() == 409) conflicts.incrementAndGet() else throw exception
+                }
+            }
+        }
+        startGate.countDown()
+        futures.forEach { it.get(30, java.util.concurrent.TimeUnit.SECONDS) }
+        pool.shutdown()
+
+        // AI는 정확히 한 번만 호출되고 진행 세션도 하나만 생성된다(이중 실행 없음).
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        // 성공 응답은 모두 같은 세션(멱등 replay)이고, 성공 + 409 = 전체 스레드 수다.
+        assertThat(successIds.distinct()).hasSize(1)
+        assertThat(successIds.size + conflicts.get()).isEqualTo(threads)
     }
 
     @Test

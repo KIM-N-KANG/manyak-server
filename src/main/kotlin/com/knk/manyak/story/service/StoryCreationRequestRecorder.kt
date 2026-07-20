@@ -60,34 +60,57 @@ class StoryCreationRequestRecorder(
             }
         }
 
-    /** 신규 요청은 PENDING 행을 기록해 실행하도록, 재요청은 상태에 따라 replay·409·재실행으로 분기한다. */
+    /**
+     * 신규 요청은 PENDING 행을 기록해 실행하도록, 재요청은 상태에 따라 replay·409·재실행으로 분기한다.
+     *
+     * 삽입 시도와 기존 행 해석을 각각 독립 트랜잭션으로 나눈다. 동시 삽입 경합의 패자는 유니크 제약 위반으로
+     * 삽입 트랜잭션만 롤백되고(그 안에서 추가 질의를 하지 않아 abort된 트랜잭션을 재사용하지 않는다), 별도 트랜잭션에서
+     * 승자 행을 비관적 락으로 다시 읽어 해석한다. 이 락이 동시 FAILED 재실행도 직렬화한다(둘 다 통과해 이중 실행되지 않도록).
+     */
     private fun claimOrReplay(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
         ownerDeviceId: String?,
-    ): Claim = txTemplate.execute {
-        val existing = repository.findByRequestId(requestId)
-        if (existing != null) {
-            return@execute resolveExisting(existing, ownerUserId, ownerDeviceId)
+    ): Claim {
+        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceId)
+        if (insertedId != null) {
+            return Claim.Run(insertedId)
         }
+        return resolveExistingLocked(requestId, ownerUserId, ownerDeviceId)
+    }
+
+    /** PENDING 행을 삽입하고 새 id를 돌려준다. 유니크 제약 위반(동시 삽입 경합의 패자)이면 null(행이 이미 존재). */
+    private fun tryInsertPending(
+        requestId: UUID,
+        stage: StoryCreationStage,
+        ownerUserId: Long?,
+        ownerDeviceId: String?,
+    ): Long? =
         try {
-            val saved = repository.saveAndFlush(
-                StoryCreationRequest(
-                    requestId = requestId,
-                    userId = ownerUserId,
-                    deviceId = ownerDeviceId,
-                    stage = stage,
-                    status = StoryCreationRequestStatus.PENDING,
-                ),
-            )
-            Claim.Run(saved.id)
+            txTemplate.execute {
+                repository.saveAndFlush(
+                    StoryCreationRequest(
+                        requestId = requestId,
+                        userId = ownerUserId,
+                        deviceId = ownerDeviceId,
+                        stage = stage,
+                        status = StoryCreationRequestStatus.PENDING,
+                    ),
+                ).id
+            }
         } catch (exception: DataIntegrityViolationException) {
-            // 동시 삽입 경합: 유니크 제약 위반이면 승자 행을 다시 읽어 재요청으로 처리한다.
-            val now = repository.findByRequestId(requestId) ?: throw exception
-            resolveExisting(now, ownerUserId, ownerDeviceId)
+            // 유니크 제약 위반은 삽입 트랜잭션 밖으로 전파돼 그 트랜잭션만 깔끔히 롤백된다(abort된 트랜잭션에서 재조회하지 않는다).
+            null
         }
-    } ?: error("Story creation request claim transaction result is empty")
+
+    /** 기존 요청 행을 비관적 락으로 조회해 상태별로 해석한다(동시 FAILED 재실행 직렬화). */
+    private fun resolveExistingLocked(requestId: UUID, ownerUserId: Long?, ownerDeviceId: String?): Claim =
+        txTemplate.execute {
+            val row = repository.findByRequestIdForUpdate(requestId)
+                ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
+            resolveExisting(row, ownerUserId, ownerDeviceId)
+        } ?: error("Story creation request claim transaction result is empty")
 
     private fun resolveExisting(row: StoryCreationRequest, ownerUserId: Long?, ownerDeviceId: String?): Claim {
         if (!row.isOwnedBy(ownerUserId, ownerDeviceId)) {
