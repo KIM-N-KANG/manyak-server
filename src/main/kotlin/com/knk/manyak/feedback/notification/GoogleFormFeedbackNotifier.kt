@@ -25,6 +25,8 @@ class GoogleFormFeedbackNotifier(
     @Value("\${manyak.google-form.feedback.form-id:}") formId: String,
     @Value("\${manyak.google-form.feedback.body-entry-id:}") bodyEntryId: String,
     @Value("\${manyak.google-form.feedback.email-entry-id:}") emailEntryId: String,
+    @Value("\${manyak.google-form.feedback.platform-entry-id:}") platformEntryId: String,
+    @Value("\${manyak.google-form.feedback.app-version-entry-id:}") appVersionEntryId: String,
     connectTimeout: Duration = Duration.ofSeconds(2),
     readTimeout: Duration = Duration.ofSeconds(3),
 ) : FeedbackNotifier {
@@ -32,6 +34,8 @@ class GoogleFormFeedbackNotifier(
     private val formId = formId.trim()
     private val bodyEntryId = bodyEntryId.trim()
     private val emailEntryId = emailEntryId.trim()
+    private val platformEntryId = platformEntryId.trim()
+    private val appVersionEntryId = appVersionEntryId.trim()
     private val responseUrl = "${baseUrl.trim().removeSuffix("/")}/forms/d/e/${this.formId}/formResponse"
     private val restClient = RestClient
         .builder()
@@ -50,9 +54,15 @@ class GoogleFormFeedbackNotifier(
         }
         val form = LinkedMultiValueMap<String, String>().apply {
             add("entry.$bodyEntryId", event.body)
-            // 이메일 필드는 폼에서 선택 항목이라, 값이 있을 때만 채운다.
+            // 이메일·플랫폼·앱 버전은 폼에서 선택 항목이라, entry-id 와 값이 모두 있을 때만 채운다.
             if (emailEntryId.isNotEmpty() && !event.email.isNullOrBlank()) {
                 add("entry.$emailEntryId", event.email)
+            }
+            if (platformEntryId.isNotEmpty() && event.platform != null) {
+                add("entry.$platformEntryId", event.platform.name)
+            }
+            if (appVersionEntryId.isNotEmpty() && !event.appVersion.isNullOrBlank()) {
+                add("entry.$appVersionEntryId", event.appVersion)
             }
         }
         try {

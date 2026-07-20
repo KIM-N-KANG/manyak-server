@@ -48,6 +48,8 @@ class GoogleFormFeedbackNotifierTests {
         formId = formId,
         bodyEntryId = "1064236498",
         emailEntryId = "1084788855",
+        platformEntryId = "486778658",
+        appVersionEntryId = "1401396038",
     )
 
     @Test
@@ -63,6 +65,20 @@ class GoogleFormFeedbackNotifierTests {
         val body = URLDecoder.decode(recorded.body.readUtf8(), "UTF-8")
         assertThat(body).contains("entry.1064236498=진행 중 버그가 있어요.")
         assertThat(body).contains("entry.1084788855=user@example.com")
+        assertThat(body).contains("entry.486778658=IOS")
+        assertThat(body).contains("entry.1401396038=1.2.0")
+    }
+
+    @Test
+    fun `플랫폼과 앱 버전이 없으면 해당 필드를 전송하지 않는다`() {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        notifier().notifyCreated(sampleEvent().copy(platform = null, appVersion = null))
+
+        val body = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        assertThat(body).contains("entry.1064236498")
+        assertThat(body).doesNotContain("entry.486778658")
+        assertThat(body).doesNotContain("entry.1401396038")
     }
 
     @Test

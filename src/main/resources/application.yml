@@ -89,6 +89,8 @@ manyak:
       form-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_ID:1FAIpQLSd1myQU4_KC3R7k6y4fNNtWyl4DmYOh87Uswsx7FI2FnLPeGg}
       body-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_BODY_ENTRY:1064236498}
       email-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_EMAIL_ENTRY:1084788855}
+      platform-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_PLATFORM_ENTRY:486778658}
+      app-version-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_APP_VERSION_ENTRY:1401396038}
   analytics:
     # device_id 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
     # 전환기(KNK-317): 새 env가 없으면 구 MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER로 fallback. 롤아웃 완료 후 fallback 제거.
