@@ -457,15 +457,18 @@ class ChatService(
         val chat = resolveChat(chatId)
         requireChatOwner(chat, userId)
 
-        // 멱등 사전 검사(락 밖): 이미 채워졌으면 AI 없이 반환한다. 최종 방어는 fillChoices의 락 안 재검사.
+        val story = storyRepository.findById(chat.storyId).orElse(null)
+        // 마지막 턴 검증(0개면 404, 낡은·타 채팅 turnId면 409) + 이번 턴 제외 history·재전송 입력·저장 본문을 함께 확정한다.
+        // 이 검증을 멱등 사전 검사보다 **먼저** 한다 — messageId로 먼저 조회하면 타 채팅의 turnId로 남의 선택지를 받거나
+        // 같은 채팅의 비마지막 턴이 409 대신 200이 될 수 있다(Codex P1 IDOR).
+        val target = resolveRegenerateTarget(chat.id, turnId)
+
+        // 멱등: 검증된 마지막 턴에 이미 선택지가 있으면 AI 없이 반환한다. 최종 방어는 fillChoices의 락 안 재검사.
         val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(turnId)
         if (existing.isNotEmpty()) {
             return ChatChoicesResponse(existing.map { it.choiceText })
         }
 
-        val story = storyRepository.findById(chat.storyId).orElse(null)
-        // 마지막 턴 검증(0개면 404, 낡은 turnId면 409) + 이번 턴 제외 history·재전송 입력·저장 본문을 함께 확정한다.
-        val target = resolveRegenerateTarget(chat.id, turnId)
         val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
 
         val recorded = try {

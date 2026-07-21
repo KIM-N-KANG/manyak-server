@@ -153,6 +153,44 @@ class ChatChoicesControllerIntegrationTests {
     }
 
     @Test
+    fun `비마지막 턴에 선택지가 있어도 409로 거절한다`() {
+        // Codex P1: 멱등 사전 검사가 검증보다 먼저면 비마지막 턴의 저장된 선택지를 200으로 돌려준다. 검증(409)이 우선해야 한다.
+        val story = seedStory()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "첫 입력", messageOrder = 1))
+        val firstAssistant = storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "첫 응답", messageOrder = 2),
+        )
+        // 비마지막(첫) 턴에 선택지가 이미 있는 상태.
+        storyChoiceRepository.save(StoryChoice(chatId = chat.id, messageId = firstAssistant.id, choiceText = "첫턴 선택", choiceOrder = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "둘째 입력", messageOrder = 3))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "둘째 응답", messageOrder = 4))
+
+        postChoices(chat.publicId.toString(), firstAssistant.id)
+            .expectStatus().isEqualTo(409)
+    }
+
+    @Test
+    fun `타 채팅의 turnId로는 선택지를 받을 수 없다`() {
+        // Codex P1 IDOR: 다른 채팅의 ASSISTANT 메시지 id(선택지 보유)를 이 채팅에 넣어도 검증에서 409로 막혀 남의 선택지가 새지 않는다.
+        val story = seedStory()
+        val chatA = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chatA.id, role = MessageRole.USER, content = "A 입력", messageOrder = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chatA.id, role = MessageRole.ASSISTANT, content = "A 응답", messageOrder = 2))
+
+        val chatB = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chatB.id, role = MessageRole.USER, content = "B 입력", messageOrder = 1))
+        val bAssistant = storyMessageRepository.save(
+            StoryMessage(chatId = chatB.id, role = MessageRole.ASSISTANT, content = "B 응답", messageOrder = 2),
+        )
+        storyChoiceRepository.save(StoryChoice(chatId = chatB.id, messageId = bAssistant.id, choiceText = "B 비밀 선택", choiceOrder = 1))
+
+        // chatA 경로에 chatB의 turnId → 409(남의 선택지 노출 없음).
+        postChoices(chatA.publicId.toString(), bAssistant.id)
+            .expectStatus().isEqualTo(409)
+    }
+
+    @Test
     fun `턴이 0개인 채팅은 404로 응답한다`() {
         val story = seedStory()
         val chat = storyChatRepository.save(StoryChat(storyId = story.id))
