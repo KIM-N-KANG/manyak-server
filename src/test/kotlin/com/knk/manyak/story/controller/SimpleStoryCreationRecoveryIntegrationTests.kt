@@ -282,6 +282,29 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `게스트로 기록된 요청은 같은 디바이스 회원 재시도를 409로 막지 않고 결과를 replay한다`() {
+        // Codex P2-7: 만료 토큰(게스트로 보임)으로 device 소유 행이 기록된 뒤, 토큰 갱신으로 같은 device의 회원이
+        // 같은 requestId로 재시도하면 device 해시로 소유가 매칭돼 저장된 결과를 replay해야 한다(409 오염 없음).
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+
+        val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", deviceA)
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        // AI 재호출 없이 저장된 결과를 replay한다(멱등 유지).
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+    }
+
+    @Test
     fun `실패한 요청은 같은 requestId로 재실행된다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()

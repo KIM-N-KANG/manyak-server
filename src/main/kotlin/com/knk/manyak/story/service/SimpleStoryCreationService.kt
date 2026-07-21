@@ -177,8 +177,10 @@ class SimpleStoryCreationService(
         responseType: Class<T>,
         block: () -> T,
     ): T {
-        val ownerDeviceIdHash = ownerDeviceIdHash(ownerUserId, deviceId)
+        // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
+        val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
+            // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지).
             return block()
         }
         return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
@@ -192,11 +194,7 @@ class SimpleStoryCreationService(
     private fun resolveCompletionOwnerUserId(simpleCreationId: Long, requestUserId: Long?): Long? =
         storyCreationSessionRepository.findById(simpleCreationId).orElse(null)?.userId ?: requestUserId
 
-    /** 생성 요청 소유 주체의 게스트 디바이스 해시. 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
-    private fun ownerDeviceIdHash(userId: Long?, deviceId: String?): String? =
-        if (userId == null) deviceIdHashOrNull(deviceId) else null
-
-    /** 게스트 디바이스 헤더를 소유 판정용 해시로 변환한다(원문 저장·비교 금지 — DeviceIdHasher). 공백·null은 미소유(null). */
+    /** 디바이스 헤더를 소유 판정용 해시로 변환한다(원문 저장·비교 금지 — DeviceIdHasher). 공백·null은 미소유(null). */
     private fun deviceIdHashOrNull(deviceId: String?): String? =
         deviceId?.takeIf { it.isNotBlank() }?.let(deviceIdHasher::hash)
 

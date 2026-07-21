@@ -71,9 +71,10 @@ class StoryCreationRequest(
 }
 
 /**
- * 복구 조회·재요청 소유 게이트. 회원 소유 행은 요청 userId가 일치해야 하고, 게스트 소유 행은
- * 요청 디바이스 해시가 (둘 다 non-null로) 일치해야 한다. 소유자가 식별되지 않는 행(둘 다 null)은 누구에게도 열리지 않는다.
+ * 복구 조회·재요청 소유 게이트. 요청의 식별자(회원 userId·디바이스 해시) 중 **하나라도** 행의 값과 일치하면 소유로 본다.
+ * 인증 상태가 요청 사이에 바뀌어도(만료 토큰↔갱신 토큰) 같은 클라이언트의 멱등 재시도가 소유 불일치로 막히지 않게 하기 위함이다(Codex P2).
+ * 두 식별자가 모두 없는(회원도 아니고 디바이스도 없는) 행은 누구에게도 열리지 않는다.
  */
 fun StoryCreationRequest.isOwnedBy(userId: Long?, deviceIdHash: String?): Boolean =
-    if (this.userId != null) this.userId == userId
-    else this.deviceIdHash != null && this.deviceIdHash == deviceIdHash
+    (this.userId != null && this.userId == userId) ||
+        (this.deviceIdHash != null && this.deviceIdHash == deviceIdHash)
