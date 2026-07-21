@@ -247,6 +247,7 @@ class RestChatTurnAiClientTests {
         webClient = WebClient.builder().baseUrl(server.url("/").toString()).build(),
         objectMapper = JsonMapper.builder().build(),
         streamTimeout = Duration.ofSeconds(5),
+        choicesTimeout = Duration.ofSeconds(5),
     )
 
     private fun sseResponse(body: String) = MockResponse()

@@ -19,7 +19,19 @@ interface ChatTurnAiClient {
         request: ChatTurnAiRequest,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult
+
+    /**
+     * 방금 생성된 본문([aiOutput])과 턴 재료로 다음 행동 선택지 3개를 생성한다(동기 REST, 스펙 §5-3-5).
+     * 선택지 생성은 채팅 턴에서 분리된 별도 호출이라 SSE가 아니라 단발 JSON 응답이다.
+     */
+    fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult
 }
+
+/** AI 선택지 생성 응답. 다음 행동 후보 3개와 호출 meta를 담는다(§5-3-5). */
+data class ChatChoicesResult(
+    val choices: List<String>,
+    val meta: AiCallMeta? = null,
+)
 
 /**
  * 채팅 턴 생성 요청. 프로퍼티명은 camelCase로 두고, AI 계약에 맞춰

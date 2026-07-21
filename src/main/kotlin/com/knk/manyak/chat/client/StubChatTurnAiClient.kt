@@ -25,6 +25,9 @@ class StubChatTurnAiClient : ChatTurnAiClient {
         )
     }
 
+    override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult =
+        ChatChoicesResult(choices = buildChoices())
+
     private fun buildAiOutput(request: ChatTurnAiRequest): String {
         val echoed = request.userInput.trim().take(USER_INPUT_PREVIEW_LENGTH)
         return "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다. " +

@@ -174,6 +174,15 @@ data class ChatTurnResponse(
     val createdAt: Instant,
 )
 
+@Schema(description = "선택지 생성 응답. 프론트는 상세 재조회로 렌더하며, 이 본문은 저장된 선택지의 참고용이다(스펙 §4-3-3).")
+data class ChatChoicesResponse(
+    @field:ArraySchema(
+        schema = Schema(description = "다음 행동 선택지", example = "주변을 살핀다."),
+        arraySchema = Schema(description = "이 턴에 저장된 다음 행동 선택지 목록(3개)"),
+    )
+    val choices: List<String>,
+)
+
 @Schema(description = "채팅 이어쓰기 요청")
 data class ContinueChatRequest(
     @field:NotBlank

@@ -1,6 +1,8 @@
 package com.knk.manyak.chat.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonUnwrapped
 import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import java.time.Duration
@@ -34,6 +36,9 @@ class RestChatTurnAiClient(
     private val objectMapper: ObjectMapper,
     @Value("\${manyak.ai.chat.stream-timeout:60s}")
     private val streamTimeout: Duration,
+    // 선택지 생성은 동기 REST라 전체 상한 타임아웃을 둔다(스펙 §4-3-3 · §5-3-5).
+    @Value("\${manyak.ai.chat.choices-timeout:30s}")
+    private val choicesTimeout: Duration,
 ) : ChatTurnAiClient {
 
     override fun streamTurn(
@@ -84,6 +89,24 @@ class RestChatTurnAiClient(
 
         // completed 없이 스트림이 끝난 경우는 AI relay가 아닌 백엔드 자체 오류로 본다.
         return result ?: error("completed 이벤트 없이 AI 스트림이 종료되었습니다.")
+    }
+
+    override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
+        val correlationHeaders = CorrelationHeaders.forwardingHeadersFromMdc()
+        val response = webClient.post()
+            .uri(CHAT_CHOICES_PATH)
+            .headers { headers -> correlationHeaders.forEach { (name, value) -> headers.set(name, value) } }
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .bodyValue(ChatChoicesAiRequest(request, aiOutput))
+            .retrieve()
+            .bodyToMono(ChoicesResponse::class.java)
+            .block(choicesTimeout)
+            ?: error("AI 선택지 응답이 비어 있습니다.")
+        return ChatChoicesResult(
+            choices = response.choices,
+            meta = response.meta?.toAiCallMeta(),
+        )
     }
 
     private fun <T> read(data: String?, type: Class<T>): T =
@@ -144,8 +167,53 @@ class RestChatTurnAiClient(
     /** SSE `error` 이벤트 페이로드. */
     private data class ErrorData(val code: String, val message: String)
 
+    /**
+     * `/chat/choices` 요청 바디. 턴 재료([turn])를 그대로 평탄화(@JsonUnwrapped)해 실어 보내고 `ai_output`을 더한다.
+     * 스키마는 채팅 턴 요청과 동일 + `ai_output`이다(스펙 §5-3-5). 평탄화라 turn의 필드별 snake_case 매핑이 그대로 유지된다.
+     */
+    private data class ChatChoicesAiRequest(
+        @get:JsonUnwrapped
+        val turn: ChatTurnAiRequest,
+        @get:JsonProperty("ai_output")
+        val aiOutput: String,
+    )
+
+    /**
+     * `/chat/choices` 응답. 동기 REST라 와이어 키는 snake_case다(camelCase는 chat SSE completed만의 예외 — §5-1).
+     * 미지 필드는 무시해 AI가 확장해도 파싱이 깨지지 않게 한다.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class ChoicesResponse(
+        val choices: List<String>,
+        val meta: ChoicesMeta? = null,
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class ChoicesMeta(
+        val model: String? = null,
+        val provider: String? = null,
+        @JsonProperty("input_token_count")
+        val inputTokenCount: Int? = null,
+        @JsonProperty("output_token_count")
+        val outputTokenCount: Int? = null,
+        @JsonProperty("retry_count")
+        val retryCount: Int? = null,
+        @JsonProperty("prompt_versions")
+        val promptVersions: Map<String, Int>? = null,
+    ) {
+        fun toAiCallMeta(): AiCallMeta = AiCallMeta(
+            model = model,
+            provider = provider,
+            inputTokenCount = inputTokenCount,
+            outputTokenCount = outputTokenCount,
+            retryCount = retryCount,
+            promptVersions = promptVersions,
+        )
+    }
+
     private companion object {
         const val CHAT_TURNS_PATH = "/api/v1/chat/turns"
+        const val CHAT_CHOICES_PATH = "/api/v1/chat/choices"
         const val EVENT_TOKEN = "token"
         const val EVENT_COMPLETED = "completed"
         const val EVENT_ERROR = "error"

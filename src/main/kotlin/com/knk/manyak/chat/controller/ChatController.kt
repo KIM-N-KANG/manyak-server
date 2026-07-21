@@ -1,6 +1,7 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.dto.BatchChatRequest
+import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
@@ -246,6 +247,51 @@ class ChatController(
             )
         }
     }
+
+    @Operation(
+        summary = "채팅 선택지 생성",
+        description = "마지막 턴의 다음 행동 선택지 3개를 생성해 저장합니다(스펙 §4-3-3, 선택지 분리). 이어쓰기와 달리 동기 JSON이며 " +
+            "선택지 생성은 무료입니다(크레딧·게스트 채팅 한도 미소모). 프론트엔드는 응답 본문이 아니라 채팅 상세 재조회의 " +
+            "turns[].choices로 렌더하며, turnId가 마지막 턴이 아니면 409, 이미 선택지가 있으면 AI 호출 없이 기존 값을 반환합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "선택지 생성·저장 성공(멱등 재호출 포함)",
+                content = [Content(schema = Schema(implementation = ChatChoicesResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "회원 소유 채팅에 소유자가 아닌 요청(토큰 누락·타 회원)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "채팅을 찾을 수 없거나 선택지를 생성할 턴이 없음(턴 0개)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "409",
+                description = "turnId가 서버의 마지막 턴이 아니거나 이미 변경됨",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "502",
+                description = "AI 선택지 생성 요청 실패(프론트 재시도 대상)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+        ],
+    )
+    @PostMapping("/chats/{chatId}/turns/{turnId}/choices")
+    fun generateChoices(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+        @Parameter(description = "턴 ID(마지막 턴의 ASSISTANT 메시지 ID)")
+        @PathVariable turnId: Long,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+    ): ChatChoicesResponse = chatService.generateChoices(chatId = chatId, turnId = turnId, userId = userId)
 
     @Operation(
         summary = "AI 응답 재생성 스트리밍",

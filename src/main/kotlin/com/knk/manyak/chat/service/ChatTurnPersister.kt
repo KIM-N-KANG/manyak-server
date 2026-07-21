@@ -250,6 +250,44 @@ class ChatTurnPersister(
         return PersistedTurn(turnId = lastAssistant.id, turnNumber = chat.currentTurn)
     }
 
+    /**
+     * 마지막 턴의 선택지를 채운다(선택지 분리, 스펙 §4-3-3). 채팅 락으로 이어쓰기·재생성과 직렬화한다.
+     *
+     * [expectedAssistantId]가 여전히 마지막 턴이 아니면 409(그새 이어쓰기가 끼어듦). 이미 선택지가 있으면
+     * AI 결과를 버리고 기존 값을 유지한다(멱등 — 동시 호출·재진입 안전, `(message_id, choice_order)` 유니크 위반 회피).
+     *
+     * @return 그 턴의 turn_number(= current_turn, 선택지는 마지막 턴에만 붙으므로). ai_call_logs 조인용.
+     */
+    @Transactional
+    fun fillChoices(chatId: Long, expectedAssistantId: Long, choices: List<String>): Int {
+        val chat = storyChatRepository.findByIdForUpdate(chatId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+
+        val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chatId)
+        if (lastAssistant == null ||
+            lastAssistant.role != MessageRole.ASSISTANT ||
+            lastAssistant.id != expectedAssistantId
+        ) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 변경되어 선택지 생성을 취소했습니다.")
+        }
+
+        // 멱등: 이미 채워졌으면(동시 호출·재진입) 그대로 둔다.
+        val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(expectedAssistantId)
+        if (existing.isEmpty() && choices.isNotEmpty()) {
+            storyChoiceRepository.saveAll(
+                choices.mapIndexed { index, text ->
+                    StoryChoice(
+                        chatId = chatId,
+                        messageId = expectedAssistantId,
+                        choiceText = text,
+                        choiceOrder = (index + 1).toShort(),
+                    )
+                },
+            )
+        }
+        return chat.currentTurn
+    }
+
     data class PersistedTurn(
         val turnId: Long,
         val turnNumber: Int,
