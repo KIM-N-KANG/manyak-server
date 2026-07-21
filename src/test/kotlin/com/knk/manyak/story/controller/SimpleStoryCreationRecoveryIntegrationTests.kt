@@ -407,6 +407,85 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `스토리 커밋 후 COMPLETED 마킹을 잃은 회수 재실행은 저장된 스토리를 재구성해 돌려준다`() {
+        // KNK-635(P2-10): compileAndPersist가 story·session(STORY_CREATED)을 커밋한 뒤, 별도 트랜잭션의 COMPLETED
+        // 마킹 커밋 전에 프로세스가 죽으면 요청 행은 result 없이 PENDING으로 남는다. 회수 재실행이 STORY_CREATED
+        // 세션을 만나 409→FAILED가 되어 잃은 story id를 복구 못 하던 것을, session.storyId로 응답을 재구성해 돌려준다.
+        val storyline = seedGeneratedStoryline()
+        val requestId = UUID.randomUUID()
+
+        val firstBody = restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", deviceA)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"$requestId","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.id").isNotEmpty
+            .returnResult()
+
+        // 크래시 창 재현: story·session은 STORY_CREATED로 유지하되, 요청 행은 COMPLETED 마킹을 잃고 오래된 PENDING으로 남은
+        // 상태로 만든다. @PreUpdate가 UPDATE마다 updatedAt을 now()로 덮으므로, 기존 행을 지우고 생성자 INSERT로 stale PENDING을 심는다
+        // (INSERT는 @PreUpdate를 발동하지 않아, 재실행 회수 임계값을 넘긴 updatedAt이 보존된다).
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 같은 requestId 회수 재실행: 409/FAILED가 아니라 저장된 스토리를 그대로 돌려준다(AI 재호출·중복 스토리·중복 과금 없음).
+        val secondBody = restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", deviceA)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"$requestId","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .returnResult()
+
+        // 저장된 스토리를 재구성해 첫 응답과 동일하게 돌려준다.
+        assertThat(String(secondBody.responseBody!!)).isEqualTo(String(firstBody.responseBody!!))
+        // AI compile은 첫 요청에서만 호출되고 스토리도 하나만 존재한다(재구성 경로는 AI·저장을 다시 타지 않는다).
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+        // 요청 행은 회수 재실행으로 다시 COMPLETED가 되고 결과가 채워진다.
+        val reconciled = requestRepository.findByRequestId(requestId)!!
+        assertThat(reconciled.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.resultJson).isNotNull()
+    }
+
+    @Test
+    fun `이미 완성된 세션에 다른 requestId로 재요청하면 409이 아니라 저장된 스토리를 재구성해 돌려준다`() {
+        // KNK-635: reconcile은 회수 재실행뿐 아니라 소유자가 이미 완성된 세션을 다른 requestId로 재요청하는 경우에도
+        // 저장된 스토리를 그대로 돌려준다(409 완화, 멱등). AI·저장을 다시 타지 않는다.
+        val storyline = seedGeneratedStoryline()
+        val firstBody = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().jsonPath("$.id").isNotEmpty
+            .returnResult()
+
+        val secondBody = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        assertThat(String(secondBody.responseBody!!)).isEqualTo(String(firstBody.responseBody!!))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+    }
+
+    @Test
     fun `스토리 완성 요청도 requestId로 복구된다`() {
         val storyline = seedGeneratedStoryline()
         val requestId = UUID.randomUUID()
@@ -482,4 +561,5 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
+    @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository
 }

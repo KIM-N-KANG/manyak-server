@@ -374,14 +374,12 @@ class SimpleStoryCreationService(
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             }
-        if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
-        }
 
         // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
         // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속.
         // - 소유 세션(소유자 있음): 같은 사용자만 완료 가능. 다른 사용자/익명(만료·무효 토큰 포함)이 simpleCreationId로
         //   남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
+        // 재구성(아래 STORY_CREATED 경로)보다 먼저 검사해 완료된 스토리가 비소유자에게 새지 않게 한다.
         val attributedUserId = when {
             session.userId == null -> userId
             session.userId == userId -> userId
@@ -389,6 +387,13 @@ class SimpleStoryCreationService(
                 HttpStatus.FORBIDDEN,
                 "본인이 시작한 간편 제작만 완료할 수 있습니다.",
             )
+        }
+
+        // 회수 재실행이 이미 완료된 세션을 만나면(P2-10, KNK-635): 409 대신 저장된 스토리로 응답을 재구성해 돌려준다.
+        // 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
+        // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다(소유 검증은 위에서 선행).
+        if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
+            return reconcileCreatedSession(session)
         }
 
         val selectedStoryline = storyCreationStorylineRepository
@@ -444,6 +449,55 @@ class SimpleStoryCreationService(
         ) {
             compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest)
         }
+    }
+
+    /**
+     * 회수 재실행(P2-10, KNK-635)이 이미 STORY_CREATED인 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
+     * 저장된 스토리로 원 POST 응답([SimpleStoryCreateResponse])을 재구성한다. [compileAndPersist]가 만든 응답과
+     * 같은 모양이며, AI·저장을 다시 타지 않는다. 소유 검증은 호출부([doCreateSimpleStory])가 선행한다.
+     *
+     * storyId·자식 행이 없으면(비정상 상태) 원래의 409로 폴백한다.
+     */
+    private fun reconcileCreatedSession(session: StoryCreationSession): StoryCreationOutcome {
+        val alreadyCreated = ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
+        val storyId = session.storyId ?: throw alreadyCreated
+        val story = storyRepository.findById(storyId).orElseThrow { alreadyCreated }
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(storyId) ?: throw alreadyCreated
+
+        val suggestedInputs = storySuggestedInputRepository
+            .findByStartSettingIdOrderByInputOrderAsc(startSetting.id)
+            .map { it.inputText }
+        val endings = storyEndingRepository
+            .findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
+            .map { it.toEndingResponse() }
+        // 응답의 genres는 세션 장르 태그(정렬 규칙은 compile 경로와 동일)로 재구성한다.
+        val genres = storyCreationSessionTagRepository
+            .findAllWithTagByCreationSessionId(session.id)
+            .map { it.tag }
+            .filter { it.category == SimpleStoryTagCategory.GENRE }
+            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            .map { it.name }
+
+        return StoryCreationOutcome(
+            response = SimpleStoryCreateResponse(
+                id = story.publicId.toString(),
+                title = story.title,
+                oneLineIntro = story.oneLineIntro,
+                description = story.description,
+                genres = genres,
+                startSettings = listOf(
+                    StoryStartSettingResponse(
+                        id = startSetting.publicId.toString(),
+                        name = startSetting.name,
+                        prologue = startSetting.prologue,
+                        startSituation = startSetting.startSituation,
+                        suggestedInputs = suggestedInputs,
+                        endings = endings,
+                    ),
+                ),
+            ),
+            aiCallLogId = null,
+        )
     }
 
     /** 스토리 장르 태그와 일치하는 활성 로어북을 선별한다. 장르 태그가 없으면 빈 목록. */
@@ -716,7 +770,8 @@ class SimpleStoryCreationService(
 
     private data class StoryCreationOutcome(
         val response: SimpleStoryCreateResponse,
-        val aiCallLogId: Long,
+        // 회수 재실행이 저장된 스토리를 재구성해 돌려주는 경로(P2-10)는 AI를 호출하지 않으므로 null이다.
+        val aiCallLogId: Long?,
     )
 
     private data class StoryCreationTagDraft(
