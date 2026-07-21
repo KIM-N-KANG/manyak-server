@@ -144,6 +144,7 @@ class StoryControllerIntegrationTests {
             .body(
                 """
                 {
+                  "requestId": "${java.util.UUID.randomUUID()}",
                   "selectedTagIds": [${genre.id}, ${protagonist.id}]
                 }
                 """.trimIndent(),
@@ -181,6 +182,7 @@ class StoryControllerIntegrationTests {
             .body(
                 """
                 {
+                  "requestId": "${java.util.UUID.randomUUID()}",
                   "selectedTagIds": [${genre.id}]
                 }
                 """.trimIndent(),
@@ -203,6 +205,7 @@ class StoryControllerIntegrationTests {
             .body(
                 """
                 {
+                  "requestId": "${java.util.UUID.randomUUID()}",
                   "customTags": [
                     {
                       "name": "비밀스러운 조력자",
@@ -241,6 +244,7 @@ class StoryControllerIntegrationTests {
             .body(
                 """
                 {
+                  "requestId": "${java.util.UUID.randomUUID()}",
                   "customTags": [
                     {
                       "name": "마법 학교",
@@ -300,7 +304,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[],"customTags":[]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[],"customTags":[]}""")
             .exchange()
             .expectStatus().isBadRequest
             .expectBody()
@@ -317,7 +321,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[999999]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[999999]}""")
             .exchange()
             .expectStatus().isBadRequest
             .expectBody()
@@ -336,7 +340,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[${genre.id}]}""")
             .exchange()
             .expectStatus().isEqualTo(502)
             .expectBody()
@@ -368,6 +372,7 @@ class StoryControllerIntegrationTests {
             .body(
                 """
                 {
+                  "requestId": "${java.util.UUID.randomUUID()}",
                   "simpleCreationId": ${seeded.sessionId},
                   "storylineId": ${seeded.storylineIds[1]},
                   "additionalInfos": ["주인공은 신중하다", "결말은 여운 있게"]
@@ -420,7 +425,7 @@ class StoryControllerIntegrationTests {
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
-                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
             )
             .exchange()
             .expectStatus().isCreated
@@ -438,7 +443,7 @@ class StoryControllerIntegrationTests {
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .body(
-                """{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]},"additionalInfos":[$additionalInfos]}""",
             )
             .exchange()
             .expectStatus().isBadRequest
@@ -456,7 +461,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":999999,"storylineId":1}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":999999,"storylineId":1}""")
             .exchange()
             .expectStatus().isNotFound
             .expectBody()
@@ -472,7 +477,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":999999}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":999999}""")
             .exchange()
             .expectStatus().isNotFound
             .expectBody()
@@ -491,7 +496,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isEqualTo(409)
             .expectBody()
@@ -509,7 +514,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -527,7 +532,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${seeded.sessionId},"storylineId":${seeded.storylineIds[0]}}""")
             .exchange()
             .expectStatus().isEqualTo(502)
             .expectBody()

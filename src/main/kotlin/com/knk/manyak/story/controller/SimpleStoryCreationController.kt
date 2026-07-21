@@ -8,6 +8,7 @@ import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
+import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StorylineRatingRequest
 import com.knk.manyak.story.dto.StorylineRatingResponse
 import com.knk.manyak.story.service.SimpleStoryCreationService
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 @Tag(name = "Simple Story Creation", description = "간편 제작 API")
 @Validated
@@ -157,6 +159,35 @@ class SimpleStoryCreationController(
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): SimpleStoryCreateResponse =
         simpleStoryCreationService.createSimpleStory(request, userId, deviceId)
+
+    @Operation(
+        summary = "백그라운드 생성 요청 복구 조회",
+        description = "모바일에서 앱 전환으로 응답을 못 받은 스토리라인 생성·스토리 완성 요청의 진행 상태·결과를 " +
+            "requestId로 되찾습니다(스펙 §4-3-8). 소유 주체(회원 또는 게스트 디바이스)만 조회할 수 있습니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공",
+                content = [Content(schema = Schema(implementation = StoryCreationRequestStatusResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "생성 요청을 찾을 수 없거나 요청자 소유가 아님",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+        ],
+    )
+    @GetMapping("/creation-requests/{requestId}")
+    fun getCreationRequest(
+        @PathVariable requestId: UUID,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+        // 게스트 소유 판정용 디바이스 ID(스펙 §4-3-8). 회원 요청은 userId로 소유를 판정한다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+    ): StoryCreationRequestStatusResponse =
+        simpleStoryCreationService.getCreationRequest(requestId, userId, deviceId)
 
     @Operation(
         summary = "스토리라인 평가 설정/변경",

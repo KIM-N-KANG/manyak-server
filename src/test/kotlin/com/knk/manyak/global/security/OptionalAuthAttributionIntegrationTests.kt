@@ -402,7 +402,7 @@ class OptionalAuthAttributionIntegrationTests {
         authorization?.let { spec.header("Authorization", it) }
         return spec
             .body(
-                """{"simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
             )
             .exchange()
     }

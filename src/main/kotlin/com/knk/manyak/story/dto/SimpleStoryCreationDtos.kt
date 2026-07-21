@@ -1,5 +1,7 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.entity.StoryCreationStage
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
@@ -8,6 +10,8 @@ import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
+import tools.jackson.databind.JsonNode
+import java.util.UUID
 
 @Schema(description = "간편 제작 태그 분류")
 enum class SimpleStoryTagCategory {
@@ -18,6 +22,14 @@ enum class SimpleStoryTagCategory {
 
 @Schema(description = "간편 제작 스토리라인 생성 요청")
 data class GenerateSimpleStorylinesRequest(
+    @field:NotNull
+    @field:Schema(
+        description = "클라이언트 생성 요청 ID(UUID). 백그라운드 생성 복구 조회·재시도 멱등 키로 쓴다(스펙 §4-3-8).",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        requiredMode = Schema.RequiredMode.REQUIRED,
+    )
+    val requestId: UUID,
+
     @field:Size(max = 20)
     @field:Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록", example = "[101, 205, 309]")
     @field:ArraySchema(
@@ -168,6 +180,14 @@ data class StorylineRatingResponse(
 
 @Schema(description = "간편 제작 스토리 생성 요청")
 data class CreateSimpleStoryRequest(
+    @field:NotNull
+    @field:Schema(
+        description = "클라이언트 생성 요청 ID(UUID). 백그라운드 생성 복구 조회·재시도 멱등 키로 쓴다(스펙 §4-3-8).",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        requiredMode = Schema.RequiredMode.REQUIRED,
+    )
+    val requestId: UUID,
+
     @field:Min(1)
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
     val simpleCreationId: Long,
@@ -225,4 +245,19 @@ data class SimpleStoryCreateResponse(
         arraySchema = Schema(description = "스토리 시작 설정 목록(KNK-515 복수화). 간편 제작은 1개다."),
     )
     val startSettings: List<StoryStartSettingResponse>,
+)
+
+@Schema(description = "백그라운드 생성 요청 복구 조회 응답(스펙 §4-3-8)")
+data class StoryCreationRequestStatusResponse(
+    @field:Schema(description = "생성 단계", example = "STORY_COMPLETION")
+    val stage: StoryCreationStage,
+
+    @field:Schema(description = "진행 상태", example = "COMPLETED")
+    val status: StoryCreationRequestStatus,
+
+    @field:Schema(
+        description = "COMPLETED일 때 원 POST 응답 본문과 동일 스키마, 그 외 null.",
+        nullable = true,
+    )
+    val result: JsonNode?,
 )
