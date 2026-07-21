@@ -36,8 +36,10 @@ class RestChatTurnAiClient(
     private val objectMapper: ObjectMapper,
     @Value("\${manyak.ai.chat.stream-timeout:60s}")
     private val streamTimeout: Duration,
-    // 선택지 생성은 동기 REST라 전체 상한 타임아웃을 둔다(스펙 §4-3-3 · §5-3-5).
-    @Value("\${manyak.ai.chat.choices-timeout:30s}")
+    // 선택지 생성은 동기 REST라 전체 상한 타임아웃을 둔다. AI가 선택지 3개를 위해 내부 재호출(호출당 ~60초)을 하므로
+    // 스펙의 30초(§4-3-3)는 AI가 폴백으로 200을 주기도 전에 끊는다(A11 타임아웃 역전). 재호출 1회 여유까지 감안해 90초로 둔다.
+    // 백엔드 내부 stopgap(KNK-636)에서는 이 값만큼 completed가 지연되므로 무한정은 아니게 상한을 유지한다.
+    @Value("\${manyak.ai.chat.choices-timeout:90s}")
     private val choicesTimeout: Duration,
 ) : ChatTurnAiClient {
 
