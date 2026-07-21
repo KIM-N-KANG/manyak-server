@@ -37,6 +37,7 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -302,6 +303,51 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         // AI 재호출 없이 저장된 결과를 replay한다(멱등 유지).
         assertThat(createStorylinesCalls.get()).isEqualTo(1)
         assertThat(sessionRepository.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `회원 소유 요청은 같은 디바이스 게스트가 복구 조회로 가로챌 수 없다`() {
+        // Codex P2-8: 회원 소유 행(userId 있음)은 디바이스 매칭이 소유를 우회하지 못한다(공유 기기·계정 전환 노출 방지).
+        val genre = seedGenreTag()
+        val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
+        val requestId = UUID.randomUUID()
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", deviceA)
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        // 같은 디바이스의 게스트(비인증)는 회원 소유 행을 복구 조회할 수 없다.
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isNotFound
+    }
+
+    @Test
+    fun `오래 PENDING인 요청은 재실행으로 회수된다`() {
+        // Codex P2-9: PENDING 커밋 후 프로세스가 죽으면 영구 409가 되지 않도록, 임계값보다 오래된 PENDING은 재실행을 허용한다.
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                // 기본 임계값(300초)보다 오래된 PENDING = 실행 중 죽은 잔여로 간주.
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(requestRepository.findByRequestId(requestId)?.status)
+            .isEqualTo(StoryCreationRequestStatus.COMPLETED)
     }
 
     @Test

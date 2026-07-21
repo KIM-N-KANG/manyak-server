@@ -5,6 +5,7 @@ import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -13,6 +14,7 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -31,6 +33,10 @@ import java.util.UUID
 class StoryCreationRequestRecorder(
     private val repository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
+    // 이 시간(초)보다 오래 PENDING인 행은 실행 중 프로세스가 죽은 것으로 보고 재실행을 허용한다(무한 409 방지).
+    // 최장 생성 동작(스토리 완성 AI 120초)보다 충분히 커, 진행 중인 정상 요청을 가로채지 않는다.
+    @param:Value("\${manyak.story.pending-reclaim-after-seconds:300}")
+    private val pendingReclaimAfterSeconds: Long,
     transactionManager: PlatformTransactionManager,
 ) {
     // PENDING 기록·상태 갱신을 본 저장 트랜잭션과 독립 커밋한다(복구 GET이 PENDING을 보게).
@@ -123,8 +129,16 @@ class StoryCreationRequestRecorder(
         return when (row.status) {
             StoryCreationRequestStatus.COMPLETED ->
                 Claim.Replay(row.resultJson ?: error("COMPLETED story creation request has no stored result"))
-            StoryCreationRequestStatus.PENDING ->
-                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 진행 중인 생성 요청입니다.")
+            StoryCreationRequestStatus.PENDING -> {
+                // 진행 중이면 409. 단 임계값보다 오래된 PENDING은 실행 중 프로세스가 죽은 잔여로 보고 재실행을 허용한다
+                // (이 판정은 행 락 안에서 이뤄져 동시 재요청과 직렬화된다 — updatedAt를 갱신해 곧이은 재요청은 다시 409로 막힌다).
+                if (row.updatedAt.isAfter(Instant.now().minusSeconds(pendingReclaimAfterSeconds))) {
+                    throw ResponseStatusException(HttpStatus.CONFLICT, "이미 진행 중인 생성 요청입니다.")
+                }
+                row.updatedAt = Instant.now()
+                repository.saveAndFlush(row)
+                Claim.Run(row.id)
+            }
             StoryCreationRequestStatus.FAILED -> {
                 // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
                 row.status = StoryCreationRequestStatus.PENDING
