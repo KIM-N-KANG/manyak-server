@@ -253,13 +253,20 @@ class ChatTurnPersister(
     /**
      * 마지막 턴의 선택지를 채운다(선택지 분리, 스펙 §4-3-3). 채팅 락으로 이어쓰기·재생성과 직렬화한다.
      *
-     * [expectedAssistantId]가 여전히 마지막 턴이 아니면 409(그새 이어쓰기가 끼어듦). 이미 선택지가 있으면
-     * AI 결과를 버리고 기존 값을 유지한다(멱등 — 동시 호출·재진입 안전, `(message_id, choice_order)` 유니크 위반 회피).
+     * [expectedAssistantId]가 여전히 마지막 턴이 아니면 409(그새 이어쓰기가 끼어듦). AI 호출은 락 밖에서 도므로,
+     * 그 사이 같은 턴이 제자리 재생성돼 본문이 바뀌면([expectedAiOutput]와 현재 본문 불일치) 낡은 본문 기준 선택지를
+     * 저장하지 않고 409로 폐기한다(Codex P1). 이미 선택지가 있으면 AI 결과를 버리고 저장된 값을 반환한다
+     * (멱등 — 동시 호출·재진입 안전, `(message_id, choice_order)` 유니크 위반 회피).
      *
-     * @return 그 턴의 turn_number(= current_turn, 선택지는 마지막 턴에만 붙으므로). ai_call_logs 조인용.
+     * @return 실제 저장된 선택지와 그 턴의 turn_number(= current_turn). 반환 선택지는 story_choices에 실재하는 값이다(Codex P2).
      */
     @Transactional
-    fun fillChoices(chatId: Long, expectedAssistantId: Long, choices: List<String>): Int {
+    fun fillChoices(
+        chatId: Long,
+        expectedAssistantId: Long,
+        expectedAiOutput: String,
+        choices: List<String>,
+    ): FilledChoices {
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
 
@@ -270,10 +277,17 @@ class ChatTurnPersister(
         ) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 변경되어 선택지 생성을 취소했습니다.")
         }
+        // 재생성 경합 방어: 선택지를 만든 본문과 현재 본문이 다르면(id 유지·제자리 교체) 낡은 선택지를 붙이지 않는다(Codex P1).
+        if (lastAssistant.content != expectedAiOutput) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "본문이 재생성되어 선택지 생성을 취소했습니다.")
+        }
 
-        // 멱등: 이미 채워졌으면(동시 호출·재진입) 그대로 둔다.
+        // 멱등: 이미 채워졌으면(동시 호출·재진입) 저장된 값을 그대로 반환한다.
         val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(expectedAssistantId)
-        if (existing.isEmpty() && choices.isNotEmpty()) {
+        if (existing.isNotEmpty()) {
+            return FilledChoices(choices = existing.map { it.choiceText }, turnNumber = chat.currentTurn)
+        }
+        if (choices.isNotEmpty()) {
             storyChoiceRepository.saveAll(
                 choices.mapIndexed { index, text ->
                     StoryChoice(
@@ -285,8 +299,11 @@ class ChatTurnPersister(
                 },
             )
         }
-        return chat.currentTurn
+        return FilledChoices(choices = choices, turnNumber = chat.currentTurn)
     }
+
+    /** [fillChoices] 결과: 실제 저장된 선택지와 그 턴의 turn_number. */
+    data class FilledChoices(val choices: List<String>, val turnNumber: Int)
 
     data class PersistedTurn(
         val turnId: Long,

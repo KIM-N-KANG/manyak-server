@@ -488,11 +488,11 @@ class ChatService(
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 선택지 생성 요청에 실패했습니다.", exception)
         }
 
-        val choices = recorded.result.choices
-        val turnNumber = chatTurnPersister.fillChoices(chat.id, turnId, choices)
+        // 락 안에서 본문 재생성 경합을 검사하고 저장한다. 반환값은 실제 저장된 선택지다(경합 시 recorded와 다를 수 있음, Codex P2).
+        val filled = chatTurnPersister.fillChoices(chat.id, turnId, target.aiOutput, recorded.result.choices)
         // ai_call_logs.turn_number를 채워 chat_response 행과 chat_id + turn_number로 조인되게 한다(§4-7).
-        aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, turnNumber)
-        return ChatChoicesResponse(choices)
+        aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, filled.turnNumber)
+        return ChatChoicesResponse(filled.choices)
     }
 
     /**

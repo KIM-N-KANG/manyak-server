@@ -11,6 +11,7 @@ import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.chat.service.ChatTurnPersister
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.story.entity.Story
@@ -21,6 +22,7 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -80,6 +82,7 @@ class ChatChoicesControllerIntegrationTests {
     @Autowired private lateinit var storyMessageRepository: StoryMessageRepository
     @Autowired private lateinit var storyChoiceRepository: StoryChoiceRepository
     @Autowired private lateinit var aiCallLogRepository: AiCallLogRepository
+    @Autowired private lateinit var chatTurnPersister: ChatTurnPersister
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -221,6 +224,42 @@ class ChatChoicesControllerIntegrationTests {
 
         // 실패 시 선택지는 저장되지 않는다.
         assertThat(storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(assistant.id)).isEmpty()
+    }
+
+    @Test
+    fun `본문이 재생성돼 바뀌면 낡은 선택지를 저장하지 않고 409를 던진다`() {
+        // Codex P1: AI 호출 중 같은 턴이 제자리 재생성되면(id 유지·content 교체) 낡은 본문 기준 선택지를 저장하면 안 된다.
+        val story = seedStory()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = 1))
+        val assistant = storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "재생성된 새 본문", messageOrder = 2),
+        )
+
+        // 선택지는 낡은 본문 기준으로 생성됐다고 가정 → 현재 본문과 불일치 → 409, 저장되지 않는다.
+        assertThatThrownBy {
+            chatTurnPersister.fillChoices(chat.id, assistant.id, "낡은 본문", listOf("A", "B", "C"))
+        }.matches { (it as org.springframework.web.server.ResponseStatusException).statusCode.value() == 409 }
+        assertThat(storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(assistant.id)).isEmpty()
+    }
+
+    @Test
+    fun `경합으로 이미 저장된 선택지가 있으면 늦은 결과 대신 저장된 값을 반환한다`() {
+        // Codex P2: 동시 호출이 먼저 저장했으면 늦은 호출의 AI 결과를 버리고 실재하는 저장 값을 돌려줘야 한다.
+        val story = seedStory()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = 1))
+        val assistant = storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "본문", messageOrder = 2),
+        )
+        storyChoiceRepository.save(StoryChoice(chatId = chat.id, messageId = assistant.id, choiceText = "먼저 저장 A", choiceOrder = 1))
+
+        val filled = chatTurnPersister.fillChoices(chat.id, assistant.id, "본문", listOf("늦은 X", "늦은 Y", "늦은 Z"))
+
+        assertThat(filled.choices).containsExactly("먼저 저장 A")
+        // 저장은 늦은 값으로 덮이지 않는다.
+        assertThat(storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(assistant.id).map { it.choiceText })
+            .containsExactly("먼저 저장 A")
     }
 
     private fun postChoices(chatId: String, turnId: Long): RestTestClient.ResponseSpec =
