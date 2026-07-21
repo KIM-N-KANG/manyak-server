@@ -397,13 +397,13 @@ class SimpleStoryCreationService(
             )
         }
 
-        // 이미 완료된 세션을 만나면(P2-10, KNK-635): 회원 소유 세션의 소유 검증된 회수(reclaim)일 때만 409 대신 저장된 스토리로
+        // 이미 완료된 세션을 만나면(P2-10, KNK-635/644): 이 세션을 만든 바로 그 요청의 회수(reclaim)일 때만 409 대신 저장된 스토리로
         // 응답을 재구성해 돌려준다. 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
-        // 게스트(익명 소유, session.userId == null) 완성 세션은 재구성하지 않는다: 소유자가 없어 회수를 정당한 요청자에 묶을 수 없어,
-        // 순차 simpleCreationId를 찍어 남의 스토리를 열람할 수 있다(Codex P1 x3). 회원 세션은 위 소유자 가드가 비소유자를 403으로 막는다.
+        // 회수 여부(isReclaim)에 더해 session.creationRequestId == 요청 request_id를 검증한다: 소유자 없는 게스트 세션도 이 바인딩으로
+        // 정당한 요청자에게 묶여, 순차 simpleCreationId를 찍거나 비소유 aged PENDING을 스왑해 남의 스토리를 열람하는 것을 막는다(Codex P1 x3).
         // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다.
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            if (isReclaim && session.userId != null) {
+            if (isReclaim && session.creationRequestId == request.requestId) {
                 return reconcileCreatedSession(session)
             }
             throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
@@ -460,14 +460,15 @@ class SimpleStoryCreationService(
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
         ) {
-            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest)
+            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest, request.requestId)
         }
     }
 
     /**
-     * 회수 재실행(P2-10, KNK-635)이 이미 STORY_CREATED인 **회원 소유** 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
+     * 회수 재실행(P2-10, KNK-635/644)이 이미 STORY_CREATED인 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
      * 저장된 스토리로 원 POST 응답([SimpleStoryCreateResponse])을 재구성한다. [compileAndPersist]가 만든 응답과 같은 모양이며,
-     * AI·저장을 다시 타지 않는다. 소유 검증(회원 소유·회수 여부)은 호출부([doCreateSimpleStory])가 선행한다(익명 세션은 재구성 안 함 — Codex P1).
+     * AI·저장을 다시 타지 않는다. 검증(회수 여부 + `creationRequestId == request_id` 바인딩)은 호출부([doCreateSimpleStory])가
+     * 선행하므로, 소유자 없는 게스트 세션도 이 세션을 만든 요청에만 안전하게 열린다(Codex P1 바인딩).
      *
      * storyId·자식 행이 없으면(비정상 상태) 원래의 409로 폴백한다.
      */
@@ -593,6 +594,8 @@ class SimpleStoryCreationService(
         // compile 요청에 실어 보낸 선별 로어북. 저장 성공 시 story_lorebooks에 연결한다(전달분과 저장분 일치).
         selectedLorebooks: List<Lorebook>,
         aiRequest: AiStoryCompileRequest,
+        // 이 완성을 수행하는 생성 요청의 request_id. STORY_CREATED와 함께 세션에 박아, 회수 재실행이 이 요청인지 검증한다(KNK-644).
+        requestId: UUID,
     ): StoryCreationOutcome {
         val recorded = try {
             aiCallRecorder.record(
@@ -721,6 +724,8 @@ class SimpleStoryCreationService(
             lockedSession.userId = attributedUserId
             lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
             lockedSession.storyId = story.id
+            // 회수 재실행 검증용 바인딩(KNK-644): 이 세션을 만든 요청의 request_id를 STORY_CREATED와 원자적으로 커밋한다.
+            lockedSession.creationRequestId = requestId
             storyCreationSessionRepository.save(lockedSession)
 
             StoryCreationOutcome(

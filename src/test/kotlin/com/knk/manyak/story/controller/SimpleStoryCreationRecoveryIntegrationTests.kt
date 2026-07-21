@@ -461,16 +461,16 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
-    fun `게스트 세션은 회수 재실행이어도 재구성하지 않고 409다`() {
-        // Codex P1: 익명(게스트) 완성 세션은 소유자가 없어 회수를 정당한 요청자에 묶을 수 없다. 회수(aged PENDING)여도 재구성하지 않고
-        // 409를 유지한다 — 아니면 공격자가 자기 소유 aged PENDING 행을 피해자 simpleCreationId로 재시도해 스토리를 열람할 수 있다.
+    fun `게스트 세션도 이 세션을 만든 requestId 회수면 저장된 스토리를 재구성해 돌려준다`() {
+        // KNK-644: 익명(게스트) 세션도 creationRequestId 바인딩으로 "이 세션을 만든 그 요청"의 회수면 안전하게 재구성 복구한다.
         val storyline = seedGeneratedStoryline() // userId=null 게스트 세션
         val requestId = UUID.randomUUID()
         val firstBody = postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
             .expectStatus().isCreated
-            .expectBody().returnResult()
+            .expectBody().jsonPath("$.id").isNotEmpty
+            .returnResult()
 
-        // 크래시 창 재현(게스트 소유 aged PENDING).
+        // 크래시 창 재현(같은 requestId, 게스트 소유 aged PENDING).
         requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
         requestRepository.flush()
         requestRepository.saveAndFlush(
@@ -483,12 +483,45 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             ),
         )
 
-        // 회수 재실행이지만 게스트 세션이므로 재구성하지 않고 409, 스토리 미노출.
+        // 같은 requestId 회수 재실행: 바인딩이 일치하므로 저장된 스토리를 그대로 돌려준다(AI 재호출·중복 스토리 없음).
         val secondBody = postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        assertThat(String(secondBody.responseBody!!)).isEqualTo(String(firstBody.responseBody!!))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+        assertThat(requestRepository.findByRequestId(requestId)?.status)
+            .isEqualTo(StoryCreationRequestStatus.COMPLETED)
+    }
+
+    @Test
+    fun `비소유 aged PENDING을 피해자 simpleCreationId로 재시도해도 바인딩 불일치로 409다`() {
+        // Codex P1(3차) 바인딩 검증: 공격자가 자기 소유 aged PENDING 행(회수 대상)을 피해자 simpleCreationId로 재시도해도,
+        // 세션의 creationRequestId가 공격자 requestId와 달라 재구성하지 않고 409. simpleCreationId를 신뢰하지 않는다.
+        val victim = seedGeneratedStoryline()
+        val victimBody = postSimpleStory(UUID.randomUUID(), victim.creationSession.id, victim.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        // 공격자(deviceB)가 소유한 aged PENDING 행 — 자기 requestId, 어떤 세션도 만들지 않음.
+        val attackerReq = UUID.randomUUID()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = attackerReq,
+                deviceIdHash = deviceIdHasher.hash(deviceB),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 공격자 requestId(회수)로 피해자 simpleCreationId를 찍어 재시도 → 바인딩 불일치 → 409, 미노출.
+        val leak = postSimpleStory(attackerReq, victim.creationSession.id, victim.id, deviceB, null)
             .expectStatus().isEqualTo(409)
             .expectBody().returnResult()
 
-        assertThat(String(secondBody.responseBody!!)).isNotEqualTo(String(firstBody.responseBody!!))
+        assertThat(String(leak.responseBody!!)).isNotEqualTo(String(victimBody.responseBody!!))
         assertThat(storyRepository.count()).isEqualTo(1)
     }
 

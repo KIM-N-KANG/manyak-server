@@ -413,9 +413,10 @@ Accept: application/json
 %}
 
 ### 8. [KNK-635] 이미 생성된 진행에 새 requestId로 재요청하면 409
-# 7번을 성공시킨 뒤 새 requestId로 같은 세션을 다시 요청하면 충돌(409)입니다. 7번은 게스트(익명) 생성이라, 회수(reclaim)든
-# 새 requestId든 재구성하지 않습니다 — 익명 세션은 소유 바인딩이 없어, 순차 simpleCreationId를 찍어 남의 스토리를 열람하는 것을 막습니다(Codex P1).
-# 회원 세션의 크래시 창 회수(같은 requestId 재실행 → 스토리 재구성)는 HTTP만으로 재현할 수 없어, 통합 테스트가 커버합니다.
+# 7번을 성공시킨 뒤 새 requestId로 같은 세션을 다시 요청하면 충돌(409)입니다. 재구성(reconcile)은 이 세션을 만든 바로 그 요청의
+# 회수일 때만 열립니다(session.creationRequestId == request_id 바인딩, KNK-644) — 새 requestId는 바인딩 불일치라 409이고,
+# 순차 simpleCreationId를 찍어 남의 스토리를 열람하는 것을 막습니다(Codex P1). 같은 requestId의 크래시 창 회수(→ 스토리 재구성)는
+# aged PENDING + STORY_CREATED 상태가 필요해 HTTP만으로 재현할 수 없어, 통합 테스트(회원·게스트 모두)가 커버합니다.
 POST {{baseUrl}}/api/v1/stories/simple
 X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
