@@ -44,19 +44,24 @@ class StoryCreationRequestRecorder(
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
     }
 
+    /**
+     * [block]에는 이 실행이 **회수(reclaim)** 인지를 넘긴다: 이미 기록돼 소유가 검증된 요청 행을 재실행하는 경우 `true`,
+     * 처음 기록하는 신규 요청이면 `false`. 완성 경로는 이 신호로 저장된 스토리 재구성(reconcile)을 회수일 때만 허용해,
+     * 새 requestId로 남의 `simpleCreationId`를 찍어 완성 스토리를 읽어내는 것을 막는다(Codex P1).
+     */
     fun <T : Any> execute(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         responseType: Class<T>,
-        block: () -> T,
+        block: (isReclaim: Boolean) -> T,
     ): T =
         when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash)) {
             is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
             is Claim.Run -> {
                 val result = try {
-                    block()
+                    block(claim.isReclaim)
                 } catch (throwable: Throwable) {
                     updateStatus(claim.id, StoryCreationRequestStatus.FAILED, resultJson = null)
                     throw throwable
@@ -81,7 +86,8 @@ class StoryCreationRequestRecorder(
     ): Claim {
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash)
         if (insertedId != null) {
-            return Claim.Run(insertedId)
+            // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가).
+            return Claim.Run(insertedId, isReclaim = false)
         }
         return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
     }
@@ -137,13 +143,17 @@ class StoryCreationRequestRecorder(
                 }
                 row.updatedAt = Instant.now()
                 repository.saveAndFlush(row)
-                Claim.Run(row.id)
+                // 소유가 검증된(isOwnedBy) 오래된 PENDING의 회수 — 완성 스토리 reconcile을 허용한다.
+                Claim.Run(row.id, isReclaim = true)
             }
             StoryCreationRequestStatus.FAILED -> {
                 // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
+                // 회수가 아니다(isReclaim=false): FAILED는 생성이 STORY_CREATED에 도달하지 못했음을 뜻하므로 정상 재실행이어야 한다.
+                // 회수로 표시하면, 신규 requestId로 완성 세션을 찔러 409→FAILED를 만든 공격자가 같은 requestId 재시도로
+                // reconcile을 유발해 남의 스토리를 열람할 수 있다(Codex P1). 진짜 회수는 crash가 남긴 aged PENDING뿐이다.
                 row.status = StoryCreationRequestStatus.PENDING
                 repository.saveAndFlush(row)
-                Claim.Run(row.id)
+                Claim.Run(row.id, isReclaim = false)
             }
         }
     }
@@ -151,11 +161,9 @@ class StoryCreationRequestRecorder(
     /**
      * 요청 행 상태를 별도 트랜잭션으로 갱신한다.
      *
-     * **알려진 한계(P2-10, 후속)**: 이 표시는 [block]의 저장 트랜잭션과 분리돼 있다. block이 스토리/세션을 커밋한 뒤
-     * 이 COMPLETED 표시 커밋 전에 프로세스가 죽으면, 행은 result 없이 PENDING으로 남는다. 회수(reclaim) 재실행은
-     * 세션이 이미 STORY_CREATED라 409→FAILED가 되어, 그 좁은 창에서는 잃은 story id를 복구하지 못한다.
-     * 이는 스펙(§4-3-8)이 인정한 동기 흐름의 핵심 한계("결과는 DB에 남지만 식별자를 못 받음")가 더 좁아진 형태다.
-     * 원자적 표시 또는 session.storyId 기반 reconcile은 후속 티켓에서 다룬다.
+     * 이 표시는 [block]의 저장 트랜잭션과 분리돼 있어, block이 스토리/세션을 커밋한 뒤 이 COMPLETED 표시 커밋 전에
+     * 프로세스가 죽으면 행이 result 없이 PENDING으로 남는 좁은 창이 있다. 이 창의 회수 재실행은 스토리 완성 경로에서
+     * session.storyId로 응답을 재구성해 COMPLETED로 되돌린다(P2-10 해소, KNK-635 — SimpleStoryCreationService.reconcileCreatedSession).
      */
     private fun updateStatus(id: Long, status: StoryCreationRequestStatus, resultJson: String?) {
         txTemplate.execute {
@@ -170,8 +178,12 @@ class StoryCreationRequestRecorder(
     }
 
     private sealed interface Claim {
-        /** 새로 기록한(또는 재실행할) 요청 행 — [block]을 실행한다. */
-        data class Run(val id: Long) : Claim
+        /**
+         * [block]을 실행할 요청 행. [isReclaim]은 crash가 남긴 **aged PENDING**의 회수 재실행이면 true, 그 외(신규 삽입·FAILED 재시도)면
+         * false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1). FAILED 재시도를 회수로 보면 완성 세션 프로브의 재시도가
+         * reconcile을 유발해 스토리를 누출하므로 제외한다.
+         */
+        data class Run(val id: Long, val isReclaim: Boolean) : Claim
 
         /** 이미 COMPLETED인 요청 — 저장된 결과를 [block] 없이 반환한다. */
         data class Replay(val resultJson: String) : Claim
