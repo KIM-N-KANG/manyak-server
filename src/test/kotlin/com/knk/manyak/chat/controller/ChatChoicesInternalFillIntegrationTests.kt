@@ -46,6 +46,10 @@ class ChatChoicesInternalFillIntegrationTests {
         @Volatile
         var failChoices = false
 
+        // streamTurn(=/chat/turns)이 실어 주는 choices. 분리 후 AI는 빈 배열이지만, 구 AI 계약·전환기 검증을 위해 토글한다.
+        @Volatile
+        var streamedChoices: List<String> = emptyList()
+
         val internalChoices = listOf("살핀다.", "나선다.", "벗어난다.")
     }
 
@@ -57,7 +61,7 @@ class ChatChoicesInternalFillIntegrationTests {
             // 분리 후 AI: 본문만 스트리밍하고 completed.choices는 빈 배열.
             override fun streamTurn(request: ChatTurnAiRequest, onToken: (String) -> Unit): ChatTurnAiResult {
                 onToken("생성 ")
-                return ChatTurnAiResult(aiOutput = "생성된 본문입니다.", choices = emptyList())
+                return ChatTurnAiResult(aiOutput = "생성된 본문입니다.", choices = streamedChoices)
             }
 
             override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
@@ -82,6 +86,7 @@ class ChatChoicesInternalFillIntegrationTests {
     fun setUp() {
         genChoiceCalls.set(0)
         failChoices = false
+        streamedChoices = emptyList()
         databaseCleaner.cleanAll()
     }
 
@@ -117,6 +122,21 @@ class ChatChoicesInternalFillIntegrationTests {
             .jsonPath("$.turns.length()").isEqualTo(1)
             .jsonPath("$.turns[0].aiOutput").isEqualTo("생성된 본문입니다.")
             .jsonPath("$.turns[0].choices.length()").isEqualTo(0)
+    }
+
+    @Test
+    fun `선택지 호출이 실패해도 스트리밍으로 받은 choices는 지우지 않는다`() {
+        // Codex P1: 구 AI 계약(또는 전환기)에서 streamTurn이 이미 choices를 줬는데 새 /chat/choices 호출이 실패하면,
+        // 그 유효한 choices를 빈 배열로 덮으면 안 된다.
+        val chat = seedChat()
+        streamedChoices = listOf("스트리밍 A", "스트리밍 B")
+        failChoices = true
+
+        streamTurn(chat.publicId.toString())
+
+        getDetail(chat.publicId.toString())
+            .jsonPath("$.turns[0].choices.length()").isEqualTo(2)
+            .jsonPath("$.turns[0].choices[0]").isEqualTo("스트리밍 A")
     }
 
     private fun streamTurn(chatId: String) {
