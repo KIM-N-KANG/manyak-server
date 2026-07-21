@@ -107,15 +107,16 @@ Accept: application/json
 ### 4. 채팅 이어쓰기 스트리밍 (핵심 검증, SSE)
 # 3번을 먼저 실행해야 chatId 변수가 설정됩니다.
 # 세션 404 검증 → 재료 조립(genre·story_settings·start_settings·history·summary) →
-#   started → token… → completed 순서로 SSE 전송. completed 시점에만 USER+ASSISTANT+choices를
-#   원자적으로 저장하고 current_turn을 1 올립니다. (AI 연동 모드는 파일 상단 안내 참고)
+#   started → token… → completed 순서로 SSE 전송. completed 시점에 USER+ASSISTANT 턴을 원자적으로 저장하고
+#   current_turn을 1 올립니다. 선택지는 턴 스트림에서 생성하지 않습니다(B23): completed.choices는 항상 빈 배열이고,
+#   선택지는 전용 엔드포인트(chat-choices.http)로 채웁니다. (AI 연동 모드는 파일 상단 안내 참고)
 #
 # ▶ IntelliJ HTTP Client는 응답 패널에 SSE 이벤트를 순서대로 펼쳐 보여줍니다.
 #   다음을 눈으로 확인하세요:
 #     - event: started   data: {"chatId":<chatId>}
 #     - event: token      data: {"text":"검"} … (여러 청크)
-#     - event: completed data: {"chatId":<chatId>,"turnId":<n>,"aiOutput":"…","choices":[…]}
-#   저장 결과(턴 1건 추가, choices, current_turn 증가)는 4번 실행 후 5번을 실행해 확인합니다.
+#     - event: completed data: {"chatId":<chatId>,"turnId":<n>,"aiOutput":"…","choices":[]}  ← choices는 빈 배열
+#   저장 결과(턴 1건 추가, choices 빈 배열, current_turn 증가)는 4번 실행 후 5번을 실행해 확인합니다.
 #
 #   ▶ 실연동(stub=false) 추가 확인:
 #     - token이 manyak-ai가 실제로 생성한 본문 청크인지(스텁 고정 문구가 아님).
@@ -137,8 +138,8 @@ Accept: text/event-stream, application/json
 %}
 
 ### 5. 스트리밍 저장 결과 확인 — 4번 직후 상세 재조회
-# 4번이 completed까지 끝나면 새 턴 1건이 저장됩니다. turns가 1건 이상이고
-# 각 턴이 userInput/aiOutput/choices를 갖는지 확인합니다.
+# 4번이 completed까지 끝나면 새 턴 1건이 저장됩니다. turns가 1건 이상이고 각 턴이 userInput/aiOutput를 갖는지,
+# choices는 빈 배열인지(턴 스트림은 선택지를 채우지 않음 — B23) 확인합니다.
 GET {{baseUrl}}/api/v1/chats/{{chatId}}
 Accept: application/json
 
@@ -151,14 +152,14 @@ Accept: application/json
         client.assert(Array.isArray(b.turns) && b.turns.length >= 1,
             `turns가 1건 이상이어야 합니다. actual=${JSON.stringify(b.turns)}`);
     });
-    client.test("마지막 턴은 userInput·aiOutput·choices를 갖는다", () => {
+    client.test("마지막 턴은 userInput·aiOutput를 갖고 choices는 빈 배열이다(B23)", () => {
         const last = b.turns[b.turns.length - 1];
         client.assert(typeof last.userInput === "string" && last.userInput.length > 0,
             `userInput이 비었습니다. actual=${JSON.stringify(last)}`);
         client.assert(typeof last.aiOutput === "string" && last.aiOutput.length > 0,
             `aiOutput이 비었습니다. actual=${JSON.stringify(last)}`);
-        client.assert(Array.isArray(last.choices),
-            `choices가 배열이 아닙니다. actual=${JSON.stringify(last.choices)}`);
+        client.assert(Array.isArray(last.choices) && last.choices.length === 0,
+            `choices가 빈 배열이어야 합니다(선택지는 전용 엔드포인트로 채움). actual=${JSON.stringify(last.choices)}`);
     });
 %}
 

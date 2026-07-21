@@ -9,10 +9,10 @@
 ###   - Postgres + AI 서버 기동 (docker compose up -d)
 ###
 ### AI 연동 모드 주의(중요):
-###   - 스텁(기본 local, manyak.ai.chat.stub=true): 이어쓰기(/turns/stream)가 completed에 이미 선택지 3개를 실어 저장합니다.
-###     따라서 이 API를 호출하면 "이미 선택지가 있음"으로 판정돼 AI 호출 없이 기존 값을 그대로 돌려줍니다(멱등 경로만 확인 가능).
-###   - 실연동(manyak.ai.chat.stub=false + MANYAK_AI_BASE_URL): 분리된 AI가 completed.choices를 빈 배열로 보내므로
-###     턴에는 선택지가 없고, 이 API가 실제로 manyak-ai의 POST /api/v1/chat/choices를 호출해 3개를 생성·저장합니다(생성 경로 확인).
+###   - 이어쓰기(/turns/stream)는 선택지를 채우지 않습니다(B23): completed.choices·저장 모두 빈 배열입니다. 따라서 스텁·실연동
+###     둘 다 이 API가 실제로 선택지를 생성·저장합니다(생성 경로 확인). 같은 턴에 다시 호출하면 저장된 값을 그대로 반환합니다(멱등).
+###   - 스텁(기본 local, manyak.ai.chat.stub=true): 이 API가 스텁 선택지 3개를 생성·저장합니다.
+###   - 실연동(manyak.ai.chat.stub=false + MANYAK_AI_BASE_URL): 이 API가 manyak-ai의 POST /api/v1/chat/choices를 호출해 생성·저장합니다.
 ###     실행 예: MANYAK_AI_BASE_URL=http://localhost:8000 manyak_ai_chat_stub=false ./gradlew bootRun
 
 @baseUrl = http://localhost:8080
@@ -116,8 +116,8 @@ Accept: application/json
 %}
 
 ### 6. 선택지 생성 (핵심 검증)
-# 실연동(stub=false)이면 AI를 호출해 3개를 생성·저장합니다. 스텁이면 이미 있는 선택지를 그대로 돌려줍니다(멱등).
-# 어느 모드든 응답 200 + choices 3개가 정상입니다.
+# 턴 스트림은 선택지를 채우지 않으므로(B23), 스텁·실연동 모두 이 API가 선택지 3개를 생성·저장합니다.
+# 어느 모드든 응답 200 + choices 3개가 정상입니다(같은 턴 재호출은 8번에서 멱등 확인).
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/{{turnId}}/choices
 X-Manyak-Device-Id: {{deviceId}}
 Accept: application/json

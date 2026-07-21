@@ -496,34 +496,6 @@ class ChatService(
     }
 
     /**
-     * [KNK-636 릴리스 언블록 stopgap] 턴 흐름 안에서 다음 행동 선택지를 생성한다. 프론트가 전용 엔드포인트를 트리거하기
-     * 전까지 백엔드가 선택지를 채워 completed에 실어 보낸다(프론트 무변경). 선택지 실패는 턴을 깨지 않으므로(스펙 §5-3-5)
-     * 어떤 실패(타임아웃·파싱)든 빈 배열로 흡수한다. ai_call_logs에는 CHOICE_GENERATION으로 별도 적재한다(record가 실패도 적재).
-     * 프론트 배선(KNK-622) 완료 시 이 호출을 제거하면 completed가 선택지를 기다리지 않아 지연 이득을 회복한다.
-     */
-    private fun generateChoicesForTurn(aiRequest: ChatTurnAiRequest, aiOutput: String, chat: StoryChat): ChoiceCall? =
-        try {
-            val recorded = aiCallRecorder.record(
-                AiCallContext(feature = AiCallFeature.CHOICE_GENERATION, storyId = chat.storyId, chatId = chat.publicId),
-                errorCode = { throwable -> if (throwable is ChatTurnAiException) throwable.code else "AI_CHOICE_FAILED" },
-                meta = { it.meta },
-            ) {
-                chatTurnAiClient.generateChoices(aiRequest, aiOutput)
-            }
-            ChoiceCall(recorded.result.choices, recorded.aiCallLogId)
-        } catch (exception: Exception) {
-            // 선택지 호출 실패 시 null을 돌려 호출부가 스트리밍으로 이미 받은 choices를 보존하게 한다(빈 배열로 덮지 않음, Codex P1).
-            structuredLogger.event(
-                "chat_choices_failed",
-                "chat_id" to chat.publicId.toString(),
-                "error_code" to (if (exception is ChatTurnAiException) exception.code else exception::class.simpleName),
-            )
-            null
-        }
-
-    private data class ChoiceCall(val choices: List<String>, val aiCallLogId: Long?)
-
-    /**
      * 소유권 강제(스펙 §4-5, KNK-480): 회원 소유 채팅(userId != null)은 소유자만 이어쓰기·재생성할 수 있고,
      * 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용한다(인증 회원은 차단 — 이관 후 접근).
      */
@@ -688,22 +660,18 @@ class ChatService(
                     }
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
-                val result = recorded.result
-                // [KNK-636 릴리스 언블록 stopgap] 프론트가 전용 엔드포인트(/turns/{turnId}/choices)를 트리거하기 전까지,
-                // 백엔드가 여기서 /chat/choices를 직접 호출해 completed.choices를 채운다(프론트 무변경 — 상세 조회 렌더 그대로).
-                // 저장 전에 부르므로 이번 턴이 아직 history에 없어 중복 삽입이 없다(AI 무상태). 선택지 실패는 턴을 깨지 않는다(빈 배열 폴백).
-                // 프론트 배선(KNK-622) 완료 시 이 두 줄을 제거하면 completed가 선택지를 기다리지 않아 지연 이득을 회복한다.
-                // 선택지 호출이 성공했을 때만 choices를 덮는다. 실패(null)면 스트리밍으로 받은 result.choices를 보존한다(Codex P1).
-                val choiceCall = generateChoicesForTurn(aiRequest, result.aiOutput, chat)
-                val resultWithChoices = choiceCall?.let { result.copy(choices = it.choices) } ?: result
-                val persistedTurn = persist(resultWithChoices)
+                // 선택지는 턴 스트림에서 채우지 않는다(스펙 §4-3-3, B23): completed.choices는 항상 빈 배열이고 저장도 빈 상태로 시작한다.
+                // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
+                // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
+                // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
+                val result = recorded.result.copy(choices = emptyList())
+                val persistedTurn = persist(result)
                 // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                 // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                 persisted.set(true)
                 Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
-                // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다(본문·선택지 두 행).
+                // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
-                choiceCall?.aiCallLogId?.let { aiCallRecorder.attachTurnNumber(it, persistedTurn.turnNumber) }
                 onPersisted(persistedTurn, recorded.aiCallLogId)
                 // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 턴이면 도달 엔딩 id를 함께 싣는다(B5).
                 serverAnalytics.chatAiMessageSucceeded(
@@ -720,8 +688,8 @@ class ChatService(
                             ChatStreamCompletedEvent(
                                 chatId = chatId,
                                 turnId = persistedTurn.turnId,
-                                aiOutput = resultWithChoices.aiOutput,
-                                choices = resultWithChoices.choices,
+                                aiOutput = result.aiOutput,
+                                choices = result.choices,
                                 reachedEnding = persistedTurn.reachedEnding?.name,
                             ),
                         ),
@@ -1058,10 +1026,9 @@ class ChatService(
     }
 
     private companion object {
-        // SseEmitter 전체 상한. [KNK-636 stopgap] 동안 워커가 본문 스트림(AI stream-timeout 60s) 뒤에 동기 선택지 호출
-        // (choices-timeout 90s)까지 마치고 completed를 보내므로, 이 상한이 그보다 작으면 성공한 턴도 completed 전에 스트림이
-        // 닫힌다(Codex P1). 두 타임아웃 합(150s)에 여유를 더해 덮는다. 내부 선택지 호출을 제거하면(프론트 전환) 다시 60초로 낮춘다.
+        // SseEmitter 전체 상한. 턴 스트림은 본문 스트리밍(AI stream-timeout 60s) 뒤 곧바로 completed를 보낸다(선택지는 전용
+        // 엔드포인트로 분리 — B23). stopgap 동안 본문+내부 선택지 호출(90s)까지 덮으려 160s로 상향했던 값을 원복한다.
         // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
-        const val SSE_TIMEOUT_MILLIS = 160_000L
+        const val SSE_TIMEOUT_MILLIS = 60_000L
     }
 }

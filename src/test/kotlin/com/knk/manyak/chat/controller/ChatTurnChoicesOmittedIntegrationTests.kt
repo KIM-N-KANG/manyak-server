@@ -30,27 +30,23 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * [KNK-636 릴리스 언블록 stopgap] 검증. AI가 completed.choices를 빈 배열로 보내도(분리 후 현행), 백엔드가 턴 흐름에서
- * /chat/choices를 내부 호출해 completed·저장에 선택지를 채운다(프론트 무변경). 선택지 실패는 턴을 깨지 않는다.
+ * B23(스펙 §4-3-3): 채팅 턴 스트림은 선택지를 생성·저장하지 않는다. `completed.choices`는 항상 빈 배열이고 story_choices도
+ * 빈 상태로 시작하며, 선택지는 프론트가 전용 엔드포인트(POST /turns/{turnId}/choices)로 채운다(KNK-625 분리). 과도기 배선
+ * (KNK-636 stopgap: 턴 흐름에서 /chat/choices 내부 호출)이 제거됐음을 회귀 가드한다.
  *
- * streamTurn이 빈 choices를 반환하는 페이크로 실 AI 상태를 흉내 낸다(기본 스텁은 streamTurn이 선택지를 실어 주므로 stopgap을 검증 못 함).
+ * 페이크 AI는 generateChoices 호출 횟수를 센다 — 턴 스트림이 이를 부르지 않아야 한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatChoicesInternalFillIntegrationTests {
+class ChatTurnChoicesOmittedIntegrationTests {
 
     companion object {
         val genChoiceCalls = AtomicInteger(0)
 
-        @Volatile
-        var failChoices = false
-
-        // streamTurn(=/chat/turns)이 실어 주는 choices. 분리 후 AI는 빈 배열이지만, 구 AI 계약·전환기 검증을 위해 토글한다.
+        // streamTurn(=/chat/turns)이 실어 주는 choices. 분리 후 AI는 빈 배열이지만, 잔여 값이 와도 턴 스트림이 비우는지 검증하려 토글한다.
         @Volatile
         var streamedChoices: List<String> = emptyList()
-
-        val internalChoices = listOf("살핀다.", "나선다.", "벗어난다.")
     }
 
     @TestConfiguration
@@ -58,7 +54,6 @@ class ChatChoicesInternalFillIntegrationTests {
         @Bean
         @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
-            // 분리 후 AI: 본문만 스트리밍하고 completed.choices는 빈 배열.
             override fun streamTurn(request: ChatTurnAiRequest, onToken: (String) -> Unit): ChatTurnAiResult {
                 onToken("생성 ")
                 return ChatTurnAiResult(aiOutput = "생성된 본문입니다.", choices = streamedChoices)
@@ -66,10 +61,7 @@ class ChatChoicesInternalFillIntegrationTests {
 
             override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
                 genChoiceCalls.incrementAndGet()
-                if (failChoices) {
-                    throw IllegalStateException("AI 선택지 강제 실패")
-                }
-                return ChatChoicesResult(choices = internalChoices)
+                return ChatChoicesResult(choices = listOf("살핀다.", "나선다."))
             }
         }
     }
@@ -85,64 +77,47 @@ class ChatChoicesInternalFillIntegrationTests {
     @BeforeEach
     fun setUp() {
         genChoiceCalls.set(0)
-        failChoices = false
         streamedChoices = emptyList()
         databaseCleaner.cleanAll()
     }
 
     @Test
-    fun `AI가 빈 choices를 줘도 백엔드가 내부 호출로 completed·저장에 선택지를 채운다`() {
+    fun `턴 스트림은 선택지를 내부 생성하지 않고 completed·저장 choices는 빈 배열이다`() {
         val chat = seedChat()
 
         streamTurn(chat.publicId.toString())
 
-        // 저장된 마지막 턴에 내부 호출로 채운 선택지가 실린다(프론트는 상세 조회로 그대로 렌더).
-        val detail = getDetail(chat.publicId.toString())
-        detail.jsonPath("$.turns.length()").isEqualTo(1)
-            .jsonPath("$.turns[0].choices.length()").isEqualTo(3)
-            .jsonPath("$.turns[0].choices[0]").isEqualTo("살핀다.")
-
-        assertThat(genChoiceCalls.get()).isEqualTo(1)
-        // ai_call_logs에 CHAT_RESPONSE + CHOICE_GENERATION 두 행이 같은 turn_number로 적재된다.
-        val logs = aiCallLogRepository.findAll()
-        assertThat(logs.count { it.feature == AiCallFeature.CHAT_RESPONSE }).isEqualTo(1)
-        val choiceLog = logs.single { it.feature == AiCallFeature.CHOICE_GENERATION }
-        assertThat(choiceLog.turnNumber).isEqualTo(1)
-    }
-
-    @Test
-    fun `선택지 생성이 실패해도 턴은 저장되고 completed는 빈 choices로 발행된다`() {
-        val chat = seedChat()
-        failChoices = true
-
-        streamTurn(chat.publicId.toString())
-
-        // 본문 턴은 정상 저장되고, 선택지만 비어 있다(선택지 실패가 턴을 깨지 않음).
+        // 저장된 마지막 턴의 choices는 비어 있다(전용 엔드포인트가 채울 몫).
         getDetail(chat.publicId.toString())
             .jsonPath("$.turns.length()").isEqualTo(1)
             .jsonPath("$.turns[0].aiOutput").isEqualTo("생성된 본문입니다.")
             .jsonPath("$.turns[0].choices.length()").isEqualTo(0)
+
+        // 턴 스트림은 선택지 AI를 호출하지 않는다.
+        assertThat(genChoiceCalls.get()).isZero()
+        // ai_call_logs에는 CHAT_RESPONSE만 있고 CHOICE_GENERATION은 없다(내부 선택지 호출 제거).
+        val logs = aiCallLogRepository.findAll()
+        assertThat(logs.count { it.feature == AiCallFeature.CHAT_RESPONSE }).isEqualTo(1)
+        assertThat(logs.none { it.feature == AiCallFeature.CHOICE_GENERATION }).isTrue()
     }
 
     @Test
-    fun `선택지 호출이 실패해도 스트리밍으로 받은 choices는 지우지 않는다`() {
-        // Codex P1: 구 AI 계약(또는 전환기)에서 streamTurn이 이미 choices를 줬는데 새 /chat/choices 호출이 실패하면,
-        // 그 유효한 choices를 빈 배열로 덮으면 안 된다.
+    fun `streamTurn이 choices를 실어 줘도 턴 스트림은 빈 배열로 확정한다`() {
+        // 계약을 확정적으로 유지: 잔여·구 계약으로 streamTurn 결과에 choices가 있어도 턴 저장·completed는 항상 빈 배열이다.
         val chat = seedChat()
-        streamedChoices = listOf("스트리밍 A", "스트리밍 B")
-        failChoices = true
+        streamedChoices = listOf("잔여 A", "잔여 B")
 
         streamTurn(chat.publicId.toString())
 
         getDetail(chat.publicId.toString())
-            .jsonPath("$.turns[0].choices.length()").isEqualTo(2)
-            .jsonPath("$.turns[0].choices[0]").isEqualTo("스트리밍 A")
+            .jsonPath("$.turns[0].choices.length()").isEqualTo(0)
+        assertThat(genChoiceCalls.get()).isZero()
     }
 
     private fun streamTurn(chatId: String) {
         restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")
-            .header("X-Manyak-Device-Id", "internal-fill-device")
+            .header("X-Manyak-Device-Id", "choices-omitted-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"userInput":"마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."}""")

@@ -82,13 +82,10 @@ class AiCallLogRecordingIntegrationTests {
                 .returnResult()
 
             val logs = aiCallLogRepository.findAll()
-            // 턴 흐름은 본문(chat_response)과 선택지(choice_generation, KNK-636 stopgap) 두 행을 적재한다.
-            assertThat(logs).hasSize(2)
+            // 턴 흐름은 본문(chat_response) 한 행만 적재한다. 선택지는 전용 엔드포인트로 분리돼(B23) 턴 스트림에서 호출되지 않는다.
+            assertThat(logs).hasSize(1)
             val log = logs.single { it.feature == AiCallFeature.CHAT_RESPONSE }
-            // 선택지 호출도 같은 turn_number로 적재돼 chat_response 행과 chat_id + turn_number로 조인된다.
-            val choiceLog = logs.single { it.feature == AiCallFeature.CHOICE_GENERATION }
-            assertThat(choiceLog.turnNumber).isEqualTo(1)
-            assertThat(choiceLog.chatId).isEqualTo(session.publicId)
+            assertThat(logs.none { it.feature == AiCallFeature.CHOICE_GENERATION }).isTrue()
             assertThat(log.feature).isEqualTo(AiCallFeature.CHAT_RESPONSE)
             assertThat(log.status).isEqualTo(AiCallStatus.SUCCEEDED)
             assertThat(log.callerService).isEqualTo("manyak-server")

@@ -131,11 +131,9 @@ class ChatRegenerateControllerIntegrationTests {
         assertThat(messages[0].content).isEqualTo("첫 입력")
         assertThat(messages[1].content).isEqualTo("첫 응답")
 
-        // 선택지는 전체 교체(원본 2개 → 스텁 새 선택지). 원본 텍스트는 남지 않는다.
+        // 턴 스트림은 선택지를 채우지 않으므로(B23) 재생성은 활성 선택지를 비운다. 원본 2개는 남지 않는다(버전 이력으로 이관 — 아래 테스트).
         val choices = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(lastAssistant.id)
-        assertThat(choices).isNotEmpty
-        assertThat(choices.map { it.choiceText }).doesNotContain("원본 선택 A", "원본 선택 B")
-        assertThat(choices.map { it.choiceOrder.toInt() }).startsWith(1)
+        assertThat(choices).isEmpty()
 
         // turn_number(current_turn)는 증가하지 않지만, 완료된 재생성은 regeneratedCount로 누적된다
         // (크레딧 대사가 완료 수 = current_turn + regeneratedCount로 세어 유료 재생성을 초과 환불하지 않게 함, KNK-406).
