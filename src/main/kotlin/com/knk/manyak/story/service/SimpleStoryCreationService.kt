@@ -141,7 +141,8 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
-        val generate: () -> GenerateSimpleStorylinesResponse = {
+        // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
+        val generate: (Boolean) -> GenerateSimpleStorylinesResponse = { _ ->
             val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
                 userId,
                 deviceId,
@@ -175,13 +176,14 @@ class SimpleStoryCreationService(
         ownerUserId: Long?,
         deviceId: String?,
         responseType: Class<T>,
-        block: () -> T,
+        // 콜백 인자는 이 실행이 회수(reclaim)인지다(완성 경로의 reconcile 게이트 — Codex P1). 미기록 직접 실행은 회수가 아니다.
+        block: (isReclaim: Boolean) -> T,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
-            // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지).
-            return block()
+            // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
+            return block(false)
         }
         return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
     }
@@ -330,11 +332,11 @@ class SimpleStoryCreationService(
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
-        val create: () -> SimpleStoryCreateResponse = {
+        val create: (Boolean) -> SimpleStoryCreateResponse = { isReclaim ->
             val startNanos = System.nanoTime()
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
-                val outcome = doCreateSimpleStory(request, userId, deviceId)
+                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
                 structuredLogger.event(
                     "story_created",
                     "story_id" to outcome.response.id,
@@ -369,7 +371,13 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?, deviceId: String?): StoryCreationOutcome {
+    private fun doCreateSimpleStory(
+        request: CreateSimpleStoryRequest,
+        userId: Long?,
+        deviceId: String?,
+        // 소유 검증된 회수(reclaim)인지. 완성된 세션의 스토리 재구성은 회수일 때만 허용한다(Codex P1 — 신규 requestId로 남의 스토리 열람 차단).
+        isReclaim: Boolean,
+    ): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -389,11 +397,15 @@ class SimpleStoryCreationService(
             )
         }
 
-        // 회수 재실행이 이미 완료된 세션을 만나면(P2-10, KNK-635): 409 대신 저장된 스토리로 응답을 재구성해 돌려준다.
+        // 이미 완료된 세션을 만나면(P2-10, KNK-635): 소유 검증된 회수(reclaim)일 때만 409 대신 저장된 스토리로 응답을 재구성해 돌려준다.
         // 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
+        // 신규 requestId는 회수가 아니므로 409로 막는다 — 그렇지 않으면 순차 simpleCreationId를 찍어 남의 게스트(익명 소유) 스토리를 열람할 수 있다(Codex P1).
         // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다(소유 검증은 위에서 선행).
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            return reconcileCreatedSession(session)
+            if (isReclaim) {
+                return reconcileCreatedSession(session)
+            }
+            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
         }
 
         val selectedStoryline = storyCreationStorylineRepository

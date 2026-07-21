@@ -44,19 +44,24 @@ class StoryCreationRequestRecorder(
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
     }
 
+    /**
+     * [block]에는 이 실행이 **회수(reclaim)** 인지를 넘긴다: 이미 기록돼 소유가 검증된 요청 행을 재실행하는 경우 `true`,
+     * 처음 기록하는 신규 요청이면 `false`. 완성 경로는 이 신호로 저장된 스토리 재구성(reconcile)을 회수일 때만 허용해,
+     * 새 requestId로 남의 `simpleCreationId`를 찍어 완성 스토리를 읽어내는 것을 막는다(Codex P1).
+     */
     fun <T : Any> execute(
         requestId: UUID,
         stage: StoryCreationStage,
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         responseType: Class<T>,
-        block: () -> T,
+        block: (isReclaim: Boolean) -> T,
     ): T =
         when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash)) {
             is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
             is Claim.Run -> {
                 val result = try {
-                    block()
+                    block(claim.isReclaim)
                 } catch (throwable: Throwable) {
                     updateStatus(claim.id, StoryCreationRequestStatus.FAILED, resultJson = null)
                     throw throwable
@@ -81,7 +86,8 @@ class StoryCreationRequestRecorder(
     ): Claim {
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash)
         if (insertedId != null) {
-            return Claim.Run(insertedId)
+            // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가).
+            return Claim.Run(insertedId, isReclaim = false)
         }
         return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
     }
@@ -137,13 +143,14 @@ class StoryCreationRequestRecorder(
                 }
                 row.updatedAt = Instant.now()
                 repository.saveAndFlush(row)
-                Claim.Run(row.id)
+                // 소유가 검증된(isOwnedBy) 오래된 PENDING의 회수 — 완성 스토리 reconcile을 허용한다.
+                Claim.Run(row.id, isReclaim = true)
             }
             StoryCreationRequestStatus.FAILED -> {
-                // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
+                // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다. 소유 검증된 재실행이다.
                 row.status = StoryCreationRequestStatus.PENDING
                 repository.saveAndFlush(row)
-                Claim.Run(row.id)
+                Claim.Run(row.id, isReclaim = true)
             }
         }
     }
@@ -168,8 +175,11 @@ class StoryCreationRequestRecorder(
     }
 
     private sealed interface Claim {
-        /** 새로 기록한(또는 재실행할) 요청 행 — [block]을 실행한다. */
-        data class Run(val id: Long) : Claim
+        /**
+         * [block]을 실행할 요청 행. [isReclaim]은 이미 기록·소유 검증된 행의 재실행(aged PENDING 회수·FAILED 재시도)이면 true,
+         * 처음 삽입한 신규 요청이면 false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1).
+         */
+        data class Run(val id: Long, val isReclaim: Boolean) : Claim
 
         /** 이미 COMPLETED인 요청 — 저장된 결과를 [block] 없이 반환한다. */
         data class Replay(val resultJson: String) : Claim

@@ -467,20 +467,23 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
-    fun `이미 완성된 세션에 다른 requestId로 재요청하면 409이 아니라 저장된 스토리를 재구성해 돌려준다`() {
-        // KNK-635: reconcile은 회수 재실행뿐 아니라 소유자가 이미 완성된 세션을 다른 requestId로 재요청하는 경우에도
-        // 저장된 스토리를 그대로 돌려준다(409 완화, 멱등). AI·저장을 다시 타지 않는다.
+    fun `완성된 게스트 세션에 새 requestId로 재요청하면 409이고 스토리를 누출하지 않는다`() {
+        // Codex P1: 게스트(익명 소유) 세션은 완성 후에도 userId가 null이라 누구나 소유자로 통과한다. simpleCreationId는 순차 Long이라
+        // 추측 가능하므로, 새 requestId(회수 아님)로 완성 스토리를 재구성해 돌려주면 안 된다(publicId·제목·시작설정 누출). 회수만 reconcile한다.
         val storyline = seedGeneratedStoryline()
-        val firstBody = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
+        val created = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
             .expectStatus().isCreated
             .expectBody().jsonPath("$.id").isNotEmpty
             .returnResult()
 
-        val secondBody = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
-            .expectStatus().isCreated
+        // 다른 디바이스(공격자)가 순차 simpleCreationId를 찍어 새 requestId로 재요청 → 409(회수 아님), 스토리 본문 미노출.
+        val leak = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceB, null)
+            .expectStatus().isEqualTo(409)
             .expectBody().returnResult()
 
-        assertThat(String(secondBody.responseBody!!)).isEqualTo(String(firstBody.responseBody!!))
+        // 409 응답 본문은 생성 응답(스토리 publicId·제목·시작설정)과 달라야 한다(누출 없음).
+        assertThat(String(leak.responseBody!!)).isNotEqualTo(String(created.responseBody!!))
+        // 두 번째 요청은 AI·저장을 타지 않는다(스토리 1개, compile 1회).
         assertThat(compileStoryCalls.get()).isEqualTo(1)
         assertThat(storyRepository.count()).isEqualTo(1)
     }
