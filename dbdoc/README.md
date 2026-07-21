@@ -5,7 +5,7 @@
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
 | [public.story_creation_tags](public.story_creation_tags.md) | 8 |  | BASE TABLE |
-| [public.story_creation_sessions](public.story_creation_sessions.md) | 6 |  | BASE TABLE |
+| [public.story_creation_sessions](public.story_creation_sessions.md) | 7 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
@@ -93,6 +93,7 @@ erDiagram
   varchar_30_ status
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid creation_request_id
 }
 "public.story_creation_session_tags" {
   bigint id
