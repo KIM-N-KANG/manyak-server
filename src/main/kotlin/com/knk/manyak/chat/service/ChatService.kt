@@ -1026,9 +1026,12 @@ class ChatService(
     }
 
     private companion object {
-        // SseEmitter 전체 상한. 턴 스트림은 본문 스트리밍(AI stream-timeout 60s) 뒤 곧바로 completed를 보낸다(선택지는 전용
-        // 엔드포인트로 분리 — B23). stopgap 동안 본문+내부 선택지 호출(90s)까지 덮으려 160s로 상향했던 값을 원복한다.
+        // SseEmitter 전체(MVC async) 상한. 턴 스트림은 본문 스트리밍 뒤 곧바로 completed를 보낸다(선택지는 전용 엔드포인트로
+        // 분리 — B23). stopgap 동안 본문+내부 선택지 호출까지 덮으려 160s로 상향했던 값을 낮추되, AI 스트림의 이벤트 간 idle
+        // 타임아웃(manyak.ai.chat.stream-timeout, 기본 60s)과 같게 두지 않는다: idle은 토큰 간격 상한이라 토큰이 계속 오면
+        // 총 스트리밍이 60s를 넘길 수 있고, 전체 상한이 그와 같으면 정상적인 긴 턴이 completed 전에 잘려 클라이언트가 turnId를
+        // 잃고 과금될 수 있다(Codex P2). idle 예산 위로 여유(2배)를 둬 헬시한 긴 스트림을 끊지 않는다.
         // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
-        const val SSE_TIMEOUT_MILLIS = 60_000L
+        const val SSE_TIMEOUT_MILLIS = 120_000L
     }
 }
