@@ -1,9 +1,10 @@
 ### AI 응답 재생성 스트리밍(Regenerate, SSE) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
-### 위에서부터 순서대로 실행하면 스토리·채팅·첫 턴을 만든 뒤, 그 마지막 턴을 재생성해 본문·선택지가 교체되는지 확인합니다.
+### 위에서부터 순서대로 실행하면 스토리·채팅·첫 턴을 만든 뒤, 그 마지막 턴을 재생성해 본문이 교체되는지 확인합니다.
 ###
 ### [KNK-406] 재생성(스펙 §4-3-9): 마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체합니다(리롤이 아니라 재생성).
-###   - 새 턴을 추가하지 않고 마지막 턴의 aiOutput·choices만 바꿉니다. 사용자 입력·turnCount(current_turn)는 불변입니다.
+###   - 새 턴을 추가하지 않고 마지막 턴의 aiOutput을 바꿉니다. 사용자 입력·turnCount(current_turn)는 불변입니다.
+###   - 선택지는 재생성 스트림에서 채우지 않습니다(B23): 활성 choices는 비워지고(직전 값은 버전 이력에 보관) 전용 엔드포인트로 다시 채웁니다.
 ###   - 이전 본문은 보관하지 않습니다(버전 이력 없음). turnId는 제자리 교체이므로 그대로 유지됩니다.
 ###   - 요청 {turnId}가 서버의 마지막 턴과 다르면 동기 409, 턴 0개·없는 채팅은 404, 엔딩 도달 채팅은 409입니다.
 ###
@@ -125,13 +126,13 @@ Accept: application/json
 
 ### 6. AI 응답 재생성 스트리밍 (핵심 검증, SSE)
 # 5번을 먼저 실행해야 lastTurnId 변수가 설정됩니다.
-# started → token… → completed 순서로 SSE 전송. completed 시점에 마지막 턴의 aiOutput·choices만 교체하고
-# current_turn은 올리지 않습니다.
+# started → token… → completed 순서로 SSE 전송. completed 시점에 마지막 턴의 aiOutput을 교체하고
+# current_turn은 올리지 않습니다. 선택지는 채우지 않으므로(B23) choices는 빈 배열입니다.
 #
 # ▶ IntelliJ HTTP Client 응답 패널에서 다음을 눈으로 확인하세요:
 #     - event: started   data: {"chatId":<chatId>}
 #     - event: token     data: {"text":"검"} … (여러 청크)
-#     - event: completed data: {"chatId":<chatId>,"turnId":<lastTurnId 그대로>,"aiOutput":"…(교체됨)","choices":[…]}
+#     - event: completed data: {"chatId":<chatId>,"turnId":<lastTurnId 그대로>,"aiOutput":"…(교체됨)","choices":[]}
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
 X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
