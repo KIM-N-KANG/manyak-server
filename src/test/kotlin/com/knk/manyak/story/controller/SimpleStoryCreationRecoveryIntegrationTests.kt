@@ -489,6 +489,28 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `완성된 게스트 세션을 새 requestId로 두 번 찔러도(FAILED 재시도) 스토리를 누출하지 않는다`() {
+        // Codex P1(2차): 새 requestId 1차 프로브는 409→FAILED가 된다. 같은 requestId 재시도를 회수로 취급하면 reconcile이
+        // 일어나 남의 완성 스토리를 열람할 수 있다. FAILED 재시도는 회수가 아니어야 한다(진짜 회수는 crash가 남긴 aged PENDING뿐).
+        val storyline = seedGeneratedStoryline()
+        val created = postSimpleStory(UUID.randomUUID(), storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        val probeId = UUID.randomUUID()
+        // 1차 프로브(공격자 디바이스, 새 requestId): 409 → 요청 행 FAILED 기록.
+        postSimpleStory(probeId, storyline.creationSession.id, storyline.id, deviceB, null)
+            .expectStatus().isEqualTo(409)
+        // 2차(같은 requestId 재시도): FAILED 재실행이지만 회수가 아니므로 여전히 409, 스토리 미노출.
+        val retry = postSimpleStory(probeId, storyline.creationSession.id, storyline.id, deviceB, null)
+            .expectStatus().isEqualTo(409)
+            .expectBody().returnResult()
+
+        assertThat(String(retry.responseBody!!)).isNotEqualTo(String(created.responseBody!!))
+        assertThat(storyRepository.count()).isEqualTo(1)
+    }
+
+    @Test
     fun `스토리 완성 요청도 requestId로 복구된다`() {
         val storyline = seedGeneratedStoryline()
         val requestId = UUID.randomUUID()

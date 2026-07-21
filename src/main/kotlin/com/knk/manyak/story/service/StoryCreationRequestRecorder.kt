@@ -147,10 +147,13 @@ class StoryCreationRequestRecorder(
                 Claim.Run(row.id, isReclaim = true)
             }
             StoryCreationRequestStatus.FAILED -> {
-                // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다. 소유 검증된 재실행이다.
+                // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
+                // 회수가 아니다(isReclaim=false): FAILED는 생성이 STORY_CREATED에 도달하지 못했음을 뜻하므로 정상 재실행이어야 한다.
+                // 회수로 표시하면, 신규 requestId로 완성 세션을 찔러 409→FAILED를 만든 공격자가 같은 requestId 재시도로
+                // reconcile을 유발해 남의 스토리를 열람할 수 있다(Codex P1). 진짜 회수는 crash가 남긴 aged PENDING뿐이다.
                 row.status = StoryCreationRequestStatus.PENDING
                 repository.saveAndFlush(row)
-                Claim.Run(row.id, isReclaim = true)
+                Claim.Run(row.id, isReclaim = false)
             }
         }
     }
@@ -176,8 +179,9 @@ class StoryCreationRequestRecorder(
 
     private sealed interface Claim {
         /**
-         * [block]을 실행할 요청 행. [isReclaim]은 이미 기록·소유 검증된 행의 재실행(aged PENDING 회수·FAILED 재시도)이면 true,
-         * 처음 삽입한 신규 요청이면 false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1).
+         * [block]을 실행할 요청 행. [isReclaim]은 crash가 남긴 **aged PENDING**의 회수 재실행이면 true, 그 외(신규 삽입·FAILED 재시도)면
+         * false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1). FAILED 재시도를 회수로 보면 완성 세션 프로브의 재시도가
+         * reconcile을 유발해 스토리를 누출하므로 제외한다.
          */
         data class Run(val id: Long, val isReclaim: Boolean) : Claim
 
