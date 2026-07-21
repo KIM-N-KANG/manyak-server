@@ -172,17 +172,25 @@ class SimpleStoryCreationService(
     private fun <T : Any> recordOrRun(
         requestId: UUID,
         stage: StoryCreationStage,
-        userId: Long?,
+        ownerUserId: Long?,
         deviceId: String?,
         responseType: Class<T>,
         block: () -> T,
     ): T {
-        val ownerDeviceIdHash = ownerDeviceIdHash(userId, deviceId)
-        if (userId == null && ownerDeviceIdHash == null) {
+        val ownerDeviceIdHash = ownerDeviceIdHash(ownerUserId, deviceId)
+        if (ownerUserId == null && ownerDeviceIdHash == null) {
             return block()
         }
-        return storyCreationRequestRecorder.execute(requestId, stage, userId, ownerDeviceIdHash, responseType, block)
+        return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
     }
+
+    /**
+     * 스토리 완성 요청의 멱등·복구 소유자를 정한다(Codex P2). 회원이 소유한 세션은 그 회원만 완료할 수 있으므로,
+     * 요청의 (만료·갱신으로 흔들리는) 임시 인증 신원 대신 세션 소유자를 소유자로 잡는다. 그래야 만료 토큰으로 게스트처럼
+     * 보인 첫 시도가 남긴 행이 갱신 토큰 재시도를 소유 불일치 409로 영구히 막지 않는다. 익명 세션·미존재는 요청 신원을 쓴다.
+     */
+    private fun resolveCompletionOwnerUserId(simpleCreationId: Long, requestUserId: Long?): Long? =
+        storyCreationSessionRepository.findById(simpleCreationId).orElse(null)?.userId ?: requestUserId
 
     /** 생성 요청 소유 주체의 게스트 디바이스 해시. 회원 요청([userId] non-null)은 소유를 userId로 잡으므로 null이다. */
     private fun ownerDeviceIdHash(userId: Long?, deviceId: String?): String? =
@@ -346,10 +354,11 @@ class SimpleStoryCreationService(
             }
         }
         // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
+        // 소유자는 세션 소유권으로 정한다(요청 인증 신원이 만료·갱신으로 흔들려도 회원 소유 세션의 재시도가 막히지 않도록 — Codex P2).
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORY_COMPLETION,
-            userId,
+            resolveCompletionOwnerUserId(request.simpleCreationId, userId),
             deviceId,
             SimpleStoryCreateResponse::class.java,
             create,

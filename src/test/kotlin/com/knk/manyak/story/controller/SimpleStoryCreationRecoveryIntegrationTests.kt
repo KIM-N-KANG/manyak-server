@@ -9,6 +9,10 @@ import com.knk.manyak.story.client.AiStorySettings
 import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
@@ -104,6 +108,8 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var storylineRepository: StoryCreationStorylineRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
     @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
 
     private val deviceA = "device-a"
     private val deviceB = "device-b"
@@ -249,6 +255,33 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `회원 소유 세션은 만료 토큰으로 보인 첫 시도가 회원 재시도를 409로 막지 않는다`() {
+        // Codex P2-6: 소유자를 요청 인증 신원이 아니라 세션 소유권으로 정해, 만료 토큰(게스트로 보임) 첫 시도가 남긴
+        // 행이 갱신 토큰 재시도를 소유 불일치 409로 오염하지 않는지 검증한다.
+        val member = userRepository.save(User(nickname = "회원제작자", status = UserStatus.ACTIVE))
+        val session = sessionRepository.save(
+            StoryCreationSession(userId = member.id, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val storyline = storylineRepository.save(
+            StoryCreationStoryline(creationSession = session, storylineText = "회원 스토리라인", storylineOrder = 1),
+        )
+        val requestId = UUID.randomUUID()
+
+        // 만료·누락 토큰(게스트로 보임)으로 회원 소유 세션을 완료 시도 → 소유권 불일치 403. 요청 행은 세션 회원 소유로 남는다.
+        postSimpleStory(requestId, session.id, storyline.id, deviceId = deviceA, authorization = null)
+            .expectStatus().isForbidden
+
+        // 토큰을 갱신해 같은 requestId로 재시도하면 409로 막히지 않고 정상 완료된다(멱등 키 오염 없음).
+        postSimpleStory(
+            requestId,
+            session.id,
+            storyline.id,
+            deviceId = null,
+            authorization = "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}",
+        ).expectStatus().isCreated
+    }
+
+    @Test
     fun `실패한 요청은 같은 requestId로 재실행된다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()
@@ -338,6 +371,23 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"requestId":"$requestId","selectedTagIds":[$genreTagId]}""")
             .exchange()
+
+    private fun postSimpleStory(
+        requestId: UUID,
+        simpleCreationId: Long,
+        storylineId: Long,
+        deviceId: String?,
+        authorization: String?,
+    ): RestTestClient.ResponseSpec {
+        val spec = restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .contentType(MediaType.APPLICATION_JSON)
+        deviceId?.let { spec.header("X-Manyak-Device-Id", it) }
+        authorization?.let { spec.header("Authorization", it) }
+        return spec
+            .body("""{"requestId":"$requestId","simpleCreationId":$simpleCreationId,"storylineId":$storylineId,"additionalInfos":[]}""")
+            .exchange()
+    }
 
     private fun seedGenreTag() = tagRepository.save(
         com.knk.manyak.story.entity.StoryCreationTag(
