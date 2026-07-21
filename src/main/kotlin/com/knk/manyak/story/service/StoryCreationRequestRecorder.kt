@@ -148,6 +148,15 @@ class StoryCreationRequestRecorder(
         }
     }
 
+    /**
+     * 요청 행 상태를 별도 트랜잭션으로 갱신한다.
+     *
+     * **알려진 한계(P2-10, 후속)**: 이 표시는 [block]의 저장 트랜잭션과 분리돼 있다. block이 스토리/세션을 커밋한 뒤
+     * 이 COMPLETED 표시 커밋 전에 프로세스가 죽으면, 행은 result 없이 PENDING으로 남는다. 회수(reclaim) 재실행은
+     * 세션이 이미 STORY_CREATED라 409→FAILED가 되어, 그 좁은 창에서는 잃은 story id를 복구하지 못한다.
+     * 이는 스펙(§4-3-8)이 인정한 동기 흐름의 핵심 한계("결과는 DB에 남지만 식별자를 못 받음")가 더 좁아진 형태다.
+     * 원자적 표시 또는 session.storyId 기반 reconcile은 후속 티켓에서 다룬다.
+     */
     private fun updateStatus(id: Long, status: StoryCreationRequestStatus, resultJson: String?) {
         txTemplate.execute {
             val row = repository.findById(id)
