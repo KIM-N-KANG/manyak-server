@@ -397,12 +397,13 @@ class SimpleStoryCreationService(
             )
         }
 
-        // 이미 완료된 세션을 만나면(P2-10, KNK-635): 소유 검증된 회수(reclaim)일 때만 409 대신 저장된 스토리로 응답을 재구성해 돌려준다.
-        // 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
-        // 신규 requestId는 회수가 아니므로 409로 막는다 — 그렇지 않으면 순차 simpleCreationId를 찍어 남의 게스트(익명 소유) 스토리를 열람할 수 있다(Codex P1).
-        // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다(소유 검증은 위에서 선행).
+        // 이미 완료된 세션을 만나면(P2-10, KNK-635): 회원 소유 세션의 소유 검증된 회수(reclaim)일 때만 409 대신 저장된 스토리로
+        // 응답을 재구성해 돌려준다. 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
+        // 게스트(익명 소유, session.userId == null) 완성 세션은 재구성하지 않는다: 소유자가 없어 회수를 정당한 요청자에 묶을 수 없어,
+        // 순차 simpleCreationId를 찍어 남의 스토리를 열람할 수 있다(Codex P1 x3). 회원 세션은 위 소유자 가드가 비소유자를 403으로 막는다.
+        // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다.
         if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            if (isReclaim) {
+            if (isReclaim && session.userId != null) {
                 return reconcileCreatedSession(session)
             }
             throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
@@ -464,9 +465,9 @@ class SimpleStoryCreationService(
     }
 
     /**
-     * 회수 재실행(P2-10, KNK-635)이 이미 STORY_CREATED인 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
-     * 저장된 스토리로 원 POST 응답([SimpleStoryCreateResponse])을 재구성한다. [compileAndPersist]가 만든 응답과
-     * 같은 모양이며, AI·저장을 다시 타지 않는다. 소유 검증은 호출부([doCreateSimpleStory])가 선행한다.
+     * 회수 재실행(P2-10, KNK-635)이 이미 STORY_CREATED인 **회원 소유** 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
+     * 저장된 스토리로 원 POST 응답([SimpleStoryCreateResponse])을 재구성한다. [compileAndPersist]가 만든 응답과 같은 모양이며,
+     * AI·저장을 다시 타지 않는다. 소유 검증(회원 소유·회수 여부)은 호출부([doCreateSimpleStory])가 선행한다(익명 세션은 재구성 안 함 — Codex P1).
      *
      * storyId·자식 행이 없으면(비정상 상태) 원래의 409로 폴백한다.
      */

@@ -407,21 +407,22 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
-    fun `스토리 커밋 후 COMPLETED 마킹을 잃은 회수 재실행은 저장된 스토리를 재구성해 돌려준다`() {
+    fun `회원 세션에서 스토리 커밋 후 COMPLETED 마킹을 잃은 회수 재실행은 저장된 스토리를 재구성해 돌려준다`() {
         // KNK-635(P2-10): compileAndPersist가 story·session(STORY_CREATED)을 커밋한 뒤, 별도 트랜잭션의 COMPLETED
         // 마킹 커밋 전에 프로세스가 죽으면 요청 행은 result 없이 PENDING으로 남는다. 회수 재실행이 STORY_CREATED
         // 세션을 만나 409→FAILED가 되어 잃은 story id를 복구 못 하던 것을, session.storyId로 응답을 재구성해 돌려준다.
-        val storyline = seedGeneratedStoryline()
+        // reconcile은 회원 소유 세션에만 적용한다(익명 세션은 소유 바인딩이 없어 재구성하지 않음 — Codex P1).
+        val member = userRepository.save(User(nickname = "회원제작자", status = UserStatus.ACTIVE))
+        val token = "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}"
+        val session = sessionRepository.save(
+            StoryCreationSession(userId = member.id, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val storyline = storylineRepository.save(
+            StoryCreationStoryline(creationSession = session, storylineText = "회원 스토리라인", storylineOrder = 1),
+        )
         val requestId = UUID.randomUUID()
 
-        val firstBody = restTestClient.post()
-            .uri("/api/v1/stories/simple")
-            .header("X-Manyak-Device-Id", deviceA)
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(
-                """{"requestId":"$requestId","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
-            )
-            .exchange()
+        val firstBody = postSimpleStory(requestId, session.id, storyline.id, deviceId = null, authorization = token)
             .expectStatus().isCreated
             .expectBody()
             .jsonPath("$.id").isNotEmpty
@@ -429,13 +430,13 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
         // 크래시 창 재현: story·session은 STORY_CREATED로 유지하되, 요청 행은 COMPLETED 마킹을 잃고 오래된 PENDING으로 남은
         // 상태로 만든다. @PreUpdate가 UPDATE마다 updatedAt을 now()로 덮으므로, 기존 행을 지우고 생성자 INSERT로 stale PENDING을 심는다
-        // (INSERT는 @PreUpdate를 발동하지 않아, 재실행 회수 임계값을 넘긴 updatedAt이 보존된다).
+        // (INSERT는 @PreUpdate를 발동하지 않아, 재실행 회수 임계값을 넘긴 updatedAt이 보존된다). 소유는 회원(userId)으로 심는다.
         requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
         requestRepository.flush()
         requestRepository.saveAndFlush(
             StoryCreationRequest(
                 requestId = requestId,
-                deviceIdHash = deviceIdHasher.hash(deviceA),
+                userId = member.id,
                 stage = StoryCreationStage.STORY_COMPLETION,
                 status = StoryCreationRequestStatus.PENDING,
                 updatedAt = Instant.now().minusSeconds(600),
@@ -443,14 +444,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         )
 
         // 같은 requestId 회수 재실행: 409/FAILED가 아니라 저장된 스토리를 그대로 돌려준다(AI 재호출·중복 스토리·중복 과금 없음).
-        val secondBody = restTestClient.post()
-            .uri("/api/v1/stories/simple")
-            .header("X-Manyak-Device-Id", deviceA)
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(
-                """{"requestId":"$requestId","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
-            )
-            .exchange()
+        val secondBody = postSimpleStory(requestId, session.id, storyline.id, deviceId = null, authorization = token)
             .expectStatus().isCreated
             .expectBody()
             .returnResult()
@@ -464,6 +458,38 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         val reconciled = requestRepository.findByRequestId(requestId)!!
         assertThat(reconciled.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
         assertThat(reconciled.resultJson).isNotNull()
+    }
+
+    @Test
+    fun `게스트 세션은 회수 재실행이어도 재구성하지 않고 409다`() {
+        // Codex P1: 익명(게스트) 완성 세션은 소유자가 없어 회수를 정당한 요청자에 묶을 수 없다. 회수(aged PENDING)여도 재구성하지 않고
+        // 409를 유지한다 — 아니면 공격자가 자기 소유 aged PENDING 행을 피해자 simpleCreationId로 재시도해 스토리를 열람할 수 있다.
+        val storyline = seedGeneratedStoryline() // userId=null 게스트 세션
+        val requestId = UUID.randomUUID()
+        val firstBody = postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        // 크래시 창 재현(게스트 소유 aged PENDING).
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 회수 재실행이지만 게스트 세션이므로 재구성하지 않고 409, 스토리 미노출.
+        val secondBody = postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isEqualTo(409)
+            .expectBody().returnResult()
+
+        assertThat(String(secondBody.responseBody!!)).isNotEqualTo(String(firstBody.responseBody!!))
+        assertThat(storyRepository.count()).isEqualTo(1)
     }
 
     @Test
