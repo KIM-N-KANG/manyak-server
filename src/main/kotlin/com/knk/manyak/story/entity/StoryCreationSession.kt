@@ -10,6 +10,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
+import java.util.UUID
 
 enum class StoryCreationSessionStatus {
     STORYLINES_GENERATED,
@@ -29,6 +30,11 @@ class StoryCreationSession(
 
     @Column(name = "story_id")
     var storyId: Long? = null,
+
+    // 완성(STORY_CREATED) 시점의 생성 요청 request_id(KNK-644). 회수 재실행이 "이 세션을 만든 그 요청"인지 검증해,
+    // 소유자 없는 게스트 세션도 안전하게 스토리를 재구성 복구한다(KNK-635 Codex P1의 바인딩 부재 해소).
+    @Column(name = "creation_request_id")
+    var creationRequestId: UUID? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)

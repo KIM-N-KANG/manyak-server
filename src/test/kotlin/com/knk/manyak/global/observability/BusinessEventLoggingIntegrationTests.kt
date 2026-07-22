@@ -117,7 +117,7 @@ class BusinessEventLoggingIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"simpleCreationId":999999,"storylineId":1}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":999999,"storylineId":1}""")
             .exchange()
             .expectStatus().isNotFound
 

@@ -12,6 +12,7 @@ import com.knk.manyak.chat.client.ChatTurnStartSettings
 import com.knk.manyak.chat.client.ChatTurnStorySettings
 import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.dto.BatchChatRequest
+import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
@@ -445,6 +446,56 @@ class ChatService(
     }
 
     /**
+     * 마지막 턴의 다음 행동 선택지 3개를 생성해 저장한다(선택지 분리, 스펙 §4-3-3). 이어쓰기·재생성과 달리 SSE가 아닌 동기이고,
+     * 선택지 생성은 **무료**(크레딧·게스트 채팅 한도 미소모)다. 소유 게이트는 이어쓰기와 동형이다.
+     *
+     * `turnId`가 마지막 턴이 아니면 409(재생성과 동일 패턴), 이미 선택지가 있으면 AI 호출 없이 기존 값을 반환한다(멱등 —
+     * 중복 탭·재진입 안전). 프론트는 응답 본문이 아니라 채팅 상세 재조회의 `turns[].choices`로 렌더하나, 응답에도 담아 둔다.
+     */
+    fun generateChoices(chatId: String, turnId: Long, userId: Long? = null): ChatChoicesResponse {
+        suspensionGuard.requireActive(userId) // 정지 계정의 AI 호출·쓰기 차단(§4-5 B20). 선택지는 무료지만 AI 비용은 발생한다.
+        val chat = resolveChat(chatId)
+        requireChatOwner(chat, userId)
+
+        val story = storyRepository.findById(chat.storyId).orElse(null)
+        // 마지막 턴 검증(0개면 404, 낡은·타 채팅 turnId면 409) + 이번 턴 제외 history·재전송 입력·저장 본문을 함께 확정한다.
+        // 이 검증을 멱등 사전 검사보다 **먼저** 한다 — messageId로 먼저 조회하면 타 채팅의 turnId로 남의 선택지를 받거나
+        // 같은 채팅의 비마지막 턴이 409 대신 200이 될 수 있다(Codex P1 IDOR).
+        val target = resolveRegenerateTarget(chat.id, turnId)
+
+        // 멱등: 검증된 마지막 턴에 이미 선택지가 있으면 AI 없이 반환한다. 최종 방어는 fillChoices의 락 안 재검사.
+        val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(turnId)
+        if (existing.isNotEmpty()) {
+            return ChatChoicesResponse(existing.map { it.choiceText })
+        }
+
+        val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
+
+        val recorded = try {
+            aiCallRecorder.record(
+                AiCallContext(
+                    feature = AiCallFeature.CHOICE_GENERATION,
+                    storyId = chat.storyId,
+                    chatId = chat.publicId,
+                ),
+                errorCode = { throwable -> if (throwable is ChatTurnAiException) throwable.code else "AI_CHOICE_FAILED" },
+                meta = { it.meta },
+            ) {
+                chatTurnAiClient.generateChoices(aiRequest, target.aiOutput)
+            }
+        } catch (exception: Exception) {
+            // 선택지 생성 실패는 502로 올려 프론트가 재시도한다(본문·판정은 이미 저장돼 있어 영향 없음, 스펙 §4-3-3).
+            throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 선택지 생성 요청에 실패했습니다.", exception)
+        }
+
+        // 락 안에서 본문 재생성 경합을 검사하고 저장한다. 반환값은 실제 저장된 선택지다(경합 시 recorded와 다를 수 있음, Codex P2).
+        val filled = chatTurnPersister.fillChoices(chat.id, turnId, target.aiOutput, recorded.result.choices)
+        // ai_call_logs.turn_number를 채워 chat_response 행과 chat_id + turn_number로 조인되게 한다(§4-7).
+        aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, filled.turnNumber)
+        return ChatChoicesResponse(filled.choices)
+    }
+
+    /**
      * 소유권 강제(스펙 §4-5, KNK-480): 회원 소유 채팅(userId != null)은 소유자만 이어쓰기·재생성할 수 있고,
      * 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용한다(인증 회원은 차단 — 이관 후 접근).
      */
@@ -482,12 +533,19 @@ class ChatService(
                     MessageRole.SYSTEM -> null
                 }
             }
-        return RegenerateTarget(assistantId = lastAssistant.id, userInput = pairedUser.content, history = history)
+        return RegenerateTarget(
+            assistantId = lastAssistant.id,
+            userInput = pairedUser.content,
+            aiOutput = lastAssistant.content,
+            history = history,
+        )
     }
 
     private data class RegenerateTarget(
         val assistantId: Long,
         val userInput: String,
+        // 마지막 턴의 저장된 AI 본문. 선택지 생성 시 ai_output으로 되싣는다(재생성은 사용하지 않음).
+        val aiOutput: String,
         val history: List<ChatHistoryMessage>,
     )
 
@@ -602,7 +660,11 @@ class ChatService(
                     }
                 }
                 succeededAiCallLogId = recorded.aiCallLogId
-                val result = recorded.result
+                // 선택지는 턴 스트림에서 채우지 않는다(스펙 §4-3-3, B23): completed.choices는 항상 빈 배열이고 저장도 빈 상태로 시작한다.
+                // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
+                // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
+                // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
+                val result = recorded.result.copy(choices = emptyList())
                 val persistedTurn = persist(result)
                 // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                 // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
@@ -964,6 +1026,12 @@ class ChatService(
     }
 
     private companion object {
-        const val SSE_TIMEOUT_MILLIS = 60_000L
+        // SseEmitter 전체(MVC async) 상한. 턴 스트림은 본문 스트리밍 뒤 곧바로 completed를 보낸다(선택지는 전용 엔드포인트로
+        // 분리 — B23). stopgap 동안 본문+내부 선택지 호출까지 덮으려 160s로 상향했던 값을 낮추되, AI 스트림의 이벤트 간 idle
+        // 타임아웃(manyak.ai.chat.stream-timeout, 기본 60s)과 같게 두지 않는다: idle은 토큰 간격 상한이라 토큰이 계속 오면
+        // 총 스트리밍이 60s를 넘길 수 있고, 전체 상한이 그와 같으면 정상적인 긴 턴이 completed 전에 잘려 클라이언트가 turnId를
+        // 잃고 과금될 수 있다(Codex P2). idle 예산 위로 여유(2배)를 둬 헬시한 긴 스트림을 끊지 않는다.
+        // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
+        const val SSE_TIMEOUT_MILLIS = 120_000L
     }
 }

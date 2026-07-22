@@ -22,6 +22,11 @@ springdoc:
 
 manyak:
   # auth.jwt.secret 은 여기에 하드코딩하지 않는다. 운영은 env(MANYAK_AUTH_JWT_SECRET)로만 주입한다(application.yml 기본 바인딩).
+  google-form:
+    feedback:
+      # 신규 피드백을 적재할 실 구글 폼. 운영에서만 활성화(local/test/dev 는 empty 기본값이라 발송하지 않음).
+      # 공개 식별자라 하드코딩 가능하나, env(MANYAK_GOOGLE_FORM_FEEDBACK_ID)로 덮어쓸 수 있게 둔다.
+      form-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_ID:1FAIpQLSd1myQU4_KC3R7k6y4fNNtWyl4DmYOh87Uswsx7FI2FnLPeGg}
   ai:
     chat:
       # 운영은 실제 manyak-ai 호출 (local만 stub)

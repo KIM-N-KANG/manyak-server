@@ -82,8 +82,10 @@ class AiCallLogRecordingIntegrationTests {
                 .returnResult()
 
             val logs = aiCallLogRepository.findAll()
+            // 턴 흐름은 본문(chat_response) 한 행만 적재한다. 선택지는 전용 엔드포인트로 분리돼(B23) 턴 스트림에서 호출되지 않는다.
             assertThat(logs).hasSize(1)
-            val log = logs.first()
+            val log = logs.single { it.feature == AiCallFeature.CHAT_RESPONSE }
+            assertThat(logs.none { it.feature == AiCallFeature.CHOICE_GENERATION }).isTrue()
             assertThat(log.feature).isEqualTo(AiCallFeature.CHAT_RESPONSE)
             assertThat(log.status).isEqualTo(AiCallStatus.SUCCEEDED)
             assertThat(log.callerService).isEqualTo("manyak-server")

@@ -1,0 +1,221 @@
+### 채팅 선택지 생성 전용 엔드포인트(POST /chats/{chatId}/turns/{turnId}/choices) 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환. 위에서부터 순서대로 실행하세요.
+###
+### [KNK-636] 선택지 생성을 채팅 턴에서 분리한 전용 API(스펙 §4-3-3). 이어쓰기와 달리 동기 JSON이고 무료입니다
+###   (크레딧·게스트 채팅 한도 미소모). 프론트는 응답 본문이 아니라 채팅 상세 재조회의 turns[].choices로 렌더합니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres + AI 서버 기동 (docker compose up -d)
+###
+### AI 연동 모드 주의(중요):
+###   - 이어쓰기(/turns/stream)는 선택지를 채우지 않습니다(B23): completed.choices·저장 모두 빈 배열입니다. 따라서 스텁·실연동
+###     둘 다 이 API가 실제로 선택지를 생성·저장합니다(생성 경로 확인). 같은 턴에 다시 호출하면 저장된 값을 그대로 반환합니다(멱등).
+###   - 스텁(기본 local, manyak.ai.chat.stub=true): 이 API가 스텁 선택지 3개를 생성·저장합니다.
+###   - 실연동(manyak.ai.chat.stub=false + MANYAK_AI_BASE_URL): 이 API가 manyak-ai의 POST /api/v1/chat/choices를 호출해 생성·저장합니다.
+###     실행 예: MANYAK_AI_BASE_URL=http://localhost:8000 manyak_ai_chat_stub=false ./gradlew bootRun
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인 (이번 실행 전용 deviceId 발급 — 아래 게스트 요청들이 공유)
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
+### 1. 스토리라인 생성 (준비 1/3)
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "customTags": [
+    { "name": "판타지", "category": "GENRE" },
+    { "name": "신중한", "category": "PROTAGONIST" }
+  ]
+}
+
+> {%
+    client.test("스토리라인 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("simpleCreationId", response.body.simpleCreationId);
+    client.global.set("storylineId", response.body.storylines[0].id);
+%}
+
+### 2. 최종 스토리 생성·저장 (준비 2/3)
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": ["주인공은 무속성 판정을 받은 신입생이다"]
+}
+
+> {%
+    client.test("최종 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyId", response.body.id);
+%}
+
+### 3. 채팅 생성 (준비 3/3)
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("chatId", response.body.id);
+%}
+
+### 4. 채팅 이어쓰기 스트리밍 — 선택지를 붙일 마지막 턴을 만든다 (SSE)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "다들 평범하게 속성을 발현한다. 나는 마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."
+}
+
+> {%
+    client.test("이어쓰기가 200으로 시작한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. 상세 재조회 — 마지막 턴 id(turnId)를 확보한다
+# 4번이 completed까지 끝나면 새 턴 1건이 저장됩니다. 그 턴의 id가 선택지 API의 turnId입니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const turns = response.body.turns || [];
+    client.test("저장된 턴이 있다", () => {
+        client.assert(turns.length >= 1, `turns가 1건 이상이어야 합니다. actual=${JSON.stringify(turns)}`);
+    });
+    if (turns.length >= 1) {
+        client.global.set("turnId", turns[turns.length - 1].id);
+    }
+%}
+
+### 6. 선택지 생성 (핵심 검증)
+# 턴 스트림은 선택지를 채우지 않으므로(B23), 스텁·실연동 모두 이 API가 선택지 3개를 생성·저장합니다.
+# 어느 모드든 응답 200 + choices 3개가 정상입니다(같은 턴 재호출은 8번에서 멱등 확인).
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/{{turnId}}/choices
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json
+
+> {%
+    client.test("선택지 생성이 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    client.test("choices가 3개다", () => {
+        client.assert(Array.isArray(response.body.choices) && response.body.choices.length === 3,
+            `choices가 3개가 아닙니다. actual=${JSON.stringify(response.body.choices)}`);
+    });
+%}
+
+### 7. 상세 재조회 — 선택지가 렌더 소스(turns[].choices)에 반영됐는지 확인
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    const turns = response.body.turns || [];
+    const last = turns[turns.length - 1];
+    client.test("마지막 턴에 선택지 3개가 저장됐다", () => {
+        client.assert(Array.isArray(last.choices) && last.choices.length === 3,
+            `turns[].choices가 3개가 아닙니다. actual=${JSON.stringify(last && last.choices)}`);
+    });
+%}
+
+### 8. 멱등 — 같은 턴에 다시 호출해도 200이고 기존 값을 그대로 돌려준다(AI 미호출)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/{{turnId}}/choices
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json
+
+> {%
+    client.test("재호출도 200이고 choices 3개다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(Array.isArray(response.body.choices) && response.body.choices.length === 3,
+            `choices가 3개가 아닙니다. actual=${JSON.stringify(response.body.choices)}`);
+    });
+%}
+
+### 9. 마지막 턴이 아닌 turnId → 409
+# 마지막 턴 id보다 낮은(이전 턴) 값으로 요청하면 409입니다(선택지는 마지막 턴에만).
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/1/choices
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json
+
+> {%
+    // turnId=1이 실제 마지막 턴이면 200일 수 있으나, 위 4번으로 최소 1턴 쌓였고 보통 마지막 turnId>1이라 409가 뜹니다.
+    client.test("마지막 턴이 아니면 409다", () => {
+        client.assert(response.status === 409 || response.status === 200,
+            `409(또는 우연히 마지막 턴이면 200)가 아닙니다. actual=${response.status}`);
+        if (response.status === 409) {
+            client.log("마지막 턴이 아니어서 409입니다(정상).");
+        }
+    });
+%}
+
+### 10. 순차 정수 chatId → 404 (IDOR 방지)
+POST {{baseUrl}}/api/v1/chats/999999999/turns/1/choices
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json
+
+> {%
+    client.test("순차 정수 chatId는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 11. (자유 조회) 실연동에서 AI 서버 /chat/choices 계약 직접 확인
+# 6번이 502로 실패하면, 백엔드가 호출하는 AI 엔드포인트가 200으로 응답하는지 먼저 확인합니다.
+# 아래 재료는 예시입니다. history는 이번 턴을 제외한 스냅샷이어야 합니다(백엔드가 절단, §5-3-5).
+POST http://localhost:8000/api/v1/chat/choices
+Content-Type: application/json
+Accept: application/json
+
+{
+  "genre": "판타지",
+  "story_settings": {
+    "world_setting": "마법 아카데미가 존재하는 세계",
+    "character_setting": "강진우, 무속성 1학년",
+    "user_role_setting": "무속성 신입생",
+    "rule_setting": "마법은 속성 발현으로만 사용한다."
+  },
+  "start_settings": {
+    "name": "강진우",
+    "prologue": "당신은 호아킨 아카데미의 1학년으로 입학했다.",
+    "start_situation": "적성 검사가 시작된다."
+  },
+  "history": [],
+  "user_input": "마법수정에 손을 올렸지만 아무 빛도 나오지 않았다.",
+  "summary": "",
+  "ai_output": "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다."
+}
+
+> {%
+    client.test("AI 서버 선택지 생성이 200이다", () => {
+        client.assert(response.status === 200, `AI 서버 응답이 200이 아닙니다. actual=${response.status}`);
+        client.assert(Array.isArray(response.body.choices) && response.body.choices.length === 3,
+            `choices가 3개가 아닙니다. actual=${JSON.stringify(response.body.choices)}`);
+    });
+%}

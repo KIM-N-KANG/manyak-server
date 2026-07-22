@@ -2,6 +2,7 @@ package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
+import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.MessageRole
@@ -48,6 +49,7 @@ class ChatStreamHistoryIntegrationTests {
     class CapturingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
 
+        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult = ChatChoicesResult(emptyList())
         override fun streamTurn(
             request: ChatTurnAiRequest,
             onToken: (String) -> Unit,

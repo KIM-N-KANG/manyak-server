@@ -5,6 +5,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.client.ChatTurnAiClient
+import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
@@ -55,6 +56,7 @@ class ChatTurnCreditRefundIntegrationTests {
         @Primary
         fun throwingChatTurnAiClient(): ChatTurnAiClient =
             object : ChatTurnAiClient {
+                override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult = ChatChoicesResult(emptyList())
                 override fun streamTurn(
                     request: ChatTurnAiRequest,
                     onToken: (String) -> Unit,

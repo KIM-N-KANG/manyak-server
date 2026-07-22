@@ -6,6 +6,7 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
+import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -26,6 +27,7 @@ import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
 import com.knk.manyak.story.dto.SimpleStorylineResponse
+import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -35,8 +37,10 @@ import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
+import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.entity.StoryMainEvent
@@ -44,6 +48,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
@@ -64,6 +69,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
+import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
 @Service
@@ -89,6 +95,10 @@ class SimpleStoryCreationService(
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
     private val storyThumbnailLinker: StoryThumbnailLinker,
+    private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
+    private val storyCreationRequestRepository: StoryCreationRequestRepository,
+    private val objectMapper: ObjectMapper,
+    private val deviceIdHasher: DeviceIdHasher,
     // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
     @param:Value("\${manyak.credit.story-creation-cost:20}")
     private val storyCreationCost: Long,
@@ -131,17 +141,84 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
-        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+        // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
+        val generate: (Boolean) -> GenerateSimpleStorylinesResponse = { _ ->
+            val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+                userId,
+                deviceId,
+                GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+            )
+            try {
+                doGenerateSimpleStorylines(request, userId)
+            } catch (throwable: Throwable) {
+                guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                throw throwable
+            }
+        }
+        return recordOrRun(
+            request.requestId,
+            StoryCreationStage.STORYLINE_GENERATION,
             userId,
             deviceId,
-            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+            GenerateSimpleStorylinesResponse::class.java,
+            generate,
         )
-        try {
-            return doGenerateSimpleStorylines(request, userId)
-        } catch (throwable: Throwable) {
-            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
-            throw throwable
+    }
+
+    /**
+     * 소유자를 특정할 수 있으면 [storyCreationRequestRecorder]로 감싸 백그라운드 복구·멱등(스펙 §4-3-8)을 적용한다.
+     * 단 소유자를 특정할 수 없는 게스트(디바이스 헤더 없음)는 요청 행을 기록하지 않고 그대로 실행해 문서화된 400을 낸다 —
+     * 소유자 없는 요청 행을 남기면 아무도 소유할 수 없어, 올바른 디바이스로 재시도해도 409로 영구히 막힌다(Codex P2).
+     */
+    private fun <T : Any> recordOrRun(
+        requestId: UUID,
+        stage: StoryCreationStage,
+        ownerUserId: Long?,
+        deviceId: String?,
+        responseType: Class<T>,
+        // 콜백 인자는 이 실행이 회수(reclaim)인지다(완성 경로의 reconcile 게이트 — Codex P1). 미기록 직접 실행은 회수가 아니다.
+        block: (isReclaim: Boolean) -> T,
+    ): T {
+        // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
+        val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
+        if (ownerUserId == null && ownerDeviceIdHash == null) {
+            // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
+            return block(false)
         }
+        return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
+    }
+
+    /**
+     * 스토리 완성 요청의 멱등·복구 소유자를 정한다(Codex P2). 회원이 소유한 세션은 그 회원만 완료할 수 있으므로,
+     * 요청의 (만료·갱신으로 흔들리는) 임시 인증 신원 대신 세션 소유자를 소유자로 잡는다. 그래야 만료 토큰으로 게스트처럼
+     * 보인 첫 시도가 남긴 행이 갱신 토큰 재시도를 소유 불일치 409로 영구히 막지 않는다. 익명 세션·미존재는 요청 신원을 쓴다.
+     */
+    private fun resolveCompletionOwnerUserId(simpleCreationId: Long, requestUserId: Long?): Long? =
+        storyCreationSessionRepository.findById(simpleCreationId).orElse(null)?.userId ?: requestUserId
+
+    /** 디바이스 헤더를 소유 판정용 해시로 변환한다(원문 저장·비교 금지 — DeviceIdHasher). 공백·null은 미소유(null). */
+    private fun deviceIdHashOrNull(deviceId: String?): String? =
+        deviceId?.takeIf { it.isNotBlank() }?.let(deviceIdHasher::hash)
+
+    /**
+     * 백그라운드 생성 복구 조회(스펙 §4-3-8). 소유 주체(회원 [userId] 또는 게스트 [deviceId])만 조회할 수 있고,
+     * 미존재·타인 요청은 404다. [StoryCreationRequestStatusResponse.result]는 COMPLETED일 때 원 POST 응답 본문과 동일하다.
+     */
+    @Transactional(readOnly = true)
+    fun getCreationRequest(
+        requestId: UUID,
+        userId: Long? = null,
+        deviceId: String? = null,
+    ): StoryCreationRequestStatusResponse {
+        val deviceIdHash = deviceIdHashOrNull(deviceId)
+        val row = storyCreationRequestRepository.findByRequestId(requestId)
+            ?.takeIf { it.isOwnedBy(userId, deviceIdHash) }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "생성 요청을 찾을 수 없습니다.")
+        return StoryCreationRequestStatusResponse(
+            stage = row.stage,
+            status = row.status,
+            result = row.resultJson?.let { objectMapper.readTree(it) },
+        )
     }
 
     private fun doGenerateSimpleStorylines(
@@ -254,26 +331,38 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
-        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
-        val startNanos = System.nanoTime()
-        structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
-        try {
-            val outcome = doCreateSimpleStory(request, userId, deviceId)
-            structuredLogger.event(
-                "story_created",
-                "story_id" to outcome.response.id,
-                "ai_call_log_id" to outcome.aiCallLogId,
-                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
-            )
-            return outcome.response
-        } catch (exception: Exception) {
-            structuredLogger.event(
-                "story_create_failed",
-                "error_code" to storyErrorCode(exception),
-                "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
-            )
-            throw exception
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
+        val create: (Boolean) -> SimpleStoryCreateResponse = { isReclaim ->
+            val startNanos = System.nanoTime()
+            structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
+            try {
+                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
+                structuredLogger.event(
+                    "story_created",
+                    "story_id" to outcome.response.id,
+                    "ai_call_log_id" to outcome.aiCallLogId,
+                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                )
+                outcome.response
+            } catch (exception: Exception) {
+                structuredLogger.event(
+                    "story_create_failed",
+                    "error_code" to storyErrorCode(exception),
+                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                )
+                throw exception
+            }
         }
+        // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
+        // 소유자는 세션 소유권으로 정한다(요청 인증 신원이 만료·갱신으로 흔들려도 회원 소유 세션의 재시도가 막히지 않도록 — Codex P2).
+        return recordOrRun(
+            request.requestId,
+            StoryCreationStage.STORY_COMPLETION,
+            resolveCompletionOwnerUserId(request.simpleCreationId, userId),
+            deviceId,
+            SimpleStoryCreateResponse::class.java,
+            create,
+        )
     }
 
     private fun storyErrorCode(exception: Exception): String = when (exception) {
@@ -282,19 +371,23 @@ class SimpleStoryCreationService(
         else -> exception::class.simpleName ?: "UNKNOWN"
     }
 
-    private fun doCreateSimpleStory(request: CreateSimpleStoryRequest, userId: Long?, deviceId: String?): StoryCreationOutcome {
+    private fun doCreateSimpleStory(
+        request: CreateSimpleStoryRequest,
+        userId: Long?,
+        deviceId: String?,
+        // 소유 검증된 회수(reclaim)인지. 완성된 세션의 스토리 재구성은 회수일 때만 허용한다(Codex P1 — 신규 requestId로 남의 스토리 열람 차단).
+        isReclaim: Boolean,
+    ): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
             }
-        if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
-        }
 
         // 다단계 간편 제작 소유권 강제(Codex PR #76 P2): AI 호출(비용) 전에 검사·거부한다.
         // - 익명 세션(소유자 없음): 이 finalize 요청의 인증 사용자(또는 익명)에 귀속.
         // - 소유 세션(소유자 있음): 같은 사용자만 완료 가능. 다른 사용자/익명(만료·무효 토큰 포함)이 simpleCreationId로
         //   남의 진행을 가로채 자기 user_id로 기록하거나, 소유 세션을 익명으로 떨어뜨리는 것을 막는다.
+        // 재구성(아래 STORY_CREATED 경로)보다 먼저 검사해 완료된 스토리가 비소유자에게 새지 않게 한다.
         val attributedUserId = when {
             session.userId == null -> userId
             session.userId == userId -> userId
@@ -302,6 +395,18 @@ class SimpleStoryCreationService(
                 HttpStatus.FORBIDDEN,
                 "본인이 시작한 간편 제작만 완료할 수 있습니다.",
             )
+        }
+
+        // 이미 완료된 세션을 만나면(P2-10, KNK-635/644): 이 세션을 만든 바로 그 요청의 회수(reclaim)일 때만 409 대신 저장된 스토리로
+        // 응답을 재구성해 돌려준다. 크래시로 요청 행의 COMPLETED 마킹을 잃어(별도 트랜잭션) PENDING으로 남은 뒤 회수될 때, 잃은 story id를 되찾는 경로.
+        // 회수 여부(isReclaim)에 더해 session.creationRequestId == 요청 request_id를 검증한다: 소유자 없는 게스트 세션도 이 바인딩으로
+        // 정당한 요청자에게 묶여, 순차 simpleCreationId를 찍거나 비소유 aged PENDING을 스왑해 남의 스토리를 열람하는 것을 막는다(Codex P1 x3).
+        // AI·저장을 다시 타지 않아 중복 생성·중복 과금이 없다.
+        if (session.status == StoryCreationSessionStatus.STORY_CREATED) {
+            if (isReclaim && session.creationRequestId == request.requestId) {
+                return reconcileCreatedSession(session)
+            }
+            throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
         }
 
         val selectedStoryline = storyCreationStorylineRepository
@@ -355,8 +460,58 @@ class SimpleStoryCreationService(
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
         ) {
-            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest)
+            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest, request.requestId)
         }
+    }
+
+    /**
+     * 회수 재실행(P2-10, KNK-635/644)이 이미 STORY_CREATED인 세션을 만나면, [StoryCreationSession.storyId]가 가리키는
+     * 저장된 스토리로 원 POST 응답([SimpleStoryCreateResponse])을 재구성한다. [compileAndPersist]가 만든 응답과 같은 모양이며,
+     * AI·저장을 다시 타지 않는다. 검증(회수 여부 + `creationRequestId == request_id` 바인딩)은 호출부([doCreateSimpleStory])가
+     * 선행하므로, 소유자 없는 게스트 세션도 이 세션을 만든 요청에만 안전하게 열린다(Codex P1 바인딩).
+     *
+     * storyId·자식 행이 없으면(비정상 상태) 원래의 409로 폴백한다.
+     */
+    private fun reconcileCreatedSession(session: StoryCreationSession): StoryCreationOutcome {
+        val alreadyCreated = ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
+        val storyId = session.storyId ?: throw alreadyCreated
+        val story = storyRepository.findById(storyId).orElseThrow { alreadyCreated }
+        val startSetting = storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(storyId) ?: throw alreadyCreated
+
+        val suggestedInputs = storySuggestedInputRepository
+            .findByStartSettingIdOrderByInputOrderAsc(startSetting.id)
+            .map { it.inputText }
+        val endings = storyEndingRepository
+            .findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
+            .map { it.toEndingResponse() }
+        // 응답의 genres는 세션 장르 태그(정렬 규칙은 compile 경로와 동일)로 재구성한다.
+        val genres = storyCreationSessionTagRepository
+            .findAllWithTagByCreationSessionId(session.id)
+            .map { it.tag }
+            .filter { it.category == SimpleStoryTagCategory.GENRE }
+            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            .map { it.name }
+
+        return StoryCreationOutcome(
+            response = SimpleStoryCreateResponse(
+                id = story.publicId.toString(),
+                title = story.title,
+                oneLineIntro = story.oneLineIntro,
+                description = story.description,
+                genres = genres,
+                startSettings = listOf(
+                    StoryStartSettingResponse(
+                        id = startSetting.publicId.toString(),
+                        name = startSetting.name,
+                        prologue = startSetting.prologue,
+                        startSituation = startSetting.startSituation,
+                        suggestedInputs = suggestedInputs,
+                        endings = endings,
+                    ),
+                ),
+            ),
+            aiCallLogId = null,
+        )
     }
 
     /** 스토리 장르 태그와 일치하는 활성 로어북을 선별한다. 장르 태그가 없으면 빈 목록. */
@@ -439,6 +594,8 @@ class SimpleStoryCreationService(
         // compile 요청에 실어 보낸 선별 로어북. 저장 성공 시 story_lorebooks에 연결한다(전달분과 저장분 일치).
         selectedLorebooks: List<Lorebook>,
         aiRequest: AiStoryCompileRequest,
+        // 이 완성을 수행하는 생성 요청의 request_id. STORY_CREATED와 함께 세션에 박아, 회수 재실행이 이 요청인지 검증한다(KNK-644).
+        requestId: UUID,
     ): StoryCreationOutcome {
         val recorded = try {
             aiCallRecorder.record(
@@ -567,6 +724,8 @@ class SimpleStoryCreationService(
             lockedSession.userId = attributedUserId
             lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
             lockedSession.storyId = story.id
+            // 회수 재실행 검증용 바인딩(KNK-644): 이 세션을 만든 요청의 request_id를 STORY_CREATED와 원자적으로 커밋한다.
+            lockedSession.creationRequestId = requestId
             storyCreationSessionRepository.save(lockedSession)
 
             StoryCreationOutcome(
@@ -629,7 +788,8 @@ class SimpleStoryCreationService(
 
     private data class StoryCreationOutcome(
         val response: SimpleStoryCreateResponse,
-        val aiCallLogId: Long,
+        // 회수 재실행이 저장된 스토리를 재구성해 돌려주는 경로(P2-10)는 AI를 호출하지 않으므로 null이다.
+        val aiCallLogId: Long?,
     )
 
     private data class StoryCreationTagDraft(

@@ -5,7 +5,7 @@
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
 | [public.story_creation_tags](public.story_creation_tags.md) | 8 |  | BASE TABLE |
-| [public.story_creation_sessions](public.story_creation_sessions.md) | 6 |  | BASE TABLE |
+| [public.story_creation_sessions](public.story_creation_sessions.md) | 7 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
@@ -33,6 +33,7 @@
 | [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
+| [public.story_creation_requests](public.story_creation_requests.md) | 9 |  | BASE TABLE |
 
 ## Relations
 
@@ -92,6 +93,7 @@ erDiagram
   varchar_30_ status
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid creation_request_id
 }
 "public.story_creation_session_tags" {
   bigint id
@@ -363,6 +365,17 @@ erDiagram
 "public.image_preset_genres" {
   bigint image_preset_id FK
   bigint tag_id FK
+}
+"public.story_creation_requests" {
+  bigint id
+  uuid request_id
+  bigint user_id
+  varchar_64_ device_id_hash
+  varchar_32_ stage
+  varchar_16_ status
+  text result_json
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

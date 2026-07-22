@@ -89,10 +89,9 @@ class ChatStreamControllerIntegrationTests {
         assertThat(assistant.messageOrder).isEqualTo(2)
         assertThat(assistant.content).isNotBlank()
 
-        // 선택지 N행 저장
+        // 턴 스트림은 선택지를 채우지 않는다(B23): story_choices는 빈 상태로 시작하고, 프론트가 전용 엔드포인트로 채운다.
         val choices = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(assistant.id)
-        assertThat(choices).isNotEmpty
-        assertThat(choices.map { it.choiceOrder.toInt() }).startsWith(1)
+        assertThat(choices).isEmpty()
 
         // current_turn++
         val reloaded = storyChatRepository.findById(session.id).orElseThrow()

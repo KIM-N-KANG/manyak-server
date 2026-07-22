@@ -243,10 +243,35 @@ class RestChatTurnAiClientTests {
         assertNull(recorded.getHeader("X-Manyak-Device-Id-Hash"))
     }
 
+    @Test
+    fun `generateChoices는 턴 재료를 평탄화하고 ai_output을 더해 보내며 snake meta를 파싱한다`() {
+        // 통합 테스트는 스텁을 쓰므로 실제 직렬화는 여기서 MockWebServer로 검증한다(@JsonUnwrapped·snake_case 계약).
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"choices":["살핀다.","나선다.","벗어난다."],"meta":{"input_token_count":5,"retry_count":1}}"""),
+        )
+
+        val result = client().generateChoices(sampleRequest(), "검사장은 조용해졌다.")
+
+        assertEquals(listOf("살핀다.", "나선다.", "벗어난다."), result.choices)
+        assertEquals(5, result.meta?.inputTokenCount, "snake_case input_token_count를 파싱해야 한다")
+        assertEquals(1, result.meta?.retryCount, "snake_case retry_count를 파싱해야 한다")
+
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/chat/choices", recorded.path)
+        val body = recorded.body.readUtf8()
+        // 턴 재료가 @JsonUnwrapped로 최상위에 평탄화되고(genre·story_settings) ai_output이 더해진다.
+        assertTrue(body.contains(""""ai_output":"검사장은 조용해졌다.""""), "ai_output이 없습니다: $body")
+        assertTrue(body.contains(""""genre":"판타지""""), "평탄화된 genre가 없습니다: $body")
+        assertTrue(body.contains(""""story_settings""""), "평탄화된 story_settings가 없습니다: $body")
+    }
+
     private fun client() = RestChatTurnAiClient(
         webClient = WebClient.builder().baseUrl(server.url("/").toString()).build(),
         objectMapper = JsonMapper.builder().build(),
         streamTimeout = Duration.ofSeconds(5),
+        choicesTimeout = Duration.ofSeconds(5),
     )
 
     private fun sseResponse(body: String) = MockResponse()

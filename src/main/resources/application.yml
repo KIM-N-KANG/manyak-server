@@ -80,6 +80,18 @@ manyak:
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
+  google-form:
+    # 구글 폼 formResponse 베이스 URL(교체 불필요, 테스트에서만 mock 으로 override).
+    base-url: ${MANYAK_GOOGLE_FORM_BASE_URL:https://docs.google.com}
+    feedback:
+      # 신규 피드백을 적재할 구글 폼(→ 연결된 스프레드시트). form-id/body-entry-id 미설정이면 건너뛴다.
+      # 기본값은 비워 둔다(Slack webhook 과 동일). live form-id 는 운영에만(application-prod.yml) 둬,
+      # local/수동 실행이 실 스프레드시트를 오염시키지 않게 한다. entry-id 는 공개 식별자라 여기 둔다(폼과 함께 갱신).
+      form-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_ID:}
+      body-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_BODY_ENTRY:1064236498}
+      email-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_EMAIL_ENTRY:1084788855}
+      platform-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_PLATFORM_ENTRY:486778658}
+      app-version-entry-id: ${MANYAK_GOOGLE_FORM_FEEDBACK_APP_VERSION_ENTRY:1401396038}
   analytics:
     # device_id 해시에 섞는 pepper. 미설정(빈 값)이면 무염 해시. 운영에서 추측 공격 완화용으로 설정 권장.
     # 전환기(KNK-317): 새 env가 없으면 구 MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER로 fallback. 롤아웃 완료 후 fallback 제거.

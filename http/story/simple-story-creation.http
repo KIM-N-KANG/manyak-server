@@ -18,6 +18,13 @@
 #     아래 @memberAccessToken에 직접 붙여넣으세요. 잔액은 그 회원 지갑이 비용(기본 20) 미만이어야 402가 납니다
 #     (지갑 적립 정책은 KNK-392 등 별도 티켓 소관이라 이 파일에서는 만들지 않습니다).
 
+# [KNK-631] 백그라운드 생성 복구·멱등(스펙 §4-3-8):
+#   - 스토리라인 생성(POST /storylines)·스토리 완성(POST /stories/simple) 요청 본문에 클라이언트 생성 requestId(UUID)가 필수입니다.
+#     누락하면 400입니다. 이 파일의 일반 생성 요청은 매 실행 새 requestId를 쓰도록 IntelliJ 동적 변수 {{$uuid}}를 씁니다.
+#   - 앱 전환 등으로 응답을 못 받아도 GET /stories/simple/creation-requests/{requestId}로 진행 상태·결과를 되찾습니다(12번 섹션).
+#   - 같은 requestId 재요청은 COMPLETED면 저장된 결과를 AI 재호출 없이 돌려주고(멱등), PENDING이면 409, FAILED면 재실행합니다.
+#   - 12~14번은 재실행 가능하도록 전용 고정 requestId·deviceId를 씁니다(재실행 시 COMPLETED 결과를 그대로 replay).
+
 # auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken이 이 값을 덮어씁니다.
 @memberAccessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
 
@@ -112,6 +119,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [
     {{genreTagId}},
     {{protagonistTagId}},
@@ -152,6 +160,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [
     {{genreTagId}},
     {{protagonistTagId}},
@@ -180,6 +189,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{multiInfoCreationId}},
   "storylineId": {{multiInfoStorylineId}},
   "additionalInfos": [
@@ -205,6 +215,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{simpleCreationId}},
   "storylineId": {{storylineId}},
   "additionalInfos": [
@@ -227,6 +238,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [],
   "customTags": [
     {
@@ -251,6 +263,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [],
   "customTags": []
 }
@@ -262,6 +275,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [999999999],
   "customTags": []
 }
@@ -275,6 +289,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{simpleCreationId}},
   "storylineId": 999999999
 }
@@ -292,6 +307,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": 999999999,
   "storylineId": 1
 }
@@ -334,6 +350,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{simpleCreationId}},
   "storylineId": {{storylineId}},
   "additionalInfos": [
@@ -395,20 +412,24 @@ Accept: application/json
     });
 %}
 
-### 8. 이미 생성된 진행에 재요청하면 409
-# 7번을 성공시킨 뒤 같은 세션으로 다시 요청하면 충돌(409)입니다.
+### 8. [KNK-635] 이미 생성된 진행에 새 requestId로 재요청하면 409
+# 7번을 성공시킨 뒤 새 requestId로 같은 세션을 다시 요청하면 충돌(409)입니다. 재구성(reconcile)은 이 세션을 만든 바로 그 요청의
+# 회수일 때만 열립니다(session.creationRequestId == request_id 바인딩, KNK-644) — 새 requestId는 바인딩 불일치라 409이고,
+# 순차 simpleCreationId를 찍어 남의 스토리를 열람하는 것을 막습니다(Codex P1). 같은 requestId의 크래시 창 회수(→ 스토리 재구성)는
+# aged PENDING + STORY_CREATED 상태가 필요해 HTTP만으로 재현할 수 없어, 통합 테스트(회원·게스트 모두)가 커버합니다.
 POST {{baseUrl}}/api/v1/stories/simple
 X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{simpleCreationId}},
   "storylineId": {{storylineId}}
 }
 
 > {%
-    client.test("이미 생성된 진행은 409다", () => {
+    client.test("새 requestId로 이미 생성된 진행을 재요청하면 409다", () => {
         client.assert(response.status === 409, `409가 아닙니다. actual=${response.status}`);
     });
 %}
@@ -422,6 +443,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [
     {{genreTagId}},
     {{protagonistTagId}},
@@ -450,6 +472,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{creditCreationId}},
   "storylineId": {{creditStorylineId}},
   "additionalInfos": [
@@ -480,6 +503,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{creditCreationId}},
   "storylineId": {{creditStorylineId}},
   "additionalInfos": []
@@ -498,6 +522,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [
     {{genreTagId}}
   ],
@@ -529,6 +554,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "selectedTagIds": [
     {{genreTagId}}
   ],
@@ -544,5 +570,116 @@ Accept: application/json
         if (response.status === 402) {
             client.log("한도가 소진되어 402입니다. exhaustDeviceId를 바꾸면 다시 처음부터 시도할 수 있습니다.");
         }
+    });
+%}
+
+### 12. [KNK-631] 백그라운드 생성 복구 — 고정 requestId로 스토리라인 생성 후 복구 조회
+# 1번(태그)을 먼저 실행해 genreTagId가 있어야 합니다. 재실행 가능하도록 전용 고정 requestId·deviceId를 씁니다.
+# 첫 실행은 새로 생성(COMPLETED), 재실행은 같은 requestId라 저장된 결과를 AI 재호출 없이 그대로 돌려줍니다(멱등).
+@recoveryDeviceId = recovery-demo-device
+@recoveryRequestId = 00000000-0000-4000-8000-000000000631
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{recoveryDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{recoveryRequestId}}",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("고정 requestId 스토리라인 생성이 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(Boolean(response.body.simpleCreationId), "simpleCreationId가 없습니다.");
+    });
+    if (response.status === 201) {
+        client.global.set("recoverySimpleCreationId", response.body.simpleCreationId);
+    }
+%}
+
+### 12-1. [KNK-631] 복구 조회 — 같은 requestId로 진행 상태·결과를 되찾는다
+# 12번을 먼저 실행하세요. 소유 주체(같은 deviceId)만 조회할 수 있습니다.
+GET {{baseUrl}}/api/v1/stories/simple/creation-requests/{{recoveryRequestId}}
+X-Manyak-Device-Id: {{recoveryDeviceId}}
+Accept: application/json
+
+> {%
+    client.test("복구 조회가 COMPLETED와 결과를 돌려준다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.stage === "STORYLINE_GENERATION", `stage가 STORYLINE_GENERATION이 아닙니다. actual=${response.body.stage}`);
+        client.assert(response.body.status === "COMPLETED", `status가 COMPLETED가 아닙니다. actual=${response.body.status}`);
+        client.assert(response.body.result && Array.isArray(response.body.result.storylines) && response.body.result.storylines.length === 3,
+            `result.storylines가 3개가 아닙니다. actual=${JSON.stringify(response.body.result)}`);
+    });
+%}
+
+### 13. [KNK-631] 멱등 — 같은 requestId 재요청은 AI 재호출 없이 저장된 결과를 돌려준다
+# 12번을 먼저 실행하세요. 같은 requestId·deviceId로 다시 POST하면 새 세션을 만들지 않고(중복 생성·과금 방지)
+# 12번과 동일한 simpleCreationId를 그대로 반환합니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{recoveryDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{recoveryRequestId}}",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("재요청이 12번과 같은 결과를 돌려준다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+        client.assert(String(response.body.simpleCreationId) === String(client.global.get("recoverySimpleCreationId")),
+            `재요청 simpleCreationId가 최초와 다릅니다(멱등 위반). first=${client.global.get("recoverySimpleCreationId")}, actual=${response.body.simpleCreationId}`);
+    });
+%}
+
+### 14. [KNK-631] 소유 게이트 — 다른 디바이스의 복구 조회는 404
+# 12번을 먼저 실행하세요. 소유자가 아닌 디바이스로 조회하면 존재를 노출하지 않고 404입니다.
+GET {{baseUrl}}/api/v1/stories/simple/creation-requests/{{recoveryRequestId}}
+X-Manyak-Device-Id: someone-elses-device
+Accept: application/json
+
+> {%
+    client.test("다른 디바이스의 복구 조회는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다(소유 게이트 위반). actual=${response.status}`);
+    });
+%}
+
+### 15. [KNK-631] requestId 없이 생성 요청하면 400
+# requestId는 필수입니다. 누락하면 검증 실패로 400입니다(1번을 먼저 실행해 genreTagId 준비).
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("requestId 누락은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 16. [KNK-631] 존재하지 않는 requestId 복구 조회는 404
+GET {{baseUrl}}/api/v1/stories/simple/creation-requests/{{$uuid}}
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json
+
+> {%
+    client.test("미존재 requestId 복구 조회는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
     });
 %}

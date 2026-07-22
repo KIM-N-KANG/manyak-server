@@ -10,6 +10,7 @@
 | status | varchar(30) |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| creation_request_id | uuid |  | true |  |  |  |
 
 ## Constraints
 
@@ -39,6 +40,7 @@ erDiagram
   varchar_30_ status
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid creation_request_id
 }
 "public.story_creation_session_tags" {
   bigint id

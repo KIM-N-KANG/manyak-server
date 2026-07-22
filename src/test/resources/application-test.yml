@@ -38,3 +38,7 @@ manyak:
   slack:
     # 테스트는 외부로 절대 발송하지 않는다. 환경변수 오염까지 막는 최종 보장은 통합 테스트의 @DynamicPropertySource.
     feedback-webhook-url: ""
+  google-form:
+    feedback:
+      # 테스트는 외부(구글)로 절대 발송하지 않는다. form-id 를 비워 발송을 끈다.
+      form-id: ""
