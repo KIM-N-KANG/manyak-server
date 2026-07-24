@@ -71,6 +71,7 @@ class LoginHandoffConsumptionIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var socialAccountRepository: SocialAccountRepository
     @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
+    @Autowired private lateinit var loginHandoffService: LoginHandoffService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -139,6 +140,36 @@ class LoginHandoffConsumptionIntegrationTests {
         assertThat(owner.memberTrialSeededAt).isNotNull()
         // 헤더 디바이스는 사용량이 없으므로 회원 체험이 남아 있어야 한다(소진 시드가 아니다).
         assertThat(guestTrialLimitService.reserveMember(owner.id, GuestTrialLimitService.Counter.CHAT_TURN))
+            .isTrue()
+    }
+
+    @Test
+    fun `소비하고 나면 원본 디바이스 ID 원문은 보관하지 않는다`() {
+        // 소비 결과는 24시간 연장 보관하지만, 디바이스 ID 원문은 핸드오프 수명 동안만 남아야 한다(스펙 §4-3-5).
+        // 결과를 오래 들고 있으려고 원문 식별자까지 같이 연장하면 보관 규칙을 어긴다.
+        val created = createHandoff()
+
+        loginWithHandoff("google-user-5", created.handoffCode)
+
+        assertThat(loginHandoffService.find(created.handoffCode)?.deviceId)
+            .`as`("소비 후에는 디바이스 ID 원문이 남지 않아야 한다")
+            .isNullOrEmpty()
+    }
+
+    @Test
+    fun `소비 후 재로그인은 비워진 디바이스 ID가 아니라 헤더로 폴백한다`() {
+        // 소비 시 디바이스 ID를 비우므로, 첫 로그인의 시드가 Redis 장애로 실패해 미시드로 남은 계정이
+        // 재로그인하면 빈 값이 "헤더 없음"으로 읽혀 소진 시드가 확정될 수 있다. 빈 값은 폴백 대상이어야 한다.
+        val created = createHandoff()
+        loginWithHandoff("google-user-6", created.handoffCode)
+        val owner = userRepository.findAll().single()
+        userRepository.save(owner.apply { memberTrialSeededAt = null })
+        guestTrialLimitService.restoreMember(owner.id, GuestTrialLimitService.Counter.CHAT_TURN)
+
+        loginWithHandoff("google-user-6", created.handoffCode, deviceId = EXTERNAL_DEVICE_ID)
+
+        assertThat(guestTrialLimitService.reserveMember(owner.id, GuestTrialLimitService.Counter.CHAT_TURN))
+            .`as`("사용량 없는 헤더 디바이스로 폴백해 체험이 남아 있어야 한다")
             .isTrue()
     }
 

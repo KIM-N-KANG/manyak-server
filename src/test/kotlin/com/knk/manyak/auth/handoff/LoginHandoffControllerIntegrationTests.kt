@@ -134,6 +134,18 @@ class LoginHandoffControllerIntegrationTests {
     }
 
     @Test
+    fun `UUID 형식이 아닌 ID가 섞이면 400이다`() {
+        // 미인증 엔드포인트라 임의 길이 문자열을 그대로 보관하면 Redis 메모리 증폭 통로가 된다.
+        // 형식을 UUID로 고정해 항목 크기를 묶는다(이관 제출 시점에도 어차피 400이 될 값이다).
+        restTestClient.post().uri(HANDOFFS_PATH)
+            .header(RequestCorrelationFilter.HEADER_DEVICE_ID, DEVICE_ID)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(createBody(storyIds = listOf("not-a-uuid")))
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    @Test
     fun `ID 배열이 상한을 넘으면 400이다`() {
         val tooMany = (1..101).map { UUID.randomUUID().toString() }
 

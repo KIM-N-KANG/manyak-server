@@ -19,6 +19,7 @@ private const val APP_RELATIVE_PATH = "^/(?![/\\\\])[^\\x00-\\x1F]*$"
 /** 핸드오프를 만든 인앱 브라우저 종류(분석용 태그). 스펙 §4-3-5가 고정한 세 값만 허용한다. */
 private const val SOURCE_APP_VALUES = "^(kakaotalk|instagram|threads)$"
 
+
 @Schema(description = "로그인 핸드오프 생성 요청")
 data class LoginHandoffCreateRequest(
     @field:Size(max = MAX_HANDOFF_IDS, message = "storyIds는 최대 100개까지 허용합니다.")

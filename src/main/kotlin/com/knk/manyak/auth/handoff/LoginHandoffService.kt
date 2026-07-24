@@ -50,6 +50,8 @@ class LoginHandoffService(
 
     /** 게스트 데이터와 원본 디바이스 ID를 보관하고 일회용 코드를 발급한다. 코드 원문은 이 응답에서만 노출된다. */
     fun create(request: LoginHandoffCreateRequest, deviceId: String): LoginHandoffCreateResponse {
+        requireUuidFormat(request.storyIds, "storyIds")
+        requireUuidFormat(request.chatIds, "chatIds")
         val code = generateCode()
         val expiresAt = Instant.now().plus(ttl)
         val handoff = LoginHandoff(
@@ -133,8 +135,28 @@ class LoginHandoffService(
             status = if (response.migrationClosed) LoginHandoffStatus.MIGRATION_CLOSED else LoginHandoffStatus.MIGRATED,
             migratedStoryIds = migratedIds(response.stories),
             migratedChatIds = migratedIds(response.chats),
+            // 결과는 24시간 남기지만 디바이스 ID 원문은 함께 연장하지 않는다 — 원문은 핸드오프 수명 동안만
+            // 서버에 남는다는 보관 규칙(스펙 §4-3-5)을 지키려면, 소비 시점에 지우는 것이 유일한 기회다.
+            // 소비 후에는 시드가 이미 끝나 이 값을 쓸 곳도 없다(재로그인은 헤더 디바이스로 폴백).
+            deviceId = "",
         )
         redisTemplate.opsForValue().set(keyFor(code), objectMapper.writeValueAsString(consumed), consumedTtl)
+    }
+
+    /**
+     * 공개 ID가 UUID 형식인지 확인한다(형식 오류는 요청 전체를 400으로 본다 — 이관 제출과 같은 규칙).
+     *
+     * 형식 검사는 입력 위생만이 아니라 크기 상한이기도 하다. 이 엔드포인트는 인증이 없어, 임의 길이 문자열을
+     * 100개씩 받아 그대로 보관하면 Redis 메모리 증폭 통로가 된다. UUID로 고정하면 항목당 36자로 묶인다.
+     */
+    private fun requireUuidFormat(rawIds: List<String>, field: String) {
+        rawIds.forEach { raw ->
+            try {
+                UUID.fromString(raw)
+            } catch (_: IllegalArgumentException) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "${field}의 공개 ID 형식이 올바르지 않습니다: $raw")
+            }
+        }
     }
 
     private fun migratedIds(results: List<MigrationResult>): List<String> =
