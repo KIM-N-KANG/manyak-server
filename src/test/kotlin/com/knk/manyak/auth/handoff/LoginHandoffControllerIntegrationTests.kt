@@ -1,7 +1,5 @@
 package com.knk.manyak.auth.handoff
 
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -10,9 +8,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
+import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -28,14 +24,8 @@ import java.util.UUID
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(LoginHandoffTestConfig::class)
 class LoginHandoffControllerIntegrationTests {
-
-    @TestConfiguration
-    class InMemoryStoreConfig {
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner

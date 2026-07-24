@@ -6,10 +6,6 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.social.GoogleIdTokenVerifier
-import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.service.GuestTrialLimitService
@@ -18,19 +14,16 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
-import org.springframework.http.HttpStatus
+import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
-import org.springframework.web.server.ResponseStatusException
 
 /**
  * `handoffCode`를 실은 Google 로그인이 시드와 이관을 함께 수행하는지 검증한다(스펙 §4-3-5 로그인 핸드오프).
@@ -41,36 +34,15 @@ import org.springframework.web.server.ResponseStatusException
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(LoginHandoffTestConfig::class)
 class LoginHandoffConsumptionIntegrationTests {
-
-    @TestConfiguration
-    class FakeGoogleConfig {
-        @Bean
-        @Primary
-        fun fakeGoogleIdTokenVerifier(): GoogleIdTokenVerifier =
-            GoogleIdTokenVerifier { idToken ->
-                if (idToken == "invalid") {
-                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 Google ID 토큰입니다.")
-                }
-                SocialUserInfo(
-                    providerUserId = idToken,
-                    email = "user@example.com",
-                    name = "테스터",
-                    picture = null,
-                )
-            }
-
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var socialAccountRepository: SocialAccountRepository
-    @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
+    @Autowired private lateinit var guestTrialLimitService: ToggleableGuestTrialLimitService
     @Autowired private lateinit var loginHandoffService: LoginHandoffService
     @Autowired private lateinit var redisTemplate: org.springframework.data.redis.core.StringRedisTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -78,6 +50,12 @@ class LoginHandoffConsumptionIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+    }
+
+    @AfterEach
+    fun tearDown() {
+        // 시드 실패 토글은 컨텍스트를 공유하므로 테스트마다 원복해 순서 의존을 만들지 않는다.
+        guestTrialLimitService.failSnapshot = false
     }
 
     @Test
@@ -160,6 +138,24 @@ class LoginHandoffConsumptionIntegrationTests {
         val status = fetchStatus(created.handoffCode)
         assertThat(status.status).isEqualTo("MIGRATED")
         assertThat(status.migratedStoryIds).containsExactly(story.publicId.toString())
+    }
+
+    @Test
+    fun `시드가 실패하면 핸드오프를 소비하지 않고 원본 디바이스 ID를 남긴다`() {
+        // 시드는 Redis 장애 시 false를 돌려주고 member_trial_seeded_at을 NULL로 남겨 다음 로그인이 재시도한다.
+        // 그 로그인이 핸드오프를 소비해 버리면 보관하던 원본 디바이스 ID가 지워져(보관 규칙), 재시도는 외부
+        // 브라우저 디바이스로 시드하게 된다 — 게스트 사용량이 리셋되거나 소진 상태로 잘못 확정된다.
+        guestTrialLimitService.failSnapshot = true
+        val created = createHandoff(deviceId = IN_APP_DEVICE_ID)
+
+        loginWithHandoff("google-user-10", created.handoffCode, deviceId = EXTERNAL_DEVICE_ID)
+
+        assertThat(userRepository.findAll().single().memberTrialSeededAt).isNull()
+        val handoff = loginHandoffService.find(created.handoffCode)
+        assertThat(handoff?.status).isEqualTo(LoginHandoffStatus.PENDING)
+        assertThat(handoff?.deviceId)
+            .`as`("재시도가 원본 디바이스로 시드할 수 있어야 한다")
+            .isEqualTo(IN_APP_DEVICE_ID)
     }
 
     @Test
