@@ -44,6 +44,14 @@ data class GoogleLoginRequest(
         example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
     )
     val idToken: String,
+
+    @field:Schema(
+        description = "인앱 브라우저에서 만든 로그인 핸드오프 코드(스펙 §4-3-5). 유효하면 이 호출이 회원 체험 시드" +
+            "(핸드오프의 원본 디바이스 ID가 X-Manyak-Device-Id 헤더보다 우선)와 게스트 데이터 이관을 함께 수행한다. " +
+            "무효·만료면 헤더 디바이스 ID로 폴백하고 로그인은 정상 진행한다.",
+        nullable = true,
+    )
+    val handoffCode: String? = null,
 )
 
 @Schema(description = "refresh 토큰 회전 요청")

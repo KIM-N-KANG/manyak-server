@@ -43,6 +43,8 @@ class GoogleLoginServiceTest {
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
     private val guestTrialLimitService: GuestTrialLimitService = mock(GuestTrialLimitService::class.java)
+    private val loginHandoffService: com.knk.manyak.auth.handoff.LoginHandoffService =
+        mock(com.knk.manyak.auth.handoff.LoginHandoffService::class.java)
     private val userRepository: com.knk.manyak.auth.repository.UserRepository =
         mock(com.knk.manyak.auth.repository.UserRepository::class.java)
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
@@ -55,7 +57,7 @@ class GoogleLoginServiceTest {
         `when`(authTokenService.issueTokens(anyUser())).thenReturn(TokenResponse("access", "refresh", 1800))
         return GoogleLoginService(
             verifier, registrar, authTokenService, creditWalletService, guestTrialLimitService,
-            userRepository, serverAnalytics, signupReward,
+            loginHandoffService, userRepository, serverAnalytics, signupReward,
         )
     }
 
