@@ -28,7 +28,7 @@ class SpringContextBudgetGuardTests {
             .filter { it.isFile && it.extension == "kt" }
             .flatMap { file ->
                 file.readLines()
-                    .filter { it != it.trimStart() && it.trim() == "@TestConfiguration" }
+                    .filter { it != it.trimStart() && NESTED_TEST_CONFIGURATION.containsMatchIn(it.trim()) }
                     .map { file.path }
             }
             .toList()
@@ -46,6 +46,11 @@ class SpringContextBudgetGuardTests {
 
     private companion object {
         const val TEST_SOURCE_ROOT = "src/test/kotlin"
+
+        // 인자 있는 형태(@TestConfiguration(proxyBeanMethods = false))와 정규화된 이름도 센다.
+        // 정확히 "@TestConfiguration"인 줄만 세면 그 변형들이 래칫을 그대로 통과해, 막으려던 것과 똑같이
+        // 클래스마다 컨텍스트가 늘어난다(Codex 리뷰 지적).
+        val NESTED_TEST_CONFIGURATION = Regex("""^@(\w+\.)*TestConfiguration\b""")
 
         // 현재 값(17)으로 고정한다. 더 줄였을 때만 이 숫자를 내린다.
         const val MAX_NESTED_TEST_CONFIGURATIONS = 17
