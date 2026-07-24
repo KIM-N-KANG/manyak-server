@@ -1,13 +1,8 @@
 package com.knk.manyak.global.config
 
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.junit.jupiter.api.Test
@@ -23,12 +18,6 @@ import org.junit.jupiter.api.Test
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class OpenApiDocIntegrationTests {
 
-    @TestConfiguration
-    class InMemoryStoreConfig {
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired private lateinit var restTestClient: RestTestClient
 
