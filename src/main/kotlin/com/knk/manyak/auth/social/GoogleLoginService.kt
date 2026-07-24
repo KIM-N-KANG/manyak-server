@@ -79,16 +79,19 @@ class GoogleLoginService(
             // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
             // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
             // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
-            if (user.memberTrialSeededAt == null &&
-                guestTrialLimitService.snapshotTrialAtSignup(user.id, effectiveDeviceId)
-            ) {
-                userRepository.markMemberTrialSeeded(user.id, Instant.now())
-            }
+            val seeded = user.memberTrialSeededAt != null ||
+                guestTrialLimitService.snapshotTrialAtSignup(user.id, effectiveDeviceId).also { snapshotted ->
+                    if (snapshotted) userRepository.markMemberTrialSeeded(user.id, Instant.now())
+                }
             // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
             rewardSignup(user)
             // 핸드오프 소비(= 게스트 데이터 이관)는 이 호출이 겸한다. 별도 호출로 미루면 "로그인 → 이관 → 복귀"
             // 순서 경쟁이 생기고, 시드는 이미 확정된 뒤라 되돌릴 수 없다(스펙 §4-3-5). 이미 소비된 코드는 멱등 no-op.
-            if (handoff != null && handoffCode != null) {
+            //
+            // 단, 시드가 실패했으면(Redis 장애 → 미시드로 남아 다음 로그인이 재시도) 소비하지 않는다.
+            // 소비는 보관 규칙상 원본 디바이스 ID를 지우므로, 여기서 소비해 버리면 재시도가 인앱 디바이스를
+            // 잃고 외부 브라우저 디바이스로 시드해 게스트 사용량이 리셋되거나 소진으로 잘못 확정된다.
+            if (handoff != null && handoffCode != null && seeded) {
                 consumeHandoffQuietly(handoffCode, handoff, user.id)
             }
             // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.

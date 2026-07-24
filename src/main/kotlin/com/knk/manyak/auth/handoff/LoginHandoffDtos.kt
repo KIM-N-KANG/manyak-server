@@ -10,6 +10,12 @@ import java.time.Instant
 const val MAX_HANDOFF_IDS = 100
 
 /**
+ * 복귀 경로 길이 상한. 실제 앱 경로는 `/chats/{uuid}`(약 43자) 수준이라 여유가 크다.
+ * 인증 없는 엔드포인트라 상한이 없으면 거대한 상대 경로가 핸드오프 수명 내내 Redis에 남는다.
+ */
+const val MAX_CALLBACK_PATH_LENGTH = 512
+
+/**
  * 앱 내 상대 경로만 허용하는 복귀 경로 패턴(오픈 리다이렉트 차단).
  * `/`로 시작하되 `//`·`/\`(프로토콜 상대 URL)은 막고, URL 파서가 제거해 우회를 만드는 제어 문자도 거른다.
  * 프론트엔드의 `resolveLoginCallbackUrl`과 같은 규칙이지만, 신뢰 경계인 서버에서 독립적으로 강제한다.
@@ -31,6 +37,7 @@ data class LoginHandoffCreateRequest(
     val chatIds: List<String> = emptyList(),
 
     @field:NotBlank(message = "복귀 경로는 필수입니다.")
+    @field:Size(max = MAX_CALLBACK_PATH_LENGTH, message = "복귀 경로는 최대 512자까지 허용합니다.")
     @field:Pattern(regexp = APP_RELATIVE_PATH, message = "복귀 경로는 앱 내 상대 경로여야 합니다.")
     @field:Schema(description = "로그인 후 복귀할 앱 내 상대 경로", example = "/chats/3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val callbackPath: String,

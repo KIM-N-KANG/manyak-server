@@ -134,6 +134,17 @@ class LoginHandoffControllerIntegrationTests {
     }
 
     @Test
+    fun `지나치게 긴 복귀 경로는 400이다`() {
+        // 인증 없는 엔드포인트라 상한이 없으면 거대한 상대 경로가 그대로 Redis에 보관된다(메모리 증폭).
+        restTestClient.post().uri(HANDOFFS_PATH)
+            .header(RequestCorrelationFilter.HEADER_DEVICE_ID, DEVICE_ID)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(createBody(callbackPath = "/" + "a".repeat(2048)))
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    @Test
     fun `UUID 형식이 아닌 ID가 섞이면 400이다`() {
         // 미인증 엔드포인트라 임의 길이 문자열을 그대로 보관하면 Redis 메모리 증폭 통로가 된다.
         // 형식을 UUID로 고정해 항목 크기를 묶는다(이관 제출 시점에도 어차피 400이 될 값이다).
