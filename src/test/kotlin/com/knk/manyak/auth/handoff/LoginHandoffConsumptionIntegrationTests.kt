@@ -144,6 +144,24 @@ class LoginHandoffConsumptionIntegrationTests {
     }
 
     @Test
+    fun `뒤늦게 도착한 중복 소비가 먼저 이관한 결과를 덮어쓰지 않는다`() {
+        // 같은 코드를 실은 로그인이 동시에 둘 들어오면 둘 다 PENDING 스냅샷으로 상태 가드를 통과한다.
+        // 먼저 이관한 쪽이 계정을 잠그므로 나중 쪽은 migrationClosed(빈 목록)를 받는데, 그 결과로 덮어쓰면
+        // status가 이관된 ID를 잃어 인앱이 로컬 정리를 못 한다(그 데이터는 이미 회원 소유라 게스트 조회는 403).
+        val story = saveStory(ownerId = null)
+        val created = createHandoff(storyIds = listOf(story.publicId.toString()))
+        val staleSnapshot = loginHandoffService.find(created.handoffCode)!!
+
+        loginWithHandoff("google-user-7", created.handoffCode)
+        val owner = userRepository.findAll().single()
+        loginHandoffService.consume(created.handoffCode, staleSnapshot, owner.id)
+
+        val status = fetchStatus(created.handoffCode)
+        assertThat(status.status).isEqualTo("MIGRATED")
+        assertThat(status.migratedStoryIds).containsExactly(story.publicId.toString())
+    }
+
+    @Test
     fun `소비하고 나면 원본 디바이스 ID 원문은 보관하지 않는다`() {
         // 소비 결과는 24시간 연장 보관하지만, 디바이스 ID 원문은 핸드오프 수명 동안만 남아야 한다(스펙 §4-3-5).
         // 결과를 오래 들고 있으려고 원문 식별자까지 같이 연장하면 보관 규칙을 어긴다.

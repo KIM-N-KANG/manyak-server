@@ -119,18 +119,28 @@ class LoginHandoffService(
      * 이미 소비된 코드면 재이관하지 않고 저장된 결과를 유지한다(멱등) — 응답 유실 후 재시도가
      * 오류가 아니라 같은 결과를 보게 한다. 이관 1회 잠금·시도 5회 상한은 기존 로직 그대로 적용된다.
      *
-     * 같은 코드로 동시에 두 로그인이 들어오면 둘 다 이관을 시도할 수 있으나, 조건부 UPDATE로 원자적으로
-     * 클레임하는 [GuestDataMigrationService]가 소유권 무결성을 지키므로(중복은 ALREADY_OWNED·CONFLICT)
-     * 별도 분산 락을 두지 않는다.
+     * **소비권은 SETNX로 한 번만 준다.** 같은 코드를 실은 로그인이 동시에 둘 들어오면 둘 다 PENDING 스냅샷으로
+     * 상태 가드를 통과한다. 먼저 이관한 쪽이 계정을 잠그므로 나중 쪽은 migrationClosed(빈 목록)를 받는데,
+     * 그 결과로 덮어쓰면 status가 실제 이관된 ID를 잃어 인앱이 로컬 정리를 못 한다(이미 회원 소유가 된
+     * 데이터라 게스트 조회는 403). 소비권을 얻지 못한 요청은 이관도 기록도 하지 않는다.
      */
     fun consume(code: String, handoff: LoginHandoff, userId: Long) {
         if (handoff.status == LoginHandoffStatus.MIGRATED || handoff.status == LoginHandoffStatus.MIGRATION_CLOSED) {
             return
         }
-        val response = guestDataMigrationService.migrate(
-            userId,
-            MigrationRequest(storyIds = handoff.storyIds, chatIds = handoff.chatIds),
-        )
+        if (redisTemplate.opsForValue().setIfAbsent(claimKeyFor(code), CLAIMED, consumedTtl) != true) {
+            return
+        }
+        val response = try {
+            guestDataMigrationService.migrate(
+                userId,
+                MigrationRequest(storyIds = handoff.storyIds, chatIds = handoff.chatIds),
+            )
+        } catch (ex: Exception) {
+            // 이관이 실패하면 소비권을 반납해 만료 전까지 재시도할 수 있게 한다(스펙 §4-3-5).
+            redisTemplate.delete(claimKeyFor(code))
+            throw ex
+        }
         val consumed = handoff.copy(
             status = if (response.migrationClosed) LoginHandoffStatus.MIGRATION_CLOSED else LoginHandoffStatus.MIGRATED,
             migratedStoryIds = migratedIds(response.stories),
@@ -196,6 +206,9 @@ class LoginHandoffService(
 
     private fun keyFor(code: String): String = KEY_PREFIX + hash(code)
 
+    /** 소비권 키. 본 키와 같은 해시를 쓰되 접두사만 달리해 코드 원문을 저장하지 않는 규칙을 유지한다. */
+    private fun claimKeyFor(code: String): String = CLAIM_KEY_PREFIX + hash(code)
+
     /** 코드 원문의 SHA-256 해시를 base64url로 반환한다. Redis 키로만 쓴다(원문은 저장하지 않는다). */
     private fun hash(code: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(code.toByteArray(Charsets.UTF_8))
@@ -204,6 +217,8 @@ class LoginHandoffService(
 
     private companion object {
         const val KEY_PREFIX = "login_handoff:"
+        const val CLAIM_KEY_PREFIX = "login_handoff_claim:"
+        const val CLAIMED = "1"
         const val CODE_BYTES = 32 // 256bit
 
         // 남은 PTTL을 유지하며 값을 교체한다. 이미 만료(또는 무TTL)면 아무것도 하지 않는다.
