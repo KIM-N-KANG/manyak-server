@@ -2,6 +2,7 @@ package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.handoff.LoginHandoff
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -43,6 +44,8 @@ class GoogleLoginServiceTest {
     private val authTokenService: AuthTokenService = mock(AuthTokenService::class.java)
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
     private val guestTrialLimitService: GuestTrialLimitService = mock(GuestTrialLimitService::class.java)
+    private val loginHandoffService: com.knk.manyak.auth.handoff.LoginHandoffService =
+        mock(com.knk.manyak.auth.handoff.LoginHandoffService::class.java)
     private val userRepository: com.knk.manyak.auth.repository.UserRepository =
         mock(com.knk.manyak.auth.repository.UserRepository::class.java)
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
@@ -55,7 +58,7 @@ class GoogleLoginServiceTest {
         `when`(authTokenService.issueTokens(anyUser())).thenReturn(TokenResponse("access", "refresh", 1800))
         return GoogleLoginService(
             verifier, registrar, authTokenService, creditWalletService, guestTrialLimitService,
-            userRepository, serverAnalytics, signupReward,
+            loginHandoffService, userRepository, serverAnalytics, signupReward,
         )
     }
 
@@ -136,6 +139,76 @@ class GoogleLoginServiceTest {
         verify(guestTrialLimitService).snapshotTrialAtSignup(7L, null)
         assertThat(mockingDetails(userRepository).invocations.none { it.method.name == "markMemberTrialSeeded" }).isTrue()
     }
+
+    // ---- 로그인 핸드오프 연동(스펙 §4-3-5, KNK-684) ----
+
+    @Test
+    fun `핸드오프의 원본 디바이스 ID가 요청 헤더보다 우선해 시드된다`() {
+        // 외부 브라우저의 새 디바이스로 시드하면 인앱에서 쓴 게스트 사용량이 리셋돼 파밍 우회로가 열린다.
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(loginHandoffService.find("code")).thenReturn(LoginHandoff(deviceId = IN_APP_DEVICE))
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, IN_APP_DEVICE)).thenReturn(true)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = EXTERNAL_DEVICE, handoffCode = "code")
+
+        verify(guestTrialLimitService).snapshotTrialAtSignup(7L, IN_APP_DEVICE)
+        assertThat(consumeInvoked()).`as`("시드에 성공했으면 소비한다").isTrue()
+    }
+
+    @Test
+    fun `시드가 실패하면 핸드오프를 소비하지 않는다`() {
+        // 소비는 보관 규칙상 원본 디바이스 ID를 지운다. 미시드로 남아 재시도할 계정의 핸드오프를 소비해 버리면
+        // 재시도가 인앱 디바이스를 잃고 외부 디바이스로 시드해 사용량이 리셋되거나 소진으로 잘못 확정된다.
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(loginHandoffService.find("code")).thenReturn(LoginHandoff(deviceId = IN_APP_DEVICE))
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, IN_APP_DEVICE)).thenReturn(false) // Redis 장애
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = EXTERNAL_DEVICE, handoffCode = "code")
+
+        assertThat(consumeInvoked()).`as`("미시드로 남았으므로 소비하지 않는다").isFalse()
+    }
+
+    @Test
+    fun `무효한 핸드오프 코드는 로그인을 막지 않고 헤더 디바이스로 폴백한다`() {
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(loginHandoffService.find("expired")).thenReturn(null) // 무효·만료는 예외가 아니라 null
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, EXTERNAL_DEVICE)).thenReturn(true)
+
+        serviceWith(fakeVerifier("sub")).login("dummy", deviceId = EXTERNAL_DEVICE, handoffCode = "expired")
+
+        verify(guestTrialLimitService).snapshotTrialAtSignup(7L, EXTERNAL_DEVICE)
+        assertThat(consumeInvoked()).isFalse()
+    }
+
+    @Test
+    fun `소비가 실패해도 로그인은 성공한다`() {
+        // 정지 계정의 이관은 403이지만 로그인 자체는 허용된다. 소비 예외를 전파하면 정지 안내 화면에
+        // 도달할 로그인마저 실패한다(핸드오프는 로그인의 부가 작업이지 전제가 아니다).
+        val created = User(id = 7L, nickname = "신규")
+        `when`(registrar.findExistingUser(anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anySocialUserInfo(), anyInstant())).thenReturn(created)
+        `when`(loginHandoffService.find("code")).thenReturn(LoginHandoff(deviceId = IN_APP_DEVICE))
+        `when`(guestTrialLimitService.snapshotTrialAtSignup(7L, IN_APP_DEVICE)).thenReturn(true)
+        `when`(loginHandoffService.consume(eqString("code"), anyLoginHandoff(), anyLongArg()))
+            .thenThrow(ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다."))
+
+        val tokens = serviceWith(fakeVerifier("sub")).login("dummy", deviceId = IN_APP_DEVICE, handoffCode = "code")
+
+        assertThat(tokens.accessToken).isEqualTo("access")
+    }
+
+    private fun consumeInvoked(): Boolean =
+        mockingDetails(loginHandoffService).invocations.any { it.method.name == "consume" }
+
+    private fun anyLoginHandoff(): LoginHandoff = any(LoginHandoff::class.java) ?: LoginHandoff()
+    private fun anyLongArg(): Long = org.mockito.ArgumentMatchers.anyLong()
+    private fun eqString(value: String): String = org.mockito.ArgumentMatchers.eq(value) ?: value
 
     @Test
     fun `신규 사용자면 signup 멱등 키로 가입 보상을 적립한다`() {
@@ -232,4 +305,9 @@ class GoogleLoginServiceTest {
 
         verifyNoInteractions(registrar, authTokenService)
     }
+    private companion object {
+        const val IN_APP_DEVICE = "device-in-app"
+        const val EXTERNAL_DEVICE = "device-external-browser"
+    }
+
 }
