@@ -156,7 +156,26 @@ class LoginHandoffService(
             // 소비 후에는 시드가 이미 끝나 이 값을 쓸 곳도 없다(재로그인은 헤더 디바이스로 폴백).
             deviceId = "",
         )
-        redisTemplate.opsForValue().set(keyFor(code), objectMapper.writeValueAsString(consumed), consumedTtl)
+        persistConsumed(code, consumed)
+    }
+
+    /**
+     * 이관 결과를 저장한다. 이 쓰기는 **이관이 이미 성사된 뒤**라 실패하면 소유권만 옮겨지고 상태는 PENDING에
+     * 머문다 — 인앱은 이관된 ID를 못 받아 로컬 정리를 못 하고, 그 데이터는 회원 소유라 게스트 조회가 403이 된다.
+     * 소비권은 그대로 두므로 재시도가 이관을 다시 돌리지는 않는다(계정이 잠겨 결과를 재구성할 수도 없다).
+     * 그래서 일시 장애만이라도 넘기도록 짧게 재시도한다.
+     */
+    private fun persistConsumed(code: String, consumed: LoginHandoff) {
+        val json = objectMapper.writeValueAsString(consumed)
+        repeat(TERMINAL_WRITE_ATTEMPTS) { attempt ->
+            try {
+                redisTemplate.opsForValue().set(keyFor(code), json, consumedTtl)
+                return
+            } catch (ex: DataAccessException) {
+                if (attempt == TERMINAL_WRITE_ATTEMPTS - 1) throw ex
+                logger.warn("핸드오프 결과 저장 실패 — 재시도({}/{})", attempt + 1, TERMINAL_WRITE_ATTEMPTS, ex)
+            }
+        }
     }
 
     /**
@@ -229,6 +248,7 @@ class LoginHandoffService(
         const val CLAIM_KEY_PREFIX = "login_handoff_claim:"
         const val CLAIMED = "1"
         const val CODE_BYTES = 32 // 256bit
+        const val TERMINAL_WRITE_ATTEMPTS = 3
 
         // 소비권(KEYS[2])이 없을 때만 남은 PTTL을 유지하며 값을 교체한다.
         // 소비권이 이미 나갔으면 종료 상태를 되돌리게 되므로 쓰지 않고, 이미 만료(또는 무TTL)여도 쓰지 않는다.
