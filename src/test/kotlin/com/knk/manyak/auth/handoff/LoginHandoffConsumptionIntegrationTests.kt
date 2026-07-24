@@ -72,6 +72,7 @@ class LoginHandoffConsumptionIntegrationTests {
     @Autowired private lateinit var socialAccountRepository: SocialAccountRepository
     @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
     @Autowired private lateinit var loginHandoffService: LoginHandoffService
+    @Autowired private lateinit var redisTemplate: org.springframework.data.redis.core.StringRedisTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -160,6 +161,34 @@ class LoginHandoffConsumptionIntegrationTests {
         assertThat(status.status).isEqualTo("MIGRATED")
         assertThat(status.migratedStoryIds).containsExactly(story.publicId.toString())
     }
+
+    @Test
+    fun `소비권이 나간 뒤에는 확인 호출이 저장 상태를 바꾸지 않는다`() {
+        // 확인 호출은 읽은 스냅샷을 LANDED로 바꿔 쓴다. 그 읽기와 쓰기 사이에 로그인이 소비를 끝내면
+        // 종료 상태(이관된 ID·비운 디바이스 ID)를 LANDED로 덮어써 인앱이 로컬 정리를 못 한다.
+        // 그 인터리빙을 스레드 없이 재현하기 위해, 소비를 끝낸 뒤 저장 값만 PENDING으로 되돌려
+        // "소비권은 나갔는데 저장 상태는 아직 PENDING"인 순간을 만든다. 이때 확인 호출은 쓰지 않아야 한다.
+        val keysBefore = handoffKeys()
+        val created = createHandoff(storyIds = listOf(saveStory(ownerId = null).publicId.toString()))
+        val key = (handoffKeys() - keysBefore).single()
+        loginWithHandoff("google-user-8", created.handoffCode)
+        // TTL도 함께 되돌린다. 남은 TTL이 없으면 갱신 스크립트가 만료로 보고 쓰지 않아 가드를 검증하지 못한다.
+        redisTemplate.opsForValue()
+            .set(key, storedJson(key).replace("\"MIGRATED\"", "\"PENDING\""), java.time.Duration.ofMinutes(30))
+
+        restTestClient.get().uri(HANDOFFS_PATH)
+            .header(HEADER_HANDOFF_CODE, created.handoffCode)
+            .exchange()
+            .expectStatus().isOk
+
+        assertThat(fetchStatus(created.handoffCode).status)
+            .`as`("소비권이 나갔으므로 확인 호출은 상태를 전이시키지 않아야 한다")
+            .isEqualTo("PENDING")
+    }
+
+    private fun handoffKeys(): Set<String> = redisTemplate.keys("login_handoff:*").orEmpty()
+
+    private fun storedJson(key: String): String = redisTemplate.opsForValue().get(key)!!
 
     @Test
     fun `소비하고 나면 원본 디바이스 ID 원문은 보관하지 않는다`() {

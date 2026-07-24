@@ -78,10 +78,11 @@ class LoginHandoffService(
      */
     fun land(code: String): LoginHandoffSummaryResponse {
         val handoff = requireHandoff(code)
-        if (handoff.status == LoginHandoffStatus.PENDING) {
-            // 남은 TTL을 보존하며 상태만 바꾼다. 확인 호출이 만료 시각을 늘려주면 안 된다.
-            updateKeepingTtl(code, handoff.copy(status = LoginHandoffStatus.LANDED))
-        }
+        // 남은 TTL을 보존하며 상태만 바꾼다(확인 호출이 만료 시각을 늘려주면 안 된다).
+        // 전이 판정은 스크립트 하나에 맡긴다: 여기서 읽은 스냅샷과 이 쓰기 사이에 로그인이 소비를 끝냈을 수
+        // 있고, 그대로 덮어쓰면 종료 상태(이관된 ID·비운 디바이스 ID)가 LANDED로 되돌아가 인앱이 로컬
+        // 정리를 못 한다. 소비권이 나간 뒤에는 쓰지 않으므로 종료 상태는 되돌아가지 않는다.
+        updateIfUnclaimed(code, handoff.copy(status = LoginHandoffStatus.LANDED))
         return LoginHandoffSummaryResponse(
             storyCount = handoff.storyIds.size,
             chatCount = handoff.chatIds.size,
@@ -188,11 +189,14 @@ class LoginHandoffService(
         }
     }
 
-    /** 남은 TTL(PTTL)을 그대로 유지한 채 값만 바꾼다. GET → SET 사이의 만료 경합을 피하려 원자 실행한다. */
-    private fun updateKeepingTtl(code: String, handoff: LoginHandoff) {
+    /**
+     * 소비권이 아직 나가지 않았을 때만, 남은 TTL(PTTL)을 유지한 채 값을 바꾼다.
+     * 소비권 확인 → TTL 조회 → 쓰기를 한 스크립트로 묶어 그 사이에 소비가 끼어들지 못하게 한다.
+     */
+    private fun updateIfUnclaimed(code: String, handoff: LoginHandoff) {
         redisTemplate.execute(
-            KEEP_TTL_SET_SCRIPT,
-            listOf(keyFor(code)),
+            UPDATE_IF_UNCLAIMED_SCRIPT,
+            listOf(keyFor(code), claimKeyFor(code)),
             objectMapper.writeValueAsString(handoff),
         )
     }
@@ -221,11 +225,13 @@ class LoginHandoffService(
         const val CLAIMED = "1"
         const val CODE_BYTES = 32 // 256bit
 
-        // 남은 PTTL을 유지하며 값을 교체한다. 이미 만료(또는 무TTL)면 아무것도 하지 않는다.
-        val KEEP_TTL_SET_SCRIPT = DefaultRedisScript<Long>().apply {
+        // 소비권(KEYS[2])이 없을 때만 남은 PTTL을 유지하며 값을 교체한다.
+        // 소비권이 이미 나갔으면 종료 상태를 되돌리게 되므로 쓰지 않고, 이미 만료(또는 무TTL)여도 쓰지 않는다.
+        val UPDATE_IF_UNCLAIMED_SCRIPT = DefaultRedisScript<Long>().apply {
             setResultType(Long::class.java)
             setScriptText(
                 """
+                if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
                 local ttl = redis.call('PTTL', KEYS[1])
                 if ttl < 0 then return 0 end
                 redis.call('SET', KEYS[1], ARGV[1], 'PX', ttl)
