@@ -163,6 +163,18 @@ class LoginHandoffConsumptionIntegrationTests {
     }
 
     @Test
+    fun `옮길 항목이 없는 핸드오프는 이관 시도 상한을 쓰지 않는다`() {
+        // 이관 서비스는 배열을 보기 전에 시도 횟수를 올린다. 디바이스만 실은 인앱 로그인이 그 상한(5회)을
+        // 갉아먹으면, 나중에 진짜 옮길 데이터를 실은 핸드오프가 평가도 못 받고 MIGRATION_CLOSED가 된다.
+        val created = createHandoff()
+
+        loginWithHandoff("google-user-9", created.handoffCode)
+
+        assertThat(userRepository.findAll().single().migrationAttempts).isZero()
+        assertThat(fetchStatus(created.handoffCode).status).isEqualTo("MIGRATED")
+    }
+
+    @Test
     fun `소비권이 나간 뒤에는 확인 호출이 저장 상태를 바꾸지 않는다`() {
         // 확인 호출은 읽은 스냅샷을 LANDED로 바꿔 쓴다. 그 읽기와 쓰기 사이에 로그인이 소비를 끝내면
         // 종료 상태(이관된 ID·비운 디바이스 ID)를 LANDED로 덮어써 인앱이 로컬 정리를 못 한다.

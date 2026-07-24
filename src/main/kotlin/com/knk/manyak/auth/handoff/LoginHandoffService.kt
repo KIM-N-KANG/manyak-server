@@ -1,6 +1,7 @@
 package com.knk.manyak.auth.handoff
 
 import com.knk.manyak.migration.dto.MigrationRequest
+import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.migration.service.GuestDataMigrationService
@@ -132,7 +133,11 @@ class LoginHandoffService(
         if (redisTemplate.opsForValue().setIfAbsent(claimKeyFor(code), CLAIMED, consumedTtl) != true) {
             return
         }
-        val response = try {
+        val response = if (handoff.storyIds.isEmpty() && handoff.chatIds.isEmpty()) {
+            // 옮길 항목이 없으면 이관 서비스를 부르지 않는다. 그 서비스는 배열을 보기 전에 시도 횟수를 올리므로,
+            // 디바이스만 실은 인앱 로그인이 계정당 5회 상한을 갉아먹어 나중의 진짜 이관이 평가도 못 받고 닫힌다.
+            MigrationResponse(stories = emptyList(), chats = emptyList())
+        } else try {
             guestDataMigrationService.migrate(
                 userId,
                 MigrationRequest(storyIds = handoff.storyIds, chatIds = handoff.chatIds),
