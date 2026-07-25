@@ -1,14 +1,9 @@
 package com.knk.manyak.global.error
 
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
@@ -33,13 +28,6 @@ import org.springframework.test.web.servlet.client.RestTestClient
 )
 class NotFoundResourceIntegrationTests {
 
-    @TestConfiguration
-    class InMemoryStoreConfig {
-        // 컨텍스트가 Redis 인프라 없이 뜨도록 in-memory 저장소로 대체한다(다른 통합 테스트와 동일).
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

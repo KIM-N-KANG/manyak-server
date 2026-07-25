@@ -4,8 +4,6 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
@@ -16,9 +14,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
@@ -34,12 +29,6 @@ import java.time.Instant
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class UserContentControllerIntegrationTests {
 
-    @TestConfiguration
-    class InMemoryStoreConfig {
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

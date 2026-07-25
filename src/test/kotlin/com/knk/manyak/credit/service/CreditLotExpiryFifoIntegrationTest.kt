@@ -3,8 +3,6 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditLot
 import com.knk.manyak.credit.entity.CreditReason
@@ -19,9 +17,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
 import java.time.Duration
 import java.time.Instant
@@ -39,12 +34,6 @@ import java.time.Instant
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class CreditLotExpiryFifoIntegrationTest {
 
-    @TestConfiguration
-    class InMemoryStoreConfig {
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired private lateinit var service: CreditWalletService
     @Autowired private lateinit var walletRepository: CreditWalletRepository

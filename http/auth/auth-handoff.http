@@ -1,0 +1,259 @@
+### 로그인 핸드오프(Auth) API 수동 검증 — POST/GET /api/v1/auth/handoffs, GET .../status
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-684] 인앱 브라우저 → 외부 브라우저 로그인 핸드오프(스펙 §4-3-5):
+###   - 인앱 브라우저는 Google OAuth가 막혀 로그인을 못 하고, 외부 브라우저와 저장소가 분리돼 있습니다.
+###   - 그래서 외부 전환 전에 게스트 스토리·채팅 ID와 "원본 디바이스 ID"를 서버에 임시 보관(핸드오프)하고,
+###     외부 브라우저의 로그인 호출이 그 코드를 제시해 시드와 이관을 함께 처리합니다.
+###   - 별도 consume 엔드포인트는 없습니다 — POST /auth/login/google 이 소비를 겸합니다.
+###
+### 비자명한 계약 3가지(이 파일로 직접 확인합니다):
+###   1) 코드는 URL(path·쿼리)이 아니라 X-Manyak-Handoff-Code 헤더로만 받습니다.
+###      요청 URI가 구조화 로그·Sentry breadcrumb에 남기 때문입니다(코드 원문 로그 금지 규칙).
+###   2) 없는 코드와 만료된 코드는 똑같이 404입니다(열거 오라클 방지).
+###   3) 시드는 로그인 호출에 실려야 합니다. 핸드오프의 디바이스 ID가 X-Manyak-Device-Id 헤더보다 우선합니다.
+###      로그인 뒤로 미루면 소진 시드가 1회성·비가역으로 확정됩니다(§4-3-7).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres·Redis 기동: docker compose up -d  (핸드오프는 Redis, 이관은 Postgres를 씁니다)
+###   - 게스트 데이터: 토큰 없이 스토리·채팅을 만들어 그 public_id 를 아래 자리표시자에 넣으세요.
+###     (게스트로 만든 것이라야 user_id 가 NULL → 이관에서 MIGRATED 를 관찰할 수 있습니다.)
+###   - 9번(로그인 소비)은 auth-login-google.http 와 같은 방식으로 실제 Google ID 토큰이 필요합니다.
+###     아직 이관하지 않은(migrated_at NULL) 새 계정이어야 MIGRATED 를 관찰합니다.
+
+@baseUrl = http://localhost:8080
+
+# 인앱 브라우저의 디바이스 ID(원문). 게스트 체험 사용량이 이 값으로 Redis에 쌓여 있습니다.
+@inAppDeviceId = test-device-in-app
+# 외부 브라우저의 디바이스 ID. 사용량이 없는 새 디바이스라고 가정합니다.
+@externalDeviceId = test-device-external
+# 게스트(비로그인)로 만든 스토리·채팅의 공개 ID(UUID).
+@guestStoryId = PUT_A_GUEST_STORY_PUBLIC_ID_HERE
+@guestChatId = PUT_A_GUEST_CHAT_PUBLIC_ID_HERE
+# 9번에서 쓸 Google ID 토큰(auth-login-google.http 와 동일하게 실제 토큰으로 교체).
+@googleIdToken = PUT_A_VALID_GOOGLE_ID_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 디바이스 헤더 없이 생성 → 400
+# 디바이스 ID는 회원 체험 시드에 쓰이므로 필수입니다. 게스트 체험 한도 대상 요청과 같은 검증·문구를 씁니다.
+POST {{baseUrl}}/api/v1/auth/handoffs
+Content-Type: application/json
+Accept: application/json
+
+{ "storyIds": [], "chatIds": [], "callbackPath": "/stories", "sourceApp": "instagram" }
+
+> {%
+    client.test("디바이스 헤더 없는 생성은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (에러) 앱 밖으로 나가는 복귀 경로 → 400
+# 오픈 리다이렉트 차단: 앱 내 상대 경로만 허용합니다(//evil.com 같은 프로토콜 상대 URL도 거부).
+POST {{baseUrl}}/api/v1/auth/handoffs
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{inAppDeviceId}}
+
+{ "storyIds": [], "chatIds": [], "callbackPath": "//evil.com", "sourceApp": "instagram" }
+
+> {%
+    client.test("앱 밖 복귀 경로는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. (에러) 알 수 없는 출처 앱 → 400
+# sourceApp 은 kakaotalk · instagram · threads 세 값만 허용합니다.
+POST {{baseUrl}}/api/v1/auth/handoffs
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{inAppDeviceId}}
+
+{ "storyIds": [], "chatIds": [], "callbackPath": "/stories", "sourceApp": "facebook" }
+
+> {%
+    client.test("알 수 없는 sourceApp 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (해피 패스) 핸드오프 생성 → 201
+# 게스트 스토리·채팅 ID와 원본 디바이스 ID를 보관하고 일회용 코드를 발급받습니다.
+# handoffCode 는 이 응답에서만 노출되고, handoffId 는 분석 전용(비밀 아님)으로 별개 값입니다.
+POST {{baseUrl}}/api/v1/auth/handoffs
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{inAppDeviceId}}
+
+{
+  "storyIds": ["{{guestStoryId}}"],
+  "chatIds": ["{{guestChatId}}"],
+  "callbackPath": "/chats/{{guestChatId}}",
+  "sourceApp": "instagram"
+}
+
+> {%
+    client.test("핸드오프 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("코드·분석용 id·만료 시각이 내려온다", () => {
+        client.assert(typeof b.handoffCode === "string" && b.handoffCode.length > 0, "handoffCode가 없습니다.");
+        client.assert(typeof b.handoffId === "string" && b.handoffId.length > 0, "handoffId가 없습니다.");
+        client.assert(typeof b.expiresAt === "string" && b.expiresAt.length > 0, "expiresAt이 없습니다.");
+    });
+    client.test("비밀 코드와 분석용 id는 별개 값이다", () => {
+        client.assert(b.handoffCode !== b.handoffId, "handoffCode와 handoffId가 같습니다(분석에 비밀값이 새어나갑니다).");
+    });
+    // 후속 요청(5·6·8·9번)이 헤더로 제시할 코드를 저장합니다.
+    client.global.set("handoffCode", b.handoffCode);
+%}
+
+### 5. (해피 패스 연계) 확인 호출 → 200, 상태가 LANDED 로 전이
+# 외부 브라우저 랜딩이 부르는 요청입니다. 옮길 건수와 복귀 경로만 주고 콘텐츠(제목·본문)는 주지 않습니다.
+# 4번을 먼저 실행해 전역 handoffCode 가 채워져야 합니다.
+GET {{baseUrl}}/api/v1/auth/handoffs
+Accept: application/json
+X-Manyak-Handoff-Code: {{handoffCode}}
+
+> {%
+    client.test("확인 호출은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("옮길 건수와 복귀 경로가 내려온다", () => {
+        client.assert(b.storyCount === 1, `storyCount가 1이 아닙니다. actual=${b.storyCount}`);
+        client.assert(b.chatCount === 1, `chatCount가 1이 아닙니다. actual=${b.chatCount}`);
+        client.assert(typeof b.callbackPath === "string" && b.callbackPath.startsWith("/"), "callbackPath가 앱 내 경로가 아닙니다.");
+    });
+    client.test("콘텐츠(제목·본문)는 노출되지 않는다", () => {
+        client.assert(b.title === undefined && b.stories === undefined, "콘텐츠가 노출됐습니다.");
+    });
+%}
+
+### 6. (해피 패스 연계) 상태 조회 → 200, LANDED
+# 5번을 실행한 뒤라 PENDING 이 아니라 LANDED 여야 합니다(확인 호출이 상태를 전이시킵니다).
+GET {{baseUrl}}/api/v1/auth/handoffs/status
+Accept: application/json
+X-Manyak-Handoff-Code: {{handoffCode}}
+
+> {%
+    client.test("상태 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("확인 호출 후 상태는 LANDED 다", () => {
+        client.assert(b.status === "LANDED", `LANDED가 아닙니다. actual=${b.status}`);
+    });
+    client.test("아직 이관 전이라 이관된 ID는 비어 있다", () => {
+        client.assert(Array.isArray(b.migratedStoryIds) && b.migratedStoryIds.length === 0, "migratedStoryIds가 비어 있지 않습니다.");
+        client.assert(Array.isArray(b.migratedChatIds) && b.migratedChatIds.length === 0, "migratedChatIds가 비어 있지 않습니다.");
+    });
+%}
+
+### 7. (에러) 없는 코드로 확인 → 404
+# 존재하지 않는 코드와 만료된 코드를 구분하지 않습니다(열거 오라클 방지).
+GET {{baseUrl}}/api/v1/auth/handoffs
+Accept: application/json
+X-Manyak-Handoff-Code: this-code-does-not-exist
+
+> {%
+    client.test("없는 코드 확인은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (에러) 없는 코드로 상태 조회 → 404
+GET {{baseUrl}}/api/v1/auth/handoffs/status
+Accept: application/json
+X-Manyak-Handoff-Code: this-code-does-not-exist
+
+> {%
+    client.test("없는 코드 상태 조회는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. (해피 패스 연계) 핸드오프를 실은 로그인 → 200, 시드 + 이관을 함께 수행
+# 외부 브라우저의 로그인입니다. 디바이스 헤더는 외부 브라우저 값이지만, 핸드오프의 원본 디바이스 ID가 우선합니다.
+# 4번을 먼저 실행해 전역 handoffCode 가 채워져야 하고, googleIdToken 을 실제 토큰으로 교체해야 합니다.
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{externalDeviceId}}
+
+{ "idToken": "{{googleIdToken}}", "handoffCode": "{{handoffCode}}" }
+
+> {%
+    client.test("핸드오프를 실은 로그인은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰을 교체했는지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("access/refresh 가 내려온다", () => {
+        client.assert(typeof b.accessToken === "string" && b.accessToken.length > 0, "accessToken이 없습니다.");
+        client.assert(typeof b.refreshToken === "string" && b.refreshToken.length > 0, "refreshToken이 없습니다.");
+    });
+    client.global.set("accessToken", b.accessToken);
+%}
+
+### 10. (해피 패스 연계) 로그인 후 상태 조회 → MIGRATED, 이관된 ID 목록
+# 인앱 브라우저가 돌아왔을 때 부르는 요청입니다. 여기 담긴 ID만 localStorage 에서 지워야 합니다.
+# (이관되지 않은 ID는 여전히 게스트 소유이므로 지우면 접근할 방법이 사라집니다.)
+GET {{baseUrl}}/api/v1/auth/handoffs/status
+Accept: application/json
+X-Manyak-Handoff-Code: {{handoffCode}}
+
+> {%
+    client.test("소비 후 상태 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    // 이미 이관한 적 있는 계정으로 9번을 실행했다면 MIGRATION_CLOSED 가 나옵니다(계정당 1회 잠금).
+    client.test("상태가 MIGRATED 또는 MIGRATION_CLOSED 다", () => {
+        client.assert(
+            b.status === "MIGRATED" || b.status === "MIGRATION_CLOSED",
+            `소비 상태가 아닙니다. actual=${b.status}`,
+        );
+    });
+    client.test("MIGRATED 면 이관된 ID가 담긴다", () => {
+        if (b.status === "MIGRATED") {
+            client.assert(b.migratedStoryIds.length === 1, `migratedStoryIds가 1건이 아닙니다. actual=${b.migratedStoryIds.length}`);
+            client.assert(b.migratedChatIds.length === 1, `migratedChatIds가 1건이 아닙니다. actual=${b.migratedChatIds.length}`);
+        }
+    });
+%}
+
+### 11. (멱등) 같은 코드로 다시 로그인 → 200, 재이관 없이 같은 결과
+# 응답 유실 후 재시도를 오류(409)가 아니라 같은 결과로 처리합니다(기존 /auth/migrate 멱등과 같은 결).
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{externalDeviceId}}
+
+{ "idToken": "{{googleIdToken}}", "handoffCode": "{{handoffCode}}" }
+
+> {%
+    client.test("이미 소비한 코드로 다시 로그인해도 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 12. (참고) 무효한 코드를 실은 로그인 → 200 (로그인은 막지 않고 헤더 디바이스로 폴백)
+# 핸드오프 문제로 로그인 자체가 실패하면 안 됩니다. 무효·만료 코드는 조용히 무시하고 헤더 디바이스로 시드합니다.
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: {{externalDeviceId}}
+
+{ "idToken": "{{googleIdToken}}", "handoffCode": "this-code-does-not-exist" }
+
+> {%
+    client.test("무효 코드를 실어도 로그인은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}

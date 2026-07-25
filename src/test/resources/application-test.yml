@@ -6,7 +6,12 @@ spring:
     driver-class-name: org.h2.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # create-drop이 아니라 create다. 컨텍스트가 캐시에서 축출돼 닫힐 때 create-drop은 종료 시 DROP을 돌리는데,
+      # 모든 컨텍스트가 같은 H2(jdbc:h2:mem:manyak-test)를 공유하므로 그 DROP이 아직 쓰는 컨텍스트의 스키마까지
+      # 통째로 떨어뜨린다. DatabaseCleaner는 information_schema를 읽어 지우므로 테이블이 0개면 조용히 통과하고,
+      # 증상은 한참 뒤 "Table not found"로 드러난다(무작위 클래스 순서에서 재현, KNK-686).
+      # create는 부팅 시 drop+create를 그대로 하므로 스키마 초기화는 동일하고, 종료 시 DROP만 사라진다.
+      ddl-auto: create
     open-in-view: false
   flyway:
     enabled: false

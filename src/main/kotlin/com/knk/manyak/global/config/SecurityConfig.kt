@@ -142,6 +142,11 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/logout"),
+            // 로그인 핸드오프(§4-3-5)는 셋 다 인증이 없다 — 생성은 게스트(인앱), 확인·상태 조회는 아직 로그인 전인
+            // 외부 브라우저·인앱이다. 코드는 URL이 아니라 X-Manyak-Handoff-Code 헤더로만 받는다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/handoffs"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs/status"),
         )
 
         // optional 인증 도메인 경로. authorizeHttpRequests의 permitAll 매처와 동일한 method·path로 맞춘다.
