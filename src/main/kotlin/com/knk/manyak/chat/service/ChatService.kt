@@ -14,6 +14,8 @@ import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
+import com.knk.manyak.chat.dto.ChatShareTurnResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
 import com.knk.manyak.chat.dto.ChatStreamStartedEvent
@@ -23,12 +25,15 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryChatShare
 import com.knk.manyak.chat.repository.StoryChatMainEventRepository
+import com.knk.manyak.chat.repository.StoryChatShareRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -83,6 +88,7 @@ class ChatService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
+    private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
@@ -259,6 +265,105 @@ class ChatService(
             },
             suggestedInputs = suggestedInputs,
         )
+    }
+
+    /**
+     * 채팅 공유 링크를 발급한다(스펙 §4-3-11). 요청 본문은 없고, 발급 시점의 진행 턴 수(current_turn)를
+     * 커트라인으로 고정한다 — 메시지를 복사하지 않으므로 열람이 이 커트라인 이하 턴만 조립한다.
+     *
+     * 같은 (채팅, 커트라인) 조합의 공유가 이미 있으면 새로 만들지 않고 그대로 반환한다(멱등 — 중복 클릭·재발급 안전).
+     * 턴이 진행된 뒤 발급하면 새 커트라인의 공유가 새로 생기며 기존 공유도 계속 유효하다.
+     *
+     * 삭제 경로(KNK-69)와 동일하게 채팅 행에 비관적 쓰기 락을 걸고 소유권 검사와 발급을 한 트랜잭션으로 묶는다(Codex P2).
+     * 락이 없으면 소유권 검사와 삽입 사이에 이관 클레임([StoryChatRepository.claimByPublicId])이 끼어들어,
+     * `user_id IS NULL`로 검사를 통과한 익명 요청이 방금 회원 소유가 된 채팅에 공유를 만든다. 같은 락이
+     * 동시 발급도 채팅 단위로 직렬화하므로, 뒤따르는 요청은 상대가 커밋한 공유를 조회로 발견해 멱등이 성립한다
+     * (`uq_story_chat_shares_chat_cutoff`는 DB 레벨 최후 방어로 남는다).
+     */
+    @Transactional
+    fun createChatShare(chatId: String, userId: Long?): CreateChatShareResponse {
+        val chat = resolveChatForUpdate(chatId)
+        // 소유권 게이트(§4-5): 채팅 상세 조회와 동일 규칙 — 소유 채팅은 소유자만, NULL 채팅은 게스트만. 위반 403.
+        // 존재 여부를 노출하지 않도록 404(없음·삭제) 판정 뒤에 적용한다.
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 공유할 권한이 없습니다.")
+        }
+
+        val turnCutoff = chat.currentTurn
+        val share = storyChatShareRepository.findByChatIdAndTurnCutoff(chat.id, turnCutoff)
+            ?: storyChatShareRepository.save(StoryChatShare(chatId = chat.id, turnCutoff = turnCutoff))
+
+        return CreateChatShareResponse(
+            shareId = share.publicId.toString(),
+            turnCount = share.turnCutoff,
+            createdAt = share.createdAt,
+        )
+    }
+
+    /**
+     * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
+     *
+     * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
+     * 스토리 제목·프롤로그는 채팅 상세와 동일하게 조회 시점의 라이브 값을 읽는다(공유만 별도 동결하지 않음).
+     */
+    @Transactional(readOnly = true)
+    fun getChatShare(shareId: String): ChatShareResponse {
+        val share = parsePublicIdOrNull(shareId)?.let { storyChatShareRepository.findByPublicId(it) }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
+        // 공유에는 삭제 컬럼이 없다 — 유효성은 원본 채팅의 deleted_at에 종속된다(공유 해지 수단 = 채팅 삭제).
+        val chat = storyChatRepository.findById(share.chatId).orElse(null)?.takeIf { it.deletedAt == null }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
+
+        val story = storyRepository.findById(chat.storyId).orElse(null)
+        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+
+        // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
+        val turns = loadSharedTurns(chat.id, share.turnCutoff)
+
+        // 도달 엔딩은 상세와 동일하게 이름으로 노출한다(순차 PK 노출 금지, KNK-462).
+        val endingNameById = storyEndingRepository
+            .findAllById(turns.mapNotNull { it.reachedEndingId })
+            .associate { it.id to it.name }
+
+        return ChatShareResponse(
+            id = share.publicId.toString(),
+            storyId = story?.publicId?.toString().orEmpty(),
+            storyTitle = story?.title.orEmpty(),
+            prologue = startSetting?.prologue.orEmpty(),
+            turns = turns.map { assistant ->
+                ChatShareTurnResponse(
+                    userInput = assistant.userInput,
+                    aiOutput = assistant.content,
+                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    createdAt = assistant.createdAt,
+                )
+            },
+        )
+    }
+
+    /**
+     * 공유 커트라인([turnCutoff]) 이하의 턴만 조립한다. 채팅 전체 메시지를 읽지 않아 로드량이 공유분에 비례한다(Codex P2).
+     *
+     * 커트라인 경계를 `message_order` 산술(턴 N = 2N)로 구하지 않는다 — 그 가정은 SYSTEM 메시지가 낀 형태
+     * (SYSTEM order 1 + 턴 N이 order 2N·2N+1, `ChatStreamHistoryIntegrationTests`가 지원 형태로 고정)에서 깨져
+     * 마지막 턴이 통째로 누락된다. 대신 **N번째 ASSISTANT 메시지의 order**를 논리 턴 기준으로 구해 그 이하만 읽으므로,
+     * 앞에 몇 건이 끼든 순서에 구멍이 있든 결과가 같다.
+     */
+    private fun loadSharedTurns(chatPk: Long, turnCutoff: Int): List<PairedTurn> {
+        if (turnCutoff <= 0) {
+            return emptyList()
+        }
+        val cutoffOrder = storyMessageRepository
+            .findByChatIdAndRoleOrderByMessageOrderAsc(chatPk, MessageRole.ASSISTANT, PageRequest.of(turnCutoff - 1, 1))
+            .firstOrNull()
+            ?.messageOrder
+        // 커트라인보다 턴이 적은 채팅(정상 경로에선 없는 데이터 이상)은 있는 만큼만 싣는다.
+            ?: return pairTurns(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatPk)).take(turnCutoff)
+
+        // pairTurns·take는 페어링과 턴 상한을 한 번 더 보장한다(짝 없는 USER·SYSTEM은 턴에서 제외).
+        return pairTurns(
+            storyMessageRepository.findByChatIdAndMessageOrderLessThanEqualOrderByMessageOrderAsc(chatPk, cutoffOrder),
+        ).take(turnCutoff)
     }
 
     /**
