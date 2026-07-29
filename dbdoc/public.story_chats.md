@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) |  |  |
+| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) [public.story_chat_shares](public.story_chat_shares.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | start_setting_id | bigint |  | true |  | [public.story_start_settings](public.story_start_settings.md) |  |
@@ -52,6 +52,7 @@ erDiagram
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_chat_main_events" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
@@ -98,6 +99,13 @@ erDiagram
   bigint id
   bigint chat_id FK
   bigint main_event_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_chat_shares" {
+  bigint id
+  uuid public_id
+  bigint chat_id FK
+  integer turn_cutoff
   timestamp_with_time_zone created_at
 }
 "public.stories" {

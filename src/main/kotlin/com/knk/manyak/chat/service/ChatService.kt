@@ -14,6 +14,8 @@ import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
+import com.knk.manyak.chat.dto.ChatShareTurnResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
 import com.knk.manyak.chat.dto.ChatStreamStartedEvent
@@ -23,12 +25,15 @@ import com.knk.manyak.chat.dto.ChatTurnResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryChatShare
 import com.knk.manyak.chat.repository.StoryChatMainEventRepository
+import com.knk.manyak.chat.repository.StoryChatShareRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -55,6 +60,7 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
@@ -83,6 +89,7 @@ class ChatService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
+    private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
@@ -258,6 +265,86 @@ class ChatService(
                 )
             },
             suggestedInputs = suggestedInputs,
+        )
+    }
+
+    /**
+     * 채팅 공유 링크를 발급한다(스펙 §4-3-11). 요청 본문은 없고, 발급 시점의 진행 턴 수(current_turn)를
+     * 커트라인으로 고정한다 — 메시지를 복사하지 않으므로 열람이 이 커트라인 이하 턴만 조립한다.
+     *
+     * 같은 (채팅, 커트라인) 조합의 공유가 이미 있으면 새로 만들지 않고 그대로 반환한다(멱등 — 중복 클릭·재발급 안전).
+     * 턴이 진행된 뒤 발급하면 새 커트라인의 공유가 새로 생기며 기존 공유도 계속 유효하다.
+     *
+     * 메서드에 트랜잭션을 걸지 않는다: 동시 발급의 유니크 위반을 상대가 만든 행 재조회로 흡수하려면([insertChatShare])
+     * 실패한 insert가 먼저 롤백돼 있어야 하는데, 한 트랜잭션 안이면 위반이 그 트랜잭션을 rollback-only로 만들어
+     * 재조회 결과까지 버려진다. 이 경로는 조회 2회 + 삽입 1회뿐이라 리포지터리 호출 단위 경계로 충분하다.
+     */
+    fun createChatShare(chatId: String, userId: Long?): CreateChatShareResponse {
+        val chat = resolveChat(chatId)
+        // 소유권 게이트(§4-5): 채팅 상세 조회와 동일 규칙 — 소유 채팅은 소유자만, NULL 채팅은 게스트만. 위반 403.
+        // 존재 여부를 노출하지 않도록 404(없음·삭제) 판정 뒤에 적용한다.
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 공유할 권한이 없습니다.")
+        }
+
+        val turnCutoff = chat.currentTurn
+        val share = storyChatShareRepository.findByChatIdAndTurnCutoff(chat.id, turnCutoff)
+            ?: insertChatShare(chat.id, turnCutoff)
+
+        return CreateChatShareResponse(
+            shareId = share.publicId.toString(),
+            turnCount = share.turnCutoff,
+            createdAt = share.createdAt,
+        )
+    }
+
+    /** 공유 행을 삽입하되, 동시 발급(중복 클릭)이 만든 유니크 위반은 상대가 이미 커밋한 행을 재조회해 멱등으로 흡수한다. */
+    private fun insertChatShare(chatPk: Long, turnCutoff: Int): StoryChatShare =
+        try {
+            storyChatShareRepository.saveAndFlush(StoryChatShare(chatId = chatPk, turnCutoff = turnCutoff))
+        } catch (violation: DataIntegrityViolationException) {
+            storyChatShareRepository.findByChatIdAndTurnCutoff(chatPk, turnCutoff) ?: throw violation
+        }
+
+    /**
+     * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
+     *
+     * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
+     * 스토리 제목·프롤로그는 채팅 상세와 동일하게 조회 시점의 라이브 값을 읽는다(공유만 별도 동결하지 않음).
+     */
+    @Transactional(readOnly = true)
+    fun getChatShare(shareId: String): ChatShareResponse {
+        val share = parsePublicIdOrNull(shareId)?.let { storyChatShareRepository.findByPublicId(it) }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
+        // 공유에는 삭제 컬럼이 없다 — 유효성은 원본 채팅의 deleted_at에 종속된다(공유 해지 수단 = 채팅 삭제).
+        val chat = storyChatRepository.findById(share.chatId).orElse(null)?.takeIf { it.deletedAt == null }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
+
+        val story = storyRepository.findById(chat.storyId).orElse(null)
+        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+
+        // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
+        val turns = pairTurns(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id))
+            .take(share.turnCutoff)
+
+        // 도달 엔딩은 상세와 동일하게 이름으로 노출한다(순차 PK 노출 금지, KNK-462).
+        val endingNameById = storyEndingRepository
+            .findAllById(turns.mapNotNull { it.reachedEndingId })
+            .associate { it.id to it.name }
+
+        return ChatShareResponse(
+            id = share.publicId.toString(),
+            storyId = story?.publicId?.toString().orEmpty(),
+            storyTitle = story?.title.orEmpty(),
+            prologue = startSetting?.prologue.orEmpty(),
+            turns = turns.map { assistant ->
+                ChatShareTurnResponse(
+                    userInput = assistant.userInput,
+                    aiOutput = assistant.content,
+                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    createdAt = assistant.createdAt,
+                )
+            },
         )
     }
 

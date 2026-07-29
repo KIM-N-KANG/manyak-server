@@ -34,6 +34,7 @@
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
 | [public.story_creation_requests](public.story_creation_requests.md) | 9 |  | BASE TABLE |
+| [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 
 ## Relations
 
@@ -75,6 +76,7 @@ erDiagram
 "public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
 "public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
+"public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -376,6 +378,13 @@ erDiagram
   text result_json
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.story_chat_shares" {
+  bigint id
+  uuid public_id
+  bigint chat_id FK
+  integer turn_cutoff
+  timestamp_with_time_zone created_at
 }
 ```
 
