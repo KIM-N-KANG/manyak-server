@@ -3,10 +3,12 @@ package com.knk.manyak.chat.controller
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
@@ -142,6 +144,68 @@ class ChatController(
         @PathVariable chatId: String,
         @CurrentUserId userId: Long?,
     ): ChatDetailResponse = chatService.getChatDetail(chatId, userId)
+
+    @Operation(
+        summary = "채팅 공유 발급",
+        description = "발급 시점까지의 채팅을 읽기 전용으로 여는 공유 링크를 발급합니다(스펙 §4-3-11). 요청 본문은 없습니다. " +
+            "접근 규칙은 채팅 상세 조회와 동일하며(소유 채팅은 소유자만, 소유자 없는 게스트 채팅은 게스트만), " +
+            "같은 커트라인으로 다시 호출하면 새로 만들지 않고 기존 공유를 그대로 반환합니다(멱등). " +
+            "턴이 진행된 뒤 발급하면 새 커트라인의 공유가 새로 생기며, 기존 공유도 계속 유효합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "201",
+                description = "공유 발급 성공(멱등 재발급 포함)",
+                content = [Content(schema = Schema(implementation = CreateChatShareResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "403",
+                description = "채팅 소유자가 아님(회원의 게스트 채팅 공유 포함)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "채팅을 찾을 수 없음(이미 삭제됨 포함)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/chats/{chatId}/shares")
+    fun createChatShare(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+        // optional 인증: 상세 조회와 동일한 소유권 게이트에 쓴다(§4-5).
+        @CurrentUserId userId: Long?,
+    ): CreateChatShareResponse = chatService.createChatShare(chatId, userId)
+
+    @Operation(
+        summary = "공유된 채팅 열람",
+        description = "공유 토큰으로 공유된 채팅을 조회합니다(스펙 §4-3-11). **인증이 필요하지 않습니다** — 추측 불가 UUID 링크 " +
+            "보유가 접근 수단입니다. 발급 시점 커트라인 이하의 턴만 반환하므로 이후 원본이 진행돼도 내용은 변하지 않으며, " +
+            "커트라인 이내 턴이 재생성되면 활성본이 반영됩니다. 스토리 제목·프롤로그는 조회 시점의 라이브 값입니다. " +
+            "열람에 불필요한 choices·suggestedInputs와 원본 chatId는 싣지 않습니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공",
+                content = [Content(schema = Schema(implementation = ChatShareResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "404",
+                description = "공유를 찾을 수 없음(형식 오류·부재·원본 채팅 삭제를 동일 처리)",
+                content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
+            ),
+        ],
+    )
+    @GetMapping("/shares/{shareId}")
+    fun getChatShare(
+        @Parameter(description = "공유 열람 토큰(공개 식별자)")
+        @PathVariable shareId: String,
+    ): ChatShareResponse = chatService.getChatShare(shareId)
 
     @Operation(
         summary = "채팅 삭제",

@@ -1,0 +1,356 @@
+### 채팅 공유(Chat Share) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### 위에서부터 순서대로 실행하면 스토리·채팅을 만든 뒤 공유 발급(201) → 멱등 재발급 → 무인증 열람(200)
+### → 턴 진행 후 커트라인 고정 확인 → 에러 케이스(404·403)를 확인합니다.
+###
+### [KNK-706] 스펙 §4-3-11. 시점 고정은 메시지 복사가 아니라 발급 시점 current_turn을 커트라인(turn_cutoff)으로
+###   기록하는 방식입니다. 이후 원본 채팅이 진행돼도 그 공유의 열람 내용은 변하지 않습니다(9번에서 확인).
+###   같은 (채팅, 커트라인) 조합은 멱등이라 재호출해도 같은 shareId를 돌려줍니다(5번).
+###   턴이 진행된 뒤 발급하면 새 커트라인의 공유가 새로 생기고, 기존 공유도 계속 유효합니다(8~10번).
+### 발급 접근 규칙은 채팅 상세 조회와 동일합니다(§4-5): 소유 채팅은 소유자만, 소유자 없는(게스트) 채팅은 게스트만. 위반 403(14~17번).
+### 열람은 **인증 불필요**입니다 — 추측 불가 UUID 링크 보유가 접근 수단입니다. 공유 해지 기능은 없고, 끊는 수단은 채팅 삭제뿐입니다(18번).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성·턴 진행은 실제 AI 호출입니다.
+###   - 소유권 검증(13~17)은 서로 다른 두 계정의 access 토큰이 필요합니다.
+###     auth-login-google.http 5번으로 소유자 토큰을 받아 @accessToken 에, 다른 계정 토큰을 @otherAccessToken 에 넣으세요.
+
+@baseUrl = http://localhost:8080
+
+# 소유권 케이스(13~17)용. auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_OWNER_ACCESS_TOKEN_HERE
+# 소유자와 다른 계정의 토큰(타인 발급 403 확인용).
+@otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+# [KNK-477] 게스트 체험 한도 대상(스토리라인 생성·스토리 등록·턴 진행)은 X-Manyak-Device-Id 헤더가 필수입니다.
+#   실행마다 새 deviceId를 발급해 재실행 시 한도(TTL 없음, Phase 1) 소진을 피합니다.
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
+### 1. 스토리라인 생성 (공유 대상 준비 1/3)
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "customTags": [
+    { "name": "판타지", "category": "GENRE" },
+    { "name": "신중한", "category": "PROTAGONIST" }
+  ]
+}
+
+> {%
+    client.test("스토리라인 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("simpleCreationId", response.body.simpleCreationId);
+    client.global.set("storylineId", response.body.storylines[0].id);
+%}
+
+### 2. 최종 스토리 생성·저장 (공유 대상 준비 2/3)
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": ["주인공은 무속성 판정을 받은 신입생이다"]
+}
+
+> {%
+    client.test("최종 스토리 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyId", response.body.id);
+    client.global.set("storyTitle", response.body.title);
+%}
+
+### 3. 채팅 생성 (공유 대상 준비 3/3) — 아직 0턴
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("chatId", response.body.id);
+%}
+
+### 4. 공유 발급 (핵심 검증) → 201 {shareId, turnCount, createdAt}
+# 요청 본문이 없습니다. shareId는 채팅 chatId와 무관한 별도 UUID이고, turnCount는 발급 시점 커트라인(여기서는 0턴)입니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/shares
+Accept: application/json
+
+> {%
+    client.test("공유 발급은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 shareId·turnCount·createdAt을 담는다", () => {
+        client.assert(typeof b.shareId === "string" && b.shareId.length === 36,
+            `shareId가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.shareId)}`);
+        client.assert(b.turnCount === 0, `turnCount가 0이 아닙니다(생성 직후 0턴). actual=${b.turnCount}`);
+        client.assert(typeof b.createdAt === "string", `createdAt이 없습니다. actual=${JSON.stringify(b.createdAt)}`);
+    });
+    client.test("shareId는 chatId와 다른 별도 식별자다", () => {
+        client.assert(b.shareId !== client.global.get("chatId"),
+            `shareId가 chatId와 같습니다. actual=${b.shareId}`);
+    });
+    client.global.set("shareIdTurn0", b.shareId);
+%}
+
+### 5. 같은 커트라인으로 재발급 → 멱등(같은 shareId)
+# 중복 클릭·재발급 안전. 새 공유를 만들지 않고 4번이 만든 공유를 그대로 돌려줍니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/shares
+Accept: application/json
+
+> {%
+    client.test("재발급도 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.test("같은 커트라인 재발급은 같은 shareId를 반환한다(멱등)", () => {
+        client.assert(response.body.shareId === client.global.get("shareIdTurn0"),
+            `shareId가 새로 생겼습니다. expected=${client.global.get("shareIdTurn0")} actual=${response.body.shareId}`);
+    });
+%}
+
+### 6. 공유 열람 (핵심 검증) → 무인증 200
+# Authorization 헤더 없이 200입니다. choices·suggestedInputs·원본 chatId는 응답에 없어야 합니다.
+GET {{baseUrl}}/api/v1/shares/{{shareIdTurn0}}
+Accept: application/json
+
+> {%
+    client.test("무인증 열람은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 id·storyId·storyTitle·prologue·turns를 담는다", () => {
+        client.assert(b.id === client.global.get("shareIdTurn0"), `id가 shareId와 다릅니다. actual=${b.id}`);
+        client.assert(b.storyId === client.global.get("storyId"), `storyId가 다릅니다. actual=${b.storyId}`);
+        client.assert(b.storyTitle === client.global.get("storyTitle"),
+            `storyTitle이 다릅니다. expected=${client.global.get("storyTitle")} actual=${b.storyTitle}`);
+        client.assert(typeof b.prologue === "string" && b.prologue.length > 0,
+            `prologue가 비었습니다. actual=${JSON.stringify(b.prologue)}`);
+        client.assert(Array.isArray(b.turns) && b.turns.length === 0,
+            `0턴 공유인데 turns가 비어 있지 않습니다. actual=${JSON.stringify(b.turns)}`);
+    });
+    client.test("choices·suggestedInputs·원본 chatId는 노출하지 않는다", () => {
+        client.assert(b.suggestedInputs === undefined, `suggestedInputs가 노출됐습니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+        client.assert(b.chatId === undefined, `chatId가 노출됐습니다. actual=${JSON.stringify(b.chatId)}`);
+    });
+%}
+
+### 7. 턴 1회 진행 (커트라인 고정 확인 준비) — SSE
+# completed 이벤트까지 끝나야 턴이 저장됩니다. 응답 창에서 completed가 오는 것을 확인한 뒤 8번으로 넘어가세요.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "다들 평범하게 속성을 발현한다. 나는 마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."
+}
+
+> {%
+    client.test("스트리밍이 200으로 시작한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. 턴 진행 후 재발급 → 새 커트라인의 새 공유(turnCount 1)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/shares
+Accept: application/json
+
+> {%
+    client.test("새 커트라인 발급은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.test("커트라인이 달라지면 새 공유가 생긴다", () => {
+        client.assert(response.body.shareId !== client.global.get("shareIdTurn0"),
+            `커트라인이 달라졌는데 같은 shareId입니다. actual=${response.body.shareId}`);
+        client.assert(response.body.turnCount === 1,
+            `turnCount가 1이 아닙니다(7번 completed 확인). actual=${response.body.turnCount}`);
+    });
+    client.global.set("shareIdTurn1", response.body.shareId);
+%}
+
+### 9. 이전 공유 재열람 → 커트라인 고정(여전히 0턴)
+# 발급 이후 원본이 진행돼도 그 공유의 열람 내용은 변하지 않습니다. 기존 공유도 계속 유효합니다(200).
+GET {{baseUrl}}/api/v1/shares/{{shareIdTurn0}}
+Accept: application/json
+
+> {%
+    client.test("발급 이후 진행분은 이전 공유에 반영되지 않는다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(기존 공유는 계속 유효). actual=${response.status}`);
+        client.assert(response.body.turns.length === 0,
+            `커트라인 이하만 나와야 합니다. actual turns=${response.body.turns.length}`);
+    });
+%}
+
+### 10. 새 공유 열람 → 1턴, 턴 항목은 userInput·aiOutput·reachedEnding·createdAt만
+GET {{baseUrl}}/api/v1/shares/{{shareIdTurn1}}
+Accept: application/json
+
+> {%
+    client.test("새 공유는 커트라인 이하 1턴을 담는다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.turns.length === 1, `turns가 1건이 아닙니다. actual=${response.body.turns.length}`);
+    });
+    const t = response.body.turns[0];
+    client.test("턴 항목 필드가 계약과 일치한다", () => {
+        client.assert(typeof t.userInput === "string" && t.userInput.length > 0,
+            `userInput이 비었습니다. actual=${JSON.stringify(t.userInput)}`);
+        client.assert(typeof t.aiOutput === "string" && t.aiOutput.length > 0,
+            `aiOutput이 비었습니다. actual=${JSON.stringify(t.aiOutput)}`);
+        // 엔딩 미도달 턴은 null로 직렬화됩니다(필드 자체는 존재).
+        client.assert(t.reachedEnding === null || typeof t.reachedEnding === "string",
+            `reachedEnding이 null도 문자열도 아닙니다. actual=${JSON.stringify(t.reachedEnding)}`);
+        client.assert(typeof t.createdAt === "string", `createdAt이 없습니다. actual=${JSON.stringify(t.createdAt)}`);
+        client.assert(t.choices === undefined, `choices가 노출됐습니다. actual=${JSON.stringify(t.choices)}`);
+    });
+%}
+
+### 11. 존재하지 않는 shareId로 열람 → 404
+GET {{baseUrl}}/api/v1/shares/3f2504e0-4f89-41d3-9a0c-0305e82c3301
+Accept: application/json
+
+> {%
+    client.test("없는 공유는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "공유를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 12. 형식이 잘못된 shareId로 열람 → 404 (존재 여부 비노출)
+# 순차 정수·임의 문자열 모두 부재와 동일한 404입니다.
+GET {{baseUrl}}/api/v1/shares/999999999
+Accept: application/json
+
+> {%
+    client.test("형식 오류 shareId도 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "공유를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 13. [소유권] 회원 소유 채팅 준비 — 소유자 토큰으로 채팅 생성
+# 2번의 {{storyId}}에 소유자 토큰으로 채팅을 만들어 chat.user_id 를 소유자로 박습니다.
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "storyId": "{{storyId}}"
+}
+
+> {%
+    client.test("소유 채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰 유효 확인). actual=${response.status}`);
+    });
+    client.global.set("ownedChatId", response.body.id);
+%}
+
+### 14. [소유권] 회원 소유 채팅을 미인증이 발급 → 403
+POST {{baseUrl}}/api/v1/chats/{{ownedChatId}}/shares
+Accept: application/json
+
+> {%
+    client.test("회원 소유 채팅의 미인증 발급은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 15. [소유권] 회원 소유 채팅을 타인(다른 회원)이 발급 → 403
+POST {{baseUrl}}/api/v1/chats/{{ownedChatId}}/shares
+Accept: application/json
+Authorization: Bearer {{otherAccessToken}}
+
+> {%
+    client.test("회원 소유 채팅의 타인 발급은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(두 토큰이 서로 다른 계정인지 확인). actual=${response.status}`);
+    });
+%}
+
+### 16. [소유권] 회원이 게스트(NULL) 소유 채팅을 발급 → 403
+# 교차 접근 차단(§4-5): 회원은 이관(POST /auth/migrate) 후에 접근해야 합니다. 3번 채팅은 소유자가 없습니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/shares
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("회원의 게스트 채팅 발급은 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 17. [소유권] 소유자 본인 발급 → 201
+POST {{baseUrl}}/api/v1/chats/{{ownedChatId}}/shares
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("소유자 본인 발급은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("ownedShareId", response.body.shareId);
+%}
+
+### 18. 원본 채팅 삭제 → 기존 공유 열람이 404 (공유 해지 수단 = 채팅 삭제)
+# 공유에는 삭제 컬럼이 없어 유효성이 원본 채팅 deleted_at에 종속됩니다. 삭제 후 19번을 이어서 실행하세요.
+DELETE {{baseUrl}}/api/v1/chats/{{ownedChatId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("소유자 삭제는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 19. 삭제된 채팅의 공유 열람 → 404
+GET {{baseUrl}}/api/v1/shares/{{ownedShareId}}
+Accept: application/json
+
+> {%
+    client.test("원본이 삭제되면 공유 열람은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "공유를 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 20. 삭제된 채팅으로 공유 발급 → 404
+POST {{baseUrl}}/api/v1/chats/{{ownedChatId}}/shares
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("삭제된 채팅의 공유 발급은 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "채팅을 찾을 수 없습니다.", `메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 21. (자유 조회) 이미 아는 chatId로 공유 발급
+# 위 준비 흐름 없이 실제 DB에 있는 chatId로 바로 발급하고 싶을 때 사용합니다.
+# 아래 UUID를 실제 DB의 공개 식별자(public_id)로 바꿔 실행하세요. 어서션이 없으니 응답(201/403/404)을 눈으로 확인하세요.
+POST {{baseUrl}}/api/v1/chats/ae578609-2e90-4923-af0e-64ba6a0a6f56/shares
+Accept: application/json
+
+### 22. (자유 조회) 이미 아는 shareId로 공유 열람
+# 아래 UUID를 실제 발급된 공유 토큰으로 바꿔 실행하세요. 인증 헤더 없이 열려야 합니다.
+GET {{baseUrl}}/api/v1/shares/ae578609-2e90-4923-af0e-64ba6a0a6f56
+Accept: application/json

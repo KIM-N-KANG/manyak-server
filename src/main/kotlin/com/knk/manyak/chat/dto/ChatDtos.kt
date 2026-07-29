@@ -174,6 +174,63 @@ data class ChatTurnResponse(
     val createdAt: Instant,
 )
 
+@Schema(description = "채팅 공유 발급 응답(스펙 §4-3-11)")
+data class CreateChatShareResponse(
+    @field:Schema(
+        description = "공유 열람 토큰(공개 식별자). 채팅 ID와 무관한 별도 UUID이며, 이 값으로 GET /shares/{shareId}를 무인증 열람합니다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    )
+    val shareId: String,
+
+    @field:Schema(description = "공유에 포함된 턴 수(발급 시점의 진행 턴 수 = 커트라인)", example = "2")
+    val turnCount: Int,
+
+    @field:Schema(description = "공유 발급 시각(멱등 재발급이면 최초 발급 시각)", example = "2026-06-12T12:00:00Z")
+    val createdAt: Instant,
+)
+
+@Schema(description = "공유된 채팅 열람 응답(스펙 §4-3-11)")
+data class ChatShareResponse(
+    @field:Schema(description = "공유 열람 토큰(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val id: String,
+
+    @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+    val storyId: String,
+
+    @field:Schema(description = "스토리 제목", example = "호아킨 아카데미의 무속성 신입생")
+    val storyTitle: String,
+
+    @field:Schema(
+        description = "채팅 시작 프롤로그",
+        example = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다. 입학식 전 수행되는 적성 검사. 묘한 긴장감이 검사장을 감싼다.",
+    )
+    val prologue: String,
+
+    @field:ArraySchema(
+        schema = Schema(implementation = ChatShareTurnResponse::class),
+        arraySchema = Schema(description = "공유 커트라인 이하의 채팅 진행 턴 목록. 발급 이후 진행된 턴은 포함되지 않습니다."),
+    )
+    val turns: List<ChatShareTurnResponse>,
+)
+
+@Schema(description = "공유된 채팅의 진행 턴. 열람에 불필요한 choices·suggestedInputs와 원본 chatId는 싣지 않습니다(스펙 §4-3-11).")
+data class ChatShareTurnResponse(
+    @field:Schema(
+        description = "사용자 입력",
+        example = "마법수정에서 아무 빛도 나오지 않았지만, 내려가는 순간 수정이 금 가더니 깨져버렸다.",
+    )
+    val userInput: String,
+
+    @field:Schema(description = "사용자 입력을 바탕으로 AI가 이어쓴 이야기", example = "검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.")
+    val aiOutput: String,
+
+    @field:Schema(description = "이번 턴에 도달한 엔딩 이름(도달 아니면 null)", nullable = true, example = "왕좌를 되찾다")
+    val reachedEnding: String? = null,
+
+    @field:Schema(description = "생성 시각", example = "2026-06-12T12:10:00Z")
+    val createdAt: Instant,
+)
+
 @Schema(description = "선택지 생성 응답. 프론트는 상세 재조회로 렌더하며, 이 본문은 저장된 선택지의 참고용이다(스펙 §4-3-3).")
 data class ChatChoicesResponse(
     @field:ArraySchema(
