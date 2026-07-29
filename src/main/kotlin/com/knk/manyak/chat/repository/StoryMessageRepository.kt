@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param
 interface StoryMessageRepository : JpaRepository<StoryMessage, Long> {
     fun findByChatIdOrderByMessageOrderAsc(chatId: Long): List<StoryMessage>
 
+    /**
+     * message_order 상한 이하의 메시지만 순서대로 조회한다. 채팅 공유 열람(§4-3-11)이 커트라인까지만 읽어
+     * 전체 이력 로드를 피하는 데 쓴다 — 턴 N의 ASSISTANT가 message_order 2N이라는 [ChatTurnPersister] 부여 규칙에 의존한다.
+     */
+    fun findByChatIdAndMessageOrderLessThanEqualOrderByMessageOrderAsc(
+        chatId: Long,
+        messageOrder: Int,
+    ): List<StoryMessage>
+
     fun findByChatIdOrderByMessageOrderDesc(
         chatId: Long,
         pageable: Pageable,

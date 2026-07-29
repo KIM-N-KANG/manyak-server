@@ -60,7 +60,6 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
-import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
@@ -275,12 +274,15 @@ class ChatService(
      * 같은 (채팅, 커트라인) 조합의 공유가 이미 있으면 새로 만들지 않고 그대로 반환한다(멱등 — 중복 클릭·재발급 안전).
      * 턴이 진행된 뒤 발급하면 새 커트라인의 공유가 새로 생기며 기존 공유도 계속 유효하다.
      *
-     * 메서드에 트랜잭션을 걸지 않는다: 동시 발급의 유니크 위반을 상대가 만든 행 재조회로 흡수하려면([insertChatShare])
-     * 실패한 insert가 먼저 롤백돼 있어야 하는데, 한 트랜잭션 안이면 위반이 그 트랜잭션을 rollback-only로 만들어
-     * 재조회 결과까지 버려진다. 이 경로는 조회 2회 + 삽입 1회뿐이라 리포지터리 호출 단위 경계로 충분하다.
+     * 삭제 경로(KNK-69)와 동일하게 채팅 행에 비관적 쓰기 락을 걸고 소유권 검사와 발급을 한 트랜잭션으로 묶는다(Codex P2).
+     * 락이 없으면 소유권 검사와 삽입 사이에 이관 클레임([StoryChatRepository.claimByPublicId])이 끼어들어,
+     * `user_id IS NULL`로 검사를 통과한 익명 요청이 방금 회원 소유가 된 채팅에 공유를 만든다. 같은 락이
+     * 동시 발급도 채팅 단위로 직렬화하므로, 뒤따르는 요청은 상대가 커밋한 공유를 조회로 발견해 멱등이 성립한다
+     * (`uq_story_chat_shares_chat_cutoff`는 DB 레벨 최후 방어로 남는다).
      */
+    @Transactional
     fun createChatShare(chatId: String, userId: Long?): CreateChatShareResponse {
-        val chat = resolveChat(chatId)
+        val chat = resolveChatForUpdate(chatId)
         // 소유권 게이트(§4-5): 채팅 상세 조회와 동일 규칙 — 소유 채팅은 소유자만, NULL 채팅은 게스트만. 위반 403.
         // 존재 여부를 노출하지 않도록 404(없음·삭제) 판정 뒤에 적용한다.
         if (!isOwnerAccessAllowed(chat.userId, userId)) {
@@ -289,7 +291,7 @@ class ChatService(
 
         val turnCutoff = chat.currentTurn
         val share = storyChatShareRepository.findByChatIdAndTurnCutoff(chat.id, turnCutoff)
-            ?: insertChatShare(chat.id, turnCutoff)
+            ?: storyChatShareRepository.save(StoryChatShare(chatId = chat.id, turnCutoff = turnCutoff))
 
         return CreateChatShareResponse(
             shareId = share.publicId.toString(),
@@ -297,14 +299,6 @@ class ChatService(
             createdAt = share.createdAt,
         )
     }
-
-    /** 공유 행을 삽입하되, 동시 발급(중복 클릭)이 만든 유니크 위반은 상대가 이미 커밋한 행을 재조회해 멱등으로 흡수한다. */
-    private fun insertChatShare(chatPk: Long, turnCutoff: Int): StoryChatShare =
-        try {
-            storyChatShareRepository.saveAndFlush(StoryChatShare(chatId = chatPk, turnCutoff = turnCutoff))
-        } catch (violation: DataIntegrityViolationException) {
-            storyChatShareRepository.findByChatIdAndTurnCutoff(chatPk, turnCutoff) ?: throw violation
-        }
 
     /**
      * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
@@ -324,8 +318,16 @@ class ChatService(
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
-        val turns = pairTurns(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id))
-            .take(share.turnCutoff)
+        // 메시지를 전부 읽지 않고 커트라인까지만 읽는다(Codex P2): story_messages의 유일한 작성자인
+        // ChatTurnPersister.persistTurn이 USER→ASSISTANT를 1부터 연속 부여하므로 턴 N의 ASSISTANT는
+        // message_order 2N이다(재생성은 행을 늘리지 않고 제자리 교체). pairTurns·take는 그대로 둬
+        // 페어링과 턴 상한을 한 번 더 보장한다 — 오래된 채팅을 공유해도 로드량이 공유분에 비례한다.
+        val turns = pairTurns(
+            storyMessageRepository.findByChatIdAndMessageOrderLessThanEqualOrderByMessageOrderAsc(
+                chat.id,
+                share.turnCutoff * 2,
+            ),
+        ).take(share.turnCutoff)
 
         // 도달 엔딩은 상세와 동일하게 이름으로 노출한다(순차 PK 노출 금지, KNK-462).
         val endingNameById = storyEndingRepository

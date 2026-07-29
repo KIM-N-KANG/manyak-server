@@ -27,6 +27,7 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTe
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 
@@ -73,6 +74,10 @@ class ChatShareControllerIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    // 이관 클레임(@Modifying)은 트랜잭션 안에서만 실행할 수 있어 테스트에서 직접 경계를 연다.
+    @Autowired
+    private lateinit var transactionTemplate: TransactionTemplate
 
     @BeforeEach
     fun setUp() {
@@ -164,6 +169,50 @@ class ChatShareControllerIntegrationTests {
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .exchange()
             .expectStatus().isForbidden
+    }
+
+    @Test
+    fun `이관으로 소유자가 생긴 게스트 채팅은 이후 익명 발급이 403이다`() {
+        // Codex P2 회귀 가드: 발급이 채팅 행 락 없이 소유권을 검사하면, 이관 클레임(claimByPublicId)이 방금
+        // 소유자를 박은 뒤에도 stale한 user_id == null 판정으로 익명 공유가 만들어진다. 발급은 커밋된 최신
+        // 소유 상태를 봐야 한다 — 이관 후 익명 요청은 403이고, 이관 전 발급분은 그대로 유효하다.
+        val member = saveUser("이관한 회원")
+        val fixture = seedChat(turnCount = 1)
+        val beforeMigration = issueShare(fixture.chat)
+
+        val claimed = transactionTemplate.execute {
+            storyChatRepository.claimByPublicId(fixture.chat.publicId, member.id)
+        }
+        check(claimed == 1) { "이관 클레임이 적용되지 않았습니다. actual=$claimed" }
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${fixture.chat.publicId}/shares")
+            .exchange()
+            .expectStatus().isForbidden
+
+        // 이관 전에 발급된 공유는 계속 열린다(공유 해지 수단은 채팅 삭제뿐).
+        restTestClient.get()
+            .uri("/api/v1/shares/$beforeMigration")
+            .exchange()
+            .expectStatus().isOk
+    }
+
+    @Test
+    fun `커트라인이 전체 턴보다 작으면 커트라인까지의 턴만 순서대로 반환한다`() {
+        // 커트라인 조회를 message_order 상한(2N)으로 좁힌 뒤에도 경계가 정확한지 고정한다(Codex P2).
+        val fixture = seedChat(turnCount = 2)
+        val shareId = issueShare(fixture.chat)
+        appendTurn(fixture, "세 번째 입력", "세 번째 응답")
+
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(2)
+            .jsonPath("$.turns[0].userInput").isEqualTo("이름은 강진우야.")
+            .jsonPath("$.turns[1].userInput").isEqualTo("턴 2 입력")
+            .jsonPath("$.turns[1].aiOutput").isEqualTo("턴 2 응답")
     }
 
     @Test
