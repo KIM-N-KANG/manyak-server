@@ -318,16 +318,7 @@ class ChatService(
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
-        // 메시지를 전부 읽지 않고 커트라인까지만 읽는다(Codex P2): story_messages의 유일한 작성자인
-        // ChatTurnPersister.persistTurn이 USER→ASSISTANT를 1부터 연속 부여하므로 턴 N의 ASSISTANT는
-        // message_order 2N이다(재생성은 행을 늘리지 않고 제자리 교체). pairTurns·take는 그대로 둬
-        // 페어링과 턴 상한을 한 번 더 보장한다 — 오래된 채팅을 공유해도 로드량이 공유분에 비례한다.
-        val turns = pairTurns(
-            storyMessageRepository.findByChatIdAndMessageOrderLessThanEqualOrderByMessageOrderAsc(
-                chat.id,
-                share.turnCutoff * 2,
-            ),
-        ).take(share.turnCutoff)
+        val turns = loadSharedTurns(chat.id, share.turnCutoff)
 
         // 도달 엔딩은 상세와 동일하게 이름으로 노출한다(순차 PK 노출 금지, KNK-462).
         val endingNameById = storyEndingRepository
@@ -348,6 +339,31 @@ class ChatService(
                 )
             },
         )
+    }
+
+    /**
+     * 공유 커트라인([turnCutoff]) 이하의 턴만 조립한다. 채팅 전체 메시지를 읽지 않아 로드량이 공유분에 비례한다(Codex P2).
+     *
+     * 커트라인 경계를 `message_order` 산술(턴 N = 2N)로 구하지 않는다 — 그 가정은 SYSTEM 메시지가 낀 형태
+     * (SYSTEM order 1 + 턴 N이 order 2N·2N+1, `ChatStreamHistoryIntegrationTests`가 지원 형태로 고정)에서 깨져
+     * 마지막 턴이 통째로 누락된다. 대신 **N번째 ASSISTANT 메시지의 order**를 논리 턴 기준으로 구해 그 이하만 읽으므로,
+     * 앞에 몇 건이 끼든 순서에 구멍이 있든 결과가 같다.
+     */
+    private fun loadSharedTurns(chatPk: Long, turnCutoff: Int): List<PairedTurn> {
+        if (turnCutoff <= 0) {
+            return emptyList()
+        }
+        val cutoffOrder = storyMessageRepository
+            .findByChatIdAndRoleOrderByMessageOrderAsc(chatPk, MessageRole.ASSISTANT, PageRequest.of(turnCutoff - 1, 1))
+            .firstOrNull()
+            ?.messageOrder
+        // 커트라인보다 턴이 적은 채팅(정상 경로에선 없는 데이터 이상)은 있는 만큼만 싣는다.
+            ?: return pairTurns(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatPk)).take(turnCutoff)
+
+        // pairTurns·take는 페어링과 턴 상한을 한 번 더 보장한다(짝 없는 USER·SYSTEM은 턴에서 제외).
+        return pairTurns(
+            storyMessageRepository.findByChatIdAndMessageOrderLessThanEqualOrderByMessageOrderAsc(chatPk, cutoffOrder),
+        ).take(turnCutoff)
     }
 
     /**

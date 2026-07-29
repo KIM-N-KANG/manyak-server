@@ -216,6 +216,42 @@ class ChatShareControllerIntegrationTests {
     }
 
     @Test
+    fun `SYSTEM 메시지가 낀 채팅도 1턴 공유가 1턴을 정확히 반환한다`() {
+        // Codex P2 회귀 가드: 커트라인 경계를 message_order 산술(턴 N = 2N)로 구하면, SYSTEM 1건(order 1)이
+        // 앞에 낀 형태(ChatStreamHistoryIntegrationTests가 고정한 지원 형태)에서 마지막 턴이 통째로 누락된다.
+        // 1턴 공유가 0턴이 되는 것이 그 증상이다. 경계는 논리 턴(N번째 ASSISTANT) 기준이어야 한다.
+        val fixture = seedChatWithSystemPrefix(turnCount = 1)
+        val shareId = issueShare(fixture.chat)
+
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(1)
+            .jsonPath("$.turns[0].userInput").isEqualTo("유저 메시지 1")
+            .jsonPath("$.turns[0].aiOutput").isEqualTo("AI 응답 1")
+    }
+
+    @Test
+    fun `SYSTEM 메시지가 낀 채팅의 커트라인 경계도 논리 턴 기준으로 맞는다`() {
+        // 3턴 중 2턴 시점에 발급 → 발급분 2턴만, 마지막 턴은 제외. order 산술이면 여기서도 턴이 밀린다.
+        val fixture = seedChatWithSystemPrefix(turnCount = 2)
+        val shareId = issueShare(fixture.chat)
+        appendSystemPrefixTurn(fixture, turn = 3)
+
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.turns.length()").isEqualTo(2)
+            .jsonPath("$.turns[0].aiOutput").isEqualTo("AI 응답 1")
+            .jsonPath("$.turns[1].userInput").isEqualTo("유저 메시지 2")
+            .jsonPath("$.turns[1].aiOutput").isEqualTo("AI 응답 2")
+    }
+
+    @Test
     fun `없는 채팅으로 공유를 발급하면 404다`() {
         restTestClient.post()
             .uri("/api/v1/chats/${UUID.randomUUID()}/shares")
@@ -436,6 +472,43 @@ class ChatShareControllerIntegrationTests {
             assistantIds += assistant.id
         }
         return ChatFixture(story, startSetting, chat, assistantIds, order)
+    }
+
+    /**
+     * SYSTEM 1건(order 1) + 턴 N이 order 2N·2N+1인 형태로 채팅을 만든다.
+     * `ChatStreamHistoryIntegrationTests`·`ChatRegenerateHistoryIntegrationTests`가 고정한 지원 형태이며,
+     * 턴↔message_order가 2N으로 떨어지지 않아 order 산술 기반 커트라인이 깨지는 경우다.
+     */
+    private fun seedChatWithSystemPrefix(turnCount: Int): ChatFixture {
+        val story = storyRepository.save(Story(title = "호아킨 아카데미의 무속성 신입생"))
+        val startSetting = storyStartSettingRepository.save(
+            StoryStartSetting(
+                story = story,
+                name = "입학 적성 검사",
+                prologue = "마법 세계에서 당신은 호아킨 아카데미의 1학년으로 입학했다.",
+                startSituation = "적성 검사 직전의 검사장.",
+            ),
+        )
+        val chat = storyChatRepository.save(
+            StoryChat(storyId = story.id, startSettingId = startSetting.id, currentTurn = turnCount),
+        )
+        message(chat.id, MessageRole.SYSTEM, "시스템 지시문", 1)
+        val assistantIds = mutableListOf<Long>()
+        repeat(turnCount) { index ->
+            val turn = index + 1
+            message(chat.id, MessageRole.USER, "유저 메시지 $turn", turn * 2)
+            assistantIds += message(chat.id, MessageRole.ASSISTANT, "AI 응답 $turn", turn * 2 + 1).id
+        }
+        return ChatFixture(story, startSetting, chat, assistantIds, turnCount * 2 + 1)
+    }
+
+    /** [seedChatWithSystemPrefix] 형태에 턴을 하나 더 붙인다(커트라인 이후 진행). */
+    private fun appendSystemPrefixTurn(fixture: ChatFixture, turn: Int) {
+        message(fixture.chat.id, MessageRole.USER, "유저 메시지 $turn", turn * 2)
+        message(fixture.chat.id, MessageRole.ASSISTANT, "AI 응답 $turn", turn * 2 + 1)
+        val chat = storyChatRepository.findById(fixture.chat.id).orElseThrow()
+        chat.currentTurn = turn
+        storyChatRepository.save(chat)
     }
 
     /** 커트라인 이후 진행을 흉내낸다(메시지 2개 추가 + current_turn 증가). */
