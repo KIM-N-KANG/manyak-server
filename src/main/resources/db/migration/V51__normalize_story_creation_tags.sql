@@ -10,8 +10,10 @@
 --   (최소 id를 그대로 쓰면 비활성 행이 정본이 되어 활성 장르가 태그 목록에서 사라진다.)
 -- * CUSTOM 행은 같은 카테고리 PREDEFINED와 키가 겹치면 그 PREDEFINED 행으로 연결한다(런타임 연결 규칙과 동일).
 
+-- 길이는 name(30)의 2배다. lowercase가 코드포인트를 늘릴 수 있어(`İ`(U+0130) → `i` + 결합 점) 30자 표시명이
+-- 60자 정규화 키가 될 수 있다. 30으로 두면 상한을 지킨 입력이 저장 단계에서 깨진다.
 ALTER TABLE story_creation_tags
-    ADD COLUMN normalized_name VARCHAR(30);
+    ADD COLUMN normalized_name VARCHAR(60);
 
 UPDATE story_creation_tags
 SET normalized_name = lower(regexp_replace(name, '[[:space:]]', '', 'g'));

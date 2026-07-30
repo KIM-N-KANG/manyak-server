@@ -87,7 +87,7 @@ erDiagram
   boolean is_active
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
-  varchar_30_ normalized_name
+  varchar_60_ normalized_name
 }
 "public.story_creation_sessions" {
   bigint id

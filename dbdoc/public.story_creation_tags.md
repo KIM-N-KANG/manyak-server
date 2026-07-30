@@ -12,7 +12,7 @@
 | is_active | boolean | true | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
-| normalized_name | varchar(30) |  | false |  |  |  |
+| normalized_name | varchar(60) |  | false |  |  |  |
 
 ## Constraints
 
@@ -49,7 +49,7 @@ erDiagram
   boolean is_active
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
-  varchar_30_ normalized_name
+  varchar_60_ normalized_name
 }
 "public.story_creation_session_tags" {
   bigint id

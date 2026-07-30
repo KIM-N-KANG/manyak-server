@@ -60,8 +60,11 @@ class StoryCreationTag(
     /**
      * 태그 동일성 판정 키(KNK-717, 스펙 §4-3-2). 표시명 [name]은 최초 입력 원문을 유지하고,
      * 대소문자·공백 변형(BL / Bl / b l)은 이 키로 같은 태그로 묶인다.
+     *
+     * 길이는 표시명 상한(30)의 2배다. lowercase는 코드포인트를 늘릴 수 있어(`İ`(U+0130) → `i` + 결합 점, 2배가 상한)
+     * 30자 입력이 60자 키가 될 수 있다. 30으로 두면 상한을 지킨 요청이 저장 단계에서 깨진다.
      */
-    @Column(name = "normalized_name", nullable = false, length = 30)
+    @Column(name = "normalized_name", nullable = false, length = 60)
     val normalizedName: String = normalize(name)
 
     @PreUpdate

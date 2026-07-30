@@ -389,6 +389,33 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `정규화하면 길이가 늘어나는 30자 이름도 저장한다`() {
+        // 'İ'(U+0130)는 lowercase가 2코드포인트로 늘어난다. 표시명 상한 30자를 지켜도 정규화 키는 60자가 된다.
+        val name = "İ".repeat(30)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customTags": [
+                    { "name": "$name", "category": "GENRE" }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags[0].name").isEqualTo(name)
+
+        check(tagRepository.findAll().single().normalizedName.length == 60)
+    }
+
+    @Test
     fun `같은 출처와 분류와 이름의 태그는 중복 저장할 수 없다`() {
         tagRepository.saveAndFlush(
             StoryCreationTag(
