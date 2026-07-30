@@ -12,6 +12,7 @@
 | is_active | boolean | true | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| normalized_name | varchar(30) |  | false |  |  |  |
 
 ## Constraints
 
@@ -21,7 +22,7 @@
 | ck_story_creation_tags_tag_source | CHECK | CHECK (((tag_source)::text = ANY ((ARRAY['PREDEFINED'::character varying, 'CUSTOM'::character varying])::text[]))) |
 | ck_story_creation_tags_tag_type | CHECK | CHECK (((tag_type)::text = ANY ((ARRAY['GENRE'::character varying, 'PROTAGONIST'::character varying, 'SUPPORTING_CHARACTER'::character varying])::text[]))) |
 | story_creation_tags_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_creation_tags_source_type_name | UNIQUE | UNIQUE (tag_source, tag_type, name) |
+| uq_story_creation_tags_source_type_normalized_name | UNIQUE | UNIQUE (tag_source, tag_type, normalized_name) |
 
 ## Indexes
 
@@ -29,7 +30,7 @@
 | ---- | ---------- |
 | story_creation_tags_pkey | CREATE UNIQUE INDEX story_creation_tags_pkey ON public.story_creation_tags USING btree (id) |
 | idx_story_creation_tags_lookup | CREATE INDEX idx_story_creation_tags_lookup ON public.story_creation_tags USING btree (tag_source, is_active, tag_type, sort_order, id) |
-| uq_story_creation_tags_source_type_name | CREATE UNIQUE INDEX uq_story_creation_tags_source_type_name ON public.story_creation_tags USING btree (tag_source, tag_type, name) |
+| uq_story_creation_tags_source_type_normalized_name | CREATE UNIQUE INDEX uq_story_creation_tags_source_type_normalized_name ON public.story_creation_tags USING btree (tag_source, tag_type, normalized_name) |
 
 ## Relations
 
@@ -48,6 +49,7 @@ erDiagram
   boolean is_active
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_30_ normalized_name
 }
 "public.story_creation_session_tags" {
   bigint id

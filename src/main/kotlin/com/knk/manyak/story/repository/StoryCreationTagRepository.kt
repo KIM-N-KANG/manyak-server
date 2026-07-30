@@ -15,9 +15,9 @@ interface StoryCreationTagRepository : JpaRepository<StoryCreationTag, Long> {
         tagSource: StoryCreationTagSource,
     ): List<StoryCreationTag>
 
-    fun findByTagSourceAndCategoryAndNameIn(
-        tagSource: StoryCreationTagSource,
+    /** 직접 추가 태그 find-or-create용 정규화 키 조회(KNK-717). PREDEFINED 연결 판정 때문에 출처로 거르지 않는다. */
+    fun findByCategoryAndNormalizedNameIn(
         category: SimpleStoryTagCategory,
-        names: Collection<String>,
+        normalizedNames: Collection<String>,
     ): List<StoryCreationTag>
 }
