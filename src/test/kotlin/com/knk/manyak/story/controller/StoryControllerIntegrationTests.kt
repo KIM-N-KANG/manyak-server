@@ -389,8 +389,9 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `정규화하면 길이가 늘어나는 30자 이름도 저장한다`() {
-        // 'İ'(U+0130)는 lowercase가 2코드포인트로 늘어난다. 표시명 상한 30자를 지켜도 정규화 키는 60자가 된다.
+    fun `정규화 키는 SQL lower처럼 문자마다 1대1로 소문자화한다`() {
+        // 'İ'(U+0130)는 전체 케이스 매핑(String.lowercase)이면 'i' + 결합 점 2코드포인트로 늘어난다.
+        // 마이그레이션 백필의 SQL lower()는 1코드포인트 'i'를 내므로, 런타임도 문자 단위 매핑으로 맞춘다.
         val name = "İ".repeat(30)
 
         restTestClient.post()
@@ -412,7 +413,7 @@ class StoryControllerIntegrationTests {
             .expectBody()
             .jsonPath("$.selectedTags[0].name").isEqualTo(name)
 
-        check(tagRepository.findAll().single().normalizedName.length == 60)
+        check(tagRepository.findAll().single().normalizedName == "i".repeat(30))
     }
 
     @Test

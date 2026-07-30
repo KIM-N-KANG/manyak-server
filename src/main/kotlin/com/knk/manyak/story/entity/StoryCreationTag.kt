@@ -61,8 +61,8 @@ class StoryCreationTag(
      * 태그 동일성 판정 키(KNK-717, 스펙 §4-3-2). 표시명 [name]은 최초 입력 원문을 유지하고,
      * 대소문자·공백 변형(BL / Bl / b l)은 이 키로 같은 태그로 묶인다.
      *
-     * 길이는 표시명 상한(30)의 2배다. lowercase는 코드포인트를 늘릴 수 있어(`İ`(U+0130) → `i` + 결합 점, 2배가 상한)
-     * 30자 입력이 60자 키가 될 수 있다. 30으로 두면 상한을 지킨 요청이 저장 단계에서 깨진다.
+     * 길이 상한은 표시명(30)의 2배다. [normalize]는 문자 단위 매핑이라 키가 30자를 넘지 않지만,
+     * 매핑 규칙이 전체 케이스 매핑으로 바뀌면 코드포인트가 늘어 저장이 깨지므로 여유를 둔다.
      */
     @Column(name = "normalized_name", nullable = false, length = 60)
     val normalizedName: String = normalize(name)
@@ -73,7 +73,14 @@ class StoryCreationTag(
     }
 
     companion object {
-        /** trim → 내부 공백 전부 제거 → lowercase. 마이그레이션 백필 SQL과 같은 규칙이어야 한다. */
-        fun normalize(name: String): String = name.filterNot(Char::isWhitespace).lowercase()
+        /**
+         * trim → 내부 공백 전부 제거 → lowercase. 마이그레이션 백필 SQL과 같은 규칙이어야 한다.
+         *
+         * 소문자화는 [String.lowercase]가 아니라 문자 단위 [Char.lowercaseChar]를 쓴다. 전체 케이스 매핑은
+         * `İ`(U+0130)를 `i` + U+0307 두 코드포인트로 늘리는데, 백필이 쓰는 SQL `lower()`는 `i` 한 글자를 낸다.
+         * 규칙이 갈리면 백필된 키와 런타임 조회 키가 어긋나 같은 이름이 중복 행으로 갈린다.
+         */
+        fun normalize(name: String): String =
+            name.filterNot(Char::isWhitespace).map(Char::lowercaseChar).joinToString("")
     }
 }
