@@ -4,7 +4,7 @@
 
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
-| [public.story_creation_tags](public.story_creation_tags.md) | 8 |  | BASE TABLE |
+| [public.story_creation_tags](public.story_creation_tags.md) | 9 |  | BASE TABLE |
 | [public.story_creation_sessions](public.story_creation_sessions.md) | 7 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 4 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
@@ -87,6 +87,7 @@ erDiagram
   boolean is_active
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_60_ normalized_name
 }
 "public.story_creation_sessions" {
   bigint id

@@ -63,9 +63,11 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
@@ -105,6 +107,11 @@ class SimpleStoryCreationService(
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
+
+    // 커스텀 태그 마스터 행 삽입 전용. 동시 생성 유니크 충돌을 진행 중인 저장 트랜잭션과 분리해 흡수한다(KNK-717).
+    private val newTagTransactionTemplate = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+    }
 
     private companion object {
         // AI 응답이 컬럼 길이를 초과해도 트랜잭션이 실패하지 않도록 방어적으로 자른다. (stories 컬럼 정의와 일치)
@@ -232,12 +239,15 @@ class SimpleStoryCreationService(
                 name = tag.name.trim(),
             )
         }.distinctBy { it.key }
-        val aiRequestTags = predefinedTags.map { tag ->
-            StoryCreationTagDraft(
-                category = tag.category,
-                name = tag.name,
-            )
-        } + customTagDrafts
+        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 같은 태그이므로 AI 요청에서도 한 번만 보낸다(제공 태그 표기 우선).
+        val aiRequestTags = (
+            predefinedTags.map { tag ->
+                StoryCreationTagDraft(
+                    category = tag.category,
+                    name = tag.name,
+                )
+            } + customTagDrafts
+            ).distinctBy { it.key }
 
         val aiResponse = try {
             aiCallRecorder.record(
@@ -258,8 +268,9 @@ class SimpleStoryCreationService(
 
         val response = try {
             transactionTemplate.execute {
-            val customTags = findOrCreateCustomTags(customTagDrafts)
-            val tags = predefinedTags + customTags
+            val customTags = resolveCustomTags(customTagDrafts)
+            // 직접 추가 입력이 선택한 제공 태그로 해석될 수 있어 세션 태그 유니크(creation_session_id, tag_id) 전에 접는다.
+            val tags = (predefinedTags + customTags).distinctBy { it.id }
             val creationSession = storyCreationSessionRepository.save(
                 StoryCreationSession(userId = userId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
             )
@@ -796,40 +807,58 @@ class SimpleStoryCreationService(
         val category: SimpleStoryTagCategory,
         val name: String,
     ) {
+        // 태그 동일성은 표시명이 아니라 정규화 키로 판정한다(KNK-717, 스펙 §4-3-2).
         val key: Pair<SimpleStoryTagCategory, String>
-            get() = category to name
+            get() = category to StoryCreationTag.normalize(name)
     }
 
-    private fun findOrCreateCustomTags(customTagDrafts: List<StoryCreationTagDraft>): List<StoryCreationTag> {
+    /**
+     * 직접 추가 태그를 정규화 키로 해석한다(KNK-717, 스펙 §4-3-2). 같은 카테고리에 정규화 키가 같은
+     * 사전 정의 태그가 있으면 `CUSTOM` 행을 만들지 않고 그 행으로 연결하므로, 반환 목록에 `PREDEFINED`가 섞일 수 있다.
+     */
+    private fun resolveCustomTags(customTagDrafts: List<StoryCreationTagDraft>): List<StoryCreationTag> {
         if (customTagDrafts.isEmpty()) {
             return emptyList()
         }
 
-        val existingTags = customTagDrafts
+        val tagsByKey = customTagDrafts
             .groupBy { it.category }
             .flatMap { (category, drafts) ->
-                storyCreationTagRepository.findByTagSourceAndCategoryAndNameIn(
-                    tagSource = StoryCreationTagSource.CUSTOM,
+                storyCreationTagRepository.findByCategoryAndNormalizedNameIn(
                     category = category,
-                    names = drafts.map { it.name },
+                    normalizedNames = drafts.map { it.key.second },
                 )
             }
-        val tagsByKey = existingTags.associateBy { it.category to it.name }.toMutableMap()
-        val newTags = customTagDrafts
+            .groupBy { it.category to it.normalizedName }
+            .mapValues { (_, tags) ->
+                tags.firstOrNull { it.tagSource == StoryCreationTagSource.PREDEFINED } ?: tags.first()
+            }
+            .toMutableMap()
+
+        customTagDrafts
             .filterNot { tagsByKey.containsKey(it.key) }
-            .map { tag ->
-                StoryCreationTag(
-                    category = tag.category,
-                    name = tag.name,
-                    tagSource = StoryCreationTagSource.CUSTOM,
-                    sortOrder = 0,
-                    isActive = true,
-                )
-            }
+            .forEach { draft -> tagsByKey[draft.key] = createCustomTag(draft) }
 
-        storyCreationTagRepository.saveAll(newTags)
-            .forEach { tag -> tagsByKey[tag.category to tag.name] = tag }
+        return customTagDrafts.map { draft -> tagsByKey.getValue(draft.key) }
+    }
 
-        return customTagDrafts.map { tag -> tagsByKey.getValue(tag.key) }
+    /**
+     * 커스텀 태그 1행을 만든다. 같은 정규화 키를 동시 요청이 먼저 만들면 유니크 충돌을 재조회로 흡수한다.
+     * 별도 트랜잭션이라 충돌이 진행 중인 저장 트랜잭션을 말아올리지 않는다(대신 바깥이 실패해도 태그 행은 남는다 — 마스터 행이라 무해).
+     */
+    private fun createCustomTag(draft: StoryCreationTagDraft): StoryCreationTag {
+        val tag = StoryCreationTag(
+            category = draft.category,
+            name = draft.name,
+            tagSource = StoryCreationTagSource.CUSTOM,
+        )
+        return try {
+            newTagTransactionTemplate.execute { storyCreationTagRepository.saveAndFlush(tag) }!!
+        } catch (exception: DataIntegrityViolationException) {
+            storyCreationTagRepository
+                .findByCategoryAndNormalizedNameIn(draft.category, listOf(tag.normalizedName))
+                .firstOrNull { it.tagSource == StoryCreationTagSource.CUSTOM }
+                ?: throw exception
+        }
     }
 }

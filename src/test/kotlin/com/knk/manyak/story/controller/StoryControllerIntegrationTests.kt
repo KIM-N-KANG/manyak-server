@@ -264,6 +264,159 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `대소문자와 공백만 다른 직접 추가 태그는 기존 행을 재사용한다`() {
+        val existing = tagRepository.save(
+            StoryCreationTag(
+                category = SimpleStoryTagCategory.GENRE,
+                name = "BL",
+                tagSource = StoryCreationTagSource.CUSTOM,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customTags": [
+                    {
+                      "name": " b l ",
+                      "category": "GENRE"
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            // 표시명은 최초 입력 원문을 유지한다.
+            .jsonPath("$.selectedTags[0].name").isEqualTo("BL")
+            .jsonPath("$.selectedTags[0].id").isEqualTo(existing.id)
+
+        check(tagRepository.count() == 1L)
+    }
+
+    @Test
+    fun `한 요청 안의 표기 변형 직접 추가 태그는 하나로 합친다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customTags": [
+                    { "name": "BL", "category": "GENRE" },
+                    { "name": "Bl", "category": "GENRE" },
+                    { "name": "b l", "category": "GENRE" }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags[0].name").isEqualTo("BL")
+
+        check(tagRepository.count() == 1L)
+        check(sessionTagRepository.count() == 1L)
+        check(storyAiClient.lastRequest?.genreTags == listOf("BL"))
+    }
+
+    @Test
+    fun `정규화 키가 같은 제공 태그가 있으면 커스텀 태그를 만들지 않는다`() {
+        val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customTags": [
+                    { "name": "현대판타지", "category": "GENRE" }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags[0].id").isEqualTo(predefined.id)
+            .jsonPath("$.selectedTags[0].name").isEqualTo("현대 판타지")
+
+        check(tagRepository.count() == 1L)
+    }
+
+    @Test
+    fun `같은 태그를 제공 태그와 직접 추가로 함께 보내도 한 번만 연결한다`() {
+        val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "selectedTagIds": [${predefined.id}],
+                  "customTags": [
+                    { "name": "현대판타지", "category": "GENRE" }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags[0].id").isEqualTo(predefined.id)
+
+        check(tagRepository.count() == 1L)
+        check(sessionTagRepository.count() == 1L)
+        check(storyAiClient.lastRequest?.genreTags == listOf("현대 판타지"))
+    }
+
+    @Test
+    fun `정규화 키는 SQL lower처럼 문자마다 1대1로 소문자화한다`() {
+        // 'İ'(U+0130)는 전체 케이스 매핑(String.lowercase)이면 'i' + 결합 점 2코드포인트로 늘어난다.
+        // 마이그레이션 백필의 SQL lower()는 1코드포인트 'i'를 내므로, 런타임도 문자 단위 매핑으로 맞춘다.
+        val name = "İ".repeat(30)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customTags": [
+                    { "name": "$name", "category": "GENRE" }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags[0].name").isEqualTo(name)
+
+        check(tagRepository.findAll().single().normalizedName == "i".repeat(30))
+    }
+
+    @Test
     fun `같은 출처와 분류와 이름의 태그는 중복 저장할 수 없다`() {
         tagRepository.saveAndFlush(
             StoryCreationTag(
