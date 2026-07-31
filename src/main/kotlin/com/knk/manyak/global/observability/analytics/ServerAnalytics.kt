@@ -110,6 +110,23 @@ class ServerAnalytics(
         else -> null
     }
 
+    // --- 계정 연동(socialLink, KNK-739) ---
+
+    /** 연동 성공. provider는 소문자 표기(`google`·`kakao`)이며 성공에는 error_type을 싣지 않는다. */
+    fun socialLinkSucceeded(userId: Long, provider: String) =
+        emitForUser(EVENT_LINK_SUCCEEDED, userId, mapOf("provider" to provider))
+
+    /**
+     * 연동 실패. 실패 사유는 [AnalyticsErrorType] 3값으로만 구분한다 — 409의 동일/타 회원 여부를 프로퍼티로
+     * 나누면 특정 소셜 계정의 가입 여부를 알려주는 신호가 된다. social `sub`·ID 토큰·링크 코드는 싣지 않는다.
+     */
+    fun socialLinkFailed(userId: Long, provider: String, errorType: AnalyticsErrorType) =
+        emitForUser(
+            EVENT_LINK_FAILED,
+            userId,
+            mapOf("provider" to provider, "error_type" to errorType.wireValue),
+        )
+
     // --- 마이그레이션 ---
 
     fun migrationSucceeded(
@@ -199,6 +216,8 @@ class ServerAnalytics(
         const val EVENT_GOOGLE_LOGIN_FAILED = "server_login_googleLogin_processed_failed"
         const val EVENT_KAKAO_LOGIN_SUCCEEDED = "server_login_kakaoLogin_processed_succeeded"
         const val EVENT_KAKAO_LOGIN_FAILED = "server_login_kakaoLogin_processed_failed"
+        const val EVENT_LINK_SUCCEEDED = "server_link_socialLink_processed_succeeded"
+        const val EVENT_LINK_FAILED = "server_link_socialLink_processed_failed"
         const val EVENT_MIGRATION_SUCCEEDED = "server_login_migration_processed_succeeded"
         const val EVENT_MIGRATION_FAILED = "server_login_migration_processed_failed"
     }

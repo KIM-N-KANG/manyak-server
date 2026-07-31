@@ -102,15 +102,37 @@ class NimbusSocialIdTokenVerifier(
             }
     }
 
-    /** aud가 설정된 client-id 중 하나를 포함해야 통과시킨다(빈 설정이면 항상 실패). */
+    /**
+     * aud가 설정된 client-id 중 하나를 포함해야 통과시킨다(빈 설정이면 항상 실패).
+     *
+     * 여기에 `azp`(authorized party) 검사를 더한다(KNK-739). OIDC Core는 **aud가 여러 개면 `azp`를 요구**하고,
+     * `azp`가 있으면 그 값이 우리 client-id여야 한다. 이게 없으면 남의 앱이 우리 client-id를 audience로 지정해
+     * 받아낸 토큰이 통과할 수 있는데, 계정 연동은 계정 소유권을 바꾸는 경로라 그 구멍을 열어 둘 수 없다.
+     * 카카오처럼 `azp`를 싣지 않는 단일 audience 토큰은 종전대로 통과한다.
+     *
+     * **운영 주의**: 네이티브 앱이 서버 client-id를 audience로 요청하면 `azp`에 그 앱의 client-id가 실린다.
+     * 그런 구성을 도입하면 해당 client-id도 `MANYAK_*_CLIENT_IDS`에 함께 넣어야 로그인이 막히지 않는다.
+     */
     private class AudienceValidator(private val clientIds: List<String>) : OAuth2TokenValidator<Jwt> {
-        override fun validate(token: Jwt): OAuth2TokenValidatorResult =
-            if (token.audience.any { it in clientIds }) {
-                OAuth2TokenValidatorResult.success()
-            } else {
-                OAuth2TokenValidatorResult.failure(
-                    OAuth2Error("invalid_audience", "허용되지 않은 audience입니다.", null),
-                )
+        override fun validate(token: Jwt): OAuth2TokenValidatorResult {
+            if (token.audience.none { it in clientIds }) {
+                return failure("허용되지 않은 audience입니다.")
             }
+            val authorizedParty = token.getClaimAsString(CLAIM_AZP)
+            if (token.audience.size > 1 && authorizedParty == null) {
+                return failure("audience가 여러 개면 azp가 필요합니다.")
+            }
+            if (authorizedParty != null && authorizedParty !in clientIds) {
+                return failure("허용되지 않은 azp입니다.")
+            }
+            return OAuth2TokenValidatorResult.success()
+        }
+
+        private fun failure(description: String) =
+            OAuth2TokenValidatorResult.failure(OAuth2Error("invalid_audience", description, null))
+
+        private companion object {
+            const val CLAIM_AZP = "azp"
+        }
     }
 }

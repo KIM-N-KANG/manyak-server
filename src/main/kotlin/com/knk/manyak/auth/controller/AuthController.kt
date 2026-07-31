@@ -6,6 +6,7 @@ import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.link.AccountLinkService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.token.AuthTokenService
@@ -40,6 +41,7 @@ class AuthController(
     private val authTokenService: AuthTokenService,
     private val userRepository: UserRepository,
     private val socialLoginService: SocialLoginService,
+    private val accountLinkService: AccountLinkService,
     private val creditWalletService: CreditWalletService,
     private val attendanceRewardService: AttendanceRewardService,
 ) {
@@ -146,6 +148,8 @@ class AuthController(
             // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
             creditBalance = creditWalletService.balanceOf(user.id),
             attendedToday = attendanceRewardService.hasAttendedToday(user.id),
+            // 계정 연동 상태(KNK-739). 전용 조회 엔드포인트를 두지 않고 이 응답 하나로 노출한다(왕복을 늘리지 않는다).
+            linkedProviders = accountLinkService.linkedProviders(user.id),
         )
     }
 

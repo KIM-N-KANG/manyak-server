@@ -219,6 +219,68 @@ class NimbusSocialIdTokenVerifierTest {
         assertThat(info.providerUserId).isEqualTo(sharedSub)
     }
 
+    // ---- azp 하드닝(KNK-739) ----
+
+    /** aud를 여러 개 싣거나 azp를 붙인 토큰을 만든다(OIDC 다중 audience 시나리오). */
+    private fun signMultiAudToken(
+        audiences: List<String>,
+        authorizedParty: String?,
+        issuer: String = GOOGLE_ISSUER,
+        subject: String = "google-sub-1",
+    ): String {
+        val now = Instant.now()
+        val builder = JWTClaimsSet.Builder()
+            .issuer(issuer)
+            .audience(audiences)
+            .subject(subject)
+            .issueTime(Date.from(now))
+            .expirationTime(Date.from(now.plusSeconds(600)))
+        authorizedParty?.let { builder.claim("azp", it) }
+        val signed = SignedJWT(
+            JWSHeader.Builder(JWSAlgorithm.RS256).keyID(rsaKey.keyID).build(),
+            builder.build(),
+        )
+        signed.sign(RSASSASigner(rsaKey))
+        return signed.serialize()
+    }
+
+    @Test
+    fun `aud가 여러 개인데 azp가 없으면 401이다`() {
+        // OIDC Core는 다중 audience일 때 azp 확인을 요구한다. 계정 연동은 계정 소유권을 바꾸는 경로라 이 검사가 필요하다.
+        val token = signMultiAudToken(listOf(GOOGLE_CLIENT_ID, "other-app.apps.googleusercontent.com"), null)
+
+        assertThatThrownBy { googleVerifier().verify(token) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `aud가 여러 개여도 azp가 허용 client-id면 통과한다`() {
+        val token = signMultiAudToken(listOf(GOOGLE_CLIENT_ID, "other-app.apps.googleusercontent.com"), GOOGLE_CLIENT_ID)
+
+        assertThat(googleVerifier().verify(token).providerUserId).isEqualTo("google-sub-1")
+    }
+
+    @Test
+    fun `azp가 허용 목록에 없으면 401이다`() {
+        // aud가 우리 client-id 하나여도, 그 토큰을 요청한 주체(azp)가 남의 앱이면 우리 계정에 쓰이면 안 된다.
+        val token = signMultiAudToken(listOf(GOOGLE_CLIENT_ID), "attacker-app.apps.googleusercontent.com")
+
+        assertThatThrownBy { googleVerifier().verify(token) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `azp가 없는 단일 aud 토큰은 그대로 통과한다`() {
+        // 회귀 방지: 카카오는 azp를 싣지 않는다. 로그인 경로와 공유하는 코드라 기존 동작이 깨지면 안 된다.
+        assertThat(kakaoVerifier().verify(signToken(issuer = KAKAO_ISSUER, audience = KAKAO_APP_A)).providerUserId)
+            .isEqualTo("google-sub-1")
+        assertThat(googleVerifier().verify(signToken()).providerUserId).isEqualTo("google-sub-1")
+    }
+
     @Test
     fun `검증 파라미터는 스펙 표의 고정값을 쓴다`() {
         // 런타임 discovery 조회 없이 고정 주입하므로(스펙 §4-5), 값 오타가 곧 로그인 전면 실패다.
