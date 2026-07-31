@@ -77,6 +77,8 @@ class NimbusSocialIdTokenVerifier(
             email = jwt.getClaimAsString("email"),
             name = jwt.getClaimAsString("name"),
             picture = jwt.getClaimAsString("picture"),
+            // 계정 연동의 재인증 신선도 판정용(KNK-739). 로그인 경로는 쓰지 않는다.
+            issuedAt = jwt.issuedAt,
         )
     }
 

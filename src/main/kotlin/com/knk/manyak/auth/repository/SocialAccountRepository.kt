@@ -12,4 +12,10 @@ interface SocialAccountRepository : JpaRepository<SocialAccount, Long> {
     ): SocialAccount?
 
     fun findByUserId(userId: Long): List<SocialAccount>
+
+    /** 계정 연동(KNK-739): 재인증 대상 확인과 provider 중복 판정에 쓴다. (user_id, provider)는 유니크다(V52). */
+    fun findByUserIdAndProvider(
+        userId: Long,
+        provider: SocialProvider,
+    ): SocialAccount?
 }

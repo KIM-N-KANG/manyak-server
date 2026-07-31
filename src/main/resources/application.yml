@@ -46,6 +46,10 @@ manyak:
       # 운영에는 단일 카카오 앱의 키 1개만 넣는다: 카카오 sub는 앱별(pairwise)이라 여러 앱 키를 함께 허용하면
       # 앱 안에서만 유일한 sub가 앱 간에 충돌해 다른 사람이 같은 계정으로 오귀속될 수 있다(스펙 §4-5).
       client-ids: ${MANYAK_KAKAO_CLIENT_IDS:}
+    link:
+      # 계정 연동(KNK-739) 재인증 ID 토큰의 발급 시각(iat) 허용 범위. 이보다 오래된 토큰은 거부한다.
+      # 최초 로그인 때 받아 보관해 둔 ID 토큰 재제출을 막는 장치라, 늘릴수록 공용 기기 보호가 약해진다.
+      reauth-max-age: PT10M
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
   asset:
