@@ -1,0 +1,188 @@
+### 계정 연동(Auth) API 수동 검증 — GET·POST /api/v1/auth/links
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-739] 계정 연동(스펙 §4-5 후속):
+###   - 로그인된 계정에 다른 소셜 provider를 추가로 연동합니다. 연동하면 그 provider로 로그인해도
+###     같은 계정(같은 크레딧·서재)으로 들어옵니다.
+###   - **이미 연동된 provider로의 재인증이 선행돼야 합니다.** 재인증 토큰은 방금 발급받은 것이어야 하며
+###     오래된 토큰은 거부합니다(manyak.auth.link.reauth-max-age, 기본 10분 — 공용 기기에 남은 세션 악용 차단).
+###   - 새 계정도 새 세션도 만들지 않습니다. 응답에 access/refresh 토큰이 없고 기존 토큰이 그대로 유효합니다.
+###   - **연동 해제는 제공하지 않습니다**(Phase 1 범위 밖). 해제하면 그 provider 로그인이 새 계정을 만들어
+###     계정이 다시 갈라지고, 되돌리려면 계정 통합(merge)이 필요한데 미도입입니다.
+###
+### 에러 계약:
+###   - 403 code=REAUTH_FAILED           재인증 실패(토큰 무효·sub 불일치·미연동 provider·오래된 토큰). 사유는 구분하지 않습니다.
+###   - 403 code=SOCIAL_TOKEN_INVALID    연동할 소셜 ID 토큰 자체가 무효
+###   - 409 code=SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER  그 소셜 계정이 이미 다른 회원에게 연동됨
+###   - 409 code=PROVIDER_ALREADY_LINKED 내 계정에 그 provider가 이미 연동됨(교체는 해제가 필요 — 범위 밖)
+###   - 400 지원하지 않는 provider(APPLE·NAVER 등)·빈 idToken
+###   세션이 유효한 상태의 실패라 401을 쓰지 않습니다(401은 클라이언트가 세션 만료로 오인해 로그아웃합니다).
+###
+### 주의(유효 토큰 준비):
+###   실제 Google·Kakao ID 토큰은 각 소셜 로그인 플로우로만 얻을 수 있습니다.
+###     - 준비가 필요 없는 케이스(1·2·6·7번)는 바로 검증됩니다.
+###     - 해피 패스(3~5번)는 @accessToken·@reauthIdToken·@targetIdToken 을 채운 뒤 실행하세요.
+###   accessToken 은 auth-login-google.http 5번을 실행하면 전역 변수로 자동 설정됩니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동 (docker compose up -d) — 연동은 실제 DB의 social_accounts 를 읽고 씁니다.
+###   - V52 마이그레이션 적용 필요(social_accounts 에 UNIQUE(user_id, provider)).
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+# 이미 연동된 provider(보통 가입에 쓴 쪽)의 **새로 발급받은** ID 토큰.
+@reauthIdToken = PUT_A_FRESH_ID_TOKEN_OF_THE_LINKED_PROVIDER
+# 새로 연동할 provider 의 ID 토큰.
+@targetIdToken = PUT_AN_ID_TOKEN_OF_THE_PROVIDER_TO_LINK
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 인증 없이 연동 상태를 조회하면 401
+GET {{baseUrl}}/api/v1/auth/links
+Accept: application/json
+
+> {%
+    client.test("인증 없는 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. 연동 상태 조회 → 200
+# 로그인 가능한 provider(GOOGLE·KAKAO)를 연동 여부와 무관하게 모두 내려줍니다.
+# 마이 페이지는 이 응답으로 "연동 가능한 provider"와 "재인증에 쓸 provider"를 함께 판정합니다.
+GET {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("연동 상태 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(accessToken을 확인). actual=${response.status}`);
+    });
+    const links = response.body.links || [];
+    client.test("로그인 가능한 provider가 모두 내려온다", () => {
+        client.assert(links.length === 2, `links가 2개가 아닙니다. actual=${links.length}`);
+        client.assert(links[0].provider === "GOOGLE", `첫 항목이 GOOGLE이 아닙니다. actual=${links[0].provider}`);
+        client.assert(links[1].provider === "KAKAO", `둘째 항목이 KAKAO가 아닙니다. actual=${links[1].provider}`);
+        links.forEach((l) => client.assert(typeof l.linked === "boolean", `linked가 boolean이 아닙니다: ${JSON.stringify(l)}`));
+    });
+    client.log("연동 상태: " + links.map((l) => `${l.provider}=${l.linked}`).join(", "));
+%}
+
+### 3. (해피 패스) 카카오 연동 → 200
+# @reauthIdToken 에는 **이미 연동된** provider(예: GOOGLE)의 새 ID 토큰을, @targetIdToken 에는 카카오 ID 토큰을 넣습니다.
+# 재인증 provider 를 다른 값으로 바꾸려면 reauth.provider 를 함께 수정하세요.
+POST {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "provider": "KAKAO",
+  "idToken": "{{targetIdToken}}",
+  "reauth": { "provider": "GOOGLE", "idToken": "{{reauthIdToken}}" }
+}
+
+> {%
+    client.test("연동은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    client.test("응답은 최신 연동 상태이고 토큰을 싣지 않는다", () => {
+        const kakao = (response.body.links || []).find((l) => l.provider === "KAKAO");
+        client.assert(kakao && kakao.linked === true, "KAKAO가 연동되지 않았습니다.");
+        client.assert(kakao.connectedAt, "connectedAt이 없습니다.");
+        // 세션 교체가 없어야 합니다(연동은 로그인이 아닙니다).
+        client.assert(!response.body.accessToken, "응답에 accessToken이 있으면 안 됩니다.");
+        client.assert(!response.body.refreshToken, "응답에 refreshToken이 있으면 안 됩니다.");
+    });
+%}
+
+### 4. (멱등) 같은 소셜 계정을 다시 연동해도 200
+# 네트워크 재시도·더블클릭 대비. 행이 늘지 않고 같은 상태를 돌려줍니다.
+POST {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "provider": "KAKAO",
+  "idToken": "{{targetIdToken}}",
+  "reauth": { "provider": "GOOGLE", "idToken": "{{reauthIdToken}}" }
+}
+
+> {%
+    client.test("같은 소셜 계정 재연동은 멱등하게 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 5. (연계 확인) 연동한 provider로 로그인하면 같은 계정이다
+# 3번 이후 실행하세요. 새 계정이 생기지 않으므로 isNewUser 는 false 여야 합니다.
+# (이 요청은 로그인이라 새 세션을 발급합니다 — 연동 자체와는 별개입니다.)
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("연동한 provider 로그인은 200이고 신규 가입이 아니다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.isNewUser === false, `isNewUser가 false가 아닙니다(계정이 갈라졌습니다). actual=${response.body.isNewUser}`);
+    });
+%}
+
+### 6. (에러) 재인증 토큰이 무효면 403 REAUTH_FAILED
+POST {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "provider": "KAKAO",
+  "idToken": "{{targetIdToken}}",
+  "reauth": { "provider": "GOOGLE", "idToken": "not-a-real-id-token.forged.value" }
+}
+
+> {%
+    client.test("재인증 실패는 403 REAUTH_FAILED다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.code === "REAUTH_FAILED", `code가 REAUTH_FAILED가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 7. (에러) 지원하지 않는 provider면 400
+# APPLE·NAVER는 enum에만 예약돼 있고 로그인 경로가 없습니다.
+POST {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "provider": "APPLE",
+  "idToken": "some-apple-id-token",
+  "reauth": { "provider": "GOOGLE", "idToken": "{{reauthIdToken}}" }
+}
+
+> {%
+    client.test("지원하지 않는 provider는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (자유 조회) 임의 조합으로 연동 직접 확인
+# 자리표시 값을 실제 토큰으로 바꿔 원하는 조합을 눌러보세요.
+POST {{baseUrl}}/api/v1/auth/links
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "provider": "KAKAO",
+  "idToken": "PASTE_TARGET_ID_TOKEN",
+  "reauth": { "provider": "GOOGLE", "idToken": "PASTE_FRESH_REAUTH_ID_TOKEN" }
+}

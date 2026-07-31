@@ -28,6 +28,11 @@ enum class SocialProvider {
             name = "uq_social_accounts_provider_user",
             columnNames = ["provider", "provider_user_id"],
         ),
+        // 계정 연동(KNK-739, V52): 한 회원에게 같은 provider 연동은 하나뿐이다. 동시 연동 요청 경합의 최종 방어선.
+        UniqueConstraint(
+            name = "uq_social_accounts_user_provider",
+            columnNames = ["user_id", "provider"],
+        ),
     ],
     indexes = [
         Index(name = "idx_social_accounts_user", columnList = "user_id"),

@@ -85,6 +85,33 @@ class AuthDomainRepositoryTests {
     }
 
     @Test
+    fun `한 사용자에 같은 provider 연동이 둘이면 UNIQUE 제약으로 거부된다`() {
+        // 계정 연동(KNK-739)은 (provider, provider_user_id) 유니크만으로는 못 막는 경합이 있다 —
+        // 같은 회원에게 같은 provider의 서로 다른 소셜 계정 2개가 동시 요청으로 들어올 수 있다(V52 유니크).
+        val user = newUser()
+        socialAccountRepository.saveAndFlush(
+            SocialAccount(userId = user.id, provider = SocialProvider.KAKAO, providerUserId = "kakao-1"),
+        )
+
+        assertThrows(DataIntegrityViolationException::class.java) {
+            socialAccountRepository.saveAndFlush(
+                SocialAccount(userId = user.id, provider = SocialProvider.KAKAO, providerUserId = "kakao-2"),
+            )
+        }
+    }
+
+    @Test
+    fun `사용자별 provider 연동을 조회한다`() {
+        val user = newUser()
+        socialAccountRepository.saveAndFlush(
+            SocialAccount(userId = user.id, provider = SocialProvider.GOOGLE, providerUserId = "g-1"),
+        )
+
+        assertNotNull(socialAccountRepository.findByUserIdAndProvider(user.id, SocialProvider.GOOGLE))
+        assertNull(socialAccountRepository.findByUserIdAndProvider(user.id, SocialProvider.KAKAO))
+    }
+
+    @Test
     fun `사용자 저장 시 public_id가 자동 생성되고 public_id로 조회된다`() {
         val user = newUser()
 

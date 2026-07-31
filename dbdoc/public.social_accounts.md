@@ -22,6 +22,7 @@
 | social_accounts_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | social_accounts_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_social_accounts_provider_user | UNIQUE | UNIQUE (provider, provider_user_id) |
+| uq_social_accounts_user_provider | UNIQUE | UNIQUE (user_id, provider) |
 
 ## Indexes
 
@@ -30,6 +31,7 @@
 | social_accounts_pkey | CREATE UNIQUE INDEX social_accounts_pkey ON public.social_accounts USING btree (id) |
 | uq_social_accounts_provider_user | CREATE UNIQUE INDEX uq_social_accounts_provider_user ON public.social_accounts USING btree (provider, provider_user_id) |
 | idx_social_accounts_user | CREATE INDEX idx_social_accounts_user ON public.social_accounts USING btree (user_id) |
+| uq_social_accounts_user_provider | CREATE UNIQUE INDEX uq_social_accounts_user_provider ON public.social_accounts USING btree (user_id, provider) |
 
 ## Relations
 
