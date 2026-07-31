@@ -6,11 +6,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.social.GoogleIdTokenVerifier
 import com.knk.manyak.auth.social.RandomNicknameGenerator
-import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditWalletService
@@ -21,58 +17,28 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
-import org.springframework.http.HttpStatus
+import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
-import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 /**
  * POST /api/v1/auth/login/google 통합 검증.
  *
- * Google 호출은 가짜 [GoogleIdTokenVerifier](@Primary)로 대체해 외부 IO 없이 검증한다.
+ * Google 호출은 가짜 검증기([FakeSocialLoginConfig], @Primary)로 대체해 외부 IO 없이 검증한다.
  * - 유효 토큰("valid-...") → 200 + TokenResponse, find-or-create 부작용.
  * - verifier가 401을 던지는 토큰("invalid") → 401.
  * - 본문 누락/빈 idToken → 400.
  *
  * refresh 저장은 Redis 인프라 없이 검증하기 위해 InMemoryRefreshTokenStore(@Primary)로 대체한다.
+ * 가짜 배선을 [KakaoLoginIntegrationTests]와 같은 클래스로 두어 Spring 컨텍스트를 공유한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(FakeSocialLoginConfig::class)
 class GoogleLoginIntegrationTests {
-
-    @TestConfiguration
-    class FakeGoogleConfig {
-        // "invalid"는 401, 그 외(유효 토큰)는 토큰을 sub로 삼아 고정 사용자 정보를 돌려준다.
-        @Bean
-        @Primary
-        fun fakeGoogleIdTokenVerifier(): GoogleIdTokenVerifier =
-            GoogleIdTokenVerifier { idToken ->
-                when {
-                    idToken == "invalid" ->
-                        throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 Google ID 토큰입니다.")
-                    else -> SocialUserInfo(
-                        providerUserId = idToken,
-                        email = "user@example.com",
-                        name = GOOGLE_DISPLAY_NAME,
-                        picture = "https://example.com/p.png",
-                    )
-                }
-            }
-
-        companion object {
-            const val GOOGLE_DISPLAY_NAME = "테스터"
-        }
-
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
-    }
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -132,7 +98,7 @@ class GoogleLoginIntegrationTests {
         val user = userRepository.findById(social!!.userId).orElseThrow()
         assertThat(user.nickname).isNotBlank()
         assertThat(user.nickname.length).isLessThanOrEqualTo(RandomNicknameGenerator.MAX_NICKNAME_LENGTH)
-        assertThat(user.nickname).isNotEqualTo(FakeGoogleConfig.GOOGLE_DISPLAY_NAME)
+        assertThat(user.nickname).isNotEqualTo(FakeSocialLoginConfig.SOCIAL_DISPLAY_NAME)
     }
 
     @Test

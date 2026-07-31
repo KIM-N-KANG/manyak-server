@@ -1,6 +1,7 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.social.GoogleIdTokenVerifier
+import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.social.SocialIdTokenVerifier
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
@@ -14,9 +15,11 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import org.springframework.web.server.ResponseStatusException
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -47,8 +50,15 @@ class ServerAnalyticsWiringIntegrationTests {
 
         @Bean
         @Primary
-        fun fakeGoogleIdTokenVerifier(): GoogleIdTokenVerifier =
-            GoogleIdTokenVerifier { idToken -> SocialUserInfo(providerUserId = idToken) }
+        fun fakeSocialIdTokenVerifiers(): Map<SocialProvider, SocialIdTokenVerifier> {
+            val verifier = SocialIdTokenVerifier { idToken ->
+                if (idToken == "invalid") {
+                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 ID 토큰입니다.")
+                }
+                SocialUserInfo(providerUserId = idToken)
+            }
+            return mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier)
+        }
 
         @Bean
         @Primary
@@ -110,5 +120,37 @@ class ServerAnalyticsWiringIntegrationTests {
 
         val event = capturingPublisher.ofType("server_login_googleLogin_processed_succeeded").single()
         assertThat(event.eventProperties["is_new_user"]).isEqualTo(false)
+    }
+
+    @Test
+    fun `카카오 로그인 성공은 kakaoLogin 이벤트를 발행한다`() {
+        // provider별로 이벤트명이 갈린다(스펙 §6-4-2-8). 기존 googleLogin 이벤트명은 운영 발행 중이라 그대로 둔다.
+        restTestClient.post()
+            .uri("/api/v1/auth/login/kakao")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"wiring-kakao-sub"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val event = capturingPublisher.ofType("server_login_kakaoLogin_processed_succeeded").single()
+        assertThat(event.userId).isNotBlank()
+        assertThat(event.eventProperties["is_new_user"]).isEqualTo(true)
+        // 구글 이벤트로 새어 나가지 않아야 한다.
+        assertThat(capturingPublisher.ofType("server_login_googleLogin_processed_succeeded")).isEmpty()
+    }
+
+    @Test
+    fun `카카오 로그인 검증 실패는 kakaoLogin 실패 이벤트를 발행한다`() {
+        restTestClient.post()
+            .uri("/api/v1/auth/login/kakao")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"invalid"}""")
+            .exchange()
+            .expectStatus().isUnauthorized
+
+        val event = capturingPublisher.ofType("server_login_kakaoLogin_processed_failed").single()
+        // 아직 회원이 없어 게스트 식별로 발행되고, 서명·audience 실패는 validation으로 분류한다.
+        assertThat(event.userId).isNull()
+        assertThat(event.eventProperties["error_type"]).isEqualTo("validation")
     }
 }

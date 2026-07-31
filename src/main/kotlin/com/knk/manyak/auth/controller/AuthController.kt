@@ -1,12 +1,13 @@
 package com.knk.manyak.auth.controller
 
 import com.knk.manyak.auth.dto.LogoutRequest
-import com.knk.manyak.auth.dto.GoogleLoginRequest
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.dto.RefreshTokenRequest
+import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
+import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.social.GoogleLoginService
+import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
@@ -38,7 +39,7 @@ import java.util.UUID
 class AuthController(
     private val authTokenService: AuthTokenService,
     private val userRepository: UserRepository,
-    private val googleLoginService: GoogleLoginService,
+    private val socialLoginService: SocialLoginService,
     private val creditWalletService: CreditWalletService,
     private val attendanceRewardService: AttendanceRewardService,
 ) {
@@ -71,10 +72,42 @@ class AuthController(
     )
     @PostMapping("/login/google")
     fun loginWithGoogle(
-        @Valid @RequestBody request: GoogleLoginRequest,
+        @Valid @RequestBody request: SocialLoginRequest,
         // 신규 가입 시 디바이스 체험 사용량을 계정으로 스냅샷하는 데 쓴다(스펙 §4-3-7 B13). 게스트 요청과 같은 헤더이며, 없으면 스냅샷 생략.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
-    ): TokenResponse = googleLoginService.login(request.idToken, deviceId, request.handoffCode)
+    ): TokenResponse = socialLoginService.login(SocialProvider.GOOGLE, request.idToken, deviceId, request.handoffCode)
+
+    @Operation(
+        summary = "Kakao 로그인",
+        description = "Kakao OIDC ID 토큰을 검증해 사용자를 find-or-create하고 access+refresh 토큰을 발급합니다. " +
+            "요청·응답 계약은 Google 로그인과 동일합니다(검증 파라미터만 다름). " +
+            "Kakao 계정과 Google 계정은 합쳐지지 않고 별개 계정입니다(계정 통합 미도입 — 스펙 §4-5). " +
+            "토큰이 유효하지 않으면(서명·만료·issuer·audience 불일치) 401, 본문이 올바르지 않으면 400으로 응답합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "로그인 성공(토큰 발급)",
+                content = [Content(schema = Schema(implementation = TokenResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "요청 값이 올바르지 않음(idToken 누락 등)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "401",
+                description = "유효하지 않은 Kakao ID 토큰",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @PostMapping("/login/kakao")
+    fun loginWithKakao(
+        @Valid @RequestBody request: SocialLoginRequest,
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+    ): TokenResponse = socialLoginService.login(SocialProvider.KAKAO, request.idToken, deviceId, request.handoffCode)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",

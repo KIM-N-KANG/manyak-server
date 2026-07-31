@@ -20,6 +20,10 @@ manyak:
       # 로컬 더미 client-id를 기본값으로 두되 env로 덮어쓸 수 있게 한다.
       # 실제 Google 로그인을 로컬에서 검증하려면 MANYAK_GOOGLE_CLIENT_IDS=<본인 OAuth client-id>로 주입한다.
       client-ids: ${MANYAK_GOOGLE_CLIENT_IDS:local-dev-only.apps.googleusercontent.com}
+    kakao:
+      # 로컬 더미 REST API 키. 실제 Kakao 로그인을 로컬에서 검증하려면
+      # MANYAK_KAKAO_CLIENT_IDS=<카카오 앱 REST API 키>로 주입한다(더미 값으로는 aud 불일치 401이 정상).
+      client-ids: ${MANYAK_KAKAO_CLIENT_IDS:local-dev-only-kakao-rest-api-key}
   ai:
     chat:
       stub: true
