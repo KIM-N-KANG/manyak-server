@@ -36,11 +36,11 @@ data class TokenResponse(
     val isNewUser: Boolean = false,
 )
 
-@Schema(description = "Google 로그인 요청")
-data class GoogleLoginRequest(
+@Schema(description = "소셜 로그인 요청(Google·Kakao 공통)")
+data class SocialLoginRequest(
     @field:NotBlank
     @field:Schema(
-        description = "Google에서 발급받은 ID 토큰(JWT). 서버가 Google 공개키로 검증한다.",
+        description = "소셜 provider에서 발급받은 OIDC ID 토큰(JWT). 서버가 provider 공개키로 검증한다.",
         example = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMTAxNjkifQ.signature",
     )
     val idToken: String,

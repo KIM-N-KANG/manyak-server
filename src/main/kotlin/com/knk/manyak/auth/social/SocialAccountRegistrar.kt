@@ -14,15 +14,15 @@ import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 /**
- * Google 소셜 계정의 조회·생성(영속성) 책임만 가진다.
+ * 소셜 계정의 조회·생성(영속성) 책임만 가진다. provider는 인자로 받는다(흐름은 provider 무관 — 스펙 §4-5).
  *
- * [GoogleLoginService]와 분리된 별도 빈으로 두어 트랜잭션 프록시 경계를 확보한다(self-invocation 우회 방지).
+ * [SocialLoginService]와 분리된 별도 빈으로 두어 트랜잭션 프록시 경계를 확보한다(self-invocation 우회 방지).
  * 특히 [createUserAndAccount]는 독립 트랜잭션([Propagation.REQUIRES_NEW])이라,
  * 동시 첫 로그인으로 유니크 위반이 나면 **이 내부 트랜잭션만 rollback-only**가 되고
  * 바깥(로그인) 트랜잭션은 멀쩡히 재조회를 이어갈 수 있다.
  */
 @Component
-class GoogleAccountRegistrar(
+class SocialAccountRegistrar(
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
     private val nicknameGenerator: NicknameGenerator,
@@ -30,15 +30,16 @@ class GoogleAccountRegistrar(
 ) {
 
     /**
-     * (GOOGLE, providerUserId) 연동을 찾는다.
+     * ([provider], providerUserId) 연동을 찾는다. 조회 키에 provider가 들어가므로 같은 `sub` 문자열이라도
+     * provider가 다르면 별개 계정이다(계정 통합 미도입 — 스펙 §4-5 결정 기록).
      * - 있으면: `lastLoginAt`을 [now]로 갱신하고 연결된 [User]를 반환한다.
      * - 없으면: null.
      * - 연동은 있는데 [User]가 사라진 비정상 상태: 401(존재 여부를 노출하지 않도록 통일).
      */
     @Transactional
-    fun findExistingUser(info: SocialUserInfo, now: Instant): User? {
+    fun findExistingUser(provider: SocialProvider, info: SocialUserInfo, now: Instant): User? {
         val social = socialAccountRepository.findByProviderAndProviderUserId(
-            SocialProvider.GOOGLE,
+            provider,
             info.providerUserId,
         ) ?: return null
 
@@ -56,8 +57,8 @@ class GoogleAccountRegistrar(
      * 그 실패(rollback-only)를 이 트랜잭션 안에 가둬 바깥 로그인 트랜잭션이 재조회로 복구할 수 있게 한다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun createUserAndAccount(info: SocialUserInfo, now: Instant): User {
-        // 실명·외부 사진 노출을 피하기 위해 Google `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
+    fun createUserAndAccount(provider: SocialProvider, info: SocialUserInfo, now: Instant): User {
+        // 실명·외부 사진 노출을 피하기 위해 소셜 `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
         val nickname = nicknameGenerator.generate()
         val user = userRepository.save(
             User(
@@ -71,7 +72,7 @@ class GoogleAccountRegistrar(
         socialAccountRepository.save(
             SocialAccount(
                 userId = user.id,
-                provider = SocialProvider.GOOGLE,
+                provider = provider,
                 providerUserId = info.providerUserId,
                 email = info.email,
                 connectedAt = now,

@@ -30,6 +30,9 @@ manyak:
     google:
       # 테스트 전용 더미 client-id. 통합 테스트는 가짜 verifier(@Primary)를 쓰므로 실제 검증에는 쓰이지 않는다.
       client-ids: test-only.apps.googleusercontent.com
+    kakao:
+      # 위와 같은 이유의 더미 값(카카오 REST API 키 자리).
+      client-ids: test-only-kakao-rest-api-key
   ai:
     base-url: http://localhost:8000
     chat:

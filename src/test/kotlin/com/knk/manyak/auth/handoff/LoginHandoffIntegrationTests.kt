@@ -30,7 +30,7 @@ import java.util.UUID
  * **커스텀 `@TestConfiguration`을 두지 않는다.** 테스트 클래스마다 설정이 다르면 Spring 컨텍스트가 하나씩 더
  * 뜨는데, 이 스위트는 이미 컨텍스트 캐시 상한(32) 언저리라 하나만 늘어도 축출·재기동이 반복돼 CI에서
  * 다른 테스트의 HTTP 호출이 타임아웃난다(이 PR에서 실제로 관측). 그래서 가짜 Google 검증기가 필요한
- * 로그인 연동 검증은 Spring 없이 도는 [com.knk.manyak.auth.social.GoogleLoginServiceTest]가 맡고,
+ * 로그인 연동 검증은 Spring 없이 도는 [com.knk.manyak.auth.social.SocialLoginServiceTest]가 맡고,
  * 여기서는 소비를 [LoginHandoffService]에 직접 요청해 같은 규칙을 검증한다.
  */
 @ActiveProfiles("test")
