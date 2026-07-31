@@ -15,11 +15,13 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -55,7 +57,8 @@ class ServerAnalyticsWiringIntegrationTests {
                 if (idToken == "invalid") {
                     throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 ID 토큰입니다.")
                 }
-                SocialUserInfo(providerUserId = idToken)
+                // 실제 검증기는 항상 iat를 채운다. 계정 연동 재인증이 신선도를 fail-closed로 보므로 여기서도 채운다.
+                SocialUserInfo(providerUserId = idToken, issuedAt = Instant.now())
             }
             return mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier)
         }
@@ -137,6 +140,69 @@ class ServerAnalyticsWiringIntegrationTests {
         assertThat(event.eventProperties["is_new_user"]).isEqualTo(true)
         // 구글 이벤트로 새어 나가지 않아야 한다.
         assertThat(capturingPublisher.ofType("server_login_googleLogin_processed_succeeded")).isEmpty()
+    }
+
+    @Test
+    fun `계정 연동 성공은 socialLink 이벤트를 provider 소문자로 발행한다`() {
+        // 재인증(구글) → 링크 코드 → 카카오 연동. 실제 배선에서 이벤트가 나가는지 본다(KNK-739).
+        val access = restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"wiring-link-google"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["accessToken"] as String
+        capturingPublisher.events.clear()
+
+        val linkCode = restTestClient.post()
+            .uri("/api/v1/auth/links/reauth")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $access")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"provider":"GOOGLE","idToken":"wiring-link-google"}""")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(Map::class.java).returnResult().responseBody!!["linkCode"] as String
+
+        restTestClient.post()
+            .uri("/api/v1/auth/links/kakao")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $access")
+            .header("X-Manyak-Link-Code", linkCode)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"wiring-link-kakao"}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        val event = capturingPublisher.ofType("server_link_socialLink_processed_succeeded").single()
+        assertThat(event.userId).isNotBlank()
+        assertThat(event.eventProperties["provider"]).isEqualTo("kakao")
+        assertThat(event.eventProperties).doesNotContainKey("error_type")
+        // 재인증 단계는 별도 이벤트를 만들지 않는다(연동 이벤트 2종만 정의됨).
+        assertThat(capturingPublisher.ofType("server_link_socialLink_processed_failed")).isEmpty()
+    }
+
+    @Test
+    fun `계정 연동 실패는 error_type validation으로 발행한다`() {
+        val access = restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"wiring-link-fail-google"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["accessToken"] as String
+        capturingPublisher.events.clear()
+
+        // 링크 코드 없이 연동을 시도하면 403이고 실패 이벤트가 나간다.
+        restTestClient.post()
+            .uri("/api/v1/auth/links/kakao")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $access")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"wiring-link-fail-kakao"}""")
+            .exchange()
+            .expectStatus().isForbidden
+
+        val event = capturingPublisher.ofType("server_link_socialLink_processed_failed").single()
+        assertThat(event.eventProperties["provider"]).isEqualTo("kakao")
+        assertThat(event.eventProperties["error_type"]).isEqualTo("validation")
     }
 
     @Test

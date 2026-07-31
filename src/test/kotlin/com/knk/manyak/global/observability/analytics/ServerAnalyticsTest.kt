@@ -155,6 +155,32 @@ class ServerAnalyticsTest {
     }
 
     @Test
+    fun `계정 연동 성공은 provider만 싣는다`() {
+        seedMember(7L)
+
+        analytics.socialLinkSucceeded(7L, "kakao")
+
+        val e = publisher.events.single()
+        assertThat(e.eventType).isEqualTo("server_link_socialLink_processed_succeeded")
+        assertThat(e.userId).isEqualTo(memberPublicId.toString())
+        assertThat(e.eventProperties["provider"]).isEqualTo("kakao")
+        // 성공에는 error_type을 싣지 않는다(스펙 §6-4).
+        assertThat(e.eventProperties).doesNotContainKey("error_type")
+    }
+
+    @Test
+    fun `계정 연동 실패는 provider와 error_type을 싣는다`() {
+        seedMember(7L)
+
+        analytics.socialLinkFailed(7L, "google", AnalyticsErrorType.VALIDATION)
+
+        val e = publisher.events.single()
+        assertThat(e.eventType).isEqualTo("server_link_socialLink_processed_failed")
+        assertThat(e.eventProperties["provider"]).isEqualTo("google")
+        assertThat(e.eventProperties["error_type"]).isEqualTo("validation")
+    }
+
+    @Test
     fun `로그인 경로가 없는 예약 provider는 이벤트를 발행하지 않는다`() {
         // APPLE·NAVER는 enum 예약분이다(스펙 §4-5). 이벤트명을 지어내지 않고 조용히 건너뛴다(관측이 로그인을 깨지 않게).
         analytics.socialLoginSucceeded(SocialProvider.APPLE, userPublicId = memberPublicId.toString(), isNewUser = true)
