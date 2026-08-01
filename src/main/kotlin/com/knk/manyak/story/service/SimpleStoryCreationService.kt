@@ -6,6 +6,7 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.security.SuspensionGuard
@@ -228,6 +229,17 @@ class SimpleStoryCreationService(
         )
     }
 
+    /**
+     * AI trace 여정을 묶는 연결 식별자(KNK-751)를 스토리라인 호출용으로 만든다.
+     * creation_id는 이 요청의 request_id다 — AI 호출 전에 커밋되므로 실패해도 남고, 재시도에도 같은 값이다.
+     * 재생성 여부·부모 creation_id는 서버가 알 수 없어 프론트가 준 값만 전달하고, 없으면 헤더를 생략한다.
+     */
+    private fun storylineTraceLink(request: GenerateSimpleStorylinesRequest) = AiTraceLink(
+        creationId = request.requestId,
+        parentCreationId = request.parentCreationId,
+        isRegenerated = request.isRegenerated,
+    )
+
     private fun doGenerateSimpleStorylines(
         request: GenerateSimpleStorylinesRequest,
         userId: Long?,
@@ -254,7 +266,7 @@ class SimpleStoryCreationService(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest())
+                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request))
             }.result
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
@@ -272,7 +284,12 @@ class SimpleStoryCreationService(
             // 직접 추가 입력이 선택한 제공 태그로 해석될 수 있어 세션 태그 유니크(creation_session_id, tag_id) 전에 접는다.
             val tags = (predefinedTags + customTags).distinctBy { it.id }
             val creationSession = storyCreationSessionRepository.save(
-                StoryCreationSession(userId = userId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+                StoryCreationSession(
+                    userId = userId,
+                    status = StoryCreationSessionStatus.STORYLINES_GENERATED,
+                    // 이 세션을 만든 스토리라인 요청의 request_id(KNK-751). 이후 컴파일·채팅이 같은 creation_id를 이어 쓴다.
+                    storylineRequestId = request.requestId,
+                ),
             )
             storyCreationSessionTagRepository.saveAll(
                 tags.map { tag ->
@@ -471,7 +488,25 @@ class SimpleStoryCreationService(
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
         ) {
-            compileAndPersist(session, attributedUserId, selectedStoryline, genreTags, selectedLorebooks, aiRequest, request.requestId)
+            compileAndPersist(
+                session,
+                attributedUserId,
+                selectedStoryline,
+                genreTags,
+                selectedLorebooks,
+                aiRequest,
+                request.requestId,
+                // AI trace 여정(KNK-751): creation_id는 이 세션의 **스토리라인 단계** request_id다(완성 단계 requestId가 아니다).
+                // 이 컬럼 도입 전 세션은 null이라 헤더가 생략된다. 재생성 여부는 프론트가 준 값만 전달한다.
+                AiTraceLink(
+                    creationId = session.storylineRequestId,
+                    // 스토리라인 id는 Long 그대로다(스펙 §4-4: 생성 퍼널의 임시 리소스라 소유 개념이 없어 Long 노출 확정).
+                    // 같은 값이 compile 요청 본문에도 실려 있어 헤더에 넣는 것이 새 노출은 아니다.
+                    storylineId = selectedStoryline.id,
+                    storylineOrder = selectedStoryline.storylineOrder,
+                    isRegenerated = request.isRegenerated,
+                ),
+            )
         }
     }
 
@@ -607,13 +642,15 @@ class SimpleStoryCreationService(
         aiRequest: AiStoryCompileRequest,
         // 이 완성을 수행하는 생성 요청의 request_id. STORY_CREATED와 함께 세션에 박아, 회수 재실행이 이 요청인지 검증한다(KNK-644).
         requestId: UUID,
+        // Langfuse trace 연결 식별자(KNK-751). 위 requestId(완성 단계)와 달리 creation_id는 스토리라인 단계 값이다.
+        traceLink: AiTraceLink,
     ): StoryCreationOutcome {
         val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.compileStory(aiRequest)
+                storyAiClient.compileStory(aiRequest, traceLink)
             }
         } catch (exception: Exception) {
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리 생성 요청에 실패했습니다.", exception)

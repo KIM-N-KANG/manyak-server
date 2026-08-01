@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.client
 
+import com.knk.manyak.global.observability.AiTraceLink
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -15,6 +16,7 @@ class StubChatTurnAiClient : ChatTurnAiClient {
 
     override fun streamTurn(
         request: ChatTurnAiRequest,
+        traceLink: AiTraceLink,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         val aiOutput = buildAiOutput(request)
@@ -25,8 +27,11 @@ class StubChatTurnAiClient : ChatTurnAiClient {
         )
     }
 
-    override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult =
-        ChatChoicesResult(choices = buildChoices())
+    override fun generateChoices(
+        request: ChatTurnAiRequest,
+        aiOutput: String,
+        traceLink: AiTraceLink,
+    ): ChatChoicesResult = ChatChoicesResult(choices = buildChoices())
 
     private fun buildAiOutput(request: ChatTurnAiRequest): String {
         val echoed = request.userInput.trim().take(USER_INPUT_PREVIEW_LENGTH)

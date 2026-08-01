@@ -9,6 +9,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.feedback.repository.FeedbackRepository
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStoryCompileResponse
@@ -80,10 +81,10 @@ class OptionalAuthAttributionIntegrationTests {
         @Bean
         @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
-            override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
+            override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
 
-            override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse {
+            override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 compileStoryCalls.incrementAndGet()
                 return AiStoryCompileResponse(
                     stories = AiStoryMeta(

@@ -14,6 +14,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
@@ -56,9 +57,10 @@ class ChatTurnCreditRefundIntegrationTests {
         @Primary
         fun throwingChatTurnAiClient(): ChatTurnAiClient =
             object : ChatTurnAiClient {
-                override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult = ChatChoicesResult(emptyList())
+                override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
                 override fun streamTurn(
                     request: ChatTurnAiRequest,
+                    traceLink: AiTraceLink,
                     onToken: (String) -> Unit,
                 ): ChatTurnAiResult {
                     onToken("검")

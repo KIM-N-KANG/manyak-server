@@ -17,6 +17,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
@@ -65,8 +66,8 @@ class ChatTurnEndingMainEventIntegrationTests {
         @Volatile
         var result: ChatTurnAiResult = ChatTurnAiResult(aiOutput = "응답 본문", choices = listOf("선택 1"))
 
-        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult = ChatChoicesResult(emptyList())
-        override fun streamTurn(request: ChatTurnAiRequest, onToken: (String) -> Unit): ChatTurnAiResult {
+        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
+        override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult {
             lastRequest.set(request)
             onToken("응답")
             return result

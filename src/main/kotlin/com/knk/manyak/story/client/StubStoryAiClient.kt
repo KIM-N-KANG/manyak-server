@@ -1,5 +1,6 @@
 package com.knk.manyak.story.client
 
+import com.knk.manyak.global.observability.AiTraceLink
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component
 @ConditionalOnProperty(name = ["manyak.ai.story.stub"], havingValue = "true")
 class StubStoryAiClient : StoryAiClient {
 
-    override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
+    override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
         AiStorylinesResponse(
             stories = (1..STORYLINE_COUNT).map { index ->
                 AiStoryItem(
@@ -27,7 +28,7 @@ class StubStoryAiClient : StoryAiClient {
             meta = stubMeta(),
         )
 
-    override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse =
+    override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse =
         AiStoryCompileResponse(
             stories = AiStoryMeta(
                 title = "[스텁] ${request.selectedStoryline.trim().take(TITLE_PREVIEW_LENGTH).ifBlank { "제목 없음" }}",

@@ -1,5 +1,6 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStoryCompileResponse
 import com.knk.manyak.story.client.AiStoryItem
@@ -774,7 +775,7 @@ class StoryControllerIntegrationTests {
         var compileTransactionActive: Boolean? = null
             private set
 
-        override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse {
+        override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
             lastRequest = request
             transactionActiveDuringCall = TransactionSynchronizationManager.isActualTransactionActive()
             if (fail) {
@@ -796,7 +797,7 @@ class StoryControllerIntegrationTests {
             )
         }
 
-        override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse {
+        override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
             lastCompileRequest = request
             compileTransactionActive = TransactionSynchronizationManager.isActualTransactionActive()
             if (compileFail) {

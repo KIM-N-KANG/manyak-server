@@ -39,6 +39,11 @@ class StoryChat(
     @Column(name = "start_setting_id")
     val startSettingId: Long? = null,
 
+    // 이 채팅이 시작한 스토리의 간편 제작 creation_id(KNK-751). 채팅 생성 시 1회 해석해 박고,
+    // 이후 턴마다 조회 없이 그대로 AI 호출 헤더에 싣는다. 일반 제작(저작) 스토리는 null이라 헤더를 생략한다.
+    @Column(name = "creation_id", updatable = false)
+    val creationId: UUID? = null,
+
     @Column(length = 100)
     var title: String? = null,
 
