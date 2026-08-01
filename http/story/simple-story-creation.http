@@ -771,7 +771,9 @@ Accept: application/json
 ### 같은 creation_id로 실려 나가야 합니다(완성 요청의 requestId가 아님).
 
 ### 17. [KNK-751] 스토리라인 재생성 통과 필드(isRegenerated·parentCreationId)를 받아들인다
-# 서버는 두 값을 판단하지 않고 AI 헤더로 전달만 합니다. 생략하면 헤더 자체를 붙이지 않습니다.
+# isRegenerated는 서버가 판단하지 않고 AI 헤더로 전달만 합니다. 생략하면 헤더 자체를 붙이지 않습니다.
+# parentCreationId는 KNK-755부터 **검증 후 통과한 값만** 헤더로 나갑니다 — 아래처럼 임의 UUID를 보내면
+# 요청은 201로 정상 처리되지만 부모 링크는 NOT_FOUND로 기록되고 헤더는 생략됩니다(19~23번에서 자세히 확인).
 # 1번(태그 조회)을 먼저 실행해 genreTagId를 준비하세요.
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: {{deviceId}}
@@ -816,6 +818,139 @@ Accept: application/json
 
 > {%
     client.test("통과 필드가 있어도 스토리 완성이 정상 동작한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### ── [KNK-755] 스토리라인 재생성 체인 쓰기 검증 ──
+### parentCreationId는 더 이상 pass-through가 아닙니다. 서버가 ①자기참조 아님 ②존재 ③소유 연속성을 검증해
+### **통과한 값만** X-Manyak-Parent-Creation-Id 헤더로 내보내고 story_creation_requests.parent_request_id에 저장합니다.
+### 실패해도 400이 아니라 201입니다(관측이 비즈니스를 막지 않는다). 대신 보낸 원값과 사유가 행에 남습니다.
+###
+### 헤더는 백엔드→AI 방향이라 응답으로 보이지 않습니다. 저장 결과는 DB에서 직접 확인하세요:
+###   SELECT request_id, parent_request_id, attempted_parent_creation_id, parent_link_error
+###   FROM story_creation_requests
+###   WHERE request_id LIKE '75500000-0000-4000-8000-%' ORDER BY request_id;
+### 기대: ...0001은 3개 컬럼 전부 NULL(최초 생성) / ...0002는 parent_request_id=...0001·error NULL /
+###       ...0003은 parent NULL·NOT_FOUND / ...0004는 parent NULL·SELF_REFERENCE / ...0005는 parent NULL·OWNER_MISMATCH.
+### ...0003과 ...0001의 차이가 이번 설계의 핵심입니다 — 둘 다 parent_request_id는 NULL이지만,
+### 연결 실패한 행에만 attempted_parent_creation_id·parent_link_error가 남아 최초 생성으로 오판되지 않습니다.
+###
+### requestId·deviceId를 고정값으로 둔 이유(12~14번과 같은 이유): 부모와 자식이 **같은 값**을 가리켜야 체인·자기참조를
+### 눌러볼 수 있는데 {{$uuid}}는 쓸 때마다 새 값이라 두 요청을 이을 수 없습니다. 재실행하면 같은 requestId 멱등 replay로
+### 201이 그대로 나오고 행은 새로 쓰이지 않습니다(게스트 체험 한도도 소모되지 않습니다). 처음부터 다시 검증하려면
+### 아래 UUID들의 끝 두 자리와 @chainDeviceId를 함께 바꾸세요(deviceId만 바꾸면 소유 불일치로 409입니다).
+### 19~23번을 순서대로 실행하세요. 1번(태그 조회)이 선행돼야 genreTagId가 채워집니다.
+@chainDeviceId = chain-demo-device
+
+### 19. [KNK-755] 체인의 부모가 될 최초 생성 (parentCreationId 없음 → 3개 컬럼 전부 NULL)
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{chainDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "75500000-0000-4000-8000-000000000001",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": []
+}
+
+> {%
+    client.test("최초 생성은 정상 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 20. [KNK-755] 같은 기기가 19번을 부모로 재생성 → 검증 통과(헤더 forward + parent_request_id 저장)
+# 19번을 먼저 실행하세요. 부모가 아직 없으면 이 요청은 NOT_FOUND로 기록됩니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{chainDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "75500000-0000-4000-8000-000000000002",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": [],
+  "isRegenerated": true,
+  "parentCreationId": "75500000-0000-4000-8000-000000000001"
+}
+
+> {%
+    client.test("유효한 체인은 정상 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 21. [KNK-755] 존재하지 않는 부모 → 거부하지 않고 201, 사유는 NOT_FOUND로 기록
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{chainDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "75500000-0000-4000-8000-000000000003",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": [],
+  "isRegenerated": true,
+  "parentCreationId": "{{$uuid}}"
+}
+
+> {%
+    client.test("존재하지 않는 부모여도 400이 아니라 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 22. [KNK-755] 자기 자신을 부모로 지정 → 201, 사유는 SELF_REFERENCE
+# requestId와 parentCreationId가 같은 값입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{chainDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "75500000-0000-4000-8000-000000000004",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": [],
+  "isRegenerated": true,
+  "parentCreationId": "75500000-0000-4000-8000-000000000004"
+}
+
+> {%
+    client.test("자기참조여도 400이 아니라 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 23. [KNK-755] 다른 기기가 19번을 부모로 지정 → 201, 사유는 OWNER_MISMATCH
+# 디바이스 헤더만 다른 값입니다(게스트 소유는 device_id_hash로 판정). 회원끼리라면 같은 기기여도 user_id가
+# 다르면 거부됩니다 — 계정 A 로그아웃 후 계정 B의 재생성은 남의 여정이기 때문입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{chainDeviceId}}-other
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "75500000-0000-4000-8000-000000000005",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": [],
+  "isRegenerated": true,
+  "parentCreationId": "75500000-0000-4000-8000-000000000001"
+}
+
+> {%
+    client.test("타 소유자 부모여도 400이 아니라 201이다", () => {
         client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
     });
 %}

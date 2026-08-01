@@ -32,6 +32,8 @@ import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Lorebook
+import com.knk.manyak.story.entity.ParentCreationLink
+import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
@@ -41,6 +43,7 @@ import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.hasSameChainOwnerAs
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
@@ -149,6 +152,8 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
+        // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
+        val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
         // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
         val generate: (Boolean) -> GenerateSimpleStorylinesResponse = { _ ->
             val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
@@ -157,7 +162,7 @@ class SimpleStoryCreationService(
                 GuestTrialLimitService.Counter.STORYLINE_GENERATION,
             )
             try {
-                doGenerateSimpleStorylines(request, userId)
+                doGenerateSimpleStorylines(request, userId, parentLink)
             } catch (throwable: Throwable) {
                 guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
                 throw throwable
@@ -169,8 +174,37 @@ class SimpleStoryCreationService(
             userId,
             deviceId,
             GenerateSimpleStorylinesResponse::class.java,
-            generate,
+            parentLink,
+            block = generate,
         )
+    }
+
+    /**
+     * 재생성 체인의 부모 링크를 검증한다(KNK-755). 부모를 안 보냈으면 null(체인 시도 자체가 없었다).
+     *
+     * 실패해도 400으로 거부하지 않는다 — 이 레포 원칙대로 관측이 비즈니스를 막지 않는다. 대신 시도값과 사유를 남겨,
+     * "최초 생성"과 "재생성인데 연결 실패"를 DB에서 구분한다.
+     *
+     * 자기참조를 존재 확인보다 **먼저** 판정한다: DB 조회 없이 결정되고, 이 시점엔 자기 요청 행이 아직 삽입 전이라
+     * 존재 확인을 먼저 돌리면 자기참조가 NOT_FOUND로 오진되기 때문이다(진짜 사유가 가려진다).
+     */
+    private fun resolveParentLink(
+        request: GenerateSimpleStorylinesRequest,
+        userId: Long?,
+        deviceIdHash: String?,
+    ): ParentCreationLink? {
+        val attempted = request.parentCreationId ?: return null
+        val error = if (attempted == request.requestId) {
+            ParentLinkError.SELF_REFERENCE
+        } else {
+            val parent = storyCreationRequestRepository.findByRequestId(attempted)
+            when {
+                parent == null -> ParentLinkError.NOT_FOUND
+                !parent.hasSameChainOwnerAs(userId, deviceIdHash) -> ParentLinkError.OWNER_MISMATCH
+                else -> null
+            }
+        }
+        return ParentCreationLink(attempted, error)
     }
 
     /**
@@ -184,6 +218,8 @@ class SimpleStoryCreationService(
         ownerUserId: Long?,
         deviceId: String?,
         responseType: Class<T>,
+        // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
+        parentLink: ParentCreationLink? = null,
         // 콜백 인자는 이 실행이 회수(reclaim)인지다(완성 경로의 reconcile 게이트 — Codex P1). 미기록 직접 실행은 회수가 아니다.
         block: (isReclaim: Boolean) -> T,
     ): T {
@@ -193,7 +229,15 @@ class SimpleStoryCreationService(
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
             return block(false)
         }
-        return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
+        return storyCreationRequestRecorder.execute(
+            requestId,
+            stage,
+            ownerUserId,
+            ownerDeviceIdHash,
+            responseType,
+            parentLink,
+            block,
+        )
     }
 
     /**
@@ -232,17 +276,20 @@ class SimpleStoryCreationService(
     /**
      * AI trace 여정을 묶는 연결 식별자(KNK-751)를 스토리라인 호출용으로 만든다.
      * creation_id는 이 요청의 request_id다 — AI 호출 전에 커밋되므로 실패해도 남고, 재시도에도 같은 값이다.
-     * 재생성 여부·부모 creation_id는 서버가 알 수 없어 프론트가 준 값만 전달하고, 없으면 헤더를 생략한다.
+     *
+     * 부모 creation_id는 **검증을 통과한 값만** 나간다(KNK-755) — 미검증 pass-through는 존재하지 않거나 남의 여정을
+     * 가리키는 체인을 AI가 신뢰하게 만든다. 재생성 여부는 서버가 알 수 없어 프론트가 준 값을 그대로 전달한다.
      */
-    private fun storylineTraceLink(request: GenerateSimpleStorylinesRequest) = AiTraceLink(
+    private fun storylineTraceLink(request: GenerateSimpleStorylinesRequest, parentLink: ParentCreationLink?) = AiTraceLink(
         creationId = request.requestId,
-        parentCreationId = request.parentCreationId,
+        parentCreationId = parentLink?.validatedParentRequestId,
         isRegenerated = request.isRegenerated,
     )
 
     private fun doGenerateSimpleStorylines(
         request: GenerateSimpleStorylinesRequest,
         userId: Long?,
+        parentLink: ParentCreationLink?,
     ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
@@ -266,7 +313,7 @@ class SimpleStoryCreationService(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request))
+                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request, parentLink))
             }.result
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
@@ -389,7 +436,7 @@ class SimpleStoryCreationService(
             resolveCompletionOwnerUserId(request.simpleCreationId, userId),
             deviceId,
             SimpleStoryCreateResponse::class.java,
-            create,
+            block = create,
         )
     }
 

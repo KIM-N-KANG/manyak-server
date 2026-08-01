@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
@@ -55,9 +56,12 @@ class StoryCreationRequestRecorder(
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         responseType: Class<T>,
+        // 재생성 체인 부모 링크(KNK-755). 호출부가 이미 검증한 결과이며, 요청 행을 처음 삽입할 때만 기록된다
+        // (재요청은 이미 그 행이 최초 삽입 때 남긴 체인을 갖고 있다). 부모 없는 최초 생성이면 null.
+        parentLink: ParentCreationLink? = null,
         block: (isReclaim: Boolean) -> T,
     ): T =
-        when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash)) {
+        when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)) {
             is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
             is Claim.Run -> {
                 val result = try {
@@ -83,8 +87,9 @@ class StoryCreationRequestRecorder(
         stage: StoryCreationStage,
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
+        parentLink: ParentCreationLink?,
     ): Claim {
-        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash)
+        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         if (insertedId != null) {
             // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가).
             return Claim.Run(insertedId, isReclaim = false)
@@ -98,6 +103,7 @@ class StoryCreationRequestRecorder(
         stage: StoryCreationStage,
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
+        parentLink: ParentCreationLink?,
     ): Long? =
         try {
             txTemplate.execute {
@@ -108,6 +114,9 @@ class StoryCreationRequestRecorder(
                         deviceIdHash = ownerDeviceIdHash,
                         stage = stage,
                         status = StoryCreationRequestStatus.PENDING,
+                        parentRequestId = parentLink?.validatedParentRequestId,
+                        attemptedParentCreationId = parentLink?.attemptedParentCreationId,
+                        parentLinkError = parentLink?.error,
                     ),
                 ).id
             }
