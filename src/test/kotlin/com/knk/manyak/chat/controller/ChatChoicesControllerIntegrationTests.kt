@@ -12,6 +12,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.service.ChatTurnPersister
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.story.entity.Story
@@ -61,10 +62,10 @@ class ChatChoicesControllerIntegrationTests {
         @Bean
         @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
-            override fun streamTurn(request: ChatTurnAiRequest, onToken: (String) -> Unit): ChatTurnAiResult =
+            override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult =
                 error("streamTurn은 이 테스트에서 사용하지 않는다")
 
-            override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
+            override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult {
                 generateChoicesCalls.incrementAndGet()
                 if (failChoices) {
                     throw IllegalStateException("AI 선택지 강제 실패")

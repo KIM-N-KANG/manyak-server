@@ -10,7 +10,8 @@
 | status | varchar(30) |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
-| creation_request_id | uuid |  | true |  |  |  |
+| creation_request_id | uuid |  | true |  |  | KNK-644: 완성(STORY_CREATED) 시점 요청의 request_id. 회수 재실행 검증용이며 storyline_request_id(스토리라인 단계)와 다른 값이다. |
+| storyline_request_id | uuid |  | true |  |  | KNK-751: 스토리라인 생성(STORYLINE_GENERATION) 요청의 request_id. AI trace 여정을 묶는 creation_id로 헤더에 실린다. 이 컬럼 도입 전 세션은 NULL(헤더 생략). |
 
 ## Constraints
 
@@ -24,6 +25,7 @@
 | Name | Definition |
 | ---- | ---------- |
 | story_creation_sessions_pkey | CREATE UNIQUE INDEX story_creation_sessions_pkey ON public.story_creation_sessions USING btree (id) |
+| idx_story_creation_sessions_story | CREATE INDEX idx_story_creation_sessions_story ON public.story_creation_sessions USING btree (story_id) |
 
 ## Relations
 
@@ -41,6 +43,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   uuid creation_request_id
+  uuid storyline_request_id
 }
 "public.story_creation_session_tags" {
   bigint id

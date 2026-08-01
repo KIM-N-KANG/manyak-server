@@ -1,5 +1,6 @@
 package com.knk.manyak.story.client
 
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.MdcKeys
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -8,6 +9,7 @@ import org.springframework.web.client.RestClientException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.time.Duration
+import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -105,6 +107,79 @@ class RestStoryAiClientTests {
     }
 
     @Test
+    fun `스토리라인 호출에 연결 식별자 헤더를 싣는다`() {
+        val captured = mutableMapOf<String, String?>()
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/storylines") { exchange ->
+                TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
+                exchange.respondJson(STORYLINES_RESPONSE_JSON)
+            }
+            start()
+        }
+
+        val port = requireNotNull(server).address.port
+        val creationId = UUID.randomUUID()
+        val parentCreationId = UUID.randomUUID()
+        RestStoryAiClient("http://localhost:$port").createStorylines(
+            AiStorylinesRequest(genreTags = listOf("판타지"), protagonistTags = emptyList(), supportingTags = emptyList()),
+            AiTraceLink(creationId = creationId, parentCreationId = parentCreationId, isRegenerated = true),
+        )
+
+        assertEquals(creationId.toString(), captured["X-Manyak-Creation-Id"])
+        assertEquals(parentCreationId.toString(), captured["X-Manyak-Parent-Creation-Id"])
+        assertEquals("true", captured["X-Manyak-Is-Regenerated"])
+    }
+
+    @Test
+    fun `연결 식별자가 없으면 해당 헤더를 생략한다`() {
+        val captured = mutableMapOf<String, String?>()
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/storylines") { exchange ->
+                TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
+                exchange.respondJson(STORYLINES_RESPONSE_JSON)
+            }
+            start()
+        }
+
+        val port = requireNotNull(server).address.port
+        RestStoryAiClient("http://localhost:$port").createStorylines(
+            AiStorylinesRequest(genreTags = listOf("판타지"), protagonistTags = emptyList(), supportingTags = emptyList()),
+        )
+
+        TRACE_HEADER_NAMES.forEach { assertNull(captured[it], "$it 헤더는 값이 없으면 생략해야 한다") }
+    }
+
+    @Test
+    fun `compile 호출에 스토리라인 연결 식별자 헤더를 싣는다`() {
+        val captured = mutableMapOf<String, String?>()
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/compile") { exchange ->
+                TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
+                exchange.respondJson(COMPILE_RESPONSE_JSON)
+            }
+            start()
+        }
+
+        val port = requireNotNull(server).address.port
+        val creationId = UUID.randomUUID()
+        RestStoryAiClient("http://localhost:$port").compileStory(
+            AiStoryCompileRequest(
+                genreTags = listOf("판타지"),
+                protagonistTags = emptyList(),
+                supportingTags = emptyList(),
+                selectedStoryline = "선택된 스토리라인",
+                additionalInfo = "추가 정보",
+            ),
+            AiTraceLink(creationId = creationId, storylineId = 42L, storylineOrder = 2),
+        )
+
+        assertEquals(creationId.toString(), captured["X-Manyak-Creation-Id"])
+        // 스토리라인 id는 Long 그대로 나간다(스펙 §4-4).
+        assertEquals("42", captured["X-Manyak-Storyline-Id"])
+        assertEquals("2", captured["X-Manyak-Storyline-Order"])
+    }
+
+    @Test
     fun `AI 서버 응답이 지연되면 read timeout으로 실패한다`() {
         server = HttpServer.create(InetSocketAddress(0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
@@ -193,6 +268,15 @@ class RestStoryAiClientTests {
     }
 
     companion object {
+        /** KNK-751 연결 식별자 헤더. "값이 있으면 붙이고 없으면 생략"을 양방향으로 단언하기 위해 한곳에 모아 둔다. */
+        private val TRACE_HEADER_NAMES = listOf(
+            "X-Manyak-Creation-Id",
+            "X-Manyak-Parent-Creation-Id",
+            "X-Manyak-Storyline-Id",
+            "X-Manyak-Storyline-Order",
+            "X-Manyak-Is-Regenerated",
+        )
+
         private val STORYLINES_RESPONSE_JSON =
             """
             {

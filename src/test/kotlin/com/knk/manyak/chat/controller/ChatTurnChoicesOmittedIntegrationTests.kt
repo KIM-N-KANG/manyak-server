@@ -6,6 +6,7 @@ import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.story.entity.Story
@@ -54,12 +55,12 @@ class ChatTurnChoicesOmittedIntegrationTests {
         @Bean
         @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
-            override fun streamTurn(request: ChatTurnAiRequest, onToken: (String) -> Unit): ChatTurnAiResult {
+            override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult {
                 onToken("생성 ")
                 return ChatTurnAiResult(aiOutput = "생성된 본문입니다.", choices = streamedChoices)
             }
 
-            override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
+            override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult {
                 genChoiceCalls.incrementAndGet()
                 return ChatChoicesResult(choices = listOf("살핀다.", "나선다."))
             }

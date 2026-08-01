@@ -1,7 +1,9 @@
 package com.knk.manyak.chat.client
 
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.MdcKeys
 import java.time.Duration
+import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -241,6 +243,78 @@ class RestChatTurnAiClientTests {
         assertNull(recorded.getHeader("X-Manyak-Request-Id"))
         assertNull(recorded.getHeader("X-Manyak-Session-Id"))
         assertNull(recorded.getHeader("X-Manyak-Device-Id-Hash"))
+    }
+
+    @Test
+    fun `채팅 턴 호출에 연결 식별자 헤더를 싣는다`() {
+        server.enqueue(sseResponse("event: completed\ndata: {\"aiOutput\":\"끝\",\"choices\":[]}\n\n"))
+
+        val creationId = UUID.randomUUID()
+        val storyId = UUID.randomUUID()
+        val chatId = UUID.randomUUID()
+        val startSettingId = UUID.randomUUID()
+        client().streamTurn(
+            sampleRequest(),
+            AiTraceLink(
+                creationId = creationId,
+                storyId = storyId,
+                chatId = chatId,
+                startSettingId = startSettingId,
+                turnNumber = 4,
+                isRegenerated = false,
+            ),
+            onToken = {},
+        )
+
+        val recorded = server.takeRequest()
+        assertEquals(creationId.toString(), recorded.getHeader("X-Manyak-Creation-Id"))
+        assertEquals(storyId.toString(), recorded.getHeader("X-Manyak-Story-Id"))
+        assertEquals(chatId.toString(), recorded.getHeader("X-Manyak-Chat-Id"))
+        assertEquals(startSettingId.toString(), recorded.getHeader("X-Manyak-Start-Setting-Id"))
+        assertEquals("4", recorded.getHeader("X-Manyak-Turn-Number"))
+        assertEquals("false", recorded.getHeader("X-Manyak-Is-Regenerated"))
+    }
+
+    @Test
+    fun `연결 식별자가 없으면 해당 헤더를 생략한다`() {
+        server.enqueue(sseResponse("event: completed\ndata: {\"aiOutput\":\"끝\",\"choices\":[]}\n\n"))
+
+        // 일반 제작(저작) 스토리는 creation session이 없어 creation_id가 없다.
+        client().streamTurn(sampleRequest(), AiTraceLink(turnNumber = 1, isRegenerated = false), onToken = {})
+
+        val recorded = server.takeRequest()
+        assertNull(recorded.getHeader("X-Manyak-Creation-Id"))
+        assertNull(recorded.getHeader("X-Manyak-Story-Id"))
+        assertNull(recorded.getHeader("X-Manyak-Chat-Id"))
+        assertNull(recorded.getHeader("X-Manyak-Start-Setting-Id"))
+        assertEquals("1", recorded.getHeader("X-Manyak-Turn-Number"))
+    }
+
+    @Test
+    fun `선택지 호출에도 연결 식별자 헤더를 싣는다`() {
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"choices":["a","b","c"]}"""),
+        )
+
+        val chatId = UUID.randomUUID()
+        client().generateChoices(sampleRequest(), "끝", AiTraceLink(chatId = chatId, turnNumber = 2))
+
+        val recorded = server.takeRequest()
+        assertEquals(chatId.toString(), recorded.getHeader("X-Manyak-Chat-Id"))
+        assertEquals("2", recorded.getHeader("X-Manyak-Turn-Number"))
+    }
+
+    @Test
+    fun `user_source가 있으면 요청 바디에 그대로 통과시키고 없으면 생략한다`() {
+        server.enqueue(sseResponse("event: completed\ndata: {\"aiOutput\":\"끝\",\"choices\":[]}\n\n"))
+        client().streamTurn(sampleRequest().copy(userSource = "edited_choice"), onToken = {})
+        assertTrue(server.takeRequest().body.readUtf8().contains(""""user_source":"edited_choice""""))
+
+        server.enqueue(sseResponse("event: completed\ndata: {\"aiOutput\":\"끝\",\"choices\":[]}\n\n"))
+        client().streamTurn(sampleRequest(), onToken = {})
+        assertTrue("user_source" !in server.takeRequest().body.readUtf8(), "값이 없으면 필드를 생략해야 한다")
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.knk.manyak.chat.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonUnwrapped
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import java.time.Duration
@@ -45,17 +46,19 @@ class RestChatTurnAiClient(
 
     override fun streamTurn(
         request: ChatTurnAiRequest,
+        traceLink: AiTraceLink,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         var result: ChatTurnAiResult? = null
 
         // 리액티브 체인이 다른 스레드로 넘어가기 전에 호출 스레드의 MDC에서 상관관계 헤더를 캡처한다.
         // (구독 시점 스레드에는 MDC가 전파되지 않으므로 여기서 미리 읽어 둔다.)
-        val correlationHeaders = CorrelationHeaders.forwardingHeadersFromMdc()
+        // 도메인 연결 식별자(KNK-751)는 MDC가 아니라 인자로 오므로 여기서 합쳐 함께 forward한다.
+        val outboundHeaders = CorrelationHeaders.forwardingHeadersFromMdc() + traceLink.toHeaders()
 
         webClient.post()
             .uri(CHAT_TURNS_PATH)
-            .headers { headers -> correlationHeaders.forEach { (name, value) -> headers.set(name, value) } }
+            .headers { headers -> outboundHeaders.forEach { (name, value) -> headers.set(name, value) } }
             .accept(MediaType.TEXT_EVENT_STREAM)
             .bodyValue(request)
             .retrieve()
@@ -93,11 +96,15 @@ class RestChatTurnAiClient(
         return result ?: error("completed 이벤트 없이 AI 스트림이 종료되었습니다.")
     }
 
-    override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult {
-        val correlationHeaders = CorrelationHeaders.forwardingHeadersFromMdc()
+    override fun generateChoices(
+        request: ChatTurnAiRequest,
+        aiOutput: String,
+        traceLink: AiTraceLink,
+    ): ChatChoicesResult {
+        val outboundHeaders = CorrelationHeaders.forwardingHeadersFromMdc() + traceLink.toHeaders()
         val response = webClient.post()
             .uri(CHAT_CHOICES_PATH)
-            .headers { headers -> correlationHeaders.forEach { (name, value) -> headers.set(name, value) } }
+            .headers { headers -> outboundHeaders.forEach { (name, value) -> headers.set(name, value) } }
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
             .bodyValue(ChatChoicesAiRequest(request, aiOutput))

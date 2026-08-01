@@ -40,6 +40,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.LengthBuckets
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallContext
@@ -52,6 +53,7 @@ import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -88,6 +90,8 @@ class ChatService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
+    // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
+    private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -128,6 +132,11 @@ class ChatService(
                 userId = userId,
                 storyId = story.id,
                 startSettingId = startSetting?.id,
+                // AI trace 여정(KNK-751): 이 스토리를 만든 간편 제작 세션의 creation_id를 여기서 **한 번만** 해석해 박는다.
+                // 턴마다 역조회하지 않기 위해서다. 일반 제작(저작) 스토리는 세션이 없어 null이고 헤더가 생략된다.
+                creationId = storyCreationSessionRepository
+                    .findFirstByStoryIdOrderByIdAsc(story.id)
+                    ?.storylineRequestId,
             ),
         )
         structuredLogger.event(
@@ -452,13 +461,20 @@ class ChatService(
         // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val storyPublicId = story?.publicId?.toString().orEmpty()
-        val aiRequest = assembleAiRequest(chat, story, request.userInput)
+        // 이어쓰기가 만들 턴 번호의 예측치는 current_turn + 1이다(권위값은 저장이 확정하는 ai_call_logs.turn_number).
+        val aiCall = assembleAiRequest(
+            chat = chat,
+            story = story,
+            userInput = request.userInput,
+            turnNumber = chat.currentTurn + 1,
+            userSource = request.userSource,
+        )
 
         return streamTurnInternal(
             chatId = chatId,
             chat = chat,
             storyPublicId = storyPublicId,
-            aiRequest = aiRequest,
+            aiCall = aiCall,
             userId = userId,
             deviceId = deviceId,
             isRegenerated = false,
@@ -520,13 +536,21 @@ class ChatService(
         // (regenerateLastTurn은 judgment를 받지 않음). 스펙 §4-3-9/§4-3-10의 "직전 턴까지 상태로 재구성 후 새 메타로
         // 재기록"은 턴별 메타 델타 이력이 있어야 정확한데 현 스키마엔 없어 Phase 1 범위 밖으로 둔다. 엔딩 도달 턴은 위에서
         // 409로 막으므로 도달 불변식(채팅당 최초 1회)은 유지된다.
-        val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
+        // 재생성은 새 턴을 만들지 않고 마지막 턴을 교체하므로, 대상 턴 번호는 current_turn 그대로다(+1 아님).
+        val aiCall = buildAiRequest(
+            chat = chat,
+            story = story,
+            history = target.history,
+            userInput = target.userInput,
+            turnNumber = chat.currentTurn,
+            isRegenerated = true,
+        )
 
         return streamTurnInternal(
             chatId = chatId,
             chat = chat,
             storyPublicId = storyPublicId,
-            aiRequest = aiRequest,
+            aiCall = aiCall,
             userId = userId,
             deviceId = deviceId,
             isRegenerated = true,
@@ -574,7 +598,15 @@ class ChatService(
             return ChatChoicesResponse(existing.map { it.choiceText })
         }
 
-        val aiRequest = buildAiRequest(chat, story, target.history, target.userInput)
+        // 선택지는 이미 저장된 마지막 턴에 붙으므로 대상 턴 번호는 current_turn이다(새 턴을 만들지 않는다).
+        val aiCall = buildAiRequest(
+            chat = chat,
+            story = story,
+            history = target.history,
+            userInput = target.userInput,
+            turnNumber = chat.currentTurn,
+            isRegenerated = false,
+        )
 
         val recorded = try {
             aiCallRecorder.record(
@@ -586,7 +618,7 @@ class ChatService(
                 errorCode = { throwable -> if (throwable is ChatTurnAiException) throwable.code else "AI_CHOICE_FAILED" },
                 meta = { it.meta },
             ) {
-                chatTurnAiClient.generateChoices(aiRequest, target.aiOutput)
+                chatTurnAiClient.generateChoices(aiCall.request, target.aiOutput, aiCall.traceLink)
             }
         } catch (exception: Exception) {
             // 선택지 생성 실패는 502로 올려 프론트가 재시도한다(본문·판정은 이미 저장돼 있어 영향 없음, 스펙 §4-3-3).
@@ -669,7 +701,7 @@ class ChatService(
         chatId: String,
         chat: StoryChat,
         storyPublicId: String,
-        aiRequest: ChatTurnAiRequest,
+        aiCall: AiTurnCall,
         userId: Long?,
         deviceId: String?,
         isRegenerated: Boolean,
@@ -753,7 +785,7 @@ class ChatService(
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
                 ) {
-                    chatTurnAiClient.streamTurn(aiRequest) { token ->
+                    chatTurnAiClient.streamTurn(aiCall.request, aiCall.traceLink) { token ->
                         if (Thread.currentThread().isInterrupted) {
                             return@streamTurn
                         }
@@ -919,19 +951,41 @@ class ChatService(
      * 오프닝은 [ChatTurnStartSettings]로만 전달하고 history에는 포함하지 않으며,
      * 현재 입력은 아직 저장 전이므로 history에 들어가지 않는다.
      */
-    private fun assembleAiRequest(chat: StoryChat, story: Story?, userInput: String): ChatTurnAiRequest =
-        buildAiRequest(chat, story, assembleHistory(chat.id), userInput)
+    private fun assembleAiRequest(
+        chat: StoryChat,
+        story: Story?,
+        userInput: String,
+        turnNumber: Int,
+        userSource: String?,
+    ): AiTurnCall =
+        buildAiRequest(
+            chat = chat,
+            story = story,
+            history = assembleHistory(chat.id),
+            userInput = userInput,
+            turnNumber = turnNumber,
+            isRegenerated = false,
+            userSource = userSource,
+        )
 
     /**
      * 스토리 설정·시작 설정과 주어진 [history]·[userInput]으로 AI 채팅 턴 요청을 조립한다.
      * 이어쓰기는 전체 내역을, 재생성(§4-3-9)은 마지막 턴을 제외한 내역을 [history]로 넘긴다.
+     *
+     * AI 호출 헤더로 나갈 연결 식별자([AiTraceLink], KNK-751)도 같은 조회 결과로 함께 만든다 —
+     * 시작 설정 public_id가 이 조립에 이미 필요해, 헤더를 위해 다시 조회하지 않기 위해서다.
      */
     private fun buildAiRequest(
         chat: StoryChat,
         story: Story?,
         history: List<ChatHistoryMessage>,
         userInput: String,
-    ): ChatTurnAiRequest {
+        // 이번 호출이 만들 턴 번호의 **예측치**다(이어쓰기 current_turn + 1, 재생성·선택지는 그 턴 자체인 current_turn).
+        // 권위값이 아니며 최종 대조는 ai_call_logs.turn_number가 한다(번호 선점은 하지 않는다 — 실패가 번호를 태우면 안 됨).
+        turnNumber: Int,
+        isRegenerated: Boolean,
+        userSource: String? = null,
+    ): AiTurnCall {
         val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(chat.storyId)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
@@ -943,28 +997,46 @@ class ChatService(
                 ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
         }
 
-        return ChatTurnAiRequest(
-            genre = genre,
-            storySettings = ChatTurnStorySettings(
-                worldSetting = setting?.worldSetting.orEmpty(),
-                characterSetting = setting?.characterSetting.orEmpty(),
-                userRoleSetting = setting?.userRoleSetting.orEmpty(),
-                ruleSetting = setting?.ruleSetting.orEmpty(),
+        return AiTurnCall(
+            request = ChatTurnAiRequest(
+                genre = genre,
+                storySettings = ChatTurnStorySettings(
+                    worldSetting = setting?.worldSetting.orEmpty(),
+                    characterSetting = setting?.characterSetting.orEmpty(),
+                    userRoleSetting = setting?.userRoleSetting.orEmpty(),
+                    ruleSetting = setting?.ruleSetting.orEmpty(),
+                ),
+                startSettings = ChatTurnStartSettings(
+                    name = startSetting?.name.orEmpty(),
+                    prologue = startSetting?.prologue.orEmpty(),
+                    startSituation = startSetting?.startSituation.orEmpty(),
+                ),
+                history = history,
+                userInput = userInput,
+                summary = "",
+                userSource = userSource,
+                mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
+                targetMainEvent = targetMainEvent,
+                occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
+                endings = loadEligibleEndings(chat),
             ),
-            startSettings = ChatTurnStartSettings(
-                name = startSetting?.name.orEmpty(),
-                prologue = startSetting?.prologue.orEmpty(),
-                startSituation = startSetting?.startSituation.orEmpty(),
+            traceLink = AiTraceLink(
+                // 간편 제작 스토리만 값이 있다(채팅 생성 시 1회 해석해 박아 둔 값). 일반 제작은 null이라 헤더가 생략된다.
+                creationId = chat.creationId,
+                storyId = story?.publicId,
+                chatId = chat.publicId,
+                startSettingId = startSetting?.publicId,
+                turnNumber = turnNumber,
+                isRegenerated = isRegenerated,
             ),
-            history = history,
-            userInput = userInput,
-            summary = "",
-            mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
-            targetMainEvent = targetMainEvent,
-            occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
-            endings = loadEligibleEndings(chat),
         )
     }
+
+    /** AI 채팅 턴 호출 한 번에 필요한 요청 본문과 연결 식별자 헤더 재료(KNK-751). */
+    private data class AiTurnCall(
+        val request: ChatTurnAiRequest,
+        val traceLink: AiTraceLink,
+    )
 
     /** 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료). */
     private fun resolveOccurredMainEventNames(chatId: Long, mainEvents: List<StoryMainEvent>): List<String> {

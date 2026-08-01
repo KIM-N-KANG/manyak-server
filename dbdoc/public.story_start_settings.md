@@ -73,6 +73,7 @@ erDiagram
   bigint target_main_event_id FK
   integer target_progress_turns
   bigint reached_ending_id FK
+  uuid creation_id
 }
 "public.story_endings" {
   bigint id

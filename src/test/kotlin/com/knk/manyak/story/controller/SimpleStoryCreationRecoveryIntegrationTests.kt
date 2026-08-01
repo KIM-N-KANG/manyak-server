@@ -1,5 +1,6 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStoryCompileResponse
@@ -67,7 +68,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         @Bean
         @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
-            override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse {
+            override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
                 createStorylinesCalls.incrementAndGet()
                 if (failStorylines) {
                     throw IllegalStateException("AI 스토리라인 생성 강제 실패")
@@ -84,7 +85,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
                 )
             }
 
-            override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse {
+            override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 compileStoryCalls.incrementAndGet()
                 return AiStoryCompileResponse(
                     stories = AiStoryMeta(title = "복구된 스토리", oneLineIntro = "한 줄 소개", description = "설명"),

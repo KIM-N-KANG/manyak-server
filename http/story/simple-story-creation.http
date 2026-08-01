@@ -760,3 +760,62 @@ Accept: application/json
         client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
     });
 %}
+
+### ── [KNK-751] AI trace 연결 식별자 통과 필드 ──
+### 백엔드는 AI 호출 시 X-Manyak-Creation-Id / X-Manyak-Storyline-Id / X-Manyak-Storyline-Order /
+### X-Manyak-Is-Regenerated / X-Manyak-Parent-Creation-Id 를 outbound 헤더로 실어 보냅니다(Langfuse trace 연결).
+### 이 헤더는 백엔드→AI 방향이라 클라이언트 응답으로는 보이지 않습니다. 실제로 실렸는지는 manyak-ai 수신 로그나
+### Langfuse trace에서 확인하세요. 여기서는 **요청 계약**(통과 필드 수용 여부)만 눌러 봅니다.
+###
+### creation_id는 **스토리라인 단계의 requestId**입니다. 아래 17번의 requestId가 18번 compile 호출에도
+### 같은 creation_id로 실려 나가야 합니다(완성 요청의 requestId가 아님).
+
+### 17. [KNK-751] 스토리라인 재생성 통과 필드(isRegenerated·parentCreationId)를 받아들인다
+# 서버는 두 값을 판단하지 않고 AI 헤더로 전달만 합니다. 생략하면 헤더 자체를 붙이지 않습니다.
+# 1번(태그 조회)을 먼저 실행해 genreTagId를 준비하세요.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "selectedTagIds": [
+    {{genreTagId}}
+  ],
+  "customTags": [],
+  "isRegenerated": true,
+  "parentCreationId": "{{$uuid}}"
+}
+
+> {%
+    client.test("통과 필드가 있어도 스토리라인 생성이 정상 동작한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    if (response.status === 201) {
+        client.global.set("traceCreationSessionId", response.body.simpleCreationId);
+        client.global.set("traceStorylineId", response.body.storylines[1].id);
+    }
+%}
+
+### 18. [KNK-751] 완성 요청의 isRegenerated 통과 필드를 받아들인다
+# 17번을 먼저 실행해야 변수가 채워집니다. 이 호출의 AI 헤더 creation_id는 **17번의 requestId**이고,
+# 아래 requestId(완성 단계)가 아닙니다. storyline_order(1-based)도 함께 실립니다 — 위에서 2번째 후보를 골랐습니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{traceCreationSessionId}},
+  "storylineId": {{traceStorylineId}},
+  "additionalInfos": [],
+  "isRegenerated": false
+}
+
+> {%
+    client.test("통과 필드가 있어도 스토리 완성이 정상 동작한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}

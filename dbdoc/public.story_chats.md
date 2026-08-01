@@ -20,6 +20,7 @@
 | target_main_event_id | bigint |  | true |  | [public.story_main_events](public.story_main_events.md) |  |
 | target_progress_turns | integer | 0 | false |  |  |  |
 | reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
+| creation_id | uuid |  | true |  |  | KNK-751: 이 채팅이 시작한 스토리의 간편 제작 creation_id(story_creation_sessions.storyline_request_id). 일반 제작 스토리는 NULL. |
 
 ## Constraints
 
@@ -75,6 +76,7 @@ erDiagram
   bigint target_main_event_id FK
   integer target_progress_turns
   bigint reached_ending_id FK
+  uuid creation_id
 }
 "public.story_messages" {
   bigint id

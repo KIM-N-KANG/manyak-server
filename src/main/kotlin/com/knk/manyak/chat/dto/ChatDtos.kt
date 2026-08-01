@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
 import java.time.Instant
@@ -249,6 +250,21 @@ data class ContinueChatRequest(
         example = "다들 평범하게 속성을 발현한다. 나는 검사를 했지만 마법수정에서 아무런 빛이 나오지 않았다. 무속성 판정을 받고 단상 아래로 내려가는 중 마법수정에 금이 가더니 순식간에 깨져버렸다.",
     )
     val userInput: String,
+
+    // 입력 출처 통과 필드(KNK-751). 서버는 **추론하지 않고** 프론트가 준 값을 AI 바디로 통과시키기만 한다.
+    // 신뢰 경계이므로 허용값 밖은 400으로 거절한다(오타·미정의 값이 AI 프롬프트로 흘러가지 않도록).
+    @field:Pattern(
+        regexp = "choice|edited_choice|typed",
+        message = "userSource는 choice, edited_choice, typed 중 하나여야 합니다.",
+    )
+    @field:Schema(
+        description = "사용자 입력의 출처. 추천/선택지를 그대로 쓰면 choice, 고쳐 쓰면 edited_choice, 직접 입력하면 typed. " +
+            "서버는 판단하지 않고 AI 호출에 그대로 전달하며, 생략하면 전달하지 않습니다.",
+        allowableValues = ["choice", "edited_choice", "typed"],
+        example = "typed",
+        nullable = true,
+    )
+    val userSource: String? = null,
 )
 
 @Schema(description = "AI 응답 재생성 요청")
