@@ -16,12 +16,24 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * CreditWalletService의 기반 연산 통합 검증(스펙 §4-3-7 원장과 동시성).
  *
  * - reward: 지갑 생성·적립, 멱등 키 중복 시 미적립(rewarded=false), 잔액 = 원장 합계.
  * - deduct: 잔액 차감·음수 원장 행, 잔액 부족/지갑 부재 시 InsufficientCreditException.
+ *
+ * **월 상한 테스트의 창은 "월 모양"이 아니라 now 기준 상대 구간(±1일)이다**(KNK-753).
+ *
+ * [MonthlyRewardCap]은 시간대를 모르는 순수 `[windowStart, windowEnd)` Instant 비교이고, 그 구간을 KST 월 모양으로
+ * 만드는 건 호출부(`InviteService.kstMonthRangeOf`)의 책임이다. KST 월 경계 계산 자체는 `InviteServiceTest`가
+ * `Clock.fixed`로 이미 검증하므로, 여기서 월 모양을 흉내 내면 커버리지는 늘지 않고 시점 의존만 생긴다 —
+ * 창을 테스트 시작 시 한 번 계산하는데 원장 행의 created_at은 그 **뒤에** 찍히므로(엔티티 기본값 `Instant.now()`),
+ * 월 경계 직전에 실행되면 행이 다음 달로 넘어가 창 밖이 되고 단언이 깨진다(Codex P2).
+ *
+ * 그래서 이 클래스는 cap 메커니즘 자체(구간 안 집계가 상한 미만일 때만 적립)만 검증하고, 창은 now를 확실히
+ * 포함하거나(±1일) 확실히 제외하는(+1~+2일) 폭으로 잡아 경계 경합을 원천 제거한다.
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -136,11 +148,13 @@ class CreditWalletServiceIntegrationTest {
     @Test
     fun `월 상한 미만이면 적립하고 상한에 도달하면 같은 구간 적립을 건너뛴다`() {
         // 초대 보상 월 상한(스펙 §4-3-7): 지갑 락 안에서 구간 집계가 상한 미만일 때만 적립한다. 상한 3으로 좁혀 경계를 확인한다.
+        // 창은 now를 확실히 감싸는 상대 구간이다(월 모양을 쓰지 않는 이유는 클래스 KDoc 참조).
+        val now = Instant.now()
         val window = MonthlyRewardCap(
             reason = CreditReason.INVITE_REWARD,
             cap = 3,
-            windowStart = Instant.parse("2026-07-01T00:00:00Z"),
-            windowEnd = Instant.parse("2026-08-01T00:00:00Z"),
+            windowStart = now.minus(1, ChronoUnit.DAYS),
+            windowEnd = now.plus(1, ChronoUnit.DAYS),
         )
 
         // 서로 다른 멱등 키로 3회까지는 적립된다(구간 내 count가 0→1→2에서 상한 3 미만).
@@ -161,21 +175,23 @@ class CreditWalletServiceIntegrationTest {
 
     @Test
     fun `구간 밖의 기존 적립은 월 상한 집계에 포함되지 않는다`() {
-        // 6월(구간 밖)에 상한만큼 적립돼 있어도, 7월 구간 집계는 0이라 7월 적립은 통과해야 한다(KST 월 경계 검증).
-        val juneKey = "invite:old:1:$userId"
-        service.reward(userId, 500, CreditReason.INVITE_REWARD, juneKey)
-        // 위 6월 적립 행의 createdAt은 now(테스트 시각)이라, 창을 그보다 더 미래(8월)로 잡아 "구간 밖 과거"를 흉내낸다.
-        val augustWindow = MonthlyRewardCap(
+        // 창 밖에 상한만큼 적립돼 있어도, 창 안 집계는 0이라 이번 적립은 통과해야 한다.
+        val pastKey = "invite:old:1:$userId"
+        service.reward(userId, 500, CreditReason.INVITE_REWARD, pastKey)
+        // 위 적립 행의 createdAt은 now(테스트 시각)이라, 창을 now보다 확실히 뒤로 잡아 "구간 밖 과거"를 흉내낸다(클래스 KDoc 참조).
+        val now = Instant.now()
+        val futureWindow = MonthlyRewardCap(
             reason = CreditReason.INVITE_REWARD,
             cap = 1,
-            windowStart = Instant.parse("2027-08-01T00:00:00Z"),
-            windowEnd = Instant.parse("2027-09-01T00:00:00Z"),
+            windowStart = now.plus(1, ChronoUnit.DAYS),
+            windowEnd = now.plus(2, ChronoUnit.DAYS),
         )
 
-        val outcome = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:new:1:$userId", monthlyCap = augustWindow)
+        val outcome = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:new:1:$userId", monthlyCap = futureWindow)
 
         // 창 밖(과거) 적립은 집계에서 빠지므로 상한 1이어도 이번 적립은 통과한다.
         assertThat(outcome.rewarded).isTrue()
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.INVITE_REWARD }).isEqualTo(2)
     }
+
 }
