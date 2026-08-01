@@ -16,13 +16,24 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import java.time.Instant
-import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /**
  * CreditWalletService의 기반 연산 통합 검증(스펙 §4-3-7 원장과 동시성).
  *
  * - reward: 지갑 생성·적립, 멱등 키 중복 시 미적립(rewarded=false), 잔액 = 원장 합계.
  * - deduct: 잔액 차감·음수 원장 행, 잔액 부족/지갑 부재 시 InsufficientCreditException.
+ *
+ * **월 상한 테스트의 창은 "월 모양"이 아니라 now 기준 상대 구간(±1일)이다**(KNK-753).
+ *
+ * [MonthlyRewardCap]은 시간대를 모르는 순수 `[windowStart, windowEnd)` Instant 비교이고, 그 구간을 KST 월 모양으로
+ * 만드는 건 호출부(`InviteService.kstMonthRangeOf`)의 책임이다. KST 월 경계 계산 자체는 `InviteServiceTest`가
+ * `Clock.fixed`로 이미 검증하므로, 여기서 월 모양을 흉내 내면 커버리지는 늘지 않고 시점 의존만 생긴다 —
+ * 창을 테스트 시작 시 한 번 계산하는데 원장 행의 created_at은 그 **뒤에** 찍히므로(엔티티 기본값 `Instant.now()`),
+ * 월 경계 직전에 실행되면 행이 다음 달로 넘어가 창 밖이 되고 단언이 깨진다(Codex P2).
+ *
+ * 그래서 이 클래스는 cap 메커니즘 자체(구간 안 집계가 상한 미만일 때만 적립)만 검증하고, 창은 now를 확실히
+ * 포함하거나(±1일) 확실히 제외하는(+1~+2일) 폭으로 잡아 경계 경합을 원천 제거한다.
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -137,14 +148,13 @@ class CreditWalletServiceIntegrationTest {
     @Test
     fun `월 상한 미만이면 적립하고 상한에 도달하면 같은 구간 적립을 건너뛴다`() {
         // 초대 보상 월 상한(스펙 §4-3-7): 지갑 락 안에서 구간 집계가 상한 미만일 때만 적립한다. 상한 3으로 좁혀 경계를 확인한다.
-        // 구간은 **실행 시점의 KST 월**로 잡는다. 아래 적립이 만드는 원장 행의 created_at은 실제 now()라,
-        // 고정 날짜 구간을 쓰면 그 달이 지나는 순간 행이 구간 밖으로 나가 집계가 0이 되고 상한에 걸리지 않는다(KNK-753).
-        val (monthStart, monthEnd) = kstMonthRangeOf(Instant.now())
+        // 창은 now를 확실히 감싸는 상대 구간이다(월 모양을 쓰지 않는 이유는 클래스 KDoc 참조).
+        val now = Instant.now()
         val window = MonthlyRewardCap(
             reason = CreditReason.INVITE_REWARD,
             cap = 3,
-            windowStart = monthStart,
-            windowEnd = monthEnd,
+            windowStart = now.minus(1, ChronoUnit.DAYS),
+            windowEnd = now.plus(1, ChronoUnit.DAYS),
         )
 
         // 서로 다른 멱등 키로 3회까지는 적립된다(구간 내 count가 0→1→2에서 상한 3 미만).
@@ -165,18 +175,16 @@ class CreditWalletServiceIntegrationTest {
 
     @Test
     fun `구간 밖의 기존 적립은 월 상한 집계에 포함되지 않는다`() {
-        // 지난달(구간 밖)에 상한만큼 적립돼 있어도, 이번 달 구간 집계는 0이라 이번 달 적립은 통과해야 한다(KST 월 경계 검증).
+        // 창 밖에 상한만큼 적립돼 있어도, 창 안 집계는 0이라 이번 적립은 통과해야 한다.
         val pastKey = "invite:old:1:$userId"
         service.reward(userId, 500, CreditReason.INVITE_REWARD, pastKey)
-        // 위 적립 행의 createdAt은 now(테스트 시각)이라, 창을 **다음 KST 월**로 잡아 "구간 밖 과거"를 흉내낸다.
-        // 고정 미래 날짜(예: 2027-08)를 쓰면 그 달이 오는 순간 now()가 창 안으로 들어와 테스트가 깨진다(KNK-753 — 위 테스트와 같은 결함).
-        val nextMonthStart = kstMonthRangeOf(Instant.now()).second
-        val (windowStart, windowEnd) = kstMonthRangeOf(nextMonthStart)
+        // 위 적립 행의 createdAt은 now(테스트 시각)이라, 창을 now보다 확실히 뒤로 잡아 "구간 밖 과거"를 흉내낸다(클래스 KDoc 참조).
+        val now = Instant.now()
         val futureWindow = MonthlyRewardCap(
             reason = CreditReason.INVITE_REWARD,
             cap = 1,
-            windowStart = windowStart,
-            windowEnd = windowEnd,
+            windowStart = now.plus(1, ChronoUnit.DAYS),
+            windowEnd = now.plus(2, ChronoUnit.DAYS),
         )
 
         val outcome = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:new:1:$userId", monthlyCap = futureWindow)
@@ -186,22 +194,4 @@ class CreditWalletServiceIntegrationTest {
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.INVITE_REWARD }).isEqualTo(2)
     }
 
-    /**
-     * [instant]가 속한 KST 월의 [시작, 다음달 시작) 구간을 돌려준다. 월 상한 구간의 **기준 시간대는 KST**이며,
-     * 이는 유일한 프로덕션 호출부인 `InviteService.kstMonthRangeOf`와 같은 계산이다(경계가 UTC면 KST 기준 월초·월말
-     * 9시간이 어긋난 구간을 검증하게 된다).
-     *
-     * 원장 행의 created_at은 [com.knk.manyak.credit.entity.CreditTransaction]의 기본값 `Instant.now()`라
-     * 서비스에 고정 Clock을 주입해도 바뀌지 않는다. 그래서 이 테스트는 고정 시계 대신 실제 now() 기준으로
-     * 구간을 계산해 데이터와 경계를 같은 시간축에 맞춘다(KNK-753).
-     */
-    private fun kstMonthRangeOf(instant: Instant): Pair<Instant, Instant> {
-        val monthStartDate = instant.atZone(SEOUL_ZONE).toLocalDate().withDayOfMonth(1)
-        return monthStartDate.atStartOfDay(SEOUL_ZONE).toInstant() to
-            monthStartDate.plusMonths(1).atStartOfDay(SEOUL_ZONE).toInstant()
-    }
-
-    private companion object {
-        val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
-    }
 }
