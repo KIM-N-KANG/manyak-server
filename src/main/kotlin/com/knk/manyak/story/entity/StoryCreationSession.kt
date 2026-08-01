@@ -36,6 +36,11 @@ class StoryCreationSession(
     @Column(name = "creation_request_id")
     var creationRequestId: UUID? = null,
 
+    // 스토리라인 생성 요청의 request_id(KNK-751). 위 creation_request_id(완성 단계)와 **다른 단계**의 값이다.
+    // AI trace 여정(스토리라인 → 컴파일 → 채팅)을 묶는 creation_id로 AI 호출 헤더에 실린다.
+    @Column(name = "storyline_request_id")
+    var storylineRequestId: UUID? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     var status: StoryCreationSessionStatus,

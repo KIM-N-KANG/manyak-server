@@ -20,14 +20,15 @@ import java.time.Instant
 import java.util.Optional
 
 /**
- * GoogleAccountRegistrar의 find-or-create 계약을 고정한다(영속성 책임만 가진다).
+ * SocialAccountRegistrar의 find-or-create 계약을 고정한다(영속성 책임만 가진다).
  *
  * 저장소는 mock으로 두고 호출·인자만 검증한다(JPA flush는 통합 테스트의 관심사).
+ * provider는 인자로 받으므로 Google·Kakao 양쪽에 같은 계약이 적용되는지 함께 본다(스펙 §4-5 — 흐름은 provider 무관).
  *
  * - findExistingUser: 연동이 있으면 lastLoginAt 갱신 + User 반환, 없으면 null, User 부재면 401.
- * - createUserAndAccount: 닉네임을 [NicknameGenerator]로 발급해(Google `name`과 무관) User+SocialAccount를 생성한다.
+ * - createUserAndAccount: 닉네임을 [NicknameGenerator]로 발급해(소셜 클레임과 무관) User+SocialAccount를 생성한다.
  */
-class GoogleAccountRegistrarTest {
+class SocialAccountRegistrarTest {
 
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
@@ -35,27 +36,36 @@ class GoogleAccountRegistrarTest {
     // 닉네임 발급은 결정적 고정값으로 스텁해, 레지스트라가 생성기 결과를 그대로 쓰는지만 검증한다.
     private val nicknameGenerator = NicknameGenerator { GeneratedNickname(GENERATED_NICKNAME, GENERATED_NOUN) }
     private val profileImagePresetService: ProfileImagePresetService = mock(ProfileImagePresetService::class.java)
-    private val registrar = GoogleAccountRegistrar(
+    private val registrar = SocialAccountRegistrar(
         userRepository, socialAccountRepository, nicknameGenerator, profileImagePresetService,
     )
 
     @Test
-    fun `findExistingUser는 연동이 있으면 lastLoginAt을 갱신하고 User를 반환한다`() {
+    fun `구글 연동이 있으면 lastLoginAt을 갱신하고 User를 반환한다`() {
+        assertFindsExistingUser(SocialProvider.GOOGLE)
+    }
+
+    @Test
+    fun `카카오 연동이 있으면 lastLoginAt을 갱신하고 User를 반환한다`() {
+        assertFindsExistingUser(SocialProvider.KAKAO)
+    }
+
+    private fun assertFindsExistingUser(provider: SocialProvider) {
         val existingUser = User(id = 42L, nickname = "기존닉")
         val before = Instant.now().minusSeconds(3600)
         val social = SocialAccount(
             id = 7L,
             userId = 42L,
-            provider = SocialProvider.GOOGLE,
-            providerUserId = "google-sub-123",
+            provider = provider,
+            providerUserId = "social-sub-123",
             email = "alice@example.com",
             lastLoginAt = before,
         )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "google-sub-123"))
+        `when`(socialAccountRepository.findByProviderAndProviderUserId(provider, "social-sub-123"))
             .thenReturn(social)
         `when`(userRepository.findById(42L)).thenReturn(Optional.of(existingUser))
 
-        val user = registrar.findExistingUser(info("google-sub-123"), Instant.now())
+        val user = registrar.findExistingUser(provider, info("social-sub-123"), Instant.now())
 
         assertThat(user).isSameAs(existingUser)
         assertThat(social.lastLoginAt).isAfter(before)
@@ -63,10 +73,20 @@ class GoogleAccountRegistrarTest {
     }
 
     @Test
+    fun `findExistingUser는 provider가 다르면 같은 sub라도 찾지 않는다`() {
+        // 계정 통합은 도입하지 않는다(스펙 §4-5 결정 기록) — 조회 키는 (provider, provider_user_id)다.
+        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, "shared-sub"))
+            .thenReturn(null)
+
+        assertThat(registrar.findExistingUser(SocialProvider.KAKAO, info("shared-sub"), Instant.now())).isNull()
+        verify(socialAccountRepository).findByProviderAndProviderUserId(SocialProvider.KAKAO, "shared-sub")
+    }
+
+    @Test
     fun `findExistingUser는 연동이 없으면 null을 반환한다`() {
         `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(null)
 
-        assertThat(registrar.findExistingUser(info("sub"), Instant.now())).isNull()
+        assertThat(registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), Instant.now())).isNull()
     }
 
     @Test
@@ -75,21 +95,31 @@ class GoogleAccountRegistrarTest {
         `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(social)
         `when`(userRepository.findById(99L)).thenReturn(Optional.empty())
 
-        assertThatThrownBy { registrar.findExistingUser(info("sub"), Instant.now()) }
+        assertThatThrownBy { registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), Instant.now()) }
             .isInstanceOf(ResponseStatusException::class.java)
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")
     }
 
     @Test
-    fun `createUserAndAccount는 닉네임과 명사 매핑 프리셋 이미지로 User와 SocialAccount를 생성한다`() {
+    fun `구글 가입은 닉네임과 명사 매핑 프리셋 이미지로 User와 SocialAccount를 생성한다`() {
+        assertCreatesUserAndAccount(SocialProvider.GOOGLE)
+    }
+
+    @Test
+    fun `카카오 가입도 같은 규칙으로 User와 SocialAccount를 생성한다`() {
+        assertCreatesUserAndAccount(SocialProvider.KAKAO)
+    }
+
+    private fun assertCreatesUserAndAccount(provider: SocialProvider) {
         `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
         `when`(profileImagePresetService.imageUrlFor(GENERATED_NOUN)).thenReturn(PRESET_URL)
         `when`(profileImagePresetService.thumbnailBase64For(GENERATED_NOUN)).thenReturn(PRESET_THUMBNAIL)
 
         registrar.createUserAndAccount(
+            provider,
             SocialUserInfo(
-                providerUserId = "google-sub-123",
+                providerUserId = "social-sub-123",
                 email = "alice@example.com",
                 name = "Alice",
                 picture = "https://example.com/alice.png",
@@ -99,9 +129,9 @@ class GoogleAccountRegistrarTest {
 
         val userCaptor = ArgumentCaptor.forClass(User::class.java)
         verify(userRepository).save(userCaptor.capture())
-        // Google `name`("Alice")이 아니라 생성기가 발급한 닉네임을 써야 한다(실명 노출 방지).
+        // 소셜 `name`("Alice")이 아니라 생성기가 발급한 닉네임을 써야 한다(실명 노출 방지).
         assertThat(userCaptor.value.nickname).isEqualTo(GENERATED_NICKNAME)
-        // Google `picture`가 아니라 닉네임 명사에 매핑된 프리셋 URL·썸네일을 써야 한다(외부 사진 노출 방지, B7).
+        // 소셜 `picture`가 아니라 닉네임 명사에 매핑된 프리셋 URL·썸네일을 써야 한다(외부 사진 노출 방지, B7).
         assertThat(userCaptor.value.profileImageUrl).isEqualTo(PRESET_URL)
         assertThat(userCaptor.value.profileThumbnailBase64).isEqualTo(PRESET_THUMBNAIL)
         assertThat(userCaptor.value.status).isEqualTo(UserStatus.ACTIVE)
@@ -110,8 +140,8 @@ class GoogleAccountRegistrarTest {
 
         val socialCaptor = ArgumentCaptor.forClass(SocialAccount::class.java)
         verify(socialAccountRepository).save(socialCaptor.capture())
-        assertThat(socialCaptor.value.provider).isEqualTo(SocialProvider.GOOGLE)
-        assertThat(socialCaptor.value.providerUserId).isEqualTo("google-sub-123")
+        assertThat(socialCaptor.value.provider).isEqualTo(provider)
+        assertThat(socialCaptor.value.providerUserId).isEqualTo("social-sub-123")
         assertThat(socialCaptor.value.email).isEqualTo("alice@example.com")
         assertThat(socialCaptor.value.lastLoginAt).isNotNull()
     }

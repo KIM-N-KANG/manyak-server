@@ -29,4 +29,20 @@ object ApiErrorCodes {
 
     /** 초대 코드 입력(409): 계정당 평생 1회 자격을 이미 소진한 재제출이다(스펙 §4-3-7, KNK-567). */
     const val INVITE_ALREADY_REDEEMED = "INVITE_ALREADY_REDEEMED"
+
+    /**
+     * 계정 연동(403): 이미 연동된 provider로의 재인증에 실패했다(KNK-739).
+     * 토큰 무효·sub 불일치·미연동 provider·오래된 토큰을 사유 구분 없이 이 코드로 묶는다(계정 존재 여부 비노출).
+     * 세션은 유효하므로 401이 아니다 — 401로 내면 클라이언트가 세션 만료로 오인해 로그아웃한다.
+     */
+    const val REAUTH_FAILED = "REAUTH_FAILED"
+
+    /** 계정 연동(403): 연동하려는 소셜 ID 토큰 자체가 무효다(서명·만료·issuer·audience). 재인증 실패와 구분한다. */
+    const val SOCIAL_TOKEN_INVALID = "SOCIAL_TOKEN_INVALID"
+
+    /** 계정 연동(409): 그 소셜 계정이 이미 다른 회원에게 연동돼 있다. 합치는 것은 merge라 범위 밖이다(스펙 §4-5). */
+    const val SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER = "SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER"
+
+    /** 계정 연동(409): 내 계정에 그 provider가 이미(다른 소셜 계정으로) 연동돼 있다. 교체는 해제가 필요한데 범위 밖이다. */
+    const val PROVIDER_ALREADY_LINKED = "PROVIDER_ALREADY_LINKED"
 }

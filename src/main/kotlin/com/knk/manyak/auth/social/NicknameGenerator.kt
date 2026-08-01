@@ -11,7 +11,7 @@ data class GeneratedNickname(val text: String, val noun: String)
 /**
  * 회원가입 시 부여할 표시 닉네임을 만든다.
  *
- * 랜덤 발급을 구현체 뒤로 감춰, 사용하는 쪽([GoogleAccountRegistrar])은 값의 출처(랜덤·유도 등)에 의존하지 않는다.
+ * 랜덤 발급을 구현체 뒤로 감춰, 사용하는 쪽([SocialAccountRegistrar])은 값의 출처(랜덤·유도 등)에 의존하지 않는다.
  */
 fun interface NicknameGenerator {
     fun generate(): GeneratedNickname

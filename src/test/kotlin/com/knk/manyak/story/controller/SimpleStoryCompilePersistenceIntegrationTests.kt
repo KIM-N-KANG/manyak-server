@@ -1,5 +1,6 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStoryCompileResponse
@@ -84,10 +85,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Bean
         @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
-            override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
+            override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
 
-            override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse {
+            override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 capturedRequest = request
                 return AiStoryCompileResponse(
                     stories = AiStoryMeta("생성된 스토리", "한 줄 소개", "설명"),

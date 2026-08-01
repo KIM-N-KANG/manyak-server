@@ -1,6 +1,7 @@
 package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.dto.TokenResponse
+import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.handoff.LoginHandoff
 import com.knk.manyak.auth.handoff.LoginHandoffService
@@ -14,37 +15,39 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 /**
- * Google ID 토큰으로 로그인한다(검증 → find-or-create → 우리 토큰 발급).
+ * 소셜 ID 토큰으로 로그인한다(검증 → find-or-create → 우리 토큰 발급). 흐름은 provider와 무관하게 동일하고
+ * 검증 파라미터만 갈린다(스펙 §4-5) — provider는 호출 인자로 받아 검증기 선택·계정 조회·분석 이벤트에 흘린다.
  *
- * 1) [GoogleIdTokenVerifier]로 ID 토큰을 검증해 [SocialUserInfo]를 얻는다(실패는 401).
- * 2) [GoogleAccountRegistrar]로 (GOOGLE, providerUserId) 연동을 find-or-create한다.
+ * 1) [SocialIdTokenVerifier]로 ID 토큰을 검증해 [SocialUserInfo]를 얻는다(실패는 401).
+ * 2) [SocialAccountRegistrar]로 (provider, providerUserId) 연동을 find-or-create한다.
  *    - 있으면: 연결된 [User]를 재사용하고 `lastLoginAt`을 갱신한다.
- *    - 없으면: [User](nickname=name→email local-part→"사용자", 50자 제한, ACTIVE)와 [SocialAccount]를 생성한다.
+ *    - 없으면: [User](랜덤 닉네임·프리셋 이미지, ACTIVE)와 [com.knk.manyak.auth.entity.SocialAccount]를 생성한다.
  * 3) 해석된 [User]에 가입 보상 크레딧을 **멱등하게** 적립한다(KNK-392, 스펙 §4-3-7. 별도 API 없음).
  * 4) [AuthTokenService.issueTokens]로 access+refresh를 발급하고 신규 가입 여부(isNewUser)를 실어 반환한다.
  *
  * 초대 보상은 이 경로와 무관하다 — 코드 입력(POST /users/me/invite/redeem)에서 동기·원자적으로 적립한다
  * (KNK-567 개편. 구 링크 방식의 로그인 inviteCode 제출·self-heal 재적립(KNK-393)은 폐기).
  *
- * 트랜잭션은 [GoogleAccountRegistrar]가 가진다(이 빈은 트랜잭션 밖에서 오케스트레이션만 한다).
+ * 트랜잭션은 [SocialAccountRegistrar]가 가진다(이 빈은 트랜잭션 밖에서 오케스트레이션만 한다).
  * 그래서 동시 첫 로그인으로 생성이 유니크 위반([DataIntegrityViolationException])이면,
  * 실패한 내부 트랜잭션과 무관하게 한 번 더 조회해 상대 요청이 만든 계정을 재사용한다(아래 참고).
  *
  * 가입 보상은 **매 로그인마다** 해석된 User에 시도하되 멱등 키(signup:{userId})로 회원당 최대 1회만 적립한다.
  * 이유(자가 복구): 계정 생성 트랜잭션(REQUIRES_NEW)은 커밋됐는데 보상 적립 전에 실패·크래시가 나면 계정만 남고
- * 보상은 없다. 다음 로그인부턴 [GoogleAccountRegistrar.findExistingUser]가 그 계정을 찾아 생성 경로를 다시
+ * 보상은 없다. 다음 로그인부턴 [SocialAccountRegistrar.findExistingUser]가 그 계정을 찾아 생성 경로를 다시
  * 타지 않으므로, 보상을 생성 경로에만 두면 유실이 영구화된다. 매 로그인 멱등 적립이면 원장 행이 없는 첫 로그인이
  * 지급하고 이후 로그인은 값싼 no-op(existsByIdempotencyKey → rewarded=false)이라, 유실을 자가 복구하면서도 정확히 1회만 준다.
  */
 @Service
-class GoogleLoginService(
-    private val verifier: GoogleIdTokenVerifier,
-    private val registrar: GoogleAccountRegistrar,
+class SocialLoginService(
+    private val verifiers: Map<SocialProvider, SocialIdTokenVerifier>,
+    private val registrar: SocialAccountRegistrar,
     private val authTokenService: AuthTokenService,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
@@ -57,13 +60,18 @@ class GoogleLoginService(
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    fun login(idToken: String, deviceId: String? = null, handoffCode: String? = null): TokenResponse {
+    fun login(
+        provider: SocialProvider,
+        idToken: String,
+        deviceId: String? = null,
+        handoffCode: String? = null,
+    ): TokenResponse {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
-        // validation, Google 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
+        // validation, provider 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
         val info = try {
-            verifier.verify(idToken)
+            verifierFor(provider).verify(idToken)
         } catch (e: Exception) {
-            serverAnalytics.googleLoginFailed(classifyVerifyError(e))
+            serverAnalytics.socialLoginFailed(provider, classifyVerifyError(e))
             throw e
         }
         // 인앱 브라우저에서 넘어온 로그인이면 핸드오프에 보관된 원본 디바이스 ID가 요청 헤더보다 우선한다(스펙 §4-3-5).
@@ -74,7 +82,7 @@ class GoogleLoginService(
         // 빈 문자열을 그대로 넘기면 시드가 우회 시도로 오인해 소진 시드를 비가역 확정한다(§4-3-7).
         val effectiveDeviceId = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
         return try {
-            val (user, isNewUser) = findOrCreateUser(info)
+            val (user, isNewUser) = findOrCreateUser(provider, info)
             // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
             // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
             // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
@@ -96,17 +104,25 @@ class GoogleLoginService(
             }
             // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.
             val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
-            serverAnalytics.googleLoginSucceeded(user.publicId.toString(), isNewUser)
+            serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser)
             tokens
         } catch (e: Exception) {
             // 검증 통과 후 사용자 저장·보상·토큰 발급 중 실패는 서버 내부 처리 실패로 분류한다(스펙 §6-6-7).
-            serverAnalytics.googleLoginFailed(AnalyticsErrorType.SERVER)
+            serverAnalytics.socialLoginFailed(provider, AnalyticsErrorType.SERVER)
             throw e
         }
     }
 
     /**
-     * 토큰 검증 예외를 분석용 error_type으로 분류한다(스펙 §6-6-7). verifier는 잘못된 토큰과 **Google JWK 조회 네트워크
+     * provider의 검증기를 찾는다. 배선이 없는 provider(APPLE·NAVER는 enum에만 예약 — 스펙 §4-5)는
+     * 토큰을 보지 않고 401로 막는다(fail-closed). 검증 없는 로그인 경로가 열리는 것보다 거부가 안전하다.
+     */
+    private fun verifierFor(provider: SocialProvider): SocialIdTokenVerifier =
+        verifiers[provider]
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "지원하지 않는 로그인 방식입니다.")
+
+    /**
+     * 토큰 검증 예외를 분석용 error_type으로 분류한다(스펙 §6-6-7). verifier는 잘못된 토큰과 **provider JWK 조회 네트워크
      * 실패를 모두 401(ResponseStatusException)로 감싸므로**, 원인 체인을 먼저 훑어 연결·소켓·원격 키 소스 실패면 network로 본다
      * (Codex P2). 그 외 401은 서명·만료·audience 검증 실패라 validation, ResponseStatusException이 아니면 외부 호출 성격상 network.
      */
@@ -119,21 +135,21 @@ class GoogleLoginService(
      * 연동을 찾으면 그 User를, 없으면 새로 만들어 반환한다(find-or-create).
      *
      * 동시 첫 로그인 경합: 두 요청이 모두 조회에서 놓치고 둘 다 생성을 시도하면, 한쪽은
-     * 유니크 위반으로 실패한다. 이때 [GoogleAccountRegistrar.createUserAndAccount]는 독립 트랜잭션이라
+     * 유니크 위반으로 실패한다. 이때 [SocialAccountRegistrar.createUserAndAccount]는 독립 트랜잭션이라
      * 그 실패가 여기(트랜잭션 밖)로 전파돼도 우리는 rollback-only에 걸리지 않는다. 한 번 더 조회하면
      * 이번엔 상대 요청이 커밋한 계정이 보이므로 그 User를 재사용한다(500 대신 정상 로그인).
      * 재조회로도 못 찾으면 일시적 경합이 아니라 실제 정합성 문제이므로 원 예외를 그대로 드러낸다.
      */
-    private fun findOrCreateUser(info: SocialUserInfo): Pair<User, Boolean> {
+    private fun findOrCreateUser(provider: SocialProvider, info: SocialUserInfo): Pair<User, Boolean> {
         val now = Instant.now()
-        registrar.findExistingUser(info, now)?.let { return it to false }
+        registrar.findExistingUser(provider, info, now)?.let { return it to false }
 
         return try {
-            registrar.createUserAndAccount(info, now) to true
+            registrar.createUserAndAccount(provider, info, now) to true
         } catch (ex: DataIntegrityViolationException) {
             // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
             // 이 경로는 상대가 만든 기존 계정 재사용이므로 신규 아님(is_new_user=false).
-            (registrar.findExistingUser(info, Instant.now()) ?: throw ex) to false
+            (registrar.findExistingUser(provider, info, Instant.now()) ?: throw ex) to false
         }
     }
 

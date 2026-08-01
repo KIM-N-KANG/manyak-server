@@ -2,6 +2,7 @@ package com.knk.manyak.story.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 import org.springframework.beans.factory.annotation.Value
@@ -15,9 +16,13 @@ import java.net.URI
 import java.time.Duration
 
 interface StoryAiClient {
-    fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse
+    /**
+     * [traceLink]는 Langfuse trace를 제작 여정으로 묶는 도메인 연결 식별자다(KNK-751). MDC 상관관계 헤더와 달리
+     * 도메인 값이라 호출부가 인자로 넘긴다. 기본값(빈 링크)이면 해당 헤더가 전부 생략된다.
+     */
+    fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink = AiTraceLink()): AiStorylinesResponse
 
-    fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse
+    fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink = AiTraceLink()): AiStoryCompileResponse
 }
 
 data class AiStorylinesRequest(
@@ -184,10 +189,11 @@ class RestStoryAiClient(
     private val storylineRestClient = buildRestClient(connectTimeout, storylineReadTimeout)
     private val compileRestClient = buildRestClient(connectTimeout, compileReadTimeout)
 
-    override fun createStorylines(request: AiStorylinesRequest): AiStorylinesResponse =
+    override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
         storylineRestClient
             .post()
             .uri("/api/v1/story/storylines")
+            .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
             .body(request)
@@ -195,10 +201,11 @@ class RestStoryAiClient(
             .body(AiStorylinesResponse::class.java)
             ?: throw IllegalStateException("AI storylines response body is empty")
 
-    override fun compileStory(request: AiStoryCompileRequest): AiStoryCompileResponse =
+    override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse =
         compileRestClient
             .post()
             .uri("/api/v1/story/compile")
+            .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
             .body(request)

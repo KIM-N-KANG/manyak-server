@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability.analytics
 
+import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.MdcKeys
 import org.slf4j.LoggerFactory
@@ -84,15 +85,47 @@ class ServerAnalytics(
     fun feedbackSubmissionFailed(userId: Long?, errorType: AnalyticsErrorType) =
         emitForUser(EVENT_FEEDBACK_FAILED, userId, mapOf("error_type" to errorType.wireValue))
 
-    // --- 로그인(googleLogin) ---
+    // --- 로그인(googleLogin·kakaoLogin) ---
 
     /** 성공 시엔 이미 해석된 회원 public_id가 있으므로 조회 없이 회원 식별로 발행한다. */
-    fun googleLoginSucceeded(userPublicId: String, isNewUser: Boolean) =
-        publishSafely(EVENT_LOGIN_SUCCEEDED, userPublicId, mapOf("is_new_user" to isNewUser))
+    fun socialLoginSucceeded(provider: SocialProvider, userPublicId: String, isNewUser: Boolean) =
+        loginEvents(provider)?.let { (succeeded, _) ->
+            publishSafely(succeeded, userPublicId, mapOf("is_new_user" to isNewUser))
+        }
 
     /** 실패는 토큰 검증 단계라 아직 회원이 없다 — 게스트(device_id_hash)로 발행한다. */
-    fun googleLoginFailed(errorType: AnalyticsErrorType) =
-        publishSafely(EVENT_LOGIN_FAILED, userPublicId = null, mapOf("error_type" to errorType.wireValue))
+    fun socialLoginFailed(provider: SocialProvider, errorType: AnalyticsErrorType) =
+        loginEvents(provider)?.let { (_, failed) ->
+            publishSafely(failed, userPublicId = null, mapOf("error_type" to errorType.wireValue))
+        }
+
+    /**
+     * provider별 로그인 이벤트명 (성공, 실패). 이벤트명은 provider마다 갈리며, 기존 googleLogin 이벤트명은
+     * 운영에서 발행 중이라 그대로 유지한다(개명하면 대시보드·퍼널이 끊긴다).
+     * 로그인 경로가 없는 예약 provider(APPLE·NAVER)는 null이라 발행을 건너뛴다 — 관측이 로그인을 깨지 않아야 한다.
+     */
+    private fun loginEvents(provider: SocialProvider): Pair<String, String>? = when (provider) {
+        SocialProvider.GOOGLE -> EVENT_GOOGLE_LOGIN_SUCCEEDED to EVENT_GOOGLE_LOGIN_FAILED
+        SocialProvider.KAKAO -> EVENT_KAKAO_LOGIN_SUCCEEDED to EVENT_KAKAO_LOGIN_FAILED
+        else -> null
+    }
+
+    // --- 계정 연동(socialLink, KNK-739) ---
+
+    /** 연동 성공. provider는 소문자 표기(`google`·`kakao`)이며 성공에는 error_type을 싣지 않는다. */
+    fun socialLinkSucceeded(userId: Long, provider: String) =
+        emitForUser(EVENT_LINK_SUCCEEDED, userId, mapOf("provider" to provider))
+
+    /**
+     * 연동 실패. 실패 사유는 [AnalyticsErrorType] 3값으로만 구분한다 — 409의 동일/타 회원 여부를 프로퍼티로
+     * 나누면 특정 소셜 계정의 가입 여부를 알려주는 신호가 된다. social `sub`·ID 토큰·링크 코드는 싣지 않는다.
+     */
+    fun socialLinkFailed(userId: Long, provider: String, errorType: AnalyticsErrorType) =
+        emitForUser(
+            EVENT_LINK_FAILED,
+            userId,
+            mapOf("provider" to provider, "error_type" to errorType.wireValue),
+        )
 
     // --- 마이그레이션 ---
 
@@ -179,8 +212,12 @@ class ServerAnalytics(
         const val EVENT_CHAT_FAILED = "server_chat_aiMessage_processed_failed"
         const val EVENT_FEEDBACK_SUCCEEDED = "server_feedback_submission_processed_succeeded"
         const val EVENT_FEEDBACK_FAILED = "server_feedback_submission_processed_failed"
-        const val EVENT_LOGIN_SUCCEEDED = "server_login_googleLogin_processed_succeeded"
-        const val EVENT_LOGIN_FAILED = "server_login_googleLogin_processed_failed"
+        const val EVENT_GOOGLE_LOGIN_SUCCEEDED = "server_login_googleLogin_processed_succeeded"
+        const val EVENT_GOOGLE_LOGIN_FAILED = "server_login_googleLogin_processed_failed"
+        const val EVENT_KAKAO_LOGIN_SUCCEEDED = "server_login_kakaoLogin_processed_succeeded"
+        const val EVENT_KAKAO_LOGIN_FAILED = "server_login_kakaoLogin_processed_failed"
+        const val EVENT_LINK_SUCCEEDED = "server_link_socialLink_processed_succeeded"
+        const val EVENT_LINK_FAILED = "server_link_socialLink_processed_failed"
         const val EVENT_MIGRATION_SUCCEEDED = "server_login_migration_processed_succeeded"
         const val EVENT_MIGRATION_FAILED = "server_login_migration_processed_failed"
     }

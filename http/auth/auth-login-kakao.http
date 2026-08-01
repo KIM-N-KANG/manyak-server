@@ -1,0 +1,157 @@
+### Kakao 로그인(Auth) API 수동 검증 — POST /api/v1/auth/login/kakao
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-727] Kakao OIDC 연동(스펙 §4-5):
+###   - 클라이언트가 카카오에서 받은 OIDC ID 토큰(JWT)을 보내면, 서버가 카카오 공개키(JWK)로
+###     서명·만료·issuer(https://kauth.kakao.com)·audience(설정 REST API 키)를 검증한다.
+###   - 검증 성공 시 (provider=KAKAO, sub)로 SocialAccount를 find-or-create하고,
+###     우리 토큰(access HS256 JWT + 불투명 refresh)을 발급한다. 요청·응답 계약은 Google 로그인과 같다.
+###   - DB 마이그레이션은 없다(provider 체크 제약이 이미 KAKAO를 허용).
+###
+### 주의(카카오 고유 사항):
+###   - 카카오 `sub`는 **앱별(pairwise)** 이다. 카카오 디벨로퍼스 앱을 바꾸면 같은 사용자라도 sub가 바뀌어
+###     기존 회원이 자기 계정에 접근할 수 없다(사실상 비가역). 앱은 서비스 공용 계정의 단일 앱으로 고정한다.
+###   - 그래서 MANYAK_KAKAO_CLIENT_IDS 에는 **단일 앱의 REST API 키 1개만** 넣는다. 서로 다른 앱 키를 함께
+###     허용하면 앱 안에서만 유일한 sub가 앱 간에 충돌해 다른 사람이 같은 계정으로 오귀속될 수 있다.
+###   - 동의항목을 요청하지 않는다(scope는 openid 단독). 닉네임·이메일·프로필 사진은 오지 않으며,
+###     프로필은 provider와 무관하게 랜덤 닉네임 + 명사 매핑 프리셋 이미지로 발급된다.
+###   - Google 계정과는 **합쳐지지 않는다**. 같은 사람이 Google·Kakao로 각각 로그인하면 별개 계정이다.
+###
+### 주의(유효 토큰 준비):
+###   유효한 카카오 ID 토큰은 실제 카카오 로그인 플로우로만 얻을 수 있어 이 파일만으로는 발급할 수 없습니다. 따라서:
+###     - 준비가 필요 없는 에러 케이스(1~4번: 빈 본문/누락/형식 불량 토큰)는 바로 검증됩니다.
+###     - 해피 패스(5번)는 @kakaoIdToken 에 실제 ID 토큰을 채운 뒤 실행하세요.
+###   서버 설정(MANYAK_KAKAO_CLIENT_IDS)에 그 토큰의 aud(REST API 키)가 포함돼 있어야 통과합니다.
+###   설정이 비어 있으면(기본값) 카카오 토큰은 전부 401입니다(fail-closed — Google 설정과 독립).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동 (docker compose up -d) — 로그인은 실제 DB의 users/social_accounts 를 읽고 씁니다.
+###   - 환경변수: MANYAK_AUTH_JWT_SECRET(우리 토큰 서명 키), MANYAK_KAKAO_CLIENT_IDS(허용 REST API 키).
+
+@baseUrl = http://localhost:8080
+
+# 준비가 필요한 요청에서 사용. 실제 카카오 ID 토큰으로 교체하세요.
+@kakaoIdToken = PUT_A_VALID_KAKAO_ID_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) idToken 이 빈 문자열 → 400
+# @NotBlank 검증 실패. 본문 형식은 맞지만 값이 비어 있으면 400입니다.
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "" }
+
+> {%
+    client.test("빈 idToken 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.status === 400, `body.status가 400이 아닙니다. actual=${response.body.status}`);
+    });
+%}
+
+### 2. (에러) 본문 누락(idToken 필드 없음) → 400
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{}
+
+> {%
+    client.test("idToken 누락은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. (에러) 형식이 깨진/위조된 토큰 → 401
+# 임의 문자열은 카카오 JWK 서명 검증을 통과하지 못해 401입니다(실패 사유와 무관하게 일괄 401).
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "not-a-real-kakao-id-token.forged.value" }
+
+> {%
+    client.test("위조/형식 불량 토큰은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (에러) 다른 앱/다른 provider가 발급한 토큰 → 401
+# Google ID 토큰을 카카오 엔드포인트에 보내면 issuer 불일치로 401입니다.
+# 같은 이유로, 허용 목록에 없는 카카오 앱이 발급한 토큰도 audience 불일치로 401입니다
+# (앱별 sub가 같은 계정으로 수렴하지 않게 막는 방어선 — 위 주의 참고).
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "PASTE_A_GOOGLE_ID_TOKEN_OR_OTHER_APP_KAKAO_TOKEN" }
+
+> {%
+    client.test("다른 issuer/audience 토큰은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (해피 패스) 유효한 카카오 ID 토큰으로 로그인 → 200 + 우리 토큰 발급
+# @kakaoIdToken 을 실제 ID 토큰으로 교체한 뒤 실행하세요. 첫 호출은 사용자를 생성하고,
+# 같은 sub로 다시 호출하면 같은 사용자를 재사용합니다(둘 다 200, isNewUser만 true→false).
+#
+# X-Manyak-Device-Id 헤더(선택): 신규 가입(첫 호출) 시에만 이 디바이스의 남은 체험 횟수를 회원 계정으로
+# 스냅샷합니다(파밍 차단, B13). Google 로그인과 동일한 규칙입니다.
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: test-device-kakao-signup
+
+{ "idToken": "{{kakaoIdToken}}" }
+
+> {%
+    client.test("유효 ID 토큰 로그인은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰과 MANYAK_KAKAO_CLIENT_IDS를 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("access/refresh 와 메타가 내려온다", () => {
+        client.assert(typeof b.accessToken === "string" && b.accessToken.length > 0, "accessToken이 없습니다.");
+        client.assert(typeof b.refreshToken === "string" && b.refreshToken.length > 0, "refreshToken이 없습니다.");
+        client.assert(b.tokenType === "Bearer", `tokenType이 Bearer가 아닙니다. actual=${b.tokenType}`);
+        client.assert(typeof b.expiresIn === "number" && b.expiresIn > 0, `expiresIn이 양수가 아닙니다. actual=${b.expiresIn}`);
+    });
+    client.test("isNewUser 가 boolean 으로 내려온다", () => {
+        client.assert(typeof b.isNewUser === "boolean", `isNewUser 가 없습니다. actual=${b.isNewUser}`);
+    });
+    // 발급받은 토큰을 저장해 후속 검증(6번 /me)에 재사용한다.
+    client.global.set("accessToken", b.accessToken);
+    client.global.set("refreshToken", b.refreshToken);
+%}
+
+### 6. (해피 패스 연계) 5번에서 받은 access 로 /me → 200
+# 5번을 먼저 실행해 accessToken 전역 변수가 채워져야 합니다.
+# 카카오는 동의항목이 없어 닉네임·프로필 사진 클레임이 오지 않으므로, 닉네임은 반드시 서버가 발급한
+# "형용사 명사" 랜덤 값이어야 합니다(Google 가입과 동일 규칙).
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("로그인으로 받은 access 로 /me 는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(5번을 먼저 실행했는지 확인). actual=${response.status}`);
+    });
+    client.test("닉네임은 형용사+명사 랜덤 발급 형식이다(공백 1개)", () => {
+        const nickname = response.body.nickname;
+        client.assert(typeof nickname === "string" && nickname.length > 0, "nickname이 없습니다.");
+        client.assert(nickname.length <= 50, `nickname이 50자를 넘습니다. actual=${nickname.length}`);
+        client.assert(nickname.split(" ").length === 2, `"형용사 명사" 형식이 아닙니다. actual=${nickname}`);
+    });
+%}
+
+### 7. (자유 조회) 임의의 idToken 으로 로그인 직접 확인
+# 위 흐름 없이 특정 ID 토큰만 빠르게 눌러보고 싶을 때 사용합니다. 자리표시 값을 실제 토큰으로 교체하세요.
+POST {{baseUrl}}/api/v1/auth/login/kakao
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "PASTE_A_KAKAO_ID_TOKEN_TO_TRY" }

@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability.analytics
 
+import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.MdcKeys
@@ -112,7 +113,11 @@ class ServerAnalyticsTest {
 
     @Test
     fun `로그인 성공은 회원 public_id와 is_new_user를 싣는다`() {
-        analytics.googleLoginSucceeded(userPublicId = memberPublicId.toString(), isNewUser = true)
+        analytics.socialLoginSucceeded(
+            SocialProvider.GOOGLE,
+            userPublicId = memberPublicId.toString(),
+            isNewUser = true,
+        )
 
         val e = publisher.events.single()
         assertThat(e.eventType).isEqualTo("server_login_googleLogin_processed_succeeded")
@@ -123,12 +128,65 @@ class ServerAnalyticsTest {
 
     @Test
     fun `로그인 실패는 게스트로 발행하고 error_type을 싣는다`() {
-        analytics.googleLoginFailed(AnalyticsErrorType.VALIDATION)
+        analytics.socialLoginFailed(SocialProvider.GOOGLE, AnalyticsErrorType.VALIDATION)
 
         val e = publisher.events.single()
         assertThat(e.eventType).isEqualTo("server_login_googleLogin_processed_failed")
         assertThat(e.userId).isNull()
         assertThat(e.eventProperties["error_type"]).isEqualTo("validation")
+    }
+
+    @Test
+    fun `카카오 로그인은 provider별 이벤트명으로 발행한다`() {
+        // 이벤트명만 갈리고 프로퍼티 계약은 같다(스펙 §6-4-2-8). 기존 googleLogin 이벤트명은 운영 발행 중이라 유지한다.
+        analytics.socialLoginSucceeded(
+            SocialProvider.KAKAO,
+            userPublicId = memberPublicId.toString(),
+            isNewUser = false,
+        )
+        analytics.socialLoginFailed(SocialProvider.KAKAO, AnalyticsErrorType.VALIDATION)
+
+        assertThat(publisher.events.map { it.eventType }).containsExactly(
+            "server_login_kakaoLogin_processed_succeeded",
+            "server_login_kakaoLogin_processed_failed",
+        )
+        assertThat(publisher.events[0].eventProperties["is_new_user"]).isEqualTo(false)
+        assertThat(publisher.events[1].eventProperties["error_type"]).isEqualTo("validation")
+    }
+
+    @Test
+    fun `계정 연동 성공은 provider만 싣는다`() {
+        seedMember(7L)
+
+        analytics.socialLinkSucceeded(7L, "kakao")
+
+        val e = publisher.events.single()
+        assertThat(e.eventType).isEqualTo("server_link_socialLink_processed_succeeded")
+        assertThat(e.userId).isEqualTo(memberPublicId.toString())
+        assertThat(e.eventProperties["provider"]).isEqualTo("kakao")
+        // 성공에는 error_type을 싣지 않는다(스펙 §6-4).
+        assertThat(e.eventProperties).doesNotContainKey("error_type")
+    }
+
+    @Test
+    fun `계정 연동 실패는 provider와 error_type을 싣는다`() {
+        seedMember(7L)
+
+        analytics.socialLinkFailed(7L, "google", AnalyticsErrorType.VALIDATION)
+
+        val e = publisher.events.single()
+        assertThat(e.eventType).isEqualTo("server_link_socialLink_processed_failed")
+        assertThat(e.eventProperties["provider"]).isEqualTo("google")
+        assertThat(e.eventProperties["error_type"]).isEqualTo("validation")
+    }
+
+    @Test
+    fun `로그인 경로가 없는 예약 provider는 이벤트를 발행하지 않는다`() {
+        // APPLE·NAVER는 enum 예약분이다(스펙 §4-5). 이벤트명을 지어내지 않고 조용히 건너뛴다(관측이 로그인을 깨지 않게).
+        analytics.socialLoginSucceeded(SocialProvider.APPLE, userPublicId = memberPublicId.toString(), isNewUser = true)
+        analytics.socialLoginFailed(SocialProvider.NAVER, AnalyticsErrorType.VALIDATION)
+
+        assertThat(publisher.events).isEmpty()
     }
 
     @Test

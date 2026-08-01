@@ -1,6 +1,8 @@
 package com.knk.manyak.chat.client
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.aicall.AiCallMeta
 
 /**
@@ -14,9 +16,13 @@ interface ChatTurnAiClient {
     /**
      * 채팅 턴을 생성한다. 생성 도중 토큰 청크가 [onToken]으로 순차 발행되고,
      * 생성이 끝나면 누적된 [ChatTurnAiResult.aiOutput]과 선택지를 반환한다.
+     *
+     * [traceLink]는 Langfuse trace를 스토리 여정으로 묶는 도메인 연결 식별자다(KNK-751).
+     * MDC 상관관계 헤더와 달리 도메인 값이라 호출부가 인자로 넘긴다.
      */
     fun streamTurn(
         request: ChatTurnAiRequest,
+        traceLink: AiTraceLink = AiTraceLink(),
         onToken: (String) -> Unit,
     ): ChatTurnAiResult
 
@@ -24,7 +30,11 @@ interface ChatTurnAiClient {
      * 방금 생성된 본문([aiOutput])과 턴 재료로 다음 행동 선택지 3개를 생성한다(동기 REST, 스펙 §5-3-5).
      * 선택지 생성은 채팅 턴에서 분리된 별도 호출이라 SSE가 아니라 단발 JSON 응답이다.
      */
-    fun generateChoices(request: ChatTurnAiRequest, aiOutput: String): ChatChoicesResult
+    fun generateChoices(
+        request: ChatTurnAiRequest,
+        aiOutput: String,
+        traceLink: AiTraceLink = AiTraceLink(),
+    ): ChatChoicesResult
 }
 
 /** AI 선택지 생성 응답. 다음 행동 후보 3개와 호출 meta를 담는다(§5-3-5). */
@@ -49,6 +59,12 @@ data class ChatTurnAiRequest(
     @JsonProperty("user_input")
     val userInput: String,
     val summary: String,
+
+    // 사용자 입력의 출처(choice | edited_choice | typed). 프론트가 준 값을 서버가 추론 없이 통과시키기만 한다(KNK-751).
+    // 없으면 필드를 통째로 생략해, 값을 모를 때 AI가 임의 기본값으로 오해하지 않게 한다.
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("user_source")
+    val userSource: String? = null,
 
     // 주요 사건·엔딩 런타임 재료(스펙 §5-3-4, D11). 전부 선택 필드이며, 재료가 없으면 빈 값으로 하위호환된다.
     // main_events: 스토리의 주요 사건 전체. target_main_event: 현재 목표 사건 상태(백엔드가 되돌려 실음).

@@ -21,4 +21,10 @@ interface StoryCreationSessionRepository : JpaRepository<StoryCreationSession, L
     @Modifying
     @Query("UPDATE StoryCreationSession s SET s.userId = :userId WHERE s.storyId = :storyId AND s.userId IS NULL")
     fun claimByStoryId(@Param("storyId") storyId: Long, @Param("userId") userId: Long): Int
+
+    /**
+     * 완성 스토리 → 이 스토리를 만든 간편 제작 세션 역조회(KNK-751). 채팅 생성 시 creation_id를 1회 해석하는 데만 쓴다.
+     * 한 스토리에 세션은 하나지만(compile이 story_id를 박는다) 계약상 첫 행으로 고정한다. 일반 제작 스토리는 없어서 null이다.
+     */
+    fun findFirstByStoryIdOrderByIdAsc(storyId: Long): StoryCreationSession?
 }

@@ -380,3 +380,63 @@ Accept: text/event-stream, application/json
         }
     });
 %}
+
+### ── [KNK-751] 입력 출처(userSource) 통과와 AI trace 연결 헤더 ──
+### 백엔드는 채팅 AI 호출에 X-Manyak-Creation-Id(간편 제작 스토리만) / X-Manyak-Story-Id / X-Manyak-Chat-Id /
+### X-Manyak-Start-Setting-Id / X-Manyak-Turn-Number / X-Manyak-Is-Regenerated 를 outbound 헤더로 싣습니다.
+### 백엔드→AI 방향이라 아래 응답으로는 보이지 않습니다. 실제 수신은 manyak-ai 로그·Langfuse trace에서 확인하세요.
+###   - turn_number는 **예측치**입니다(이어쓰기 current_turn + 1, 재생성은 그 턴 그대로). 권위값은 ai_call_logs.turn_number입니다.
+###   - is_regenerated는 서버가 채웁니다(이어쓰기 false, /turns/regenerate/stream true).
+### userSource는 프론트가 준 값을 서버가 **추론 없이** AI 요청 바디로 통과시킵니다(허용값 밖은 400).
+
+### 16. [KNK-751] userSource를 실어 이어쓰기 → 200 (AI 바디로 그대로 통과)
+# 3번(채팅 생성)을 먼저 실행해 chatId를 준비하세요. 허용값: choice | edited_choice | typed.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "추천 선택지를 조금 고쳐서 입력한다.",
+  "userSource": "edited_choice"
+}
+
+> {%
+    client.test("허용값 userSource는 그대로 통과해 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 17. [KNK-751] 허용값 밖 userSource → 400 (신뢰 경계 검증)
+# 서버는 값을 추론하지 않으므로, 오타·미정의 값이 AI 프롬프트로 흘러가지 않도록 여기서 막습니다.
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "출처 값이 잘못된 입력.",
+  "userSource": "guessed"
+}
+
+> {%
+    client.test("허용값 밖 userSource는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 18. [KNK-751] userSource 생략은 그대로 동작한다 (필드를 AI에 보내지 않음)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream, application/json
+
+{
+  "userInput": "출처를 알리지 않고 직접 입력한다."
+}
+
+> {%
+    client.test("userSource 생략도 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}

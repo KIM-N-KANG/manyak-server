@@ -1,0 +1,195 @@
+### 계정 연동(Auth) API 수동 검증 — POST /api/v1/auth/links/reauth · POST /api/v1/auth/links/{provider}
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-739] 계정 연동(2단계 프로토콜):
+###   1단계 재인증  POST /auth/links/reauth        {provider, idToken}            → 201 {linkCode, expiresAt}
+###   2단계 연동    POST /auth/links/{provider}    {idToken} + X-Manyak-Link-Code → 201 (본문 없음)
+###   상태 조회     GET  /auth/me                  → linkedProviders: ["google", ...]
+###
+###   - 연동하면 그 provider로 로그인해도 같은 계정(같은 크레딧·서재)으로 들어옵니다.
+###   - **이미 연동된 provider로의 재인증이 선행돼야 합니다.** 연동은 계정에 로그인 수단을 영구히 추가하는
+###     작업이라 세션만으로는 부족합니다(공용 기기에 남은 세션 악용 차단).
+###   - 재인증 토큰은 **방금 발급받은 것**이어야 합니다(manyak.auth.link.reauth-max-age, 기본 10분).
+###   - 링크 코드는 짧게 만료되고(manyak.auth.link.code-ttl, 기본 5분) **성공했을 때만 소비**됩니다.
+###     403·409로 실패하면 코드가 남아 만료 전까지 재인증 없이 다시 시도할 수 있습니다.
+###   - 코드는 URL이 아니라 **헤더로만** 보냅니다(요청 URI는 구조화 로그·Sentry에 남습니다).
+###   - 새 계정도 새 세션도 만들지 않습니다. 응답에 토큰이 없고 기존 access·refresh가 그대로 유효합니다.
+###   - **이미 연동된 소셜 계정을 다시 보내면 409입니다**(내 계정이든 남의 계정이든). 멱등 성공으로 흘리지 않습니다 —
+###     최종 상태는 어느 쪽이든 같고, 클라이언트는 409를 받아도 GET /auth/me 로 현재 상태를 정확히 표시할 수 있습니다.
+###   - **연동 해제는 제공하지 않습니다**(범위 밖). 해제하면 그 provider 로그인이 새 계정을 만들어 계정이 다시 갈라집니다.
+###
+### 에러 계약:
+###   - 403 code=REAUTH_FAILED           재인증 실패(토큰 무효·sub 불일치·미연동 provider·오래된 토큰) 또는
+###                                      링크 코드 무효·만료·이미 소비됨·타인 소유. 사유는 구분하지 않습니다.
+###   - 403 code=SOCIAL_TOKEN_INVALID    연동할 소셜 ID 토큰 자체가 무효
+###   - 409 code=SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER  그 소셜 계정이 이미 다른 회원에게 연동됨
+###   - 409 code=PROVIDER_ALREADY_LINKED 내 계정에 그 provider가 이미 연동됨(같은 소셜 계정 재요청 포함)
+###   - 400 지원하지 않는 provider(apple·naver 등)·빈 idToken
+###   - 401 세션 없음·만료·위조, 또는 탈퇴(DELETED) 계정 / 403 정지(SUSPENDED) 계정
+###   세션이 유효한 상태의 실패에는 401을 쓰지 않습니다(401은 클라이언트가 세션 만료로 오인해 로그아웃합니다).
+###
+### 주의(유효 토큰 준비):
+###   실제 Google·Kakao ID 토큰은 각 소셜 로그인 플로우로만 얻을 수 있습니다.
+###     - 준비가 필요 없는 케이스(1·6·7번)는 바로 검증됩니다.
+###     - 2~5번은 @accessToken·@reauthIdToken·@targetIdToken 을 채운 뒤 실행하세요.
+###   accessToken 은 auth-login-google.http 5번을 실행하면 전역 변수로 자동 설정됩니다.
+###   재인증 토큰은 **로그인에 쓴 토큰을 재사용하지 말고** 새로 발급받으세요(오래되면 403).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres + Redis 기동 (docker compose up -d) — 링크 코드는 Redis에 보관됩니다.
+###   - V52 마이그레이션 적용(social_accounts UNIQUE(user_id, provider)).
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+# 이미 연동된 provider(보통 가입에 쓴 쪽)의 **새로 발급받은** ID 토큰.
+@reauthIdToken = PUT_A_FRESH_ID_TOKEN_OF_THE_LINKED_PROVIDER
+# 새로 연동할 provider 의 ID 토큰.
+@targetIdToken = PUT_AN_ID_TOKEN_OF_THE_PROVIDER_TO_LINK
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 인증 없이 재인증을 호출하면 401
+POST {{baseUrl}}/api/v1/auth/links/reauth
+Content-Type: application/json
+Accept: application/json
+
+{ "provider": "GOOGLE", "idToken": "anything" }
+
+> {%
+    client.test("인증 없는 재인증은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (1단계) 재인증 → 201 링크 코드 발급
+# provider 는 **이미 연동된** 쪽입니다(가입에 쓴 provider). 발급된 코드는 전역 변수로 저장해 3번에서 씁니다.
+POST {{baseUrl}}/api/v1/auth/links/reauth
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "provider": "GOOGLE", "idToken": "{{reauthIdToken}}" }
+
+> {%
+    client.test("재인증은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 오래됐는지 확인). actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    client.test("링크 코드와 만료 시각이 내려온다", () => {
+        client.assert(typeof response.body.linkCode === "string" && response.body.linkCode.length > 0, "linkCode가 없습니다.");
+        client.assert(Boolean(response.body.expiresAt), "expiresAt이 없습니다.");
+    });
+    client.global.set("linkCode", response.body.linkCode);
+    client.log("링크 코드 만료: " + response.body.expiresAt);
+%}
+
+### 3. (2단계) 연동 → 201 (본문 없음)
+# 2번을 먼저 실행해 linkCode 전역 변수가 채워져야 합니다. 경로의 provider 는 소문자입니다.
+POST {{baseUrl}}/api/v1/auth/links/kakao
+Authorization: Bearer {{accessToken}}
+X-Manyak-Link-Code: {{linkCode}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("연동은 201이고 본문이 없다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(!response.body || Object.keys(response.body).length === 0, "201에는 본문이 없어야 합니다.");
+    });
+%}
+
+### 4. (연계 확인) /auth/me 의 linkedProviders 에 반영됐는지
+# 연동 상태 전용 엔드포인트는 없습니다 — 상태 정본은 이 응답 하나입니다.
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("linkedProviders 는 소문자 배열이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        const providers = response.body.linkedProviders;
+        client.assert(Array.isArray(providers), "linkedProviders 가 배열이 아닙니다.");
+        providers.forEach((p) => client.assert(p === p.toLowerCase(), `소문자가 아닙니다: ${p}`));
+        client.log("연동된 provider: " + providers.join(", "));
+    });
+%}
+
+### 5. (재사용 금지) 성공에 쓴 링크 코드로 다시 연동하면 403
+# 코드는 성공 시 1회 소비됩니다. 재시도하려면 2번부터 다시 합니다.
+POST {{baseUrl}}/api/v1/auth/links/kakao
+Authorization: Bearer {{accessToken}}
+X-Manyak-Link-Code: {{linkCode}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("소비된 코드는 403 REAUTH_FAILED다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.code === "REAUTH_FAILED", `code가 REAUTH_FAILED가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 6. (에러) 링크 코드 없이 연동하면 403
+POST {{baseUrl}}/api/v1/auth/links/kakao
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("링크 코드 없는 연동은 403 REAUTH_FAILED다", () => {
+        client.assert(response.status === 403, `403이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.code === "REAUTH_FAILED", `code가 REAUTH_FAILED가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 7. (에러) 지원하지 않는 provider 면 400
+# apple·naver 는 enum 예약분이라 로그인·연동 경로가 없습니다.
+POST {{baseUrl}}/api/v1/auth/links/apple
+Authorization: Bearer {{accessToken}}
+X-Manyak-Link-Code: {{linkCode}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "some-apple-id-token" }
+
+> {%
+    client.test("지원하지 않는 provider는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 7-1. (재연동) 이미 연동한 소셜 계정을 새 코드로 다시 연동하면 409
+# 2번을 다시 실행해 새 linkCode 를 받은 뒤 이 요청을 누르세요(3번을 이미 성공시킨 상태여야 합니다).
+POST {{baseUrl}}/api/v1/auth/links/kakao
+Authorization: Bearer {{accessToken}}
+X-Manyak-Link-Code: {{linkCode}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("이미 연동된 소셜 계정 재요청은 409 PROVIDER_ALREADY_LINKED다", () => {
+        client.assert(response.status === 409, `409가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "PROVIDER_ALREADY_LINKED", `code가 PROVIDER_ALREADY_LINKED가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 8. (자유 조회) 임의 조합으로 재인증·연동 직접 확인
+# 자리표시 값을 실제 토큰으로 바꿔 원하는 조합을 눌러보세요(재인증 → 연동 순서).
+POST {{baseUrl}}/api/v1/auth/links/reauth
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{ "provider": "KAKAO", "idToken": "PASTE_A_FRESH_KAKAO_ID_TOKEN" }

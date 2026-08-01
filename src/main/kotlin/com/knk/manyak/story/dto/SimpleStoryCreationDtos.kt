@@ -54,6 +54,22 @@ data class GenerateSimpleStorylinesRequest(
         ),
     )
     val customTags: List<SimpleStoryCustomTagRequest> = emptyList(),
+
+    // AI trace 연결용 통과 필드(KNK-751). 스토리라인 재생성 여부와 그 직전 생성의 creation_id는 서버가 알 수 없어
+    // 프론트가 보내면 AI 호출 헤더로 그대로 전달만 하고, 없으면 헤더를 생략한다(임의 값 생성 금지).
+    @field:Schema(
+        description = "이 스토리라인 생성이 재생성인지 여부. 서버는 판단하지 않고 AI 호출에 그대로 전달합니다.",
+        example = "true",
+        nullable = true,
+    )
+    val isRegenerated: Boolean? = null,
+
+    @field:Schema(
+        description = "재생성이면 직전 생성의 creation_id(=그 요청의 requestId). 서버는 생성하지 않고 전달만 합니다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val parentCreationId: UUID? = null,
 ) {
     @AssertTrue(message = "selectedTagIds 또는 customTags 중 하나 이상은 필요합니다.")
     @Schema(hidden = true)
@@ -215,6 +231,14 @@ data class CreateSimpleStoryRequest(
     // 프론트 최악값(자유 텍스트 10 + 스토리라인당 추천 태그 3 = 13)을 단일 배열로 그대로 수용한다(스펙 간극 B5).
     @field:Size(max = 13)
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
+
+    // AI trace 연결용 통과 필드(KNK-751). 서버는 판단하지 않고 전달만 하며, 없으면 헤더를 생략한다.
+    @field:Schema(
+        description = "이 완성 요청이 재생성인지 여부. 서버는 판단하지 않고 AI 호출에 그대로 전달합니다.",
+        example = "false",
+        nullable = true,
+    )
+    val isRegenerated: Boolean? = null,
 )
 
 @Schema(description = "간편 제작 스토리 생성 응답")
