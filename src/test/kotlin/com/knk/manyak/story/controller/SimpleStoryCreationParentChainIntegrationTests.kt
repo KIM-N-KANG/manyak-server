@@ -52,8 +52,15 @@ import java.util.concurrent.atomic.AtomicReference
 class ParentChainCapturingStoryAiClient : StoryAiClient {
     val storylineLink = AtomicReference<AiTraceLink>()
 
+    /** true면 다음 스토리라인 호출이 실패한다(요청 행을 FAILED로 만들어 재실행 경로를 재현하는 용도). */
+    var failNextStorylineCall: Boolean = false
+
     override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
         storylineLink.set(traceLink)
+        if (failNextStorylineCall) {
+            failNextStorylineCall = false
+            throw IllegalStateException("AI 스토리라인 생성 실패(테스트)")
+        }
         return AiStorylinesResponse(
             stories = (1..3).map { AiStoryItem(id = it, storyline = "스토리라인 $it", recommendedInfos = listOf("정보 $it")) },
             meta = AiResponseMeta(),
@@ -217,6 +224,27 @@ class SimpleStoryCreationParentChainIntegrationTests {
         assertThat(failed.parentLinkError).isNotNull()
     }
 
+    @Test
+    fun `재실행은 재시도 본문이 아니라 요청 행에 저장된 체인을 헤더에 싣는다`() {
+        // Codex P2: 재실행(FAILED 재시도)은 요청 행을 새로 넣지 않아 체인이 최초 삽입 값 그대로다.
+        // 그런데 재시도 본문으로 다시 만든 링크를 헤더에 실으면 정본 컬럼과 다른 체인이 trace로 나간다.
+        val parentId = postStorylines(UUID.randomUUID())
+        val childId = UUID.randomUUID()
+        storyAiClient.failNextStorylineCall = true
+        postStorylines(childId, parentCreationId = parentId, expectCreated = false)
+
+        // 같은 requestId로 재시도하되 부모를 **빼고** 보낸다.
+        postStorylines(childId)
+
+        assertThat(storyAiClient.storylineLink.get().parentCreationId)
+            .`as`("재실행 헤더는 저장된 부모를 그대로 싣는다(재시도 본문이 부모를 빼도 체인이 끊기지 않는다)")
+            .isEqualTo(parentId)
+        val row = rowOf(childId)
+        assertThat(row.parentRequestId).isEqualTo(parentId)
+        assertThat(row.attemptedParentCreationId).isEqualTo(parentId)
+        assertThat(row.parentLinkError).isNull()
+    }
+
     private fun assertRejected(childId: UUID, attempted: UUID, expected: ParentLinkError) {
         assertThat(storyAiClient.storylineLink.get().parentCreationId)
             .`as`("검증에 실패한 부모는 헤더로 나가지 않는다")
@@ -246,12 +274,16 @@ class SimpleStoryCreationParentChainIntegrationTests {
             ),
         )
 
-    /** 스토리라인 생성을 호출하고 그 요청의 creation_id(=requestId)를 돌려준다. */
+    /**
+     * 스토리라인 생성을 호출하고 그 요청의 creation_id(=requestId)를 돌려준다.
+     * [expectCreated]가 false면 실패 응답(AI 실패 재현)을 기대해 상태 코드를 검사하지 않는다.
+     */
     private fun postStorylines(
         requestId: UUID,
         deviceId: String = "test-device",
         authorization: String? = null,
         parentCreationId: UUID? = null,
+        expectCreated: Boolean = true,
     ): UUID {
         val parentField = parentCreationId?.let { ""","isRegenerated":true,"parentCreationId":"$it"""" }.orEmpty()
         val spec = restTestClient.post()
@@ -259,9 +291,11 @@ class SimpleStoryCreationParentChainIntegrationTests {
             .header("X-Manyak-Device-Id", deviceId)
             .contentType(MediaType.APPLICATION_JSON)
         authorization?.let { spec.header("Authorization", it) }
-        spec.body("""{"requestId":"$requestId","selectedTagIds":[$tagId]$parentField}""")
+        val result = spec.body("""{"requestId":"$requestId","selectedTagIds":[$tagId]$parentField}""")
             .exchange()
-            .expectStatus().isCreated
+        if (expectCreated) {
+            result.expectStatus().isCreated
+        }
         return requestId
     }
 }

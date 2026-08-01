@@ -5,6 +5,7 @@ import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.isOwnedBy
+import com.knk.manyak.story.entity.parentCreationLink
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
@@ -46,9 +47,15 @@ class StoryCreationRequestRecorder(
     }
 
     /**
-     * [block]에는 이 실행이 **회수(reclaim)** 인지를 넘긴다: 이미 기록돼 소유가 검증된 요청 행을 재실행하는 경우 `true`,
+     * [block]에는 두 가지를 넘긴다.
+     *
+     * `isReclaim`은 이 실행이 **회수(reclaim)** 인지다: 이미 기록돼 소유가 검증된 요청 행을 재실행하는 경우 `true`,
      * 처음 기록하는 신규 요청이면 `false`. 완성 경로는 이 신호로 저장된 스토리 재구성(reconcile)을 회수일 때만 허용해,
      * 새 requestId로 남의 `simpleCreationId`를 찍어 완성 스토리를 읽어내는 것을 막는다(Codex P1).
+     *
+     * `parentLink`는 **이 요청 행에 실제로 기록된** 재생성 체인이다(KNK-755). 신규 삽입이면 방금 검증한 [parentLink]와 같고,
+     * 재실행이면 최초 삽입 때 확정된 저장값이다 — 재시도 본문이 부모를 빼거나 바꿔도 AI 헤더가 `parent_request_id`와
+     * 어긋나지 않도록, 호출부는 인자로 받은 이 값으로 trace를 만들어야 한다(Codex P2).
      */
     fun <T : Any> execute(
         requestId: UUID,
@@ -59,13 +66,13 @@ class StoryCreationRequestRecorder(
         // 재생성 체인 부모 링크(KNK-755). 호출부가 이미 검증한 결과이며, 요청 행을 처음 삽입할 때만 기록된다
         // (재요청은 이미 그 행이 최초 삽입 때 남긴 체인을 갖고 있다). 부모 없는 최초 생성이면 null.
         parentLink: ParentCreationLink? = null,
-        block: (isReclaim: Boolean) -> T,
+        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
     ): T =
         when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)) {
             is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
             is Claim.Run -> {
                 val result = try {
-                    block(claim.isReclaim)
+                    block(claim.isReclaim, claim.parentLink)
                 } catch (throwable: Throwable) {
                     updateStatus(claim.id, StoryCreationRequestStatus.FAILED, resultJson = null)
                     throw throwable
@@ -91,8 +98,8 @@ class StoryCreationRequestRecorder(
     ): Claim {
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         if (insertedId != null) {
-            // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가).
-            return Claim.Run(insertedId, isReclaim = false)
+            // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가). 방금 삽입한 체인이 그대로 정본이다.
+            return Claim.Run(insertedId, isReclaim = false, parentLink = parentLink)
         }
         return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
     }
@@ -153,7 +160,8 @@ class StoryCreationRequestRecorder(
                 row.updatedAt = Instant.now()
                 repository.saveAndFlush(row)
                 // 소유가 검증된(isOwnedBy) 오래된 PENDING의 회수 — 완성 스토리 reconcile을 허용한다.
-                Claim.Run(row.id, isReclaim = true)
+                // 체인은 재시도 본문이 아니라 이 행에 저장된 값을 쓴다(KNK-755).
+                Claim.Run(row.id, isReclaim = true, parentLink = row.parentCreationLink())
             }
             StoryCreationRequestStatus.FAILED -> {
                 // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
@@ -162,7 +170,8 @@ class StoryCreationRequestRecorder(
                 // reconcile을 유발해 남의 스토리를 열람할 수 있다(Codex P1). 진짜 회수는 crash가 남긴 aged PENDING뿐이다.
                 row.status = StoryCreationRequestStatus.PENDING
                 repository.saveAndFlush(row)
-                Claim.Run(row.id, isReclaim = false)
+                // 체인은 최초 삽입 때 확정된 저장값을 쓴다 — 재시도 본문이 부모를 바꿔도 정본 컬럼과 헤더가 어긋나지 않게(KNK-755).
+                Claim.Run(row.id, isReclaim = false, parentLink = row.parentCreationLink())
             }
         }
     }
@@ -191,8 +200,10 @@ class StoryCreationRequestRecorder(
          * [block]을 실행할 요청 행. [isReclaim]은 crash가 남긴 **aged PENDING**의 회수 재실행이면 true, 그 외(신규 삽입·FAILED 재시도)면
          * false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1). FAILED 재시도를 회수로 보면 완성 세션 프로브의 재시도가
          * reconcile을 유발해 스토리를 누출하므로 제외한다.
+         *
+         * [parentLink]는 이 행에 실제로 기록된 재생성 체인이다(KNK-755) — 신규 삽입은 방금 검증한 값, 재실행은 저장된 값.
          */
-        data class Run(val id: Long, val isReclaim: Boolean) : Claim
+        data class Run(val id: Long, val isReclaim: Boolean, val parentLink: ParentCreationLink?) : Claim
 
         /** 이미 COMPLETED인 요청 — 저장된 결과를 [block] 없이 반환한다. */
         data class Replay(val resultJson: String) : Claim

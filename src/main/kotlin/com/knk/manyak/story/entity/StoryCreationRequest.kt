@@ -124,6 +124,17 @@ fun StoryCreationRequest.isOwnedBy(userId: Long?, deviceIdHash: String?): Boolea
     else this.deviceIdHash != null && this.deviceIdHash == deviceIdHash
 
 /**
+ * 이미 기록된 행이 들고 있는 체인을 그대로 되살린다(KNK-755).
+ *
+ * 재실행(FAILED 재시도·aged PENDING 회수)은 요청 행을 새로 넣지 않으므로 체인은 **최초 삽입 때 확정된 값**이 정본이다.
+ * 그런데 재시도 본문의 parentCreationId가 빠지거나 바뀌었을 수 있어, 그 본문으로 다시 만든 링크를 AI 헤더에 실으면
+ * 헤더와 `parent_request_id`가 어긋난다 — 정본 컬럼과 다른 체인이 trace로 나가는 셈이다. 그래서 재실행은 이 함수로
+ * 저장된 값을 복원해 쓴다. 부모를 애초에 안 보낸 행은 null이다.
+ */
+fun StoryCreationRequest.parentCreationLink(): ParentCreationLink? =
+    attemptedParentCreationId?.let { ParentCreationLink(it, parentLinkError) }
+
+/**
  * 재생성 체인 소유 연속성 게이트(KNK-755). 복구 조회 게이트인 [isOwnedBy]와 **규칙이 달라** 별도로 둔다.
  *
  * - **양쪽 다 회원이면** `userId` 엄격 일치만 인정하고 디바이스 해시로 보조 판정하지 않는다. 같은 기기에서 계정 A가
