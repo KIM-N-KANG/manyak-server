@@ -55,8 +55,8 @@ data class GenerateSimpleStorylinesRequest(
     )
     val customTags: List<SimpleStoryCustomTagRequest> = emptyList(),
 
-    // AI trace 연결용 통과 필드(KNK-751). 스토리라인 재생성 여부와 그 직전 생성의 creation_id는 서버가 알 수 없어
-    // 프론트가 보내면 AI 호출 헤더로 그대로 전달만 하고, 없으면 헤더를 생략한다(임의 값 생성 금지).
+    // AI trace 연결용 필드(KNK-751). 서버가 값을 만들지 않고 프론트가 보낸 것만 쓰며, 없으면 헤더를 생략한다.
+    // [isRegenerated]는 서버가 판단할 수 없어 그대로 전달하지만, [parentCreationId]는 KNK-755부터 검증을 거친다.
     @field:Schema(
         description = "이 스토리라인 생성이 재생성인지 여부. 서버는 판단하지 않고 AI 호출에 그대로 전달합니다.",
         example = "true",
@@ -65,7 +65,10 @@ data class GenerateSimpleStorylinesRequest(
     val isRegenerated: Boolean? = null,
 
     @field:Schema(
-        description = "재생성이면 직전 생성의 creation_id(=그 요청의 requestId). 서버는 생성하지 않고 전달만 합니다.",
+        description = "재생성이면 직전 생성의 creation_id(=그 요청의 requestId). 서버가 이 값을 검증해 " +
+            "**통과한 경우에만** AI 호출 헤더로 전달합니다(자기참조 아님·해당 요청 존재·소유 연속성). " +
+            "검증에 실패해도 이 요청은 정상 처리되며(400이 아닙니다) 체인 헤더만 생략됩니다. " +
+            "실패 사유는 서버에 기록되므로, 재생성 체인이 이어지지 않았다면 이 값이 유효했는지 확인하세요.",
         example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         nullable = true,
     )

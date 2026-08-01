@@ -830,7 +830,8 @@ Accept: application/json
 ### 헤더는 백엔드→AI 방향이라 응답으로 보이지 않습니다. 저장 결과는 DB에서 직접 확인하세요:
 ###   SELECT request_id, parent_request_id, attempted_parent_creation_id, parent_link_error
 ###   FROM story_creation_requests
-###   WHERE request_id LIKE '75500000-0000-4000-8000-%' ORDER BY request_id;
+###   WHERE request_id::text LIKE '75500000-0000-4000-8000-%' ORDER BY request_id;
+### (request_id는 uuid 컬럼이라 ::text 캐스트 없이 LIKE를 쓰면 `operator does not exist: uuid ~~ unknown`으로 실패합니다.)
 ### 기대: ...0001은 3개 컬럼 전부 NULL(최초 생성) / ...0002는 parent_request_id=...0001·error NULL /
 ###       ...0003은 parent NULL·NOT_FOUND / ...0004는 parent NULL·SELF_REFERENCE / ...0005는 parent NULL·OWNER_MISMATCH.
 ### ...0003과 ...0001의 차이가 이번 설계의 핵심입니다 — 둘 다 parent_request_id는 NULL이지만,
