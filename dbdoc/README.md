@@ -33,7 +33,7 @@
 | [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
-| [public.story_creation_requests](public.story_creation_requests.md) | 9 |  | BASE TABLE |
+| [public.story_creation_requests](public.story_creation_requests.md) | 12 |  | BASE TABLE |
 | [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 
 ## Relations
@@ -381,6 +381,9 @@ erDiagram
   text result_json
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid parent_request_id
+  uuid attempted_parent_creation_id
+  varchar_32_ parent_link_error
 }
 "public.story_chat_shares" {
   bigint id

@@ -13,6 +13,9 @@
 | result_json | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| parent_request_id | uuid |  | true |  |  | KNK-755: 검증(존재·자기참조 아님·소유 연속성)을 통과한 직전 생성의 request_id. 이 값만 X-Manyak-Parent-Creation-Id 헤더로 나간다. 최초 생성이거나 검증 실패면 NULL. |
+| attempted_parent_creation_id | uuid |  | true |  |  | KNK-755: 프론트가 보낸 parentCreationId 원값. 검증 통과 여부와 무관하게 그대로 보존한다(안 보냈으면 NULL). 최초 생성과 연결 실패를 구분하는 근거. |
+| parent_link_error | varchar(32) |  | true |  |  | KNK-755: 부모 링크 검증 실패 사유(NOT_FOUND·OWNER_MISMATCH·SELF_REFERENCE). 검증 성공이거나 애초에 부모를 안 보냈으면 NULL. |
 
 ## Constraints
 
@@ -46,6 +49,9 @@ erDiagram
   text result_json
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  uuid parent_request_id
+  uuid attempted_parent_creation_id
+  varchar_32_ parent_link_error
 }
 ```
 
