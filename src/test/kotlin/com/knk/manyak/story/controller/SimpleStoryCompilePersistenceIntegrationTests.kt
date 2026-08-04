@@ -218,18 +218,40 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
-    fun `스토리 완성이 실패하면 story_creation_duration 타이머의 failure를 올린다`() {
+    fun `AI 호출 실패(502)는 failure를 올리고 rejected는 올리지 않는다`() {
         endingsOverride = listOf(
             AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
             AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
             AiStoryEnding("다른엔딩", 3, "조건 C", "에필로그 C"),
         )
         val storyline = persistStorylineWithGenre("로맨스")
-        val before = storyCreationTimerCount("failure")
+        val beforeFailure = storyCreationTimerCount("failure")
+        val beforeRejected = storyCreationTimerCount("rejected")
 
         postSimpleStory(storyline).expectStatus().isEqualTo(502)
 
-        assertThat(storyCreationTimerCount("failure")).isEqualTo(before + 1)
+        // 실제 생성을 시도하다 AI에서 깨진 것이라 failure다(우리가 지연·실패율로 보려는 바로 그 구간).
+        assertThat(storyCreationTimerCount("failure")).isEqualTo(beforeFailure + 1)
+        assertThat(storyCreationTimerCount("rejected")).isEqualTo(beforeRejected)
+    }
+
+    @Test
+    fun `생성 시도 이전 4xx 거부는 rejected를 올리고 failure는 올리지 않는다`() {
+        // 존재하지 않는 simpleCreationId → 404. AI 호출 없이 DB 조회 몇 번으로 끝나는 밀리초 경로라,
+        // failure에 섞이면 실패 p95를 끌어내려 AI가 느려져도 지표가 개선된 것처럼 보인다.
+        val beforeRejected = storyCreationTimerCount("rejected")
+        val beforeFailure = storyCreationTimerCount("failure")
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":999999999,"storylineId":1,"additionalInfos":[]}""")
+            .exchange()
+            .expectStatus().isNotFound
+
+        assertThat(storyCreationTimerCount("rejected")).isEqualTo(beforeRejected + 1)
+        assertThat(storyCreationTimerCount("failure")).isEqualTo(beforeFailure)
     }
 
     private fun storyCreationTimerCount(outcome: String): Long =

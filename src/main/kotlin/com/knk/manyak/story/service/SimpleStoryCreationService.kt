@@ -133,9 +133,10 @@ class SimpleStoryCreationService(
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
 
-        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 2종).
+        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration KDoc).
         const val OUTCOME_SUCCESS = "success"
         const val OUTCOME_FAILURE = "failure"
+        const val OUTCOME_REJECTED = "rejected"
     }
 
     @Transactional(readOnly = true)
@@ -439,7 +440,7 @@ class SimpleStoryCreationService(
                 outcome.response
             } catch (exception: Exception) {
                 val durationNanos = System.nanoTime() - startNanos
-                recordCreationDuration(OUTCOME_FAILURE, durationNanos)
+                recordCreationDuration(creationOutcomeOf(exception), durationNanos)
                 structuredLogger.event(
                     "story_create_failed",
                     "error_code" to storyErrorCode(exception),
@@ -463,6 +464,16 @@ class SimpleStoryCreationService(
     /**
      * 간편 스토리 완성 처리시간을 `manyak.story.creation.duration`으로 집계한다(스펙 §4-7).
      *
+     * outcome 태그는 3값이다(KNK-784):
+     *   - `success`  : 실제로 생성·저장까지 끝난 호출
+     *   - `failure`  : 생성을 시도하다 깨진 호출 — AI compile 실패(502·타임아웃)·응답 검증 실패·저장 경합. 수 초~180초.
+     *   - `rejected` : 생성 시도 **이전에** 거부된 4xx — 세션 없음(404)·소유권(403)·이미 생성됨(409)·태그 오류(400)·
+     *                  크레딧 부족과 게스트 한도(402). DB 조회 몇 번으로 끝나는 밀리초 경로다.
+     *
+     * 4xx를 failure에서 떼는 이유: 두 갈래를 한 히스토그램에 섞으면 거부 비중에 따라 실패 p95가 요동치고,
+     * 거부가 늘수록 p95가 **낮아져** AI가 실제로 느려지는데 지표는 개선된 것처럼 보이는 역전이 생긴다.
+     * 실패 건수 알림도 404 급증만으로 오발화한다. 태그 값이 2에서 3으로 늘지만 여전히 유한 enum이라 카디널리티는 안전하다.
+     *
      * 실제 생성 콜백(create) 안에서만 부르고, **AI 호출 없이 저장된 결과를 돌려주는 조회 경로 두 가지는 의도적으로 제외한다**
      * — 포함하면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
      *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
@@ -480,6 +491,16 @@ class SimpleStoryCreationService(
                 .record(durationNanos, TimeUnit.NANOSECONDS)
         }
     }
+
+    /**
+     * 완성 실패 예외를 outcome 태그로 가른다([recordCreationDuration]의 rejected/failure 정의).
+     *
+     * 4xx `ResponseStatusException`은 생성 시도 이전 거부다. 402 크레딧·게스트 한도를 던지는
+     * `CodedResponseStatusException`도 `ResponseStatusException` 하위라 이 검사에 함께 걸린다(별도 분기 불필요).
+     * 5xx(502 AI 실패 등)와 그 외 모든 예외는 실제 생성 중 깨진 것이므로 failure다.
+     */
+    private fun creationOutcomeOf(exception: Exception): String =
+        if (exception is ResponseStatusException && exception.statusCode.is4xxClientError) OUTCOME_REJECTED else OUTCOME_FAILURE
 
     private fun storyErrorCode(exception: Exception): String = when (exception) {
         is ResponseStatusException ->
