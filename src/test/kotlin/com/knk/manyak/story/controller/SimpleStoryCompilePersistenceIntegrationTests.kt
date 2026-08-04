@@ -32,6 +32,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -79,18 +81,34 @@ class SimpleStoryCompilePersistenceIntegrationTests {
 
         @Volatile
         var mainEventsOverride: List<AiStoryMainEvent>? = null
+
+        // 세션 경합 재현용: 값이 있으면 compile 호출 도중 그 세션을 STORY_CREATED로 **커밋**한다.
+        // 다른 requestId를 가진 동시 요청이 먼저 저장을 끝낸 상황과 같아, compile 후 잠금 시점에 409가 난다.
+        @Volatile
+        var flipSessionToCreatedId: Long? = null
     }
 
     @TestConfiguration
     class FakeAiClientConfig {
         @Bean
         @Primary
-        fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
+        fun fakeStoryAiClient(
+            sessionRepository: StoryCreationSessionRepository,
+            transactionManager: PlatformTransactionManager,
+        ): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
 
             override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 capturedRequest = request
+                flipSessionToCreatedId?.let { sessionId ->
+                    // 별도 트랜잭션으로 커밋해야 compileAndPersist의 findByIdForUpdate가 새 상태를 본다.
+                    TransactionTemplate(transactionManager).executeWithoutResult {
+                        val session = sessionRepository.findById(sessionId).orElseThrow()
+                        session.status = StoryCreationSessionStatus.STORY_CREATED
+                        sessionRepository.saveAndFlush(session)
+                    }
+                }
                 return AiStoryCompileResponse(
                     stories = AiStoryMeta("생성된 스토리", "한 줄 소개", "설명"),
                     storySettings = AiStorySettings("세계관", "캐릭터", "역할", "규칙"),
@@ -125,6 +143,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         capturedRequest = null
         endingsOverride = null
         mainEventsOverride = null
+        flipSessionToCreatedId = null
         databaseCleaner.cleanAll()
     }
 
@@ -231,6 +250,23 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         postSimpleStory(storyline).expectStatus().isEqualTo(502)
 
         // 실제 생성을 시도하다 AI에서 깨진 것이라 failure다(우리가 지연·실패율로 보려는 바로 그 구간).
+        assertThat(storyCreationTimerCount("failure")).isEqualTo(beforeFailure + 1)
+        assertThat(storyCreationTimerCount("rejected")).isEqualTo(beforeRejected)
+    }
+
+    @Test
+    fun `compile을 마친 뒤 세션 경합으로 나는 409는 failure를 올리고 rejected는 올리지 않는다`() {
+        // 같은 세션에 requestId가 다른 완성 요청 둘이 겹치면, 둘 다 잠금 없는 초기 상태 검사를 통과해 compile을 호출한다.
+        // 진 쪽은 compileAndPersist의 findByIdForUpdate로 잠금을 잡은 뒤 STORY_CREATED를 보고 409를 던진다.
+        // HTTP 상태는 4xx지만 AI 호출을 이미 마친 뒤라 수 초~180초가 걸린 **진짜 생성 실패**다(밀리초 거부가 아니다).
+        // 페이크 AI가 compile 도중 세션을 STORY_CREATED로 커밋해 이 경합을 결정적으로 재현한다.
+        val storyline = persistStorylineWithGenre("로맨스")
+        flipSessionToCreatedId = storyline.creationSession.id
+        val beforeFailure = storyCreationTimerCount("failure")
+        val beforeRejected = storyCreationTimerCount("rejected")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(409)
+
         assertThat(storyCreationTimerCount("failure")).isEqualTo(beforeFailure + 1)
         assertThat(storyCreationTimerCount("rejected")).isEqualTo(beforeRejected)
     }
