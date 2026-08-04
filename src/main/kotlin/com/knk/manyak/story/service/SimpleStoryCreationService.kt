@@ -133,9 +133,10 @@ class SimpleStoryCreationService(
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
 
-        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 2종).
+        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration KDoc).
         const val OUTCOME_SUCCESS = "success"
         const val OUTCOME_FAILURE = "failure"
+        const val OUTCOME_REJECTED = "rejected"
     }
 
     @Transactional(readOnly = true)
@@ -421,9 +422,12 @@ class SimpleStoryCreationService(
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
         val create: (Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _ ->
             val startNanos = System.nanoTime()
+            // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+            // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).
+            var compileStarted = false
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
-                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
+                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim) { compileStarted = true }
                 // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
                 val durationNanos = System.nanoTime() - startNanos
                 // aiCallLogId가 null이면 회수 재실행 재구성(reconcile) — AI·저장을 타지 않은 조회 경로라 측정에서 뺀다.
@@ -439,7 +443,7 @@ class SimpleStoryCreationService(
                 outcome.response
             } catch (exception: Exception) {
                 val durationNanos = System.nanoTime() - startNanos
-                recordCreationDuration(OUTCOME_FAILURE, durationNanos)
+                recordCreationDuration(creationOutcomeOf(exception, compileStarted), durationNanos)
                 structuredLogger.event(
                     "story_create_failed",
                     "error_code" to storyErrorCode(exception),
@@ -463,6 +467,16 @@ class SimpleStoryCreationService(
     /**
      * 간편 스토리 완성 처리시간을 `manyak.story.creation.duration`으로 집계한다(스펙 §4-7).
      *
+     * outcome 태그는 3값이다(KNK-784):
+     *   - `success`  : 실제로 생성·저장까지 끝난 호출
+     *   - `failure`  : 생성을 시도하다 깨진 호출 — AI compile 실패(502·타임아웃)·응답 검증 실패·저장 경합. 수 초~180초.
+     *   - `rejected` : 생성 시도 **이전에** 거부된 4xx — 세션 없음(404)·소유권(403)·이미 생성됨(409)·태그 오류(400)·
+     *                  크레딧 부족과 게스트 한도(402). DB 조회 몇 번으로 끝나는 밀리초 경로다.
+     *
+     * 4xx를 failure에서 떼는 이유: 두 갈래를 한 히스토그램에 섞으면 거부 비중에 따라 실패 p95가 요동치고,
+     * 거부가 늘수록 p95가 **낮아져** AI가 실제로 느려지는데 지표는 개선된 것처럼 보이는 역전이 생긴다.
+     * 실패 건수 알림도 404 급증만으로 오발화한다. 태그 값이 2에서 3으로 늘지만 여전히 유한 enum이라 카디널리티는 안전하다.
+     *
      * 실제 생성 콜백(create) 안에서만 부르고, **AI 호출 없이 저장된 결과를 돌려주는 조회 경로 두 가지는 의도적으로 제외한다**
      * — 포함하면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
      *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
@@ -481,6 +495,26 @@ class SimpleStoryCreationService(
         }
     }
 
+    /**
+     * 완성 실패 예외를 outcome 태그로 가른다([recordCreationDuration]의 rejected/failure 정의).
+     *
+     * **HTTP 상태만으로는 가를 수 없다.** compile을 마친 뒤에도 4xx가 날 수 있기 때문이다: 같은 세션에 requestId가
+     * 다른 완성 요청 둘이 겹치면 둘 다 잠금 없는 초기 상태 검사를 통과해 compile을 호출하고, 진 쪽은
+     * [compileAndPersist]가 `findByIdForUpdate`로 잠금을 잡은 뒤 STORY_CREATED를 보고 409(또는 세션 소실 시 404)를 던진다.
+     * 이건 AI 호출을 이미 마친 수 초~180초짜리 **실제 생성 실패**라, 밀리초 거부와 같은 시계열에 넣으면 안 된다.
+     *
+     * 그래서 compile 진입 여부([compileStarted])를 먼저 본다.
+     * - compile이 시작됐으면 상태 코드와 무관하게 failure다.
+     * - 시작 전이면 4xx `ResponseStatusException`이 rejected다. 402 크레딧·게스트 한도를 던지는
+     *   `CodedResponseStatusException`도 `ResponseStatusException` 하위라 함께 걸린다(별도 분기 불필요).
+     * - 그 외(5xx·비 HTTP 예외)는 failure다.
+     */
+    private fun creationOutcomeOf(exception: Exception, compileStarted: Boolean): String = when {
+        compileStarted -> OUTCOME_FAILURE
+        exception is ResponseStatusException && exception.statusCode.is4xxClientError -> OUTCOME_REJECTED
+        else -> OUTCOME_FAILURE
+    }
+
     private fun storyErrorCode(exception: Exception): String = when (exception) {
         is ResponseStatusException ->
             HttpStatus.resolve(exception.statusCode.value())?.name ?: exception.statusCode.toString()
@@ -493,6 +527,8 @@ class SimpleStoryCreationService(
         deviceId: String?,
         // 소유 검증된 회수(reclaim)인지. 완성된 세션의 스토리 재구성은 회수일 때만 허용한다(Codex P1 — 신규 requestId로 남의 스토리 열람 차단).
         isReclaim: Boolean,
+        // AI compile 진입 직전에 호출한다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([creationOutcomeOf]).
+        onCompileStarted: () -> Unit,
     ): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
@@ -594,6 +630,7 @@ class SimpleStoryCreationService(
                     storylineOrder = selectedStoryline.storylineOrder,
                     isRegenerated = request.isRegenerated,
                 ),
+                onCompileStarted,
             )
         }
     }
@@ -732,7 +769,10 @@ class SimpleStoryCreationService(
         requestId: UUID,
         // Langfuse trace 연결 식별자(KNK-751). 위 requestId(완성 단계)와 달리 creation_id는 스토리라인 단계 값이다.
         traceLink: AiTraceLink,
+        // compile 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([creationOutcomeOf]).
+        onCompileStarted: () -> Unit,
     ): StoryCreationOutcome {
+        onCompileStarted()
         val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORY_COMPLETION),
