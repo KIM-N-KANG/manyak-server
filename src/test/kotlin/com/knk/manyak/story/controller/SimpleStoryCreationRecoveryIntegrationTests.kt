@@ -26,6 +26,7 @@ import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.support.DatabaseCleaner
+import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -497,6 +498,45 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `회수 재실행 재구성은 story_creation_duration 타이머를 올리지 않는다`() {
+        // 회수 재실행(reconcile)은 AI 호출도 스토리 저장도 없이 저장된 스토리로 응답만 재구성하는 조회 경로다.
+        // 여기서 성공 타이머를 올리면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다
+        // (멱등 replay를 제외한 것과 같은 이유 — 스펙 §4-7 "측정 범위 주의").
+        val storyline = seedGeneratedStoryline()
+        val requestId = UUID.randomUUID()
+
+        // 1) 실제 생성은 타이머를 올린다. 이 단정이 없으면 타이머가 통째로 사라져도 아래 "증가 0"이 통과해 버린다.
+        val beforeCreate = storyCreationTimerCount("success")
+        postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+        assertThat(storyCreationTimerCount("success")).isEqualTo(beforeCreate + 1)
+
+        // 크래시 창 재현(같은 requestId, 게스트 소유 aged PENDING) — 위 회수 재실행 테스트와 같은 방식.
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 2) 회수 재실행은 201이지만 타이머는 그대로여야 한다.
+        // @SpringBootTest 컨텍스트 캐시 공유로 count가 누적되므로 절대값이 아니라 증가분 0을 단정한다.
+        val beforeReclaim = storyCreationTimerCount("success")
+        postSimpleStory(requestId, storyline.creationSession.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+
+        assertThat(storyCreationTimerCount("success")).isEqualTo(beforeReclaim)
+        // 재구성 경로였음을 함께 고정한다(AI 재호출·중복 스토리 없음).
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+    }
+
+    @Test
     fun `비소유 aged PENDING을 피해자 simpleCreationId로 재시도해도 바인딩 불일치로 409다`() {
         // Codex P1(3차) 바인딩 검증: 공격자가 자기 소유 aged PENDING 행(회수 대상)을 피해자 simpleCreationId로 재시도해도,
         // 세션의 creationRequestId가 공격자 requestId와 달라 재구성하지 않고 409. simpleCreationId를 신뢰하지 않는다.
@@ -644,6 +684,12 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             ),
         )
     }
+
+    // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
+    @Autowired private lateinit var meterRegistry: MeterRegistry
+
+    private fun storyCreationTimerCount(outcome: String): Long =
+        meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
 
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository

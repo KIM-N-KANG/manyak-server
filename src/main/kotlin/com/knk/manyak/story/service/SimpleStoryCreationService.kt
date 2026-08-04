@@ -426,7 +426,10 @@ class SimpleStoryCreationService(
                 val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
                 // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
                 val durationNanos = System.nanoTime() - startNanos
-                recordCreationDuration(OUTCOME_SUCCESS, durationNanos)
+                // aiCallLogId가 null이면 회수 재실행 재구성(reconcile) — AI·저장을 타지 않은 조회 경로라 측정에서 뺀다.
+                if (outcome.aiCallLogId != null) {
+                    recordCreationDuration(OUTCOME_SUCCESS, durationNanos)
+                }
                 structuredLogger.event(
                     "story_created",
                     "story_id" to outcome.response.id,
@@ -460,8 +463,11 @@ class SimpleStoryCreationService(
     /**
      * 간편 스토리 완성 처리시간을 `manyak.story.creation.duration`으로 집계한다(스펙 §4-7).
      *
-     * 실제 생성 콜백(create) 안에서만 부른다. 멱등 재요청(recordOrRun의 COMPLETED replay)은 AI 호출 없이
-     * 저장된 결과를 돌려주는 경로라 의도적으로 제외한다 — 포함하면 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
+     * 실제 생성 콜백(create) 안에서만 부르고, **AI 호출 없이 저장된 결과를 돌려주는 조회 경로 두 가지는 의도적으로 제외한다**
+     * — 포함하면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
+     *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
+     *   2. 회수 재실행 재구성: [reconcileCreatedSession] (콜백은 타지만 AI·저장이 없다 — [StoryCreationOutcome.aiCallLogId]가
+     *      null인 것으로 판별한다. 실제 생성 경로는 RecordedAiCall.aiCallLogId가 non-null이다)
      * 태그는 outcome(success/failure) 하나뿐이다(카디널리티 규칙).
      */
     private fun recordCreationDuration(outcome: String, durationNanos: Long) {
