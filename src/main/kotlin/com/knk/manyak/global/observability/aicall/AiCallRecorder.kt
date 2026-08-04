@@ -1,11 +1,14 @@
 package com.knk.manyak.global.observability.aicall
 
 import com.knk.manyak.global.observability.MdcKeys
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import io.sentry.Sentry
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * AI 호출을 감싸 ai_call_logs에 적재한다.
@@ -19,6 +22,7 @@ import java.util.UUID
 @Component
 class AiCallRecorder(
     private val repository: AiCallLogRepository,
+    private val meterRegistry: MeterRegistry,
     @param:Value("\${spring.application.name:manyak-server}")
     private val callerService: String,
 ) {
@@ -46,18 +50,23 @@ class AiCallRecorder(
             val result = block()
             // meta 추출·반영 실패가 성공한 AI 호출을 FAILED로 둔갑시키지 않도록 격리한다(관측 < 비즈니스).
             runCatching { meta(result)?.let(log::applyMeta) }
-            log.markSucceeded(latencyMs = elapsedMs(startNanos))
+            // 시계는 한 번만 읽어 로그(latency_ms)·메트릭이 같은 구간을 가리키게 한다.
+            val durationNanos = System.nanoTime() - startNanos
+            log.markSucceeded(latencyMs = durationNanos / 1_000_000)
             repository.save(log)
+            recordDuration(context, OUTCOME_SUCCESS, durationNanos)
             Sentry.addBreadcrumb("ai_call succeeded: ${context.feature.value}", "ai")
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
             // error_code도 컬럼 길이로 자른다. 자르지 않으면 긴 코드(예: 긴 ChatTurnAiException.code)에서
             // save가 length 위반을 던져 원래 AI 예외를 가리고 구조화 에러 relay가 깨진다.
+            val durationNanos = System.nanoTime() - startNanos
             log.markFailed(
-                latencyMs = elapsedMs(startNanos),
+                latencyMs = durationNanos / 1_000_000,
                 errorCode = errorCode(throwable)?.take(ERROR_CODE_MAX_LENGTH),
             )
             repository.save(log)
+            recordDuration(context, OUTCOME_FAILURE, durationNanos)
             Sentry.addBreadcrumb("ai_call failed: ${context.feature.value}", "ai")
             // 적재된 호출 id로 후처리(예: Sentry 캡처 후 sentry_event_id 연결)할 기회를 준다.
             // 후처리(관측) 실패가 원래 예외를 가리지 않도록 격리한 뒤 전파한다.
@@ -107,10 +116,29 @@ class AiCallRecorder(
     private fun cleanMdc(key: String): String? =
         MDC.get(key)?.takeIf { it.isNotBlank() && it != UNKNOWN }?.take(IDENTIFIER_MAX_LENGTH)
 
-    private fun elapsedMs(startNanos: Long): Long = (System.nanoTime() - startNanos) / 1_000_000
+    /**
+     * AI 호출 지연을 `manyak.ai.call.duration`으로 집계한다(스펙 §4-7).
+     *
+     * 태그는 유한 enum인 feature(4종)·outcome(2종)뿐이다 — user_id·story_id·request_id 같은 고유값을 태그로
+     * 넣으면 시계열이 무한히 늘어난다. 개별 추적은 구조화 로그와 ai_call_logs의 몫이다.
+     */
+    private fun recordDuration(context: AiCallContext, outcome: String, durationNanos: Long) {
+        // 메트릭 기록 실패가 AI 호출 결과를 바꾸지 않도록 격리한다(관측 < 비즈니스).
+        runCatching {
+            Timer.builder("manyak.ai.call.duration")
+                .description("AI API 호출 처리시간")
+                .tag("feature", context.feature.value)
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .record(durationNanos, TimeUnit.NANOSECONDS)
+        }
+    }
 
     companion object {
         private const val UNKNOWN = "unknown"
+
+        private const val OUTCOME_SUCCESS = "success"
+        private const val OUTCOME_FAILURE = "failure"
 
         // 컬럼 길이와 일치시켜, 초과 입력이 적재 실패로 비즈니스 호출을 막지 않도록 자른다.
         private const val IDENTIFIER_MAX_LENGTH = 128 // request_id·session_id VARCHAR(128)

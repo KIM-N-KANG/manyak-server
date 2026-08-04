@@ -66,6 +66,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
@@ -77,6 +79,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 @Service
 class SimpleStoryCreationService(
@@ -95,6 +98,7 @@ class SimpleStoryCreationService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
+    private val meterRegistry: MeterRegistry,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
@@ -128,6 +132,10 @@ class SimpleStoryCreationService(
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
+
+        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 2종).
+        const val OUTCOME_SUCCESS = "success"
+        const val OUTCOME_FAILURE = "failure"
     }
 
     @Transactional(readOnly = true)
@@ -416,18 +424,26 @@ class SimpleStoryCreationService(
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
                 val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
+                // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
+                val durationNanos = System.nanoTime() - startNanos
+                // aiCallLogId가 null이면 회수 재실행 재구성(reconcile) — AI·저장을 타지 않은 조회 경로라 측정에서 뺀다.
+                if (outcome.aiCallLogId != null) {
+                    recordCreationDuration(OUTCOME_SUCCESS, durationNanos)
+                }
                 structuredLogger.event(
                     "story_created",
                     "story_id" to outcome.response.id,
                     "ai_call_log_id" to outcome.aiCallLogId,
-                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                    "duration_ms" to durationNanos / 1_000_000,
                 )
                 outcome.response
             } catch (exception: Exception) {
+                val durationNanos = System.nanoTime() - startNanos
+                recordCreationDuration(OUTCOME_FAILURE, durationNanos)
                 structuredLogger.event(
                     "story_create_failed",
                     "error_code" to storyErrorCode(exception),
-                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                    "duration_ms" to durationNanos / 1_000_000,
                 )
                 throw exception
             }
@@ -442,6 +458,27 @@ class SimpleStoryCreationService(
             SimpleStoryCreateResponse::class.java,
             block = create,
         )
+    }
+
+    /**
+     * 간편 스토리 완성 처리시간을 `manyak.story.creation.duration`으로 집계한다(스펙 §4-7).
+     *
+     * 실제 생성 콜백(create) 안에서만 부르고, **AI 호출 없이 저장된 결과를 돌려주는 조회 경로 두 가지는 의도적으로 제외한다**
+     * — 포함하면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
+     *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
+     *   2. 회수 재실행 재구성: [reconcileCreatedSession] (콜백은 타지만 AI·저장이 없다 — [StoryCreationOutcome.aiCallLogId]가
+     *      null인 것으로 판별한다. 실제 생성 경로는 RecordedAiCall.aiCallLogId가 non-null이다)
+     * 태그는 outcome(success/failure) 하나뿐이다(카디널리티 규칙).
+     */
+    private fun recordCreationDuration(outcome: String, durationNanos: Long) {
+        // 메트릭 기록 실패가 성공한 스토리 생성을 500으로 만들거나 실패 경로에서 원래 예외를 가리지 않도록 격리한다.
+        runCatching {
+            Timer.builder("manyak.story.creation.duration")
+                .description("간편 스토리 완성 처리시간")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .record(durationNanos, TimeUnit.NANOSECONDS)
+        }
     }
 
     private fun storyErrorCode(exception: Exception): String = when (exception) {
