@@ -15,6 +15,7 @@ import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -59,8 +60,9 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
     /** persistTurn 성공 직후 호출되는 attachTurnNumber를 던지게 해, 저장은 됐지만 completed 전까지 실패한 상태를 만든다. */
     class FailingAfterPersistAiCallRecorder(
         repository: AiCallLogRepository,
+        meterRegistry: MeterRegistry,
         callerService: String,
-    ) : AiCallRecorder(repository, callerService) {
+    ) : AiCallRecorder(repository, meterRegistry, callerService) {
         override fun attachTurnNumber(aiCallLogId: Long, turnNumber: Int) {
             throw RuntimeException("post-persist terminal failure (test)")
         }
@@ -72,8 +74,9 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
         @Primary
         fun failingAiCallRecorder(
             repository: AiCallLogRepository,
+            meterRegistry: MeterRegistry,
             @Value("\${spring.application.name:manyak-server}") callerService: String,
-        ): AiCallRecorder = FailingAfterPersistAiCallRecorder(repository, callerService)
+        ): AiCallRecorder = FailingAfterPersistAiCallRecorder(repository, meterRegistry, callerService)
     }
 
     @Autowired

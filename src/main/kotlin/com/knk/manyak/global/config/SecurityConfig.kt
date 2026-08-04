@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
 import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
@@ -26,12 +27,19 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity, jwtDecoder: JwtDecoder): SecurityFilterChain =
+    fun securityFilterChain(http: HttpSecurity, jwtDecoder: JwtDecoder, environment: Environment): SecurityFilterChain =
         http
             .cors { }
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                // /actuator/prometheus 무인증 허용은 local 프로파일로만 한정한다(스펙 §4-7).
+                // 아래 전역 permitAll 목록에 넣으면 안 된다: 지금은 운영 exposure(health,info)에 없어 뚫리지 않을 뿐,
+                // 나중에 누가 exposure에 prometheus 한 줄을 더하는 순간 인증 없이 내부 지표가 공개된다.
+                // 노출 목록과 인증 게이트를 두 겹으로 유지한다.
+                if (environment.matchesProfiles("local")) {
+                    it.requestMatchers("/actuator/prometheus").permitAll()
+                }
                 it
                     .requestMatchers(
                         "/actuator/health",
