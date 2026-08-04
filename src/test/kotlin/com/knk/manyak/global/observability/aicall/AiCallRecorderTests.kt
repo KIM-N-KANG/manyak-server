@@ -1,6 +1,7 @@
 package com.knk.manyak.global.observability.aicall
 
 import com.knk.manyak.global.observability.MdcKeys
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -28,9 +29,12 @@ class AiCallRecorderTests {
 
     private lateinit var recorder: AiCallRecorder
 
+    private lateinit var meterRegistry: SimpleMeterRegistry
+
     @BeforeEach
     fun setUp() {
-        recorder = AiCallRecorder(repository, "manyak-server")
+        meterRegistry = SimpleMeterRegistry()
+        recorder = AiCallRecorder(repository, meterRegistry, "manyak-server")
         // @SpringBootTest 통합 테스트가 같은 H2 인메모리 DB에 커밋한 행과 섞이지 않도록 비운다.
         repository.deleteAll()
         MDC.clear()
@@ -38,6 +42,7 @@ class AiCallRecorderTests {
 
     @AfterEach
     fun tearDown() {
+        meterRegistry.close()
         MDC.clear()
     }
 
@@ -63,6 +68,14 @@ class AiCallRecorderTests {
         assertNotNull(log.latencyMs)
         assertNotNull(log.completedAt)
         assertNull(log.errorCode)
+
+        // 메트릭 태그는 feature·outcome 유한 enum뿐이다(스펙 §4-7 카디널리티 규칙).
+        val timer = meterRegistry
+            .get("manyak.ai.call.duration")
+            .tag("feature", "storyline_generation")
+            .tag("outcome", "success")
+            .timer()
+        assertEquals(1L, timer.count())
     }
 
     @Test
@@ -82,6 +95,13 @@ class AiCallRecorderTests {
         assertEquals("MY_CODE", log.errorCode)
         assertNotNull(log.latencyMs)
         assertNotNull(log.completedAt)
+
+        val timer = meterRegistry
+            .get("manyak.ai.call.duration")
+            .tag("feature", "chat_response")
+            .tag("outcome", "failure")
+            .timer()
+        assertEquals(1L, timer.count())
     }
 
     @Test

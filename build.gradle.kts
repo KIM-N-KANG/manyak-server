@@ -30,12 +30,19 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
+    // OTLP 메트릭 자동구성(OtlpMetricsExportAutoConfiguration.otlpConfig)이 이 모듈의 OpenTelemetryProperties 빈을
+    // 인자로 받는다. 빼면 OTLP 레지스트리가 아예 뜨지 않는다(레지스트리 자동구성 조건 미충족).
+    implementation("org.springframework.boot:spring-boot-opentelemetry")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
     implementation("io.sentry:sentry-spring-boot-4:8.43.1")
+    // 메트릭은 OTLP push로 Grafana Cloud에 보낸다(스펙 §4-7). prometheus 레지스트리는 로컬에서
+    // /actuator/prometheus로 export 내용을 눈으로 확인하는 용도이며 운영에서는 export를 끈다.
+    implementation("io.micrometer:micrometer-registry-otlp")
+    implementation("io.micrometer:micrometer-registry-prometheus")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
     testRuntimeOnly("com.h2database:h2")

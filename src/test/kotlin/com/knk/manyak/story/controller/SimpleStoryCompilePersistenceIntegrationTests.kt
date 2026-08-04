@@ -31,6 +31,7 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -115,6 +116,9 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
+    @Autowired private lateinit var meterRegistry: MeterRegistry
 
     @BeforeEach
     fun setUp() {
@@ -201,6 +205,35 @@ class SimpleStoryCompilePersistenceIntegrationTests {
 
         assertThat(storyRepository.findAll()).isEmpty()
     }
+
+    @Test
+    fun `스토리 완성이 성공하면 story_creation_duration 타이머의 success를 올린다`() {
+        val storyline = persistStorylineWithGenre("로맨스")
+        // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 레지스트리 count가 누적된다. 절대값이 아니라 증가분을 본다.
+        val before = storyCreationTimerCount("success")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        assertThat(storyCreationTimerCount("success")).isEqualTo(before + 1)
+    }
+
+    @Test
+    fun `스토리 완성이 실패하면 story_creation_duration 타이머의 failure를 올린다`() {
+        endingsOverride = listOf(
+            AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+            AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+            AiStoryEnding("다른엔딩", 3, "조건 C", "에필로그 C"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+        val before = storyCreationTimerCount("failure")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyCreationTimerCount("failure")).isEqualTo(before + 1)
+    }
+
+    private fun storyCreationTimerCount(outcome: String): Long =
+        meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
 
     private fun persistStorylineWithGenre(genre: String): StoryCreationStoryline {
         val session = sessionRepository.save(
