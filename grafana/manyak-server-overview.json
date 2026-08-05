@@ -25,7 +25,9 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {},
-        "hide": 0
+        "hide": 0,
+        "regex": "/^(?!.*usage).*$/",
+        "description": "active series 외 모든 패널이 쓴다. usage 데이터소스는 후보에서 뺀다."
       },
       {
         "name": "service",
@@ -52,7 +54,8 @@
         "query": "prometheus",
         "current": {},
         "hide": 0,
-        "description": "active series 패널 전용. Grafana Cloud의 usage/billing 데이터소스를 고르세요."
+        "description": "active series 패널 전용. 이름에 usage가 들어간 데이터소스만 후보로 걸러 둔다 — 메트릭 데이터소스와 둘 다 Prometheus 타입이라 필터가 없으면 잘못 집힌다.",
+        "regex": "/usage/"
       }
     ]
   },

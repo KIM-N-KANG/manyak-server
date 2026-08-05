@@ -195,3 +195,16 @@ No Data가 중요한 이유: 서버가 내려가면 규칙이 No Data로 발화�
 - 스펙: `knk-harness` `docs/product-specs/4-backend.md` §4-7 메트릭
 - 수동 검증: `http/common/metrics-prometheus.http`
 - 계측 코드: `AiCallRecorder`, `SimpleStoryCreationService.recordCreationDuration`, `application.yml`의 `management.metrics.distribution`
+
+## 데이터소스 변수 필터
+
+`grafanacloud-<stack>-prom`과 `grafanacloud-usage`는 **둘 다 Prometheus 타입**이라, 필터가 없으면 데이터소스 변수가 엉뚱한 쪽을 기본값으로 집습니다. 그러면 Active series 패널만 조용히 `No data`가 됩니다.
+
+그래서 두 변수에 `regex`를 걸어 후보를 갈라 뒀습니다.
+
+| 변수 | regex | 후보 |
+| --- | --- | --- |
+| `datasource` | `/^(?!.*usage).*$/` | usage가 **아닌** Prometheus |
+| `usage_datasource` | `/usage/` | 이름에 usage가 들어간 것만 |
+
+다른 스택에서 이름 규칙이 다르면 이 regex를 조정하세요.
