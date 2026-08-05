@@ -32,6 +32,8 @@ import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.toEndingResponse
 import com.knk.manyak.story.entity.Lorebook
+import com.knk.manyak.story.entity.ParentCreationLink
+import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
@@ -41,6 +43,7 @@ import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.entity.hasSameChainOwnerAs
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryLorebook
@@ -63,6 +66,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
@@ -74,6 +79,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 @Service
 class SimpleStoryCreationService(
@@ -92,6 +98,7 @@ class SimpleStoryCreationService(
     private val storyEndingRepository: StoryEndingRepository,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
+    private val meterRegistry: MeterRegistry,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
@@ -125,6 +132,11 @@ class SimpleStoryCreationService(
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
+
+        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration KDoc).
+        const val OUTCOME_SUCCESS = "success"
+        const val OUTCOME_FAILURE = "failure"
+        const val OUTCOME_REJECTED = "rejected"
     }
 
     @Transactional(readOnly = true)
@@ -149,15 +161,19 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
+        // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
+        val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
         // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
-        val generate: (Boolean) -> GenerateSimpleStorylinesResponse = { _ ->
+        // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
+        // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
+        val generate: (Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse = { _, recordedParentLink ->
             val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
                 userId,
                 deviceId,
                 GuestTrialLimitService.Counter.STORYLINE_GENERATION,
             )
             try {
-                doGenerateSimpleStorylines(request, userId)
+                doGenerateSimpleStorylines(request, userId, recordedParentLink)
             } catch (throwable: Throwable) {
                 guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
                 throw throwable
@@ -169,8 +185,37 @@ class SimpleStoryCreationService(
             userId,
             deviceId,
             GenerateSimpleStorylinesResponse::class.java,
-            generate,
+            parentLink,
+            block = generate,
         )
+    }
+
+    /**
+     * 재생성 체인의 부모 링크를 검증한다(KNK-755). 부모를 안 보냈으면 null(체인 시도 자체가 없었다).
+     *
+     * 실패해도 400으로 거부하지 않는다 — 이 레포 원칙대로 관측이 비즈니스를 막지 않는다. 대신 시도값과 사유를 남겨,
+     * "최초 생성"과 "재생성인데 연결 실패"를 DB에서 구분한다.
+     *
+     * 자기참조를 존재 확인보다 **먼저** 판정한다: DB 조회 없이 결정되고, 이 시점엔 자기 요청 행이 아직 삽입 전이라
+     * 존재 확인을 먼저 돌리면 자기참조가 NOT_FOUND로 오진되기 때문이다(진짜 사유가 가려진다).
+     */
+    private fun resolveParentLink(
+        request: GenerateSimpleStorylinesRequest,
+        userId: Long?,
+        deviceIdHash: String?,
+    ): ParentCreationLink? {
+        val attempted = request.parentCreationId ?: return null
+        val error = if (attempted == request.requestId) {
+            ParentLinkError.SELF_REFERENCE
+        } else {
+            val parent = storyCreationRequestRepository.findByRequestId(attempted)
+            when {
+                parent == null -> ParentLinkError.NOT_FOUND
+                !parent.hasSameChainOwnerAs(userId, deviceIdHash) -> ParentLinkError.OWNER_MISMATCH
+                else -> null
+            }
+        }
+        return ParentCreationLink(attempted, error)
     }
 
     /**
@@ -184,16 +229,27 @@ class SimpleStoryCreationService(
         ownerUserId: Long?,
         deviceId: String?,
         responseType: Class<T>,
-        // 콜백 인자는 이 실행이 회수(reclaim)인지다(완성 경로의 reconcile 게이트 — Codex P1). 미기록 직접 실행은 회수가 아니다.
-        block: (isReclaim: Boolean) -> T,
+        // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
+        parentLink: ParentCreationLink? = null,
+        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1)와
+        // (요청 행에 실제로 기록된 체인 — KNK-755)이다. 미기록 직접 실행은 회수가 아니고, 체인도 방금 검증한 값 그대로다.
+        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
-            return block(false)
+            return block(false, parentLink)
         }
-        return storyCreationRequestRecorder.execute(requestId, stage, ownerUserId, ownerDeviceIdHash, responseType, block)
+        return storyCreationRequestRecorder.execute(
+            requestId,
+            stage,
+            ownerUserId,
+            ownerDeviceIdHash,
+            responseType,
+            parentLink,
+            block,
+        )
     }
 
     /**
@@ -232,17 +288,20 @@ class SimpleStoryCreationService(
     /**
      * AI trace 여정을 묶는 연결 식별자(KNK-751)를 스토리라인 호출용으로 만든다.
      * creation_id는 이 요청의 request_id다 — AI 호출 전에 커밋되므로 실패해도 남고, 재시도에도 같은 값이다.
-     * 재생성 여부·부모 creation_id는 서버가 알 수 없어 프론트가 준 값만 전달하고, 없으면 헤더를 생략한다.
+     *
+     * 부모 creation_id는 **검증을 통과한 값만** 나간다(KNK-755) — 미검증 pass-through는 존재하지 않거나 남의 여정을
+     * 가리키는 체인을 AI가 신뢰하게 만든다. 재생성 여부는 서버가 알 수 없어 프론트가 준 값을 그대로 전달한다.
      */
-    private fun storylineTraceLink(request: GenerateSimpleStorylinesRequest) = AiTraceLink(
+    private fun storylineTraceLink(request: GenerateSimpleStorylinesRequest, parentLink: ParentCreationLink?) = AiTraceLink(
         creationId = request.requestId,
-        parentCreationId = request.parentCreationId,
+        parentCreationId = parentLink?.validatedParentRequestId,
         isRegenerated = request.isRegenerated,
     )
 
     private fun doGenerateSimpleStorylines(
         request: GenerateSimpleStorylinesRequest,
         userId: Long?,
+        parentLink: ParentCreationLink?,
     ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
@@ -266,7 +325,7 @@ class SimpleStoryCreationService(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request))
+                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request, parentLink))
             }.result
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
@@ -360,23 +419,35 @@ class SimpleStoryCreationService(
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
-        val create: (Boolean) -> SimpleStoryCreateResponse = { isReclaim ->
+        // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
+        val create: (Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _ ->
             val startNanos = System.nanoTime()
+            // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+            // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).
+            var compileStarted = false
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
-                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim)
+                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim) { compileStarted = true }
+                // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
+                val durationNanos = System.nanoTime() - startNanos
+                // aiCallLogId가 null이면 회수 재실행 재구성(reconcile) — AI·저장을 타지 않은 조회 경로라 측정에서 뺀다.
+                if (outcome.aiCallLogId != null) {
+                    recordCreationDuration(OUTCOME_SUCCESS, durationNanos)
+                }
                 structuredLogger.event(
                     "story_created",
                     "story_id" to outcome.response.id,
                     "ai_call_log_id" to outcome.aiCallLogId,
-                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                    "duration_ms" to durationNanos / 1_000_000,
                 )
                 outcome.response
             } catch (exception: Exception) {
+                val durationNanos = System.nanoTime() - startNanos
+                recordCreationDuration(creationOutcomeOf(exception, compileStarted), durationNanos)
                 structuredLogger.event(
                     "story_create_failed",
                     "error_code" to storyErrorCode(exception),
-                    "duration_ms" to (System.nanoTime() - startNanos) / 1_000_000,
+                    "duration_ms" to durationNanos / 1_000_000,
                 )
                 throw exception
             }
@@ -389,8 +460,59 @@ class SimpleStoryCreationService(
             resolveCompletionOwnerUserId(request.simpleCreationId, userId),
             deviceId,
             SimpleStoryCreateResponse::class.java,
-            create,
+            block = create,
         )
+    }
+
+    /**
+     * 간편 스토리 완성 처리시간을 `manyak.story.creation.duration`으로 집계한다(스펙 §4-7).
+     *
+     * outcome 태그는 3값이다(KNK-784):
+     *   - `success`  : 실제로 생성·저장까지 끝난 호출
+     *   - `failure`  : 생성을 시도하다 깨진 호출 — AI compile 실패(502·타임아웃)·응답 검증 실패·저장 경합. 수 초~180초.
+     *   - `rejected` : 생성 시도 **이전에** 거부된 4xx — 세션 없음(404)·소유권(403)·이미 생성됨(409)·태그 오류(400)·
+     *                  크레딧 부족과 게스트 한도(402). DB 조회 몇 번으로 끝나는 밀리초 경로다.
+     *
+     * 4xx를 failure에서 떼는 이유: 두 갈래를 한 히스토그램에 섞으면 거부 비중에 따라 실패 p95가 요동치고,
+     * 거부가 늘수록 p95가 **낮아져** AI가 실제로 느려지는데 지표는 개선된 것처럼 보이는 역전이 생긴다.
+     * 실패 건수 알림도 404 급증만으로 오발화한다. 태그 값이 2에서 3으로 늘지만 여전히 유한 enum이라 카디널리티는 안전하다.
+     *
+     * 실제 생성 콜백(create) 안에서만 부르고, **AI 호출 없이 저장된 결과를 돌려주는 조회 경로 두 가지는 의도적으로 제외한다**
+     * — 포함하면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다.
+     *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
+     *   2. 회수 재실행 재구성: [reconcileCreatedSession] (콜백은 타지만 AI·저장이 없다 — [StoryCreationOutcome.aiCallLogId]가
+     *      null인 것으로 판별한다. 실제 생성 경로는 RecordedAiCall.aiCallLogId가 non-null이다)
+     * 태그는 outcome(success/failure) 하나뿐이다(카디널리티 규칙).
+     */
+    private fun recordCreationDuration(outcome: String, durationNanos: Long) {
+        // 메트릭 기록 실패가 성공한 스토리 생성을 500으로 만들거나 실패 경로에서 원래 예외를 가리지 않도록 격리한다.
+        runCatching {
+            Timer.builder("manyak.story.creation.duration")
+                .description("간편 스토리 완성 처리시간")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .record(durationNanos, TimeUnit.NANOSECONDS)
+        }
+    }
+
+    /**
+     * 완성 실패 예외를 outcome 태그로 가른다([recordCreationDuration]의 rejected/failure 정의).
+     *
+     * **HTTP 상태만으로는 가를 수 없다.** compile을 마친 뒤에도 4xx가 날 수 있기 때문이다: 같은 세션에 requestId가
+     * 다른 완성 요청 둘이 겹치면 둘 다 잠금 없는 초기 상태 검사를 통과해 compile을 호출하고, 진 쪽은
+     * [compileAndPersist]가 `findByIdForUpdate`로 잠금을 잡은 뒤 STORY_CREATED를 보고 409(또는 세션 소실 시 404)를 던진다.
+     * 이건 AI 호출을 이미 마친 수 초~180초짜리 **실제 생성 실패**라, 밀리초 거부와 같은 시계열에 넣으면 안 된다.
+     *
+     * 그래서 compile 진입 여부([compileStarted])를 먼저 본다.
+     * - compile이 시작됐으면 상태 코드와 무관하게 failure다.
+     * - 시작 전이면 4xx `ResponseStatusException`이 rejected다. 402 크레딧·게스트 한도를 던지는
+     *   `CodedResponseStatusException`도 `ResponseStatusException` 하위라 함께 걸린다(별도 분기 불필요).
+     * - 그 외(5xx·비 HTTP 예외)는 failure다.
+     */
+    private fun creationOutcomeOf(exception: Exception, compileStarted: Boolean): String = when {
+        compileStarted -> OUTCOME_FAILURE
+        exception is ResponseStatusException && exception.statusCode.is4xxClientError -> OUTCOME_REJECTED
+        else -> OUTCOME_FAILURE
     }
 
     private fun storyErrorCode(exception: Exception): String = when (exception) {
@@ -405,6 +527,8 @@ class SimpleStoryCreationService(
         deviceId: String?,
         // 소유 검증된 회수(reclaim)인지. 완성된 세션의 스토리 재구성은 회수일 때만 허용한다(Codex P1 — 신규 requestId로 남의 스토리 열람 차단).
         isReclaim: Boolean,
+        // AI compile 진입 직전에 호출한다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([creationOutcomeOf]).
+        onCompileStarted: () -> Unit,
     ): StoryCreationOutcome {
         val session = storyCreationSessionRepository.findById(request.simpleCreationId)
             .orElseThrow {
@@ -506,6 +630,7 @@ class SimpleStoryCreationService(
                     storylineOrder = selectedStoryline.storylineOrder,
                     isRegenerated = request.isRegenerated,
                 ),
+                onCompileStarted,
             )
         }
     }
@@ -644,7 +769,10 @@ class SimpleStoryCreationService(
         requestId: UUID,
         // Langfuse trace 연결 식별자(KNK-751). 위 requestId(완성 단계)와 달리 creation_id는 스토리라인 단계 값이다.
         traceLink: AiTraceLink,
+        // compile 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([creationOutcomeOf]).
+        onCompileStarted: () -> Unit,
     ): StoryCreationOutcome {
+        onCompileStarted()
         val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORY_COMPLETION),

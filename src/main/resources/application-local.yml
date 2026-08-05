@@ -11,6 +11,30 @@ spring:
   flyway:
     enabled: true
 
+management:
+  endpoints:
+    web:
+      exposure:
+        # 로컬만 prometheus를 더해 실제 export 내용을 눈으로 확인한다(운영은 health,info 유지 — 스펙 §4-7).
+        include: health,info,prometheus
+  otlp:
+    metrics:
+      export:
+        # export.enabled는 여기서 켜지 않는다 — application.yml의 기본 off(MANYAK_OTLP_METRICS_ENABLED:false)를
+        # 로컬도 그대로 상속한다. 여기서 true로 굳히면 endpoint 없이 클론해 그냥 실행한 팀원의 앱이 10초마다
+        # localhost:4318로 헛푸시하며 connection refused를 쌓는다(기본 off로 막으려던 바로 그 실패 모드).
+        # '엔드포인트 주입이 먼저, 토글이 나중' 규칙은 로컬에도 똑같이 적용한다(스펙 §4-7 · §7-6).
+        # 로컬에서 켜려면 IntelliJ 실행 환경변수에 아래를 함께 넣는다(단일 프로세스라 표준 OTEL_* 이름을 쓴다):
+        #   OTEL_EXPORTER_OTLP_ENDPOINT · OTEL_EXPORTER_OTLP_HEADERS(Grafana Cloud 인증 헤더)
+        #   OTEL_SERVICE_NAME=manyak-server-local · MANYAK_OTLP_METRICS_ENABLED=true
+        # 켜지 않아도 /actuator/prometheus로 export 내용은 그대로 확인할 수 있다(아래 prometheus export).
+        # 로컬은 확인 회전을 빠르게 하려고 10초(켰을 때만 의미가 있다).
+        step: 10s
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
 manyak:
   auth:
     jwt:
