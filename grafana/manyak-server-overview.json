@@ -2,12 +2,19 @@
   "uid": "manyak-server-overview",
   "title": "Manyak Server — Overview",
   "description": "RED + AI 호출 지연 + 스토리 완성 + 인프라 + 무료 티어 예산. KNK-782. 쿼리 규칙은 grafana/README.md 참고.",
-  "tags": ["manyak", "server", "knk-782"],
+  "tags": [
+    "manyak",
+    "server",
+    "knk-782"
+  ],
   "schemaVersion": 39,
   "version": 1,
   "editable": true,
   "graphTooltip": 1,
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "refresh": "1m",
   "timezone": "browser",
   "templating": {
@@ -24,12 +31,18 @@
         "name": "service",
         "label": "service_name",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "query": "label_values(jvm_memory_used_bytes, service_name)",
         "refresh": 1,
         "includeAll": false,
         "multi": false,
-        "current": { "text": "manyak-server", "value": "manyak-server" },
+        "current": {
+          "text": "manyak-server",
+          "value": "manyak-server"
+        },
         "hide": 0
       },
       {
@@ -44,15 +57,52 @@
     ]
   },
   "panels": [
-    { "type": "row", "title": "RED — 요청률 · 오류율 · 응답시간", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false, "panels": [] },
+    {
+      "type": "row",
+      "title": "RED — 요청률 · 오류율 · 응답시간",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "type": "timeseries",
       "title": "요청률 (req/s)",
       "description": "전체 HTTP 요청 처리율. 트래픽 급증·급감을 먼저 본다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0, "custom": { "fillOpacity": 10 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -64,23 +114,57 @@
     {
       "type": "timeseries",
       "title": "5xx 오류율 (%)",
-      "description": "서버 오류 비율. 4xx는 클라이언트 문제라 제외한다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "description": "서버 오류 비율. 4xx는 클라이언트 문제라 제외한다. 5xx가 한 건도 없으면 분자 시계열이 아예 없어 빈 결과가 되므로 or vector(0)으로 0%를 그린다 — \"오류 없음\"과 \"데이터 없음\"을 구분하기 위해서다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
-          "custom": { "fillOpacity": 10 },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+          "custom": {
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(rate(http_server_requests_milliseconds_count{service_name=\"$service\", status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_milliseconds_count{service_name=\"$service\"}[5m])), 0.0001)",
+          "expr": "100 * (sum(rate(http_server_requests_milliseconds_count{service_name=\"$service\", status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_requests_milliseconds_count{service_name=\"$service\"}[5m])), 0.0001)",
           "legendFormat": "5xx 비율"
         }
       ]
@@ -89,10 +173,32 @@
       "type": "timeseries",
       "title": "HTTP p95 (ms)",
       "description": "⚠️ 히스토그램 상한이 10s다. AI를 기다리는 엔드포인트는 10초에서 뭉개진다 — 그 경로는 아래 전용 타이머로 본다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "ms", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -101,16 +207,53 @@
         }
       ]
     },
-
-    { "type": "row", "title": "AI 호출 — 멘토 피드백 핵심 지표", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }, "collapsed": false, "panels": [] },
+    {
+      "type": "row",
+      "title": "AI 호출 — 멘토 피드백 핵심 지표",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "type": "timeseries",
       "title": "AI 호출 p95 (feature별, ms)",
       "description": "성공 호출만 본다. 상한 240s는 compile 타임아웃 180s보다 위라 타임아웃 직전 분포까지 보인다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "ms", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -122,36 +265,105 @@
     {
       "type": "timeseries",
       "title": "AI 실패율 (feature별, %)",
-      "description": "AiCallRecorder는 AI 호출만 감싸므로 여기 failure는 전부 진짜 AI 실패다(거부가 섞이지 않는다).",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 10 },
+      "description": "AiCallRecorder는 AI 호출만 감싸므로 여기 failure는 전부 진짜 AI 실패다(거부가 섞이지 않는다). 실패가 없는 feature도 0%로 그리려고 0 * rate(전체)를 or로 더한다 — 그렇지 않으면 무장애 상태가 \"데이터 없음\"으로 보인다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum by (feature) (rate(manyak_ai_call_duration_milliseconds_count{service_name=\"$service\", outcome=\"failure\"}[5m])) / clamp_min(sum by (feature) (rate(manyak_ai_call_duration_milliseconds_count{service_name=\"$service\"}[5m])), 0.0001)",
+          "expr": "100 * sum by (feature) (rate(manyak_ai_call_duration_milliseconds_count{service_name=\"$service\", outcome=\"failure\"}[5m]) or 0 * rate(manyak_ai_call_duration_milliseconds_count{service_name=\"$service\"}[5m])) / clamp_min(sum by (feature) (rate(manyak_ai_call_duration_milliseconds_count{service_name=\"$service\"}[5m])), 0.0001)",
           "legendFormat": "{{feature}}"
         }
       ]
     },
-
-    { "type": "row", "title": "스토리 완성", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }, "collapsed": false, "panels": [] },
+    {
+      "type": "row",
+      "title": "스토리 완성",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "type": "timeseries",
       "title": "완성 p95 (ms)",
       "description": "AI compile + 저장 포함. 멱등 replay와 회수 재구성은 측정에서 제외돼 있다(KNK-779·784).",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 },
-      "fieldConfig": { "defaults": { "unit": "ms", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -169,10 +381,43 @@
       "type": "timeseries",
       "title": "완성 결과 분포 (/s)",
       "description": "⚠️ outcome 3값이다(KNK-784). rejected는 생성 시도 이전 4xx 거부(밀리초)라 failure와 성격이 다르다 — 알림은 failure만 봐야 한다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 },
-      "fieldConfig": { "defaults": { "unit": "ops", "min": 0, "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "sum"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -181,41 +426,134 @@
         }
       ]
     },
-
-    { "type": "row", "title": "인프라 — CPU · 힙 · GC · DB 커넥션", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 }, "collapsed": false, "panels": [] },
+    {
+      "type": "row",
+      "title": "인프라 — CPU · 힙 · GC · DB 커넥션",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "type": "timeseries",
       "title": "CPU 사용률",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 30 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "expr": "process_cpu_usage{service_name=\"$service\"}", "legendFormat": "프로세스" },
-        { "refId": "B", "expr": "system_cpu_usage{service_name=\"$service\"}", "legendFormat": "시스템" }
+        {
+          "refId": "A",
+          "expr": "process_cpu_usage{service_name=\"$service\"}",
+          "legendFormat": "프로세스"
+        },
+        {
+          "refId": "B",
+          "expr": "system_cpu_usage{service_name=\"$service\"}",
+          "legendFormat": "시스템"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "JVM 힙",
       "description": "t3.small(2GB)에 server·ai가 함께 뜬다. 힙이 max에 붙으면 GC 패널을 같이 본다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 30 },
-      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(jvm_memory_used_bytes{service_name=\"$service\", area=\"heap\"})", "legendFormat": "used" },
-        { "refId": "B", "expr": "sum(jvm_memory_committed_bytes{service_name=\"$service\", area=\"heap\"})", "legendFormat": "committed" }
+        {
+          "refId": "A",
+          "expr": "sum(jvm_memory_used_bytes{service_name=\"$service\", area=\"heap\"})",
+          "legendFormat": "used"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(jvm_memory_committed_bytes{service_name=\"$service\", area=\"heap\"})",
+          "legendFormat": "committed"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "GC pause 평균 (ms)",
       "description": "percentile histogram을 켜지 않아 _bucket이 없다 → p95 대신 평균. GC가 실제로 발생해야 나타난다.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 30 },
-      "fieldConfig": { "defaults": { "unit": "ms", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -228,42 +566,131 @@
       "type": "timeseries",
       "title": "HikariCP 커넥션",
       "description": "⚠️ jdbc_connections_* 도 같은 값을 다른 이름으로 내보낸다. 둘 중 하나만 쓴다(여기서는 hikaricp).",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 30 },
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(hikaricp_connections_active{service_name=\"$service\"})", "legendFormat": "active" },
-        { "refId": "B", "expr": "sum(hikaricp_connections_idle{service_name=\"$service\"})", "legendFormat": "idle" },
-        { "refId": "C", "expr": "sum(hikaricp_connections_pending{service_name=\"$service\"})", "legendFormat": "pending(대기)" }
+        {
+          "refId": "A",
+          "expr": "sum(hikaricp_connections_active{service_name=\"$service\"})",
+          "legendFormat": "active"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(hikaricp_connections_idle{service_name=\"$service\"})",
+          "legendFormat": "idle"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(hikaricp_connections_pending{service_name=\"$service\"})",
+          "legendFormat": "pending(대기)"
+        }
       ]
     },
-
-    { "type": "row", "title": "예산 — 무료 티어 한도 감시", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 }, "collapsed": false, "panels": [] },
+    {
+      "type": "row",
+      "title": "예산 — 무료 티어 한도 감시",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "type": "timeseries",
       "title": "Active series (무료 티어 한도 10,000)",
       "description": "데이터소스를 grafanacloud usage로 골라야 뜬다. 트라이얼 동안은 한도가 안 걸려 넘겨도 증상이 없다가 만료 시점에 잘리기 시작한다.",
-      "datasource": { "type": "prometheus", "uid": "${usage_datasource}" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 39 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${usage_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 7000 }, { "color": "red", "value": 9000 }] },
-          "custom": { "thresholdsStyle": { "mode": "line" } }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7000
+              },
+              {
+                "color": "red",
+                "value": 9000
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
-        { "refId": "A", "expr": "grafanacloud_instance_active_series", "legendFormat": "active series" }
+        {
+          "refId": "A",
+          "expr": "grafanacloud_instance_active_series",
+          "legendFormat": "active series"
+        }
       ]
     },
     {
       "type": "text",
       "title": "읽는 법 · 함정",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 39 },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
       "options": {
         "mode": "markdown",
         "content": "### 쿼리 규칙 (실측 확인)\n\n- 라벨은 `job`이 **아니라** `service_name`\n- 운영 `manyak-server` / 로컬 `manyak-server-local`\n- 이름은 `..._milliseconds_*` (로컬 `/actuator/prometheus`는 `_seconds_*`)\n\n### 판독\n\n- **HTTP p95가 10s에 붙으면** 상한에 걸린 것. AI 경로는 위 전용 타이머로 본다\n- **완성 결과 분포**의 `rejected` 급증은 장애가 아니라 클라이언트 문제 신호\n- **AI p95 상승 + HTTP p95 정상** = AI 쪽 지연\n- `jvm_gc_pause_*`는 GC 발생 후에만 나타남\n\n### 아직 없는 것\n\n**알림 미설정.** 기준선(2026-08-06 수신 시작)이 쌓인 뒤 임계값과 **No Data 동작**을 함께 설계한다 — 서버가 꺼지면 규칙이 No Data로 발화한다."
