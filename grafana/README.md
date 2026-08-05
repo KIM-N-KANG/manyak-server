@@ -12,6 +12,40 @@
 
 Terraform provider(`grafana_dashboard`)로 관리하면 IaC가 되어 `manyak-terraform`으로 가야 하지만, 손으로 import하는 JSON은 IaC가 아닙니다. 대시보드가 늘어 수동 import가 번거로워지면 그때 옮기면 되고, JSON은 그대로 재사용됩니다.
 
+## 무엇을 재는가
+
+| 메트릭 | 태그 | 계측 지점 | 재는 구간 |
+| --- | --- | --- | --- |
+| `http.server.requests` | `uri`(경로 템플릿)·`method`·`status`·`outcome` | Spring Boot 자동 | 컨트롤러 진입 ~ 응답 |
+| `manyak.ai.call.duration` | `feature`(4종)·`outcome`(2값) | `AiCallRecorder.record` | AI 클라이언트 호출 직전 ~ 응답/예외 |
+| `manyak.story.creation.duration` | `outcome`(3값) | `SimpleStoryCreationService.recordCreationDuration` | 완성 콜백 전체(AI + 저장 + 크레딧) |
+| JVM · 프로세스 · HikariCP | 바인더별 | Micrometer 기본 바인더 | 자원 상태 |
+
+`feature`는 `storyline_generation`·`story_completion`·`chat_response`·`choice_generation`입니다. `choice_generation`은 현재 독립 AI 호출이 없어(선택지가 채팅 턴 응답에 함께 옴) 라인이 안 나오는 게 정상입니다.
+
+**측정에서 일부러 뺀 것** — `manyak.story.creation.duration`은 AI 호출 없이 저장된 결과를 돌려주는 두 경로를 제외합니다. 멱등 재요청(COMPLETED replay)과 회수 재실행 재구성입니다. 포함하면 밀리초짜리 조회가 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡됩니다.
+
+## 어떻게 흘러가는가
+
+```
+Micrometer Timer  →  OtlpMeterRegistry  ──60초──▶  Grafana Cloud OTLP 게이트웨이
+   (앱 코드)          (spring-boot)                   (외부 저장·조회)
+```
+
+**push 방식입니다(스크레이프 아님).** 그래서 운영은 `/actuator/prometheus`를 노출하지 않고 인바운드 경로도 열지 않습니다. Prometheus·Grafana를 별도 EC2에 자체 호스팅하지 않는 이유이기도 합니다 — 단일 인스턴스 운영에서 관측 대상과 관측자가 같이 죽고, 관리 비용이 이득보다 큽니다.
+
+**켜지는 조건은 세 가지가 모두 참일 때입니다.**
+
+1. 시크릿에 `SERVER_MANAGEMENT_OTLP_METRICS_EXPORT_URL`·`..._HEADERS_AUTHORIZATION`이 **둘 다** 있음
+2. `deploy.sh`가 그 둘을 `.env`에 기록(한쪽만 있으면 3줄 전부 생략)
+3. `MANYAK_OTLP_METRICS_ENABLED=true`
+
+기본값은 **off**입니다. micrometer의 기본 endpoint가 `http://localhost:4318`이라, 켠 채 endpoint를 주지 않으면 모든 환경이 매 step마다 헛푸시합니다.
+
+**설정 위치는 `application.yml`의 `management.*`** 입니다. 히스토그램 on/off와 버킷 구간이 여기 있고, 이 값이 대시보드 해석에 직접 영향을 줍니다(아래 히스토그램 상한 절).
+
+**이름이 두 번 바뀝니다.** 코드의 `manyak.ai.call.duration`이 Prometheus 노출에서 `manyak_ai_call_duration_seconds_*`가 되고, OTLP 전송에서는 기본 시간 단위가 달라 **`_milliseconds_*`** 로 도착합니다. 쿼리를 쓸 때 이 차이가 가장 흔한 실수입니다.
+
 ## 왜 이 지표들인가
 
 ### 3층으로 나눠 본다 — 원인을 좁히기 위해
