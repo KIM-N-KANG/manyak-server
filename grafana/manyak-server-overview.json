@@ -631,7 +631,7 @@
         "uid": "${usage_datasource}"
       },
       "gridPos": {
-        "h": 9,
+        "h": 14,
         "w": 12,
         "x": 0,
         "y": 39
@@ -686,14 +686,14 @@
       "type": "text",
       "title": "읽는 법 · 함정",
       "gridPos": {
-        "h": 9,
+        "h": 14,
         "w": 12,
         "x": 12,
         "y": 39
       },
       "options": {
         "mode": "markdown",
-        "content": "### 쿼리 규칙 (실측 확인)\n\n- 라벨은 `job`이 **아니라** `service_name`\n- 운영 `manyak-server` / 로컬 `manyak-server-local`\n- 이름은 `..._milliseconds_*` (로컬 `/actuator/prometheus`는 `_seconds_*`)\n\n### 판독\n\n- **HTTP p95가 10s에 붙으면** 상한에 걸린 것. AI 경로는 위 전용 타이머로 본다\n- **완성 결과 분포**의 `rejected` 급증은 장애가 아니라 클라이언트 문제 신호\n- **AI p95 상승 + HTTP p95 정상** = AI 쪽 지연\n- `jvm_gc_pause_*`는 GC 발생 후에만 나타남\n\n### 아직 없는 것\n\n**알림 미설정.** 기준선(2026-08-06 수신 시작)이 쌓인 뒤 임계값과 **No Data 동작**을 함께 설계한다 — 서버가 꺼지면 규칙이 No Data로 발화한다."
+        "content": "### 왜 3층으로 보나\n\n```\nHTTP 입구   → 서비스가 밖에서 정상인가\n └ 완성     → 기능 자체가 느린가\n    └ AI    → 외부 AI가 느린가\n```\n\n한 층만 보면 '느리다'까지만 알고 **어디가** 느린지 모른다.\n\n| 관측 | 해석 |\n|---|---|\n| AI↑ · HTTP↑ | AI 지연이 사용자에게 전달 중 |\n| AI 정상 · 완성↑ | 저장·크레딧·락에서 시간 소모 |\n| 완성 정상 · HTTP↑ | 다른 엔드포인트 문제 |\n\n⚠️ **두 p95를 빼서 AI 기여도를 구할 수 없다** — 다른 표본의 분위수라 산술이 성립하지 않는다. 원인 후보를 좁히는 도구지 확정하는 도구가 아니다.\n\n### 인프라를 같이 두는 이유\n\n`t3.small` 한 대에 server·ai가 함께 뜬다. '외부 AI가 느린 것'과 '자원이 없어 느린 것'은 대응이 다르다. **HikariCP `pending`이 0이 아니면 그것만으로 DB 병목 신호.**\n\n### 쿼리 규칙 (실측)\n\n- 라벨은 `job`이 **아니라** `service_name`\n- 이름은 `..._milliseconds_*` (로컬은 `_seconds_*`)\n- `outcome` 3값 — 알림은 `failure`만. `rejected`는 밀리초 거부라 p95를 끌어내림\n- `jvm_gc_pause_*`는 GC 발생 후에만 나타남\n\n### 아직 없는 것\n\n**알림 미설정.** 기준선(2026-08-06 수신 시작)이 쌓인 뒤 임계값과 **No Data 동작**을 함께 설계한다 — 서버가 꺼지면 규칙이 No Data로 발화한다."
       }
     }
   ]
