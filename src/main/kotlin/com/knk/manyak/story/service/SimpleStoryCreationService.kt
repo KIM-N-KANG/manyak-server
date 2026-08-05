@@ -482,7 +482,7 @@ class SimpleStoryCreationService(
      *   1. 멱등 재요청: [recordOrRun]의 COMPLETED replay (콜백 자체가 실행되지 않아 자연히 빠진다)
      *   2. 회수 재실행 재구성: [reconcileCreatedSession] (콜백은 타지만 AI·저장이 없다 — [StoryCreationOutcome.aiCallLogId]가
      *      null인 것으로 판별한다. 실제 생성 경로는 RecordedAiCall.aiCallLogId가 non-null이다)
-     * 태그는 outcome(success/failure) 하나뿐이다(카디널리티 규칙).
+     * 태그는 outcome 하나뿐이다(위 3값 — 고유값을 넣지 않는다는 카디널리티 규칙).
      */
     private fun recordCreationDuration(outcome: String, durationNanos: Long) {
         // 메트릭 기록 실패가 성공한 스토리 생성을 500으로 만들거나 실패 경로에서 원래 예외를 가리지 않도록 격리한다.
