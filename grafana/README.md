@@ -5,6 +5,7 @@
 | 파일 | 내용 |
 | --- | --- |
 | `manyak-server-overview.json` | RED · AI 호출 지연 · 스토리 완성 · 인프라 · 무료 티어 예산 (KNK-782) |
+| [`PANELS.md`](./PANELS.md) | **패널별 상세** — 각 차트의 목적·단위·값을 움직이는 원인·읽는 법·함정 |
 
 ## 왜 이 레포인가
 
@@ -19,11 +20,14 @@ Terraform provider(`grafana_dashboard`)로 관리하면 IaC가 되어 `manyak-te
 | `http.server.requests` | `uri`(경로 템플릿)·`method`·`status`·`outcome` | Spring Boot 자동 | 컨트롤러 진입 ~ 응답 |
 | `manyak.ai.call.duration` | `feature`(4종)·`outcome`(2값) | `AiCallRecorder.record` | AI 클라이언트 호출 직전 ~ 응답/예외 |
 | `manyak.story.creation.duration` | `outcome`(3값) | `SimpleStoryCreationService.recordCreationDuration` | 완성 콜백 전체(AI + 저장 + 크레딧) |
+| `manyak.storyline.creation.result` | `outcome`(3값) | `SimpleStoryCreationService.recordStorylineResult` | 스토리라인 생성 **건수만**(Counter) |
 | JVM · 프로세스 · HikariCP | 바인더별 | Micrometer 기본 바인더 | 자원 상태 |
 
 `feature`는 `storyline_generation`·`story_completion`·`chat_response`·`choice_generation`입니다. `choice_generation`은 현재 독립 AI 호출이 없어(선택지가 채팅 턴 응답에 함께 옴) 라인이 안 나오는 게 정상입니다.
 
 **측정에서 일부러 뺀 것** — `manyak.story.creation.duration`은 AI 호출 없이 저장된 결과를 돌려주는 두 경로를 제외합니다. 멱등 재요청(COMPLETED replay)과 회수 재실행 재구성입니다. 포함하면 밀리초짜리 조회가 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡됩니다.
+
+**스토리라인만 Counter인 이유**(KNK-801) — 스토리라인 생성은 AI 호출 1회가 유스케이스의 거의 전부라 소요가 `manyak.ai.call.duration{feature="storyline_generation"}`과 사실상 겹칩니다. 반면 **결과 분포는 그쪽에 없습니다** — 특히 게스트 한도 소진(402)은 AI 호출 **전에** 끊기므로 AI 타이머에도 Langfuse trace에도 남지 않습니다. 그 사각지대만 건수로 덮고 히스토그램은 두지 않아 시계열은 3개로 끝납니다.
 
 ## 어떻게 흘러가는가
 
@@ -60,7 +64,7 @@ HTTP 입구        http.server.requests           서비스가 밖에서 정상�
 
 **HTTP만으로는 부족한 이유** — 간편 스토리 완성 요청 하나에는 소유권 확인, 크레딧 또는 게스트 한도 처리, AI compile 호출, 여러 테이블 저장이 함께 들어갑니다. HTTP p95가 올랐다는 사실만으로는 AI가 느린 건지 저장이 느린 건지 구분할 수 없습니다.
 
-**AI를 따로 재는 이유** — AI read 타임아웃이 스토리라인 90초·compile 180초입니다. 이 서비스에서 지연의 지배적 요인이고, 우리가 통제하지 못하는 외부 의존입니다. 멘토 피드백이 AI 응답시간을 짚은 것도 이 때문입니다. `AiCallRecorder`라는 **공통 호출 경계 한 곳**에서 재기 때문에 기능이 늘어도 계측이 빠지지 않습니다.
+**AI를 따로 재는 이유** — AI read 타임아웃이 스토리라인 90초·compile 180초입니다. 이 서비스에서 지연의 지배적 요인이고, 우리가 통제하지 못하는 외부 의존입니다. `AiCallRecorder`라는 **공통 호출 경계 한 곳**에서 재기 때문에 기능이 늘어도 계측이 빠지지 않습니다.
 
 **세 층을 함께 읽는 법**
 
@@ -75,6 +79,34 @@ HTTP 입구        http.server.requests           서비스가 밖에서 정상�
 **두 p95를 빼서 AI 기여도를 구할 수 없습니다.** 서로 다른 표본에서 계산된 분위수라 산술이 성립하지 않습니다. 요청별 구간 시간을 연결하려면 트레이스나 `request_id` 기반 별도 계측이 필요합니다. 이 대시보드는 **원인 후보를 좁히는 도구**이지 원인을 확정하는 도구가 아닙니다.
 
 개별 사건 추적도 여기서 못 합니다 — 그건 구조화 로그와 `ai_call_logs`의 몫입니다. 메트릭에 `user_id`·`story_id` 같은 고유값을 넣지 않는 이유이기도 합니다(시계열이 무한히 늘어남).
+
+### AI 지표를 Langfuse에 맡기지 않는 이유
+
+manyak-ai는 Langfuse로 LLM 호출을 추적합니다(KNK-707·751). 그럼 `manyak.ai.call.duration`이 중복 아니냐는 질문이 나오는데, **겹치는 건 지연 하나뿐이고 그것도 재는 구간이 다릅니다.**
+
+```
+manyak-server ──① 컨테이너 왕복 + AI 서버 처리 ──▶ manyak-ai ──② LLM ──▶ DeepSeek
+              └───── manyak.ai.call.duration ─────┘  └── Langfuse ──┘
+```
+
+Micrometer는 ①+②를, Langfuse는 ②를 잽니다. 그 사이에 프롬프트 조립·검증·재시도·컨테이너 간 네트워크가 있고, server와 ai가 같은 `t3.small`에 얹혀 있어 자원 경합도 여기 들어갑니다. **Langfuse만 보면 "LLM은 3초인데 사용자는 12초 기다렸다"를 못 잡습니다.**
+
+**장애 때 Langfuse는 조용해집니다.** AI 서버가 죽거나 타임아웃하면 trace가 아예 생기지 않고, 없는 것으로는 실패율을 셀 수 없습니다 — 실패율이 오르는 게 아니라 그래프가 비어 버립니다. 관측 대상이 죽을 때 같이 조용해지는 도구는 장애 감지에 쓸 수 없습니다. 서버 쪽 타이머는 AI가 무응답이어도 `outcome="failure"`를 올립니다.
+
+**실패의 정의도 어긋납니다.** AI가 200을 줬는데 서버가 응답 검증에서 깐 경우 Langfuse에는 성공으로 남습니다. 사용자는 502를 받았는데도 그렇습니다.
+
+| | Micrometer(이 대시보드) | Langfuse |
+| --- | --- | --- |
+| 역할 | **알림을 거는 축** | **원인을 파고드는 도구** |
+| 재는 것 | 경계 지연, 실패율 | 토큰, 비용, 프롬프트·응답 내용, 모델·버전 비교, 품질 스코어 |
+| 태그·차원 | 값이 유한한 것만(`feature`·`outcome`) | 고차원 자유 |
+| 대상이 죽으면 | `failure`로 잡힘 | 기록 없음 |
+
+그래서 **Micrometer에 `model`·`prompt_version`·토큰 수를 태그로 붙이지 않습니다.** 버전이 바뀔 때마다 시계열이 늘어나는 전형적인 카디널리티 폭발이고, 무료 티어 예산과 정면으로 부딪칩니다. 그 축은 Langfuse의 몫입니다.
+
+알림이 울린 뒤 어떤 프롬프트에서 무슨 응답이 왔는지는 Langfuse에서 봅니다. 두 도구는 대체재가 아니라 순서입니다.
+
+> 2026-08-06 기준 Langfuse는 **서버가 헤더를 보내는 데까지만 확인**됐고, manyak-ai가 실제로 적재하는지는 AI팀 확인 대기 중입니다(KNK-707). 검증되지 않은 경로에 지연·실패율 관측을 넘길 수 없다는 점도 현재로선 이유가 됩니다.
 
 ### 인프라를 같은 화면에 두는 이유
 
