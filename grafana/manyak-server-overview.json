@@ -212,7 +212,7 @@
     },
     {
       "type": "row",
-      "title": "AI 호출 — 멘토 피드백 핵심 지표",
+      "title": "AI 호출",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -327,7 +327,7 @@
     },
     {
       "type": "row",
-      "title": "스토리 완성",
+      "title": "스토리 제작 — 스토리라인 · 완성",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -430,13 +430,62 @@
       ]
     },
     {
+      "type": "timeseries",
+      "title": "스토리라인 결과 분포 (/s)",
+      "description": "⚠️ Counter다(Timer 아님). 스토리라인은 AI 호출 1회가 유스케이스의 거의 전부라 소요가 manyak.ai.call.duration{feature=\"storyline_generation\"}과 겹쳐 duration을 따로 재지 않는다. rejected에는 게스트 한도 소진(402)이 들어오는데 AI 호출 전에 끊기므로 AI 타이머에도 Langfuse trace에도 남지 않는다 — 이 패널이 그 사각지대를 덮는 유일한 지표다(KNK-801).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(manyak_storyline_creation_result_total{service_name=\"$service\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
       "type": "row",
       "title": "인프라 — CPU · 힙 · GC · DB 커넥션",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 37
       },
       "collapsed": false,
       "panels": []
@@ -452,7 +501,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 30
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -496,7 +545,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 30
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -539,7 +588,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 30
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -577,7 +626,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 30
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -620,7 +669,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 46
       },
       "collapsed": false,
       "panels": []
@@ -637,7 +686,7 @@
         "h": 14,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -692,7 +741,7 @@
         "h": 14,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 47
       },
       "options": {
         "mode": "markdown",

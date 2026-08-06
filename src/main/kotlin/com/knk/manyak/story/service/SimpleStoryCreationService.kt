@@ -66,6 +66,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import org.springframework.beans.factory.annotation.Value
@@ -133,7 +134,8 @@ class SimpleStoryCreationService(
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
 
-        // manyak.story.creation.duration의 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration KDoc).
+        // 완성 타이머(manyak.story.creation.duration)와 스토리라인 카운터(manyak.storyline.creation.result)가
+        // 공유하는 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration·recordStorylineResult KDoc).
         const val OUTCOME_SUCCESS = "success"
         const val OUTCOME_FAILURE = "failure"
         const val OUTCOME_REJECTED = "rejected"
@@ -167,15 +169,26 @@ class SimpleStoryCreationService(
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
         // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
         val generate: (Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse = { _, recordedParentLink ->
-            val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
-                userId,
-                deviceId,
-                GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-            )
+            // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+            // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
+            var aiCallStarted = false
+            // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
             try {
-                doGenerateSimpleStorylines(request, userId, recordedParentLink)
+                val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
+                    userId,
+                    deviceId,
+                    GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+                )
+                val response = try {
+                    doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+                } catch (throwable: Throwable) {
+                    guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                    throw throwable
+                }
+                recordStorylineResult(OUTCOME_SUCCESS)
+                response
             } catch (throwable: Throwable) {
-                guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
                 throw throwable
             }
         }
@@ -302,6 +315,8 @@ class SimpleStoryCreationService(
         request: GenerateSimpleStorylinesRequest,
         userId: Long?,
         parentLink: ParentCreationLink?,
+        // AI 호출 진입 직전에 부른다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([storylineOutcomeOf]).
+        onAiCallStarted: () -> Unit,
     ): GenerateSimpleStorylinesResponse {
         val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
         val customTagDrafts = request.customTags.map { tag ->
@@ -320,6 +335,8 @@ class SimpleStoryCreationService(
             } + customTagDrafts
             ).distinctBy { it.key }
 
+        // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
+        onAiCallStarted()
         val aiResponse = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
@@ -512,6 +529,49 @@ class SimpleStoryCreationService(
     private fun creationOutcomeOf(exception: Exception, compileStarted: Boolean): String = when {
         compileStarted -> OUTCOME_FAILURE
         exception is ResponseStatusException && exception.statusCode.is4xxClientError -> OUTCOME_REJECTED
+        else -> OUTCOME_FAILURE
+    }
+
+    /**
+     * 스토리라인 생성 결과 분포를 `manyak.storyline.creation.result`로 집계한다(KNK-801).
+     *
+     * outcome 태그 값은 완성 타이머([recordCreationDuration])와 같은 3값이다:
+     *   - `success`  : 스토리라인 생성·저장까지 끝난 호출
+     *   - `failure`  : AI 호출에 진입한 뒤 깨진 호출 — AI 실패(502)·타임아웃·저장 실패
+     *   - `rejected` : AI 호출 **이전에** 거부된 4xx — 게스트 한도 소진(402)·사용할 수 없는 태그 ID(400) 등
+     *
+     * **Timer가 아니라 Counter인 이유**: 스토리라인 생성은 AI 호출 1회가 유스케이스의 거의 전부라 소요가
+     * `manyak.ai.call.duration{feature="storyline_generation"}`과 사실상 겹친다. 반면 결과 분포는 그쪽에 없다 —
+     * 특히 **게스트 한도 402는 AI 호출 전에 끊기므로 AI 타이머에도 Langfuse trace에도 남지 않는다**(양쪽 관측 사각지대).
+     * 히스토그램 버킷이 없어 시계열도 outcome 3개로 끝난다.
+     *
+     * 멱등 재요청([recordOrRun]의 COMPLETED replay)은 콜백 자체가 실행되지 않아 자연히 빠진다. 완성 경로와 달리
+     * 스토리라인에는 회수 재실행 재구성 개념이 없어 별도 제외 판별이 필요 없다.
+     * 태그는 outcome 하나뿐이다(위 3값 — 고유값을 넣지 않는다는 카디널리티 규칙).
+     */
+    private fun recordStorylineResult(outcome: String) {
+        // 메트릭 기록 실패가 성공한 생성을 500으로 만들거나 실패 경로에서 원래 예외를 가리지 않도록 격리한다.
+        runCatching {
+            Counter.builder("manyak.storyline.creation.result")
+                .description("간편 제작 스토리라인 생성 결과 분포")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .increment()
+        }
+    }
+
+    /**
+     * 스토리라인 생성 실패를 outcome 태그로 가른다([recordStorylineResult]의 rejected/failure 정의).
+     *
+     * 완성 경로([creationOutcomeOf])와 같은 이유로 **HTTP 상태만으로는 가를 수 없다** — AI 호출 이후 단계(저장)에서
+     * 나는 4xx를 밀리초 거부로 오분류하면, 수십 초를 쓴 실패가 rejected로 새어 실패율을 낮춰 보이게 한다.
+     * 그래서 AI 진입 여부([aiCallStarted])를 먼저 본다.
+     *
+     * 여기서 `Throwable`을 받는 것은 호출부가 `Throwable`을 잡기 때문이다(게스트 한도 복원이 Error에도 돌아야 한다).
+     */
+    private fun storylineOutcomeOf(throwable: Throwable, aiCallStarted: Boolean): String = when {
+        aiCallStarted -> OUTCOME_FAILURE
+        throwable is ResponseStatusException && throwable.statusCode.is4xxClientError -> OUTCOME_REJECTED
         else -> OUTCOME_FAILURE
     }
 

@@ -2,7 +2,8 @@
 ### IntelliJ HTTP Client 호환.
 ###
 ### 검증 대상: local 프로파일에서 새로 생긴 /actuator/prometheus 노출과 무인증 허용, 그리고
-### 커스텀 Timer 2종(manyak.ai.call.duration · manyak.story.creation.duration)이 실제로 export되는지.
+### 커스텀 Timer 2종(manyak.ai.call.duration · manyak.story.creation.duration)과
+### Counter 1종(manyak.storyline.creation.result)이 실제로 export되는지.
 ###
 ### [중요] 이 파일은 **local 프로파일 전용**입니다.
 ###   - 운영에는 /actuator/prometheus가 노출되지 않습니다(404). 메트릭은 스크레이프가 아니라 OTLP push로
@@ -144,10 +145,15 @@ Accept: application/json
     });
 %}
 
-### 5. 커스텀 Timer 2종이 실제로 export되는지 확인 (핵심 검증)
+### 5. 커스텀 메트릭 3종이 실제로 export되는지 확인 (핵심 검증)
 # 3~4번을 먼저 실행하세요. Micrometer는 점(.)을 밑줄(_)로 바꿔 export하므로 이름은 다음과 같습니다:
-#   manyak.ai.call.duration      → manyak_ai_call_duration_seconds_{count,sum,bucket,max}
+#   manyak.ai.call.duration        → manyak_ai_call_duration_seconds_{count,sum,bucket,max}
 #   manyak.story.creation.duration → manyak_story_creation_duration_seconds_{count,sum,bucket,max}
+#   manyak.storyline.creation.result → manyak_storyline_creation_result_total   ← Counter라 _total (KNK-801)
+#
+# [Counter와 Timer의 차이] 스토리라인은 Counter라 _bucket·_sum이 없고 _total 한 줄뿐입니다. 소요를 재지 않는 이유는
+#   AI 호출 1회가 유스케이스의 거의 전부라 manyak_ai_call_duration{feature="storyline_generation"}과 겹치기 때문입니다.
+#   대신 결과 분포는 그쪽에 없습니다 — 특히 게스트 한도 소진(402)은 AI 호출 전에 끊겨 AI 타이머에도 Langfuse에도 안 남습니다.
 #
 # [눈으로 확인할 것] 응답 본문(Response 탭)을 열어 아래를 직접 보세요. 어서션은 존재 여부까지만 봅니다.
 #   1) manyak_ai_call_duration_seconds_count{feature="storyline_generation",outcome="success",...} 값이 1 이상인가
@@ -188,6 +194,19 @@ GET {{baseUrl}}/actuator/prometheus
         client.assert(body.indexOf("manyak_story_creation_duration_seconds_bucket") >= 0,
             "_bucket 라인이 없습니다. application.yml의 percentiles-histogram 설정을 확인하세요.");
     });
+
+    client.test("manyak_storyline_creation_result가 export된다", () => {
+        client.assert(body.indexOf("manyak_storyline_creation_result_total") >= 0,
+            "manyak_storyline_creation_result_total 라인이 없습니다. 3번(스토리라인 생성)을 먼저 실행했는지 확인하세요.");
+    });
+
+    client.test("스토리라인 카운터는 버킷 없이 outcome 태그만 붙는다", () => {
+        client.assert(body.indexOf("manyak_storyline_creation_result_bucket") < 0,
+            "Counter인데 _bucket이 있습니다. 히스토그램이 잘못 켜졌고 시계열이 불필요하게 늘어납니다.");
+        const line = body.split("\n").find(l => l.indexOf("manyak_storyline_creation_result_total") === 0) || "";
+        client.assert(line.indexOf('outcome="success"') >= 0,
+            `outcome="success" 태그가 없습니다. actual=${line}`);
+    });
 %}
 
 ### 6. (자유 조회) 그냥 눌러 보는 요청
@@ -197,6 +216,10 @@ GET {{baseUrl}}/actuator/prometheus
 #     failure = 생성을 시도하다 깨진 것(AI compile 실패·타임아웃), rejected = 생성 시도 이전 4xx 거부.
 #     둘을 나눈 이유는 밀리초짜리 거부가 섞이면 실패 p95가 낙관적으로 왜곡되기 때문입니다(application.yml 주석 참고).
 #   - outcome="rejected"를 만들려면: 존재하지 않는 simpleCreationId·storylineId로 완성을 요청합니다(404).
+#   - manyak_storyline_creation_result_total의 outcome도 같은 3값입니다(KNK-801).
+#     rejected를 만들려면 3번 요청의 selectedTagIds에 없는 태그 ID(예: 999999999)를 넣습니다(400, AI 호출 전 거부).
+#     같은 deviceId로 스토리라인 생성을 6번 반복해 게스트 한도(기본 5회)를 넘겨도 402 rejected가 나옵니다 —
+#     이쪽이 이 지표를 만든 실제 이유이므로, 한 번은 직접 만들어 보고 라인이 오르는지 확인하세요.
 #   - outcome="failure"를 만들려면: AI 서버를 내리고(MANYAK_AI_STORY_STUB=false로 띄운 뒤 AI 미기동)
 #     완성을 요청해 502로 실패시킨 뒤 이 요청을 다시 누릅니다.
 #     (manyak_ai_call_duration의 outcome은 success·failure 2값 그대로입니다 — 거부 분리는 완성 타이머에만 해당)
