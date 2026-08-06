@@ -691,6 +691,58 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     private fun storyCreationTimerCount(outcome: String): Long =
         meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
 
+    // --- KNK-801: 스토리라인 생성 결과 분포(manyak.storyline.creation.result) ---
+    // 완성 경로(KNK-784)와 같은 3값 outcome을 쓰되 duration이 아니라 건수만 센다 — 스토리라인은 AI 호출 1회가
+    // 유스케이스의 거의 전부라 소요가 manyak.ai.call.duration과 겹치는 반면, 결과 분포는 그쪽에 없다.
+    // 한쪽 카운터만 단정하면 오분류를 못 잡으므로, 늘어야 할 값과 늘지 않아야 할 값을 함께 본다.
+
+    @Test
+    fun `스토리라인 생성이 성공하면 storyline_result의 success를 올리고 failure·rejected는 올리지 않는다`() {
+        val genreTag = seedGenreTag()
+        // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 카운터가 누적된다. 절대값이 아니라 증가분을 본다.
+        val beforeSuccess = storylineResultCount("success")
+        val beforeFailure = storylineResultCount("failure")
+        val beforeRejected = storylineResultCount("rejected")
+
+        postStorylines(UUID.randomUUID(), genreTag.id, deviceA).expectStatus().isCreated
+
+        assertThat(storylineResultCount("success")).isEqualTo(beforeSuccess + 1)
+        assertThat(storylineResultCount("failure")).isEqualTo(beforeFailure)
+        assertThat(storylineResultCount("rejected")).isEqualTo(beforeRejected)
+    }
+
+    @Test
+    fun `스토리라인 AI 호출 실패(502)는 failure를 올리고 rejected는 올리지 않는다`() {
+        val genreTag = seedGenreTag()
+        failStorylines = true
+        val beforeFailure = storylineResultCount("failure")
+        val beforeRejected = storylineResultCount("rejected")
+
+        postStorylines(UUID.randomUUID(), genreTag.id, deviceA).expectStatus().isEqualTo(502)
+
+        // AI 호출에 진입한 뒤 깨진 것이라 failure다(우리가 실패율로 보려는 바로 그 구간).
+        assertThat(storylineResultCount("failure")).isEqualTo(beforeFailure + 1)
+        assertThat(storylineResultCount("rejected")).isEqualTo(beforeRejected)
+    }
+
+    @Test
+    fun `스토리라인 AI 호출 이전 4xx 거부는 rejected를 올리고 failure는 올리지 않는다`() {
+        // 존재하지 않는 태그 ID → findSelectedPredefinedTags가 400. AI를 부르기 전이라 밀리초로 끝나는 거부 경로다.
+        // 게스트 한도 소진(402)도 같은 자리에서 걸리며, 그 거부가 이 지표를 만든 이유다(AI 타이머·Langfuse 양쪽 사각지대).
+        val beforeRejected = storylineResultCount("rejected")
+        val beforeFailure = storylineResultCount("failure")
+
+        postStorylines(UUID.randomUUID(), 999999999L, deviceA).expectStatus().isBadRequest
+
+        assertThat(storylineResultCount("rejected")).isEqualTo(beforeRejected + 1)
+        assertThat(storylineResultCount("failure")).isEqualTo(beforeFailure)
+        // AI를 부르지 않았음을 함께 확인한다 — 부르고도 400이 났다면 분류 기준(aiCallStarted)이 깨진 것이다.
+        assertThat(createStorylinesCalls.get()).isZero()
+    }
+
+    private fun storylineResultCount(outcome: String): Double =
+        meterRegistry.find("manyak.storyline.creation.result").tag("outcome", outcome).counter()?.count() ?: 0.0
+
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository
 }
