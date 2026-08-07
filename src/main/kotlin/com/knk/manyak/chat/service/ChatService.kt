@@ -60,6 +60,8 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
@@ -106,6 +108,7 @@ class ChatService(
     // 채팅 턴 1회 소모량(스펙 §4-3-7, KNK-477 확정: 10. 재생성도 동일 값·사유를 공유).
     @param:Value("\${manyak.credit.chat-turn-cost:10}")
     private val chatTurnCost: Long,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     @Transactional
@@ -709,19 +712,26 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
-        // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
-        // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다.
-        // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
-        // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
-        // 회원 소모 2단(스펙 §4-3-7 B13): 계정 귀속 체험 잔여가 있으면 먼저 무료로 소진하고, 없으면 크레딧을 선차감한다.
-        val memberTrialCovered =
-            userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
-        if (userId != null && !memberTrialCovered) {
-            creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
+        // 선차감·한도 예약은 SseEmitter를 만들기 전 동기 구간이다. 여기서 나는 402/400은 AI를 부르기 전 거부라
+        // AI 타이머(manyak.ai.call.duration)에도 Langfuse에도 남지 않으므로 rejected로 세어 둔다(KNK-811).
+        val (memberTrialCovered, guestDeviceId) = try {
+            // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
+            // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다.
+            // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
+            // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
+            // 회원 소모 2단(스펙 §4-3-7 B13): 계정 귀속 체험 잔여가 있으면 먼저 무료로 소진하고, 없으면 크레딧을 선차감한다.
+            val covered =
+                userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
+            if (userId != null && !covered) {
+                creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
+            }
+            // 게스트(userId == null)는 크레딧 대신 디바이스 ID별 chat_turn 체험 한도를 예약한다(스펙 §4-3-7, KNK-477).
+            // 한도 소진·device 헤더 누락은 여기서 동기 402/400으로 던져져(스트림 미개시) 그대로 컨트롤러에 전파된다.
+            covered to guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+        } catch (throwable: Throwable) {
+            recordChatTurnResult(OUTCOME_REJECTED)
+            throw throwable
         }
-        // 게스트(userId == null)는 크레딧 대신 디바이스 ID별 chat_turn 체험 한도를 예약한다(스펙 §4-3-7, KNK-477).
-        // 한도 소진·device 헤더 누락은 여기서 동기 402/400으로 던져져(스트림 미개시) 그대로 컨트롤러에 전파된다.
-        val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
         // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persist 성공 직후 세워, 이후 completed 전송 실패·연결
         // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
@@ -868,7 +878,11 @@ class ChatService(
                 // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,
                 // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
-                if (!persisted.get()) {
+                val persistedOk = persisted.get()
+                // 결과 판정은 이 finally·아래 whenComplete·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
+                // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
+                recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
+                if (!persistedOk) {
                     refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
                 }
             }
@@ -877,6 +891,8 @@ class ChatService(
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
+            // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
+            recordChatTurnResult(OUTCOME_FAILURE)
             refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
@@ -895,6 +911,8 @@ class ChatService(
         // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
         future.whenComplete { _, _ ->
             if (!workerStarted.get()) {
+                // 워커가 스킵돼 저장에 도달하지 못한 턴이다. 워커 finally가 안 돌므로 결과도 여기서 센다(KNK-811).
+                recordChatTurnResult(OUTCOME_FAILURE)
                 refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             }
         }
@@ -936,13 +954,61 @@ class ChatService(
             } else if (guestDeviceId != null) {
                 guestTrialLimitService.restore(guestDeviceId, GuestTrialLimitService.Counter.CHAT_TURN)
             }
+            recordChatTurnRefund(OUTCOME_SUCCESS)
         } catch (exception: Exception) {
+            // 환불 실패는 사용자가 실패한 턴에 과금된 채 남는다는 뜻이라 로그만으로는 부족하다(KNK-811).
+            recordChatTurnRefund(OUTCOME_FAILURE)
             structuredLogger.event(
                 "chat_turn_refund_failed",
                 "chat_pk" to chatPk,
                 "idempotency_key" to refundKey,
                 "error" to (exception.message ?: exception::class.simpleName ?: "unknown"),
             )
+        }
+    }
+
+    /**
+     * 채팅 턴 결과 분포를 `manyak.chat.turn.result`로 집계한다(KNK-811).
+     *
+     * outcome은 스토리 완성·스토리라인과 같은 3값이다:
+     *   - `success`  : 턴이 저장까지 확정된 호출(`persisted`)
+     *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·큐드 취소·스케줄 거부
+     *   - `rejected` : 스트림 개시 **이전** 4xx — 크레딧 부족(402)·게스트 한도 소진(402)·device 헤더 누락(400)
+     *
+     * **Timer가 아니라 Counter인 이유**: 채팅 턴은 스트리밍이라 `manyak.ai.call.duration{feature="chat_response"}`이
+     * 이미 스트림 전체를 재고 있어 유스케이스 타이머가 사실상 겹친다. 반면 `rejected`는 AI를 부르기 전에 끊겨
+     * 그쪽에 남지 않는다.
+     *
+     * **호출 지점은 셋이고 서로 배타적이다**(겹치면 이중 계수된다):
+     *   1. 워커 finally — `workerStarted`인 경우를 소유하며 `persisted`로 success/failure를 가른다
+     *   2. `future.whenComplete`의 `!workerStarted` — 큐드 취소로 워커가 스킵된 경우
+     *   3. 스케줄 거부 catch — future 자체가 없어 1·2가 돌지 않는 경우
+     */
+    private fun recordChatTurnResult(outcome: String) {
+        // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
+        runCatching {
+            Counter.builder("manyak.chat.turn.result")
+                .description("채팅 턴 결과 분포")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .increment()
+        }
+    }
+
+    /**
+     * 채팅 턴 환불 결과를 `manyak.chat.turn.refund`로 집계한다(KNK-811).
+     *
+     * `failure`는 **선차감분을 되돌리지 못했다**는 뜻이다. 사용자가 실패한 턴에 과금된 상태로 남으므로
+     * 관측 지표가 아니라 정산 정확성 신호로 읽는다(회원은 원장에 선차감이 남아 사후 정산으로 복구 가능).
+     * 실제로 되돌릴 대상이 있고 게이트를 통과한 호출만 센다 — 무차감 게스트나 중복 호출은 여기 오지 않는다.
+     */
+    private fun recordChatTurnRefund(outcome: String) {
+        runCatching {
+            Counter.builder("manyak.chat.turn.refund")
+                .description("채팅 턴 선차감 환불 결과")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .increment()
         }
     }
 
@@ -1210,5 +1276,11 @@ class ChatService(
         // 잃고 과금될 수 있다(Codex P2). idle 예산 위로 여유(2배)를 둬 헬시한 긴 스트림을 끊지 않는다.
         // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
         const val SSE_TIMEOUT_MILLIS = 120_000L
+
+        // manyak.chat.turn.result·manyak.chat.turn.refund가 공유하는 outcome 태그 값(유한 enum —
+        // 의미는 recordChatTurnResult·recordChatTurnRefund KDoc). 스토리 완성·스토리라인과 같은 어휘를 쓴다.
+        const val OUTCOME_SUCCESS = "success"
+        const val OUTCOME_FAILURE = "failure"
+        const val OUTCOME_REJECTED = "rejected"
     }
 }

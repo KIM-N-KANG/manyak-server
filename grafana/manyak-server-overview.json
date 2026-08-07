@@ -479,13 +479,124 @@
       ]
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 900,
+      "panels": [],
+      "title": "채팅",
+      "type": "row"
+    },
+    {
+      "type": "timeseries",
+      "title": "채팅 턴 결과 분포 (/s)",
+      "description": "rejected는 크레딧 부족·게스트 한도 소진(402)·device 헤더 누락(400)이다. 스트림을 열기 전에 끊기므로 AI 타이머에도 Langfuse에도 남지 않는다 — 이 패널만 덮는 구간이다(KNK-811). 알림은 failure만 봐야 한다: rejected는 클라이언트 사정으로 얼마든지 늘어난다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(manyak_chat_turn_result_total{service_name=\"$service\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "채팅 턴 환불 결과 (/s)",
+      "description": "⚠️ failure는 선차감분을 되돌리지 못했다는 뜻이다. 사용자가 실패한 턴에 과금된 채로 남으므로 관측 지표가 아니라 정산 정확성 신호다. 0이 아니면 즉시 조사 대상이며, 원장에 선차감이 남아 있어 사후 정산으로 복구할 수 있다(KNK-811).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(manyak_chat_turn_refund_total{service_name=\"$service\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
       "type": "row",
       "title": "인프라 — CPU · 힙 · GC · DB 커넥션",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 46
       },
       "collapsed": false,
       "panels": []
@@ -501,7 +612,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 38
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -545,7 +656,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 38
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -588,7 +699,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 38
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -626,7 +737,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 38
+        "y": 47
       },
       "fieldConfig": {
         "defaults": {
@@ -669,7 +780,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 55
       },
       "collapsed": false,
       "panels": []
@@ -686,7 +797,7 @@
         "h": 14,
         "w": 12,
         "x": 0,
-        "y": 47
+        "y": 56
       },
       "fieldConfig": {
         "defaults": {
@@ -741,7 +852,7 @@
         "h": 14,
         "w": 12,
         "x": 12,
-        "y": 47
+        "y": 56
       },
       "options": {
         "mode": "markdown",
