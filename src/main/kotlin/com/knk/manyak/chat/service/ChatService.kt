@@ -37,6 +37,7 @@ import com.knk.manyak.chat.repository.StoryChatShareRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
@@ -712,6 +713,11 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
+        // 결과 계수 게이트. 판정 지점(워커 finally · whenComplete · 스케줄 거부)은 논리적으로 배타적이지만,
+        // 취소가 "executor가 runnable 실행을 결정한 뒤 workerStarted를 세우기 전"에 이기면 whenComplete가
+        // workerStarted==false를 보고 failure를 센 뒤 워커가 이어서 자기 finally로 한 번 더 셀 수 있다.
+        // 환불이 refundGate로 막는 것과 같은 경합이라, 결과 계수에도 같은 1회 게이트를 둔다(Codex P2).
+        val resultGate = AtomicBoolean(false)
         // 선차감·한도 예약은 SseEmitter를 만들기 전 동기 구간이다. 여기서 나는 402/400은 AI를 부르기 전 거부라
         // AI 타이머(manyak.ai.call.duration)에도 Langfuse에도 남지 않으므로 rejected로 세어 둔다(KNK-811).
         val (memberTrialCovered, guestDeviceId) = try {
@@ -729,7 +735,9 @@ class ChatService(
             // 한도 소진·device 헤더 누락은 여기서 동기 402/400으로 던져져(스트림 미개시) 그대로 컨트롤러에 전파된다.
             covered to guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
         } catch (throwable: Throwable) {
-            recordChatTurnResult(OUTCOME_REJECTED)
+            // 4xx 거부만 rejected다. Redis·DB 장애로 예약·차감이 깨진 경우는 5xx로 나가므로 failure로 세야
+            // 실패 알림에 잡힌다 — rejected는 알림에서 제외되는 축이라 여기 섞으면 운영 장애가 조용히 사라진다(Codex P2).
+            recordChatTurnResult(resultGate, if (isChatTurnClientRejection(throwable)) OUTCOME_REJECTED else OUTCOME_FAILURE)
             throw throwable
         }
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
@@ -881,7 +889,7 @@ class ChatService(
                 val persistedOk = persisted.get()
                 // 결과 판정은 이 finally·아래 whenComplete·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
                 // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
-                recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
+                recordChatTurnResult(resultGate, if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
                     refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
                 }
@@ -892,7 +900,7 @@ class ChatService(
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
-            recordChatTurnResult(OUTCOME_FAILURE)
+            recordChatTurnResult(resultGate, OUTCOME_FAILURE)
             refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
@@ -912,7 +920,7 @@ class ChatService(
         future.whenComplete { _, _ ->
             if (!workerStarted.get()) {
                 // 워커가 스킵돼 저장에 도달하지 못한 턴이다. 워커 finally가 안 돌므로 결과도 여기서 센다(KNK-811).
-                recordChatTurnResult(OUTCOME_FAILURE)
+                recordChatTurnResult(resultGate, OUTCOME_FAILURE)
                 refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             }
         }
@@ -939,8 +947,9 @@ class ChatService(
         if (userId == null && guestDeviceId == null) return
         if (!gate.compareAndSet(false, true)) return
         try {
-            if (memberTrialCovered && userId != null) {
+            val restored = if (memberTrialCovered && userId != null) {
                 // 이 턴이 체험 잔여로 무료 처리됐으면 크레딧이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
+                // restoreMember는 Redis 장애를 삼키고 정상 반환하므로, 성공 여부는 반환값으로만 알 수 있다(Codex P2).
                 guestTrialLimitService.restoreMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
             } else if (userId != null) {
                 creditWalletService.reward(
@@ -951,12 +960,24 @@ class ChatService(
                     refType = "CHAT",
                     refId = chatPk,
                 )
+                true
             } else if (guestDeviceId != null) {
                 guestTrialLimitService.restore(guestDeviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+                true
+            } else {
+                true
             }
-            recordChatTurnRefund(OUTCOME_SUCCESS)
-        } catch (exception: Exception) {
             // 환불 실패는 사용자가 실패한 턴에 과금된 채 남는다는 뜻이라 로그만으로는 부족하다(KNK-811).
+            recordChatTurnRefund(if (restored) OUTCOME_SUCCESS else OUTCOME_FAILURE)
+            if (!restored) {
+                structuredLogger.event(
+                    "chat_turn_refund_failed",
+                    "chat_pk" to chatPk,
+                    "idempotency_key" to refundKey,
+                    "error" to "member_trial_restore_failed",
+                )
+            }
+        } catch (exception: Exception) {
             recordChatTurnRefund(OUTCOME_FAILURE)
             structuredLogger.event(
                 "chat_turn_refund_failed",
@@ -984,7 +1005,9 @@ class ChatService(
      *   2. `future.whenComplete`의 `!workerStarted` — 큐드 취소로 워커가 스킵된 경우
      *   3. 스케줄 거부 catch — future 자체가 없어 1·2가 돌지 않는 경우
      */
-    private fun recordChatTurnResult(outcome: String) {
+    private fun recordChatTurnResult(gate: AtomicBoolean, outcome: String) {
+        // 한 턴은 정확히 1회만 센다. 판정 지점이 논리적으로 배타적이어도 취소 경합에서 겹칠 수 있다(Codex P2).
+        if (!gate.compareAndSet(false, true)) return
         // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
         runCatching {
             Counter.builder("manyak.chat.turn.result")
@@ -1283,4 +1306,23 @@ class ChatService(
         const val OUTCOME_FAILURE = "failure"
         const val OUTCOME_REJECTED = "rejected"
     }
+}
+
+/**
+ * 채팅 턴의 스트림 개시 전 실패가 **클라이언트 책임 거부(4xx)** 인지 판정한다(KNK-811, Codex P2).
+ *
+ * 이 구분이 필요한 이유: `rejected`는 실패 알림 축에서 제외된다. Redis·DB 장애로 예약·차감이 깨진 경우까지
+ * 여기 넣으면 5xx로 나가는 운영 장애가 실패 신호에서 조용히 사라진다.
+ *
+ * 크레딧 부족은 [InsufficientCreditException]이라 `ResponseStatusException`이 **아니다** — 컨트롤러가 402로
+ * 변환하므로 상태 코드만 보면 놓친다. 게스트 한도 소진·device 헤더 누락은 `CodedResponseStatusException`
+ * (`ResponseStatusException` 하위)이라 4xx 검사에 걸린다.
+ *
+ * 클래스 밖 최상위로 둔 것은 상태가 필요 없는 순수 판정이고, 생성자 의존이 많은 [ChatService] 없이
+ * 단위 테스트로 분류표를 고정하기 위해서다.
+ */
+internal fun isChatTurnClientRejection(throwable: Throwable): Boolean = when {
+    throwable is InsufficientCreditException -> true
+    throwable is ResponseStatusException && throwable.statusCode.is4xxClientError -> true
+    else -> false
 }
