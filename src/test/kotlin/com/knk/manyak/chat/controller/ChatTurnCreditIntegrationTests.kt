@@ -12,10 +12,13 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import java.time.Duration
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
@@ -58,6 +61,10 @@ class ChatTurnCreditIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
 
     @BeforeEach
     fun setUp() {
@@ -118,6 +125,59 @@ class ChatTurnCreditIntegrationTests {
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.REFUND }).isTrue()
     }
+
+    // --- KNK-811: 채팅 턴 결과 분포(manyak.chat.turn.result) ---
+    // 채팅은 지금까지 AI 경계(manyak.ai.call.duration)만 덮여 있었다. 크레딧·게스트 한도 거부는 SseEmitter를
+    // 열기 전 동기 구간에서 끊기므로 AI 타이머에도 Langfuse에도 안 남는다(스토리라인과 같은 사각지대).
+    // 한쪽 카운터만 단정하면 오분류를 못 잡으므로 늘어야 할 값과 늘지 않아야 할 값을 함께 본다.
+
+    @Test
+    fun `턴이 저장까지 끝나면 chat_turn_result의 success를 올리고 failure·rejected는 올리지 않는다`() {
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val member = saveUser("성공지표회원")
+        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+        // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 카운터가 누적된다. 절대값이 아니라 증가분을 본다.
+        val beforeSuccess = chatTurnResultCount("success")
+        val beforeFailure = chatTurnResultCount("failure")
+        val beforeRejected = chatTurnResultCount("rejected")
+
+        assertThat(streamAsMember(chat.publicId.toString(), member, "문을 연다.")).contains("completed")
+
+        // 결과 기록은 SSE 워커의 finally에서 일어나므로 잠깐 기다린다.
+        await().atMost(Duration.ofSeconds(5)).untilAsserted {
+            assertThat(chatTurnResultCount("success")).isEqualTo(beforeSuccess + 1)
+        }
+        assertThat(chatTurnResultCount("failure")).isEqualTo(beforeFailure)
+        assertThat(chatTurnResultCount("rejected")).isEqualTo(beforeRejected)
+    }
+
+    @Test
+    fun `잔액 부족으로 스트림 개시 전 402면 rejected를 올리고 success·failure는 올리지 않는다`() {
+        val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
+        val member = saveUser("거부지표회원")
+        // 잔액 0 → 선차감 단계에서 InsufficientCreditException → 컨트롤러가 402. AI를 부르지 않는다.
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+        val beforeRejected = chatTurnResultCount("rejected")
+        val beforeSuccess = chatTurnResultCount("success")
+        val beforeFailure = chatTurnResultCount("failure")
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"userInput":"손을 든다."}""")
+            .exchange()
+            .expectStatus().isEqualTo(402)
+
+        assertThat(chatTurnResultCount("rejected")).isEqualTo(beforeRejected + 1)
+        assertThat(chatTurnResultCount("success")).isEqualTo(beforeSuccess)
+        assertThat(chatTurnResultCount("failure")).isEqualTo(beforeFailure)
+    }
+
+    private fun chatTurnResultCount(outcome: String): Double =
+        meterRegistry.find("manyak.chat.turn.result").tag("outcome", outcome).counter()?.count() ?: 0.0
 
     @Test
     fun `회원이 체험 잔여가 있으면 크레딧 대신 체험으로 무료 처리된다`() {

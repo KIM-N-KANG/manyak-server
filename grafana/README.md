@@ -4,7 +4,7 @@
 
 | 파일 | 내용 |
 | --- | --- |
-| `manyak-server-overview.json` | RED · AI 호출 지연 · 스토리 완성 · 인프라 · 무료 티어 예산 (KNK-782) |
+| `manyak-server-overview.json` | RED · AI 호출 · 스토리 제작 · 채팅 · 인프라 · 무료 티어 예산 |
 | [`PANELS.md`](./PANELS.md) | **패널별 상세** — 각 차트의 목적·단위·값을 움직이는 원인·읽는 법·함정 |
 
 ## 왜 이 레포인가
@@ -21,11 +21,15 @@ Terraform provider(`grafana_dashboard`)로 관리하면 IaC가 되어 `manyak-te
 | `manyak.ai.call.duration` | `feature`(4종)·`outcome`(2값) | `AiCallRecorder.record` | AI 클라이언트 호출 직전 ~ 응답/예외 |
 | `manyak.story.creation.duration` | `outcome`(3값) | `SimpleStoryCreationService.recordCreationDuration` | 완성 콜백 전체(AI + 저장 + 크레딧) |
 | `manyak.storyline.creation.result` | `outcome`(3값) | `SimpleStoryCreationService.recordStorylineResult` | 스토리라인 생성 **건수만**(Counter) |
+| `manyak.chat.turn.result` | `outcome`(3값) | `ChatService.recordChatTurnResult` | 채팅 턴 **건수만**(Counter) |
+| `manyak.chat.turn.refund` | `outcome`(2값) | `ChatService.recordChatTurnRefund` | 선차감 환불 성공·실패(Counter) |
 | JVM · 프로세스 · HikariCP | 바인더별 | Micrometer 기본 바인더 | 자원 상태 |
 
-`feature`는 `storyline_generation`·`story_completion`·`chat_response`·`choice_generation`입니다. `choice_generation`은 현재 독립 AI 호출이 없어(선택지가 채팅 턴 응답에 함께 옴) 라인이 안 나오는 게 정상입니다.
+`feature`는 `storyline_generation`·`story_completion`·`chat_response`·`choice_generation` 4종이며 **모두 독립 AI 호출입니다**. `choice_generation`은 선택지 전용 엔드포인트(`ChatService.generateChoices`)가 부르므로, 라인이 비어 있으면 정상이 아니라 **그 엔드포인트가 호출되지 않고 있다**는 뜻입니다.
 
 **측정에서 일부러 뺀 것** — `manyak.story.creation.duration`은 AI 호출 없이 저장된 결과를 돌려주는 두 경로를 제외합니다. 멱등 재요청(COMPLETED replay)과 회수 재실행 재구성입니다. 포함하면 밀리초짜리 조회가 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡됩니다.
+
+**채팅도 Counter만 둡니다**(KNK-811) — 채팅 턴은 SSE 스트리밍이라 `manyak.ai.call.duration{feature="chat_response"}`이 이미 스트림 전체를 잽니다. 대신 크레딧·게스트 한도 거부(402)는 **스트림을 열기 전**에 끊겨 그쪽에 안 남고, 환불 실패는 지금까지 로그에만 있었습니다. `manyak.chat.turn.refund`의 `failure`는 사용자가 실패한 턴에 과금된 채 남았다는 뜻이라 정산 정확성 신호로 읽습니다.
 
 **스토리라인만 Counter인 이유**(KNK-801) — 스토리라인 생성은 AI 호출 1회가 유스케이스의 거의 전부라 소요가 `manyak.ai.call.duration{feature="storyline_generation"}`과 사실상 겹칩니다. 반면 **결과 분포는 그쪽에 없습니다** — 특히 게스트 한도 소진(402)은 AI 호출 **전에** 끊기므로 AI 타이머에도 Langfuse trace에도 남지 않습니다. 그 사각지대만 건수로 덮고 히스토그램은 두지 않아 시계열은 3개로 끝납니다.
 

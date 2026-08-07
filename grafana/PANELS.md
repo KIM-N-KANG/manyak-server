@@ -20,8 +20,12 @@
 | `manyak_ai_call_duration_*` | `success` · `failure` (소문자) | `AiCallRecorder` |
 | `manyak_story_creation_duration_*` | `success` · `failure` · `rejected` (소문자) | `SimpleStoryCreationService` |
 | `manyak_storyline_creation_result_*` | `success` · `failure` · `rejected` (소문자) | `SimpleStoryCreationService` |
+| `manyak_chat_turn_result_*` | `success` · `failure` · `rejected` · `cancelled` (소문자) | `ChatService` |
+| `manyak_chat_turn_refund_*` | `success` · `failure` (소문자) | `ChatService` |
 
-**이름이 같을 뿐 전혀 다른 축입니다.** 대소문자로 구분되며, 섞어 쓰면 조용히 빈 결과가 나옵니다. 아래 셋(소문자)은 의미가 같으니 함께 읽어도 됩니다.
+**Spring이 붙이는 것과 우리가 붙이는 것은 이름만 같고 전혀 다른 축입니다.** 대소문자로 구분되며 섞어 쓰면 오류가 아니라 조용히 빈 결과가 나옵니다.
+
+소문자 `outcome`끼리는 어휘가 통일돼 있어 함께 읽어도 됩니다 — `success`는 저장까지 확정, `failure`는 시도하다 깨짐, `rejected`는 AI 호출 이전 거부입니다. 다만 `manyak_chat_turn_refund_*`만 축이 다릅니다: 거기서 `failure`는 턴 실패가 아니라 **환불에 실패했다**는 뜻입니다.
 
 ---
 
@@ -166,7 +170,9 @@ connect timeout은 공통 5초입니다. **연결 자체가 안 되는 장애는
 
 `story_completion`이 180초에 근접하면 타임아웃 직전이라는 뜻입니다. 상한을 240초로 잡은 게 이걸 보기 위해서입니다 — **상한이 120초였다면 그 구간이 전부 뭉개져 보이지 않았을 것입니다.**
 
-**함정** — `choice_generation`은 **현재 라인이 안 나오는 게 정상입니다.** 선택지가 채팅 턴 응답에 함께 오기 때문에 독립 AI 호출이 없습니다. legend에 나타나지 않는 `feature`는 계측 누락이 아니라 그 시간대에 호출이 없었다는 뜻입니다.
+**함정** — legend에 없는 `feature`는 계측 누락이 아니라 **그 시간대에 호출이 없었다**는 뜻입니다. 시계열은 실제로 호출된 조합에만 생깁니다.
+
+특히 `choice_generation`이 비어 있으면 정상이 아닙니다. 선택지는 전용 엔드포인트(`ChatService.generateChoices`)가 부르는 **독립 AI 호출**이므로, 라인이 없다면 프론트가 그 엔드포인트를 호출하지 않고 있다는 신호입니다. 채팅 턴은 도는데 선택지만 비어 있는 상태가 그 경우입니다.
 
 ---
 
@@ -326,7 +332,67 @@ sum by (outcome) (rate(manyak_storyline_creation_result_total{service_name="$ser
 
 **측정에서 빠지는 것** — 멱등 재요청(같은 `requestId` replay)은 콜백 자체가 실행되지 않아 자연히 제외됩니다. 완성 경로와 달리 스토리라인에는 회수 재실행 재구성이 없어 별도 판별이 필요 없습니다.
 
-**⚠️ 수신 이름 미확인** — 코드의 `manyak.storyline.creation.result`는 Prometheus 규약상 Counter라 `_total`이 붙습니다. 다만 **OTLP를 거친 실제 수신 이름은 아직 실측하지 않았습니다.** 타이머가 `_seconds`에서 `_milliseconds`로 바뀐 전례가 있으니, 배포 후 Metrics browser에서 확인하고 다르면 이 쿼리를 고치세요. 틀리면 오류가 아니라 **빈 패널**이 됩니다.
+**수신 이름** — `_total`이 붙어 `manyak_storyline_creation_result_total`로 도착합니다(2026-08-06 실측). **Counter는 타이머와 달리 단위 변환이 없어 이름이 그대로입니다** — 타이머가 `_seconds`에서 `_milliseconds`로 바뀌는 것과 다릅니다.
+
+---
+
+# 채팅
+
+채팅 턴은 SSE 스트리밍이라 **소요를 따로 재지 않습니다.** `manyak_ai_call_duration{feature="chat_response"}`이 이미 스트림 전체를 재고 있어 유스케이스 타이머가 사실상 겹칩니다. 대신 AI 경계가 못 보는 두 가지를 건수로 덮습니다.
+
+## 채팅 턴 결과 분포 (/s)
+
+```promql
+sum by (outcome) (rate(manyak_chat_turn_result_total{service_name="$service"}[5m]))
+```
+
+| | |
+| --- | --- |
+| 단위 | `ops` — 초당 건수. Y축 최소 0 |
+| 분할 | `outcome` 4값 |
+| 종류 | **Counter** |
+
+**⚠️ 이 패널이 존재하는 이유는 `rejected`입니다.** 회원 크레딧 10 선차감과 게스트 `CHAT_TURN` 한도 예약은 **SseEmitter를 만들기 전 동기 구간**에서 일어납니다. 잔액 부족·한도 소진·device 헤더 누락은 여기서 402/400으로 끊겨 스트림이 아예 열리지 않으므로, AI 타이머에도 Langfuse trace에도 남지 않습니다.
+
+| 값 | 뜻 | 무엇을 의미하나 |
+| --- | --- | --- |
+| `success` | 턴이 저장까지 확정 | 정상 |
+| `failure` | 저장에 도달하지 못하고 종료 | AI 실패·타임아웃·저장 오류·큐드 취소·스케줄 거부 |
+| `rejected` | 스트림 개시 **이전** 4xx | **크레딧 부족·게스트 한도 소진(402)**·device 헤더 누락(400) |
+| `cancelled` | 실행 대기 중 취소돼 워커가 스킵됨 | `chatSseExecutor` 포화 + 클라이언트 끊김 |
+
+**읽는 법 — `rejected` 급증은 장애가 아니라 제품 신호입니다.** 크레딧이 떨어진 사용자가 계속 시도한다는 뜻이므로 충전 유도나 크레딧 정책을 볼 근거입니다. **알림은 `failure`만 걸어야 합니다.** `rejected`를 섞으면 잔액 0인 사용자의 반복 시도만으로 AI 장애 알림이 울립니다.
+
+`failure`가 늘면 AI 실패율 패널의 `chat_response`를 함께 봅니다. 거기가 깨끗한데 여기 `failure`만 늘었다면 AI 밖의 저장 오류이거나 `chatSseExecutor` 포화입니다.
+
+**`cancelled`가 왜 따로 있나** — 실행 대기 중 취소돼 워커가 스킵된 턴입니다. 이 판정만 **잠정적**이라 다른 값과 섞지 않았습니다. 취소가 워커의 첫 문장보다 아주 근소하게 앞서면, `cancelled`로 센 뒤 워커가 이어서 저장에 성공할 수 있습니다.
+
+그 경합에서는 `cancelled` 1건과 `success` 1건이 함께 남아 **합계만 하나 늘 뿐, 저장·과금된 턴이 실패로 굳지는 않습니다.** 잠정 판정을 `failure`로 세고 1회 게이트로 잠그면 그 오분류가 영구히 남는데, 그쪽이 훨씬 나쁩니다.
+
+**`cancelled` 급증은 `chatSseExecutor` 포화 신호입니다.** 대기열에 쌓인 턴이 처리되기 전에 클라이언트가 끊고 있다는 뜻이므로, 스레드 풀 설정이나 AI 지연을 함께 봅니다.
+
+---
+
+## 채팅 턴 환불 결과 (/s)
+
+```promql
+sum by (outcome) (rate(manyak_chat_turn_refund_total{service_name="$service"}[5m]))
+```
+
+| | |
+| --- | --- |
+| 단위 | `ops` — 초당 건수 |
+| 분할 | `outcome` 2값(`success`/`failure`) |
+
+**무엇을 보나** — 저장 없이 끝난 턴의 선차감분이 실제로 되돌아갔는지입니다. 회원은 크레딧 환불(멱등 키로 1회), 게스트는 체험 카운터 복원, 회원 체험 소진분은 체험 카운터 복원입니다.
+
+**⚠️ `failure`는 관측 지표가 아니라 정산 정확성 신호입니다.** 되돌리지 못했다는 것은 **사용자가 실패한 턴에 대해 과금된 채로 남았다**는 뜻입니다. 이전에는 `chat_turn_refund_failed` 로그에만 남아 로그를 뒤져야 알 수 있었습니다.
+
+**0이 아니면 즉시 조사 대상입니다.** 회원은 원장에 선차감 행이 남아 있어 사후 정산으로 복구할 수 있으니, 해당 시각의 `chat_turn_refund_failed` 로그에서 `idempotency_key`와 `chat_pk`를 찾아 대조하세요.
+
+**정상 상태에서도 `success`는 0이 아닙니다.** AI 타임아웃이나 연결 끊김은 늘 일부 발생하고 그때마다 환불이 돕니다. 결과 분포의 `failure`와 대체로 같이 움직여야 하며, **`failure`는 오르는데 환불 `success`가 따라 오르지 않으면** 환불 경로가 도는지 확인해야 합니다.
+
+**세는 대상** — 되돌릴 것이 실제로 있고 게이트를 통과한 호출만 셉니다. 무차감 게스트(디바이스 없음)나 중복 호출은 집계에 들어오지 않습니다.
 
 ---
 
@@ -526,7 +592,8 @@ grafanacloud_instance_active_series
 | 요청별 구간 분해 | p95끼리 빼는 산술이 성립하지 않음 | 트레이스나 `request_id` 기반 별도 계측 필요 |
 | 개별 사건 추적 | 메트릭에 고유값 태그를 넣지 않음 | 구조화 로그, `ai_call_logs`, Sentry |
 | 토큰·비용·프롬프트 내용 | 카디널리티 폭발 | Langfuse |
-| 스토리라인 생성 소요 | AI 호출 1회가 거의 전부라 AI 타이머와 겹침 | AI 호출 p95의 `storyline_generation` |
+| 스토리라인·채팅 턴 소요 | AI 호출이 유스케이스의 거의 전부라 AI 타이머와 겹침 | AI 호출 p95의 해당 `feature` |
+| 채팅 첫 토큰까지의 시간(TTFB) | 스트리밍이라 AI 타이머는 스트림 **전체**를 잼 | 없음. 필요해지면 별도 계측 |
 | 알림 | 기준선이 없어 임계값이 근거 없는 숫자가 됨 | KNK-800에서 설계 예정 |
 | CPU 크레딧 잔량 | Micrometer가 수집하지 않음 | CloudWatch `CPUCreditBalance` |
 | 컨테이너 OOM kill | JVM이 죽으면 기록이 안 남음 | EC2 `dmesg`, 컨테이너 재시작 로그 |
