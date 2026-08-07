@@ -713,11 +713,6 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
-        // 결과 계수 게이트. 판정 지점(워커 finally · whenComplete · 스케줄 거부)은 논리적으로 배타적이지만,
-        // 취소가 "executor가 runnable 실행을 결정한 뒤 workerStarted를 세우기 전"에 이기면 whenComplete가
-        // workerStarted==false를 보고 failure를 센 뒤 워커가 이어서 자기 finally로 한 번 더 셀 수 있다.
-        // 환불이 refundGate로 막는 것과 같은 경합이라, 결과 계수에도 같은 1회 게이트를 둔다(Codex P2).
-        val resultGate = AtomicBoolean(false)
         // 선차감·한도 예약은 SseEmitter를 만들기 전 동기 구간이다. 여기서 나는 402/400은 AI를 부르기 전 거부라
         // AI 타이머(manyak.ai.call.duration)에도 Langfuse에도 남지 않으므로 rejected로 세어 둔다(KNK-811).
         val (memberTrialCovered, guestDeviceId) = try {
@@ -737,7 +732,7 @@ class ChatService(
         } catch (throwable: Throwable) {
             // 4xx 거부만 rejected다. Redis·DB 장애로 예약·차감이 깨진 경우는 5xx로 나가므로 failure로 세야
             // 실패 알림에 잡힌다 — rejected는 알림에서 제외되는 축이라 여기 섞으면 운영 장애가 조용히 사라진다(Codex P2).
-            recordChatTurnResult(resultGate, if (isChatTurnClientRejection(throwable)) OUTCOME_REJECTED else OUTCOME_FAILURE)
+            recordChatTurnResult(if (isChatTurnClientRejection(throwable)) OUTCOME_REJECTED else OUTCOME_FAILURE)
             throw throwable
         }
         // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
@@ -889,7 +884,7 @@ class ChatService(
                 val persistedOk = persisted.get()
                 // 결과 판정은 이 finally·아래 whenComplete·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
                 // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
-                recordChatTurnResult(resultGate, if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
+                recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
                     refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
                 }
@@ -900,7 +895,7 @@ class ChatService(
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
-            recordChatTurnResult(resultGate, OUTCOME_FAILURE)
+            recordChatTurnResult(OUTCOME_FAILURE)
             refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
@@ -919,14 +914,14 @@ class ChatService(
         // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
         future.whenComplete { _, _ ->
             if (!workerStarted.get()) {
-                // **여기서는 결과를 세지 않는다**(KNK-811, Codex P2 재리뷰). `!workerStarted`는 확정 판정이 아니다:
-                // AsyncRun이 취소 검사를 통과한 뒤 람다가 workerStarted를 세우기 전 취소가 끼어들면, 이 콜백이
-                // false를 보고도 워커는 곧이어 실행돼 저장에 성공할 수 있다. 그때 여기서 failure를 세고 게이트를
-                // 선점하면 **저장·과금된 턴이 영구히 실패로 기록된다** — 이중 계수보다 나쁜 오분류다.
-                // 그래서 결과 계수는 자기 결과를 아는 워커 finally와, 워커가 확실히 없는 스케줄 거부 catch에만 둔다.
-                // 대가는 큐드-취소가 결과에서 빠지는 것인데, 그 경우 환불은 아래에서 그대로 일어나므로
-                // `manyak.chat.turn.refund{success}`가 결과 `failure`보다 많은 것으로 드러난다.
-                // (환불의 provisional 판정은 이 변경 이전부터 있던 동작이라 그대로 둔다 — refundGate가 1회를 보장한다.)
+                // 큐드-취소는 별도 outcome으로 센다(KNK-811, Codex P2 재리뷰). `!workerStarted`는 확정이 아니라
+                // 잠정 판정이다 — AsyncRun이 취소 검사를 통과한 뒤 람다가 workerStarted를 세우기 전 취소가
+                // 끼어들면, 여기서 false를 보고도 워커가 곧이어 저장에 성공할 수 있다.
+                //
+                // 그래서 success/failure와 **같은 값을 쓰지 않는다**. 경합이 나면 이 턴은 `cancelled` 1건과
+                // 워커의 `success` 1건이 함께 남아 합계만 하나 늘 뿐, **저장·과금된 턴이 실패로 굳지 않는다**.
+                // 잠정 판정을 failure로 세고 게이트로 잠그면 그 오분류가 영구히 남는다(그쪽이 더 나쁘다).
+                recordChatTurnResult(OUTCOME_CANCELLED)
                 refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             }
         }
@@ -1006,20 +1001,18 @@ class ChatService(
      * 이미 스트림 전체를 재고 있어 유스케이스 타이머가 사실상 겹친다. 반면 `rejected`는 AI를 부르기 전에 끊겨
      * 그쪽에 남지 않는다.
      *
-     * **호출 지점은 둘뿐이고 서로 배타적이다**:
+     * **호출 지점은 셋이다**:
      *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 `persisted`로 success/failure를 가른다
-     *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우
+     *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우(failure)
+     *   3. `future.whenComplete`의 `!workerStarted` — 큐드-취소(`cancelled`)
      *
-     * `future.whenComplete`의 `!workerStarted`에서는 **일부러 세지 않는다**(Codex P2 재리뷰). 그 시점의
-     * `workerStarted == false`는 확정이 아니라 잠정 판정이라, 곧이어 워커가 저장에 성공하면 저장·과금된 턴을
-     * 실패로 굳혀 버린다. 대신 큐드-취소 턴이 결과 집계에서 빠지는데, 그 경우에도 환불은 일어나므로
-     * `manyak.chat.turn.refund{outcome="success"}`가 결과 `failure`보다 많은 것으로 드러난다.
-     *
-     * [gate]는 그래서 지금은 이론적으로 남는 방어지만, 판정 지점이 다시 늘 때 이중 계수를 막도록 남겨 둔다.
+     * 3번만 **잠정 판정**이다. AsyncRun이 취소 검사를 통과한 뒤 람다가 `workerStarted`를 세우기 전 취소가
+     * 끼어들면, 그 시점의 `false`를 보고도 워커가 곧이어 저장에 성공할 수 있다. 그래서 3번은 1·2와
+     * **다른 outcome 값**을 쓴다 — 경합이 나면 `cancelled` 1건과 `success` 1건이 함께 남아 합계만 하나 늘 뿐,
+     * 저장·과금된 턴이 실패로 굳지 않는다. 잠정 판정을 `failure`로 세고 1회 게이트로 잠그면 그 오분류가
+     * 영구히 남는데, 그쪽이 더 나쁘다(Codex P2 재리뷰에서 확인).
      */
-    private fun recordChatTurnResult(gate: AtomicBoolean, outcome: String) {
-        // 한 턴은 정확히 1회만 센다. 판정 지점이 논리적으로 배타적이어도 취소 경합에서 겹칠 수 있다(Codex P2).
-        if (!gate.compareAndSet(false, true)) return
+    private fun recordChatTurnResult(outcome: String) {
         // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
         runCatching {
             Counter.builder("manyak.chat.turn.result")
@@ -1317,6 +1310,10 @@ class ChatService(
         const val OUTCOME_SUCCESS = "success"
         const val OUTCOME_FAILURE = "failure"
         const val OUTCOME_REJECTED = "rejected"
+
+        // 큐드-취소 전용. success/failure와 섞지 않는 이유는 whenComplete의 판정이 잠정적이기 때문이다
+        // (recordChatTurnResult KDoc 참고). 알림은 failure만 보므로 이 값이 늘어도 오발화하지 않는다.
+        const val OUTCOME_CANCELLED = "cancelled"
     }
 }
 

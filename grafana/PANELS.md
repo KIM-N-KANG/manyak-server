@@ -20,7 +20,7 @@
 | `manyak_ai_call_duration_*` | `success` · `failure` (소문자) | `AiCallRecorder` |
 | `manyak_story_creation_duration_*` | `success` · `failure` · `rejected` (소문자) | `SimpleStoryCreationService` |
 | `manyak_storyline_creation_result_*` | `success` · `failure` · `rejected` (소문자) | `SimpleStoryCreationService` |
-| `manyak_chat_turn_result_*` | `success` · `failure` · `rejected` (소문자) | `ChatService` |
+| `manyak_chat_turn_result_*` | `success` · `failure` · `rejected` · `cancelled` (소문자) | `ChatService` |
 | `manyak_chat_turn_refund_*` | `success` · `failure` (소문자) | `ChatService` |
 
 **Spring이 붙이는 것과 우리가 붙이는 것은 이름만 같고 전혀 다른 축입니다.** 대소문자로 구분되며 섞어 쓰면 오류가 아니라 조용히 빈 결과가 나옵니다.
@@ -349,7 +349,7 @@ sum by (outcome) (rate(manyak_chat_turn_result_total{service_name="$service"}[5m
 | | |
 | --- | --- |
 | 단위 | `ops` — 초당 건수. Y축 최소 0 |
-| 분할 | `outcome` 3값 |
+| 분할 | `outcome` 4값 |
 | 종류 | **Counter** |
 
 **⚠️ 이 패널이 존재하는 이유는 `rejected`입니다.** 회원 크레딧 10 선차감과 게스트 `CHAT_TURN` 한도 예약은 **SseEmitter를 만들기 전 동기 구간**에서 일어납니다. 잔액 부족·한도 소진·device 헤더 누락은 여기서 402/400으로 끊겨 스트림이 아예 열리지 않으므로, AI 타이머에도 Langfuse trace에도 남지 않습니다.
@@ -359,16 +359,17 @@ sum by (outcome) (rate(manyak_chat_turn_result_total{service_name="$service"}[5m
 | `success` | 턴이 저장까지 확정 | 정상 |
 | `failure` | 저장에 도달하지 못하고 종료 | AI 실패·타임아웃·저장 오류·큐드 취소·스케줄 거부 |
 | `rejected` | 스트림 개시 **이전** 4xx | **크레딧 부족·게스트 한도 소진(402)**·device 헤더 누락(400) |
+| `cancelled` | 실행 대기 중 취소돼 워커가 스킵됨 | `chatSseExecutor` 포화 + 클라이언트 끊김 |
 
 **읽는 법 — `rejected` 급증은 장애가 아니라 제품 신호입니다.** 크레딧이 떨어진 사용자가 계속 시도한다는 뜻이므로 충전 유도나 크레딧 정책을 볼 근거입니다. **알림은 `failure`만 걸어야 합니다.** `rejected`를 섞으면 잔액 0인 사용자의 반복 시도만으로 AI 장애 알림이 울립니다.
 
 `failure`가 늘면 AI 실패율 패널의 `chat_response`를 함께 봅니다. 거기가 깨끗한데 여기 `failure`만 늘었다면 AI 밖의 저장 오류이거나 `chatSseExecutor` 포화입니다.
 
-**기록 지점은 둘입니다** — 워커 `finally`(워커가 실행된 모든 경우)와 스케줄 거부 `catch`(future 미생성).
+**`cancelled`가 왜 따로 있나** — 실행 대기 중 취소돼 워커가 스킵된 턴입니다. 이 판정만 **잠정적**이라 다른 값과 섞지 않았습니다. 취소가 워커의 첫 문장보다 아주 근소하게 앞서면, `cancelled`로 센 뒤 워커가 이어서 저장에 성공할 수 있습니다.
 
-**⚠️ 큐드 취소 턴은 이 패널에서 빠집니다.** 실행 대기 중 취소돼 워커가 스킵된 경우인데, 그 시점에는 워커가 곧 실행될지 확정할 수 없어 여기서 세지 않습니다. 잠정 판정으로 `failure`를 세면 곧이어 저장에 성공한 턴이 **저장·과금됐는데 실패로 굳는** 오분류가 생기기 때문입니다.
+그 경합에서는 `cancelled` 1건과 `success` 1건이 함께 남아 **합계만 하나 늘 뿐, 저장·과금된 턴이 실패로 굳지는 않습니다.** 잠정 판정을 `failure`로 세고 1회 게이트로 잠그면 그 오분류가 영구히 남는데, 그쪽이 훨씬 나쁩니다.
 
-대신 그 턴도 환불은 일어나므로, **환불 `success`가 결과 `failure`보다 꾸준히 많으면 큐드 취소가 발생하고 있다**는 신호로 읽습니다. 그 상태가 지속되면 `chatSseExecutor`가 포화라는 뜻입니다.
+**`cancelled` 급증은 `chatSseExecutor` 포화 신호입니다.** 대기열에 쌓인 턴이 처리되기 전에 클라이언트가 끊고 있다는 뜻이므로, 스레드 풀 설정이나 AI 지연을 함께 봅니다.
 
 ---
 
