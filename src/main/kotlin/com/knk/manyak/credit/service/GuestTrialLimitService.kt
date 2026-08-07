@@ -93,13 +93,17 @@ class GuestTrialLimitService(
     /**
      * 회원 요청이 실패·미완료로 끝나면 예약한 체험 잔여를 되돌린다(크레딧 환불에 대응). 0 아래로 내려가지 않는다.
      * 복원은 best-effort다 — Redis 장애는 삼켜 SSE 종료·응답을 막지 않는다(예약이 성공했던 카운터라 사후 정합은 별개).
+     *
+     * **복원 여부를 반환한다**(KNK-811): 예외를 삼키므로 호출부가 성공/실패를 구분할 방법이 이 반환값뿐이다.
+     * `false`면 사용자가 소진한 체험 1회가 되돌아가지 않은 것이라, 호출부는 이를 환불 실패로 관측해야 한다
+     * — 삼킨 채 성공으로 세면 정산 신호가 거짓이 된다(Codex P2).
      */
-    fun restoreMember(userId: Long, counter: Counter) {
-        try {
-            redisTemplate.execute(RESTORE_SCRIPT, listOf(memberKeyFor(userId, counter)))
-        } catch (ex: DataAccessException) {
-            logger.warn("회원 체험 복원 실패(Redis) — 무시: userId={}, counter={}", userId, counter, ex)
-        }
+    fun restoreMember(userId: Long, counter: Counter): Boolean = try {
+        redisTemplate.execute(RESTORE_SCRIPT, listOf(memberKeyFor(userId, counter)))
+        true
+    } catch (ex: DataAccessException) {
+        logger.warn("회원 체험 복원 실패(Redis) — 무시: userId={}, counter={}", userId, counter, ex)
+        false
     }
 
     /**

@@ -19,6 +19,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
+import io.micrometer.core.instrument.MeterRegistry
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -93,10 +94,51 @@ class ChatTurnCreditRefundIntegrationTests {
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
+    // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
     }
+
+    @Test
+    fun `AI 실패로 저장 없이 끝난 턴은 failure와 환불 success를 함께 올린다`() {
+        // KNK-811. 저장 전 실패라 선차감분이 환불된다. 환불 실패는 지금까지 로그(chat_turn_refund_failed)에만
+        // 남아, 사용자가 실패한 턴에 과금된 채로 남는 상황을 지표로 볼 수 없었다.
+        val story = storyRepository.save(Story(title = "지표 스토리", genre = "판타지"))
+        val member = saveUser("실패지표회원")
+        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+        // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 카운터가 누적된다. 절대값이 아니라 증가분을 본다.
+        val beforeFailure = chatTurnResultCount("failure")
+        val beforeSuccess = chatTurnResultCount("success")
+        val beforeRefundOk = chatTurnRefundCount("success")
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"userInput":"불을 붙인다."}""")
+            .exchange()
+            .expectStatus().isOk
+
+        // 결과·환불 기록 모두 SSE 워커의 finally에서 일어나므로 잠깐 기다린다.
+        await().atMost(Duration.ofSeconds(5)).untilAsserted {
+            assertThat(chatTurnResultCount("failure")).isEqualTo(beforeFailure + 1)
+            assertThat(chatTurnRefundCount("success")).isEqualTo(beforeRefundOk + 1)
+        }
+        // 스트림은 200으로 열렸지만 저장에 도달하지 못했으므로 success는 오르지 않아야 한다.
+        assertThat(chatTurnResultCount("success")).isEqualTo(beforeSuccess)
+    }
+
+    private fun chatTurnResultCount(outcome: String): Double =
+        meterRegistry.find("manyak.chat.turn.result").tag("outcome", outcome).counter()?.count() ?: 0.0
+
+    private fun chatTurnRefundCount(outcome: String): Double =
+        meterRegistry.find("manyak.chat.turn.refund").tag("outcome", outcome).counter()?.count() ?: 0.0
 
     @Test
     fun `실패한 턴은 CHAT_TURN을 환불해 순잔액이 원복된다`() {

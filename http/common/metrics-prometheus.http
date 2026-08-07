@@ -3,7 +3,8 @@
 ###
 ### 검증 대상: local 프로파일에서 새로 생긴 /actuator/prometheus 노출과 무인증 허용, 그리고
 ### 커스텀 Timer 2종(manyak.ai.call.duration · manyak.story.creation.duration)과
-### Counter 1종(manyak.storyline.creation.result)이 실제로 export되는지.
+### Counter 3종(manyak.storyline.creation.result · manyak.chat.turn.result · manyak.chat.turn.refund)이
+### 실제로 export되는지.
 ###
 ### [중요] 이 파일은 **local 프로파일 전용**입니다.
 ###   - 운영에는 /actuator/prometheus가 노출되지 않습니다(404). 메트릭은 스크레이프가 아니라 OTLP push로
@@ -150,6 +151,8 @@ Accept: application/json
 #   manyak.ai.call.duration        → manyak_ai_call_duration_seconds_{count,sum,bucket,max}
 #   manyak.story.creation.duration → manyak_story_creation_duration_seconds_{count,sum,bucket,max}
 #   manyak.storyline.creation.result → manyak_storyline_creation_result_total   ← Counter라 _total (KNK-801)
+#   manyak.chat.turn.result          → manyak_chat_turn_result_total            ← KNK-811
+#   manyak.chat.turn.refund          → manyak_chat_turn_refund_total            ← KNK-811
 #
 # [Counter와 Timer의 차이] 스토리라인은 Counter라 _bucket·_sum이 없고 _total 한 줄뿐입니다. 소요를 재지 않는 이유는
 #   AI 호출 1회가 유스케이스의 거의 전부라 manyak_ai_call_duration{feature="storyline_generation"}과 겹치기 때문입니다.
@@ -220,6 +223,12 @@ GET {{baseUrl}}/actuator/prometheus
 #     rejected를 만들려면 3번 요청의 selectedTagIds에 없는 태그 ID(예: 999999999)를 넣습니다(400, AI 호출 전 거부).
 #     같은 deviceId로 스토리라인 생성을 6번 반복해 게스트 한도(기본 5회)를 넘겨도 402 rejected가 나옵니다 —
 #     이쪽이 이 지표를 만든 실제 이유이므로, 한 번은 직접 만들어 보고 라인이 오르는지 확인하세요.
+#   - manyak_chat_turn_result_total은 4값입니다(KNK-811): success·failure·rejected·cancelled.
+#     cancelled는 executor 대기 중 취소돼 워커가 스킵된 턴으로, 판정이 잠정적이라 다른 값과 분리했습니다. 채팅 턴은 이 파일의 시나리오에 없으므로,
+#     지표를 보려면 http/chat/ 의 턴 스트림 요청을 한 번 태운 뒤 5번을 다시 실행하세요.
+#     rejected를 만들려면 크레딧이 0인 회원으로 턴을 요청합니다(스트림이 열리기 전에 402).
+#   - manyak_chat_turn_refund_total의 failure는 **선차감을 되돌리지 못했다**는 뜻이라 정산 문제 신호입니다.
+#     정상 환경에서는 0이어야 하며, 여기서 인위적으로 만들 방법은 없습니다(환불 경로 자체가 실패해야 함).
 #   - outcome="failure"를 만들려면: AI 서버를 내리고(MANYAK_AI_STORY_STUB=false로 띄운 뒤 AI 미기동)
 #     완성을 요청해 502로 실패시킨 뒤 이 요청을 다시 누릅니다.
 #     (manyak_ai_call_duration의 outcome은 success·failure 2값 그대로입니다 — 거부 분리는 완성 타이머에만 해당)
