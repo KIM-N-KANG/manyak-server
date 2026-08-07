@@ -919,8 +919,14 @@ class ChatService(
         // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
         future.whenComplete { _, _ ->
             if (!workerStarted.get()) {
-                // 워커가 스킵돼 저장에 도달하지 못한 턴이다. 워커 finally가 안 돌므로 결과도 여기서 센다(KNK-811).
-                recordChatTurnResult(resultGate, OUTCOME_FAILURE)
+                // **여기서는 결과를 세지 않는다**(KNK-811, Codex P2 재리뷰). `!workerStarted`는 확정 판정이 아니다:
+                // AsyncRun이 취소 검사를 통과한 뒤 람다가 workerStarted를 세우기 전 취소가 끼어들면, 이 콜백이
+                // false를 보고도 워커는 곧이어 실행돼 저장에 성공할 수 있다. 그때 여기서 failure를 세고 게이트를
+                // 선점하면 **저장·과금된 턴이 영구히 실패로 기록된다** — 이중 계수보다 나쁜 오분류다.
+                // 그래서 결과 계수는 자기 결과를 아는 워커 finally와, 워커가 확실히 없는 스케줄 거부 catch에만 둔다.
+                // 대가는 큐드-취소가 결과에서 빠지는 것인데, 그 경우 환불은 아래에서 그대로 일어나므로
+                // `manyak.chat.turn.refund{success}`가 결과 `failure`보다 많은 것으로 드러난다.
+                // (환불의 provisional 판정은 이 변경 이전부터 있던 동작이라 그대로 둔다 — refundGate가 1회를 보장한다.)
                 refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
             }
         }
@@ -1000,10 +1006,16 @@ class ChatService(
      * 이미 스트림 전체를 재고 있어 유스케이스 타이머가 사실상 겹친다. 반면 `rejected`는 AI를 부르기 전에 끊겨
      * 그쪽에 남지 않는다.
      *
-     * **호출 지점은 셋이고 서로 배타적이다**(겹치면 이중 계수된다):
-     *   1. 워커 finally — `workerStarted`인 경우를 소유하며 `persisted`로 success/failure를 가른다
-     *   2. `future.whenComplete`의 `!workerStarted` — 큐드 취소로 워커가 스킵된 경우
-     *   3. 스케줄 거부 catch — future 자체가 없어 1·2가 돌지 않는 경우
+     * **호출 지점은 둘뿐이고 서로 배타적이다**:
+     *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 `persisted`로 success/failure를 가른다
+     *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우
+     *
+     * `future.whenComplete`의 `!workerStarted`에서는 **일부러 세지 않는다**(Codex P2 재리뷰). 그 시점의
+     * `workerStarted == false`는 확정이 아니라 잠정 판정이라, 곧이어 워커가 저장에 성공하면 저장·과금된 턴을
+     * 실패로 굳혀 버린다. 대신 큐드-취소 턴이 결과 집계에서 빠지는데, 그 경우에도 환불은 일어나므로
+     * `manyak.chat.turn.refund{outcome="success"}`가 결과 `failure`보다 많은 것으로 드러난다.
+     *
+     * [gate]는 그래서 지금은 이론적으로 남는 방어지만, 판정 지점이 다시 늘 때 이중 계수를 막도록 남겨 둔다.
      */
     private fun recordChatTurnResult(gate: AtomicBoolean, outcome: String) {
         // 한 턴은 정확히 1회만 센다. 판정 지점이 논리적으로 배타적이어도 취소 경합에서 겹칠 수 있다(Codex P2).

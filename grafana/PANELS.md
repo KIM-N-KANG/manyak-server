@@ -364,7 +364,11 @@ sum by (outcome) (rate(manyak_chat_turn_result_total{service_name="$service"}[5m
 
 `failure`가 늘면 AI 실패율 패널의 `chat_response`를 함께 봅니다. 거기가 깨끗한데 여기 `failure`만 늘었다면 AI 밖의 저장 오류이거나 `chatSseExecutor` 포화입니다.
 
-**세 기록 지점이 배타적입니다.** 워커 `finally`(워커가 실행된 경우), `future.whenComplete`의 `!workerStarted`(큐드 취소), 스케줄 거부 `catch`(future 미생성). 겹치면 이중 계수되므로 이 배타성이 깨지지 않게 유지해야 합니다.
+**기록 지점은 둘입니다** — 워커 `finally`(워커가 실행된 모든 경우)와 스케줄 거부 `catch`(future 미생성).
+
+**⚠️ 큐드 취소 턴은 이 패널에서 빠집니다.** 실행 대기 중 취소돼 워커가 스킵된 경우인데, 그 시점에는 워커가 곧 실행될지 확정할 수 없어 여기서 세지 않습니다. 잠정 판정으로 `failure`를 세면 곧이어 저장에 성공한 턴이 **저장·과금됐는데 실패로 굳는** 오분류가 생기기 때문입니다.
+
+대신 그 턴도 환불은 일어나므로, **환불 `success`가 결과 `failure`보다 꾸준히 많으면 큐드 취소가 발생하고 있다**는 신호로 읽습니다. 그 상태가 지속되면 `chatSseExecutor`가 포화라는 뜻입니다.
 
 ---
 
