@@ -56,6 +56,12 @@ sum(increase(manyak_chat_turn_refund_total{service_name="manyak-server", outcome
 
 임계값이 0인 알림은 보통 위험하지만 여기서는 안전합니다. 정상 운영에서 이 값은 0이고, 0이 아닌 순간이 곧 조사 대상입니다. 울리면 그 시각의 `chat_turn_refund_failed` 로그에서 `idempotency_key`와 `chat_pk`를 찾아 원장과 대조합니다.
 
+**⚠️ 이 규칙은 서버의 카운터 사전 등록에 의존합니다.** Micrometer Counter는 첫 `increment()` 때 등록되므로, 사전 등록이 없으면 첫 실패가 값 1인 샘플 하나로 등장하고 `increase()`가 뺄 이전 샘플을 못 찾아 결과를 내지 못합니다. 규칙은 그것을 No Data로 보고 `Normal`로 넘깁니다 — **첫 한 건을 잡으려던 규칙이 정확히 그 한 건을 놓칩니다.**
+
+`ChatTurnRefundMeters`가 기동 시 `success`·`failure`를 0으로 등록해 이 사각지대를 없앱니다. **이 빈을 지우면 알림이 조용히 반쪽이 됩니다** — 규칙은 초록으로 남고 첫 실패만 사라지므로 알아차릴 방법이 없습니다. 회귀 가드는 `ChatTurnRefundMetersTests`와 `ChatTurnCreditRefundIntegrationTests`의 "환불 실패 카운터는 실패가 한 번도 없어도 등록돼 있다"입니다.
+
+같은 함정이 임계값 0인 다른 규칙에도 적용됩니다. **알림이 카운터의 첫 한 건에 의존한다면 그 카운터는 사전 등록돼야 합니다.** 규칙 2는 임계값이 5라 첫 건이 보이지 않아도 발화 시점에는 시계열이 이미 존재하므로 영향이 없습니다.
+
 ## 왜 비율이 아니라 건수인가
 
 티켓(KNK-800) 초안은 5xx 오류율·AI 실패율처럼 **비율** 임계값을 후보로 뒀는데, 지금 트래픽에서는 쓸 수 없습니다.

@@ -1029,10 +1029,13 @@ class ChatService(
      * `failure`는 **선차감분을 되돌리지 못했다**는 뜻이다. 사용자가 실패한 턴에 과금된 상태로 남으므로
      * 관측 지표가 아니라 정산 정확성 신호로 읽는다(회원은 원장에 선차감이 남아 사후 정산으로 복구 가능).
      * 실제로 되돌릴 대상이 있고 게이트를 통과한 호출만 센다 — 무차감 게스트나 중복 호출은 여기 오지 않는다.
+     *
+     * 시계열은 [ChatTurnRefundMeters]가 기동 시 0으로 만들어 두므로 여기서 처음 등록되지 않는다.
+     * 그 이유(첫 실패를 알림이 놓치는 문제)는 해당 클래스 KDoc에 있다.
      */
     private fun recordChatTurnRefund(outcome: String) {
         runCatching {
-            Counter.builder("manyak.chat.turn.refund")
+            Counter.builder(METRIC_CHAT_TURN_REFUND)
                 .description("채팅 턴 선차감 환불 결과")
                 .tag("outcome", outcome)
                 .register(meterRegistry)
@@ -1296,7 +1299,9 @@ class ChatService(
         }
     }
 
-    private companion object {
+    // [ChatTurnRefundMeters]가 메트릭 이름·outcome 값을 공유해야 해서 private이 아니다.
+    // 사전 등록과 increment가 같은 상수를 봐야 미터 신원이 갈리지 않는다.
+    internal companion object {
         // SseEmitter 전체(MVC async) 상한. 턴 스트림은 본문 스트리밍 뒤 곧바로 completed를 보낸다(선택지는 전용 엔드포인트로
         // 분리 — B23). stopgap 동안 본문+내부 선택지 호출까지 덮으려 160s로 상향했던 값을 낮추되, AI 스트림의 이벤트 간 idle
         // 타임아웃(manyak.ai.chat.stream-timeout, 기본 60s)과 같게 두지 않는다: idle은 토큰 간격 상한이라 토큰이 계속 오면
@@ -1304,6 +1309,10 @@ class ChatService(
         // 잃고 과금될 수 있다(Codex P2). idle 예산 위로 여유(2배)를 둬 헬시한 긴 스트림을 끊지 않는다.
         // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
         const val SSE_TIMEOUT_MILLIS = 120_000L
+
+        // [ChatTurnRefundMeters]가 기동 시 이 이름으로 시계열을 0에 만들어 둔다. 사전 등록과 여기의
+        // increment가 같은 미터를 가리켜야 하므로(이름·태그가 미터 신원이다) 리터럴을 쓰지 않는다.
+        const val METRIC_CHAT_TURN_REFUND = "manyak.chat.turn.refund"
 
         // manyak.chat.turn.result·manyak.chat.turn.refund가 공유하는 outcome 태그 값(유한 enum —
         // 의미는 recordChatTurnResult·recordChatTurnRefund KDoc). 스토리 완성·스토리라인과 같은 어휘를 쓴다.
