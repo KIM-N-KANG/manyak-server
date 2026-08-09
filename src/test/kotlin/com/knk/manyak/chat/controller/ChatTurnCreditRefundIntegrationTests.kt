@@ -141,6 +141,18 @@ class ChatTurnCreditRefundIntegrationTests {
         meterRegistry.find("manyak.chat.turn.refund").tag("outcome", outcome).counter()?.count() ?: 0.0
 
     @Test
+    fun `환불 실패 카운터는 실패가 한 번도 없어도 등록돼 있다`() {
+        // KNK-800. 알림이 "10분간 failure > 0"으로 첫 한 건을 잡으려 하는데, Counter가 첫 increment 때
+        // 등록되면 첫 실패는 값 1짜리 샘플 하나로 등장한다. increase()는 뺄 이전 샘플이 없어 결과를 내지
+        // 못하고 규칙은 No Data(=Normal)로 삼켜진다 — 잡으려던 바로 그 한 건을 놓친다.
+        // ChatTurnRefundMeters가 기동 시 0으로 등록해 두면 첫 실패가 0->1 증가로 잡힌다.
+        // 카운터는 클래스 간 공유 컨텍스트에서 누적될 수 있으므로 값이 아니라 존재만 본다.
+        assertThat(meterRegistry.find("manyak.chat.turn.refund").tag("outcome", "failure").counter())
+            .describedAs("환불 failure 카운터가 기동 시점부터 등록돼 있어야 한다")
+            .isNotNull
+    }
+
+    @Test
     fun `실패한 턴은 CHAT_TURN을 환불해 순잔액이 원복된다`() {
         val story = storyRepository.save(Story(title = "설정 미완 스토리", genre = "판타지"))
         val member = saveUser("환불회원")
