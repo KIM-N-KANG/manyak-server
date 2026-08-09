@@ -594,6 +594,6 @@ grafanacloud_instance_active_series
 | 토큰·비용·프롬프트 내용 | 카디널리티 폭발 | Langfuse |
 | 스토리라인·채팅 턴 소요 | AI 호출이 유스케이스의 거의 전부라 AI 타이머와 겹침 | AI 호출 p95의 해당 `feature` |
 | 채팅 첫 토큰까지의 시간(TTFB) | 스트리밍이라 AI 타이머는 스트림 **전체**를 잼 | 없음. 필요해지면 별도 계측 |
-| 알림 | 기준선이 없어 임계값이 근거 없는 숫자가 됨 | KNK-800에서 설계 예정 |
+| 알림 | 대시보드의 임계선은 색상 표시용 | `ALERTS.md` — 규칙 3개를 별도로 둠 |
 | CPU 크레딧 잔량 | Micrometer가 수집하지 않음 | CloudWatch `CPUCreditBalance` |
 | 컨테이너 OOM kill | JVM이 죽으면 기록이 안 남음 | EC2 `dmesg`, 컨테이너 재시작 로그 |
