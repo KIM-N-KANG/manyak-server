@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
 
 /**
  * 채팅 선택지 선택 결과 기록(KNK-819, 스펙 §4-3-3) 통합 검증.
@@ -219,6 +220,39 @@ class ChatTurnChoiceSelectionIntegrationTests {
         streamTurn(onlyOrder.chatPublicId, CHOICE_TEXTS[0], choiceOrder = 1)
         assertTurnPersisted(onlyOrder, expectedTurnCount = 2)
         assertNoSelectionRecorded(onlyOrder.assistantId)
+    }
+
+    @Test
+    fun `요청 시작 이후에 만들어진 선택지는 순번이 맞아도 기록하지 않는다`() {
+        // 재생성은 ASSISTANT id를 유지한 채 선택지만 갈아끼우므로, sourceTurnId·choiceOrder가 맞아도 사용자가 본
+        // 세대가 아닐 수 있다(Codex P2). 사용자는 요청을 보내기 전에 선택지를 봤을 수밖에 없으므로, 요청 시작
+        // 시각보다 나중에 만들어진 행은 본 적 없는 행이다. createdAt을 미래로 두어 그 상황을 결정적으로 만든다.
+        val story = seedStory()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "첫 입력", messageOrder = 1),
+        )
+        val assistant = storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "첫 응답", messageOrder = 2),
+        )
+        val future = Instant.now().plusSeconds(600)
+        CHOICE_TEXTS.forEachIndexed { index, text ->
+            storyChoiceRepository.save(
+                StoryChoice(
+                    chatId = chat.id,
+                    messageId = assistant.id,
+                    choiceText = text,
+                    choiceOrder = (index + 1).toShort(),
+                    createdAt = future,
+                ),
+            )
+        }
+
+        streamTurn(chat.publicId.toString(), CHOICE_TEXTS[0], sourceTurnId = assistant.id, choiceOrder = 1)
+
+        // 턴 저장은 성공하고(거절 금지 계약), 선택 기록만 건너뛴다.
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().currentTurn).isEqualTo(2)
+        assertNoSelectionRecorded(assistant.id)
     }
 
     @Test

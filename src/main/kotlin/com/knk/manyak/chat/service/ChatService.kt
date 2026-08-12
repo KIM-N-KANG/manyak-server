@@ -453,6 +453,9 @@ class ChatService(
         userId: Long? = null,
         deviceId: String? = null,
     ): SseEmitter {
+        // 선택 기록의 세대 가드 기준 시각(KNK-819). **AI 호출 전인 요청 진입 시점**에 잡아야 한다 — 사용자는
+        // 요청을 보내기 전에 선택지를 봤으므로, 이 시각 이후에 만들어진 선택지 행은 재생성이 갈아끼운 세대다.
+        val requestedAt = Instant.now()
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         // 채팅을 공개 식별자로 먼저 검증한다(없으면 동기 404). 이후 내부 PK로 저장·이력을 처리하고,
         // SSE 이벤트에는 외부에 노출하는 공개 식별자(chatId)만 싣는다.
@@ -491,7 +494,8 @@ class ChatService(
                     judgment = result.toTurnJudgment(),
                     // 선택 기록(KNK-819)은 프론트가 보낸 값을 그대로 넘긴다 — 유효성 판정은 저장 트랜잭션 안에서 한다.
                     // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(최대 180초) 동안 마지막 턴이 바뀐 경우를 놓친다.
-                    selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder),
+                    // requestedAt은 그 판정의 세대 기준이다(위 진입 시점에 확정).
+                    selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder, requestedAt),
                 )
             },
             onPersisted = { persistedTurn, aiCallLogId ->
