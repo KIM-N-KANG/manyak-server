@@ -142,6 +142,12 @@ class ChatTurnPersister(
      * 수밖에 없으므로 정상 경로에서는 항상 `choice.createdAt <= requestedAt`이다. 요청이 시작된 뒤에 만들어진 행은
      * 본 적 없는 행이므로 기록하지 않는다. 재생성 뒤 새 선택지에서 골라 보내는 것은 **새 요청**이라 그 요청의
      * `requestedAt`이 새 행들의 `createdAt`보다 뒤여서 정상 기록된다 — 이 가드로 잃는 데이터는 없다.
+     *
+     * **알려진 한계 — 완전한 방어가 아니다.** 이 가드가 막는 것은 "요청이 시작된 뒤에 생긴 세대"뿐이다. 다른 탭·세션에서
+     * 재생성과 선택지 재생성이 **요청 시작 전에 이미 끝난** 뒤 낡은 탭이 예전 세대 기준으로 전송하면, 새 행의
+     * `createdAt`이 `requestedAt`보다 앞서 가드를 통과해 같은 순번의 새 세대 행이 기록될 수 있다(Codex 2차 지적).
+     * 정확한 판정은 클라이언트가 본 선택지 세대 식별자(`choiceId`)를 요청에 실어야 가능하며 KNK-762 범위다.
+     * 여기서 시각 비교를 세대 식별자로 대체하지 말 것 — 그러면 와이어 계약이 바뀐다.
      */
     private fun recordChoiceSelection(chatId: Long, selection: ChoiceSelection, userInput: String) {
         val sourceTurnId = selection.sourceTurnId ?: return // 값을 안 보낸 요청(구버전 클라이언트)은 로그도 남기지 않는다.
