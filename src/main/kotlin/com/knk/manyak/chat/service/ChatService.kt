@@ -489,6 +489,9 @@ class ChatService(
                     aiOutput = result.aiOutput,
                     choices = result.choices,
                     judgment = result.toTurnJudgment(),
+                    // 선택 기록(KNK-819)은 프론트가 보낸 값을 그대로 넘긴다 — 유효성 판정은 저장 트랜잭션 안에서 한다.
+                    // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(최대 180초) 동안 마지막 턴이 바뀐 경우를 놓친다.
+                    selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder),
                 )
             },
             onPersisted = { persistedTurn, aiCallLogId ->
