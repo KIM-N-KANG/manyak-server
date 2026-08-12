@@ -15,7 +15,7 @@
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 17 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
-| [public.story_choices](public.story_choices.md) | 8 |  | BASE TABLE |
+| [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
@@ -199,6 +199,7 @@ erDiagram
   boolean is_selected
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
+  boolean is_edited
 }
 "public.story_creation_storyline_ratings" {
   bigint id

@@ -9,9 +9,10 @@
 | message_id | bigint |  | false |  | [public.story_messages](public.story_messages.md) |  |
 | choice_text | text |  | false |  |  |  |
 | choice_order | smallint |  | false |  |  |  |
-| is_selected | boolean | false | false |  |  |  |
-| selected_at | timestamp with time zone |  | true |  |  |  |
+| is_selected | boolean | false | false |  |  | KNK-819: 이 선택지를 골라 다음 턴을 보냈으면 true. 다음 턴 저장 트랜잭션에서 직전 턴의 해당 행에 기록한다(마지막 턴이 아니거나 순번이 범위 밖이면 기록을 건너뛴다). |
+| selected_at | timestamp with time zone |  | true |  |  | KNK-819: is_selected를 true로 기록한 시각. 그 선택으로 진행한 다음 턴이 저장된 시각과 같다. |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| is_edited | boolean |  | true |  |  | KNK-819: 선택한 선택지 원문과 최종 user_input의 정규화(NFC→trim→내부 공백 런 축약, 구두점 보존) 비교 결과. 고쳐 보냈으면 true, 그대로면 false. 선택 기록이 없으면 NULL. |
 
 ## Constraints
 
@@ -49,6 +50,7 @@ erDiagram
   boolean is_selected
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
+  boolean is_edited
 }
 "public.story_chats" {
   bigint id

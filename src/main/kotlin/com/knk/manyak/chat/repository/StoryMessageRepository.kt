@@ -38,6 +38,17 @@ interface StoryMessageRepository : JpaRepository<StoryMessage, Long> {
     fun findFirstByChatIdOrderByMessageOrderDesc(chatId: Long): StoryMessage?
 
     /**
+     * 채팅의 마지막 ASSISTANT 메시지(= 마지막 턴)를 role까지 좁혀 조회한다. 선택 기록(§4-3-3, KNK-819)이
+     * `sourceTurnId`를 이 값과 대조한다.
+     *
+     * [findFirstByChatIdOrderByMessageOrderDesc]에 role 검사를 덧붙이지 않고 전용 쿼리를 두는 이유는,
+     * "마지막 턴 = 마지막 ASSISTANT"라는 스펙 문안을 그대로 옮기기 위해서다. 현행 운영 경로는 USER·ASSISTANT만
+     * 저장해 두 방식이 등가지만, DB는 SYSTEM을 허용하고 `story_choices.message_id`에도 role 제약이 없어
+     * ASSISTANT 뒤에 다른 role이 오는 데이터가 생기면 role 무관 조회는 정상 선택을 조용히 건너뛴다.
+     */
+    fun findFirstByChatIdAndRoleOrderByMessageOrderDesc(chatId: Long, role: MessageRole): StoryMessage?
+
+    /**
      * 주어진 채팅들에서 해당 role의 마지막(messageOrder 최대) 메시지만 채팅당 1건씩 조회한다.
      * 목록 프리뷰처럼 채팅별 최신 한 건만 필요할 때 메모리 로드를 줄이기 위해 사용한다.
      */

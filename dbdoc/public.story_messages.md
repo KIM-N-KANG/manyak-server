@@ -58,6 +58,7 @@ erDiagram
   boolean is_selected
   timestamp_with_time_zone selected_at
   timestamp_with_time_zone created_at
+  boolean is_edited
 }
 "public.story_message_versions" {
   bigint id
