@@ -30,9 +30,12 @@ class DevProfileConfigTests {
     }
 
     @Test
-    fun `개발 프로파일은 운영 구글 폼 id를 갖지 않는다`() {
-        // 운영 폼 id는 application-prod.yml에만 있어야 한다. 여기 값이 생기면 개발 피드백이 운영 시트에 적재된다.
-        assertThat(devProperties.getProperty("manyak.google-form.feedback.form-id")).isNullOrEmpty()
+    fun `개발 프로파일은 구글 폼 id를 빈 문자열로 잠근다`() {
+        // 키 부재는 빈 값을 보장하지 않는다. 생략하면 base(application.yml)의 placeholder
+        // `${MANYAK_GOOGLE_FORM_FEEDBACK_ID:}`가 살아나, dev 태스크에 legacy override가 남아 있으면
+        // 개발 피드백이 운영 폼에 적재된다. 그래서 '키가 존재하고 값이 비어 있을 것'까지 단정한다.
+        assertThat(devProperties).containsKey("manyak.google-form.feedback.form-id")
+        assertThat(devProperties.getProperty("manyak.google-form.feedback.form-id")).isEmpty()
     }
 
     @Test
