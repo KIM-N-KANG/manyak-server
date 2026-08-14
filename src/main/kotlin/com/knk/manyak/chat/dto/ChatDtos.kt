@@ -265,6 +265,25 @@ data class ContinueChatRequest(
         nullable = true,
     )
     val userSource: String? = null,
+
+    // 선택 기록(KNK-819, 스펙 §4-3-3): 사용자가 고른 직전 턴 선택지를 가리킨다.
+    // **형식 검증 애노테이션을 붙이지 않는다** — 0·음수·범위 밖·낡은 turnId 전부 400이 아니라 기록만 건너뛴다.
+    // 관측이 채팅 전송을 막지 않기 위함이라, @Positive 하나만 붙어도 그 계약이 깨진다.
+    @field:Schema(
+        description = "고른 선택지가 달린 직전 턴의 ID(채팅 상세 turns[].id). choiceOrder와 함께 보내면 서버가 선택 결과를 " +
+            "기록하며, 값이 낡았거나 다른 채팅의 턴이면 거절하지 않고 기록만 생략합니다.",
+        example = "3",
+        nullable = true,
+    )
+    val sourceTurnId: Long? = null,
+
+    @field:Schema(
+        description = "고른 선택지의 순번. DB와 같은 1부터 시작하는 값이며, 채팅 상세 turns[].choices 배열의 인덱스 + 1입니다. " +
+            "범위 밖 값은 400이 아니라 기록 생략으로 처리합니다.",
+        example = "1",
+        nullable = true,
+    )
+    val choiceOrder: Int? = null,
 )
 
 @Schema(description = "AI 응답 재생성 요청")

@@ -15,11 +15,14 @@ import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.text.Normalizer
+import java.time.Instant
 
 /**
  * 채팅 턴 완료 시점의 원자적 저장 책임만 가진다.
@@ -40,6 +43,8 @@ class ChatTurnPersister(
     private val endingReachRecorder: EndingReachRecorder,
 ) {
 
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     // 이력 선택지 스냅샷 직렬화용. 컨텍스트 ObjectMapper 빈에 의존하지 않도록 로컬 인스턴스를 둔다(List<String> 직렬화만 사용).
     private val objectMapper = ObjectMapper()
 
@@ -57,6 +62,8 @@ class ChatTurnPersister(
         choices: List<String>,
         // AI 판정 결과(목표 사건·완결 사건·도달 엔딩). 턴 저장과 같은 트랜잭션에서 채팅 상태에 반영한다(§4-3-10, D11).
         judgment: TurnJudgment = TurnJudgment(),
+        // 사용자가 고른 직전 턴 선택지(§4-3-3, KNK-819). 프론트가 안 보내면 두 값이 null이라 기록하지 않는다.
+        selection: ChoiceSelection = ChoiceSelection(),
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -66,6 +73,9 @@ class ChatTurnPersister(
 
         // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
         val reachedEnding = resolveReachedEnding(chat, judgment.endingName)
+
+        // 선택 기록은 아래 insert보다 **먼저** 해야 한다 — 새 ASSISTANT를 넣고 나면 그게 마지막 턴이 돼 판정이 뒤집힌다.
+        recordChoiceSelection(chatId, selection, userInput)
 
         val lastOrder = storyMessageRepository
             .findFirstByChatIdOrderByMessageOrderDesc(chatId)
@@ -110,6 +120,70 @@ class ChatTurnPersister(
         storyChatRepository.save(chat)
 
         return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn, reachedEnding = reachedEnding)
+    }
+
+    /**
+     * 사용자가 고른 직전 턴 선택지에 선택 결과를 기록한다(§4-3-3, KNK-819).
+     *
+     * 새 메시지를 insert하기 **전에**, 그리고 [persistTurn]이 잡은 채팅 락 안에서 호출해야 한다. 같은 트랜잭션에
+     * 묶는 것이 설계의 하중을 받는 전제다 — 별도 트랜잭션으로 먼저 커밋하면 그 틈에 재생성이 락을 잡아
+     * 방금 기록한 선택지를 [regenerateLastTurn]의 deleteAll로 지울 수 있다.
+     *
+     * 기록 조건(선택 정보 있음 · 지금 마지막 턴 · 순번이 그 턴의 선택지 범위 안 · 사용자가 본 세대)을 하나라도
+     * 못 채우면 조용히 건너뛴다. **예외를 던지지 않아 턴 저장을 거절·롤백하지 않는다** — 관측이 채팅 전송을 막지 않는다.
+     *
+     * 순번은 인덱스 산술이 아니라 저장된 `choice_order` 값으로 찾는다. 0-based 실수와 순번 공백이 별도 경계
+     * 분기 없이 "못 찾음 → 건너뜀" 한 갈래로 걸린다.
+     *
+     * **세대 가드(stale)** — 재생성은 ASSISTANT 메시지 id를 유지한 채 본문만 바꾸고 선택지를 갈아끼우므로,
+     * `sourceTurnId`·`choiceOrder`가 모두 일치해도 사용자가 본 선택지가 아닐 수 있다. AI 호출 중인 이어쓰기 옆에서
+     * 재생성이 커밋되고 선택지가 다시 채워지면, 뒤늦게 도는 이 메서드가 새 세대의 같은 순번 행을 선택 처리하고
+     * `isEdited`를 사용자가 본 적 없는 원문과 비교해 계산한다(Codex P2). 사용자는 요청을 보내기 전에 선택지를 봤을
+     * 수밖에 없으므로 정상 경로에서는 항상 `choice.createdAt <= requestedAt`이다. 요청이 시작된 뒤에 만들어진 행은
+     * 본 적 없는 행이므로 기록하지 않는다. 재생성 뒤 새 선택지에서 골라 보내는 것은 **새 요청**이라 그 요청의
+     * `requestedAt`이 새 행들의 `createdAt`보다 뒤여서 정상 기록된다 — 이 가드로 잃는 데이터는 없다.
+     *
+     * **알려진 한계 — 완전한 방어가 아니다.** 이 가드가 막는 것은 "요청이 시작된 뒤에 생긴 세대"뿐이다. 다른 탭·세션에서
+     * 재생성과 선택지 재생성이 **요청 시작 전에 이미 끝난** 뒤 낡은 탭이 예전 세대 기준으로 전송하면, 새 행의
+     * `createdAt`이 `requestedAt`보다 앞서 가드를 통과해 같은 순번의 새 세대 행이 기록될 수 있다(Codex 2차 지적).
+     * 정확한 판정은 클라이언트가 본 선택지 세대 식별자(`choiceId`)를 요청에 실어야 가능하며 KNK-762 범위다.
+     * 여기서 시각 비교를 세대 식별자로 대체하지 말 것 — 그러면 와이어 계약이 바뀐다.
+     */
+    private fun recordChoiceSelection(chatId: Long, selection: ChoiceSelection, userInput: String) {
+        val sourceTurnId = selection.sourceTurnId ?: return // 값을 안 보낸 요청(구버전 클라이언트)은 로그도 남기지 않는다.
+        val lastAssistant = storyMessageRepository
+            .findFirstByChatIdAndRoleOrderByMessageOrderDesc(chatId, MessageRole.ASSISTANT)
+        // 마지막 턴 대조 하나가 "다른 채팅의 턴 ID"와 "이미 진행된 낡은 턴"을 함께 막는다.
+        val isLastTurn = lastAssistant?.id == sourceTurnId
+        val choice = if (!isLastTurn) {
+            null
+        } else {
+            storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(sourceTurnId)
+                .firstOrNull { it.choiceOrder.toInt() == selection.choiceOrder && it.chatId == chatId }
+        }
+        // sourceTurnId를 보냈는데 기록하지 못한 경우만 남긴다. 0-based 순번 같은 클라이언트 실수와 세대 불일치가
+        // 조용히 묻히는 것을 막는 관측이며, 사유를 구분해 싣는다. 사용자 입력·선택지 원문은 싣지 않는다.
+        val skipReason = when {
+            !isLastTurn -> "LAST_TURN_MISMATCH"
+            choice == null -> "CHOICE_NOT_FOUND"
+            choice.createdAt.isAfter(selection.requestedAt) -> "STALE_CHOICE"
+            else -> null
+        }
+        if (skipReason != null || choice == null) {
+            logger.warn(
+                "채팅 선택 기록 건너뜀: reason={}, chatId={}, sourceTurnId={}, choiceOrder={}, lastAssistantId={}",
+                skipReason ?: "CHOICE_NOT_FOUND",
+                chatId,
+                sourceTurnId,
+                selection.choiceOrder,
+                lastAssistant?.id,
+            )
+            return
+        }
+        // 영속 상태 엔티티라 더티 체킹으로 이 트랜잭션 커밋에 함께 반영된다(명시적 save 불필요).
+        choice.isSelected = true
+        choice.selectedAt = Instant.now()
+        choice.isEdited = normalizeForComparison(choice.choiceText) != normalizeForComparison(userInput)
     }
 
     /**
@@ -313,7 +387,42 @@ class ChatTurnPersister(
     )
 
     data class ReachedEnding(val id: Long, val name: String)
+
+    companion object {
+        /**
+         * 선택지 원문과 최종 사용자 입력을 비교하기 위한 정규화(§4-3-3, KNK-819).
+         * 유니코드 NFC → 앞뒤 공백 제거 → 내부 공백 런을 스페이스 하나로 축약.
+         *
+         * **구두점은 지우지 않는다** — 마침표를 바꾸거나 지우는 것도 사용자가 실제로 손댄 편집이고,
+         * 구두점을 뭉개면 `"간다."`와 `"간다?"`처럼 서로 다른 선택지가 같아진다.
+         *
+         * 같은 파일의 [StoryCreationTag.normalize](태그 키 정규화)를 재사용하지 않는 이유는 그쪽이 공백을
+         * **전부 제거**하고 소문자화까지 해서, 문장 비교에 쓰면 `"문을 연다"`와 `"문을연다"`가 같아지기 때문이다.
+         */
+        internal fun normalizeForComparison(text: String): String =
+            Normalizer.normalize(text, Normalizer.Form.NFC)
+                .trim()
+                .replace(WHITESPACE_RUN, " ")
+
+        // (?U)는 UNICODE_CHARACTER_CLASS. 이게 없으면 \s가 ASCII 공백만 잡아 전각 공백(U+3000)이 남는다.
+        private val WHITESPACE_RUN = Regex("(?U)\\s+")
+    }
 }
+
+/**
+ * 사용자가 고른 직전 턴 선택지(§4-3-3, KNK-819). 프론트가 보낸 값을 그대로 담으며 서버가 보정하지 않는다.
+ *
+ * 두 값이 각각 nullable이라 한쪽만 온 요청도 그대로 표현된다 — [ChatTurnPersister]가 `sourceTurnId`를 기준으로
+ * "값을 안 보낸 요청(무로그)"과 "보냈는데 기록 못 한 요청(WARN)"을 가른다.
+ *
+ * [requestedAt]은 **서버가 요청 진입 시점에 잡는 시각**이다(와이어 필드가 아니다). 선택지 세대 가드에 쓴다 —
+ * 자세한 이유는 [ChatTurnPersister.recordChoiceSelection]의 세대 가드 설명 참조.
+ */
+data class ChoiceSelection(
+    val sourceTurnId: Long? = null,
+    val choiceOrder: Int? = null,
+    val requestedAt: Instant = Instant.now(),
+)
 
 /** 채팅 턴 저장 트랜잭션에 반영할 AI 판정 결과(§4-3-10). 전부 선택이며, 재료가 없으면 상태 변화가 없다. */
 data class TurnJudgment(
