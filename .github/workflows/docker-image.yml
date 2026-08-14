@@ -145,12 +145,30 @@ jobs:
       - name: Force new ECS deployment
         if: steps.gate.outputs.skip != 'true'
         run: |
-          aws ecs update-service \
+          # 이 호출이 만든 배포 id 를 잡아 둔다. services-stable 만으로는 부족하다 —
+          # 서비스에 circuit breaker rollback 이 켜져 있어(compute-ecs), 새 태스크가 못 뜨면 ECS 가
+          # 직전 배포로 되돌리고, 그 상태도 "안정적인 배포 1개 + desired 충족"이라 waiter 가 성공한다.
+          # 그러면 이후 헬스 검사는 옛 태스크를 보게 되어 실패한 배포가 초록으로 끝난다.
+          DEPLOY_ID=$(aws ecs update-service \
             --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
-            --force-new-deployment --no-cli-pager --query 'service.serviceName' --output text
+            --force-new-deployment --no-cli-pager \
+            --query "service.deployments[?status=='PRIMARY'].id | [0]" --output text)
+          echo "배포 id: $DEPLOY_ID"
+
+          # 그 배포가 COMPLETED 가 될 때까지 폴링한다. 롤백되면 rolloutState 가 FAILED 가 되거나
+          # 배포 자체가 목록에서 사라지므로 둘 다 실패로 처리한다.
+          for i in $(seq 1 60); do
+            STATE=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+              --query "services[0].deployments[?id=='$DEPLOY_ID'].rolloutState | [0]" --output text)
+            case "$STATE" in
+              COMPLETED) echo "✅ 배포 $DEPLOY_ID COMPLETED"; break ;;
+              FAILED) echo "::error::배포 $DEPLOY_ID 가 FAILED — circuit breaker 롤백 발생. CloudWatch /ecs/manyak-dev 확인"; exit 1 ;;
+              None|"") echo "::error::배포 $DEPLOY_ID 가 사라졌습니다(롤백으로 교체) — CloudWatch /ecs/manyak-dev 확인"; exit 1 ;;
+              *) echo "배포 $STATE — 대기 $i/60 (10s)"; sleep 10 ;;
+            esac
+          done
+          [ "$STATE" = "COMPLETED" ]
           # 배포 안정화까지 대기. 개발 서비스는 stop-then-start(겹치지 않음)라 그 사이 짧은 중단이 있다.
-          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
-          echo "✅ ECS 서비스 안정화"
 
       # server 가 healthy 여도 ai 는 죽어 있을 수 있다 — ai 컨테이너는 essential=false 라
       # 태스크를 죽이지 않고, ALB 헬스는 server 만 본다. 그래서 컨테이너 단위로 따로 확인한다.
@@ -161,13 +179,29 @@ jobs:
             --query 'taskArns[0]' --output text)
           aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
             --query 'tasks[0].containers[].{name:name,status:lastStatus,health:healthStatus}' --output table
-          UNHEALTHY=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
-            --query "length(tasks[0].containers[?healthStatus!='HEALTHY'])" --output text)
-          if [ "$UNHEALTHY" != "0" ]; then
-            echo "::error::HEALTHY 가 아닌 컨테이너가 있습니다 — CloudWatch /ecs/manyak-dev 로그 확인"
-            exit 1
-          fi
-          echo "✅ 컨테이너 전부 HEALTHY"
+          # 단발 검사는 안 된다. 배포 완료 시점에도 ai 는 아직 UNKNOWN 일 수 있다 —
+          # 태스크 헬스체크에 start period 와 재시도가 있고, ai 는 essential=false 라
+          # 배포 완료 판정이 ai 의 healthy 를 기다려 주지 않는다. 정상 기동 중인 컨테이너를
+          # 실패로 떨어뜨리지 않도록, 전부 HEALTHY 가 되거나 종료 상태가 될 때까지 폴링한다.
+          # 문자열 매칭을 쓰지 않는다 — UNHEALTHY 도 "HEALTHY" 로 끝나서 부분일치로는 비정상을
+          # 정상으로 오판한다. JMESPath 로 정확히 비교해 개수를 센다.
+          for i in $(seq 1 20); do
+            aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+              --query 'tasks[0].containers[].{name:name,status:lastStatus,health:healthStatus}' --output table
+            PENDING=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+              --query "length(tasks[0].containers[?healthStatus!='HEALTHY'])" --output text)
+            if [ "$PENDING" = "0" ]; then
+              echo "✅ 컨테이너 전부 HEALTHY"; exit 0
+            fi
+            BAD=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+              --query "length(tasks[0].containers[?healthStatus=='UNHEALTHY' || lastStatus=='STOPPED'])" --output text)
+            if [ "$BAD" != "0" ]; then
+              echo "::error::UNHEALTHY 또는 STOPPED 컨테이너가 있습니다 — CloudWatch /ecs/manyak-dev 로그 확인"
+              exit 1
+            fi
+            echo "컨테이너 기동 대기 $i/20 (15s)..."; sleep 15
+          done
+          echo "::error::제한 시간 안에 전부 HEALTHY 가 되지 않았습니다 — CloudWatch /ecs/manyak-dev 로그 확인"; exit 1
 
       - name: Smoke test (/actuator/health)
         if: steps.gate.outputs.skip != 'true'
