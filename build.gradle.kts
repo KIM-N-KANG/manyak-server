@@ -97,6 +97,17 @@ tasks.withType<Test> {
     //    ""로 비우면 빈 값도 유효한 override라 test yml 설정을 지우므로 remove로 아예 제거한다.
     environment.keys.filter { it.startsWith("SPRING_DATASOURCE_") || it.startsWith("SPRING_FLYWAY_") }
         .forEach { environment.remove(it) }
+    // 테스트 HTTP 클라이언트는 keep-alive 커넥션을 재사용하지 않는다(KNK-823).
+    // RestTestClient는 RestClient 기본 팩토리를 쓰는데, webflux 스타터 때문에 reactor-netty가 감지돼
+    // ReactorClientHttpRequestFactory가 잡히고, 그 커넥션 풀은 JVM 전역(HttpResources)이며 기본값이
+    // "maxIdleTime 없음"이라 유휴 커넥션을 영원히 보관한다. 서버가 그 사이 커넥션을 닫으면(Tomcat
+    // keep-alive 만료, 컨텍스트 캐시 축출로 Tomcat 종료 후 포트 재사용) 풀은 죽은 커넥션을 그대로
+    // 내주고, FIN을 아직 처리하지 못한 찰나에 요청이 실리면 POST가 재시도 없이 터진다
+    // (PrematureCloseException: "Connection has been closed BEFORE response, while sending request body").
+    // 전체 스위트에서만·간헐로 나던 SSE 통합 테스트 실패의 정체가 이것이다.
+    // 0이면 축출 조건이 idleTime >= 0 이라 풀에 들어간 커넥션은 항상 축출된다 = 재사용 자체가 없어져
+    // 확률을 낮추는 게 아니라 경합 자체가 사라진다. 로컬호스트 핸드셰이크 비용은 무시할 수준이다.
+    systemProperty("reactor.netty.pool.maxIdleTime", "0")
 }
 
 tasks.bootJar {
