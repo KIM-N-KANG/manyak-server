@@ -27,7 +27,8 @@
 
 ### Codex 리뷰
 
-- PR 리뷰는 ready 전환 후 PR 코멘트 `@codex review`로 받습니다. 절차는 `request-codex-review` 스킬을 따릅니다. Codex 관련 비자명한 동작 세 가지:
+- PR 리뷰는 **`gh pr ready <번호>` 전환만으로 자동으로** 달립니다. 절차는 `request-codex-review` 스킬을 따르되 **멘션 단계는 건너뜁니다**. Codex 관련 비자명한 동작 네 가지:
+  - **`@codex review` 멘션을 달지 않습니다.** 중복이 아니라 해롭습니다 — ready 전환으로 이미 자동 리뷰가 도는데, 멘션은 리뷰 쿼터를 태우고 `You have reached your Codex usage limits for code reviews`로 거절돼 "리뷰 실패"로 오독하게 만듭니다(2026-08-14 PR #185에서 거절 코멘트와 별개로 자동 리뷰는 5분 뒤 정상 도착).
   - **draft PR은 리뷰하지 않습니다**(멘션해도 무반응). `gh pr ready <번호>` 전환이 선행돼야 합니다.
   - **"지적 없음" 결과는 정식 review가 아니라 PR 이슈 코멘트**("Didn't find any major issues")나 호출 코멘트의 봇 👍로 옵니다. reviews API만 폴링하면 영영 못 잡습니다.
   - **재리뷰는 이미 고친 인라인 지적을 최신 커밋에 재앵커해 되살립니다.** 재앵커 의심 시 `git show HEAD:<file>`로 실제 코드를 검증하고, 이미 반영됐으면 "이미 반영됨(커밋 해시)"으로 회신만 하고 다시 고치지 않습니다. 재앵커만 남으면 머지 가능으로 판단합니다.
