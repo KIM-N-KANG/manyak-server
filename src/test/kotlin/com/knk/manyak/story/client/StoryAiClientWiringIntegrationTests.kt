@@ -49,8 +49,7 @@ class StoryAiClientStubWiringIntegrationTests {
         val compiled = storyAiClient.compileStory(
             AiStoryCompileRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = listOf("신중한"),
-                supportingTags = emptyList(),
+                protagonist = AiCharacter(features = listOf("신중한")),
                 selectedStoryline = "선택된 스토리라인",
                 additionalInfo = "추가 정보",
             ),
@@ -66,8 +65,7 @@ class StoryAiClientStubWiringIntegrationTests {
         val response = storyAiClient.createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = listOf("신중한"),
-                supportingTags = emptyList(),
+                protagonist = AiCharacter(features = listOf("신중한")),
             ),
         )
 

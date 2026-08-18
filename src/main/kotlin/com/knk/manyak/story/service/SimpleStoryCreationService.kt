@@ -15,6 +15,7 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.story.client.AiCharacter
 import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
@@ -347,20 +348,14 @@ class SimpleStoryCreationService(
         }
         val customTagDrafts = characterDrafts.flatMap { it.customTags }.distinctBy { it.key }
 
-        // KNK-846 전까지 StoryAiClient의 옛 세 필드를 유지한다. 새 인물 입력의 특징만 역할별로 평탄화하고,
-        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 제공 태그 표기를 우선해 한 번만 보낸다.
-        val aiRequestTags = (
-            genreTags.map { tag ->
-                StoryCreationTagDraft(
-                    category = tag.category,
-                    name = tag.name,
-                )
-            } + characterDrafts.flatMap { character ->
-                character.predefinedTags.map { tag ->
-                    StoryCreationTagDraft(category = tag.category, name = tag.name)
-                } + character.customTags
-            }
-            ).distinctBy { it.key }
+        // AI 인물 단위 계약(KNK-846): 장르 + 주인공/주변 인물별 {name, gender, features}. 아직 저장 전이라 요청 draft로 조립한다.
+        val aiRequest = AiStorylinesRequest(
+            genreTags = genreTags.distinctBy { it.normalizedName }.map { it.name },
+            protagonist = characterDrafts.first { it.role == StoryCreationCharacterRole.PROTAGONIST }.toAiCharacter(),
+            supportingCharacters = characterDrafts
+                .filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+                .map { it.toAiCharacter() },
+        )
 
         // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
         onAiCallStarted()
@@ -369,7 +364,7 @@ class SimpleStoryCreationService(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request, parentLink))
+                storyAiClient.createStorylines(aiRequest, storylineTraceLink(request, parentLink))
             }.result
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
@@ -680,21 +675,45 @@ class SimpleStoryCreationService(
             .findByIdAndCreationSessionId(request.storylineId, request.simpleCreationId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "선택한 스토리라인을 찾을 수 없습니다.")
 
-        val sessionTags = storyCreationSessionTagRepository
+        val sessionTagRows = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
+        // 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
+        val genreTags = sessionTagRows
             .map { it.tag }
-            // 스토리라인 경로의 StoryCreationTagDraft.key와 같은 기준으로 AI 요청용 평탄화만 중복 제거한다.
-            .distinctBy { it.category to it.normalizedName }
-        val genreTags = sessionTags
             .filter { it.category == SimpleStoryTagCategory.GENRE }
+            .distinctBy { it.normalizedName }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+        val characters = storyCreationCharacterRepository
+            .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
+        // 인물 행이 있으면 저장 인물(character_id)별로, 없으면(KNK-845 배포 전 생성된 구 세션) 세션 태그를 카테고리로 복원한다.
+        // 구 세션은 character_id가 전부 null이라 인물 단위로 되싣을 수 없지만, 사용자가 선택한 특징을 유료 컴파일에서 유실시키면 안 된다.
+        val (aiProtagonist, aiSupportingCharacters) = if (characters.isNotEmpty()) {
+            // 특징은 저장 인물별로 되싣는다. character는 LAZY지만 FK id는 초기화 없이 읽힌다(그룹핑 키로만 사용).
+            val featureNamesByCharacterId = sessionTagRows
+                .filter { it.character != null }
+                .groupBy { it.character!!.id }
+                .mapValues { (_, rows) -> rows.map { it.tag }.distinctBy { it.normalizedName }.map { it.name } }
+            val protagonist = characters.firstOrNull { it.role == StoryCreationCharacterRole.PROTAGONIST }
+            val supporting = characters.filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+            // 주인공 행이 없어도(비정상) 빈 객체를 실어 AI 필수 필드 누락(422)을 피한다.
+            (protagonist?.toAiCharacter(featureNamesByCharacterId) ?: AiCharacter()) to
+                supporting.map { it.toAiCharacter(featureNamesByCharacterId) }
+        } else {
+            // 구 세션 폴백: 카테고리별 세션 태그명(정규화 키 중복 제거)으로 복원. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
+            val featureNamesOf = { category: SimpleStoryTagCategory ->
+                sessionTagRows.map { it.tag }.filter { it.category == category }.distinctBy { it.normalizedName }.map { it.name }
+            }
+            val supportingFeatures = featureNamesOf(SimpleStoryTagCategory.SUPPORTING_CHARACTER)
+            AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST)) to
+                if (supportingFeatures.isEmpty()) emptyList() else listOf(AiCharacter(features = supportingFeatures))
+        }
         // 스토리 장르로 로어북을 선별해 compile 요청에 세계관·용어 확장 재료로 싣는다(스펙 §4-3-6·§5-3-3).
         // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
         val selectedLorebooks = selectLorebooksForGenres(genreTags)
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
-            protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            protagonist = aiProtagonist,
+            supportingCharacters = aiSupportingCharacters,
             selectedStoryline = selectedStoryline.storylineText,
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
             lorebooks = selectedLorebooks.map { AiLorebookItem(name = it.name, content = it.content) },
@@ -1069,11 +1088,21 @@ class SimpleStoryCreationService(
         return distinctTagIds.map { tagsById.getValue(it) }
     }
 
-    private fun List<StoryCreationTagDraft>.toAiStorylinesRequest(): AiStorylinesRequest =
-        AiStorylinesRequest(
-            genreTags = filter { it.category == SimpleStoryTagCategory.GENRE }.map { it.name },
-            protagonistTags = filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+    /** 스토리라인 경로: 저장 전 draft를 인물 단위 AI 입력으로 변환한다. 제공 태그를 먼저 두어 정규화 키가 겹치는 직접 추가 태그는 제공 표기를 남긴다. */
+    private fun StoryCreationCharacterDraft.toAiCharacter(): AiCharacter =
+        AiCharacter(
+            name = name,
+            gender = gender?.name,
+            features = (predefinedTags.map { it.name } + customTags.map { it.name })
+                .distinctBy { StoryCreationTag.normalize(it) },
+        )
+
+    /** 컴파일 경로: 저장된 인물과 [featureNamesByCharacterId](character_id→특징명)로 인물 단위 AI 입력을 되싣는다. */
+    private fun StoryCreationCharacter.toAiCharacter(featureNamesByCharacterId: Map<Long, List<String>>): AiCharacter =
+        AiCharacter(
+            name = name,
+            gender = gender?.name,
+            features = featureNamesByCharacterId[id].orEmpty(),
         )
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
