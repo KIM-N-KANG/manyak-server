@@ -41,6 +41,7 @@ import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationCharacter
 import com.knk.manyak.story.entity.StoryCreationCharacterRole
+import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -312,7 +313,9 @@ class SimpleStoryCreationService(
         return StoryCreationRequestStatusResponse(
             stage = row.stage,
             status = row.status,
-            result = row.resultJson?.let { objectMapper.readTree(it) },
+            result = row.resultJson
+                ?.takeIf { row.status == StoryCreationRequestStatus.COMPLETED }
+                ?.let { objectMapper.readTree(it) },
         )
     }
 

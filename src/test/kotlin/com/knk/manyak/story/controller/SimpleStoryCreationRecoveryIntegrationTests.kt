@@ -172,6 +172,31 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `호환 불가 replay fallback 중인 PENDING 요청은 저장된 옛 결과를 노출하지 않는다`() {
+        val requestId = UUID.randomUUID()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                // 호환 불가 replay fallback을 식별하기 위해 DB에는 이전 COMPLETED 응답을 보존한다.
+                resultJson = """{"simpleCreationId":1,"selectedTags":[],"storylines":[]}""",
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .json(
+                """{"stage":"STORYLINE_GENERATION","status":"PENDING","result":null}""",
+            )
+    }
+
+    @Test
     fun `같은 requestId 재요청은 AI 재호출 없이 저장된 결과를 돌려준다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()
