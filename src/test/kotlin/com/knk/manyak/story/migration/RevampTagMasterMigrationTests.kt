@@ -2,6 +2,7 @@ package com.knk.manyak.story.migration
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * KNK-847 제작 태그 마스터 개편(V57) 검증.
@@ -93,6 +94,26 @@ class RevampTagMasterMigrationTests {
         "SUPPORTING_CHARACTER" to "귀족", "SUPPORTING_CHARACTER" to "조력자", "SUPPORTING_CHARACTER" to "장난기 많은",
         "SUPPORTING_CHARACTER" to "후회하는", "SUPPORTING_CHARACTER" to "능글맞은",
     )
+
+    @Test
+    fun `이동 태그의 세션 연결 보정 단계가 존재한다`() {
+        // KNK-846 유실 방지: 이동 5태그의 character_id NULL 세션 태그를 주인공 인물 행에 재연결하는 3b 단계.
+        // dedup 삭제 + 재연결 UPDATE 두 문장이 first_protagonist(주인공 있는 세션만) 기준으로 있어야 한다.
+        assertTrue(
+            migrationSql.contains("first_protagonist"),
+            "이동 태그 세션 연결 보정(first_protagonist CTE)이 없습니다.",
+        )
+        assertTrue(
+            Regex("""UPDATE story_creation_session_tags[\s\S]*?SET character_id = fp\.character_id""")
+                .containsMatchIn(migrationSql),
+            "이동 태그 character_id NULL 행을 주인공에 재연결하는 UPDATE가 없습니다.",
+        )
+        assertTrue(
+            Regex("""DELETE FROM story_creation_session_tags[\s\S]*?st\.character_id IS NULL[\s\S]*?EXISTS""")
+                .containsMatchIn(migrationSql),
+            "유니크 충돌 시 NULL 행을 dedup 삭제하는 단계가 없습니다.",
+        )
+    }
 
     @Test
     fun `비활성화 대상은 티켓의 32건 구성과 정확히 일치한다`() {

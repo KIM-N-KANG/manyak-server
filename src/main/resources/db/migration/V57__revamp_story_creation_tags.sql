@@ -108,6 +108,56 @@ SET tag_type = 'PROTAGONIST', updated_at = now()
 WHERE tag_source = 'PREDEFINED' AND tag_type = 'GENRE'
   AND name IN ('회귀', '빙의', '환생', '시한부', '시스템');
 
+-- 3b) 이동 태그의 세션 연결 보정 (KNK-846 컴파일 경로 유실 방지).
+--     V56~V57 창에서 새 계약(KNK-845/846) 세션이 회귀·빙의·환생·시한부·시스템을 '장르'로 저장하면 character_id가 NULL이다.
+--     이 태그가 이제 PROTAGONIST라, 컴파일 조립부는 장르 필터(category==GENRE)에도 character_id별 특징 조회에도 이 행을
+--     넣지 못해 사용자 선택이 유실된다. 그래서 이동 태그의 character_id NULL 행을 그 세션의 주인공 인물 행에 재연결한다.
+--     - (a) 주인공 인물 행이 있는 세션(=새 계약 세션)만 재연결한다. 구 계약 세션(인물 행 없음)은 NULL을 유지한다
+--           — 846의 category 폴백이 이 태그들을 주인공 특징으로 복원하므로 그대로가 맞다.
+--     - (b) 주인공이 이미 같은 태그를 가지면 재연결이 (creation_session_id, character_id, tag_id) 유니크를 위반하므로,
+--           재연결 대신 NULL 행을 삭제해 dedup한다(먼저 수행).
+--     - (c) 주인공 인물 행이 복수면 role·sort_order·id 정렬의 첫 행을 쓴다(앱 조회 정렬과 동일).
+WITH moved_tags AS (
+    SELECT id FROM story_creation_tags
+    WHERE tag_source = 'PREDEFINED' AND tag_type = 'PROTAGONIST'
+      AND name IN ('회귀', '빙의', '환생', '시한부', '시스템')
+),
+first_protagonist AS (
+    SELECT DISTINCT ON (creation_session_id) creation_session_id, id AS character_id
+    FROM story_creation_characters
+    WHERE role = 'PROTAGONIST'
+    ORDER BY creation_session_id, sort_order, id
+)
+DELETE FROM story_creation_session_tags st
+USING first_protagonist fp
+WHERE st.character_id IS NULL
+  AND st.tag_id IN (SELECT id FROM moved_tags)
+  AND fp.creation_session_id = st.creation_session_id
+  AND EXISTS (
+      SELECT 1 FROM story_creation_session_tags e
+      WHERE e.creation_session_id = st.creation_session_id
+        AND e.character_id = fp.character_id
+        AND e.tag_id = st.tag_id
+  );
+
+WITH moved_tags AS (
+    SELECT id FROM story_creation_tags
+    WHERE tag_source = 'PREDEFINED' AND tag_type = 'PROTAGONIST'
+      AND name IN ('회귀', '빙의', '환생', '시한부', '시스템')
+),
+first_protagonist AS (
+    SELECT DISTINCT ON (creation_session_id) creation_session_id, id AS character_id
+    FROM story_creation_characters
+    WHERE role = 'PROTAGONIST'
+    ORDER BY creation_session_id, sort_order, id
+)
+UPDATE story_creation_session_tags st
+SET character_id = fp.character_id
+FROM first_protagonist fp
+WHERE st.character_id IS NULL
+  AND st.tag_id IN (SELECT id FROM moved_tags)
+  AND fp.creation_session_id = st.creation_session_id;
+
 -- 4) BL 승격 (1). 운영에 CUSTOM GENRE 'BL'(정규화 'bl')이 있으면 PREDEFINED로 승격, 없으면 신규 삽입.
 --    유니크 키에 tag_source가 포함돼 그냥 INSERT하면 같은 이름이 두 행으로 공존하므로 UPDATE 승격이 우선이다.
 --    가드: PREDEFINED GENRE 'bl'이 이미 있는 혼재 편차 상태면 승격 UPDATE가 유니크(tag_source,tag_type,normalized_name)를
