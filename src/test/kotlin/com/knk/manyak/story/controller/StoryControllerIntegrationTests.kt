@@ -860,6 +860,57 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `주변 인물 행만 있고 주인공 행이 없으면 세션 스코프 주인공 특징을 카테고리로 복원한다`() {
+        // 스키마상 주인공 없이 주변 인물만 있는 세션이 가능하다. 이 경우에도 character_id NULL인 PROTAGONIST 카테고리
+        // 세션 태그(이동 태그 포함)가 유실되지 않고 category 폴백으로 주인공 특징에 복원돼야 한다.
+        val session = sessionRepository.save(
+            StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "다크 판타지", 10)
+        val protagonistFeature = seedTag(SimpleStoryTagCategory.PROTAGONIST, "회귀", 10)
+        val supportingFeature = seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "충직한", 10)
+        val supporting = characterRepository.save(
+            StoryCreationCharacter(
+                creationSession = session,
+                role = StoryCreationCharacterRole.SUPPORTING_CHARACTER,
+                name = "레온",
+                sortOrder = 1,
+            ),
+        )
+        sessionTagRepository.saveAll(
+            listOf(
+                // 장르·주인공 특징은 세션 스코프(character_id NULL). 주인공 인물 행은 없다.
+                StoryCreationSessionTag(creationSession = session, tag = genre),
+                StoryCreationSessionTag(creationSession = session, tag = protagonistFeature),
+                // 주변 인물 특징은 주변 인물 행에 귀속.
+                StoryCreationSessionTag(creationSession = session, tag = supportingFeature, character = supporting),
+            ),
+        )
+        val storyline = storylineRepository.save(
+            StoryCreationStoryline(creationSession = session, storylineText = "스토리라인 1", storylineOrder = 1),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${session.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        val compileRequest = requireNotNull(storyAiClient.lastCompileRequest)
+        // 주인공 행이 없어도 NULL 주인공 특징이 유실되지 않고 category 폴백으로 복원된다.
+        check(compileRequest.protagonist.name == null)
+        check(compileRequest.protagonist.gender == null)
+        check(compileRequest.protagonist.features == listOf("회귀"))
+        // 주변 인물 조립은 그대로.
+        check(compileRequest.supportingCharacters.single().name == "레온")
+        check(compileRequest.supportingCharacters.single().features == listOf("충직한"))
+    }
+
+    @Test
     fun `추가 정보가 13개면 스토리를 생성한다`() {
         val seeded = seedGeneratedSession()
         val additionalInfos = (1..13).joinToString(",") { "\"추가 정보 $it\"" }
