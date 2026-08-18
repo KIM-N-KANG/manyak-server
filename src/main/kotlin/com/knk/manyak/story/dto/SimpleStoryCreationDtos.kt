@@ -11,6 +11,7 @@ import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import tools.jackson.databind.JsonNode
+import java.text.Normalizer
 import java.util.UUID
 
 @Schema(description = "간편 제작 태그 분류")
@@ -18,6 +19,12 @@ enum class SimpleStoryTagCategory {
     GENRE,
     PROTAGONIST,
     SUPPORTING_CHARACTER,
+}
+
+@Schema(description = "간편 제작 인물 성별")
+enum class SimpleStoryCharacterGender {
+    MALE,
+    FEMALE,
 }
 
 @Schema(description = "간편 제작 스토리라인 생성 요청")
@@ -31,29 +38,26 @@ data class GenerateSimpleStorylinesRequest(
     val requestId: UUID,
 
     @field:Size(max = 20)
-    @field:Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록", example = "[101, 205, 309]")
+    @field:Schema(description = "사용자가 선택한 사전 정의 장르 태그 ID 목록", example = "[101, 102]")
     @field:ArraySchema(
-        schema = Schema(description = "사전 정의 태그 ID", example = "101"),
+        schema = Schema(description = "사전 정의 장르 태그 ID", example = "101"),
         maxItems = 20,
-        arraySchema = Schema(description = "사용자가 선택한 사전 정의 태그 ID 목록", example = "[101, 205, 309]"),
+        arraySchema = Schema(description = "사용자가 선택한 사전 정의 장르 태그 ID 목록", example = "[101, 102]"),
     )
-    val selectedTagIds: List<@Min(1) Long> = emptyList(),
+    val genreTagIds: List<@Min(1) Long> = emptyList(),
 
     @field:Valid
-    @field:Size(max = 20)
-    @field:Schema(
-        description = "사용자가 직접 추가한 태그 목록. 서버는 저장 후 선택 태그와 함께 AI 서버 요청에 사용합니다.",
-        example = """[{"name":"비밀스러운 조력자","category":"SUPPORTING_CHARACTER"},{"name":"마법 학교","category":"GENRE"}]""",
-    )
+    @field:Schema(description = "주인공 입력", requiredMode = Schema.RequiredMode.REQUIRED)
+    val protagonist: SimpleStoryCharacterRequest,
+
+    @field:Valid
+    @field:Size(max = 5, message = "주변 인물은 최대 5명까지 입력할 수 있습니다.")
     @field:ArraySchema(
-        schema = Schema(implementation = SimpleStoryCustomTagRequest::class),
-        maxItems = 20,
-        arraySchema = Schema(
-            description = "사용자가 직접 추가한 태그 목록",
-            example = """[{"name":"비밀스러운 조력자","category":"SUPPORTING_CHARACTER"},{"name":"마법 학교","category":"GENRE"}]""",
-        ),
+        schema = Schema(implementation = SimpleStoryCharacterRequest::class),
+        maxItems = 5,
+        arraySchema = Schema(description = "주변 인물 입력 목록(최대 5명)"),
     )
-    val customTags: List<SimpleStoryCustomTagRequest> = emptyList(),
+    val supportingCharacters: List<SimpleStoryCharacterRequest> = emptyList(),
 
     // AI trace 연결용 필드(KNK-751). 서버가 값을 만들지 않고 프론트가 보낸 것만 쓰며, 없으면 헤더를 생략한다.
     // [isRegenerated]는 서버가 판단할 수 없어 그대로 전달하지만, [parentCreationId]는 KNK-755부터 검증을 거친다.
@@ -74,39 +78,51 @@ data class GenerateSimpleStorylinesRequest(
     )
     val parentCreationId: UUID? = null,
 ) {
-    @AssertTrue(message = "selectedTagIds 또는 customTags 중 하나 이상은 필요합니다.")
+    @AssertTrue(message = "인물 이름은 중복될 수 없습니다.")
     @Schema(hidden = true)
-    fun hasAnyTags(): Boolean = selectedTagIds.isNotEmpty() || customTags.isNotEmpty()
+    fun hasUniqueCharacterNames(): Boolean {
+        val keys = (listOf(protagonist) + supportingCharacters).mapNotNull { it.duplicateNameKey() }
+        return keys.size == keys.distinct().size
+    }
 }
 
-@Schema(description = "간편 제작 직접 추가 태그")
-data class SimpleStoryCustomTagRequest(
-    @field:NotBlank
+@Schema(description = "간편 제작 인물 입력")
+data class SimpleStoryCharacterRequest(
     @field:Size(max = 30)
-    @field:Schema(description = "사용자가 직접 입력한 태그 이름", example = "비밀스러운 조력자", maxLength = 30)
-    val name: String,
+    @field:Schema(description = "인물 이름. 비우면 AI가 생성합니다.", example = "아린", maxLength = 30, nullable = true)
+    val name: String? = null,
 
-    @field:Schema(description = "직접 추가 태그 분류", example = "SUPPORTING_CHARACTER")
-    val category: SimpleStoryTagCategory,
-)
+    @field:Schema(description = "인물 성별. 비우면 AI가 생성합니다.", example = "FEMALE", nullable = true)
+    val gender: SimpleStoryCharacterGender? = null,
+
+    @field:Schema(description = "선택한 사전 정의 특징 태그 ID 목록", example = "[205, 206]")
+    val featureTagIds: List<@Min(1) Long> = emptyList(),
+
+    @field:Schema(description = "직접 추가한 특징 태그 이름 목록", example = "[\"용감한\"]")
+    val customTags: List<@NotBlank @Size(max = 30) String> = emptyList(),
+) {
+    @AssertTrue(message = "인물당 특징은 최대 3개까지 입력할 수 있습니다.")
+    @Schema(hidden = true)
+    fun hasAtMostThreeFeatures(): Boolean = featureTagIds.size + customTags.size <= 3
+
+    fun cleanedName(): String? = name
+        ?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+        ?.trim()
+        ?.replace(Regex("\\s+"), " ")
+        ?.takeIf { it.isNotEmpty() }
+
+    fun duplicateNameKey(): String? = cleanedName()
+        ?.filterNot(Char::isWhitespace)
+        ?.lowercase()
+}
 
 @Schema(description = "간편 제작 스토리라인 생성 응답")
 data class GenerateSimpleStorylinesResponse(
     @field:Schema(description = "간편 제작 진행 ID", example = "1")
     val simpleCreationId: Long,
 
-    @field:Schema(
-        description = "저장된 선택 태그",
-        example = """[{"id":101,"name":"게임","category":"GENRE"},{"id":205,"name":"소심한","category":"PROTAGONIST"},{"id":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
-    )
-    @field:ArraySchema(
-        schema = Schema(implementation = SimpleStoryTagResponse::class),
-        arraySchema = Schema(
-            description = "저장된 선택 태그",
-            example = """[{"id":101,"name":"게임","category":"GENRE"},{"id":205,"name":"소심한","category":"PROTAGONIST"},{"id":309,"name":"위험한","category":"SUPPORTING_CHARACTER"}]""",
-        ),
-    )
-    val selectedTags: List<SimpleStoryTagResponse>,
+    @field:Schema(description = "장르와 인물별로 정리한 저장 입력")
+    val selectedTags: SimpleStorySelectedTagsResponse,
 
     @field:Size(min = 3, max = 3)
     @field:ArraySchema(
@@ -143,6 +159,20 @@ data class SimpleStoryTagResponse(
 
     @field:Schema(description = "태그 분류", example = "PROTAGONIST")
     val category: SimpleStoryTagCategory,
+)
+
+@Schema(description = "간편 제작 장르와 인물별 저장 입력")
+data class SimpleStorySelectedTagsResponse(
+    val genreTags: List<SimpleStoryTagResponse>,
+    val protagonist: SimpleStorySelectedCharacterResponse,
+    val supportingCharacters: List<SimpleStorySelectedCharacterResponse>,
+)
+
+@Schema(description = "간편 제작 인물별 저장 입력")
+data class SimpleStorySelectedCharacterResponse(
+    val name: String?,
+    val gender: SimpleStoryCharacterGender?,
+    val features: List<SimpleStoryTagResponse>,
 )
 
 @Schema(description = "간편 제작 예시 스토리라인")

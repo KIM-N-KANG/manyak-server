@@ -16,6 +16,7 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -142,7 +143,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceA)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[${genre.id}]}""")
+            .body("""{"genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
 
@@ -247,7 +248,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
         assertThat(requestRepository.findByRequestId(requestId)).isNull()
@@ -298,7 +299,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -318,7 +319,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -386,7 +387,11 @@ class SimpleStoryCreationRecoveryIntegrationTests {
                 startGate.await()
                 try {
                     val response = simpleStoryCreationService.generateSimpleStorylines(
-                        GenerateSimpleStorylinesRequest(requestId = requestId, selectedTagIds = listOf(genre.id)),
+                        GenerateSimpleStorylinesRequest(
+                            requestId = requestId,
+                            genreTagIds = listOf(genre.id),
+                            protagonist = SimpleStoryCharacterRequest(),
+                        ),
                         userId = null,
                         deviceId = deviceA,
                     )
@@ -642,7 +647,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceId)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[$genreTagId]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[$genreTagId],"protagonist":{}}""")
             .exchange()
 
     private fun postSimpleStory(

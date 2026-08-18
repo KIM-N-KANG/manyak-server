@@ -22,8 +22,12 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
+import com.knk.manyak.story.dto.SimpleStoryCharacterGender
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryRecommendedInfoResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedCharacterResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedTagsResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
@@ -35,6 +39,8 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCreationCharacter
+import com.knk.manyak.story.entity.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -52,6 +58,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
@@ -86,6 +93,7 @@ import java.util.concurrent.TimeUnit
 class SimpleStoryCreationService(
     private val storyCreationTagRepository: StoryCreationTagRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val storyCreationCharacterRepository: StoryCreationCharacterRepository,
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
     private val storyCreationStorylineRepository: StoryCreationStorylineRepository,
     private val storyCreationStorylineRecommendedInfoRepository: StoryCreationStorylineRecommendedInfoRepository,
@@ -318,21 +326,27 @@ class SimpleStoryCreationService(
         // AI 호출 진입 직전에 부른다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([storylineOutcomeOf]).
         onAiCallStarted: () -> Unit,
     ): GenerateSimpleStorylinesResponse {
-        val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
-        val customTagDrafts = request.customTags.map { tag ->
-            StoryCreationTagDraft(
-                category = tag.category,
-                name = tag.name.trim(),
-            )
-        }.distinctBy { it.key }
-        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 같은 태그이므로 AI 요청에서도 한 번만 보낸다(제공 태그 표기 우선).
+        val genreTags = findSelectedPredefinedTags(request.genreTagIds, SimpleStoryTagCategory.GENRE)
+        val characterDrafts = listOf(
+            request.protagonist.toCharacterDraft(StoryCreationCharacterRole.PROTAGONIST, sortOrder = 1),
+        ) + request.supportingCharacters.mapIndexed { index, character ->
+            character.toCharacterDraft(StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = index + 1)
+        }
+        val customTagDrafts = characterDrafts.flatMap { it.customTags }.distinctBy { it.key }
+
+        // KNK-846 전까지 StoryAiClient의 옛 세 필드를 유지한다. 새 인물 입력의 특징만 역할별로 평탄화하고,
+        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 제공 태그 표기를 우선해 한 번만 보낸다.
         val aiRequestTags = (
-            predefinedTags.map { tag ->
+            genreTags.map { tag ->
                 StoryCreationTagDraft(
                     category = tag.category,
                     name = tag.name,
                 )
-            } + customTagDrafts
+            } + characterDrafts.flatMap { character ->
+                character.predefinedTags.map { tag ->
+                    StoryCreationTagDraft(category = tag.category, name = tag.name)
+                } + character.customTags
+            }
             ).distinctBy { it.key }
 
         // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
@@ -356,9 +370,7 @@ class SimpleStoryCreationService(
 
         val response = try {
             transactionTemplate.execute {
-            val customTags = resolveCustomTags(customTagDrafts)
-            // 직접 추가 입력이 선택한 제공 태그로 해석될 수 있어 세션 태그 유니크(creation_session_id, tag_id) 전에 접는다.
-            val tags = (predefinedTags + customTags).distinctBy { it.id }
+            val customTagsByKey = resolveCustomTags(customTagDrafts).associateBy { it.category to it.normalizedName }
             val creationSession = storyCreationSessionRepository.save(
                 StoryCreationSession(
                     userId = userId,
@@ -367,12 +379,36 @@ class SimpleStoryCreationService(
                     storylineRequestId = request.requestId,
                 ),
             )
+            val characters = storyCreationCharacterRepository.saveAll(
+                characterDrafts.map { character ->
+                    StoryCreationCharacter(
+                        creationSession = creationSession,
+                        role = character.role,
+                        name = character.name,
+                        gender = character.gender,
+                        sortOrder = character.sortOrder.toShort(),
+                    )
+                },
+            )
+            val featureTagsByCharacter = characterDrafts.zip(characters).associate { (draft, character) ->
+                character to (
+                    draft.predefinedTags + draft.customTags.map { customTagsByKey.getValue(it.key) }
+                    ).distinctBy { it.id }
+            }
             storyCreationSessionTagRepository.saveAll(
-                tags.map { tag ->
+                genreTags.distinctBy { it.id }.map { tag ->
                     StoryCreationSessionTag(
                         creationSession = creationSession,
                         tag = tag,
                     )
+                } + featureTagsByCharacter.flatMap { (character, tags) ->
+                    tags.map { tag ->
+                        StoryCreationSessionTag(
+                            creationSession = creationSession,
+                            tag = tag,
+                            character = character,
+                        )
+                    }
                 },
             )
 
@@ -412,7 +448,13 @@ class SimpleStoryCreationService(
 
             GenerateSimpleStorylinesResponse(
                 simpleCreationId = creationSession.id,
-                selectedTags = tags.map { it.toTagResponse() },
+                selectedTags = SimpleStorySelectedTagsResponse(
+                    genreTags = genreTags.distinctBy { it.id }.map { it.toTagResponse() },
+                    protagonist = characters.first().toSelectedCharacterResponse(featureTagsByCharacter),
+                    supportingCharacters = characters.drop(1).map { character ->
+                        character.toSelectedCharacterResponse(featureTagsByCharacter)
+                    },
+                ),
                 storylines = storylineResponses,
             )
             } ?: throw IllegalStateException("Storyline creation transaction result is empty")
@@ -988,14 +1030,18 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Story creation transaction result is empty")
     }
 
-    private fun findSelectedPredefinedTags(selectedTagIds: List<Long>): List<StoryCreationTag> {
-        val distinctTagIds = selectedTagIds.distinct()
+    private fun findSelectedPredefinedTags(
+        tagIds: List<Long>,
+        expectedCategory: SimpleStoryTagCategory,
+    ): List<StoryCreationTag> {
+        val distinctTagIds = tagIds.distinct()
         if (distinctTagIds.isEmpty()) {
             return emptyList()
         }
 
         val tagsById = storyCreationTagRepository
             .findByIdInAndTagSourceAndIsActiveTrue(distinctTagIds, StoryCreationTagSource.PREDEFINED)
+            .filter { it.category == expectedCategory }
             .associateBy { it.id }
         val missingTagIds = distinctTagIds.filterNot { tagsById.containsKey(it) }
         if (missingTagIds.isNotEmpty()) {
@@ -1022,6 +1068,35 @@ class SimpleStoryCreationService(
             category = category,
         )
 
+    private fun SimpleStoryCharacterRequest.toCharacterDraft(
+        role: StoryCreationCharacterRole,
+        sortOrder: Int,
+    ): StoryCreationCharacterDraft {
+        val category = when (role) {
+            StoryCreationCharacterRole.PROTAGONIST -> SimpleStoryTagCategory.PROTAGONIST
+            StoryCreationCharacterRole.SUPPORTING_CHARACTER -> SimpleStoryTagCategory.SUPPORTING_CHARACTER
+        }
+        return StoryCreationCharacterDraft(
+            role = role,
+            name = cleanedName(),
+            gender = gender,
+            sortOrder = sortOrder,
+            predefinedTags = findSelectedPredefinedTags(featureTagIds, category),
+            customTags = customTags.map { name ->
+                StoryCreationTagDraft(category = category, name = name.trim())
+            }.distinctBy { it.key },
+        )
+    }
+
+    private fun StoryCreationCharacter.toSelectedCharacterResponse(
+        featureTagsByCharacter: Map<StoryCreationCharacter, List<StoryCreationTag>>,
+    ): SimpleStorySelectedCharacterResponse =
+        SimpleStorySelectedCharacterResponse(
+            name = name,
+            gender = gender,
+            features = featureTagsByCharacter.getValue(this).map { it.toTagResponse() },
+        )
+
     private data class StoryCreationOutcome(
         val response: SimpleStoryCreateResponse,
         // 회수 재실행이 저장된 스토리를 재구성해 돌려주는 경로(P2-10)는 AI를 호출하지 않으므로 null이다.
@@ -1036,6 +1111,15 @@ class SimpleStoryCreationService(
         val key: Pair<SimpleStoryTagCategory, String>
             get() = category to StoryCreationTag.normalize(name)
     }
+
+    private data class StoryCreationCharacterDraft(
+        val role: StoryCreationCharacterRole,
+        val name: String?,
+        val gender: SimpleStoryCharacterGender?,
+        val sortOrder: Int,
+        val predefinedTags: List<StoryCreationTag>,
+        val customTags: List<StoryCreationTagDraft>,
+    )
 
     /**
      * 직접 추가 태그를 정규화 키로 해석한다(KNK-717, 스펙 §4-3-2). 같은 카테고리에 정규화 키가 같은

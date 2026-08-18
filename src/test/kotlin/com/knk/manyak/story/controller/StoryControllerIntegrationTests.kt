@@ -39,6 +39,7 @@ import org.springframework.context.annotation.Primary
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -83,6 +84,9 @@ class StoryControllerIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired
+    private lateinit var jdbcTemplate: JdbcTemplate
 
     @BeforeEach
     fun setUp() {
@@ -146,7 +150,8 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "selectedTagIds": [${genre.id}, ${protagonist.id}]
+                  "genreTagIds": [${genre.id}],
+                  "protagonist": {"featureTagIds": [${protagonist.id}]}
                 }
                 """.trimIndent(),
             )
@@ -154,8 +159,9 @@ class StoryControllerIntegrationTests {
             .expectStatus().isCreated
             .expectBody()
             .jsonPath("$.simpleCreationId").isNumber
-            .jsonPath("$.selectedTags.length()").isEqualTo(2)
-            .jsonPath("$.selectedTags[0].name").isEqualTo("판타지")
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo("판타지")
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo("기억상실")
             .jsonPath("$.storylines.length()").isEqualTo(3)
             .jsonPath("$.storylines[0].storyline").isEqualTo("생성 스토리 1")
             .jsonPath("$.storylines[0].recommendedInfos.length()").isEqualTo(3)
@@ -172,6 +178,143 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `인물 단위 입력으로 스토리라인을 생성하고 인물과 귀속 태그를 저장한다`() {
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        val protagonistFeature = seedTag(SimpleStoryTagCategory.PROTAGONIST, "기억상실", 10)
+        val supportingFeature = seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "비밀스러운 조력자", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genre.id}],
+                  "protagonist": {
+                    "name": "  아린  ",
+                    "gender": "FEMALE",
+                    "featureTagIds": [${protagonistFeature.id}],
+                    "customTags": ["용감한"]
+                  },
+                  "supportingCharacters": [
+                    {
+                      "name": "레온",
+                      "gender": "MALE",
+                      "featureTagIds": [${supportingFeature.id}],
+                      "customTags": ["헌신적인"]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo("판타지")
+            .jsonPath("$.selectedTags.protagonist.name").isEqualTo("아린")
+            .jsonPath("$.selectedTags.protagonist.gender").isEqualTo("FEMALE")
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(2)
+            .jsonPath("$.selectedTags.supportingCharacters[0].name").isEqualTo("레온")
+            .jsonPath("$.selectedTags.supportingCharacters[0].features.length()").isEqualTo(2)
+
+        val characters = jdbcTemplate.queryForList(
+            """
+            SELECT role, name, gender, sort_order
+            FROM story_creation_characters
+            ORDER BY CASE role WHEN 'PROTAGONIST' THEN 0 ELSE 1 END, sort_order
+            """.trimIndent(),
+        )
+        check(characters.size == 2)
+        check(characters[0]["ROLE"] == "PROTAGONIST")
+        check(characters[0]["NAME"] == "아린")
+        check(characters[0]["GENDER"] == "FEMALE")
+        check(characters[0]["SORT_ORDER"] == 1.toShort() || characters[0]["SORT_ORDER"] == 1)
+        check(characters[1]["ROLE"] == "SUPPORTING_CHARACTER")
+        check(characters[1]["NAME"] == "레온")
+
+        val savedTags = jdbcTemplate.queryForList(
+            """
+            SELECT t.name, c.role
+            FROM story_creation_session_tags st
+            JOIN story_creation_tags t ON t.id = st.tag_id
+            LEFT JOIN story_creation_characters c ON c.id = st.character_id
+            ORDER BY st.id
+            """.trimIndent(),
+        )
+        check(savedTags.map { it["NAME"] } == listOf("판타지", "기억상실", "용감한", "비밀스러운 조력자", "헌신적인"))
+        check(savedTags.map { it["ROLE"] } == listOf(null, "PROTAGONIST", "PROTAGONIST", "SUPPORTING_CHARACTER", "SUPPORTING_CHARACTER"))
+
+        // KNK-846 전까지 AI 클라이언트의 옛 필드는 유지하되 새 입력의 특징을 평탄화해 컴파일을 보존한다.
+        check(storyAiClient.lastRequest?.genreTags == listOf("판타지"))
+        check(storyAiClient.lastRequest?.protagonistTags == listOf("기억상실", "용감한"))
+        check(storyAiClient.lastRequest?.supportingTags == listOf("비밀스러운 조력자", "헌신적인"))
+    }
+
+    @Test
+    fun `주변 인물이 5명을 초과하면 스토리라인 생성을 거절한다`() {
+        val supportingCharacters = (1..6).joinToString(",") { "{\"name\":\"인물 $it\"}" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","protagonist":{},"supportingCharacters":[$supportingCharacters]}""",
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.details[0].message").isEqualTo("주변 인물은 최대 5명까지 입력할 수 있습니다.")
+    }
+
+    @Test
+    fun `인물의 특징이 3개를 초과하면 스토리라인 생성을 거절한다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "protagonist": {
+                    "featureTagIds": [1, 2],
+                    "customTags": ["하나", "둘"]
+                  }
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.details[0].message").isEqualTo("인물당 특징은 최대 3개까지 입력할 수 있습니다.")
+    }
+
+    @Test
+    fun `공백과 대소문자를 제거한 인물 이름이 중복이면 스토리라인 생성을 거절한다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "protagonist": {"name": "Alice"},
+                  "supportingCharacters": [{"name": " a L i c e "}]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.details[0].message").isEqualTo("인물 이름은 중복될 수 없습니다.")
+    }
+
+    @Test
     fun `AI가 추천 추가 정보를 비워 응답해도 빈 목록으로 스토리라인을 생성한다`() {
         val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
         storyAiClient.emptyRecommendedInfos = true
@@ -184,7 +327,8 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "selectedTagIds": [${genre.id}]
+                  "genreTagIds": [${genre.id}],
+                  "protagonist": {}
                 }
                 """.trimIndent(),
             )
@@ -207,11 +351,9 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    {
-                      "name": "비밀스러운 조력자",
-                      "category": "SUPPORTING_CHARACTER"
-                    }
+                  "protagonist": {},
+                  "supportingCharacters": [
+                    {"customTags": ["비밀스러운 조력자"]}
                   ]
                 }
                 """.trimIndent(),
@@ -219,9 +361,9 @@ class StoryControllerIntegrationTests {
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
-            .jsonPath("$.selectedTags[0].name").isEqualTo("비밀스러운 조력자")
-            .jsonPath("$.selectedTags[0].category").isEqualTo("SUPPORTING_CHARACTER")
+            .jsonPath("$.selectedTags.supportingCharacters[0].features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.supportingCharacters[0].features[0].name").isEqualTo("비밀스러운 조력자")
+            .jsonPath("$.selectedTags.supportingCharacters[0].features[0].category").isEqualTo("SUPPORTING_CHARACTER")
 
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
@@ -232,7 +374,7 @@ class StoryControllerIntegrationTests {
     fun `이미 저장된 직접 추가 태그는 재사용한다`() {
         tagRepository.save(
             StoryCreationTag(
-                category = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.PROTAGONIST,
                 name = "마법 학교",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -246,20 +388,15 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    {
-                      "name": "마법 학교",
-                      "category": "GENRE"
-                    }
-                  ]
+                  "protagonist": {"customTags": ["마법 학교"]}
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
-            .jsonPath("$.selectedTags[0].name").isEqualTo("마법 학교")
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo("마법 학교")
 
         check(tagRepository.count() == 1L)
     }
@@ -268,7 +405,7 @@ class StoryControllerIntegrationTests {
     fun `대소문자와 공백만 다른 직접 추가 태그는 기존 행을 재사용한다`() {
         val existing = tagRepository.save(
             StoryCreationTag(
-                category = SimpleStoryTagCategory.GENRE,
+                category = SimpleStoryTagCategory.PROTAGONIST,
                 name = "BL",
                 tagSource = StoryCreationTagSource.CUSTOM,
             ),
@@ -282,22 +419,17 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    {
-                      "name": " b l ",
-                      "category": "GENRE"
-                    }
-                  ]
+                  "protagonist": {"customTags": [" b l "]}
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
             // 표시명은 최초 입력 원문을 유지한다.
-            .jsonPath("$.selectedTags[0].name").isEqualTo("BL")
-            .jsonPath("$.selectedTags[0].id").isEqualTo(existing.id)
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo("BL")
+            .jsonPath("$.selectedTags.protagonist.features[0].id").isEqualTo(existing.id)
 
         check(tagRepository.count() == 1L)
     }
@@ -312,28 +444,24 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    { "name": "BL", "category": "GENRE" },
-                    { "name": "Bl", "category": "GENRE" },
-                    { "name": "b l", "category": "GENRE" }
-                  ]
+                  "protagonist": {"customTags": ["BL", "Bl", "b l"]}
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
-            .jsonPath("$.selectedTags[0].name").isEqualTo("BL")
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo("BL")
 
         check(tagRepository.count() == 1L)
         check(sessionTagRepository.count() == 1L)
-        check(storyAiClient.lastRequest?.genreTags == listOf("BL"))
+        check(storyAiClient.lastRequest?.protagonistTags == listOf("BL"))
     }
 
     @Test
     fun `정규화 키가 같은 제공 태그가 있으면 커스텀 태그를 만들지 않는다`() {
-        val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
+        val predefined = seedTag(SimpleStoryTagCategory.PROTAGONIST, "현대 판타지", 10)
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
@@ -343,25 +471,23 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    { "name": "현대판타지", "category": "GENRE" }
-                  ]
+                  "protagonist": {"customTags": ["현대판타지"]}
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
-            .jsonPath("$.selectedTags[0].id").isEqualTo(predefined.id)
-            .jsonPath("$.selectedTags[0].name").isEqualTo("현대 판타지")
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features[0].id").isEqualTo(predefined.id)
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo("현대 판타지")
 
         check(tagRepository.count() == 1L)
     }
 
     @Test
     fun `같은 태그를 제공 태그와 직접 추가로 함께 보내도 한 번만 연결한다`() {
-        val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
+        val predefined = seedTag(SimpleStoryTagCategory.PROTAGONIST, "현대 판타지", 10)
 
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
@@ -371,22 +497,22 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "selectedTagIds": [${predefined.id}],
-                  "customTags": [
-                    { "name": "현대판타지", "category": "GENRE" }
-                  ]
+                  "protagonist": {
+                    "featureTagIds": [${predefined.id}],
+                    "customTags": ["현대판타지"]
+                  }
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags.length()").isEqualTo(1)
-            .jsonPath("$.selectedTags[0].id").isEqualTo(predefined.id)
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features[0].id").isEqualTo(predefined.id)
 
         check(tagRepository.count() == 1L)
         check(sessionTagRepository.count() == 1L)
-        check(storyAiClient.lastRequest?.genreTags == listOf("현대 판타지"))
+        check(storyAiClient.lastRequest?.protagonistTags == listOf("현대 판타지"))
     }
 
     @Test
@@ -403,16 +529,14 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "customTags": [
-                    { "name": "$name", "category": "GENRE" }
-                  ]
+                  "protagonist": {"customTags": ["$name"]}
                 }
                 """.trimIndent(),
             )
             .exchange()
             .expectStatus().isCreated
             .expectBody()
-            .jsonPath("$.selectedTags[0].name").isEqualTo(name)
+            .jsonPath("$.selectedTags.protagonist.features[0].name").isEqualTo(name)
 
         check(tagRepository.findAll().single().normalizedName == "i".repeat(30))
     }
@@ -453,12 +577,12 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
-    fun `태그가 없으면 스토리라인 생성 요청을 거절한다`() {
+    fun `주인공이 없으면 스토리라인 생성 요청을 거절한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[],"customTags":[]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[]}""")
             .exchange()
             .expectStatus().isBadRequest
             .expectBody()
@@ -475,7 +599,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[999999]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[999999],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
             .expectBody()
@@ -494,7 +618,7 @@ class StoryControllerIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"${java.util.UUID.randomUUID()}","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isEqualTo(502)
             .expectBody()
