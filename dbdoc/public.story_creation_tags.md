@@ -56,6 +56,7 @@ erDiagram
   bigint creation_session_id FK
   bigint tag_id FK
   timestamp_with_time_zone created_at
+  bigint character_id FK
 }
 "public.image_preset_genres" {
   bigint image_preset_id FK

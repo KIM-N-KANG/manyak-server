@@ -7,6 +7,7 @@ import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.parentCreationLink
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
@@ -15,6 +16,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
+import tools.jackson.core.JacksonException
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
@@ -41,13 +43,15 @@ class StoryCreationRequestRecorder(
     private val pendingReclaimAfterSeconds: Long,
     transactionManager: PlatformTransactionManager,
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     // PENDING 기록·상태 갱신을 본 저장 트랜잭션과 독립 커밋한다(복구 GET이 PENDING을 보게).
     private val txTemplate = TransactionTemplate(transactionManager).apply {
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
     }
 
     /**
-     * [block]에는 두 가지를 넘긴다.
+     * [block]에는 세 가지를 넘긴다.
      *
      * `isReclaim`은 이 실행이 **회수(reclaim)** 인지다: 이미 기록돼 소유가 검증된 요청 행을 재실행하는 경우 `true`,
      * 처음 기록하는 신규 요청이면 `false`. 완성 경로는 이 신호로 저장된 스토리 재구성(reconcile)을 회수일 때만 허용해,
@@ -56,6 +60,9 @@ class StoryCreationRequestRecorder(
      * `parentLink`는 **이 요청 행에 실제로 기록된** 재생성 체인이다(KNK-755). 신규 삽입이면 방금 검증한 [parentLink]와 같고,
      * 재실행이면 최초 삽입 때 확정된 저장값이다 — 재시도 본문이 부모를 빼거나 바꿔도 AI 헤더가 `parent_request_id`와
      * 어긋나지 않도록, 호출부는 인자로 받은 이 값으로 trace를 만들어야 한다(Codex P2).
+     *
+     * `isIncompatibleReplayFallback`은 COMPLETED의 저장 JSON을 현재 응답 타입으로 읽지 못해 정상 생성 경로를 다시 타는
+     * 경우에만 `true`다. 호출부는 이 신호로 이미 성공한 최초 실행의 크레딧·게스트 한도를 다시 소모하지 않게 한다.
      */
     fun <T : Any> execute(
         requestId: UUID,
@@ -66,21 +73,85 @@ class StoryCreationRequestRecorder(
         // 재생성 체인 부모 링크(KNK-755). 호출부가 이미 검증한 결과이며, 요청 행을 처음 삽입할 때만 기록된다
         // (재요청은 이미 그 행이 최초 삽입 때 남긴 체인을 갖고 있다). 부모 없는 최초 생성이면 null.
         parentLink: ParentCreationLink? = null,
-        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
-    ): T =
-        when (val claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)) {
-            is Claim.Replay -> objectMapper.readValue(claim.resultJson, responseType)
-            is Claim.Run -> {
-                val result = try {
-                    block(claim.isReclaim, claim.parentLink)
-                } catch (throwable: Throwable) {
-                    updateStatus(claim.id, StoryCreationRequestStatus.FAILED, resultJson = null)
-                    throw throwable
-                }
-                updateStatus(claim.id, StoryCreationRequestStatus.COMPLETED, objectMapper.writeValueAsString(result))
-                result
+        block: (
+            isReclaim: Boolean,
+            isIncompatibleReplayFallback: Boolean,
+            recordedParentLink: ParentCreationLink?,
+        ) -> T,
+    ): T {
+        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
+        while (claim is Claim.Replay) {
+            try {
+                return objectMapper.readValue(claim.resultJson, responseType)
+            } catch (exception: JacksonException) {
+                logger.warn(
+                    "저장된 생성 결과 역직렬화 실패 — 정상 생성 경로로 복구: requestId={}, stage={}, responseType={}",
+                    requestId,
+                    stage,
+                    responseType.name,
+                    exception,
+                )
+                claim = claimIncompatibleReplayFallback(
+                    requestId,
+                    stage,
+                    ownerUserId,
+                    ownerDeviceIdHash,
+                    claim.resultJson,
+                )
             }
         }
+
+        val run = claim as Claim.Run
+        val result = try {
+            block(run.isReclaim, run.isIncompatibleReplayFallback, run.parentLink)
+        } catch (throwable: Throwable) {
+            // 호환 불가 replay의 fallback도 실패하면 옛 COMPLETED 결과를 보존한다. 그래야 다음 재시도도 fallback으로 식별돼
+            // 최초 성공 때 이미 소모한 크레딧·게스트 한도를 다시 예약하지 않는다.
+            val failureStatus = if (run.isIncompatibleReplayFallback) {
+                StoryCreationRequestStatus.COMPLETED
+            } else {
+                StoryCreationRequestStatus.FAILED
+            }
+            updateStatus(run.id, failureStatus, resultJson = null)
+            throw throwable
+        }
+        updateStatus(run.id, StoryCreationRequestStatus.COMPLETED, objectMapper.writeValueAsString(result))
+        return result
+    }
+
+    /**
+     * 읽을 수 없는 COMPLETED 결과를 발견한 호출 하나만 PENDING으로 바꿔 fallback 실행권을 얻는다.
+     * 역직렬화와 행 잠금 사이에 다른 호출이 결과를 갱신했다면 그 최신 결과를 다시 replay하고, 이미 fallback 실행 중이면 409다.
+     */
+    private fun claimIncompatibleReplayFallback(
+        requestId: UUID,
+        stage: StoryCreationStage,
+        ownerUserId: Long?,
+        ownerDeviceIdHash: String?,
+        failedResultJson: String,
+    ): Claim =
+        txTemplate.execute {
+            val row = repository.findByRequestIdForUpdate(requestId)
+                ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
+            if (!row.isOwnedBy(ownerUserId, ownerDeviceIdHash)) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
+            }
+            if (row.stage != stage) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, "다른 단계에서 사용된 요청 ID입니다.")
+            }
+            if (row.status != StoryCreationRequestStatus.COMPLETED || row.resultJson != failedResultJson) {
+                return@execute resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
+            }
+
+            row.status = StoryCreationRequestStatus.PENDING
+            repository.saveAndFlush(row)
+            Claim.Run(
+                id = row.id,
+                isReclaim = true,
+                isIncompatibleReplayFallback = true,
+                parentLink = row.parentCreationLink(),
+            )
+        } ?: error("Story creation request incompatible replay claim transaction result is empty")
 
     /**
      * 신규 요청은 PENDING 행을 기록해 실행하도록, 재요청은 상태에 따라 replay·409·재실행으로 분기한다.
@@ -99,7 +170,12 @@ class StoryCreationRequestRecorder(
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         if (insertedId != null) {
             // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가). 방금 삽입한 체인이 그대로 정본이다.
-            return Claim.Run(insertedId, isReclaim = false, parentLink = parentLink)
+            return Claim.Run(
+                insertedId,
+                isReclaim = false,
+                isIncompatibleReplayFallback = false,
+                parentLink = parentLink,
+            )
         }
         return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
     }
@@ -160,8 +236,14 @@ class StoryCreationRequestRecorder(
                 row.updatedAt = Instant.now()
                 repository.saveAndFlush(row)
                 // 소유가 검증된(isOwnedBy) 오래된 PENDING의 회수 — 완성 스토리 reconcile을 허용한다.
+                // resultJson이 남은 PENDING은 호환 불가 replay fallback 도중 프로세스가 죽은 경우라, 재회수에서도 중복 소모를 막는다.
                 // 체인은 재시도 본문이 아니라 이 행에 저장된 값을 쓴다(KNK-755).
-                Claim.Run(row.id, isReclaim = true, parentLink = row.parentCreationLink())
+                Claim.Run(
+                    row.id,
+                    isReclaim = true,
+                    isIncompatibleReplayFallback = row.resultJson != null,
+                    parentLink = row.parentCreationLink(),
+                )
             }
             StoryCreationRequestStatus.FAILED -> {
                 // 일시 실패 재시도: 같은 requestId로 다시 실행하도록 PENDING으로 되돌린다.
@@ -171,7 +253,12 @@ class StoryCreationRequestRecorder(
                 row.status = StoryCreationRequestStatus.PENDING
                 repository.saveAndFlush(row)
                 // 체인은 최초 삽입 때 확정된 저장값을 쓴다 — 재시도 본문이 부모를 바꿔도 정본 컬럼과 헤더가 어긋나지 않게(KNK-755).
-                Claim.Run(row.id, isReclaim = false, parentLink = row.parentCreationLink())
+                Claim.Run(
+                    row.id,
+                    isReclaim = false,
+                    isIncompatibleReplayFallback = false,
+                    parentLink = row.parentCreationLink(),
+                )
             }
         }
     }
@@ -197,13 +284,18 @@ class StoryCreationRequestRecorder(
 
     private sealed interface Claim {
         /**
-         * [block]을 실행할 요청 행. [isReclaim]은 crash가 남긴 **aged PENDING**의 회수 재실행이면 true, 그 외(신규 삽입·FAILED 재시도)면
-         * false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1). FAILED 재시도를 회수로 보면 완성 세션 프로브의 재시도가
-         * reconcile을 유발해 스토리를 누출하므로 제외한다.
+         * [block]을 실행할 요청 행. [isReclaim]은 crash가 남긴 **aged PENDING** 또는 호환되지 않는 COMPLETED replay의
+         * 회수 재실행이면 true, 그 외(신규 삽입·FAILED 재시도)면 false. 완성 경로의 reconcile 허용 게이트로 쓰인다(Codex P1).
+         * FAILED 재시도를 회수로 보면 완성 세션 프로브의 재시도가 reconcile을 유발해 스토리를 누출하므로 제외한다.
          *
          * [parentLink]는 이 행에 실제로 기록된 재생성 체인이다(KNK-755) — 신규 삽입은 방금 검증한 값, 재실행은 저장된 값.
          */
-        data class Run(val id: Long, val isReclaim: Boolean, val parentLink: ParentCreationLink?) : Claim
+        data class Run(
+            val id: Long,
+            val isReclaim: Boolean,
+            val isIncompatibleReplayFallback: Boolean,
+            val parentLink: ParentCreationLink?,
+        ) : Claim
 
         /** 이미 COMPLETED인 요청 — 저장된 결과를 [block] 없이 반환한다. */
         data class Replay(val resultJson: String) : Claim

@@ -14,8 +14,10 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -113,6 +115,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
 
     private val deviceA = "device-a"
     private val deviceB = "device-b"
@@ -142,7 +145,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceA)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[${genre.id}]}""")
+            .body("""{"genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
 
@@ -169,6 +172,31 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `호환 불가 replay fallback 중인 PENDING 요청은 저장된 옛 결과를 노출하지 않는다`() {
+        val requestId = UUID.randomUUID()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                // 호환 불가 replay fallback을 식별하기 위해 DB에는 이전 COMPLETED 응답을 보존한다.
+                resultJson = """{"simpleCreationId":1,"selectedTags":[],"storylines":[]}""",
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .json(
+                """{"stage":"STORYLINE_GENERATION","status":"PENDING","result":null}""",
+            )
+    }
+
+    @Test
     fun `같은 requestId 재요청은 AI 재호출 없이 저장된 결과를 돌려준다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()
@@ -188,6 +216,32 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         // 중복 세션이 만들어지지 않는다(진행 세션 1개).
         assertThat(sessionRepository.count()).isEqualTo(1)
         assertThat(String(first.responseBody!!)).isEqualTo(String(second.responseBody!!))
+    }
+
+    @Test
+    fun `옛 응답 형태가 저장된 COMPLETED 요청은 게스트 한도를 재소모하지 않고 정상 생성으로 복구한다`() {
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+
+        val completed = requestRepository.findByRequestId(requestId)!!
+        completed.resultJson =
+            """{"simpleCreationId":${completed.id},"selectedTags":[],"storylines":[]}"""
+        requestRepository.saveAndFlush(completed)
+
+        postStorylines(requestId, genre.id, deviceA)
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo(genre.name)
+
+        // 옛 result_json은 replay할 수 없어 정상 생성 경로를 다시 타지만, 같은 멱등 요청의 게스트 한도는 재예약하지 않는다.
+        assertThat(createStorylinesCalls.get()).isEqualTo(2)
+        assertThat(sessionRepository.count()).isEqualTo(2)
+        repeat(4) {
+            assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isTrue()
+        }
+        assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isFalse()
     }
 
     @Test
@@ -247,7 +301,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
         assertThat(requestRepository.findByRequestId(requestId)).isNull()
@@ -298,7 +352,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -318,7 +372,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -386,7 +440,11 @@ class SimpleStoryCreationRecoveryIntegrationTests {
                 startGate.await()
                 try {
                     val response = simpleStoryCreationService.generateSimpleStorylines(
-                        GenerateSimpleStorylinesRequest(requestId = requestId, selectedTagIds = listOf(genre.id)),
+                        GenerateSimpleStorylinesRequest(
+                            requestId = requestId,
+                            genreTagIds = listOf(genre.id),
+                            protagonist = SimpleStoryCharacterRequest(),
+                        ),
                         userId = null,
                         deviceId = deviceA,
                     )
@@ -642,7 +700,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceId)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[$genreTagId]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[$genreTagId],"protagonist":{}}""")
             .exchange()
 
     private fun postSimpleStory(

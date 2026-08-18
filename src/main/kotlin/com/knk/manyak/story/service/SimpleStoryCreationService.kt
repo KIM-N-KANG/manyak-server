@@ -22,8 +22,12 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
+import com.knk.manyak.story.dto.SimpleStoryCharacterGender
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryRecommendedInfoResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedCharacterResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedTagsResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
@@ -35,6 +39,9 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCreationCharacter
+import com.knk.manyak.story.entity.StoryCreationCharacterRole
+import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -52,6 +59,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
@@ -86,6 +94,7 @@ import java.util.concurrent.TimeUnit
 class SimpleStoryCreationService(
     private val storyCreationTagRepository: StoryCreationTagRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val storyCreationCharacterRepository: StoryCreationCharacterRepository,
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
     private val storyCreationStorylineRepository: StoryCreationStorylineRepository,
     private val storyCreationStorylineRecommendedInfoRepository: StoryCreationStorylineRecommendedInfoRepository,
@@ -168,30 +177,36 @@ class SimpleStoryCreationService(
         // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
         // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
-        val generate: (Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse = { _, recordedParentLink ->
-            // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
-            // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
-            var aiCallStarted = false
-            // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
-            try {
-                val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
-                    userId,
-                    deviceId,
-                    GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-                )
-                val response = try {
-                    doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+        val generate: (Boolean, Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse =
+            { _, isIncompatibleReplayFallback, recordedParentLink ->
+                // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+                // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
+                var aiCallStarted = false
+                // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
+                try {
+                    // 호환되지 않는 옛 COMPLETED 응답의 fallback은 최초 성공 때 이미 예약한 한도를 다시 소모하지 않는다.
+                    val guestDeviceId = if (isIncompatibleReplayFallback) {
+                        null
+                    } else {
+                        guestTrialLimitService.reserveForGuestOrNull(
+                            userId,
+                            deviceId,
+                            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+                        )
+                    }
+                    val response = try {
+                        doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+                    } catch (throwable: Throwable) {
+                        guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                        throw throwable
+                    }
+                    recordStorylineResult(OUTCOME_SUCCESS)
+                    response
                 } catch (throwable: Throwable) {
-                    guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                    recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
                     throw throwable
                 }
-                recordStorylineResult(OUTCOME_SUCCESS)
-                response
-            } catch (throwable: Throwable) {
-                recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
-                throw throwable
             }
-        }
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORYLINE_GENERATION,
@@ -244,15 +259,19 @@ class SimpleStoryCreationService(
         responseType: Class<T>,
         // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
         parentLink: ParentCreationLink? = null,
-        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1)와
-        // (요청 행에 실제로 기록된 체인 — KNK-755)이다. 미기록 직접 실행은 회수가 아니고, 체인도 방금 검증한 값 그대로다.
-        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
+        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1), 호환되지 않는 replay의
+        // fallback인지(중복 소모 방지), 요청 행에 실제로 기록된 체인(KNK-755)이다.
+        block: (
+            isReclaim: Boolean,
+            isIncompatibleReplayFallback: Boolean,
+            recordedParentLink: ParentCreationLink?,
+        ) -> T,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
-            return block(false, parentLink)
+            return block(false, false, parentLink)
         }
         return storyCreationRequestRecorder.execute(
             requestId,
@@ -294,7 +313,9 @@ class SimpleStoryCreationService(
         return StoryCreationRequestStatusResponse(
             stage = row.stage,
             status = row.status,
-            result = row.resultJson?.let { objectMapper.readTree(it) },
+            result = row.resultJson
+                ?.takeIf { row.status == StoryCreationRequestStatus.COMPLETED }
+                ?.let { objectMapper.readTree(it) },
         )
     }
 
@@ -318,21 +339,27 @@ class SimpleStoryCreationService(
         // AI 호출 진입 직전에 부른다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([storylineOutcomeOf]).
         onAiCallStarted: () -> Unit,
     ): GenerateSimpleStorylinesResponse {
-        val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
-        val customTagDrafts = request.customTags.map { tag ->
-            StoryCreationTagDraft(
-                category = tag.category,
-                name = tag.name.trim(),
-            )
-        }.distinctBy { it.key }
-        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 같은 태그이므로 AI 요청에서도 한 번만 보낸다(제공 태그 표기 우선).
+        val genreTags = findSelectedPredefinedTags(request.genreTagIds, SimpleStoryTagCategory.GENRE)
+        val characterDrafts = listOf(
+            request.protagonist.toCharacterDraft(StoryCreationCharacterRole.PROTAGONIST, sortOrder = 1),
+        ) + request.supportingCharacters.mapIndexed { index, character ->
+            character.toCharacterDraft(StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = index + 1)
+        }
+        val customTagDrafts = characterDrafts.flatMap { it.customTags }.distinctBy { it.key }
+
+        // KNK-846 전까지 StoryAiClient의 옛 세 필드를 유지한다. 새 인물 입력의 특징만 역할별로 평탄화하고,
+        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 제공 태그 표기를 우선해 한 번만 보낸다.
         val aiRequestTags = (
-            predefinedTags.map { tag ->
+            genreTags.map { tag ->
                 StoryCreationTagDraft(
                     category = tag.category,
                     name = tag.name,
                 )
-            } + customTagDrafts
+            } + characterDrafts.flatMap { character ->
+                character.predefinedTags.map { tag ->
+                    StoryCreationTagDraft(category = tag.category, name = tag.name)
+                } + character.customTags
+            }
             ).distinctBy { it.key }
 
         // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
@@ -356,9 +383,7 @@ class SimpleStoryCreationService(
 
         val response = try {
             transactionTemplate.execute {
-            val customTags = resolveCustomTags(customTagDrafts)
-            // 직접 추가 입력이 선택한 제공 태그로 해석될 수 있어 세션 태그 유니크(creation_session_id, tag_id) 전에 접는다.
-            val tags = (predefinedTags + customTags).distinctBy { it.id }
+            val customTagsByKey = resolveCustomTags(customTagDrafts).associateBy { it.category to it.normalizedName }
             val creationSession = storyCreationSessionRepository.save(
                 StoryCreationSession(
                     userId = userId,
@@ -367,12 +392,36 @@ class SimpleStoryCreationService(
                     storylineRequestId = request.requestId,
                 ),
             )
+            val characters = storyCreationCharacterRepository.saveAll(
+                characterDrafts.map { character ->
+                    StoryCreationCharacter(
+                        creationSession = creationSession,
+                        role = character.role,
+                        name = character.name,
+                        gender = character.gender,
+                        sortOrder = character.sortOrder.toShort(),
+                    )
+                },
+            )
+            val featureTagsByCharacter = characterDrafts.zip(characters).associate { (draft, character) ->
+                character to (
+                    draft.predefinedTags + draft.customTags.map { customTagsByKey.getValue(it.key) }
+                    ).distinctBy { it.id }
+            }
             storyCreationSessionTagRepository.saveAll(
-                tags.map { tag ->
+                genreTags.distinctBy { it.id }.map { tag ->
                     StoryCreationSessionTag(
                         creationSession = creationSession,
                         tag = tag,
                     )
+                } + featureTagsByCharacter.flatMap { (character, tags) ->
+                    tags.map { tag ->
+                        StoryCreationSessionTag(
+                            creationSession = creationSession,
+                            tag = tag,
+                            character = character,
+                        )
+                    }
                 },
             )
 
@@ -412,7 +461,13 @@ class SimpleStoryCreationService(
 
             GenerateSimpleStorylinesResponse(
                 simpleCreationId = creationSession.id,
-                selectedTags = tags.map { it.toTagResponse() },
+                selectedTags = SimpleStorySelectedTagsResponse(
+                    genreTags = genreTags.distinctBy { it.id }.map { it.toTagResponse() },
+                    protagonist = characters.first().toSelectedCharacterResponse(featureTagsByCharacter),
+                    supportingCharacters = characters.drop(1).map { character ->
+                        character.toSelectedCharacterResponse(featureTagsByCharacter)
+                    },
+                ),
                 storylines = storylineResponses,
             )
             } ?: throw IllegalStateException("Storyline creation transaction result is empty")
@@ -437,7 +492,7 @@ class SimpleStoryCreationService(
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
-        val create: (Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _ ->
+        val create: (Boolean, Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _, _ ->
             val startNanos = System.nanoTime()
             // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
             // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).
@@ -628,6 +683,8 @@ class SimpleStoryCreationService(
         val sessionTags = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
             .map { it.tag }
+            // 스토리라인 경로의 StoryCreationTagDraft.key와 같은 기준으로 AI 요청용 평탄화만 중복 제거한다.
+            .distinctBy { it.category to it.normalizedName }
         val genreTags = sessionTags
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
@@ -988,14 +1045,18 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Story creation transaction result is empty")
     }
 
-    private fun findSelectedPredefinedTags(selectedTagIds: List<Long>): List<StoryCreationTag> {
-        val distinctTagIds = selectedTagIds.distinct()
+    private fun findSelectedPredefinedTags(
+        tagIds: List<Long>,
+        expectedCategory: SimpleStoryTagCategory,
+    ): List<StoryCreationTag> {
+        val distinctTagIds = tagIds.distinct()
         if (distinctTagIds.isEmpty()) {
             return emptyList()
         }
 
         val tagsById = storyCreationTagRepository
             .findByIdInAndTagSourceAndIsActiveTrue(distinctTagIds, StoryCreationTagSource.PREDEFINED)
+            .filter { it.category == expectedCategory }
             .associateBy { it.id }
         val missingTagIds = distinctTagIds.filterNot { tagsById.containsKey(it) }
         if (missingTagIds.isNotEmpty()) {
@@ -1022,6 +1083,35 @@ class SimpleStoryCreationService(
             category = category,
         )
 
+    private fun SimpleStoryCharacterRequest.toCharacterDraft(
+        role: StoryCreationCharacterRole,
+        sortOrder: Int,
+    ): StoryCreationCharacterDraft {
+        val category = when (role) {
+            StoryCreationCharacterRole.PROTAGONIST -> SimpleStoryTagCategory.PROTAGONIST
+            StoryCreationCharacterRole.SUPPORTING_CHARACTER -> SimpleStoryTagCategory.SUPPORTING_CHARACTER
+        }
+        return StoryCreationCharacterDraft(
+            role = role,
+            name = cleanedName(),
+            gender = gender,
+            sortOrder = sortOrder,
+            predefinedTags = findSelectedPredefinedTags(featureTagIds, category),
+            customTags = customTags.map { name ->
+                StoryCreationTagDraft(category = category, name = name.trim())
+            }.distinctBy { it.key },
+        )
+    }
+
+    private fun StoryCreationCharacter.toSelectedCharacterResponse(
+        featureTagsByCharacter: Map<StoryCreationCharacter, List<StoryCreationTag>>,
+    ): SimpleStorySelectedCharacterResponse =
+        SimpleStorySelectedCharacterResponse(
+            name = name,
+            gender = gender,
+            features = featureTagsByCharacter.getValue(this).map { it.toTagResponse() },
+        )
+
     private data class StoryCreationOutcome(
         val response: SimpleStoryCreateResponse,
         // 회수 재실행이 저장된 스토리를 재구성해 돌려주는 경로(P2-10)는 AI를 호출하지 않으므로 null이다.
@@ -1036,6 +1126,15 @@ class SimpleStoryCreationService(
         val key: Pair<SimpleStoryTagCategory, String>
             get() = category to StoryCreationTag.normalize(name)
     }
+
+    private data class StoryCreationCharacterDraft(
+        val role: StoryCreationCharacterRole,
+        val name: String?,
+        val gender: SimpleStoryCharacterGender?,
+        val sortOrder: Int,
+        val predefinedTags: List<StoryCreationTag>,
+        val customTags: List<StoryCreationTagDraft>,
+    )
 
     /**
      * 직접 추가 태그를 정규화 키로 해석한다(KNK-717, 스펙 §4-3-2). 같은 카테고리에 정규화 키가 같은
