@@ -683,6 +683,8 @@ class SimpleStoryCreationService(
         val sessionTags = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
             .map { it.tag }
+            // 스토리라인 경로의 StoryCreationTagDraft.key와 같은 기준으로 AI 요청용 평탄화만 중복 제거한다.
+            .distinctBy { it.category to it.normalizedName }
         val genreTags = sessionTags
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))

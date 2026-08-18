@@ -720,6 +720,58 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `같은 특징을 고른 여러 인물의 컴파일 AI 태그를 역할별 정규화 키로 중복 제거한다`() {
+        val protagonistFeature = seedTag(SimpleStoryTagCategory.PROTAGONIST, "헌신적인", 10)
+        val supportingFeature = seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "헌신적인", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "protagonist": {"featureTagIds": [${protagonistFeature.id}]},
+                  "supportingCharacters": [
+                    {"name": "조력자 1", "featureTagIds": [${supportingFeature.id}]},
+                    {"name": "조력자 2", "featureTagIds": [${supportingFeature.id}]}
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        // 인물별 귀속 저장은 유지된다. 같은 주변 인물 태그가 각 character_id에 한 행씩 연결된다.
+        val session = sessionRepository.findAll().single()
+        val savedTags = sessionTagRepository.findAllWithTagByCreationSessionId(session.id)
+        check(savedTags.count { it.tag.category == SimpleStoryTagCategory.PROTAGONIST } == 1)
+        check(savedTags.count { it.tag.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER } == 2)
+
+        // 스토리라인 경로는 이미 카테고리+정규화 이름 기준으로 역할별 한 번만 보낸다.
+        check(storyAiClient.lastRequest?.protagonistTags == listOf("헌신적인"))
+        check(storyAiClient.lastRequest?.supportingTags == listOf("헌신적인"))
+
+        val storyline = storylineRepository.findAll().first()
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${session.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        val compileRequest = storyAiClient.lastCompileRequest
+        requireNotNull(compileRequest)
+        // 같은 표시명이어도 주인공/주변 인물 카테고리는 별개이며, 각 역할 안에서만 중복이 제거된다.
+        check(compileRequest.protagonistTags == listOf("헌신적인"))
+        check(compileRequest.supportingTags == listOf("헌신적인"))
+    }
+
+    @Test
     fun `추가 정보가 13개면 스토리를 생성한다`() {
         val seeded = seedGeneratedSession()
         val additionalInfos = (1..13).joinToString(",") { "\"추가 정보 $it\"" }
