@@ -792,6 +792,74 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `인물 행이 없는 구 세션은 컴파일 AI 요청에 세션 태그 특징을 카테고리로 복원한다`() {
+        // KNK-845 배포 전 생성된 세션은 story_creation_characters 행 없이(character_id 전부 null) 세션 스코프 태그만 있다.
+        val session = sessionRepository.save(
+            StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val tags = listOf(
+            seedTag(SimpleStoryTagCategory.GENRE, "다크 판타지", 10),
+            seedTag(SimpleStoryTagCategory.PROTAGONIST, "신중한", 10),
+            seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "충직한", 10),
+        )
+        sessionTagRepository.saveAll(
+            tags.map { tag -> StoryCreationSessionTag(creationSession = session, tag = tag) },
+        )
+        val storyline = storylineRepository.save(
+            StoryCreationStoryline(creationSession = session, storylineText = "스토리라인 1", storylineOrder = 1),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${session.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        // 인물 행이 없어도 사용자 선택 특징이 유실되지 않고 카테고리로 복원돼 실린다(유료 컴파일 특징 유실 방지).
+        val compileRequest = requireNotNull(storyAiClient.lastCompileRequest)
+        check(compileRequest.genreTags == listOf("다크 판타지"))
+        check(compileRequest.protagonist.name == null)
+        check(compileRequest.protagonist.gender == null)
+        check(compileRequest.protagonist.features == listOf("신중한"))
+        check(compileRequest.supportingCharacters.map { it.features } == listOf(listOf("충직한")))
+    }
+
+    @Test
+    fun `인물 행이 없고 주변 인물 태그도 없는 구 세션은 주변 인물을 빈 배열로 보낸다`() {
+        val session = sessionRepository.save(
+            StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+        )
+        val tags = listOf(
+            seedTag(SimpleStoryTagCategory.GENRE, "다크 판타지", 10),
+            seedTag(SimpleStoryTagCategory.PROTAGONIST, "신중한", 10),
+        )
+        sessionTagRepository.saveAll(
+            tags.map { tag -> StoryCreationSessionTag(creationSession = session, tag = tag) },
+        )
+        val storyline = storylineRepository.save(
+            StoryCreationStoryline(creationSession = session, storylineText = "스토리라인 1", storylineOrder = 1),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${session.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+
+        val compileRequest = requireNotNull(storyAiClient.lastCompileRequest)
+        check(compileRequest.protagonist.features == listOf("신중한"))
+        check(compileRequest.supportingCharacters.isEmpty())
+    }
+
+    @Test
     fun `추가 정보가 13개면 스토리를 생성한다`() {
         val seeded = seedGeneratedSession()
         val additionalInfos = (1..13).joinToString(",") { "\"추가 정보 $it\"" }

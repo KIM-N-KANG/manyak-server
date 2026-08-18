@@ -683,23 +683,37 @@ class SimpleStoryCreationService(
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .distinctBy { it.normalizedName }
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
-        // 특징은 KNK-845가 저장한 인물(character_id)별로 되싣는다. character는 LAZY지만 FK id는 초기화 없이 읽힌다(그룹핑 키로만 사용).
-        val featureNamesByCharacterId = sessionTagRows
-            .filter { it.character != null }
-            .groupBy { it.character!!.id }
-            .mapValues { (_, rows) -> rows.map { it.tag }.distinctBy { it.normalizedName }.map { it.name } }
         val characters = storyCreationCharacterRepository
             .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
-        val protagonist = characters.firstOrNull { it.role == StoryCreationCharacterRole.PROTAGONIST }
-        val supportingCharacters = characters.filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+        // 인물 행이 있으면 저장 인물(character_id)별로, 없으면(KNK-845 배포 전 생성된 구 세션) 세션 태그를 카테고리로 복원한다.
+        // 구 세션은 character_id가 전부 null이라 인물 단위로 되싣을 수 없지만, 사용자가 선택한 특징을 유료 컴파일에서 유실시키면 안 된다.
+        val (aiProtagonist, aiSupportingCharacters) = if (characters.isNotEmpty()) {
+            // 특징은 저장 인물별로 되싣는다. character는 LAZY지만 FK id는 초기화 없이 읽힌다(그룹핑 키로만 사용).
+            val featureNamesByCharacterId = sessionTagRows
+                .filter { it.character != null }
+                .groupBy { it.character!!.id }
+                .mapValues { (_, rows) -> rows.map { it.tag }.distinctBy { it.normalizedName }.map { it.name } }
+            val protagonist = characters.firstOrNull { it.role == StoryCreationCharacterRole.PROTAGONIST }
+            val supporting = characters.filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+            // 주인공 행이 없어도(비정상) 빈 객체를 실어 AI 필수 필드 누락(422)을 피한다.
+            (protagonist?.toAiCharacter(featureNamesByCharacterId) ?: AiCharacter()) to
+                supporting.map { it.toAiCharacter(featureNamesByCharacterId) }
+        } else {
+            // 구 세션 폴백: 카테고리별 세션 태그명(정규화 키 중복 제거)으로 복원. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
+            val featureNamesOf = { category: SimpleStoryTagCategory ->
+                sessionTagRows.map { it.tag }.filter { it.category == category }.distinctBy { it.normalizedName }.map { it.name }
+            }
+            val supportingFeatures = featureNamesOf(SimpleStoryTagCategory.SUPPORTING_CHARACTER)
+            AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST)) to
+                if (supportingFeatures.isEmpty()) emptyList() else listOf(AiCharacter(features = supportingFeatures))
+        }
         // 스토리 장르로 로어북을 선별해 compile 요청에 세계관·용어 확장 재료로 싣는다(스펙 §4-3-6·§5-3-3).
         // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
         val selectedLorebooks = selectLorebooksForGenres(genreTags)
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
-            // 주인공 행이 없어도(구 세션) 빈 객체를 실어 AI 필수 필드 누락(422)을 피한다.
-            protagonist = protagonist?.toAiCharacter(featureNamesByCharacterId) ?: AiCharacter(),
-            supportingCharacters = supportingCharacters.map { it.toAiCharacter(featureNamesByCharacterId) },
+            protagonist = aiProtagonist,
+            supportingCharacters = aiSupportingCharacters,
             selectedStoryline = selectedStoryline.storylineText,
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
             lorebooks = selectedLorebooks.map { AiLorebookItem(name = it.name, content = it.content) },
