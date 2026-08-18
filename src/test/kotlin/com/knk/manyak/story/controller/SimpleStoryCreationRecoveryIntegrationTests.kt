@@ -14,6 +14,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
@@ -114,6 +115,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
 
     private val deviceA = "device-a"
     private val deviceB = "device-b"
@@ -189,6 +191,32 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         // 중복 세션이 만들어지지 않는다(진행 세션 1개).
         assertThat(sessionRepository.count()).isEqualTo(1)
         assertThat(String(first.responseBody!!)).isEqualTo(String(second.responseBody!!))
+    }
+
+    @Test
+    fun `옛 응답 형태가 저장된 COMPLETED 요청은 게스트 한도를 재소모하지 않고 정상 생성으로 복구한다`() {
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+
+        val completed = requestRepository.findByRequestId(requestId)!!
+        completed.resultJson =
+            """{"simpleCreationId":${completed.id},"selectedTags":[],"storylines":[]}"""
+        requestRepository.saveAndFlush(completed)
+
+        postStorylines(requestId, genre.id, deviceA)
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo(genre.name)
+
+        // 옛 result_json은 replay할 수 없어 정상 생성 경로를 다시 타지만, 같은 멱등 요청의 게스트 한도는 재예약하지 않는다.
+        assertThat(createStorylinesCalls.get()).isEqualTo(2)
+        assertThat(sessionRepository.count()).isEqualTo(2)
+        repeat(4) {
+            assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isTrue()
+        }
+        assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isFalse()
     }
 
     @Test

@@ -176,30 +176,36 @@ class SimpleStoryCreationService(
         // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
         // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
-        val generate: (Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse = { _, recordedParentLink ->
-            // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
-            // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
-            var aiCallStarted = false
-            // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
-            try {
-                val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
-                    userId,
-                    deviceId,
-                    GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-                )
-                val response = try {
-                    doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+        val generate: (Boolean, Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse =
+            { _, isIncompatibleReplayFallback, recordedParentLink ->
+                // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+                // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
+                var aiCallStarted = false
+                // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
+                try {
+                    // 호환되지 않는 옛 COMPLETED 응답의 fallback은 최초 성공 때 이미 예약한 한도를 다시 소모하지 않는다.
+                    val guestDeviceId = if (isIncompatibleReplayFallback) {
+                        null
+                    } else {
+                        guestTrialLimitService.reserveForGuestOrNull(
+                            userId,
+                            deviceId,
+                            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+                        )
+                    }
+                    val response = try {
+                        doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+                    } catch (throwable: Throwable) {
+                        guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                        throw throwable
+                    }
+                    recordStorylineResult(OUTCOME_SUCCESS)
+                    response
                 } catch (throwable: Throwable) {
-                    guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                    recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
                     throw throwable
                 }
-                recordStorylineResult(OUTCOME_SUCCESS)
-                response
-            } catch (throwable: Throwable) {
-                recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
-                throw throwable
             }
-        }
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORYLINE_GENERATION,
@@ -252,15 +258,19 @@ class SimpleStoryCreationService(
         responseType: Class<T>,
         // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
         parentLink: ParentCreationLink? = null,
-        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1)와
-        // (요청 행에 실제로 기록된 체인 — KNK-755)이다. 미기록 직접 실행은 회수가 아니고, 체인도 방금 검증한 값 그대로다.
-        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
+        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1), 호환되지 않는 replay의
+        // fallback인지(중복 소모 방지), 요청 행에 실제로 기록된 체인(KNK-755)이다.
+        block: (
+            isReclaim: Boolean,
+            isIncompatibleReplayFallback: Boolean,
+            recordedParentLink: ParentCreationLink?,
+        ) -> T,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
-            return block(false, parentLink)
+            return block(false, false, parentLink)
         }
         return storyCreationRequestRecorder.execute(
             requestId,
@@ -479,7 +489,7 @@ class SimpleStoryCreationService(
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
-        val create: (Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _ ->
+        val create: (Boolean, Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _, _ ->
             val startNanos = System.nanoTime()
             // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
             // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).

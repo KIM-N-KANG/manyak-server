@@ -14,6 +14,8 @@ import tools.jackson.databind.JsonNode
 import java.text.Normalizer
 import java.util.UUID
 
+private val CHARACTER_NAME_WHITESPACE = Regex("(?U)\\s+")
+
 @Schema(description = "간편 제작 태그 분류")
 enum class SimpleStoryTagCategory {
     GENRE,
@@ -108,11 +110,11 @@ data class SimpleStoryCharacterRequest(
     fun cleanedName(): String? = name
         ?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
         ?.trim()
-        ?.replace(Regex("\\s+"), " ")
+        ?.replace(CHARACTER_NAME_WHITESPACE, " ")
         ?.takeIf { it.isNotEmpty() }
 
     fun duplicateNameKey(): String? = cleanedName()
-        ?.filterNot(Char::isWhitespace)
+        ?.replace(CHARACTER_NAME_WHITESPACE, "")
         ?.lowercase()
 }
 

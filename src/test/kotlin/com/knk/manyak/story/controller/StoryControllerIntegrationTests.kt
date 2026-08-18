@@ -315,6 +315,32 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `인물 이름의 유니코드 공백을 일반 공백으로 축약해 저장한다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "protagonist": {"name": "A\u2003B"}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.protagonist.name").isEqualTo("A B")
+
+        val savedName = jdbcTemplate.queryForObject(
+            "SELECT name FROM story_creation_characters WHERE role = 'PROTAGONIST'",
+            String::class.java,
+        )
+        check(savedName == "A B")
+    }
+
+    @Test
     fun `AI가 추천 추가 정보를 비워 응답해도 빈 목록으로 스토리라인을 생성한다`() {
         val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
         storyAiClient.emptyRecommendedInfos = true
