@@ -96,22 +96,39 @@ class RevampTagMasterMigrationTests {
     )
 
     @Test
-    fun `이동 태그의 세션 연결 보정 단계가 존재한다`() {
+    fun `이동 태그의 세션 연결 보정 3b는 순서·필터·선택 조건을 유지한다`() {
         // KNK-846 유실 방지: 이동 5태그의 character_id NULL 세션 태그를 주인공 인물 행에 재연결하는 3b 단계.
-        // dedup 삭제 + 재연결 UPDATE 두 문장이 first_protagonist(주인공 있는 세션만) 기준으로 있어야 한다.
-        assertTrue(
-            migrationSql.contains("first_protagonist"),
-            "이동 태그 세션 연결 보정(first_protagonist CTE)이 없습니다.",
+        // 회귀 방지를 위해 핵심 불변식을 고정한다.
+
+        // (1) moved_tags: 이동 5태그(PREDEFINED PROTAGONIST) 필터가 DELETE·UPDATE 두 문장에 모두 있어야 한다.
+        val movedTagsCte = Regex(
+            """moved_tags AS \([\s\S]*?tag_type = 'PROTAGONIST'[\s\S]*?name IN \('회귀', '빙의', '환생', '시한부', '시스템'\)""",
         )
-        assertTrue(
-            Regex("""UPDATE story_creation_session_tags[\s\S]*?SET character_id = fp\.character_id""")
-                .containsMatchIn(migrationSql),
-            "이동 태그 character_id NULL 행을 주인공에 재연결하는 UPDATE가 없습니다.",
+        assertEquals(2, movedTagsCte.findAll(migrationSql).count(), "이동 5태그 필터가 두 문장에 모두 있어야 한다.")
+
+        // (2) first_protagonist: DISTINCT ON·role='PROTAGONIST'·정렬(sort_order,id) 선택 조건이 두 문장에 유지돼야 한다.
+        val firstProtagonistCte = Regex(
+            """first_protagonist AS \([\s\S]*?DISTINCT ON \(creation_session_id\)[\s\S]*?WHERE role = 'PROTAGONIST'[\s\S]*?ORDER BY creation_session_id, sort_order, id""",
         )
+        assertEquals(2, firstProtagonistCte.findAll(migrationSql).count(), "first_protagonist 선택 조건이 두 문장에 유지돼야 한다.")
+
+        // (3) dedup DELETE: character_id NULL 행 + 주인공 기존 태그 비교(character_id·tag_id)를 유지해야 한다.
+        val dedupDelete = requireNotNull(
+            Regex(
+                """DELETE FROM story_creation_session_tags st[\s\S]*?st\.character_id IS NULL[\s\S]*?e\.character_id = fp\.character_id[\s\S]*?e\.tag_id = st\.tag_id""",
+            ).find(migrationSql),
+        ) { "dedup DELETE(주인공 기존 태그 character_id·tag_id 비교)가 없습니다." }
+
+        // (4) 재연결 UPDATE.
+        val reconnectUpdate = requireNotNull(
+            Regex("""UPDATE story_creation_session_tags st\s*SET character_id = fp\.character_id\s*FROM first_protagonist fp""")
+                .find(migrationSql),
+        ) { "이동 태그 NULL 행을 주인공에 재연결하는 UPDATE가 없습니다." }
+
+        // (5) dedup DELETE가 재연결 UPDATE보다 앞서야 유니크 충돌 없이 재연결된다.
         assertTrue(
-            Regex("""DELETE FROM story_creation_session_tags[\s\S]*?st\.character_id IS NULL[\s\S]*?EXISTS""")
-                .containsMatchIn(migrationSql),
-            "유니크 충돌 시 NULL 행을 dedup 삭제하는 단계가 없습니다.",
+            dedupDelete.range.first < reconnectUpdate.range.first,
+            "dedup DELETE가 재연결 UPDATE보다 앞서야 합니다.",
         )
     }
 

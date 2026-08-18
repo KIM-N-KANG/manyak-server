@@ -685,8 +685,12 @@ class SimpleStoryCreationService(
             .sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val characters = storyCreationCharacterRepository
             .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
+        // 세션 스코프(character_id NULL) 태그를 카테고리로 복원하는 폴백. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
+        // 주인공 인물 행이 없는 세션(구 계약 세션, 또는 스키마상 가능한 주변 인물만 있는 세션)의 주인공 특징·이동 태그 유실을 막는다.
+        val featureNamesOf = { category: SimpleStoryTagCategory ->
+            sessionTagRows.map { it.tag }.filter { it.category == category }.distinctBy { it.normalizedName }.map { it.name }
+        }
         // 인물 행이 있으면 저장 인물(character_id)별로, 없으면(KNK-845 배포 전 생성된 구 세션) 세션 태그를 카테고리로 복원한다.
-        // 구 세션은 character_id가 전부 null이라 인물 단위로 되싣을 수 없지만, 사용자가 선택한 특징을 유료 컴파일에서 유실시키면 안 된다.
         val (aiProtagonist, aiSupportingCharacters) = if (characters.isNotEmpty()) {
             // 특징은 저장 인물별로 되싣는다. character는 LAZY지만 FK id는 초기화 없이 읽힌다(그룹핑 키로만 사용).
             val featureNamesByCharacterId = sessionTagRows
@@ -695,14 +699,13 @@ class SimpleStoryCreationService(
                 .mapValues { (_, rows) -> rows.map { it.tag }.distinctBy { it.normalizedName }.map { it.name } }
             val protagonist = characters.firstOrNull { it.role == StoryCreationCharacterRole.PROTAGONIST }
             val supporting = characters.filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
-            // 주인공 행이 없어도(비정상) 빈 객체를 실어 AI 필수 필드 누락(422)을 피한다.
-            (protagonist?.toAiCharacter(featureNamesByCharacterId) ?: AiCharacter()) to
+            // 주인공 행이 있으면 인물 단위로, 없으면(주변 인물만 존재하는 세션) category 폴백으로 복원한다 —
+            // character_id NULL인 주인공 특징(이동 태그 포함)이 유실되지 않게 한다(주변 인물 조립은 그대로).
+            (protagonist?.toAiCharacter(featureNamesByCharacterId)
+                ?: AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST))) to
                 supporting.map { it.toAiCharacter(featureNamesByCharacterId) }
         } else {
-            // 구 세션 폴백: 카테고리별 세션 태그명(정규화 키 중복 제거)으로 복원. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
-            val featureNamesOf = { category: SimpleStoryTagCategory ->
-                sessionTagRows.map { it.tag }.filter { it.category == category }.distinctBy { it.normalizedName }.map { it.name }
-            }
+            // 인물 행이 전혀 없는 구 세션: 주인공·주변 인물 모두 category 폴백.
             val supportingFeatures = featureNamesOf(SimpleStoryTagCategory.SUPPORTING_CHARACTER)
             AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST)) to
                 if (supportingFeatures.isEmpty()) emptyList() else listOf(AiCharacter(features = supportingFeatures))
