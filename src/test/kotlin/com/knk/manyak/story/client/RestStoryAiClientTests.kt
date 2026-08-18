@@ -58,16 +58,16 @@ class RestStoryAiClientTests {
         val response = RestStoryAiClient("http://localhost:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = listOf("기억상실"),
-                supportingTags = listOf("비밀스러운 조력자"),
+                protagonist = AiCharacter(features = listOf("기억상실")),
+                supportingCharacters = listOf(AiCharacter(features = listOf("비밀스러운 조력자"))),
             ),
         )
 
         assertTrue(capturedContentType?.startsWith("application/json") == true)
         assertEquals(null, capturedUpgrade)
         assertTrue(requireNotNull(capturedBody).contains(""""genre_tags":["판타지"]"""))
-        assertTrue(requireNotNull(capturedBody).contains(""""protagonist_tags":["기억상실"]"""))
-        assertTrue(requireNotNull(capturedBody).contains(""""supporting_tags":["비밀스러운 조력자"]"""))
+        assertTrue(requireNotNull(capturedBody).contains(""""features":["기억상실"]"""))
+        assertTrue(requireNotNull(capturedBody).contains(""""supporting_characters":[{"""))
         assertEquals("생성 스토리", response.stories.single().storyline)
     }
 
@@ -95,8 +95,7 @@ class RestStoryAiClientTests {
         RestStoryAiClient("http://localhost:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = emptyList(),
-                supportingTags = emptyList(),
+                protagonist = AiCharacter(),
             ),
         )
 
@@ -121,7 +120,10 @@ class RestStoryAiClientTests {
         val creationId = UUID.randomUUID()
         val parentCreationId = UUID.randomUUID()
         RestStoryAiClient("http://localhost:$port").createStorylines(
-            AiStorylinesRequest(genreTags = listOf("판타지"), protagonistTags = emptyList(), supportingTags = emptyList()),
+            AiStorylinesRequest(
+                genreTags = listOf("판타지"),
+                protagonist = AiCharacter(),
+            ),
             AiTraceLink(creationId = creationId, parentCreationId = parentCreationId, isRegenerated = true),
         )
 
@@ -143,7 +145,10 @@ class RestStoryAiClientTests {
 
         val port = requireNotNull(server).address.port
         RestStoryAiClient("http://localhost:$port").createStorylines(
-            AiStorylinesRequest(genreTags = listOf("판타지"), protagonistTags = emptyList(), supportingTags = emptyList()),
+            AiStorylinesRequest(
+                genreTags = listOf("판타지"),
+                protagonist = AiCharacter(),
+            ),
         )
 
         TRACE_HEADER_NAMES.forEach { assertNull(captured[it], "$it 헤더는 값이 없으면 생략해야 한다") }
@@ -165,8 +170,7 @@ class RestStoryAiClientTests {
         RestStoryAiClient("http://localhost:$port").compileStory(
             AiStoryCompileRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = emptyList(),
-                supportingTags = emptyList(),
+                protagonist = AiCharacter(),
                 selectedStoryline = "선택된 스토리라인",
                 additionalInfo = "추가 정보",
             ),
@@ -201,10 +205,9 @@ class RestStoryAiClientTests {
         assertFailsWith<RestClientException> {
             client.createStorylines(
                 AiStorylinesRequest(
-                    genreTags = listOf("판타지"),
-                    protagonistTags = emptyList(),
-                    supportingTags = emptyList(),
-                ),
+                genreTags = listOf("판타지"),
+                protagonist = AiCharacter(),
+            ),
             )
         }
     }
@@ -237,10 +240,9 @@ class RestStoryAiClientTests {
         assertFailsWith<RestClientException> {
             client.createStorylines(
                 AiStorylinesRequest(
-                    genreTags = listOf("판타지"),
-                    protagonistTags = emptyList(),
-                    supportingTags = emptyList(),
-                ),
+                genreTags = listOf("판타지"),
+                protagonist = AiCharacter(),
+            ),
             )
         }
 
@@ -248,8 +250,7 @@ class RestStoryAiClientTests {
         val compiled = client.compileStory(
             AiStoryCompileRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = emptyList(),
-                supportingTags = emptyList(),
+                protagonist = AiCharacter(),
                 selectedStoryline = "선택된 스토리라인",
                 additionalInfo = "추가 정보",
             ),

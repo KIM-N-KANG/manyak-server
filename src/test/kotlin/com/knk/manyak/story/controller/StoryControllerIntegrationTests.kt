@@ -11,6 +11,8 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
+import com.knk.manyak.story.entity.StoryCreationCharacter
+import com.knk.manyak.story.entity.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
@@ -20,6 +22,7 @@ import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
+import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -60,6 +63,9 @@ class StoryControllerIntegrationTests {
 
     @Autowired
     private lateinit var sessionTagRepository: StoryCreationSessionTagRepository
+
+    @Autowired
+    private lateinit var characterRepository: StoryCreationCharacterRepository
 
     @Autowired
     private lateinit var storylineRepository: StoryCreationStorylineRepository
@@ -171,8 +177,8 @@ class StoryControllerIntegrationTests {
         requireNotNull(aiRequest)
         check(storyAiClient.transactionActiveDuringCall == false)
         check(aiRequest.genreTags == listOf("판타지"))
-        check(aiRequest.protagonistTags == listOf("기억상실"))
-        check(aiRequest.supportingTags.isEmpty())
+        check(aiRequest.protagonist.features == listOf("기억상실"))
+        check(aiRequest.supportingCharacters.isEmpty())
         check(storylineRepository.count() == 3L)
         check(recommendedInfoRepository.count() == 9L)
     }
@@ -247,10 +253,15 @@ class StoryControllerIntegrationTests {
         check(savedTags.map { it["NAME"] } == listOf("판타지", "기억상실", "용감한", "비밀스러운 조력자", "헌신적인"))
         check(savedTags.map { it["ROLE"] } == listOf(null, "PROTAGONIST", "PROTAGONIST", "SUPPORTING_CHARACTER", "SUPPORTING_CHARACTER"))
 
-        // KNK-846 전까지 AI 클라이언트의 옛 필드는 유지하되 새 입력의 특징을 평탄화해 컴파일을 보존한다.
-        check(storyAiClient.lastRequest?.genreTags == listOf("판타지"))
-        check(storyAiClient.lastRequest?.protagonistTags == listOf("기억상실", "용감한"))
-        check(storyAiClient.lastRequest?.supportingTags == listOf("비밀스러운 조력자", "헌신적인"))
+        // AI 인물 단위 계약(KNK-846): 인물별 이름·성별·특징을 그대로 싣는다.
+        val storylineRequest = requireNotNull(storyAiClient.lastRequest)
+        check(storylineRequest.genreTags == listOf("판타지"))
+        check(storylineRequest.protagonist.name == "아린")
+        check(storylineRequest.protagonist.gender == "FEMALE")
+        check(storylineRequest.protagonist.features == listOf("기억상실", "용감한"))
+        check(storylineRequest.supportingCharacters.single().name == "레온")
+        check(storylineRequest.supportingCharacters.single().gender == "MALE")
+        check(storylineRequest.supportingCharacters.single().features == listOf("비밀스러운 조력자", "헌신적인"))
     }
 
     @Test
@@ -393,7 +404,8 @@ class StoryControllerIntegrationTests {
 
         val aiRequest = storyAiClient.lastRequest
         requireNotNull(aiRequest)
-        check(aiRequest.supportingTags == listOf("비밀스러운 조력자"))
+        check(aiRequest.protagonist.features.isEmpty())
+        check(aiRequest.supportingCharacters.single().features == listOf("비밀스러운 조력자"))
     }
 
     @Test
@@ -482,7 +494,7 @@ class StoryControllerIntegrationTests {
 
         check(tagRepository.count() == 1L)
         check(sessionTagRepository.count() == 1L)
-        check(storyAiClient.lastRequest?.protagonistTags == listOf("BL"))
+        check(storyAiClient.lastRequest?.protagonist?.features == listOf("BL"))
     }
 
     @Test
@@ -538,7 +550,7 @@ class StoryControllerIntegrationTests {
 
         check(tagRepository.count() == 1L)
         check(sessionTagRepository.count() == 1L)
-        check(storyAiClient.lastRequest?.protagonistTags == listOf("현대 판타지"))
+        check(storyAiClient.lastRequest?.protagonist?.features == listOf("현대 판타지"))
     }
 
     @Test
@@ -703,7 +715,8 @@ class StoryControllerIntegrationTests {
         requireNotNull(compileRequest)
         check(storyAiClient.compileTransactionActive == false)
         check(compileRequest.genreTags == listOf("다크 판타지", "정치극"))
-        check(compileRequest.protagonistTags == listOf("신중한"))
+        check(compileRequest.protagonist.features == listOf("신중한"))
+        check(compileRequest.supportingCharacters.isEmpty())
         check(compileRequest.selectedStoryline == "스토리라인 2")
         check(compileRequest.additionalInfo == "주인공은 신중하다\n결말은 여운 있게")
 
@@ -732,7 +745,7 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "protagonist": {"featureTagIds": [${protagonistFeature.id}]},
+                  "protagonist": {"gender": "FEMALE", "featureTagIds": [${protagonistFeature.id}]},
                   "supportingCharacters": [
                     {"name": "조력자 1", "featureTagIds": [${supportingFeature.id}]},
                     {"name": "조력자 2", "featureTagIds": [${supportingFeature.id}]}
@@ -749,9 +762,11 @@ class StoryControllerIntegrationTests {
         check(savedTags.count { it.tag.category == SimpleStoryTagCategory.PROTAGONIST } == 1)
         check(savedTags.count { it.tag.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER } == 2)
 
-        // 스토리라인 경로는 이미 카테고리+정규화 이름 기준으로 역할별 한 번만 보낸다.
-        check(storyAiClient.lastRequest?.protagonistTags == listOf("헌신적인"))
-        check(storyAiClient.lastRequest?.supportingTags == listOf("헌신적인"))
+        // 인물 단위 계약에선 같은 표시명이어도 인물별로 각자 자기 특징을 싣는다(역할 간 합산·중복 제거 없음).
+        val storylineReq = requireNotNull(storyAiClient.lastRequest)
+        check(storylineReq.protagonist.features == listOf("헌신적인"))
+        check(storylineReq.supportingCharacters.map { it.name } == listOf("조력자 1", "조력자 2"))
+        check(storylineReq.supportingCharacters.map { it.features } == listOf(listOf("헌신적인"), listOf("헌신적인")))
 
         val storyline = storylineRepository.findAll().first()
         restTestClient.post()
@@ -766,9 +781,14 @@ class StoryControllerIntegrationTests {
 
         val compileRequest = storyAiClient.lastCompileRequest
         requireNotNull(compileRequest)
-        // 같은 표시명이어도 주인공/주변 인물 카테고리는 별개이며, 각 역할 안에서만 중복이 제거된다.
-        check(compileRequest.protagonistTags == listOf("헌신적인"))
-        check(compileRequest.supportingTags == listOf("헌신적인"))
+        // 같은 표시명이어도 인물별로 각자 자기 특징을 싣는다.
+        check(compileRequest.protagonist.features == listOf("헌신적인"))
+        check(compileRequest.supportingCharacters.map { it.features } == listOf(listOf("헌신적인"), listOf("헌신적인")))
+        // 컴파일 AI 요청은 저장된 인물의 이름·성별을 그대로 보존한다(미입력은 null, 입력값은 원값). 주변 인물 이름은 저장 순서대로 실린다.
+        check(compileRequest.protagonist.name == null)
+        check(compileRequest.protagonist.gender == "FEMALE")
+        check(compileRequest.supportingCharacters.map { it.name } == listOf("조력자 1", "조력자 2"))
+        check(compileRequest.supportingCharacters.all { it.gender == null })
     }
 
     @Test
@@ -916,13 +936,22 @@ class StoryControllerIntegrationTests {
         val session = sessionRepository.save(
             StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
-        val tags = listOf(
+        // KNK-846 컴파일 경로는 인물(character_id) 단위로 특징을 되싣는다. 장르는 세션 스코프, 주인공 특징은 인물 스코프로 시드한다.
+        val genreTags = listOf(
             seedTag(SimpleStoryTagCategory.GENRE, "다크 판타지", 10),
             seedTag(SimpleStoryTagCategory.GENRE, "정치극", 11),
-            seedTag(SimpleStoryTagCategory.PROTAGONIST, "신중한", 10),
+        )
+        val protagonistFeature = seedTag(SimpleStoryTagCategory.PROTAGONIST, "신중한", 10)
+        val protagonist = characterRepository.save(
+            StoryCreationCharacter(
+                creationSession = session,
+                role = StoryCreationCharacterRole.PROTAGONIST,
+                sortOrder = 1,
+            ),
         )
         sessionTagRepository.saveAll(
-            tags.map { tag -> StoryCreationSessionTag(creationSession = session, tag = tag) },
+            genreTags.map { tag -> StoryCreationSessionTag(creationSession = session, tag = tag) } +
+                StoryCreationSessionTag(creationSession = session, tag = protagonistFeature, character = protagonist),
         )
         val storylines = storylineRepository.saveAll(
             (1..3).map { order ->

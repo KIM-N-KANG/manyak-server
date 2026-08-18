@@ -25,15 +25,26 @@ interface StoryAiClient {
     fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink = AiTraceLink()): AiStoryCompileResponse
 }
 
+/**
+ * AI 인물 단위 입력(KNK-846, AI 계약 §5-3-2). 주인공·주변 인물 공용이며 세 항목 전부 선택이다.
+ * [gender]는 "MALE"/"FEMALE"/null(도메인 enum 이름과 일치). 빈 값은 AI가 자동 생성한다.
+ * 주인공은 AI 쪽 기본값 없는 필수 필드라, 입력이 비어도 이 객체를 생략하지 않고 그대로 싣는다(누락하면 422).
+ */
+data class AiCharacter(
+    val name: String? = null,
+    val gender: String? = null,
+    val features: List<String> = emptyList(),
+)
+
 data class AiStorylinesRequest(
     @JsonProperty("genre_tags")
     val genreTags: List<String>,
 
-    @JsonProperty("protagonist_tags")
-    val protagonistTags: List<String>,
+    val protagonist: AiCharacter,
 
-    @JsonProperty("supporting_tags")
-    val supportingTags: List<String>,
+    // 명시적 null도 빈 배열로 보낸다(로어북 KNK-422와 같은 관례). 서버는 항상 리스트를 싣는다.
+    @JsonProperty("supporting_characters")
+    val supportingCharacters: List<AiCharacter> = emptyList(),
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -84,11 +95,10 @@ data class AiStoryCompileRequest(
     @JsonProperty("genre_tags")
     val genreTags: List<String>,
 
-    @JsonProperty("protagonist_tags")
-    val protagonistTags: List<String>,
+    val protagonist: AiCharacter,
 
-    @JsonProperty("supporting_tags")
-    val supportingTags: List<String>,
+    @JsonProperty("supporting_characters")
+    val supportingCharacters: List<AiCharacter> = emptyList(),
 
     @JsonProperty("selected_storyline")
     val selectedStoryline: String,
