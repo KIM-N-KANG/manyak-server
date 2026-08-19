@@ -605,6 +605,59 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `제공 장르와 직접 입력 장르의 합이 20이면 스토리라인을 생성한다`() {
+        // 옛 계약(selectedTagIds 20 + customTags 20)이 아니라 장르 총량 20을 상한으로 둔다.
+        val genreIds = (1..10).map { seedTag(SimpleStoryTagCategory.GENRE, "장르 $it", it).id }
+        val customGenres = (1..10).joinToString(",") { "\"직접 장르 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genreIds.joinToString(",")}],
+                  "customGenreTags": [$customGenres],
+                  "protagonist": {}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(20)
+    }
+
+    @Test
+    fun `제공 장르와 직접 입력 장르의 합이 20을 넘으면 거절한다`() {
+        val genreIds = (1..10).map { seedTag(SimpleStoryTagCategory.GENRE, "장르 $it", it).id }
+        val customGenres = (1..11).joinToString(",") { "\"직접 장르 $it\"" }
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genreIds.joinToString(",")}],
+                  "customGenreTags": [$customGenres],
+                  "protagonist": {}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.details[0].message").isEqualTo("장르는 선택과 직접 입력을 합쳐 최대 20개까지 입력할 수 있습니다.")
+
+        check(storyAiClient.lastRequest == null)
+    }
+
+    @Test
     fun `같은 정규화 키를 장르와 인물 특징으로 함께 보내면 분류별로 각각 저장한다`() {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")

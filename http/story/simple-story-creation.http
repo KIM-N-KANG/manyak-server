@@ -422,6 +422,30 @@ Accept: application/json
     });
 %}
 
+### 3-7. [KNK-859] 선택 장르와 직접 입력 장르의 합이 20을 넘으면 400
+# 필드별 상한은 각각 20이지만, 장르 총량은 합쳐서 20개까지입니다(옛 계약의 실질 상한과 동일).
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "customGenreTags": ["장르1", "장르2", "장르3", "장르4", "장르5", "장르6", "장르7", "장르8", "장르9", "장르10", "장르11", "장르12", "장르13", "장르14", "장르15", "장르16", "장르17", "장르18", "장르19", "장르20"],
+  "protagonist": {}
+}
+
+> {%
+    client.test("장르 합산 21개는 400이다", () => {
+        client.assert(response.status === 400, `400 Bad Request가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(
+            JSON.stringify(response.body.details || []).indexOf("최대 20개") >= 0,
+            `장르 합산 상한 메시지가 없습니다. body=${JSON.stringify(response.body)}`,
+        );
+    });
+%}
+
 ### 4. 주인공 객체 없이 요청하면 400
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: {{deviceId}}

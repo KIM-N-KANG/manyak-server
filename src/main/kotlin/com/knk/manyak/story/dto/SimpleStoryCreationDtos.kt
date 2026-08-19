@@ -91,6 +91,13 @@ data class GenerateSimpleStorylinesRequest(
     )
     val parentCreationId: UUID? = null,
 ) {
+    // 장르 총량 상한(KNK-859). 필드별 @Size(max = 20)만으로는 선택 20 + 직접 입력 20 = 40까지 열려, 옛 계약의
+    // 실질 상한(장르 합산 20)보다 늘어난다. 인물 특징의 [SimpleStoryCharacterRequest.hasAtMostThreeFeatures]와 같이
+    // 중복 제거 전 요청 항목 수로 센다.
+    @AssertTrue(message = "장르는 선택과 직접 입력을 합쳐 최대 20개까지 입력할 수 있습니다.")
+    @Schema(hidden = true)
+    fun hasAtMostTwentyGenres(): Boolean = genreTagIds.size + customGenreTags.size <= 20
+
     /**
      * [customGenreTags] 원소 길이 검증(KNK-859). 원소에 붙인 `@NotBlank`·`@Size`는 코틀린이 JVM 타입 애노테이션을
      * 기본으로 내보내지 않아 실제로 발동하지 않으므로(레포 전반의 기존 간극), 이 필드는 메서드 제약으로 직접 막는다.
