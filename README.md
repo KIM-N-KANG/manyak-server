@@ -22,6 +22,25 @@ docker compose up -d
 ./gradlew test
 ```
 
+## 로컬 관측 스택 (선택)
+
+로그 파이프라인(Fluent Bit → OpenSearch)을 학습·검증할 때만 띄웁니다. 평소 개발에는 필요 없습니다.
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
+
+- OpenSearch: <http://localhost:9200>
+- OpenSearch Dashboards: <http://localhost:5601>
+
+내릴 때는 `down`, 색인 데이터까지 지우려면 `down -v`를 씁니다.
+
+```bash
+docker compose -f docker-compose.observability.yml down
+```
+
+이 스택은 `manyak-observability` 프로젝트로 분리돼 있어 평소 개발용 `docker compose up -d`(postgres·redis)와 서로 간섭하지 않습니다. 보안 플러그인을 끈 **로컬 학습 전용** 구성이므로 그대로 운영에 쓰지 않습니다.
+
 ## 환경변수
 
 로컬 실행에도 DB 접속 환경변수가 필요합니다. `.env.example`에 필요한 변수 목록이 정리되어 있습니다.

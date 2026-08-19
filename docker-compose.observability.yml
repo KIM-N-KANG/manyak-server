@@ -1,0 +1,71 @@
+# 로컬 관측 스택(KNK-853). 평소 개발용 docker-compose.yml(postgres·redis)과 **분리된 파일**이다.
+# 평소 개발 회전에는 필요 없고, 로그 파이프라인을 학습·검증할 때만 띄운다.
+#
+#   띄우기:  docker compose -f docker-compose.observability.yml up -d
+#   내리기:  docker compose -f docker-compose.observability.yml down
+#   데이터까지 지우기: docker compose -f docker-compose.observability.yml down -v
+#
+# 이 스택의 목적은 두 가지다.
+#   1. Fluent Bit → (Vector) → OpenSearch 파이프라인을 손에 익힌다.
+#   2. 운영 도메인(KNK-854)에 그대로 올릴 **인덱스 템플릿**을 여기서 만들고 검증한다.
+#      그래서 로그 스키마는 운영과 같은 LogstashEncoder JSON을 기준으로 삼는다.
+#
+# 프로젝트 이름을 분리한다. compose는 기본적으로 **디렉터리 이름**을 프로젝트로 쓰는데, 그러면 이 스택이
+# docker-compose.yml(postgres·redis)과 같은 `manyak-server` 프로젝트에 묶인다. 그 상태에서 어느 한쪽에
+# `--remove-orphans`를 주면 다른 쪽 컨테이너가 orphan으로 지워진다. 이름을 갈라 그 사고를 원천 차단한다.
+name: manyak-observability
+
+services:
+  opensearch:
+    # 버전을 고정한다(latest 금지 — 재현 가능해야 한다). 3.8.0은 2026-08 기준 최신 안정 버전이다.
+    # 운영은 AWS OpenSearch Service가 지원하는 버전을 따라가야 하므로 여기와 다를 수 있다.
+    # 버전 대조는 도메인을 만드는 KNK-854에서 한다.
+    image: opensearchproject/opensearch:3.8.0
+    container_name: manyak-opensearch
+    environment:
+      # 단일 노드. 클러스터를 구성하지 않으므로 마스터 선출 과정을 건너뛴다.
+      - discovery.type=single-node
+      # 힙 1GB. 컨테이너 전체 메모리의 절반 이하로 잡는 게 관례다(나머지는 Lucene이 파일 캐시로 쓴다).
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      # 보안 플러그인 끄기 — **로컬 학습 전용**이다.
+      # 켜면 TLS 인증서·admin 비밀번호(2.12+부터 OPENSEARCH_INITIAL_ADMIN_PASSWORD 필수)가 따라붙어
+      # 학습의 본줄기(로그 파이프라인)와 무관한 설정에 시간을 쓰게 된다.
+      # 운영 도메인(KNK-854)은 반대로 인증·접근제어를 반드시 켠다.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      # JVM 힙이 디스크로 스왑되면 검색 지연이 튄다. memlock으로 메모리에 고정한다.
+      memlock: { soft: -1, hard: -1 }
+      # Lucene은 세그먼트마다 파일 핸들을 쓴다. 기본값으로는 부족해 공식 문서가 65536을 권장한다.
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      # REST API. curl·Fluent Bit·Vector가 여기로 색인한다.
+      - "9200:9200"
+    volumes:
+      - manyak-opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      # 단일 노드라 status는 green이 아니라 **yellow가 정상**이다(복제본을 둘 노드가 없어 replica가 미할당).
+      # 그래서 green을 기다리면 영원히 unhealthy다. 응답 자체가 오는지만 본다.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:3.8.0
+    container_name: manyak-opensearch-dashboards
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      # 컨테이너 네트워크 안에서는 서비스명으로 찾는다(localhost가 아니다 — 각 컨테이너의 localhost는 자기 자신이다).
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      # 서버 쪽 보안을 껐으므로 대시보드의 인증 플러그인도 함께 꺼야 한다. 한쪽만 끄면 로그인 화면에서 막힌다.
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      # 브라우저로 http://localhost:5601 접속.
+      - "5601:5601"
+
+volumes:
+  manyak-opensearch-data:
