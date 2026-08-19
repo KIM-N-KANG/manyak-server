@@ -137,9 +137,14 @@ services:
       # `:-` 는 값이 없거나 **비어 있을 때** 기본값을 쓴다. 아래 값은 application-local.yml 과 같은 로컬 전용 더미다.
       MANYAK_AUTH_JWT_SECRET: "${MANYAK_AUTH_JWT_SECRET:-local-dev-only-jwt-secret-change-me-please-32b}"
     env_file:
-      # DB 계정·CORS 등 나머지는 평소 쓰던 .env 를 그대로 쓴다.
+      # DB 계정과 CORS 등 나머지는 평소 쓰던 .env 를 그대로 쓴다.
       # 위 environment 가 env_file 보다 우선하므로 DB URL 등은 컨테이너용 값이 이긴다.
       - .env
+    extra_hosts:
+      # Docker Desktop(mac/win)에는 host.docker.internal 이 기본 제공되지만 네이티브 Linux Docker Engine 에는
+      # 없다. 매핑하지 않으면 리눅스에서 위 DB URL 이 해소되지 않아 기동 직후 실패한다.
+      # scripts/gen-db-docs.sh 도 같은 이유로 --add-host=host.docker.internal:host-gateway 를 명시한다.
+      - "host.docker.internal:host-gateway"
     ports:
       - "18080:8080"
     logging:
