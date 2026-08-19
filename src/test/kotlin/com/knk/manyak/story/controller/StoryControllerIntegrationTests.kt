@@ -562,10 +562,18 @@ class StoryControllerIntegrationTests {
                 check(genres.contains("학원물")) { "최종 스토리 genres에 직접 입력 장르가 없습니다: $genres" }
                 check(genres.contains("판타지")) { "최종 스토리 genres에 제공 장르가 없습니다: $genres" }
             }
+
+        // 컴파일 AI 요청에도 직접 입력 장르가 실려야 한다. 최종 genres 단정만으로는 컴파일 경로에서만
+        // CUSTOM 행이 빠지는 회귀를 놓친다(응답 genres는 다른 코드가 만든다).
+        val compileGenres = requireNotNull(storyAiClient.lastCompileRequest).genreTags
+        check(compileGenres.contains("학원물")) { "컴파일 AI 요청에 직접 입력 장르가 없습니다: $compileGenres" }
+        check(compileGenres.contains("판타지")) { "컴파일 AI 요청에 제공 장르가 없습니다: $compileGenres" }
     }
 
     @Test
     fun `정규화 키가 같은 제공 장르가 있으면 직접 입력 장르로 커스텀 행을 만들지 않는다`() {
+        // 직접 입력만 보낸다(genreTagIds는 비움). 제공 장르를 함께 고르면 직접 입력을 통째로 무시해도 통과해
+        // 무엇도 증명하지 못한다 — 연결 여부는 직접 입력 단독일 때만 드러난다.
         val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
 
         restTestClient.post()
@@ -576,7 +584,7 @@ class StoryControllerIntegrationTests {
                 """
                 {
                   "requestId": "${java.util.UUID.randomUUID()}",
-                  "genreTagIds": [${predefined.id}],
+                  "genreTagIds": [],
                   "customGenreTags": ["현대판타지"],
                   "protagonist": {}
                 }
@@ -591,7 +599,9 @@ class StoryControllerIntegrationTests {
 
         check(tagRepository.count() == 1L)
         check(sessionTagRepository.count() == 1L)
-        check(storyAiClient.lastRequest?.genreTags == listOf("현대 판타지"))
+        // 스토리라인 AI 요청은 태그 해석(트랜잭션) 이전에 조립되므로 사용자가 입력한 표기 그대로 나간다.
+        // 저장·응답만 제공 태그 표시명으로 수렴한다(인물 특징의 기존 동작과 같다).
+        check(storyAiClient.lastRequest?.genreTags == listOf("현대판타지"))
     }
 
     @Test

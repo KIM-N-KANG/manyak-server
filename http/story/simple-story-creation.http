@@ -351,6 +351,8 @@ Accept: application/json
 ### 3-4. [KNK-859] 정규화 키가 같은 제공 장르가 있으면 커스텀 장르 행을 만들지 않는다
 # 1번 요청을 먼저 실행해야 genreTagId/genreTagName/genreTagNameSpaced 변수가 설정됩니다.
 # 인물 특징(3-2)과 같은 규칙이 장르에도 적용되는지 확인합니다(KNK-717, 스펙 §4-3-2).
+# 제공 장르는 ID로 고르지 않고 공백 변형 이름만 직접 입력합니다 — 함께 고르면 직접 입력이 무시돼도
+# 응답이 같아서 "연결됐는지"를 구분하지 못합니다.
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: genre-custom-verify-{{$uuid}}
 Content-Type: application/json
@@ -358,7 +360,7 @@ Accept: application/json
 
 {
   "requestId": "{{$uuid}}",
-  "genreTagIds": [{{genreTagId}}],
+  "genreTagIds": [],
   "customGenreTags": ["{{genreTagNameSpaced}}"],
   "protagonist": {}
 }
