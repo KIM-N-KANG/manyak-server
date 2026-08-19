@@ -5,14 +5,20 @@
     StructuredArguments(event_name 등)를 최상위 필드로 내보내 CloudWatch에서 그대로 질의한다.
     개발도 CloudWatch Logs로 나가고, 개발 환경의 존재 이유가 운영 배포 리허설이라
     prod용 CloudWatch Insights 쿼리를 개발에서 그대로 리허설할 수 있어야 한다(KNK-828).
+  - `jsonlog` 프로파일: 로컬에서 JSON 로그를 켜는 스위치다(KNK-853). 로컬 관측 스택
+    (docker-compose.observability.yml)의 Fluent Bit → OpenSearch 파이프라인은 운영과 같은
+    LogstashEncoder JSON을 전제로 하는데, local 프로파일은 평문이라 그대로는 태울 수 없다.
+    `SPRING_PROFILES_ACTIVE=local,jsonlog` 처럼 덧붙여 쓴다. 평소 개발에는 켜지 않는다
+    (사람이 읽기엔 평문이 낫다).
   - 그 외(local/test 등): 사람이 읽기 쉬운 Spring Boot 기본 콘솔 패턴 유지.
-    아래 두 블록의 조건은 **반드시 서로 배타적**이어야 한다. 한쪽만 dev를 더하면 dev에서 JSON·CONSOLE
-    두 appender가 동시에 붙어 로그가 2줄씩 찍힌다.
+    아래 두 블록의 조건은 **반드시 서로 배타적**이어야 한다. 한쪽만 프로파일을 더하면 그 프로파일에서
+    JSON·CONSOLE 두 appender가 동시에 붙어 로그가 2줄씩 찍힌다. 프로파일을 추가할 때는 위 목록과
+    아래 부정 조건을 **함께** 고쳐야 한다.
 -->
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <springProfile name="prod,dev">
+    <springProfile name="prod,dev,jsonlog">
         <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
                 <customFields>{"service":"manyak-server"}</customFields>
@@ -23,7 +29,7 @@
         </root>
     </springProfile>
 
-    <springProfile name="!prod &amp; !dev">
+    <springProfile name="!prod &amp; !dev &amp; !jsonlog">
         <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>

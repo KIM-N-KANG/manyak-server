@@ -67,5 +67,18 @@ services:
       # 브라우저로 http://localhost:5601 접속.
       - "5601:5601"
 
+  fluent-bit:
+    # 로그를 모아 OpenSearch로 보내는 수집기. 운영(ECS)에서는 AWS가 이 역할을
+    # FireLens라는 이름으로 사이드카에 띄우는데, 그 실체가 곧 Fluent Bit이다.
+    # 그래서 여기서 검증한 설정이 KNK-855에서 거의 그대로 쓰인다.
+    image: fluent/fluent-bit:5.1.1
+    container_name: manyak-fluent-bit
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    volumes:
+      # 설정 파일을 읽기 전용으로 넣는다. 파일을 고치고 `restart`만 하면 반영된다.
+      - ./opensearch/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+
 volumes:
   manyak-opensearch-data:
