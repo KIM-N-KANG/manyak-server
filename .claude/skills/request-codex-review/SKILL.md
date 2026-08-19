@@ -15,7 +15,8 @@ description: 이미 올라간 PR을 ready로 전환하고 `@codex review` 코멘
 - 리뷰 호출은 PR 본문이 아니라 **PR 코멘트 `@codex review`** 로만 트리거됩니다.
 - 리뷰는 즉시 오지 않습니다. **폴링으로 도착을 감지**합니다(보통 수 분~20분).
 - Codex 봇 계정은 `chatgpt-codex-connector[bot]`입니다.
-- **Codex는 지적이 있을 때만 정식 review(`pulls/{n}/reviews`)를 만듭니다. 지적이 없으면 "Didn't find any major issues" 같은 이슈 코멘트(`issues/{n}/comments`)나 호출 코멘트의 👍 리액션으로만 응답합니다.** 그래서 `reviews` 수만 폴링하면 "지적 없음" 응답을 놓쳐 timeout이 납니다. **리뷰 도착은 리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트의 Codex 봇 👍 세 신호 중 하나로 감지**합니다. 👍는 반드시 **봇 계정 리액션만** 세야 합니다. 사람이 호출 코멘트에 먼저 👍를 누르면 오탐하므로 `.content=="+1"`에 더해 `.user.login==$BOT`로 필터합니다. (메모리: codex-review-as-issue-comment)
+- **Codex는 지적이 있을 때만 정식 review(`pulls/{n}/reviews`)를 만듭니다. 지적이 없으면 "Didn't find any major issues" 같은 이슈 코멘트(`issues/{n}/comments`)나 👍 리액션으로만 응답합니다.** 그래서 `reviews` 수만 폴링하면 "지적 없음" 응답을 놓쳐 timeout이 납니다. **리뷰 도착은 리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트의 봇 👍 · PR 본문의 봇 👍 네 신호 중 하나로 감지**합니다. 👍는 반드시 **봇 계정 리액션만** 세야 합니다. 사람이 먼저 👍를 누르면 오탐하므로 `.content=="+1"`에 더해 `.user.login==$BOT`로 필터합니다. (메모리: codex-review-as-issue-comment)
+- **👍가 달리는 위치는 트리거 방식에 따라 다릅니다.** `@codex review` 멘션으로 부르면 **호출 코멘트**(`issues/comments/{id}/reactions`)에, ready 전환만으로 도는 **최초 자동 리뷰에는 호출 코멘트가 아예 없어 PR 본문**(`issues/{n}/reactions`)에 달립니다. 우리 워크플로는 최초 리뷰에 멘션을 달지 않으므로(쿼터 소진·거절), **본문 리액션을 안 보면 최초 리뷰의 "지적 없음"을 매번 놓칩니다.** PR #193에서 Codex가 ready 전환 3분 뒤 본문에 `+1`을 달았는데 폴링이 40분 헛돌고 timeout을 냈습니다(같은 패턴: PR #189). timeout이 났다고 "리뷰가 안 돌았다 → 멘션 재시도"로 넘어가기 전에 **반드시 본문 리액션부터 조회**합니다.
 - `issues/{n}/comments`·`pulls/{n}/reviews`·`pulls/{n}/comments`·`issues/comments/{id}/reactions`는 기본 30개씩 페이지네이션됩니다. 코멘트·리액션이 많은 PR에서는 Codex의 새 응답이나 봇 👍가 2페이지 이상으로 밀려 1페이지만 세면 감지에 실패하므로 **항상 `--paginate`(+`per_page=100`)로 전 페이지를 훑습니다.** 단, `--slurp`는 `--jq`와 함께 못 씁니다(gh 에러). **카운트는 `--paginate --jq "…|length"`가 페이지마다 수를 뱉으니 `awk`로 합산**하되, `gh api | awk`로 파이프하면 gh 실패가 awk의 성공에 가려져 조용히 0이 됩니다. 기준선이 거짓 0이면 이전 라운드의 옛 코멘트를 현재 응답으로 오인해 조기 종료하므로, **`codex_count` 헬퍼처럼 gh 출력을 먼저 받아 실패 시 `return 1`로 전파**하고(기준선은 실패 시 중단, 폴링은 이전 값 유지) 그 뒤에 `awk`로 합산합니다. **조회는 `--paginate --jq 'select(…)'`**로 페이지별 필터 결과를 이어 받습니다.
 
 ## 작업 흐름
@@ -53,28 +54,36 @@ echo "baseline reviews=$PREV_REVIEWS comments=$PREV_COMMENTS trigger_comment=$CM
 
 ### 3. 첫 응답 도착까지 폴링 (최대 ~20분)
 
-**리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트 👍** 세 신호 중 하나라도 잡히면 응답 도착으로 봅니다. `reviews`만 보면 "지적 없음"이 이슈 코멘트/👍로 오는 경우를 놓칩니다.
+**리뷰 수 증가 · Codex 봇 이슈 코멘트 증가 · 호출 코멘트 👍 · PR 본문 👍** 네 신호 중 하나라도 잡히면 응답 도착으로 봅니다. `reviews`만 보면 "지적 없음"이 이슈 코멘트/👍로 오는 경우를 놓칩니다.
+
+**본문 👍(`bu`)는 최초 자동 리뷰의 유일한 신호이므로 빠뜨리면 안 됩니다.** 멘션 없이 ready 전환만 한 경우 `CMTID`가 비어 있는데, 그때 `issues/comments//reactions`를 부르면 gh가 실패해 `tu=0`으로 떨어질 뿐이라 폴링은 계속 돕니다(무해). 본문 리액션은 PR 생성 전부터 사람이 눌러 둘 수 있으므로 **기준선 `PREV_BODY_THUMBS`를 잡아 증가분만** 봅니다.
 
 ```bash
+# 2단계에서 함께 기록 (멘션 없이 ready 전환만 하는 최초 리뷰에서도 필요)
+PREV_BODY_THUMBS=$(codex_count "repos/$REPO/issues/$PR/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || { echo "기준선(body reactions) 조회 실패 — 중단"; exit 1; }
+
 for i in $(seq 1 40); do
   rv=$(codex_count "repos/$REPO/pulls/$PR/reviews?per_page=100"    "[.[]|select(.user.login==\"$BOT\")]|length") || rv=$PREV_REVIEWS
   cm=$(codex_count "repos/$REPO/issues/$PR/comments?per_page=100"  "[.[]|select(.user.login==\"$BOT\")]|length") || cm=$PREV_COMMENTS
-  tu=$(codex_count "repos/$REPO/issues/comments/$CMTID/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || tu=0
-  if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];  then echo "CODEX_REVIEW_DETECTED reviews=$rv (정식 리뷰 — 지적 있음)"; exit 0; fi
-  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ]; then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 도착 — 4단계 본문 확인 필요)"; exit 0; fi
-  if [ "${tu:-0}" -ge 1 ];                then echo "CODEX_THUMB_DETECTED (👍 — 지적 없음)"; exit 0; fi
-  echo "poll $i/40: reviews=$rv comments=$cm thumb=$tu (baseline rev=$PREV_REVIEWS cmt=$PREV_COMMENTS) — 30s 대기"
+  bu=$(codex_count "repos/$REPO/issues/$PR/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || bu=$PREV_BODY_THUMBS
+  tu=0
+  [ -n "$CMTID" ] && { tu=$(codex_count "repos/$REPO/issues/comments/$CMTID/reactions?per_page=100" "[.[]|select(.content==\"+1\" and .user.login==\"$BOT\")]|length") || tu=0; }
+  if [ "${rv:-0}" -gt "$PREV_REVIEWS" ];      then echo "CODEX_REVIEW_DETECTED reviews=$rv (정식 리뷰 — 지적 있음)"; exit 0; fi
+  if [ "${cm:-0}" -gt "$PREV_COMMENTS" ];     then echo "CODEX_COMMENT_DETECTED comments=$cm (이슈 코멘트 도착 — 4단계 본문 확인 필요)"; exit 0; fi
+  if [ "${bu:-0}" -gt "$PREV_BODY_THUMBS" ];  then echo "CODEX_BODY_THUMB_DETECTED (PR 본문 👍 — 지적 없음)"; exit 0; fi
+  if [ "${tu:-0}" -ge 1 ];                    then echo "CODEX_THUMB_DETECTED (호출 코멘트 👍 — 지적 없음)"; exit 0; fi
+  echo "poll $i/40: reviews=$rv comments=$cm body_thumb=$bu thumb=$tu (baseline rev=$PREV_REVIEWS cmt=$PREV_COMMENTS body=$PREV_BODY_THUMBS) — 30s 대기"
   sleep 30
 done
 echo "TIMEOUT_20MIN_NO_RESPONSE"; exit 0
 ```
 
-- `CODEX_COMMENT_DETECTED`/`CODEX_THUMB_DETECTED`는 대개 "지적 없음"이지만, 이슈 코멘트에 요약·질문이 섞일 수 있으니 4단계에서 본문을 반드시 읽고 판단합니다.
-- timeout이면 무한정 기다리지 말고 현재 상태를 사용자에게 보고하고 어떻게 할지 묻습니다.
+- `CODEX_COMMENT_DETECTED`/`CODEX_THUMB_DETECTED`/`CODEX_BODY_THUMB_DETECTED`는 대개 "지적 없음"이지만, 이슈 코멘트에 요약·질문이 섞일 수 있으니 4단계에서 본문을 반드시 읽고 판단합니다.
+- timeout이면 **먼저 4단계 조회를 그대로 한 번 실행해** 놓친 응답이 없는지 확인합니다(특히 PR 본문 리액션). 그래도 비어 있으면 현재 상태를 사용자에게 보고하고 어떻게 할지 묻습니다. timeout만 보고 멘션을 재시도하면 쿼터를 태웁니다.
 
 ### 4. 리뷰 내용 확인·판단
 
-세 곳을 모두 봅니다. "지적 없음" 응답은 이슈 코멘트로 오므로, 정식 리뷰·인라인 코멘트가 비어 있어도 **이슈 코멘트를 반드시 확인**합니다.
+네 곳을 모두 봅니다. "지적 없음" 응답은 이슈 코멘트나 👍로 오므로, 정식 리뷰·인라인 코멘트가 비어 있어도 **이슈 코멘트와 PR 본문 리액션을 반드시 확인**합니다.
 
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
@@ -84,10 +93,15 @@ gh pr view $PR --json reviews --jq '.reviews[] | {author: .author.login, state, 
 gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {created_at, body}'
 # 인라인(파일 위) 코멘트 본문
 gh api --paginate "repos/$REPO/pulls/$PR/comments?per_page=100"  --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {path, line, body}'
+# PR 본문 리액션 (최초 자동 리뷰의 "지적 없음"은 여기로만 온다)
+gh api --paginate "repos/$REPO/issues/$PR/reactions?per_page=100" --jq '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | {content, created_at}'
+# 리액션이 이번 리뷰 결과인지 가리려면 ready 전환 시각과 비교한다
+gh api --paginate "repos/$REPO/issues/$PR/timeline?per_page=100" --jq '.[] | select(.event=="ready_for_review") | {event, created_at}'
 ```
 
 - 지적을 **메이저(반영 필요)** 와 **마이너/제안(보류 가능)** 으로 분류합니다.
 - 이슈 코멘트가 "no major issues"류이고 정식 리뷰·인라인 지적이 없으면 "메이저 없음 — 머지 가능"으로 보고합니다.
+- 정식 리뷰·이슈 코멘트·인라인이 전부 비어 있고 **PR 본문에 봇 `+1`만 있으며 그 시각이 `ready_for_review` 이후**면, 자동 리뷰가 정상 완료돼 지적이 없었던 것입니다(실례: PR #189·#193). "리뷰 안 옴"으로 오판하지 않습니다.
 - 반영 여부가 애매한 지적은 임의로 고치지 말고 사용자 판단을 받습니다.
 
 ### 5. 반영 후 재리뷰 (지적을 고친 경우)
