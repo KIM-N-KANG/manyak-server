@@ -63,7 +63,15 @@ dependencies {
 
 kotlin {
     compilerOptions {
-        freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
+        // -Xemit-jvm-type-annotations: 컬렉션 원소 제약(`List<@NotBlank @Size(max = 30) String>`)을 살린다(KNK-862).
+        // 이 플래그가 없으면 코틀린이 타입 애노테이션을 클래스 파일에 내보내지 않아
+        // (`javap -v`에 RuntimeVisibleTypeAnnotations 없음) Hibernate Validator가 원소 제약을 보지 못하고,
+        // 검증을 통과한 과길이 값이 저장 단계에서 터져 400이 아니라 500이 된다. 지우면 그 간극이 되살아난다.
+        freeCompilerArgs.addAll(
+            "-Xjsr305=strict",
+            "-Xannotation-default-target=param-property",
+            "-Xemit-jvm-type-annotations",
+        )
     }
 }
 

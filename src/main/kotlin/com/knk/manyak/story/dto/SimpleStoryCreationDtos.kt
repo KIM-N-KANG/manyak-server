@@ -99,9 +99,13 @@ data class GenerateSimpleStorylinesRequest(
     fun hasAtMostTwentyGenres(): Boolean = genreTagIds.size + customGenreTags.size <= 20
 
     /**
-     * [customGenreTags] 원소 길이 검증(KNK-859). 원소에 붙인 `@NotBlank`·`@Size`는 코틀린이 JVM 타입 애노테이션을
-     * 기본으로 내보내지 않아 실제로 발동하지 않으므로(레포 전반의 기존 간극), 이 필드는 메서드 제약으로 직접 막는다.
-     * 상한 30은 `story_creation_tags.name` 컬럼 길이이고, 서버가 trim 후 저장하므로 trim 기준으로 잰다.
+     * [customGenreTags] 원소 길이 검증(KNK-859).
+     *
+     * KNK-862에서 `-Xemit-jvm-type-annotations`를 켜 원소 `@NotBlank`·`@Size`도 이제 실제로 발동하지만,
+     * 이 메서드 제약은 남겨 둔다. 중복이 아니라 더 엄격하기 때문이다 — 원소 `@Size(max = 30)`은 입력 문자열
+     * 그대로를 재는 반면 여기는 trim 후를 재고, 서버는 trim 후 값을 `story_creation_tags.name`(길이 30)에
+     * 저장한다. 즉 앞뒤 공백을 포함해 30자를 넘는 입력은 원소 제약이 먼저 걸러 주고, 이 메서드는 저장되는
+     * 값 기준의 상한을 지킨다. 지우면 후자가 사라진다.
      */
     @AssertTrue(message = "직접 입력 장르는 공백을 제외하고 1자 이상 30자 이하여야 합니다.")
     @Schema(hidden = true)
