@@ -55,6 +55,24 @@ Fluent Bit만으로도 OpenSearch에 넣을 수 있습니다. 그런데 **목적
 
 Vector가 맡는 나머지 일은 **가공**입니다. `vector.yaml`의 VRL이 `container_name`의 앞 슬래시를 떼어 운영과 모양을 맞추고, 전송 과정에서 딸려온 찌꺼기(`timestamp`·`path`·`source_type`)를 걷어냅니다. 이런 규칙을 중앙 한 곳에서 고칠 수 있다는 게 계층을 나누는 이유입니다.
 
+### Vector와 Data Prepper
+
+같은 자리(수집기와 저장소 사이의 가공 계층)를 놓고 겨루는 도구라 **둘 중 하나만** 씁니다. 이 스택은 Vector를 골랐습니다.
+
+| | Vector | Data Prepper |
+|---|---|---|
+| 만든 곳 | Datadog(Timber.io 인수) | OpenSearch 프로젝트 |
+| 언어 | Rust | Java |
+| 로그 | 가볍고 VRL로 변환이 자유롭다 | 되지만 무겁다 |
+| 트레이스 | **서비스 맵을 만들 수 없다** | `service_map_stateful` 전용 프로세서 |
+| 목적지 | OpenSearch·S3·Kafka·CloudWatch 등 다수 | OpenSearch 중심 |
+
+**로그만 놓고 보면 Vector가 낫습니다.** 메모리를 적게 쓰고, VRL이 Data Prepper의 프로세서 조합보다 표현력이 좋으며, 디스크 버퍼가 제대로 동작합니다.
+
+**트레이스는 얘기가 다릅니다.** OpenSearch Dashboards의 Trace Analytics는 `otel-v1-apm-span-*`과 `otel-v1-apm-service-map` 인덱스를 읽는데, 뒤쪽을 만드는 `service_map_stateful` 프로세서가 Data Prepper에만 있습니다. Vector에는 대응물이 없습니다. 그래서 트레이스를 붙일 때는 **로그는 Vector, 트레이스는 Data Prepper**로 두 경로를 따로 두게 됩니다. 둘 중 하나를 고르는 문제가 아닙니다.
+
+트레이스는 이 스택의 범위 밖이라 Data Prepper는 두지 않았습니다. 필요해지는 시점은 로그만으로 장애 원인을 못 좁힐 때입니다.
+
 ### Fluent Bit → Vector는 forward가 아니라 HTTP입니다
 
 `forward`(fluentd 프로토콜)로 보내면 Vector가 통째로 버립니다.
