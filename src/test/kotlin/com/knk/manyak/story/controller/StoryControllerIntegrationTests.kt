@@ -710,6 +710,50 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `빈 문자열이나 30자를 넘는 인물 특징은 거절한다`() {
+        // KNK-862: `List<@NotBlank @Size(max = 30) String>` 원소 제약은 `-Xemit-jvm-type-annotations` 없이는
+        // 클래스 파일에 나가지 않아 발동하지 않았다. 31자는 `story_creation_tags.name`(길이 30) 저장에서
+        // 터져 400이 아니라 500이 됐다.
+        listOf("", " ", "가".repeat(31)).forEach { invalid ->
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(
+                    """{"requestId":"${java.util.UUID.randomUUID()}","protagonist":{"customTags":["$invalid"]}}""",
+                )
+                .exchange()
+                .expectStatus().isBadRequest
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+        }
+
+        check(storyAiClient.lastRequest == null)
+        check(tagRepository.count() == 0L)
+    }
+
+    @Test
+    fun `0 이하의 장르 태그 ID는 요청 검증 단계에서 거절한다`() {
+        // KNK-862: `List<@Min(1) Long>` 원소 제약도 같은 이유로 죽어 있었다. 다만 0은 조회에서도 못 찾아
+        // 어차피 400(`사용할 수 없는 태그 ID`)이 나므로, 상태 코드만 보면 제약이 죽어 있어도 통과한다.
+        // 제약이 실제로 발동했음은 details의 field 경로(`genreTagIds[0]`)로만 드러난다.
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[0],"protagonist":{}}""",
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+            .jsonPath("$.details[0].field").isEqualTo("genreTagIds[0]")
+
+        check(storyAiClient.lastRequest == null)
+    }
+
+    @Test
     fun `정규화 키가 같은 제공 태그가 있으면 커스텀 태그를 만들지 않는다`() {
         val predefined = seedTag(SimpleStoryTagCategory.PROTAGONIST, "현대 판타지", 10)
 

@@ -1098,3 +1098,67 @@ Accept: application/json
         client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
     });
 %}
+
+### 24. [KNK-862] 빈 인물 특징 → 400 (이전에는 201로 통과)
+# 컬렉션 원소 제약(`List<@NotBlank @Size(max = 30) String>`)은 `-Xemit-jvm-type-annotations` 없이는
+# 클래스 파일에 나가지 않아 발동하지 않았습니다. 이 요청이 201로 통과하면 그 플래그가 빠진 것입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {
+    "customTags": [""]
+  }
+}
+
+> {%
+    client.test("빈 인물 특징은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 25. [KNK-862] 30자를 넘는 인물 특징 → 400 (이전에는 저장 단계에서 터져 500)
+# story_creation_tags.name이 VARCHAR(30)이라, 검증을 통과한 31자가 insert에서 터졌습니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {
+    "customTags": ["가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"]
+  }
+}
+
+> {%
+    client.test("31자 인물 특징은 500이 아니라 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 26. [KNK-862] 0 이하의 태그 ID → 400, details 경로가 genreTagIds[0]
+# 0은 조회에서도 못 찾아 어차피 400이므로, 원소 `@Min(1)`이 실제로 발동했는지는 details의 field로만 드러납니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [0],
+  "protagonist": {}
+}
+
+> {%
+    client.test("0 태그 ID는 요청 검증 단계에서 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.details && response.body.details[0].field === "genreTagIds[0]",
+            `details[0].field가 genreTagIds[0]이 아닙니다: ${JSON.stringify(response.body.details)}`);
+    });
+%}
