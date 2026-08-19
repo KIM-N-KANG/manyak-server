@@ -76,9 +76,69 @@ services:
     depends_on:
       opensearch:
         condition: service_healthy
+    ports:
+      # forward 입력. 도커의 fluentd 로그 드라이버는 **컨테이너가 아니라 도커 데몬**이 실행하므로
+      # 데몬(=호스트) 입장에서 닿는 주소여야 한다. 그래서 컨테이너 네트워크만으로는 부족하고
+      # 이렇게 호스트로 게시해야 app 컨테이너의 로그가 들어온다.
+      - "24224:24224"
     volumes:
       # 설정 파일을 읽기 전용으로 넣는다. 파일을 고치고 `restart`만 하면 반영된다.
       - ./opensearch/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./opensearch/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+
+  app:
+    # 로컬 만약 서버를 **컨테이너로** 띄워, 운영(ECS FireLens)과 같은 경로로 로그를 흘린다.
+    #   앱 stdout → 도커 로그 드라이버(fluentd) → Fluent Bit → OpenSearch
+    #
+    # 평소에는 뜨지 않는다(profiles). 일상 개발·테스트는 종전대로 `./gradlew bootRun` 을 쓰고,
+    # 로그 파이프라인을 확인할 때만 아래처럼 켠다.
+    #   ./gradlew bootJar
+    #   docker compose -f docker-compose.observability.yml --profile app up -d app
+    profiles: ["app"]
+    # 이미지를 따로 빌드하지 않는다. 루트 Dockerfile은 컨테이너 안에서 gradle 빌드를 다시 돌려 느리다.
+    # 여기서는 로컬에서 만든 jar를 그대로 얹어 확인 회전을 짧게 가져간다.
+    image: eclipse-temurin:21-jre-alpine
+    container_name: manyak-app
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    volumes:
+      - ./build/libs/app.jar:/app/app.jar:ro
+    command: ["java", "-jar", "/app/app.jar"]
+    environment:
+      # jsonlog 를 겹쳐 LogstashEncoder JSON 을 켠다(logback-spring.xml).
+      SPRING_PROFILES_ACTIVE: "local,jsonlog"
+      # 컨테이너 안에서 호스트의 postgres·redis(평소 개발용 docker-compose.yml)를 찾아간다.
+      # 두 스택이 별도 compose 프로젝트라 서비스 이름으로는 못 찾고, 호스트를 거쳐야 한다.
+      MANYAK_DB_URL: "jdbc:postgresql://host.docker.internal:${MANYAK_DB_PORT:-5432}/${MANYAK_DB_NAME:-manyak}"
+      SPRING_DATA_REDIS_HOST: "host.docker.internal"
+      SPRING_DATA_REDIS_PORT: "${MANYAK_REDIS_PORT:-6379}"
+      # 로컬 확인용이라 AI는 스텁으로 둔다(실제 호출 없이 즉답).
+      MANYAK_AI_CHAT_STUB: "true"
+      MANYAK_AI_STORY_STUB: "true"
+      # .env 의 localhost 는 컨테이너 안에서 자기 자신을 가리키므로 호스트로 돌린다.
+      MANYAK_AI_BASE_URL: "http://host.docker.internal:8000"
+      # .env 에 이 키가 **빈 값으로** 있는데, 환경변수는 yml 보다 우선하므로 그대로 두면
+      # application-local.yml 의 로컬 기본값을 빈 값이 덮어 `IllegalArgumentException: Empty key` 로 죽는다
+      # (bootRun 은 .env 를 읽지 않아 이 문제가 드러나지 않는다).
+      # `:-` 는 값이 없거나 **비어 있을 때** 기본값을 쓴다. 아래 값은 application-local.yml 과 같은 로컬 전용 더미다.
+      MANYAK_AUTH_JWT_SECRET: "${MANYAK_AUTH_JWT_SECRET:-local-dev-only-jwt-secret-change-me-please-32b}"
+    env_file:
+      # DB 계정·CORS 등 나머지는 평소 쓰던 .env 를 그대로 쓴다.
+      # 위 environment 가 env_file 보다 우선하므로 DB URL 등은 컨테이너용 값이 이긴다.
+      - .env
+    ports:
+      - "18080:8080"
+    logging:
+      # 이 컨테이너의 stdout 을 Fluent Bit 으로 보낸다. 운영에서 ECS 가 `awsfirelens` 드라이버로
+      # 하는 일과 같다(FireLens 의 실체가 Fluent Bit 이다).
+      driver: fluentd
+      options:
+        # 도커 데몬이 접속하는 주소라 컨테이너 이름이 아니라 호스트 주소를 쓴다.
+        fluentd-address: "localhost:24224"
+        # Fluent Bit 이 아직 안 떠 있어도 컨테이너가 기동하게 한다.
+        # 기본값(false)이면 접속 실패 시 컨테이너가 아예 시작하지 못한다.
+        fluentd-async: "true"
 
 volumes:
   manyak-opensearch-data:

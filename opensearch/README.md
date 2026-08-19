@@ -6,6 +6,8 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 |---|---|
 | `setup.sh` | 스택 기동 후 한 번 실행하는 초기 설정 |
 | `index-template.json` | 인덱스 템플릿(필드 타입 정의) |
+| `fluent-bit.conf` | 로그 수집·파싱·전송 설정 |
+| `parsers.conf` | 위에서 쓰는 JSON 파서 정의 |
 
 ## 시작하기
 
@@ -13,6 +15,37 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 docker compose -f docker-compose.observability.yml up -d
 ./opensearch/setup.sh
 ```
+
+### 앱 로그를 흘려보기
+
+평소 개발은 종전대로 `./gradlew bootRun`을 쓰고, 로그 파이프라인을 볼 때만 앱을 컨테이너로 띄웁니다.
+
+```bash
+./gradlew bootJar
+docker compose -f docker-compose.observability.yml --profile app up -d app
+```
+
+앱은 `localhost:18080`에 뜹니다. 요청을 하나 보내고 `request_id`로 찾아보면 파이프라인 전체가 확인됩니다.
+
+```bash
+curl -s -o /dev/null -H 'X-Manyak-Request-Id: req_demo_0001' \
+  -H 'X-Manyak-Device-Id: d' -H 'X-Manyak-Session-Id: s' \
+  http://localhost:18080/api/v1/stories/simple/tags
+curl -s "http://localhost:9200/manyak-logs-local-*/_search?q=request_id:req_demo_0001&pretty"
+```
+
+경로는 이렇습니다. 운영(ECS FireLens)과 같은 모양이라 여기서 검증한 FILTER·OUTPUT이 [KNK-855](https://kimandkang.atlassian.net/browse/KNK-855)로 그대로 넘어갑니다.
+
+```
+앱 컨테이너 stdout → 도커 fluentd 드라이버 → Fluent Bit(forward) → parser → OpenSearch
+```
+
+#### 알아둘 것
+
+- **`profiles: ["app"]`이라 `--profile app` 없이는 앱이 뜨지 않습니다.** 평소 `up -d`는 관측 스택만 띄웁니다.
+- **`.env`의 빈 값이 yml 기본값을 덮습니다.** `MANYAK_AUTH_JWT_SECRET`이 빈 값이라 그대로 두면 `IllegalArgumentException: Empty key`로 죽습니다. compose에서 `${...:-기본값}`으로 막아뒀습니다. `bootRun`은 `.env`를 읽지 않아 이 문제가 드러나지 않습니다.
+- **파싱에 실패한 줄도 버려지지 않습니다.** Spring 배너처럼 JSON이 아닌 줄은 `log` 필드를 단 채 통과합니다(기동당 20줄 남짓). 관측 시스템에서 유실이 최악이라 파서를 느슨하게 둔 것입니다.
+- **Docker Desktop은 이중 로깅을 해서** `fluentd` 드라이버를 써도 `docker logs`가 됩니다. 운영 ECS에는 없는 편의라, FireLens를 쓰면 그 경로 조회가 막힙니다.
 
 `setup.sh`는 **사는 곳이 다른 두 가지**를 등록합니다. 이름이 비슷해 헷갈리기 쉽습니다.
 
