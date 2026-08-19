@@ -48,6 +48,17 @@ data class GenerateSimpleStorylinesRequest(
     )
     val genreTagIds: List<@Min(1) Long> = emptyList(),
 
+    // KNK-859: 인물 단위 계약 교체(KNK-845)에서 함께 빠졌던 장르 직접 입력을 되살린다. 인물 특징의
+    // [SimpleStoryCharacterRequest.customTags]와 같은 규칙으로, 정규화 키가 같은 사전 정의 장르가 있으면 그 행에 연결한다.
+    @field:Size(max = 20)
+    @field:Schema(description = "사용자가 직접 입력한 장르 이름 목록", example = """["학원물"]""")
+    @field:ArraySchema(
+        schema = Schema(description = "직접 입력한 장르 이름", example = "학원물", maxLength = 30),
+        maxItems = 20,
+        arraySchema = Schema(description = "사용자가 직접 입력한 장르 이름 목록", example = """["학원물"]"""),
+    )
+    val customGenreTags: List<@NotBlank @Size(max = 30) String> = emptyList(),
+
     @field:Valid
     @field:Schema(description = "주인공 입력", requiredMode = Schema.RequiredMode.REQUIRED)
     val protagonist: SimpleStoryCharacterRequest,
@@ -80,6 +91,15 @@ data class GenerateSimpleStorylinesRequest(
     )
     val parentCreationId: UUID? = null,
 ) {
+    /**
+     * [customGenreTags] 원소 길이 검증(KNK-859). 원소에 붙인 `@NotBlank`·`@Size`는 코틀린이 JVM 타입 애노테이션을
+     * 기본으로 내보내지 않아 실제로 발동하지 않으므로(레포 전반의 기존 간극), 이 필드는 메서드 제약으로 직접 막는다.
+     * 상한 30은 `story_creation_tags.name` 컬럼 길이이고, 서버가 trim 후 저장하므로 trim 기준으로 잰다.
+     */
+    @AssertTrue(message = "직접 입력 장르는 공백을 제외하고 1자 이상 30자 이하여야 합니다.")
+    @Schema(hidden = true)
+    fun hasValidCustomGenreTags(): Boolean = customGenreTags.all { it.trim().length in 1..30 }
+
     @AssertTrue(message = "인물 이름은 중복될 수 없습니다.")
     @Schema(hidden = true)
     fun hasUniqueCharacterNames(): Boolean {

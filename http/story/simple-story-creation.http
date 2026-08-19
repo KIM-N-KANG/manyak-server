@@ -317,6 +317,109 @@ Accept: application/json
     });
 %}
 
+### 3-3. [KNK-859] 직접 입력한 장르가 저장되고 응답에 노출된다
+# KNK-845에서 인물 단위 계약으로 교체하며 빠졌던 장르 직접 입력(customGenreTags) 복원 확인입니다.
+# 1번 요청을 먼저 실행해야 genreTagId/genreTagName 변수가 설정됩니다.
+# 응답 genreTags는 [사전 정의 장르 ...] 다음에 [직접 입력 장르 ...] 순서입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: genre-custom-verify-{{$uuid}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "customGenreTags": ["학원물", "학 원 물"],
+  "protagonist": {"customTags": ["기억을 잃은 파일럿"]}
+}
+
+> {%
+    client.test("직접 입력 장르가 사전 정의 장르 뒤에 붙는다", () => {
+        client.assert(response.status === 201, `201 Created가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        const genres = response.body.selectedTags.genreTags || [];
+        client.assert(genres.length === 2, `genreTags가 2개가 아닙니다(표기 변형은 하나로 합쳐집니다). actual=${genres.length}, body=${JSON.stringify(genres)}`);
+        client.assert(
+            genres[0].name === client.global.get("genreTagName"),
+            `첫 원소가 사전 정의 장르가 아닙니다. actual=${genres[0].name}`,
+        );
+        client.assert(genres[1].name === "학원물", `직접 입력 장르 표시명이 최초 입력 원문이 아닙니다. actual=${genres[1].name}`);
+        client.assert(genres[1].category === "GENRE", `직접 입력 장르의 category가 GENRE가 아닙니다. actual=${genres[1].category}`);
+    });
+
+%}
+
+### 3-4. [KNK-859] 정규화 키가 같은 제공 장르가 있으면 커스텀 장르 행을 만들지 않는다
+# 1번 요청을 먼저 실행해야 genreTagId/genreTagName/genreTagNameSpaced 변수가 설정됩니다.
+# 인물 특징(3-2)과 같은 규칙이 장르에도 적용되는지 확인합니다(KNK-717, 스펙 §4-3-2).
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: genre-custom-verify-{{$uuid}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "customGenreTags": ["{{genreTagNameSpaced}}"],
+  "protagonist": {}
+}
+
+> {%
+    client.test("정규화 키가 같은 직접 입력 장르는 제공 장르로 연결된다", () => {
+        client.assert(response.status === 201, `201 Created가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        const genres = response.body.selectedTags.genreTags || [];
+        client.assert(genres.length === 1, `genreTags가 1개가 아닙니다. actual=${genres.length}, body=${JSON.stringify(genres)}`);
+        client.assert(
+            String(genres[0].id) === String(client.global.get("genreTagId")),
+            `제공 장르가 아닌 새 태그로 연결됐습니다. actual=${genres[0].id}, expected=${client.global.get("genreTagId")}`,
+        );
+        client.assert(
+            genres[0].name === client.global.get("genreTagName"),
+            `제공 장르 표시명이 아닙니다. actual=${genres[0].name}`,
+        );
+    });
+%}
+
+### 3-5. [KNK-859] 빈 문자열이거나 30자를 넘는 직접 입력 장르면 400
+# 상한 30은 story_creation_tags.name 컬럼 길이이고, 서버가 trim한 뒤 잽니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [],
+  "customGenreTags": ["   "],
+  "protagonist": {}
+}
+
+> {%
+    client.test("빈 직접 입력 장르는 400이다", () => {
+        client.assert(response.status === 400, `400 Bad Request가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code가 BAD_REQUEST가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
+### 3-6. [KNK-859] 31자 직접 입력 장르면 400
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [],
+  "customGenreTags": ["가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"],
+  "protagonist": {}
+}
+
+> {%
+    client.test("30자를 넘는 직접 입력 장르는 400이다", () => {
+        client.assert(response.status === 400, `400 Bad Request가 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code가 BAD_REQUEST가 아닙니다. actual=${response.body.code}`);
+    });
+%}
+
 ### 4. 주인공 객체 없이 요청하면 400
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: {{deviceId}}

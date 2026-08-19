@@ -498,6 +498,150 @@ class StoryControllerIntegrationTests {
     }
 
     @Test
+    fun `직접 입력한 장르를 저장하고 응답과 AI 요청에 함께 싣는다`() {
+        // KNK-859: 인물 단위 계약(KNK-845) 교체 때 함께 사라진 장르 직접 입력을 복원한다.
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genre.id}],
+                  "customGenreTags": [" 학원물 ", "학 원 물"],
+                  "protagonist": {"customTags": ["용감한"]}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            // 표기 변형은 정규화 키로 하나로 합쳐, 사전 정의 장르 뒤에 붙는다.
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(2)
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo("판타지")
+            .jsonPath("$.selectedTags.genreTags[1].name").isEqualTo("학원물")
+            .jsonPath("$.selectedTags.genreTags[1].category").isEqualTo("GENRE")
+
+        val savedTags = jdbcTemplate.queryForList(
+            """
+            SELECT t.name, t.tag_type, t.tag_source, st.character_id
+            FROM story_creation_session_tags st
+            JOIN story_creation_tags t ON t.id = st.tag_id
+            ORDER BY st.id
+            """.trimIndent(),
+        )
+        check(savedTags.map { it["NAME"] } == listOf("판타지", "학원물", "용감한"))
+        // 장르는 세션 스코프(character_id NULL), 인물 특징만 인물에 귀속된다.
+        check(savedTags.map { it["CHARACTER_ID"] == null } == listOf(true, true, false))
+        check(savedTags[1]["TAG_TYPE"] == "GENRE")
+        check(savedTags[1]["TAG_SOURCE"] == "CUSTOM")
+
+        // AI 요청은 제공 장르를 앞에 두고 직접 입력 장르를 뒤에 붙인다.
+        check(storyAiClient.lastRequest?.genreTags == listOf("판타지", "학원물"))
+
+        // 컴파일 경로도 세션의 GENRE 행을 그대로 읽으므로 직접 입력 장르가 최종 스토리까지 이어진다.
+        val storylineId = jdbcTemplate.queryForObject(
+            "SELECT MIN(id) FROM story_creation_storylines",
+            Long::class.java,
+        )
+        val creationId = jdbcTemplate.queryForObject("SELECT MIN(id) FROM story_creation_sessions", Long::class.java)
+        restTestClient.post()
+            .uri("/api/v1/stories/simple")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":$creationId,"storylineId":$storylineId,"additionalInfos":[]}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.genres").value<List<String>> { genres ->
+                check(genres.contains("학원물")) { "최종 스토리 genres에 직접 입력 장르가 없습니다: $genres" }
+                check(genres.contains("판타지")) { "최종 스토리 genres에 제공 장르가 없습니다: $genres" }
+            }
+    }
+
+    @Test
+    fun `정규화 키가 같은 제공 장르가 있으면 직접 입력 장르로 커스텀 행을 만들지 않는다`() {
+        val predefined = seedTag(SimpleStoryTagCategory.GENRE, "현대 판타지", 10)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${predefined.id}],
+                  "customGenreTags": ["현대판타지"],
+                  "protagonist": {}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.genreTags[0].id").isEqualTo(predefined.id)
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo("현대 판타지")
+
+        check(tagRepository.count() == 1L)
+        check(sessionTagRepository.count() == 1L)
+        check(storyAiClient.lastRequest?.genreTags == listOf("현대 판타지"))
+    }
+
+    @Test
+    fun `같은 정규화 키를 장르와 인물 특징으로 함께 보내면 분류별로 각각 저장한다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "customGenreTags": ["회귀"],
+                  "protagonist": {"customTags": ["회귀"]}
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.genreTags[0].category").isEqualTo("GENRE")
+            .jsonPath("$.selectedTags.protagonist.features.length()").isEqualTo(1)
+            .jsonPath("$.selectedTags.protagonist.features[0].category").isEqualTo("PROTAGONIST")
+
+        // 태그 동일성은 (분류, 정규화 키)라 장르 행과 특징 행은 별개다.
+        check(tagRepository.count() == 2L)
+        check(sessionTagRepository.count() == 2L)
+    }
+
+    @Test
+    fun `빈 문자열이나 30자를 넘는 직접 입력 장르는 거절한다`() {
+        listOf("", " ", "가".repeat(31)).forEach { invalid ->
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(
+                    """{"requestId":"${java.util.UUID.randomUUID()}","customGenreTags":["$invalid"],"protagonist":{}}""",
+                )
+                .exchange()
+                .expectStatus().isBadRequest
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+        }
+
+        check(storyAiClient.lastRequest == null)
+    }
+
+    @Test
     fun `정규화 키가 같은 제공 태그가 있으면 커스텀 태그를 만들지 않는다`() {
         val predefined = seedTag(SimpleStoryTagCategory.PROTAGONIST, "현대 판타지", 10)
 
