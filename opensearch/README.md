@@ -8,6 +8,7 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 | `index-template.json` | 인덱스 템플릿(필드 타입 정의) |
 | `fluent-bit.conf` | 로그 수집·파싱·전송 설정 |
 | `parsers.conf` | 위에서 쓰는 JSON 파서 정의 |
+| `vector.yaml` | 중앙 가공·버퍼 계층 설정 |
 
 ## 시작하기
 
@@ -34,11 +35,35 @@ curl -s -o /dev/null -H 'X-Manyak-Request-Id: req_demo_0001' \
 curl -s "http://localhost:9200/manyak-logs-local-*/_search?q=request_id:req_demo_0001&pretty"
 ```
 
-경로는 이렇습니다. 운영(ECS FireLens)과 같은 모양이라 여기서 검증한 FILTER·OUTPUT이 [KNK-855](https://kimandkang.atlassian.net/browse/KNK-855)로 그대로 넘어갑니다.
+경로는 이렇습니다. 앞쪽 절반이 운영(ECS FireLens)과 같은 모양이라, 여기서 검증한 파싱·전송 설정이 [KNK-855](https://kimandkang.atlassian.net/browse/KNK-855)로 그대로 넘어갑니다.
 
 ```
-앱 컨테이너 stdout → 도커 fluentd 드라이버 → Fluent Bit(forward) → parser → OpenSearch
+앱 stdout → 도커 fluentd 드라이버 → Fluent Bit → Vector → OpenSearch
+                                    (수집)      (가공·버퍼)
 ```
+
+## 왜 Vector를 한 겹 더 두나
+
+Fluent Bit만으로도 OpenSearch에 넣을 수 있습니다. 그런데 **목적지가 잠깐 죽으면 로그가 사라집니다.** 로컬에서 두 번 재현해 확인했습니다.
+
+| 구성 | 실험 | 결과 |
+|---|---|---|
+| Fluent Bit → OpenSearch | Fluent Bit을 1분 중단 | 그 사이 로그 **유실** |
+| Fluent Bit → **Vector** → OpenSearch | OpenSearch를 중단 | 버퍼에 쌓였다가 **복구 후 전달** |
+
+도커 로그 드라이버의 `fluentd-async` 버퍼는 메모리뿐이라 한도를 넘으면 버립니다. Vector의 디스크 버퍼(`buffer.type: disk`)가 그 구멍을 메웁니다. 운영(Fargate FireLens)도 디스크 버퍼가 사실상 없어 같은 위험을 안습니다.
+
+Vector가 맡는 나머지 일은 **가공**입니다. `vector.yaml`의 VRL이 `container_name`의 앞 슬래시를 떼어 운영과 모양을 맞추고, 전송 과정에서 딸려온 찌꺼기(`timestamp`·`path`·`source_type`)를 걷어냅니다. 이런 규칙을 중앙 한 곳에서 고칠 수 있다는 게 계층을 나누는 이유입니다.
+
+### Fluent Bit → Vector는 forward가 아니라 HTTP입니다
+
+`forward`(fluentd 프로토콜)로 보내면 Vector가 통째로 버립니다.
+
+```
+Error decoding fluent message. error=UnexpectedValue(...) error_type="parser_failed"
+```
+
+Fluent Bit 5.x는 각 항목을 `[[시각, 메타데이터], 레코드]`인 **v2 이벤트 형식**으로 보내는데 Vector의 `fluent` 소스가 이를 해석하지 못합니다. 데이터는 도착하는데 색인만 안 되므로 원인을 찾기 어렵습니다. HTTP + NDJSON으로 보내면 이 문제가 없습니다.
 
 #### 알아둘 것
 

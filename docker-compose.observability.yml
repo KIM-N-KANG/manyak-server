@@ -67,15 +67,28 @@ services:
       # 브라우저로 http://localhost:5601 접속.
       - "5601:5601"
 
+  vector:
+    # Fluent Bit과 OpenSearch 사이의 중앙 가공·버퍼 계층(vector.yaml).
+    # 목적지가 잠깐 죽어도 디스크에 쌓아 두었다가 되살아나면 밀어 넣는다.
+    image: timberio/vector:0.57.0-alpine
+    container_name: manyak-vector
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    volumes:
+      - ./opensearch/vector.yaml:/etc/vector/vector.yaml:ro
+      # 디스크 버퍼가 쓰는 저장소. 컨테이너를 지워도 남아야 버퍼의 의미가 있다.
+      - manyak-vector-data:/var/lib/vector
+
   fluent-bit:
-    # 로그를 모아 OpenSearch로 보내는 수집기. 운영(ECS)에서는 AWS가 이 역할을
+    # 로그를 모아 Vector로 넘기는 수집기. 운영(ECS)에서는 AWS가 이 역할을
     # FireLens라는 이름으로 사이드카에 띄우는데, 그 실체가 곧 Fluent Bit이다.
     # 그래서 여기서 검증한 설정이 KNK-855에서 거의 그대로 쓰인다.
     image: fluent/fluent-bit:5.1.1
     container_name: manyak-fluent-bit
     depends_on:
-      opensearch:
-        condition: service_healthy
+      vector:
+        condition: service_started
     ports:
       # forward 입력. 도커의 fluentd 로그 드라이버는 **컨테이너가 아니라 도커 데몬**이 실행하므로
       # 데몬(=호스트) 입장에서 닿는 주소여야 한다. 그래서 컨테이너 네트워크만으로는 부족하고
@@ -142,3 +155,4 @@ services:
 
 volumes:
   manyak-opensearch-data:
+  manyak-vector-data:
