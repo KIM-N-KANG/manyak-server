@@ -175,37 +175,43 @@ class SimpleStoryCreationService(
     ): GenerateSimpleStorylinesResponse {
         // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
         val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
-        // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
         // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
         val generate: (Boolean, Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse =
-            { _, isIncompatibleReplayFallback, recordedParentLink ->
-                // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
-                // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
-                var aiCallStarted = false
-                // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
-                try {
-                    // 호환되지 않는 옛 COMPLETED 응답의 fallback은 최초 성공 때 이미 예약한 한도를 다시 소모하지 않는다.
-                    val guestDeviceId = if (isIncompatibleReplayFallback) {
-                        null
-                    } else {
-                        guestTrialLimitService.reserveForGuestOrNull(
-                            userId,
-                            deviceId,
-                            GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-                        )
-                    }
-                    val response = try {
-                        doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+            { isReclaim, isIncompatibleReplayFallback, recordedParentLink ->
+                // 회수 재구성(KNK-848): 세션은 커밋됐지만 요청 행 COMPLETED 마킹을 잃어 aged PENDING으로 남은 창에서, 같은 requestId
+                // 회수가 AI·게스트 한도를 다시 소모하지 않도록 저장된 세션을 재구성해 반환한다(완성 경로 reconcileCreatedSession 대응).
+                // 호환 불가 replay fallback은 옛 결과를 못 읽어 의도적으로 재생성하는 별개 경로라 재구성하지 않는다(그 세션 재사용은 옛 동작을 깬다).
+                // 세션이 없으면(진짜 실패의 aged PENDING) null → 종전대로 생성한다.
+                val reclaimed = if (isReclaim && !isIncompatibleReplayFallback) reconcileGeneratedStorylines(request) else null
+                reclaimed ?: run {
+                    // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+                    // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
+                    var aiCallStarted = false
+                    // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
+                    try {
+                        // 호환되지 않는 옛 COMPLETED 응답의 fallback은 최초 성공 때 이미 예약한 한도를 다시 소모하지 않는다.
+                        val guestDeviceId = if (isIncompatibleReplayFallback) {
+                            null
+                        } else {
+                            guestTrialLimitService.reserveForGuestOrNull(
+                                userId,
+                                deviceId,
+                                GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+                            )
+                        }
+                        val response = try {
+                            doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+                        } catch (throwable: Throwable) {
+                            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                            throw throwable
+                        }
+                        recordStorylineResult(OUTCOME_SUCCESS)
+                        response
                     } catch (throwable: Throwable) {
-                        guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                        recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
                         throw throwable
                     }
-                    recordStorylineResult(OUTCOME_SUCCESS)
-                    response
-                } catch (throwable: Throwable) {
-                    recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
-                    throw throwable
                 }
             }
         return recordOrRun(
@@ -441,30 +447,7 @@ class SimpleStoryCreationService(
                 }
             ).groupBy { info -> info.storyline.id }
 
-            val storylineResponses = storylines.map { storyline ->
-                SimpleStorylineResponse(
-                    id = storyline.id,
-                    storyline = storyline.storylineText,
-                    recommendedInfos = recommendedInfos[storyline.id].orEmpty().map { info ->
-                        SimpleStoryRecommendedInfoResponse(
-                            id = info.id,
-                            text = info.infoText,
-                        )
-                    },
-                )
-            }
-
-            GenerateSimpleStorylinesResponse(
-                simpleCreationId = creationSession.id,
-                selectedTags = SimpleStorySelectedTagsResponse(
-                    genreTags = genreTags.distinctBy { it.id }.map { it.toTagResponse() },
-                    protagonist = characters.first().toSelectedCharacterResponse(featureTagsByCharacter),
-                    supportingCharacters = characters.drop(1).map { character ->
-                        character.toSelectedCharacterResponse(featureTagsByCharacter)
-                    },
-                ),
-                storylines = storylineResponses,
-            )
+            buildStorylinesResponse(creationSession, genreTags, characters, featureTagsByCharacter, storylines, recommendedInfos)
             } ?: throw IllegalStateException("Storyline creation transaction result is empty")
         } catch (exception: Exception) {
             // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
@@ -478,6 +461,74 @@ class SimpleStoryCreationService(
         // 스토리라인 생성 성공 분석 이벤트(스펙 §6-4-2-3). 세션 저장으로 확정된 creation_id를 싣는다.
         serverAnalytics.storylineGenerationSucceeded(userId = userId, creationId = response.simpleCreationId)
         return response
+    }
+
+    /**
+     * 저장된 세션·인물·태그·스토리라인·추천 정보로 스토리라인 생성 응답을 조립한다.
+     * 최초 생성(트랜잭션 안의 방금 저장분)과 회수 재구성([reconcileGeneratedStorylines])이 같은 코드로 응답을 만들게 공유한다.
+     * [characters]는 주인공이 첫 원소여야 한다(생성 경로의 draft 순서·회수 경로의 role 오름차순 조회가 모두 그러함).
+     */
+    private fun buildStorylinesResponse(
+        session: StoryCreationSession,
+        genreTags: List<StoryCreationTag>,
+        characters: List<StoryCreationCharacter>,
+        featureTagsByCharacter: Map<StoryCreationCharacter, List<StoryCreationTag>>,
+        storylines: List<StoryCreationStoryline>,
+        recommendedInfosByStoryline: Map<Long, List<StoryCreationStorylineRecommendedInfo>>,
+    ): GenerateSimpleStorylinesResponse =
+        GenerateSimpleStorylinesResponse(
+            simpleCreationId = session.id,
+            selectedTags = SimpleStorySelectedTagsResponse(
+                genreTags = genreTags.distinctBy { it.id }.map { it.toTagResponse() },
+                protagonist = characters.first().toSelectedCharacterResponse(featureTagsByCharacter),
+                supportingCharacters = characters.drop(1).map { it.toSelectedCharacterResponse(featureTagsByCharacter) },
+            ),
+            storylines = storylines.map { storyline ->
+                SimpleStorylineResponse(
+                    id = storyline.id,
+                    storyline = storyline.storylineText,
+                    recommendedInfos = recommendedInfosByStoryline[storyline.id].orEmpty().map { info ->
+                        SimpleStoryRecommendedInfoResponse(id = info.id, text = info.infoText)
+                    },
+                )
+            },
+        )
+
+    /**
+     * 스토리라인 회수(reclaim) 재구성(KNK-848). 세션 저장 트랜잭션은 커밋됐지만 요청 행의 COMPLETED 마킹 커밋 전에 프로세스가
+     * 죽어 aged PENDING으로 남은 좁은 창에서, 같은 requestId 회수가 AI·게스트 한도를 다시 소모하지 않도록 저장된 세션으로
+     * 응답을 재구성한다(스토리 완성 경로의 [reconcileCreatedSession]에 대응). 소유는 [StoryCreationRequestRecorder]가 isReclaim
+     * 판정 전에 이미 검증했고, 여기서는 `storyline_request_id == requestId` 바인딩(이 조회 자체)으로 남의 세션 재구성을 막는다.
+     * 이 requestId로 만든 세션이 없으면(진짜 실패의 aged PENDING) null을 반환해 정상 생성으로 폴백한다.
+     */
+    private fun reconcileGeneratedStorylines(request: GenerateSimpleStorylinesRequest): GenerateSimpleStorylinesResponse? {
+        val session = storyCreationSessionRepository.findFirstByStorylineRequestIdOrderByIdAsc(request.requestId)
+            ?: return null
+        val characters = storyCreationCharacterRepository
+            .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(session.id)
+        val storylines = storyCreationStorylineRepository
+            .findByCreationSessionIdOrderByStorylineOrderAscIdAsc(session.id)
+        // 세션 저장은 원자적이라 커밋된 세션엔 인물·스토리라인이 함께 있다. 방어적으로 비정상 상태면 재구성하지 않고 정상 생성으로 폴백한다.
+        if (characters.isEmpty() || storylines.isEmpty()) {
+            return null
+        }
+
+        val sessionTagRows = storyCreationSessionTagRepository.findAllWithTagByCreationSessionId(session.id)
+        // 장르는 세션 스코프(character_id NULL), 특징은 character_id별. 최초 생성의 저장 순서(태그 id 오름차순)를 그대로 재현한다.
+        val genreTags = sessionTagRows
+            .filter { it.character == null && it.tag.category == SimpleStoryTagCategory.GENRE }
+            .map { it.tag }
+        val featureTagsByCharacterId = sessionTagRows
+            .filter { it.character != null }
+            .groupBy { it.character!!.id }
+            .mapValues { (_, rows) -> rows.map { it.tag } }
+        val featureTagsByCharacter = characters.associateWith { featureTagsByCharacterId[it.id].orEmpty() }
+
+        val recommendedInfosByStoryline = storyCreationStorylineRecommendedInfoRepository
+            .findByStorylineIdInOrderByStorylineIdAscInfoOrderAsc(storylines.map { it.id })
+            .groupBy { it.storyline.id }
+
+        return buildStorylinesResponse(session, genreTags, characters, featureTagsByCharacter, storylines, recommendedInfosByStoryline)
     }
 
     fun createSimpleStory(

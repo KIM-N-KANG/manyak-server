@@ -26,6 +26,7 @@
 | ---- | ---------- |
 | story_creation_sessions_pkey | CREATE UNIQUE INDEX story_creation_sessions_pkey ON public.story_creation_sessions USING btree (id) |
 | idx_story_creation_sessions_story | CREATE INDEX idx_story_creation_sessions_story ON public.story_creation_sessions USING btree (story_id) |
+| idx_story_creation_sessions_storyline_request_id | CREATE INDEX idx_story_creation_sessions_storyline_request_id ON public.story_creation_sessions USING btree (storyline_request_id) |
 
 ## Relations
 

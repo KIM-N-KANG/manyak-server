@@ -7,8 +7,15 @@ import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.util.UUID
 
 interface StoryCreationSessionRepository : JpaRepository<StoryCreationSession, Long> {
+    /**
+     * 스토리라인 생성 회수(reclaim) 재구성용(KNK-848). 이 스토리라인 요청 request_id로 만든 세션을 조회한다.
+     * 한 requestId는 세션 하나만 만들지만(멱등 창의 crash 재현), 계약상 첫 행으로 고정한다. 없으면 null(진짜 실패의 aged PENDING).
+     */
+    fun findFirstByStorylineRequestIdOrderByIdAsc(storylineRequestId: UUID): StoryCreationSession?
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM StoryCreationSession s WHERE s.id = :id")
     fun findByIdForUpdate(id: Long): StoryCreationSession?
