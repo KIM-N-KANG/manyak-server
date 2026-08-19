@@ -55,6 +55,12 @@ class RequestCorrelationFilter(
         rawSessionId: String?,
         rawDeviceId: String?,
     ) {
+        // 이 경고의 목적은 "프론트엔드가 실제 API 호출에서 추적 헤더를 빠뜨림"을 잡는 것이다.
+        // 비즈니스 API(/api/*) 밖의 경로는 헬스체크(ALB·ECS)·취약점 스캐너 등 기계 트래픽이라
+        // 헤더가 없는 게 정상이고, 경고를 찍으면 로그의 대부분을 노이즈로 채운다(실측 92%).
+        // MDC unknown 적재·request_id 발급은 경로와 무관하게 그대로 동작한다.
+        if (!request.requestURI.startsWith("/api/")) return
+
         val missing = buildList {
             if (rawDeviceId == null) add(HEADER_DEVICE_ID)
             if (rawSessionId == null) add(HEADER_SESSION_ID)
