@@ -691,6 +691,57 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `직접 입력 장르가 섞인 완성 회수도 최초 응답과 같은 장르 순서를 돌려준다`() {
+        // KNK-861: 장르 선별 규칙이 compile 경로와 완성 회수 경로에 복붙돼 있어, KNK-859가 compile 경로 한 곳만 고쳤다.
+        // CUSTOM은 sort_order 기본값이 0이라 tagSource 키가 빠진 회수 경로에서만 직접 입력 장르가 제공 장르를 앞질렀다.
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 10)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 20)
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", deviceA)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${UUID.randomUUID()}","genreTagIds":[${genreB.id},${genreA.id}],""" +
+                    """"customGenreTags":["학원물"],"protagonist":{}}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+        val session = sessionRepository.findAll().single()
+        val storyline = storylineRepository.findAll().first()
+        val requestId = UUID.randomUUID()
+
+        // 최초 응답은 '사전 정의(sortOrder) → 직접 입력' 순서다.
+        val first = postSimpleStory(requestId, session.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.genres[0]").isEqualTo("판타지")
+            .jsonPath("$.genres[1]").isEqualTo("무협")
+            .jsonPath("$.genres[2]").isEqualTo("학원물")
+            .returnResult()
+
+        // 크래시 창 재현(같은 requestId, 게스트 소유 aged PENDING).
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 회수 재구성 응답의 장르 순서는 최초 응답과 같아야 한다(바디 바이트 동일).
+        val second = postSimpleStory(requestId, session.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+    }
+
+    @Test
     fun `회수 재실행 재구성은 story_creation_duration 타이머를 올리지 않는다`() {
         // 회수 재실행(reconcile)은 AI 호출도 스토리 저장도 없이 저장된 스토리로 응답만 재구성하는 조회 경로다.
         // 여기서 성공 타이머를 올리면 아주 짧은 시간이 섞여 p95가 실제 생성 비용보다 낙관적으로 왜곡된다

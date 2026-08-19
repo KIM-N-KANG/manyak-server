@@ -738,15 +738,7 @@ class SimpleStoryCreationService(
 
         val sessionTagRows = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
-        // 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
-        // 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
-        // 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
-        // storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
-        val genreTags = sessionTagRows
-            .map { it.tag }
-            .filter { it.category == SimpleStoryTagCategory.GENRE }
-            .distinctBy { it.normalizedName }
-            .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
+        val genreTags = selectGenreTags(sessionTagRows)
         val characters = storyCreationCharacterRepository
             .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
         // 세션 스코프(character_id NULL) 태그를 카테고리로 복원하는 폴백. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
@@ -858,12 +850,8 @@ class SimpleStoryCreationService(
         val endings = storyEndingRepository
             .findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
             .map { it.toEndingResponse() }
-        // 응답의 genres는 세션 장르 태그(정렬 규칙은 compile 경로와 동일)로 재구성한다.
-        val genres = storyCreationSessionTagRepository
-            .findAllWithTagByCreationSessionId(session.id)
-            .map { it.tag }
-            .filter { it.category == SimpleStoryTagCategory.GENRE }
-            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+        // 응답의 genres는 세션 장르 태그로 재구성한다 — compile 경로와 같은 selectGenreTags를 써 순서를 일치시킨다(KNK-861).
+        val genres = selectGenreTags(storyCreationSessionTagRepository.findAllWithTagByCreationSessionId(session.id))
             .map { it.name }
 
         return StoryCreationOutcome(
@@ -887,6 +875,21 @@ class SimpleStoryCreationService(
             aiCallLogId = null,
         )
     }
+
+    /**
+     * 세션 태그 행에서 장르 태그를 선별한다(카테고리 필터 + 정규화 키 중복 제거 + 정렬).
+     * compile 경로와 완성 회수 경로가 공유한다 — 규칙이 복붙돼 한쪽만 고쳐지면 회수 응답 순서가 최초 응답과 어긋난다(KNK-861).
+     *
+     * 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
+     * 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
+     * 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
+     * storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
+     */
+    private fun selectGenreTags(sessionTagRows: List<StoryCreationSessionTag>): List<StoryCreationTag> = sessionTagRows
+        .map { it.tag }
+        .filter { it.category == SimpleStoryTagCategory.GENRE }
+        .distinctBy { it.normalizedName }
+        .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
 
     /** 스토리 장르 태그와 일치하는 활성 로어북을 선별한다. 장르 태그가 없으면 빈 목록. */
     private fun selectLorebooksForGenres(genreTags: List<StoryCreationTag>): List<Lorebook> {
