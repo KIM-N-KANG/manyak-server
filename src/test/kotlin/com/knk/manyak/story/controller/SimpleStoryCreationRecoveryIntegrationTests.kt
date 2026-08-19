@@ -474,6 +474,56 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `직접 입력 장르가 섞인 회수 재구성도 최초 응답과 같은 순서를 돌려준다`() {
+        // KNK-859: 커스텀 장르는 사전 정의 장르 뒤에 저장되므로(st.id 오름차순), 회수 재구성도 같은 순서여야 한다.
+        // 입력을 태그 id 내림차순으로 실어 "입력 순서 ≠ id 순서"를 만든다(정렬 회귀 감지).
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 2)
+        val requestId = UUID.randomUUID()
+
+        val body = """
+            {
+              "requestId": "$requestId",
+              "genreTagIds": [${genreB.id}, ${genreA.id}],
+              "customGenreTags": ["학원물", "느와르"],
+              "protagonist": {"customTags": ["회귀"]}
+            }
+        """.trimIndent()
+        val postRich = {
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", deviceA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+        }
+
+        val first = postRich().expectStatus().isCreated.expectBody().returnResult()
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+
+        simulateStorylineCrashWindow(requestId, deviceA)
+
+        val second = postRich().expectStatus().isCreated.expectBody().returnResult()
+
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.result.selectedTags.genreTags.length()").isEqualTo(4)
+            .jsonPath("$.result.selectedTags.genreTags[0].name").isEqualTo("무협")
+            .jsonPath("$.result.selectedTags.genreTags[1].name").isEqualTo("판타지")
+            .jsonPath("$.result.selectedTags.genreTags[2].name").isEqualTo("학원물")
+            .jsonPath("$.result.selectedTags.genreTags[3].name").isEqualTo("느와르")
+            .jsonPath("$.result.selectedTags.protagonist.features[0].name").isEqualTo("회귀")
+    }
+
+    @Test
     fun `그 회수는 게스트 스토리라인 한도를 재소모하지 않는다`() {
         // KNK-848의 사용자에게 보이는 유일한 피해: 회수 재실행이 STORYLINE_GENERATION 카운터를 재예약하면 게스트가 1회 제작에
         // 한도 2회를 잃는다. crash 창 회수는 한도를 예약하지 않아야 한다.

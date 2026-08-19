@@ -352,11 +352,17 @@ class SimpleStoryCreationService(
         ) + request.supportingCharacters.mapIndexed { index, character ->
             character.toCharacterDraft(StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = index + 1)
         }
-        val customTagDrafts = characterDrafts.flatMap { it.customTags }.distinctBy { it.key }
+        // 장르 직접 입력(KNK-859). 인물 특징과 같은 정규화 키 규칙으로 다루되 분류만 GENRE다.
+        val customGenreDrafts = request.customGenreTags
+            .map { StoryCreationTagDraft(category = SimpleStoryTagCategory.GENRE, name = it.trim()) }
+            .distinctBy { it.key }
+        val customTagDrafts = (customGenreDrafts + characterDrafts.flatMap { it.customTags }).distinctBy { it.key }
 
         // AI 인물 단위 계약(KNK-846): 장르 + 주인공/주변 인물별 {name, gender, features}. 아직 저장 전이라 요청 draft로 조립한다.
         val aiRequest = AiStorylinesRequest(
-            genreTags = genreTags.distinctBy { it.normalizedName }.map { it.name },
+            // 제공 장르를 앞에 둬, 정규화 키가 겹치는 직접 입력 장르는 제공 표기를 남긴다(인물 특징과 같은 규칙).
+            genreTags = (genreTags.map { it.name } + customGenreDrafts.map { it.name })
+                .distinctBy { StoryCreationTag.normalize(it) },
             protagonist = characterDrafts.first { it.role == StoryCreationCharacterRole.PROTAGONIST }.toAiCharacter(),
             supportingCharacters = characterDrafts
                 .filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
@@ -409,8 +415,12 @@ class SimpleStoryCreationService(
                     draft.predefinedTags + draft.customTags.map { customTagsByKey.getValue(it.key) }
                     ).distinctBy { it.id }
             }
+            // 사전 정의 장르 → 직접 입력 장르 순. 세션 태그 저장 순서(st.id)가 곧 회수 재구성 응답 순서다(KNK-848).
+            val sessionGenreTags = (
+                genreTags + customGenreDrafts.map { customTagsByKey.getValue(it.key) }
+                ).distinctBy { it.id }
             storyCreationSessionTagRepository.saveAll(
-                genreTags.distinctBy { it.id }.map { tag ->
+                sessionGenreTags.map { tag ->
                     StoryCreationSessionTag(
                         creationSession = creationSession,
                         tag = tag,
@@ -447,7 +457,7 @@ class SimpleStoryCreationService(
                 }
             ).groupBy { info -> info.storyline.id }
 
-            buildStorylinesResponse(creationSession, genreTags, characters, featureTagsByCharacter, storylines, recommendedInfos)
+            buildStorylinesResponse(creationSession, sessionGenreTags, characters, featureTagsByCharacter, storylines, recommendedInfos)
             } ?: throw IllegalStateException("Storyline creation transaction result is empty")
         } catch (exception: Exception) {
             // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
@@ -729,11 +739,14 @@ class SimpleStoryCreationService(
         val sessionTagRows = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
         // 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
+        // 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
+        // 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
+        // storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
         val genreTags = sessionTagRows
             .map { it.tag }
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .distinctBy { it.normalizedName }
-            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
         val characters = storyCreationCharacterRepository
             .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
         // 세션 스코프(character_id NULL) 태그를 카테고리로 복원하는 폴백. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
