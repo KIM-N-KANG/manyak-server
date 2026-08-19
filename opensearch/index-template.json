@@ -1,0 +1,53 @@
+{
+  "index_patterns": ["manyak-logs-*"],
+  "priority": 100,
+  "_meta": {
+    "description": "manyak 애플리케이션 로그(LogstashEncoder JSON) 인덱스 템플릿. 로컬 학습 스택과 운영 도메인이 같은 파일을 쓴다.",
+    "ticket": "KNK-853",
+    "source_of_truth": "src/main/resources/logback-spring.xml (LogstashEncoder) + StructuredLogger"
+  },
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "5s"
+    },
+    "mappings": {
+      "dynamic_templates": [
+        {
+          "strings_as_keyword": {
+            "match_mapping_type": "string",
+            "mapping": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "@version": { "type": "keyword" },
+
+        "message": { "type": "text" },
+        "stack_trace": { "type": "text" },
+
+        "level": { "type": "keyword" },
+        "level_value": { "type": "integer" },
+        "logger_name": { "type": "keyword" },
+        "thread_name": { "type": "keyword" },
+        "service": { "type": "keyword" },
+        "tags": { "type": "keyword" },
+
+        "request_id": { "type": "keyword" },
+        "session_id": { "type": "keyword" },
+        "device_id_hash": { "type": "keyword" },
+
+        "event_name": { "type": "keyword" },
+        "endpoint": { "type": "keyword" },
+        "http_method": { "type": "keyword" },
+        "status_code": { "type": "integer" },
+        "duration_ms": { "type": "long" }
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+# Vector 설정(KNK-853). Fluent Bit 과 OpenSearch 사이의 **중앙 가공·버퍼 계층**이다.
+#
+#   앱 → 도커 로그 드라이버 → Fluent Bit → Vector → OpenSearch
+#                              (수집)      (가공·버퍼)
+#
+# 왜 나누나
+#   - Fluent Bit 은 앱 옆에 붙는 에이전트라 가벼워야 한다(운영에선 태스크마다 하나씩 뜬다).
+#   - 무거운 가공과 버퍼링은 중앙에 하나만 두는 편이 낫다. 규칙을 고칠 때 에이전트를 전부
+#     재배포하지 않아도 되고, 목적지가 잠깐 죽어도 여기서 받아 둘 수 있다.
+#
+# Data Prepper 와 같은 자리를 놓고 겨루는 도구이며, 로그에 한해서는 Vector 가 더 가볍고 유연하다.
+# 다만 트레이스(OpenSearch Trace Analytics)는 Data Prepper 전용 프로세서가 필요해 대체되지 않는다.
+
+# 디스크 버퍼가 파일을 쓸 위치. 아래 sink 의 buffer.type=disk 를 쓰려면 반드시 필요하다.
+data_dir: /var/lib/vector
+
+sources:
+  # Fluent Bit 의 http 출력을 NDJSON 으로 받는다.
+  #
+  # `type: fluent`(forward 프로토콜)를 먼저 시도했다가 되돌렸다. Fluent Bit 5.x 는 각 항목을
+  # `[[시각, 메타데이터], 레코드]` 인 v2 이벤트 형식으로 보내는데 Vector 의 fluent 소스가 이를
+  # 해석하지 못하고 `Error decoding fluent message ... parser_failed` 로 통째로 버린다(실측).
+  # HTTP + JSON 은 양쪽 다 단순히 지원하므로 이 문제가 없다.
+  fluentbit:
+    type: http_server
+    address: 0.0.0.0:24225
+    encoding: ndjson
+
+transforms:
+  # VRL(Vector Remap Language)로 레코드를 손본다. Fluent Bit 의 필터보다 표현력이 훨씬 좋다.
+  refine:
+    type: remap
+    inputs: [fluentbit]
+    source: |
+      # ① 이 로그가 Vector 를 지났다는 표시. Fluent Bit 이 경로에 있는지 증명할 때 썼던 것과 같은 수법으로,
+      #    나중에 이 필드의 유무만 보면 경로를 확인할 수 있다.
+      .pipeline = "vector"
+
+      # ② 도커가 붙이는 container_name 은 "/manyak-app" 처럼 앞에 슬래시가 붙는다.
+      #    운영(ECS)에서는 슬래시가 없으므로 여기서 떼어 양쪽 모양을 맞춘다.
+      if exists(.container_name) {
+        .container_name = replace(to_string!(.container_name), r'^/', "")
+      }
+
+      # ③ 전송 과정에서 딸려 온 찌꺼기를 걷어낸다.
+      #    - timestamp   : Vector 가 수신한 시각. 우리 정본은 @timestamp 라 헷갈리기만 한다.
+      #    - path        : Fluent Bit 이 POST 한 HTTP 경로("/"). 항상 같은 값이라 정보가 없다.
+      #    - source_type : Vector 내부 메타데이터.
+      #    남겨 두면 인덱스 매핑만 불어난다. 가공 계층을 두는 이유가 이런 정리다.
+      del(.timestamp)
+      del(.path)
+      del(.source_type)
+
+sinks:
+  opensearch:
+    type: elasticsearch
+    inputs: [refine]
+    endpoints: ["http://opensearch:9200"]
+    # OpenSearch 는 Elasticsearch 7.10 에서 갈라져 나왔다. auto 로 두면 3.8.0 이라는 버전 문자열을
+    # ES 8 로 오인해 요청 형식이 어긋날 수 있으므로 v7 로 못 박는다.
+    api_version: v7
+    mode: bulk
+    bulk:
+      # Fluent Bit 의 Logstash_Format 과 같은 결과(manyak-logs-local-2026.08.19)를 만든다.
+      index: "manyak-logs-local-%Y.%m.%d"
+
+    # ─── 이 파일의 핵심 ───────────────────────────────────────────────
+    # 목적지(OpenSearch)가 잠깐 죽어도 로그를 디스크에 쌓아 두었다가 되살아나면 밀어 넣는다.
+    # 도커 로그 드라이버의 메모리 버퍼는 한도를 넘으면 그냥 버려서(실측 확인) 유실이 난다.
+    # 그 구멍을 메우는 게 이 계층의 존재 이유다.
+    buffer:
+      type: disk
+      # 디스크 버퍼의 최소 허용치가 256MiB다. 이보다 작게 주면 기동에 실패한다.
+      max_size: 268435488
+      # 버퍼가 가득 차면 **막는다**(뒤로 밀어냄). drop_newest 로 두면 조용히 버려진다.
+      when_full: block

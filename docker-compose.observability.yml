@@ -1,0 +1,163 @@
+# 로컬 관측 스택(KNK-853). 평소 개발용 docker-compose.yml(postgres·redis)과 **분리된 파일**이다.
+# 평소 개발 회전에는 필요 없고, 로그 파이프라인을 학습·검증할 때만 띄운다.
+#
+#   띄우기:  docker compose -f docker-compose.observability.yml up -d
+#   내리기:  docker compose -f docker-compose.observability.yml down
+#   데이터까지 지우기: docker compose -f docker-compose.observability.yml down -v
+#
+# 이 스택의 목적은 두 가지다.
+#   1. Fluent Bit → (Vector) → OpenSearch 파이프라인을 손에 익힌다.
+#   2. 운영 도메인(KNK-854)에 그대로 올릴 **인덱스 템플릿**을 여기서 만들고 검증한다.
+#      그래서 로그 스키마는 운영과 같은 LogstashEncoder JSON을 기준으로 삼는다.
+#
+# 프로젝트 이름을 분리한다. compose는 기본적으로 **디렉터리 이름**을 프로젝트로 쓰는데, 그러면 이 스택이
+# docker-compose.yml(postgres·redis)과 같은 `manyak-server` 프로젝트에 묶인다. 그 상태에서 어느 한쪽에
+# `--remove-orphans`를 주면 다른 쪽 컨테이너가 orphan으로 지워진다. 이름을 갈라 그 사고를 원천 차단한다.
+name: manyak-observability
+
+services:
+  opensearch:
+    # 버전을 고정한다(latest 금지 — 재현 가능해야 한다). 3.8.0은 2026-08 기준 최신 안정 버전이다.
+    # 운영은 AWS OpenSearch Service가 지원하는 버전을 따라가야 하므로 여기와 다를 수 있다.
+    # 버전 대조는 도메인을 만드는 KNK-854에서 한다.
+    image: opensearchproject/opensearch:3.8.0
+    container_name: manyak-opensearch
+    environment:
+      # 단일 노드. 클러스터를 구성하지 않으므로 마스터 선출 과정을 건너뛴다.
+      - discovery.type=single-node
+      # 힙 1GB. 컨테이너 전체 메모리의 절반 이하로 잡는 게 관례다(나머지는 Lucene이 파일 캐시로 쓴다).
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      # 보안 플러그인 끄기 — **로컬 학습 전용**이다.
+      # 켜면 TLS 인증서·admin 비밀번호(2.12+부터 OPENSEARCH_INITIAL_ADMIN_PASSWORD 필수)가 따라붙어
+      # 학습의 본줄기(로그 파이프라인)와 무관한 설정에 시간을 쓰게 된다.
+      # 운영 도메인(KNK-854)은 반대로 인증·접근제어를 반드시 켠다.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      # JVM 힙이 디스크로 스왑되면 검색 지연이 튄다. memlock으로 메모리에 고정한다.
+      memlock: { soft: -1, hard: -1 }
+      # Lucene은 세그먼트마다 파일 핸들을 쓴다. 기본값으로는 부족해 공식 문서가 65536을 권장한다.
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      # REST API. curl·Fluent Bit·Vector가 여기로 색인한다.
+      - "9200:9200"
+    volumes:
+      - manyak-opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      # 단일 노드라 status는 green이 아니라 **yellow가 정상**이다(복제본을 둘 노드가 없어 replica가 미할당).
+      # 그래서 green을 기다리면 영원히 unhealthy다. 응답 자체가 오는지만 본다.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:3.8.0
+    container_name: manyak-opensearch-dashboards
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      # 컨테이너 네트워크 안에서는 서비스명으로 찾는다(localhost가 아니다 — 각 컨테이너의 localhost는 자기 자신이다).
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      # 서버 쪽 보안을 껐으므로 대시보드의 인증 플러그인도 함께 꺼야 한다. 한쪽만 끄면 로그인 화면에서 막힌다.
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      # 브라우저로 http://localhost:5601 접속.
+      - "5601:5601"
+
+  vector:
+    # Fluent Bit과 OpenSearch 사이의 중앙 가공·버퍼 계층(vector.yaml).
+    # 목적지가 잠깐 죽어도 디스크에 쌓아 두었다가 되살아나면 밀어 넣는다.
+    image: timberio/vector:0.57.0-alpine
+    container_name: manyak-vector
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    volumes:
+      - ./opensearch/vector.yaml:/etc/vector/vector.yaml:ro
+      # 디스크 버퍼가 쓰는 저장소. 컨테이너를 지워도 남아야 버퍼의 의미가 있다.
+      - manyak-vector-data:/var/lib/vector
+
+  fluent-bit:
+    # 로그를 모아 Vector로 넘기는 수집기. 운영(ECS)에서는 AWS가 이 역할을
+    # FireLens라는 이름으로 사이드카에 띄우는데, 그 실체가 곧 Fluent Bit이다.
+    # 그래서 여기서 검증한 설정이 KNK-855에서 거의 그대로 쓰인다.
+    image: fluent/fluent-bit:5.1.1
+    container_name: manyak-fluent-bit
+    depends_on:
+      vector:
+        condition: service_started
+    ports:
+      # forward 입력. 도커의 fluentd 로그 드라이버는 **컨테이너가 아니라 도커 데몬**이 실행하므로
+      # 데몬(=호스트) 입장에서 닿는 주소여야 한다. 그래서 컨테이너 네트워크만으로는 부족하고
+      # 이렇게 호스트로 게시해야 app 컨테이너의 로그가 들어온다.
+      - "24224:24224"
+    volumes:
+      # 설정 파일을 읽기 전용으로 넣는다. 파일을 고치고 `restart`만 하면 반영된다.
+      - ./opensearch/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./opensearch/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+
+  app:
+    # 로컬 만약 서버를 **컨테이너로** 띄워, 운영(ECS FireLens)과 같은 경로로 로그를 흘린다.
+    #   앱 stdout → 도커 로그 드라이버(fluentd) → Fluent Bit → OpenSearch
+    #
+    # 평소에는 뜨지 않는다(profiles). 일상 개발·테스트는 종전대로 `./gradlew bootRun` 을 쓰고,
+    # 로그 파이프라인을 확인할 때만 아래처럼 켠다.
+    #   ./gradlew bootJar
+    #   docker compose -f docker-compose.observability.yml --profile app up -d app
+    profiles: ["app"]
+    # 이미지를 따로 빌드하지 않는다. 루트 Dockerfile은 컨테이너 안에서 gradle 빌드를 다시 돌려 느리다.
+    # 여기서는 로컬에서 만든 jar를 그대로 얹어 확인 회전을 짧게 가져간다.
+    image: eclipse-temurin:21-jre-alpine
+    container_name: manyak-app
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    volumes:
+      - ./build/libs/app.jar:/app/app.jar:ro
+    command: ["java", "-jar", "/app/app.jar"]
+    environment:
+      # jsonlog 를 겹쳐 LogstashEncoder JSON 을 켠다(logback-spring.xml).
+      SPRING_PROFILES_ACTIVE: "local,jsonlog"
+      # 컨테이너 안에서 호스트의 postgres·redis(평소 개발용 docker-compose.yml)를 찾아간다.
+      # 두 스택이 별도 compose 프로젝트라 서비스 이름으로는 못 찾고, 호스트를 거쳐야 한다.
+      MANYAK_DB_URL: "jdbc:postgresql://host.docker.internal:${MANYAK_DB_PORT:-5432}/${MANYAK_DB_NAME:-manyak}"
+      SPRING_DATA_REDIS_HOST: "host.docker.internal"
+      SPRING_DATA_REDIS_PORT: "${MANYAK_REDIS_PORT:-6379}"
+      # 로컬 확인용이라 AI는 스텁으로 둔다(실제 호출 없이 즉답).
+      MANYAK_AI_CHAT_STUB: "true"
+      MANYAK_AI_STORY_STUB: "true"
+      # .env 의 localhost 는 컨테이너 안에서 자기 자신을 가리키므로 호스트로 돌린다.
+      MANYAK_AI_BASE_URL: "http://host.docker.internal:8000"
+      # .env 에 이 키가 **빈 값으로** 있는데, 환경변수는 yml 보다 우선하므로 그대로 두면
+      # application-local.yml 의 로컬 기본값을 빈 값이 덮어 `IllegalArgumentException: Empty key` 로 죽는다
+      # (bootRun 은 .env 를 읽지 않아 이 문제가 드러나지 않는다).
+      # `:-` 는 값이 없거나 **비어 있을 때** 기본값을 쓴다. 아래 값은 application-local.yml 과 같은 로컬 전용 더미다.
+      MANYAK_AUTH_JWT_SECRET: "${MANYAK_AUTH_JWT_SECRET:-local-dev-only-jwt-secret-change-me-please-32b}"
+    env_file:
+      # DB 계정과 CORS 등 나머지는 평소 쓰던 .env 를 그대로 쓴다.
+      # 위 environment 가 env_file 보다 우선하므로 DB URL 등은 컨테이너용 값이 이긴다.
+      - .env
+    extra_hosts:
+      # Docker Desktop(mac/win)에는 host.docker.internal 이 기본 제공되지만 네이티브 Linux Docker Engine 에는
+      # 없다. 매핑하지 않으면 리눅스에서 위 DB URL 이 해소되지 않아 기동 직후 실패한다.
+      # scripts/gen-db-docs.sh 도 같은 이유로 --add-host=host.docker.internal:host-gateway 를 명시한다.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "18080:8080"
+    logging:
+      # 이 컨테이너의 stdout 을 Fluent Bit 으로 보낸다. 운영에서 ECS 가 `awsfirelens` 드라이버로
+      # 하는 일과 같다(FireLens 의 실체가 Fluent Bit 이다).
+      driver: fluentd
+      options:
+        # 도커 데몬이 접속하는 주소라 컨테이너 이름이 아니라 호스트 주소를 쓴다.
+        fluentd-address: "localhost:24224"
+        # Fluent Bit 이 아직 안 떠 있어도 컨테이너가 기동하게 한다.
+        # 기본값(false)이면 접속 실패 시 컨테이너가 아예 시작하지 못한다.
+        fluentd-async: "true"
+
+volumes:
+  manyak-opensearch-data:
+  manyak-vector-data:
