@@ -739,11 +739,14 @@ class SimpleStoryCreationService(
         val sessionTagRows = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
         // 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
+        // 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
+        // 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
+        // storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
         val genreTags = sessionTagRows
             .map { it.tag }
             .filter { it.category == SimpleStoryTagCategory.GENRE }
             .distinctBy { it.normalizedName }
-            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+            .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
         val characters = storyCreationCharacterRepository
             .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
         // 세션 스코프(character_id NULL) 태그를 카테고리로 복원하는 폴백. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.

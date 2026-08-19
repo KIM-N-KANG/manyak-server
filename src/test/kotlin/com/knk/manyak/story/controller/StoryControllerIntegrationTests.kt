@@ -561,6 +561,10 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.genres").value<List<String>> { genres ->
                 check(genres.contains("학원물")) { "최종 스토리 genres에 직접 입력 장르가 없습니다: $genres" }
                 check(genres.contains("판타지")) { "최종 스토리 genres에 제공 장르가 없습니다: $genres" }
+                // 직접 입력 장르는 사전 정의 장르 뒤에 온다. CUSTOM은 sortOrder 기본값이 0이라 정렬 기준에
+                // tagSource가 없으면 시드 sortOrder(10 이상)를 가진 제공 장르를 앞질러, 스토리라인 응답 순서와
+                // 어긋나고 썸네일 매칭도 직접 입력 장르를 첫 장르로 보게 된다.
+                check(genres.first() == "판타지") { "최종 스토리 genres 첫 원소가 제공 장르가 아닙니다: $genres" }
             }
 
         // 컴파일 AI 요청에도 직접 입력 장르가 실려야 한다. 최종 genres 단정만으로는 컴파일 경로에서만
@@ -568,6 +572,7 @@ class StoryControllerIntegrationTests {
         val compileGenres = requireNotNull(storyAiClient.lastCompileRequest).genreTags
         check(compileGenres.contains("학원물")) { "컴파일 AI 요청에 직접 입력 장르가 없습니다: $compileGenres" }
         check(compileGenres.contains("판타지")) { "컴파일 AI 요청에 제공 장르가 없습니다: $compileGenres" }
+        check(compileGenres.first() == "판타지") { "컴파일 AI 요청 첫 장르가 제공 장르가 아닙니다: $compileGenres" }
     }
 
     @Test
