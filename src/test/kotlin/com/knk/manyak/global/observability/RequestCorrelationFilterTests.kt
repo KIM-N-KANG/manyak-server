@@ -119,7 +119,7 @@ class RequestCorrelationFilterTests {
         try {
             for (path in listOf("/actuator/health", "/", "/zend/vendor/phpunit/eval-stdin.php")) {
                 val (mdc, _) = runFilter(MockHttpServletRequest("GET", path))
-                // 경고만 끄는 것이다 — MDC unknown 적재는 그대로 동작해야 한다.
+                // 경고만 끄는 것이다. MDC unknown 적재는 그대로 동작해야 한다.
                 assertThat(mdc["session_id"]).isEqualTo("unknown")
             }
         } finally {
