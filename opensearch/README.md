@@ -4,7 +4,30 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 
 | 파일 | 용도 |
 |---|---|
+| `setup.sh` | 스택 기동 후 한 번 실행하는 초기 설정 |
 | `index-template.json` | 인덱스 템플릿(필드 타입 정의) |
+
+## 시작하기
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+./opensearch/setup.sh
+```
+
+`setup.sh`는 **사는 곳이 다른 두 가지**를 등록합니다. 이름이 비슷해 헷갈리기 쉽습니다.
+
+| | 무엇을 정하나 | 어디에 저장되나 |
+|---|---|---|
+| **인덱스 템플릿** | 로그를 어떤 **타입으로 저장**할지 | OpenSearch(9200) |
+| **인덱스 패턴** | Discover에서 어떤 인덱스를 **어떤 시간축으로 볼지** | Dashboards(5601) |
+
+둘 다 컨테이너 안에만 삽니다. `down -v`로 볼륨을 지우면 함께 사라지므로, 그때는 `setup.sh`를 다시 실행하면 됩니다. 여러 번 실행해도 안전합니다.
+
+### 스크립트가 대신 피해 주는 함정
+
+- **인덱스 패턴에 필드 목록을 함께 넣어야 합니다.** `title`·`timeFieldName`만 등록하면 Discover가 `Could not locate that index-pattern-field (id: @timestamp)`로 막힙니다.
+- **필드 목록은 실제 인덱스가 있어야 읽을 수 있습니다.** 인덱스가 하나도 없으면 400이 납니다. 그래서 빈 인덱스(`manyak-logs-local-{날짜}`)를 먼저 만듭니다.
+- **저장 객체 생성은 `POST ?overwrite=true`입니다.** `PUT`은 기존 객체 수정 전용이라 처음 실행에서 404가 납니다.
 
 ## 인덱스 이름 규칙
 
