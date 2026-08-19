@@ -112,7 +112,7 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
-    fun `비즈니스 API가 아닌 경로(헬스체크·스캐너)는 헤더가 없어도 경고를 남기지 않는다`() {
+    fun `비즈니스 API가 아닌 경로(헬스체크, 스캐너)는 헤더가 없어도 경고를 남기지 않는다`() {
         val logger = LoggerFactory.getLogger(RequestCorrelationFilter::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
