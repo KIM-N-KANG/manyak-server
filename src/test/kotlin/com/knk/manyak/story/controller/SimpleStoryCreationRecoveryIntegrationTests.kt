@@ -407,6 +407,91 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `세션 커밋 후 COMPLETED 마킹을 잃은 스토리라인 회수는 AI 없이 최초 세션을 재구성해 돌려준다`() {
+        // KNK-848: doGenerateSimpleStorylines가 세션·스토리라인을 커밋한 뒤 별도 트랜잭션의 COMPLETED 마킹 커밋 전에
+        // 프로세스가 죽으면 요청 행은 result 없이 aged PENDING으로 남는다. 회수 재실행이 doGenerateSimpleStorylines를
+        // 다시 타면 AI 재호출·중복 세션·게스트 한도 이중 소모가 생기던 것을, 저장된 세션을 재구성해 돌려주도록 고친다.
+        // 다중 장르·다중 특징을 **입력 순서가 태그 id 오름차순과 다르게** 실어, 재구성 응답의 배열 순서가 최초 응답과
+        // 어긋나면 아래 바디 동일성 단정이 깨지게 한다(session_tags 정렬 회귀 감지).
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 2)
+        val protFeat1 = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.PROTAGONIST, "회귀", 1)
+        val protFeat2 = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.PROTAGONIST, "먼치킨", 2)
+        val suppFeat = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.SUPPORTING_CHARACTER, "조력자", 1)
+        val requestId = UUID.randomUUID()
+
+        // 장르·특징 모두 id 내림차순으로 실어 입력 순서 ≠ id 순서.
+        val body = """
+            {
+              "requestId": "$requestId",
+              "genreTagIds": [${genreB.id}, ${genreA.id}],
+              "protagonist": {"featureTagIds": [${protFeat2.id}, ${protFeat1.id}]},
+              "supportingCharacters": [{"name": "레온", "featureTagIds": [${suppFeat.id}]}]
+            }
+        """.trimIndent()
+        val postRich = {
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", deviceA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+        }
+
+        val first = postRich()
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+
+        simulateStorylineCrashWindow(requestId, deviceA)
+
+        val second = postRich()
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        // AI 재호출·중복 세션 없이 최초 세션을 그대로 재구성해 돌려준다(장르·특징 배열 순서까지 바이트 동일).
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+        // 재구성 응답의 배열 순서가 입력 순서(=저장 st.id 순서)와 같은지 명시적으로 고정한다 — 재구성이 tag.id 등 다른 기준으로
+        // 정렬하면(정렬 회귀) 이 단정이 깨진다. session_tags 조회에 ORDER BY st.id를 둔 이유가 이 순서 결정성이다(KNK-848 B1).
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.result.selectedTags.genreTags[0].name").isEqualTo("무협")
+            .jsonPath("$.result.selectedTags.genreTags[1].name").isEqualTo("판타지")
+            .jsonPath("$.result.selectedTags.protagonist.features[0].name").isEqualTo("먼치킨")
+            .jsonPath("$.result.selectedTags.protagonist.features[1].name").isEqualTo("회귀")
+            .jsonPath("$.result.selectedTags.supportingCharacters[0].name").isEqualTo("레온")
+            .jsonPath("$.result.selectedTags.supportingCharacters[0].features[0].name").isEqualTo("조력자")
+        // 요청 행은 회수로 다시 COMPLETED가 되고 결과가 채워진다.
+        val reconciled = requestRepository.findByRequestId(requestId)!!
+        assertThat(reconciled.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.resultJson).isNotNull()
+    }
+
+    @Test
+    fun `그 회수는 게스트 스토리라인 한도를 재소모하지 않는다`() {
+        // KNK-848의 사용자에게 보이는 유일한 피해: 회수 재실행이 STORYLINE_GENERATION 카운터를 재예약하면 게스트가 1회 제작에
+        // 한도 2회를 잃는다. crash 창 회수는 한도를 예약하지 않아야 한다.
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated // 최초 1회 소모
+        simulateStorylineCrashWindow(requestId, deviceA)
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated // 회수: 재소모 없어야 한다
+
+        // 최초 1회만 소모됐다면 기본 한도(5)에서 4회 더 예약 가능하고 5번째는 거절이다(이중 소모였다면 3회에서 끊긴다).
+        repeat(4) {
+            assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isTrue()
+        }
+        assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isFalse()
+    }
+
+    @Test
     fun `실패한 요청은 같은 requestId로 재실행된다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()
@@ -703,6 +788,24 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .body("""{"requestId":"$requestId","genreTagIds":[$genreTagId],"protagonist":{}}""")
             .exchange()
 
+    /**
+     * 스토리라인 crash 창 재현: 세션·스토리라인은 커밋된 채, 요청 행만 COMPLETED 마킹을 잃고 aged PENDING(게스트 소유)으로 남긴다.
+     * @PreUpdate가 UPDATE마다 updatedAt을 now()로 덮으므로, 기존 행을 지우고 생성자 INSERT로 stale PENDING을 심어 회수 임계값을 넘긴다.
+     */
+    private fun simulateStorylineCrashWindow(requestId: UUID, deviceId: String) {
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceId),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+    }
+
     private fun postSimpleStory(
         requestId: UUID,
         simpleCreationId: Long,
@@ -720,12 +823,18 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .exchange()
     }
 
-    private fun seedGenreTag() = tagRepository.save(
+    private fun seedGenreTag() = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+
+    private fun seedTag(
+        category: com.knk.manyak.story.dto.SimpleStoryTagCategory,
+        name: String,
+        sortOrder: Int,
+    ) = tagRepository.save(
         com.knk.manyak.story.entity.StoryCreationTag(
-            category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
-            name = "판타지",
+            category = category,
+            name = name,
             tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.PREDEFINED,
-            sortOrder = 1,
+            sortOrder = sortOrder,
             isActive = true,
         ),
     )
