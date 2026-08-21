@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_creation_sessions_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.story_creation_storylines](public.story_creation_storylines.md) |  |  |
+| id | bigint | nextval('story_creation_sessions_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.story_creation_storylines](public.story_creation_storylines.md) [public.story_creation_characters](public.story_creation_characters.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | true |  |  |  |
 | status | varchar(30) |  | false |  |  |  |
@@ -26,6 +26,7 @@
 | ---- | ---------- |
 | story_creation_sessions_pkey | CREATE UNIQUE INDEX story_creation_sessions_pkey ON public.story_creation_sessions USING btree (id) |
 | idx_story_creation_sessions_story | CREATE INDEX idx_story_creation_sessions_story ON public.story_creation_sessions USING btree (story_id) |
+| idx_story_creation_sessions_storyline_request_id | CREATE INDEX idx_story_creation_sessions_storyline_request_id ON public.story_creation_sessions USING btree (storyline_request_id) |
 
 ## Relations
 
@@ -34,6 +35,7 @@ erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_creation_characters" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 
 "public.story_creation_sessions" {
   bigint id
@@ -50,6 +52,7 @@ erDiagram
   bigint creation_session_id FK
   bigint tag_id FK
   timestamp_with_time_zone created_at
+  bigint character_id FK
 }
 "public.story_creation_storylines" {
   bigint id
@@ -57,6 +60,15 @@ erDiagram
   text storyline_text
   smallint storyline_order
   boolean is_selected
+  timestamp_with_time_zone created_at
+}
+"public.story_creation_characters" {
+  bigint id
+  bigint creation_session_id FK
+  varchar_30_ role
+  varchar_30_ name
+  varchar_10_ gender
+  smallint sort_order
   timestamp_with_time_zone created_at
 }
 ```

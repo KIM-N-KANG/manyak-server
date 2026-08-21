@@ -15,6 +15,7 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.story.client.AiCharacter
 import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
@@ -22,8 +23,12 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesResponse
+import com.knk.manyak.story.dto.SimpleStoryCharacterGender
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.SimpleStoryRecommendedInfoResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedCharacterResponse
+import com.knk.manyak.story.dto.SimpleStorySelectedTagsResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryTagResponse
@@ -35,6 +40,9 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCreationCharacter
+import com.knk.manyak.story.entity.StoryCreationCharacterRole
+import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -52,6 +60,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
@@ -86,6 +95,7 @@ import java.util.concurrent.TimeUnit
 class SimpleStoryCreationService(
     private val storyCreationTagRepository: StoryCreationTagRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val storyCreationCharacterRepository: StoryCreationCharacterRepository,
     private val storyCreationSessionTagRepository: StoryCreationSessionTagRepository,
     private val storyCreationStorylineRepository: StoryCreationStorylineRepository,
     private val storyCreationStorylineRecommendedInfoRepository: StoryCreationStorylineRecommendedInfoRepository,
@@ -165,33 +175,45 @@ class SimpleStoryCreationService(
     ): GenerateSimpleStorylinesResponse {
         // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
         val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
-        // 스토리라인 생성에는 reconcile 개념이 없어 회수 신호를 쓰지 않는다.
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
         // 확정된 저장값이라, 재시도 본문이 부모를 빼거나 바꿔도 헤더가 parent_request_id와 어긋나지 않는다(Codex P2).
-        val generate: (Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse = { _, recordedParentLink ->
-            // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
-            // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
-            var aiCallStarted = false
-            // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
-            try {
-                val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
-                    userId,
-                    deviceId,
-                    GuestTrialLimitService.Counter.STORYLINE_GENERATION,
-                )
-                val response = try {
-                    doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
-                } catch (throwable: Throwable) {
-                    guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
-                    throw throwable
+        val generate: (Boolean, Boolean, ParentCreationLink?) -> GenerateSimpleStorylinesResponse =
+            { isReclaim, isIncompatibleReplayFallback, recordedParentLink ->
+                // 회수 재구성(KNK-848): 세션은 커밋됐지만 요청 행 COMPLETED 마킹을 잃어 aged PENDING으로 남은 창에서, 같은 requestId
+                // 회수가 AI·게스트 한도를 다시 소모하지 않도록 저장된 세션을 재구성해 반환한다(완성 경로 reconcileCreatedSession 대응).
+                // 호환 불가 replay fallback은 옛 결과를 못 읽어 의도적으로 재생성하는 별개 경로라 재구성하지 않는다(그 세션 재사용은 옛 동작을 깬다).
+                // 세션이 없으면(진짜 실패의 aged PENDING) null → 종전대로 생성한다.
+                val reclaimed = if (isReclaim && !isIncompatibleReplayFallback) reconcileGeneratedStorylines(request) else null
+                reclaimed ?: run {
+                    // AI 호출에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
+                    // — 완성 경로와 같은 이유로 HTTP 상태만으로는 가를 수 없다([storylineOutcomeOf]).
+                    var aiCallStarted = false
+                    // 게스트 한도 예약(402)까지 감싸야 한다 — 그 거부가 이 지표를 만든 이유(양쪽 관측 사각지대)이기 때문이다.
+                    try {
+                        // 호환되지 않는 옛 COMPLETED 응답의 fallback은 최초 성공 때 이미 예약한 한도를 다시 소모하지 않는다.
+                        val guestDeviceId = if (isIncompatibleReplayFallback) {
+                            null
+                        } else {
+                            guestTrialLimitService.reserveForGuestOrNull(
+                                userId,
+                                deviceId,
+                                GuestTrialLimitService.Counter.STORYLINE_GENERATION,
+                            )
+                        }
+                        val response = try {
+                            doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
+                        } catch (throwable: Throwable) {
+                            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                            throw throwable
+                        }
+                        recordStorylineResult(OUTCOME_SUCCESS)
+                        response
+                    } catch (throwable: Throwable) {
+                        recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
+                        throw throwable
+                    }
                 }
-                recordStorylineResult(OUTCOME_SUCCESS)
-                response
-            } catch (throwable: Throwable) {
-                recordStorylineResult(storylineOutcomeOf(throwable, aiCallStarted))
-                throw throwable
             }
-        }
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORYLINE_GENERATION,
@@ -244,15 +266,19 @@ class SimpleStoryCreationService(
         responseType: Class<T>,
         // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
         parentLink: ParentCreationLink? = null,
-        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1)와
-        // (요청 행에 실제로 기록된 체인 — KNK-755)이다. 미기록 직접 실행은 회수가 아니고, 체인도 방금 검증한 값 그대로다.
-        block: (isReclaim: Boolean, recordedParentLink: ParentCreationLink?) -> T,
+        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1), 호환되지 않는 replay의
+        // fallback인지(중복 소모 방지), 요청 행에 실제로 기록된 체인(KNK-755)이다.
+        block: (
+            isReclaim: Boolean,
+            isIncompatibleReplayFallback: Boolean,
+            recordedParentLink: ParentCreationLink?,
+        ) -> T,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
-            return block(false, parentLink)
+            return block(false, false, parentLink)
         }
         return storyCreationRequestRecorder.execute(
             requestId,
@@ -294,7 +320,9 @@ class SimpleStoryCreationService(
         return StoryCreationRequestStatusResponse(
             stage = row.stage,
             status = row.status,
-            result = row.resultJson?.let { objectMapper.readTree(it) },
+            result = row.resultJson
+                ?.takeIf { row.status == StoryCreationRequestStatus.COMPLETED }
+                ?.let { objectMapper.readTree(it) },
         )
     }
 
@@ -318,22 +346,28 @@ class SimpleStoryCreationService(
         // AI 호출 진입 직전에 부른다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([storylineOutcomeOf]).
         onAiCallStarted: () -> Unit,
     ): GenerateSimpleStorylinesResponse {
-        val predefinedTags = findSelectedPredefinedTags(request.selectedTagIds)
-        val customTagDrafts = request.customTags.map { tag ->
-            StoryCreationTagDraft(
-                category = tag.category,
-                name = tag.name.trim(),
-            )
-        }.distinctBy { it.key }
-        // 선택한 제공 태그와 정규화 키가 같은 직접 추가 태그는 같은 태그이므로 AI 요청에서도 한 번만 보낸다(제공 태그 표기 우선).
-        val aiRequestTags = (
-            predefinedTags.map { tag ->
-                StoryCreationTagDraft(
-                    category = tag.category,
-                    name = tag.name,
-                )
-            } + customTagDrafts
-            ).distinctBy { it.key }
+        val genreTags = findSelectedPredefinedTags(request.genreTagIds, SimpleStoryTagCategory.GENRE)
+        val characterDrafts = listOf(
+            request.protagonist.toCharacterDraft(StoryCreationCharacterRole.PROTAGONIST, sortOrder = 1),
+        ) + request.supportingCharacters.mapIndexed { index, character ->
+            character.toCharacterDraft(StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = index + 1)
+        }
+        // 장르 직접 입력(KNK-859). 인물 특징과 같은 정규화 키 규칙으로 다루되 분류만 GENRE다.
+        val customGenreDrafts = request.customGenreTags
+            .map { StoryCreationTagDraft(category = SimpleStoryTagCategory.GENRE, name = it.trim()) }
+            .distinctBy { it.key }
+        val customTagDrafts = (customGenreDrafts + characterDrafts.flatMap { it.customTags }).distinctBy { it.key }
+
+        // AI 인물 단위 계약(KNK-846): 장르 + 주인공/주변 인물별 {name, gender, features}. 아직 저장 전이라 요청 draft로 조립한다.
+        val aiRequest = AiStorylinesRequest(
+            // 제공 장르를 앞에 둬, 정규화 키가 겹치는 직접 입력 장르는 제공 표기를 남긴다(인물 특징과 같은 규칙).
+            genreTags = (genreTags.map { it.name } + customGenreDrafts.map { it.name })
+                .distinctBy { StoryCreationTag.normalize(it) },
+            protagonist = characterDrafts.first { it.role == StoryCreationCharacterRole.PROTAGONIST }.toAiCharacter(),
+            supportingCharacters = characterDrafts
+                .filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+                .map { it.toAiCharacter() },
+        )
 
         // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
         onAiCallStarted()
@@ -342,7 +376,7 @@ class SimpleStoryCreationService(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
-                storyAiClient.createStorylines(aiRequestTags.toAiStorylinesRequest(), storylineTraceLink(request, parentLink))
+                storyAiClient.createStorylines(aiRequest, storylineTraceLink(request, parentLink))
             }.result
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
@@ -356,9 +390,7 @@ class SimpleStoryCreationService(
 
         val response = try {
             transactionTemplate.execute {
-            val customTags = resolveCustomTags(customTagDrafts)
-            // 직접 추가 입력이 선택한 제공 태그로 해석될 수 있어 세션 태그 유니크(creation_session_id, tag_id) 전에 접는다.
-            val tags = (predefinedTags + customTags).distinctBy { it.id }
+            val customTagsByKey = resolveCustomTags(customTagDrafts).associateBy { it.category to it.normalizedName }
             val creationSession = storyCreationSessionRepository.save(
                 StoryCreationSession(
                     userId = userId,
@@ -367,12 +399,40 @@ class SimpleStoryCreationService(
                     storylineRequestId = request.requestId,
                 ),
             )
+            val characters = storyCreationCharacterRepository.saveAll(
+                characterDrafts.map { character ->
+                    StoryCreationCharacter(
+                        creationSession = creationSession,
+                        role = character.role,
+                        name = character.name,
+                        gender = character.gender,
+                        sortOrder = character.sortOrder.toShort(),
+                    )
+                },
+            )
+            val featureTagsByCharacter = characterDrafts.zip(characters).associate { (draft, character) ->
+                character to (
+                    draft.predefinedTags + draft.customTags.map { customTagsByKey.getValue(it.key) }
+                    ).distinctBy { it.id }
+            }
+            // 사전 정의 장르 → 직접 입력 장르 순. 세션 태그 저장 순서(st.id)가 곧 회수 재구성 응답 순서다(KNK-848).
+            val sessionGenreTags = (
+                genreTags + customGenreDrafts.map { customTagsByKey.getValue(it.key) }
+                ).distinctBy { it.id }
             storyCreationSessionTagRepository.saveAll(
-                tags.map { tag ->
+                sessionGenreTags.map { tag ->
                     StoryCreationSessionTag(
                         creationSession = creationSession,
                         tag = tag,
                     )
+                } + featureTagsByCharacter.flatMap { (character, tags) ->
+                    tags.map { tag ->
+                        StoryCreationSessionTag(
+                            creationSession = creationSession,
+                            tag = tag,
+                            character = character,
+                        )
+                    }
                 },
             )
 
@@ -397,24 +457,7 @@ class SimpleStoryCreationService(
                 }
             ).groupBy { info -> info.storyline.id }
 
-            val storylineResponses = storylines.map { storyline ->
-                SimpleStorylineResponse(
-                    id = storyline.id,
-                    storyline = storyline.storylineText,
-                    recommendedInfos = recommendedInfos[storyline.id].orEmpty().map { info ->
-                        SimpleStoryRecommendedInfoResponse(
-                            id = info.id,
-                            text = info.infoText,
-                        )
-                    },
-                )
-            }
-
-            GenerateSimpleStorylinesResponse(
-                simpleCreationId = creationSession.id,
-                selectedTags = tags.map { it.toTagResponse() },
-                storylines = storylineResponses,
-            )
+            buildStorylinesResponse(creationSession, sessionGenreTags, characters, featureTagsByCharacter, storylines, recommendedInfos)
             } ?: throw IllegalStateException("Storyline creation transaction result is empty")
         } catch (exception: Exception) {
             // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
@@ -430,6 +473,74 @@ class SimpleStoryCreationService(
         return response
     }
 
+    /**
+     * 저장된 세션·인물·태그·스토리라인·추천 정보로 스토리라인 생성 응답을 조립한다.
+     * 최초 생성(트랜잭션 안의 방금 저장분)과 회수 재구성([reconcileGeneratedStorylines])이 같은 코드로 응답을 만들게 공유한다.
+     * [characters]는 주인공이 첫 원소여야 한다(생성 경로의 draft 순서·회수 경로의 role 오름차순 조회가 모두 그러함).
+     */
+    private fun buildStorylinesResponse(
+        session: StoryCreationSession,
+        genreTags: List<StoryCreationTag>,
+        characters: List<StoryCreationCharacter>,
+        featureTagsByCharacter: Map<StoryCreationCharacter, List<StoryCreationTag>>,
+        storylines: List<StoryCreationStoryline>,
+        recommendedInfosByStoryline: Map<Long, List<StoryCreationStorylineRecommendedInfo>>,
+    ): GenerateSimpleStorylinesResponse =
+        GenerateSimpleStorylinesResponse(
+            simpleCreationId = session.id,
+            selectedTags = SimpleStorySelectedTagsResponse(
+                genreTags = genreTags.distinctBy { it.id }.map { it.toTagResponse() },
+                protagonist = characters.first().toSelectedCharacterResponse(featureTagsByCharacter),
+                supportingCharacters = characters.drop(1).map { it.toSelectedCharacterResponse(featureTagsByCharacter) },
+            ),
+            storylines = storylines.map { storyline ->
+                SimpleStorylineResponse(
+                    id = storyline.id,
+                    storyline = storyline.storylineText,
+                    recommendedInfos = recommendedInfosByStoryline[storyline.id].orEmpty().map { info ->
+                        SimpleStoryRecommendedInfoResponse(id = info.id, text = info.infoText)
+                    },
+                )
+            },
+        )
+
+    /**
+     * 스토리라인 회수(reclaim) 재구성(KNK-848). 세션 저장 트랜잭션은 커밋됐지만 요청 행의 COMPLETED 마킹 커밋 전에 프로세스가
+     * 죽어 aged PENDING으로 남은 좁은 창에서, 같은 requestId 회수가 AI·게스트 한도를 다시 소모하지 않도록 저장된 세션으로
+     * 응답을 재구성한다(스토리 완성 경로의 [reconcileCreatedSession]에 대응). 소유는 [StoryCreationRequestRecorder]가 isReclaim
+     * 판정 전에 이미 검증했고, 여기서는 `storyline_request_id == requestId` 바인딩(이 조회 자체)으로 남의 세션 재구성을 막는다.
+     * 이 requestId로 만든 세션이 없으면(진짜 실패의 aged PENDING) null을 반환해 정상 생성으로 폴백한다.
+     */
+    private fun reconcileGeneratedStorylines(request: GenerateSimpleStorylinesRequest): GenerateSimpleStorylinesResponse? {
+        val session = storyCreationSessionRepository.findFirstByStorylineRequestIdOrderByIdAsc(request.requestId)
+            ?: return null
+        val characters = storyCreationCharacterRepository
+            .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(session.id)
+        val storylines = storyCreationStorylineRepository
+            .findByCreationSessionIdOrderByStorylineOrderAscIdAsc(session.id)
+        // 세션 저장은 원자적이라 커밋된 세션엔 인물·스토리라인이 함께 있다. 방어적으로 비정상 상태면 재구성하지 않고 정상 생성으로 폴백한다.
+        if (characters.isEmpty() || storylines.isEmpty()) {
+            return null
+        }
+
+        val sessionTagRows = storyCreationSessionTagRepository.findAllWithTagByCreationSessionId(session.id)
+        // 장르는 세션 스코프(character_id NULL), 특징은 character_id별. 최초 생성의 저장 순서(태그 id 오름차순)를 그대로 재현한다.
+        val genreTags = sessionTagRows
+            .filter { it.character == null && it.tag.category == SimpleStoryTagCategory.GENRE }
+            .map { it.tag }
+        val featureTagsByCharacterId = sessionTagRows
+            .filter { it.character != null }
+            .groupBy { it.character!!.id }
+            .mapValues { (_, rows) -> rows.map { it.tag } }
+        val featureTagsByCharacter = characters.associateWith { featureTagsByCharacterId[it.id].orEmpty() }
+
+        val recommendedInfosByStoryline = storyCreationStorylineRecommendedInfoRepository
+            .findByStorylineIdInOrderByStorylineIdAscInfoOrderAsc(storylines.map { it.id })
+            .groupBy { it.storyline.id }
+
+        return buildStorylinesResponse(session, genreTags, characters, featureTagsByCharacter, storylines, recommendedInfosByStoryline)
+    }
+
     fun createSimpleStory(
         request: CreateSimpleStoryRequest,
         userId: Long? = null,
@@ -437,7 +548,7 @@ class SimpleStoryCreationService(
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
-        val create: (Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _ ->
+        val create: (Boolean, Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _, _ ->
             val startNanos = System.nanoTime()
             // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
             // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).
@@ -625,19 +736,43 @@ class SimpleStoryCreationService(
             .findByIdAndCreationSessionId(request.storylineId, request.simpleCreationId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "선택한 스토리라인을 찾을 수 없습니다.")
 
-        val sessionTags = storyCreationSessionTagRepository
+        val sessionTagRows = storyCreationSessionTagRepository
             .findAllWithTagByCreationSessionId(request.simpleCreationId)
-            .map { it.tag }
-        val genreTags = sessionTags
-            .filter { it.category == SimpleStoryTagCategory.GENRE }
-            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+        val genreTags = selectGenreTags(sessionTagRows)
+        val characters = storyCreationCharacterRepository
+            .findAllByCreationSessionIdOrderByRoleAscSortOrderAscIdAsc(request.simpleCreationId)
+        // 세션 스코프(character_id NULL) 태그를 카테고리로 복원하는 폴백. 이름·성별은 저장돼 있지 않아 null이고 AI가 생성한다.
+        // 주인공 인물 행이 없는 세션(구 계약 세션, 또는 스키마상 가능한 주변 인물만 있는 세션)의 주인공 특징·이동 태그 유실을 막는다.
+        val featureNamesOf = { category: SimpleStoryTagCategory ->
+            sessionTagRows.map { it.tag }.filter { it.category == category }.distinctBy { it.normalizedName }.map { it.name }
+        }
+        // 인물 행이 있으면 저장 인물(character_id)별로, 없으면(KNK-845 배포 전 생성된 구 세션) 세션 태그를 카테고리로 복원한다.
+        val (aiProtagonist, aiSupportingCharacters) = if (characters.isNotEmpty()) {
+            // 특징은 저장 인물별로 되싣는다. character는 LAZY지만 FK id는 초기화 없이 읽힌다(그룹핑 키로만 사용).
+            val featureNamesByCharacterId = sessionTagRows
+                .filter { it.character != null }
+                .groupBy { it.character!!.id }
+                .mapValues { (_, rows) -> rows.map { it.tag }.distinctBy { it.normalizedName }.map { it.name } }
+            val protagonist = characters.firstOrNull { it.role == StoryCreationCharacterRole.PROTAGONIST }
+            val supporting = characters.filter { it.role == StoryCreationCharacterRole.SUPPORTING_CHARACTER }
+            // 주인공 행이 있으면 인물 단위로, 없으면(주변 인물만 존재하는 세션) category 폴백으로 복원한다 —
+            // character_id NULL인 주인공 특징(이동 태그 포함)이 유실되지 않게 한다(주변 인물 조립은 그대로).
+            (protagonist?.toAiCharacter(featureNamesByCharacterId)
+                ?: AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST))) to
+                supporting.map { it.toAiCharacter(featureNamesByCharacterId) }
+        } else {
+            // 인물 행이 전혀 없는 구 세션: 주인공·주변 인물 모두 category 폴백.
+            val supportingFeatures = featureNamesOf(SimpleStoryTagCategory.SUPPORTING_CHARACTER)
+            AiCharacter(features = featureNamesOf(SimpleStoryTagCategory.PROTAGONIST)) to
+                if (supportingFeatures.isEmpty()) emptyList() else listOf(AiCharacter(features = supportingFeatures))
+        }
         // 스토리 장르로 로어북을 선별해 compile 요청에 세계관·용어 확장 재료로 싣는다(스펙 §4-3-6·§5-3-3).
         // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
         val selectedLorebooks = selectLorebooksForGenres(genreTags)
         val aiRequest = AiStoryCompileRequest(
             genreTags = genreTags.map { it.name },
-            protagonistTags = sessionTags.filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = sessionTags.filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+            protagonist = aiProtagonist,
+            supportingCharacters = aiSupportingCharacters,
             selectedStoryline = selectedStoryline.storylineText,
             additionalInfo = request.additionalInfos.joinToString(separator = "\n"),
             lorebooks = selectedLorebooks.map { AiLorebookItem(name = it.name, content = it.content) },
@@ -715,12 +850,8 @@ class SimpleStoryCreationService(
         val endings = storyEndingRepository
             .findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id)
             .map { it.toEndingResponse() }
-        // 응답의 genres는 세션 장르 태그(정렬 규칙은 compile 경로와 동일)로 재구성한다.
-        val genres = storyCreationSessionTagRepository
-            .findAllWithTagByCreationSessionId(session.id)
-            .map { it.tag }
-            .filter { it.category == SimpleStoryTagCategory.GENRE }
-            .sortedWith(compareBy({ it.sortOrder }, { it.id }))
+        // 응답의 genres는 세션 장르 태그로 재구성한다 — compile 경로와 같은 selectGenreTags를 써 순서를 일치시킨다(KNK-861).
+        val genres = selectGenreTags(storyCreationSessionTagRepository.findAllWithTagByCreationSessionId(session.id))
             .map { it.name }
 
         return StoryCreationOutcome(
@@ -744,6 +875,21 @@ class SimpleStoryCreationService(
             aiCallLogId = null,
         )
     }
+
+    /**
+     * 세션 태그 행에서 장르 태그를 선별한다(카테고리 필터 + 정규화 키 중복 제거 + 정렬).
+     * compile 경로와 완성 회수 경로가 공유한다 — 규칙이 복붙돼 한쪽만 고쳐지면 회수 응답 순서가 최초 응답과 어긋난다(KNK-861).
+     *
+     * 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
+     * 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
+     * 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
+     * storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
+     */
+    private fun selectGenreTags(sessionTagRows: List<StoryCreationSessionTag>): List<StoryCreationTag> = sessionTagRows
+        .map { it.tag }
+        .filter { it.category == SimpleStoryTagCategory.GENRE }
+        .distinctBy { it.normalizedName }
+        .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
 
     /** 스토리 장르 태그와 일치하는 활성 로어북을 선별한다. 장르 태그가 없으면 빈 목록. */
     private fun selectLorebooksForGenres(genreTags: List<StoryCreationTag>): List<Lorebook> {
@@ -988,14 +1134,18 @@ class SimpleStoryCreationService(
         } ?: throw IllegalStateException("Story creation transaction result is empty")
     }
 
-    private fun findSelectedPredefinedTags(selectedTagIds: List<Long>): List<StoryCreationTag> {
-        val distinctTagIds = selectedTagIds.distinct()
+    private fun findSelectedPredefinedTags(
+        tagIds: List<Long>,
+        expectedCategory: SimpleStoryTagCategory,
+    ): List<StoryCreationTag> {
+        val distinctTagIds = tagIds.distinct()
         if (distinctTagIds.isEmpty()) {
             return emptyList()
         }
 
         val tagsById = storyCreationTagRepository
             .findByIdInAndTagSourceAndIsActiveTrue(distinctTagIds, StoryCreationTagSource.PREDEFINED)
+            .filter { it.category == expectedCategory }
             .associateBy { it.id }
         val missingTagIds = distinctTagIds.filterNot { tagsById.containsKey(it) }
         if (missingTagIds.isNotEmpty()) {
@@ -1008,11 +1158,21 @@ class SimpleStoryCreationService(
         return distinctTagIds.map { tagsById.getValue(it) }
     }
 
-    private fun List<StoryCreationTagDraft>.toAiStorylinesRequest(): AiStorylinesRequest =
-        AiStorylinesRequest(
-            genreTags = filter { it.category == SimpleStoryTagCategory.GENRE }.map { it.name },
-            protagonistTags = filter { it.category == SimpleStoryTagCategory.PROTAGONIST }.map { it.name },
-            supportingTags = filter { it.category == SimpleStoryTagCategory.SUPPORTING_CHARACTER }.map { it.name },
+    /** 스토리라인 경로: 저장 전 draft를 인물 단위 AI 입력으로 변환한다. 제공 태그를 먼저 두어 정규화 키가 겹치는 직접 추가 태그는 제공 표기를 남긴다. */
+    private fun StoryCreationCharacterDraft.toAiCharacter(): AiCharacter =
+        AiCharacter(
+            name = name,
+            gender = gender?.name,
+            features = (predefinedTags.map { it.name } + customTags.map { it.name })
+                .distinctBy { StoryCreationTag.normalize(it) },
+        )
+
+    /** 컴파일 경로: 저장된 인물과 [featureNamesByCharacterId](character_id→특징명)로 인물 단위 AI 입력을 되싣는다. */
+    private fun StoryCreationCharacter.toAiCharacter(featureNamesByCharacterId: Map<Long, List<String>>): AiCharacter =
+        AiCharacter(
+            name = name,
+            gender = gender?.name,
+            features = featureNamesByCharacterId[id].orEmpty(),
         )
 
     private fun StoryCreationTag.toTagResponse(): SimpleStoryTagResponse =
@@ -1020,6 +1180,35 @@ class SimpleStoryCreationService(
             id = id,
             name = name,
             category = category,
+        )
+
+    private fun SimpleStoryCharacterRequest.toCharacterDraft(
+        role: StoryCreationCharacterRole,
+        sortOrder: Int,
+    ): StoryCreationCharacterDraft {
+        val category = when (role) {
+            StoryCreationCharacterRole.PROTAGONIST -> SimpleStoryTagCategory.PROTAGONIST
+            StoryCreationCharacterRole.SUPPORTING_CHARACTER -> SimpleStoryTagCategory.SUPPORTING_CHARACTER
+        }
+        return StoryCreationCharacterDraft(
+            role = role,
+            name = cleanedName(),
+            gender = gender,
+            sortOrder = sortOrder,
+            predefinedTags = findSelectedPredefinedTags(featureTagIds, category),
+            customTags = customTags.map { name ->
+                StoryCreationTagDraft(category = category, name = name.trim())
+            }.distinctBy { it.key },
+        )
+    }
+
+    private fun StoryCreationCharacter.toSelectedCharacterResponse(
+        featureTagsByCharacter: Map<StoryCreationCharacter, List<StoryCreationTag>>,
+    ): SimpleStorySelectedCharacterResponse =
+        SimpleStorySelectedCharacterResponse(
+            name = name,
+            gender = gender,
+            features = featureTagsByCharacter.getValue(this).map { it.toTagResponse() },
         )
 
     private data class StoryCreationOutcome(
@@ -1036,6 +1225,15 @@ class SimpleStoryCreationService(
         val key: Pair<SimpleStoryTagCategory, String>
             get() = category to StoryCreationTag.normalize(name)
     }
+
+    private data class StoryCreationCharacterDraft(
+        val role: StoryCreationCharacterRole,
+        val name: String?,
+        val gender: SimpleStoryCharacterGender?,
+        val sortOrder: Int,
+        val predefinedTags: List<StoryCreationTag>,
+        val customTags: List<StoryCreationTagDraft>,
+    )
 
     /**
      * 직접 추가 태그를 정규화 키로 해석한다(KNK-717, 스펙 §4-3-2). 같은 카테고리에 정규화 키가 같은

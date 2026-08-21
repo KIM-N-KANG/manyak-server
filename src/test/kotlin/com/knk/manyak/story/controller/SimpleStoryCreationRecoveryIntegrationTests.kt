@@ -14,8 +14,10 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
+import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -113,6 +115,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
 
     private val deviceA = "device-a"
     private val deviceB = "device-b"
@@ -142,7 +145,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceA)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"selectedTagIds":[${genre.id}]}""")
+            .body("""{"genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
 
@@ -169,6 +172,31 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Test
+    fun `호환 불가 replay fallback 중인 PENDING 요청은 저장된 옛 결과를 노출하지 않는다`() {
+        val requestId = UUID.randomUUID()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                // 호환 불가 replay fallback을 식별하기 위해 DB에는 이전 COMPLETED 응답을 보존한다.
+                resultJson = """{"simpleCreationId":1,"selectedTags":[],"storylines":[]}""",
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .json(
+                """{"stage":"STORYLINE_GENERATION","status":"PENDING","result":null}""",
+            )
+    }
+
+    @Test
     fun `같은 requestId 재요청은 AI 재호출 없이 저장된 결과를 돌려준다`() {
         val genre = seedGenreTag()
         val requestId = UUID.randomUUID()
@@ -188,6 +216,32 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         // 중복 세션이 만들어지지 않는다(진행 세션 1개).
         assertThat(sessionRepository.count()).isEqualTo(1)
         assertThat(String(first.responseBody!!)).isEqualTo(String(second.responseBody!!))
+    }
+
+    @Test
+    fun `옛 응답 형태가 저장된 COMPLETED 요청은 게스트 한도를 재소모하지 않고 정상 생성으로 복구한다`() {
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated
+
+        val completed = requestRepository.findByRequestId(requestId)!!
+        completed.resultJson =
+            """{"simpleCreationId":${completed.id},"selectedTags":[],"storylines":[]}"""
+        requestRepository.saveAndFlush(completed)
+
+        postStorylines(requestId, genre.id, deviceA)
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.selectedTags.genreTags[0].name").isEqualTo(genre.name)
+
+        // 옛 result_json은 replay할 수 없어 정상 생성 경로를 다시 타지만, 같은 멱등 요청의 게스트 한도는 재예약하지 않는다.
+        assertThat(createStorylinesCalls.get()).isEqualTo(2)
+        assertThat(sessionRepository.count()).isEqualTo(2)
+        repeat(4) {
+            assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isTrue()
+        }
+        assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isFalse()
     }
 
     @Test
@@ -247,7 +301,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         restTestClient.post()
             .uri("/api/v1/stories/simple/storylines")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isBadRequest
         assertThat(requestRepository.findByRequestId(requestId)).isNull()
@@ -298,7 +352,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -318,7 +372,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .header("X-Manyak-Device-Id", deviceA)
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[${genre.id}]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[${genre.id}],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
 
@@ -350,6 +404,141 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         assertThat(createStorylinesCalls.get()).isEqualTo(1)
         assertThat(requestRepository.findByRequestId(requestId)?.status)
             .isEqualTo(StoryCreationRequestStatus.COMPLETED)
+    }
+
+    @Test
+    fun `세션 커밋 후 COMPLETED 마킹을 잃은 스토리라인 회수는 AI 없이 최초 세션을 재구성해 돌려준다`() {
+        // KNK-848: doGenerateSimpleStorylines가 세션·스토리라인을 커밋한 뒤 별도 트랜잭션의 COMPLETED 마킹 커밋 전에
+        // 프로세스가 죽으면 요청 행은 result 없이 aged PENDING으로 남는다. 회수 재실행이 doGenerateSimpleStorylines를
+        // 다시 타면 AI 재호출·중복 세션·게스트 한도 이중 소모가 생기던 것을, 저장된 세션을 재구성해 돌려주도록 고친다.
+        // 다중 장르·다중 특징을 **입력 순서가 태그 id 오름차순과 다르게** 실어, 재구성 응답의 배열 순서가 최초 응답과
+        // 어긋나면 아래 바디 동일성 단정이 깨지게 한다(session_tags 정렬 회귀 감지).
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 2)
+        val protFeat1 = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.PROTAGONIST, "회귀", 1)
+        val protFeat2 = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.PROTAGONIST, "먼치킨", 2)
+        val suppFeat = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.SUPPORTING_CHARACTER, "조력자", 1)
+        val requestId = UUID.randomUUID()
+
+        // 장르·특징 모두 id 내림차순으로 실어 입력 순서 ≠ id 순서.
+        val body = """
+            {
+              "requestId": "$requestId",
+              "genreTagIds": [${genreB.id}, ${genreA.id}],
+              "protagonist": {"featureTagIds": [${protFeat2.id}, ${protFeat1.id}]},
+              "supportingCharacters": [{"name": "레온", "featureTagIds": [${suppFeat.id}]}]
+            }
+        """.trimIndent()
+        val postRich = {
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", deviceA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+        }
+
+        val first = postRich()
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+
+        simulateStorylineCrashWindow(requestId, deviceA)
+
+        val second = postRich()
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        // AI 재호출·중복 세션 없이 최초 세션을 그대로 재구성해 돌려준다(장르·특징 배열 순서까지 바이트 동일).
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+        // 재구성 응답의 배열 순서가 입력 순서(=저장 st.id 순서)와 같은지 명시적으로 고정한다 — 재구성이 tag.id 등 다른 기준으로
+        // 정렬하면(정렬 회귀) 이 단정이 깨진다. session_tags 조회에 ORDER BY st.id를 둔 이유가 이 순서 결정성이다(KNK-848 B1).
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.result.selectedTags.genreTags[0].name").isEqualTo("무협")
+            .jsonPath("$.result.selectedTags.genreTags[1].name").isEqualTo("판타지")
+            .jsonPath("$.result.selectedTags.protagonist.features[0].name").isEqualTo("먼치킨")
+            .jsonPath("$.result.selectedTags.protagonist.features[1].name").isEqualTo("회귀")
+            .jsonPath("$.result.selectedTags.supportingCharacters[0].name").isEqualTo("레온")
+            .jsonPath("$.result.selectedTags.supportingCharacters[0].features[0].name").isEqualTo("조력자")
+        // 요청 행은 회수로 다시 COMPLETED가 되고 결과가 채워진다.
+        val reconciled = requestRepository.findByRequestId(requestId)!!
+        assertThat(reconciled.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.resultJson).isNotNull()
+    }
+
+    @Test
+    fun `직접 입력 장르가 섞인 회수 재구성도 최초 응답과 같은 순서를 돌려준다`() {
+        // KNK-859: 커스텀 장르는 사전 정의 장르 뒤에 저장되므로(st.id 오름차순), 회수 재구성도 같은 순서여야 한다.
+        // 입력을 태그 id 내림차순으로 실어 "입력 순서 ≠ id 순서"를 만든다(정렬 회귀 감지).
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 2)
+        val requestId = UUID.randomUUID()
+
+        val body = """
+            {
+              "requestId": "$requestId",
+              "genreTagIds": [${genreB.id}, ${genreA.id}],
+              "customGenreTags": ["학원물", "느와르"],
+              "protagonist": {"customTags": ["회귀"]}
+            }
+        """.trimIndent()
+        val postRich = {
+            restTestClient.post()
+                .uri("/api/v1/stories/simple/storylines")
+                .header("X-Manyak-Device-Id", deviceA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+        }
+
+        val first = postRich().expectStatus().isCreated.expectBody().returnResult()
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+
+        simulateStorylineCrashWindow(requestId, deviceA)
+
+        val second = postRich().expectStatus().isCreated.expectBody().returnResult()
+
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/simple/creation-requests/$requestId")
+            .header("X-Manyak-Device-Id", deviceA)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.result.selectedTags.genreTags.length()").isEqualTo(4)
+            .jsonPath("$.result.selectedTags.genreTags[0].name").isEqualTo("무협")
+            .jsonPath("$.result.selectedTags.genreTags[1].name").isEqualTo("판타지")
+            .jsonPath("$.result.selectedTags.genreTags[2].name").isEqualTo("학원물")
+            .jsonPath("$.result.selectedTags.genreTags[3].name").isEqualTo("느와르")
+            .jsonPath("$.result.selectedTags.protagonist.features[0].name").isEqualTo("회귀")
+    }
+
+    @Test
+    fun `그 회수는 게스트 스토리라인 한도를 재소모하지 않는다`() {
+        // KNK-848의 사용자에게 보이는 유일한 피해: 회수 재실행이 STORYLINE_GENERATION 카운터를 재예약하면 게스트가 1회 제작에
+        // 한도 2회를 잃는다. crash 창 회수는 한도를 예약하지 않아야 한다.
+        val genre = seedGenreTag()
+        val requestId = UUID.randomUUID()
+
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated // 최초 1회 소모
+        simulateStorylineCrashWindow(requestId, deviceA)
+        postStorylines(requestId, genre.id, deviceA).expectStatus().isCreated // 회수: 재소모 없어야 한다
+
+        // 최초 1회만 소모됐다면 기본 한도(5)에서 4회 더 예약 가능하고 5번째는 거절이다(이중 소모였다면 3회에서 끊긴다).
+        repeat(4) {
+            assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isTrue()
+        }
+        assertThat(guestTrialLimitService.reserve(deviceA, GuestTrialLimitService.Counter.STORYLINE_GENERATION)).isFalse()
     }
 
     @Test
@@ -386,7 +575,11 @@ class SimpleStoryCreationRecoveryIntegrationTests {
                 startGate.await()
                 try {
                     val response = simpleStoryCreationService.generateSimpleStorylines(
-                        GenerateSimpleStorylinesRequest(requestId = requestId, selectedTagIds = listOf(genre.id)),
+                        GenerateSimpleStorylinesRequest(
+                            requestId = requestId,
+                            genreTagIds = listOf(genre.id),
+                            protagonist = SimpleStoryCharacterRequest(),
+                        ),
                         userId = null,
                         deviceId = deviceA,
                     )
@@ -495,6 +688,57 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         assertThat(storyRepository.count()).isEqualTo(1)
         assertThat(requestRepository.findByRequestId(requestId)?.status)
             .isEqualTo(StoryCreationRequestStatus.COMPLETED)
+    }
+
+    @Test
+    fun `직접 입력 장르가 섞인 완성 회수도 최초 응답과 같은 장르 순서를 돌려준다`() {
+        // KNK-861: 장르 선별 규칙이 compile 경로와 완성 회수 경로에 복붙돼 있어, KNK-859가 compile 경로 한 곳만 고쳤다.
+        // CUSTOM은 sort_order 기본값이 0이라 tagSource 키가 빠진 회수 경로에서만 직접 입력 장르가 제공 장르를 앞질렀다.
+        val genreA = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 10)
+        val genreB = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "무협", 20)
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", deviceA)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"requestId":"${UUID.randomUUID()}","genreTagIds":[${genreB.id},${genreA.id}],""" +
+                    """"customGenreTags":["학원물"],"protagonist":{}}""",
+            )
+            .exchange()
+            .expectStatus().isCreated
+        val session = sessionRepository.findAll().single()
+        val storyline = storylineRepository.findAll().first()
+        val requestId = UUID.randomUUID()
+
+        // 최초 응답은 '사전 정의(sortOrder) → 직접 입력' 순서다.
+        val first = postSimpleStory(requestId, session.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.genres[0]").isEqualTo("판타지")
+            .jsonPath("$.genres[1]").isEqualTo("무협")
+            .jsonPath("$.genres[2]").isEqualTo("학원물")
+            .returnResult()
+
+        // 크래시 창 재현(같은 requestId, 게스트 소유 aged PENDING).
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceA),
+                stage = StoryCreationStage.STORY_COMPLETION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+
+        // 회수 재구성 응답의 장르 순서는 최초 응답과 같아야 한다(바디 바이트 동일).
+        val second = postSimpleStory(requestId, session.id, storyline.id, deviceA, null)
+            .expectStatus().isCreated
+            .expectBody().returnResult()
+
+        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
     }
 
     @Test
@@ -642,8 +886,26 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", deviceId)
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[$genreTagId]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[$genreTagId],"protagonist":{}}""")
             .exchange()
+
+    /**
+     * 스토리라인 crash 창 재현: 세션·스토리라인은 커밋된 채, 요청 행만 COMPLETED 마킹을 잃고 aged PENDING(게스트 소유)으로 남긴다.
+     * @PreUpdate가 UPDATE마다 updatedAt을 now()로 덮으므로, 기존 행을 지우고 생성자 INSERT로 stale PENDING을 심어 회수 임계값을 넘긴다.
+     */
+    private fun simulateStorylineCrashWindow(requestId: UUID, deviceId: String) {
+        requestRepository.delete(requestRepository.findByRequestId(requestId)!!)
+        requestRepository.flush()
+        requestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = requestId,
+                deviceIdHash = deviceIdHasher.hash(deviceId),
+                stage = StoryCreationStage.STORYLINE_GENERATION,
+                status = StoryCreationRequestStatus.PENDING,
+                updatedAt = Instant.now().minusSeconds(600),
+            ),
+        )
+    }
 
     private fun postSimpleStory(
         requestId: UUID,
@@ -662,12 +924,18 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .exchange()
     }
 
-    private fun seedGenreTag() = tagRepository.save(
+    private fun seedGenreTag() = seedTag(com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, "판타지", 1)
+
+    private fun seedTag(
+        category: com.knk.manyak.story.dto.SimpleStoryTagCategory,
+        name: String,
+        sortOrder: Int,
+    ) = tagRepository.save(
         com.knk.manyak.story.entity.StoryCreationTag(
-            category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
-            name = "판타지",
+            category = category,
+            name = name,
             tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.PREDEFINED,
-            sortOrder = 1,
+            sortOrder = sortOrder,
             isActive = true,
         ),
     )

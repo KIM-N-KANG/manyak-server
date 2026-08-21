@@ -112,6 +112,24 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
+    fun `비즈니스 API가 아닌 경로(헬스체크, 스캐너)는 헤더가 없어도 경고를 남기지 않는다`() {
+        val logger = LoggerFactory.getLogger(RequestCorrelationFilter::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            for (path in listOf("/actuator/health", "/", "/zend/vendor/phpunit/eval-stdin.php")) {
+                val (mdc, _) = runFilter(MockHttpServletRequest("GET", path))
+                // 경고만 끄는 것이다. MDC unknown 적재는 그대로 동작해야 한다.
+                assertThat(mdc["session_id"]).isEqualTo("unknown")
+            }
+        } finally {
+            logger.detachAppender(appender)
+        }
+
+        assertThat(appender.list).noneMatch { it.level == Level.WARN }
+    }
+
+    @Test
     fun `필수 헤더가 없어도 4xx로 막지 않고 체인을 진행한다`() {
         var chainInvoked = false
         val response = MockHttpServletResponse()

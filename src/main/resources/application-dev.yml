@@ -1,0 +1,73 @@
+# 개발 환경(ECS Fargate, dev-api.manyak.app) 프로파일(KNK-828).
+#
+# 이 파일은 prod를 상속하지 않는 **단독 프로파일**이다(SPRING_PROFILES_ACTIVE=dev).
+# `prod,dev` 겹쳐쓰기를 쓰면 dev가 application-prod.yml의 현재·미래 기본값(운영 구글 폼 id, 운영 asset URL)을
+# 계속 물려받는데, 이 프로파일이 생긴 이유가 정확히 그 상속을 끊는 것이다.
+# 그래서 prod와 겹치는 아래 datasource·JPA·flyway 12줄은 중복을 감수하고 여기 다시 쓴다
+# (application-local.yml도 같은 12줄을 이미 중복한다 — 레포 관례).
+spring:
+  datasource:
+    url: ${MANYAK_DB_URL}
+    username: ${MANYAK_DB_USERNAME}
+    password: ${MANYAK_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+manyak:
+  google-form:
+    feedback:
+      # 빈 문자열 **리터럴**이다(placeholder를 쓰지 않는다). 개발은 어떤 구글 폼에도 적재하면 안 되므로 잠근다.
+      #
+      # 키를 생략하면 base(application.yml)의 `${MANYAK_GOOGLE_FORM_FEEDBACK_ID:}`가 살아나는데,
+      # 이 env는 `manyak.google-form.feedback.form-id`의 relaxed binding 이름이 아니라서
+      # (그 이름은 MANYAK_GOOGLEFORM_FEEDBACK_FORMID다) 바인딩이 아니라 **placeholder로만** 먹는다.
+      # 즉 dev 태스크에 legacy override가 남아 있으면 base placeholder가 그 값을 받아 개발 피드백이
+      # 운영 폼에 적재된다. 실측으로 재현했다(env 주입 시 유효값 = 운영 폼 id, origin=application.yml:140).
+      # 프로파일 파일이 base보다 우선하므로 여기 리터럴을 두면 env가 남아 있어도 빈 값이 이긴다.
+      #
+      # 아래 profile-preset-base-url·sentry.environment에는 같은 잠금을 적용하지 않는다. 성격이 다르다.
+      form-id: ""
+  ai:
+    # 생략해도 스텁 빈이 @ConditionalOnProperty(matchIfMissing=true)로 비활성이라 실 클라이언트가 뜨지만,
+    # 개발은 운영 배포 리허설 환경이라 "공개된 엔드포인트가 스텁으로 응답하는데 헬스는 정상"이 최악의 실패 모드다.
+    # 기본값에 기대지 않고 명시해 그 시나리오를 설정 파일 수준에서 못 박는다.
+    chat:
+      stub: false
+    story:
+      stub: false
+  asset:
+    # 개발 주소를 dev 기본값으로 굽는다. application.yml 기본값이 운영 주소(https://api.manyak.app)이고
+    # ProfileImagePresetService가 전체 URL을 profile_image_url에 **영구 저장**하므로,
+    # MANYAK_ASSET_BASE_URL 주입을 한 번만 빠뜨려도 개발 가입자 DB에 운영 URL이 남아 되돌릴 수 없다.
+    #
+    # form-id와 달리 여기는 placeholder를 유지한다(잠그지 않는다). asset base URL은 환경별로 **다른 값을
+    # 실제로 공급받아야 하는 값**이라 env가 이겨야 한다. 이 기본값은 잠금이 아니라 주입 부재에 대한 fail-safe다.
+    # (form-id는 개발이 어떤 값도 가지면 안 되는 값이라 잠그는 게 맞다.)
+    profile-preset-base-url: ${MANYAK_ASSET_BASE_URL:https://dev-api.manyak.app}
+
+sentry:
+  # 이 값은 Sentry 환경 구분이자 manyak-ai의 Langfuse 활성화 가드 입력이다(운영 Langfuse(JP)로 개발 프롬프트가
+  # 새지 않게 하는 스위치). application.yml 기본값 `local`이 위험하진 않지만, 개발의 정확한 이름은 dev다.
+  #
+  # 여기도 form-id식 잠금은 불가능하다. SENTRY_ENVIRONMENT는 `sentry.environment`의 relaxed binding
+  # 이름이라 systemEnvironment property source가 프로파일 yml보다 **우선**한다. 리터럴을 박아도 env가 이긴다.
+  # 그래서 잘못된 값이 주입되지 않게 하는 일은 YAML이 아니라 인프라(ECS task definition) 몫으로 남긴다.
+  environment: ${SENTRY_ENVIRONMENT:dev}
+
+# --- 여기에 "없는" 것들 (빠뜨린 게 아니라 의도적으로 비워 둔다) ---
+# dev는 prod를 상속하지 않으므로, prod가 끄거나 덮어쓴 값들은 여기서 아무것도 안 하면 base(application.yml)나
+# Spring 기본값이 그대로 산다. 즉 아래 항목은 "설정하지 않는 것"이 정답이다.
+#
+# - springdoc.api-docs/swagger-ui : application.yml 기본이 노출. prod의 `enabled: false`(KNK-321)를
+#   상속하지 않으므로 개발에서 Swagger가 그대로 열린다(클라이언트 개발자용).
+#   (반대로 manyak.google-form.feedback.form-id는 위에 **명시**했다. base 기본값이 빈 문자열이라 생략해도
+#   될 것 같지만, 그 기본값은 placeholder라 legacy env가 남아 있으면 운영 폼 id를 받아 온다. 잠그려면 리터럴이 필요하다.)
+# - management.health.redis.enabled : Spring 기본 true. prod만 배포 사정으로 false다.
+# - manyak.asset.image-base-url : 운영 CDN 기본값을 그대로 쓴다. 읽기 전용 조회용이고 DB에 저장되지 않아
+#   오염 경로가 아니다(profile-preset-base-url과 성격이 다르다).
+# - DB 크리덴셜·CORS 오리진·JWT/OAuth 시크릿·Amplitude 키 : 환경별 값이라 환경변수로만 주입한다.

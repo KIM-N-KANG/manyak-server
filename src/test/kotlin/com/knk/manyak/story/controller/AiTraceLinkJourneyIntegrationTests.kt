@@ -230,7 +230,7 @@ class AiTraceLinkJourneyIntegrationTests {
             .uri("/api/v1/stories/simple/storylines")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"requestId":"$requestId","selectedTagIds":[$tagId]}""")
+            .body("""{"requestId":"$requestId","genreTagIds":[$tagId],"protagonist":{}}""")
             .exchange()
             .expectStatus().isCreated
             .expectBody(String::class.java)

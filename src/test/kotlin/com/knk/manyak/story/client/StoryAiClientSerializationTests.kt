@@ -30,30 +30,49 @@ class StoryAiClientSerializationTests {
         """.trimIndent()
 
     @Test
-    fun `AI 스토리라인 요청은 snake case 필드명으로 직렬화한다`() {
+    fun `AI 스토리라인 요청은 인물 단위 snake case 필드명으로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = listOf("기억상실"),
-                supportingTags = listOf("비밀스러운 조력자"),
+                protagonist = AiCharacter(name = "아린", gender = "FEMALE", features = listOf("기억상실")),
+                supportingCharacters = listOf(AiCharacter(features = listOf("비밀스러운 조력자"))),
             ),
         )
 
         assertTrue(json.contains(""""genre_tags":["판타지"]"""))
-        assertTrue(json.contains(""""protagonist_tags":["기억상실"]"""))
-        assertTrue(json.contains(""""supporting_tags":["비밀스러운 조력자"]"""))
+        assertTrue(json.contains(""""protagonist":{"""))
+        assertTrue(json.contains(""""name":"아린""""))
+        assertTrue(json.contains(""""gender":"FEMALE""""))
+        assertTrue(json.contains(""""features":["기억상실"]"""))
+        assertTrue(json.contains(""""supporting_characters":[{"""))
+        assertTrue(json.contains(""""features":["비밀스러운 조력자"]"""))
         assertFalse(json.contains("genreTags"))
-        assertFalse(json.contains("protagonistTags"))
-        assertFalse(json.contains("supportingTags"))
+        assertFalse(json.contains("supportingCharacters"))
+        assertFalse(json.contains("protagonist_tags"))
+        assertFalse(json.contains("supporting_tags"))
     }
 
     @Test
-    fun `AI 스토리 완성 요청은 additional_info 필드명으로 직렬화한다`() {
+    fun `AI 스토리라인 요청은 주인공 입력이 비어도 protagonist 객체를 생략하지 않는다`() {
+        val json = objectMapper.writeValueAsString(
+            AiStorylinesRequest(
+                genreTags = emptyList(),
+                protagonist = AiCharacter(),
+            ),
+        )
+
+        // 주인공은 AI 쪽 기본값 없는 필수 필드다 — 누락하면 422이므로 빈 입력도 객체로 실린다.
+        assertTrue(json.contains(""""protagonist":{"""))
+        assertTrue(json.contains(""""supporting_characters":[]"""))
+    }
+
+    @Test
+    fun `AI 스토리 완성 요청은 인물 단위와 additional_info 필드명으로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(
             AiStoryCompileRequest(
                 genreTags = listOf("판타지"),
-                protagonistTags = listOf("기억상실"),
-                supportingTags = listOf("비밀스러운 조력자"),
+                protagonist = AiCharacter(name = "아린", features = listOf("기억상실")),
+                supportingCharacters = listOf(AiCharacter(name = "레온", features = listOf("비밀스러운 조력자"))),
                 selectedStoryline = "선택한 스토리라인",
                 additionalInfo = "주인공은 신중하다",
             ),
@@ -61,8 +80,12 @@ class StoryAiClientSerializationTests {
 
         assertTrue(json.contains(""""additional_info":"주인공은 신중하다""""))
         assertTrue(json.contains(""""selected_storyline":"선택한 스토리라인""""))
+        assertTrue(json.contains(""""protagonist":{"""))
+        assertTrue(json.contains(""""supporting_characters":[{"""))
         assertFalse(json.contains("extra_info"))
         assertFalse(json.contains("additionalInfo"))
+        assertFalse(json.contains("protagonist_tags"))
+        assertFalse(json.contains("supporting_tags"))
     }
 
     @Test

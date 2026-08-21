@@ -291,7 +291,7 @@ class SimpleStoryCreationParentChainIntegrationTests {
             .header("X-Manyak-Device-Id", deviceId)
             .contentType(MediaType.APPLICATION_JSON)
         authorization?.let { spec.header("Authorization", it) }
-        val result = spec.body("""{"requestId":"$requestId","selectedTagIds":[$tagId]$parentField}""")
+        val result = spec.body("""{"requestId":"$requestId","genreTagIds":[$tagId],"protagonist":{}$parentField}""")
             .exchange()
         if (expectCreated) {
             result.expectStatus().isCreated
