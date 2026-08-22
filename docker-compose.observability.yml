@@ -44,8 +44,11 @@ services:
     volumes:
       - manyak-opensearch-data:/usr/share/opensearch/data
     healthcheck:
-      # 단일 노드라 status는 green이 아니라 **yellow가 정상**이다(복제본을 둘 노드가 없어 replica가 미할당).
-      # 그래서 green을 기다리면 영원히 unhealthy다. 응답 자체가 오는지만 본다.
+      # 상태 색을 정하는 건 노드 수가 아니라 **인덱스가 요구한 복제본을 놓을 자리가 있는가**다.
+      # 우리 로그 템플릿이 number_of_replicas: 0 이라 미할당 샤드가 안 생겨 단일 노드에서도 green이다
+      # (실측: unassigned_shards 0. 운영 도메인도 같은 결과 — KNK-854).
+      # 그래도 여기서는 색을 보지 않고 응답 여부만 본다. 복제본을 요구하는 인덱스가 하나라도 끼면
+      # yellow가 되는데, 그건 기동 실패가 아니라서 컨테이너를 unhealthy로 묶을 이유가 없다.
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
       timeout: 5s
