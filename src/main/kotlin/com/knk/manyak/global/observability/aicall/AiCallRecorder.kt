@@ -1,6 +1,7 @@
 package com.knk.manyak.global.observability.aicall
 
 import com.knk.manyak.global.observability.MdcKeys
+import com.knk.manyak.global.observability.StructuredLogger
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import io.sentry.Sentry
@@ -25,6 +26,7 @@ class AiCallRecorder(
     private val meterRegistry: MeterRegistry,
     @param:Value("\${spring.application.name:manyak-server}")
     private val callerService: String,
+    private val structuredLogger: StructuredLogger,
 ) {
     /**
      * [block]을 실행하며 호출 이력을 적재한다. 성공 시 결과와 적재 id를 반환하고,
@@ -45,6 +47,7 @@ class AiCallRecorder(
     ): RecordedAiCall<T> {
         val log = repository.save(started(context))
         Sentry.addBreadcrumb("ai_call started: ${context.feature.value}", "ai")
+        logEvent(EVENT_STARTED, context, log.id)
         val startNanos = System.nanoTime()
         try {
             val result = block()
@@ -56,6 +59,7 @@ class AiCallRecorder(
             repository.save(log)
             recordDuration(context, OUTCOME_SUCCESS, durationNanos)
             Sentry.addBreadcrumb("ai_call succeeded: ${context.feature.value}", "ai")
+            logEvent(EVENT_COMPLETED, context, log.id, OUTCOME_SUCCESS, durationNanos)
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
             // error_code도 컬럼 길이로 자른다. 자르지 않으면 긴 코드(예: 긴 ChatTurnAiException.code)에서
@@ -68,6 +72,7 @@ class AiCallRecorder(
             repository.save(log)
             recordDuration(context, OUTCOME_FAILURE, durationNanos)
             Sentry.addBreadcrumb("ai_call failed: ${context.feature.value}", "ai")
+            logEvent(EVENT_COMPLETED, context, log.id, OUTCOME_FAILURE, durationNanos)
             // 적재된 호출 id로 후처리(예: Sentry 캡처 후 sentry_event_id 연결)할 기회를 준다.
             // 후처리(관측) 실패가 원래 예외를 가리지 않도록 격리한 뒤 전파한다.
             runCatching { onFailure(log.id, throwable) }
@@ -122,6 +127,37 @@ class AiCallRecorder(
      * 태그는 유한 enum인 feature(4종)·outcome(2종)뿐이다 — user_id·story_id·request_id 같은 고유값을 태그로
      * 넣으면 시계열이 무한히 늘어난다. 개별 추적은 구조화 로그와 ai_call_logs의 몫이다.
      */
+    /**
+     * AI 호출 구간을 구조화 로그로 남긴다(KNK-960).
+     *
+     * KNK-855로 로그가 OpenSearch에 모이면서 request_id 하나로 요청을 따라갈 수 있게 됐는데,
+     * 서버 구간이 완료 한 줄뿐이라 전체 소요와 LLM 소요의 차이가 어디서 났는지 보이지 않았다
+     * (실측: 전체 13.6초 중 LLM 11.0초, 나머지 2.6초 미상). 시작·종료 두 줄이면 그 구간이 드러난다.
+     *
+     * request_id·session_id·device_id_hash는 MDC에 있어 인코더가 자동으로 붙이므로 여기서 넣지 않는다.
+     * 프롬프트·응답 본문은 넣지 않는다 — 어느 호출이 얼마나 걸렸는지만 알면 되고, 원문은 Langfuse의 몫이다.
+     */
+    private fun logEvent(
+        eventName: String,
+        context: AiCallContext,
+        aiCallLogId: Long,
+        outcome: String? = null,
+        durationNanos: Long? = null,
+    ) {
+        // 로깅 실패가 AI 호출 결과를 바꾸지 않도록 격리한다(관측 < 비즈니스). 메트릭·meta 추출과 같은 원칙이다.
+        runCatching {
+            val fields = LinkedHashMap<String, Any?>()
+            fields["feature"] = context.feature.value
+            fields["ai_call_log_id"] = aiCallLogId
+            outcome?.let { fields["outcome"] = it }
+            // 메트릭과 같은 시계에서 나온 값이라 대시보드와 로그가 어긋나지 않는다.
+            durationNanos?.let { fields["duration_ms"] = it / 1_000_000 }
+            context.storyId?.let { fields["story_id"] = it }
+            context.chatId?.let { fields["chat_id"] = it.toString() }
+            structuredLogger.event(eventName, fields)
+        }
+    }
+
     private fun recordDuration(context: AiCallContext, outcome: String, durationNanos: Long) {
         // 메트릭 기록 실패가 AI 호출 결과를 바꾸지 않도록 격리한다(관측 < 비즈니스).
         runCatching {
@@ -139,6 +175,10 @@ class AiCallRecorder(
 
         private const val OUTCOME_SUCCESS = "success"
         private const val OUTCOME_FAILURE = "failure"
+
+        // 구조화 로그 event_name(KNK-960). 이름을 바꾸면 Dashboards 저장 검색이 깨진다.
+        private const val EVENT_STARTED = "ai_call_started"
+        private const val EVENT_COMPLETED = "ai_call_completed"
 
         // 컬럼 길이와 일치시켜, 초과 입력이 적재 실패로 비즈니스 호출을 막지 않도록 자른다.
         private const val IDENTIFIER_MAX_LENGTH = 128 // request_id·session_id VARCHAR(128)

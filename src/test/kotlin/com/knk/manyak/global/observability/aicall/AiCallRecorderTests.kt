@@ -1,6 +1,7 @@
 package com.knk.manyak.global.observability.aicall
 
 import com.knk.manyak.global.observability.MdcKeys
+import com.knk.manyak.global.observability.StructuredLogger
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -34,7 +35,7 @@ class AiCallRecorderTests {
     @BeforeEach
     fun setUp() {
         meterRegistry = SimpleMeterRegistry()
-        recorder = AiCallRecorder(repository, meterRegistry, "manyak-server")
+        recorder = AiCallRecorder(repository, meterRegistry, "manyak-server", StructuredLogger())
         // @SpringBootTest 통합 테스트가 같은 H2 인메모리 DB에 커밋한 행과 섞이지 않도록 비운다.
         repository.deleteAll()
         MDC.clear()
