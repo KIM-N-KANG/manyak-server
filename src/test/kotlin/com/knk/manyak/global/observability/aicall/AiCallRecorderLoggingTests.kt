@@ -99,6 +99,21 @@ class AiCallRecorderLoggingTests {
     }
 
     @Test
+    fun `내부 PK인 story_id는 로그에 남기지 않고 publicId인 chat_id만 남긴다`() {
+        val chatPublicId = java.util.UUID.randomUUID()
+        recorder.record(
+            AiCallContext(AiCallFeature.CHAT_RESPONSE, storyId = 42L, chatId = chatPublicId),
+        ) { "ok" }
+
+        val completed = eventsByName()["ai_call_completed"]!!
+        // AiCallContext.storyId는 ai_call_logs 컬럼용 내부 PK다. 기존 로그의 story_id는 publicId(UUID)라
+        // 값이 조인되지 않고, 순차 PK가 로그에 노출된다(CLAUDE.md: 외부 노출 식별자는 public_id).
+        assertThat(completed).doesNotContainKey("story_id")
+        // chat_id는 publicId라 기존 로그와 같은 값으로 조인된다.
+        assertThat(completed["chat_id"]).isEqualTo(chatPublicId.toString())
+    }
+
+    @Test
     fun `프롬프트나 응답 본문은 로그에 남기지 않는다`() {
         val secret = "사용자가 쓴 채팅 원문"
         recorder.record(AiCallContext(AiCallFeature.CHAT_RESPONSE)) { secret }

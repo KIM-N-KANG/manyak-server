@@ -152,8 +152,13 @@ class AiCallRecorder(
             outcome?.let { fields["outcome"] = it }
             // 메트릭과 같은 시계에서 나온 값이라 대시보드와 로그가 어긋나지 않는다.
             durationNanos?.let { fields["duration_ms"] = it / 1_000_000 }
-            context.storyId?.let { fields["story_id"] = it }
+            // chat_id는 publicId(UUID)라 기존 chat_started·ai_response_saved 로그와 같은 값으로 조인된다.
             context.chatId?.let { fields["chat_id"] = it.toString() }
+            // story_id는 **일부러 넣지 않는다.** AiCallContext.storyId는 ai_call_logs 컬럼용 내부 PK인데,
+            // 기존 로그의 story_id는 publicId(UUID)라 값이 조인되지 않고 순차 PK가 로그에 노출된다
+            // (CLAUDE.md: 외부 노출 식별자는 public_id, IDOR 방지). publicId를 여기까지 끌고 오려면
+            // AiCallContext와 호출부 네 곳을 고쳐야 하는데 얻는 게 없다 — ai_call_log_id로 ai_call_logs 행에
+            // 닿으면 story를 찾을 수 있고, 같은 요청의 다른 로그는 request_id로 묶인다.
             structuredLogger.event(eventName, fields)
         }
     }
