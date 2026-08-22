@@ -75,5 +75,10 @@ curl -sf -X POST "$OSD_URL/api/saved_objects/index-pattern/manyak-logs?overwrite
 echo "  ✓ $PATTERN (시간축 @timestamp, 필드 $(printf '%s' "$FIELDS" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["fields"]))')개)"
 
 echo
-echo "완료. Discover 열기 → $OSD_URL/app/data-explorer/discover"
+# 운영 도메인처럼 FGAC 를 쓰면 OSD_URL 에 자격증명을 실어 넘기게 되는데(https://user:pw@host),
+# 그 URL 을 그대로 안내하면 브라우저가 거부한다
+# (`Request cannot be constructed from a URL that includes credentials`, KNK-854 실측).
+# 그래서 안내 문구에서는 자격증명을 떼고 보여준다. curl 호출에는 위처럼 그대로 쓴다.
+BROWSER_URL=$(printf '%s' "$OSD_URL" | sed -E 's#^(https?://)[^/@]*@#\1#')
+echo "완료. Discover 열기 → $BROWSER_URL/app/data-explorer/discover"
 echo "로그가 안 보이면 오른쪽 위 시간 범위를 넓히세요(기본값이 Last 15 minutes입니다)."
