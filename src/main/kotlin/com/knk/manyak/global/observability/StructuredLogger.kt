@@ -16,11 +16,11 @@ import org.springframework.stereotype.Component
  * 길이 구간(message_length_bucket)·content_length·has_email 같은 대체 값만 전달한다.
  */
 @Component
-class StructuredLogger {
+open class StructuredLogger {
 
     private val log = LoggerFactory.getLogger(StructuredLogger::class.java)
 
-    fun event(eventName: String, fields: Map<String, Any?>) {
+    open fun event(eventName: String, fields: Map<String, Any?>) {
         val payload = LinkedHashMap<String, Any?>()
         payload["event_name"] = eventName
         payload.putAll(fields)

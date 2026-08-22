@@ -10,6 +10,7 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.story.entity.Story
@@ -62,7 +63,8 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
         repository: AiCallLogRepository,
         meterRegistry: MeterRegistry,
         callerService: String,
-    ) : AiCallRecorder(repository, meterRegistry, callerService) {
+        structuredLogger: StructuredLogger,
+    ) : AiCallRecorder(repository, meterRegistry, callerService, structuredLogger) {
         override fun attachTurnNumber(aiCallLogId: Long, turnNumber: Int) {
             throw RuntimeException("post-persist terminal failure (test)")
         }
@@ -76,7 +78,9 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
             repository: AiCallLogRepository,
             meterRegistry: MeterRegistry,
             @Value("\${spring.application.name:manyak-server}") callerService: String,
-        ): AiCallRecorder = FailingAfterPersistAiCallRecorder(repository, meterRegistry, callerService)
+            structuredLogger: StructuredLogger,
+        ): AiCallRecorder =
+            FailingAfterPersistAiCallRecorder(repository, meterRegistry, callerService, structuredLogger)
     }
 
     @Autowired
