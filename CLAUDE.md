@@ -78,7 +78,8 @@
 
 ### 배포·릴리스
 
-- **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`: ECR push → SSM `deploy.sh` → smoke). dev 머지는 프로덕션에 반영되지 않습니다.
+- **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`). 흐름은 빌드가 ECR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 `:latest` 승격 → ECS `manyak-prod` 서비스에 `force-new-deployment` → 배포 id 폴링·컨테이너 헬스·`api.manyak.app` 스모크입니다. dev 머지는 프로덕션에 반영되지 않습니다.
+- **EC2+SSM 경로는 수동 `workflow_dispatch` 롤백 수단으로만 남아 있습니다**(KNK-963). 실행 전에 `manyak-terraform`에서 ALB 트래픽을 EC2로 되돌리는 것(`ecs_traffic_weight = 0`)이 전제이며, EC2를 회수하면 그 잡은 제거합니다. main push로는 돌지 않습니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영. main/dev 직접 push 금지(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 와이어 계약(요청/응답 필드)이 바뀌는 릴리스는 manyak-web·manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.
@@ -87,4 +88,4 @@
 ### Terraform/IaC 작업
 
 - 운영 인프라(Terraform/IaC)는 `manyak-terraform` 레포로 분리됨(KNK-296). 이 레포에는 IaC 코드를 두지 않으며, terraform 작업·제약·apply는 그 레포의 `CLAUDE.md`를 따릅니다.
-- 이 레포에서 알아야 할 최소한: 운영 compose는 terraform user-data로 구워지므로 **compose/인프라 변경은 SSM 배포로 반영되지 않고 terraform apply(=인스턴스 교체, 짧은 다운타임)가 필요**하며, 교체 인스턴스는 `:latest`로 부팅하므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
+- 이 레포에서 알아야 할 최소한: **인프라 정의 변경은 앱 레포 배포 잡으로 반영되지 않고 terraform apply가 필요**합니다. ECS 태스크 정의(컨테이너·환경변수·헬스체크)가 terraform 관리이고 CI 역할에는 `RegisterTaskDefinition` 권한이 없어, 배포 잡은 기존 정의로 이미지를 다시 pull할 뿐입니다. 롤백용 EC2의 운영 compose도 terraform user-data로 구워져 apply(=인스턴스 교체, 짧은 다운타임)가 필요하고, 교체 인스턴스는 `:latest`로 부팅하므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
