@@ -61,8 +61,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # main 푸시 → 배포용 ECR (OIDC, 장기 키 미보관)
+      # main 에서의 수동 실행(workflow_dispatch)도 포함한다. 롤백 경로인 EC2 배포 잡이 그 이벤트로만
+      # 도는데, 여기서 인증을 건너뛰면 태그가 ECR 이 아닌 GHCR 로 잡히고 push 도 되지 않아
+      # 롤백 실행이 "ECR 에 그 SHA 가 이미 있어야만" 성립하는 반쪽 경로가 된다(KNK-963).
       - name: Configure AWS credentials
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -70,7 +73,7 @@ jobs:
 
       - name: Log in to Amazon ECR
         id: ecr-login
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: aws-actions/amazon-ecr-login@v2
 
       # 대상 레지스트리/태그 결정: main → ECR(short-sha), 그 외 → GHCR(short-sha)
@@ -104,7 +107,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+          push: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
           tags: ${{ steps.image-tags.outputs.tags }}
 
   # dev 푸시(GHCR 갱신) 후 → 개발 ECS 서비스에 새 배포를 트리거 + 헬스 스모크 (KNK-829)
