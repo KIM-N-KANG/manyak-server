@@ -1200,16 +1200,26 @@ class SimpleStoryCreationService(
             return@mapNotNull null
         }
         val base64 = image.imageBase64?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        // 디코딩은 업로드 밖에서 먼저 끝낸다 — 깨진 base64는 올라간 객체가 없으니 아래 보상 삭제도 필요 없다.
+        val bytes = try {
+            Base64.getDecoder().decode(base64)
+        } catch (exception: Exception) {
+            logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
+            return@mapNotNull null
+        }
         val objectKey = "$CHARACTER_IMAGE_KEY_PREFIX/$storyPublicId/${UUID.randomUUID()}.$CHARACTER_IMAGE_EXTENSION"
         val url = try {
             characterImageStorage.upload(
                 objectKey,
-                Base64.getDecoder().decode(base64),
+                bytes,
                 image.contentType?.takeIf { it.isNotBlank() } ?: CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE,
             )
         } catch (exception: Exception) {
             // 이미지 한 장 때문에 스토리 생성이 실패해서는 안 된다. 사유만 남기고 이미지 없이 진행한다.
             logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
+            // 예외가 났어도 저장소는 객체를 받았을 수 있다(응답만 유실된 경우). 이 키는 반환값에 실리지 않아
+            // 트랜잭션 보상 삭제가 닿지 못하므로 여기서 지운다. 실제로 안 올라갔으면 삭제는 무해한 no-op이다.
+            deleteCharacterImageQuietly(storyPublicId, objectKey)
             null
         }
         url?.let { name to UploadedCharacterImage(objectKey, it) }
@@ -1230,14 +1240,17 @@ class SimpleStoryCreationService(
         try {
             return block()
         } catch (throwable: Throwable) {
-            uploadedImages.values.forEach { uploaded ->
-                try {
-                    characterImageStorage.delete(uploaded.objectKey)
-                } catch (exception: Exception) {
-                    logCharacterImageEvent("character_image_cleanup_failed", storyPublicId, exception)
-                }
-            }
+            uploadedImages.values.forEach { uploaded -> deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey) }
             throw throwable
+        }
+    }
+
+    /** 고아가 될 객체를 지운다. 삭제 실패는 로그만 남긴다 — 정리 실패가 원래 실패 원인을 가려서는 안 된다. */
+    private fun deleteCharacterImageQuietly(storyPublicId: UUID, objectKey: String) {
+        try {
+            characterImageStorage.delete(objectKey)
+        } catch (exception: Exception) {
+            logCharacterImageEvent("character_image_cleanup_failed", storyPublicId, exception)
         }
     }
 

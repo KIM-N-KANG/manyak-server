@@ -103,6 +103,9 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         // 보상 삭제로 지운 객체 키. 저장 실패 시 고아 객체 정리 검증용.
         val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+        // 업로드를 시도한 객체 키(실패분 포함). 실패한 업로드의 키를 지우는지 검증하는 데 쓴다.
+        val attemptedUploadKeys = java.util.concurrent.CopyOnWriteArrayList<String>()
+
         // 값이 있으면 그 인물 이름의 업로드에서 예외를 던진다(S3 장애 재현).
         @Volatile
         var uploadFailureKeyMarker: String? = null
@@ -153,6 +156,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Primary
         fun fakeCharacterImageStorage(): CharacterImageStorage = object : CharacterImageStorage {
             override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
+                attemptedUploadKeys += objectKey
                 uploadFailureKeyMarker?.let { marker ->
                     if (marker == FAIL_ALL_UPLOADS) {
                         throw IllegalStateException("S3 업로드 실패(테스트)")
@@ -195,6 +199,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         characterImages = emptyList()
         uploads.clear()
         deletes.clear()
+        attemptedUploadKeys.clear()
         uploadFailureKeyMarker = null
         databaseCleaner.cleanAll()
     }
@@ -417,7 +422,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
-    fun `S3 업로드가 실패해도 인물은 image_url 없이 저장되고 스토리 생성은 성공한다`() {
+    fun `S3 업로드가 실패해도 인물은 image_url 없이 저장되고 실패한 객체 키를 지운다`() {
         characterAppearances = listOf(AiCharacterAppearance("서준", "MALE", "20대 초반"))
         characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
         uploadFailureKeyMarker = FAIL_ALL_UPLOADS
@@ -429,6 +434,9 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
         assertThat(saved.map { it.name }).containsExactly("서준")
         assertThat(saved.single().imageUrl).isNull()
+        // 업로드가 예외로 끝나도 저장소는 객체를 받았을 수 있다. 그 키는 반환값에 실리지 않아 트랜잭션 보상 삭제가
+        // 닿지 못하므로, 업로드 실패 지점에서 바로 지워야 고아 객체가 남지 않는다(Codex P2).
+        assertThat(deletes).containsExactly(attemptedUploadKeys.single())
     }
 
     @Test
@@ -500,6 +508,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val story = storyRepository.findAll().first()
         assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single().imageUrl).isNull()
         assertThat(uploads).isEmpty()
+        // 디코딩이 업로드보다 먼저라 올라간 객체가 없다 — 지울 것도 없다.
+        assertThat(deletes).isEmpty()
     }
 
     @Test
