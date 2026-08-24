@@ -8,6 +8,7 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import java.net.URI
 import java.time.Duration
 
 /**
@@ -36,6 +37,8 @@ interface CharacterImageStorage {
 class S3CharacterImageStorage(
     @param:Value("\${manyak.asset.character-image.bucket:}") private val bucket: String,
     @param:Value("\${manyak.asset.character-image.region:}") private val region: String,
+    // S3 호환 저장소(로컬 MinIO 등)를 쓸 때만 채운다. 비어 있으면 AWS 기본 엔드포인트를 그대로 쓴다.
+    @param:Value("\${manyak.asset.character-image.endpoint:}") private val endpoint: String,
     @param:Value("\${manyak.asset.image-base-url:}") private val baseUrl: String,
 ) : CharacterImageStorage {
 
@@ -46,6 +49,14 @@ class S3CharacterImageStorage(
         } else {
             S3Client.builder()
                 .apply { if (region.isNotBlank()) region(Region.of(region)) }
+                // MinIO 같은 S3 호환 저장소는 가상 호스트 방식(bucket.host) 주소를 해석하지 못하므로 path-style을 켠다.
+                // 자격증명은 손대지 않는다 — AWS 기본 체인(AWS_ACCESS_KEY_ID·AWS_SECRET_ACCESS_KEY 등)을 그대로 쓴다.
+                .apply {
+                    if (endpoint.isNotBlank()) {
+                        endpointOverride(URI.create(endpoint))
+                        forcePathStyle(true)
+                    }
+                }
                 // SDK 기본값에는 API 호출 타임아웃이 없어, S3가 느리거나 half-open이면 동기 putObject가 재시도까지
                 // 물고 늘어진다. 인물은 최대 5명이라 호출 전체 상한 10초면 최악 누적이 50초로 묶이고, 이는 compile
                 // (최대 180초) 뒤에 붙는 부가 작업이라 스토리 생성 요청 예산을 위협하지 않는다. 시도당 5초는 그 안에서

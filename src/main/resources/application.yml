@@ -112,6 +112,9 @@ manyak:
       # 비워 두면(로컬·미구성) 업로드를 건너뛰고 image_url이 NULL인 인물로 저장한다 — 스토리 생성은 정상 진행된다.
       bucket: ${MANYAK_CHARACTER_IMAGE_BUCKET:}
       region: ${MANYAK_CHARACTER_IMAGE_REGION:}
+      # S3 호환 저장소 엔드포인트(로컬 MinIO 검증용). 값이 있으면 path-style로 그 주소에 붙고,
+      # 비어 있으면 AWS 기본 엔드포인트를 쓴다. 운영은 비워 둔다.
+      endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   credit:
