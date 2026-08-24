@@ -90,8 +90,9 @@ class S3CharacterImageStorage(
     }
 
     private companion object {
-        // 재시도를 포함한 호출 하나의 전체 상한.
-        val API_CALL_TIMEOUT: Duration = Duration.ofSeconds(10)
+        // 재시도를 포함한 호출 하나의 전체 상한. 단계 예산([ImageStageBudget])이 새 호출을 시작할지 판단할 때
+        // 같은 값을 여유로 쓰므로 한 곳에 둔다 — 두 값이 어긋나면 마감을 넘겨 끝나는 호출이 생긴다.
+        val API_CALL_TIMEOUT: Duration = ImageStageBudget.CALL_TIMEOUT
 
         // 시도 하나의 상한. 전체 상한 안에서 재시도 한 번이 들어갈 수 있는 값이다.
         val API_CALL_ATTEMPT_TIMEOUT: Duration = Duration.ofSeconds(5)

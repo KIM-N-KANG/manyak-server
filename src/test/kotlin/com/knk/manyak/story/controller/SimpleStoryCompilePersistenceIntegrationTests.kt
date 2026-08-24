@@ -521,6 +521,26 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
+    fun `외형과 이미지의 이름이 갈려도 합쳐서 5명까지만 저장한다`() {
+        // 상한이 배열별이면 외형 3명 + 이미지 4명(이름 1개만 겹침)이 6행이 된다. 상한은 최종 인물 집합에 걸린다.
+        // 합집합 순서는 외형이 앞이고(first-wins) 이름이 겹치지 않는 이미지가 뒤를 잇는다 → A B C / D E F 중 F가 잘린다.
+        characterAppearances = listOf("A", "B", "C").map { AiCharacterAppearance(it, "MALE") }
+        characterImages = listOf("C", "D", "E", "F").map {
+            AiCharacterImage(it, imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        }
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("A", "B", "C", "D", "E")
+        // 잘린 F는 업로드도 하지 않는다. 남은 C·D·E만 올라가고, 외형만 있는 A·B는 이미지가 없다.
+        assertThat(uploads).hasSize(3)
+        assertThat(saved.filter { it.imageUrl != null }.map { it.name }).containsExactly("C", "D", "E")
+    }
+
+    @Test
     fun `이름이 비어 있는 인물은 저장하지 않고 업로드도 하지 않는다`() {
         characterAppearances = listOf(AiCharacterAppearance("   "))
         characterImages = listOf(AiCharacterImage("", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
