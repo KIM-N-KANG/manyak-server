@@ -1,0 +1,62 @@
+[
+  {
+    "imageKey": "thumb_0051",
+    "type": "THUMBNAIL",
+    "genres": [
+      "무협"
+    ],
+    "mood": "비장",
+    "subject": "표국짐꾼",
+    "prop": "유운검",
+    "sourceFile": "오리지널 스토리/유운잔검기 썸네일.png",
+    "objectKey": "thumbnails/thumb_0051.png"
+  },
+  {
+    "imageKey": "thumb_0052",
+    "type": "THUMBNAIL",
+    "genres": [
+      "학원"
+    ],
+    "mood": "설렘",
+    "subject": "교실",
+    "prop": "자리뽑기",
+    "sourceFile": "오리지널 스토리/연애는 대학 가서 썸네일.png",
+    "objectKey": "thumbnails/thumb_0052.png"
+  },
+  {
+    "imageKey": "thumb_0053",
+    "type": "THUMBNAIL",
+    "genres": [
+      "로맨스 판타지"
+    ],
+    "mood": "북부겨울",
+    "subject": "대공성",
+    "prop": "계약서",
+    "sourceFile": "오리지널 스토리/대공님, 계약 위반입니다 썸네일.png",
+    "objectKey": "thumbnails/thumb_0053.png"
+  },
+  {
+    "imageKey": "thumb_0054",
+    "type": "THUMBNAIL",
+    "genres": [
+      "현대 판타지"
+    ],
+    "mood": "결의",
+    "subject": "멸망의밤",
+    "prop": "균열",
+    "sourceFile": "오리지널 스토리/나만 기억하는 멸망 썸네일.png",
+    "objectKey": "thumbnails/thumb_0054.png"
+  },
+  {
+    "imageKey": "thumb_0055",
+    "type": "THUMBNAIL",
+    "genres": [
+      "탈출"
+    ],
+    "mood": "괴담",
+    "subject": "지하철",
+    "prop": "안내방송",
+    "sourceFile": "오리지널 스토리/0호선 썸네일.png",
+    "objectKey": "thumbnails/thumb_0055.png"
+  }
+]

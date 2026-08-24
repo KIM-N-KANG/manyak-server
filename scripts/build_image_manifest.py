@@ -34,6 +34,10 @@ MIGRATION_DIR = REPO_ROOT / "src/main/resources/db/migration"
 MANIFEST_PATH = REPO_ROOT / "scripts/image-presets.manifest.json"
 SEED_SQL_PATH = MIGRATION_DIR / "V46__seed_image_presets.sql"
 RENAME_MAP_PATH = REPO_ROOT / "scripts/image-presets.rename.tsv"
+# 자산 아카이브 밖 수동 자산(오리지널 스토리 전용 아트웍 등)의 오버레이. 스캔 결과 뒤에 합쳐져
+# 매니페스트·리네임 맵에는 실리지만, V46 시드 SQL에는 넣지 않는다 — 이미 적용된 마이그레이션이고
+# 오버레이 자산의 DB 카탈로그 등록은 운영 시드(오리지널 스토리 시드 SQL)가 수행한다(KNK-934).
+OVERLAY_PATH = REPO_ROOT / "scripts/image-presets.overlay.json"
 
 # 디렉터리명 → (카탈로그 타입, imageKey 접두, S3 prefix)
 TYPES = {
@@ -159,6 +163,18 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
     return entries
 
 
+def load_overlay(scanned_keys: set[str]) -> list[dict]:
+    """수동 오버레이 자산을 읽는다. 스캔 키와 충돌하면 실패시킨다(silent overwrite 방지)."""
+    if not OVERLAY_PATH.exists():
+        return []
+    overlay = json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))
+    duplicated = [e["imageKey"] for e in overlay if e["imageKey"] in scanned_keys]
+    if duplicated:
+        print(f"오버레이 imageKey가 스캔 자산과 충돌합니다: {duplicated}", file=sys.stderr)
+        sys.exit(1)
+    return overlay
+
+
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -216,12 +232,14 @@ def main() -> None:
     args = parser.parse_args()
 
     entries = parse_assets(args.assets_dir.expanduser())
-    manifest = json.dumps(entries, ensure_ascii=False, indent=2) + "\n"
+    overlay = load_overlay({e["imageKey"] for e in entries})
+    combined = entries + overlay
+    manifest = json.dumps(combined, ensure_ascii=False, indent=2) + "\n"
     seed_sql = render_seed_sql(entries)
-    rename_map = "".join(f"{e['sourceFile']}\t{e['objectKey']}\n" for e in entries)
+    rename_map = "".join(f"{e['sourceFile']}\t{e['objectKey']}\n" for e in combined)
 
     by_type: dict[str, int] = {}
-    for entry in entries:
+    for entry in combined:
         by_type[entry["type"]] = by_type.get(entry["type"], 0) + 1
 
     if args.check:
