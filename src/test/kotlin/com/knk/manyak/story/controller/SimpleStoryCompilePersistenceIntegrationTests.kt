@@ -17,6 +17,7 @@ import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.Lorebook
+import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
@@ -110,6 +111,11 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Volatile
         var uploadFailureKeyMarker: String? = null
 
+        // true면 업로드 시점에 그 객체 키가 가리키는 storyPublicId로 스토리 행을 **커밋**한다.
+        // 커밋은 반영됐는데 응답만 유실돼 예외가 난 모호한 실패와 같은 상태를 만든다.
+        @Volatile
+        var commitStoryOnUpload: Boolean = false
+
         // 세션 경합 재현용: 값이 있으면 compile 호출 도중 그 세션을 STORY_CREATED로 **커밋**한다.
         // 다른 requestId를 가진 동시 요청이 먼저 저장을 끝낸 상황과 같아, compile 후 잠금 시점에 409가 난다.
         @Volatile
@@ -154,9 +160,20 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         /** 실제 S3 대신 업로드를 기록하는 스텁. 반환 URL은 운영과 같은 `base-url + 객체 키` 모양이다. */
         @Bean
         @Primary
-        fun fakeCharacterImageStorage(): CharacterImageStorage = object : CharacterImageStorage {
+        fun fakeCharacterImageStorage(
+            storyRepository: StoryRepository,
+            transactionManager: PlatformTransactionManager,
+        ): CharacterImageStorage = object : CharacterImageStorage {
             override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
                 attemptedUploadKeys += objectKey
+                if (commitStoryOnUpload) {
+                    // 객체 키(characters/generated/{storyPublicId}/{uuid}.webp)에서 스토리 public_id를 꺼내
+                    // 별도 트랜잭션으로 스토리를 커밋한다. 이후 저장 트랜잭션이 깨져도 스토리 행은 남는다.
+                    val storyPublicId = java.util.UUID.fromString(objectKey.split("/")[2])
+                    TransactionTemplate(transactionManager).executeWithoutResult {
+                        storyRepository.saveAndFlush(Story(publicId = storyPublicId, title = "커밋된 스토리"))
+                    }
+                }
                 uploadFailureKeyMarker?.let { marker ->
                     if (marker == FAIL_ALL_UPLOADS) {
                         throw IllegalStateException("S3 업로드 실패(테스트)")
@@ -200,6 +217,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         uploads.clear()
         deletes.clear()
         attemptedUploadKeys.clear()
+        commitStoryOnUpload = false
         uploadFailureKeyMarker = null
         databaseCleaner.cleanAll()
     }
@@ -545,6 +563,26 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(storyRepository.findAll()).isEmpty()
         assertThat(uploads).hasSize(1)
         assertThat(deletes).containsExactly(uploads.single().first)
+    }
+
+    @Test
+    fun `저장이 예외로 끝나도 스토리 행이 남아 있으면 인물 이미지를 지우지 않는다`() {
+        // 커밋이 서버에 반영됐는데 응답만 유실돼 예외가 나는 모호한 실패를 재현한다. 그 상태에서는 스토리와
+        // image_url이 영구히 남으므로 객체를 지우면 DB가 가리키는 이미지가 깨진다.
+        // 재현 방법: 스텁 스토리지가 업로드 시점에 그 storyPublicId로 스토리를 **커밋**한다. 이어지는 저장
+        // 트랜잭션은 public_id 유니크 위반으로 깨지므로(500), 보상 삭제 판정이 보는 상태는 실제 모호한 실패와
+        // 같다 — 저장 트랜잭션은 예외로 끝났는데 그 public_id의 스토리 행은 존재한다.
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        commitStoryOnUpload = true
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(500)
+
+        assertThat(uploads).hasSize(1)
+        // 스토리 행이 남아 있으니 지우지 않는다(고아 객체 비용 < 깨진 이미지 피해).
+        assertThat(deletes).isEmpty()
+        assertThat(storyRepository.findAll()).hasSize(1)
     }
 
     private fun storyCreationTimerCount(outcome: String): Long =

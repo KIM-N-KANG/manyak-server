@@ -1240,9 +1240,40 @@ class SimpleStoryCreationService(
         try {
             return block()
         } catch (throwable: Throwable) {
-            uploadedImages.values.forEach { uploaded -> deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey) }
+            if (uploadedImages.isNotEmpty() && isStoryAbsent(storyPublicId)) {
+                uploadedImages.values.forEach { uploaded -> deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey) }
+            }
             throw throwable
         }
+    }
+
+    /**
+     * 보상 삭제를 해도 되는지 판정한다 — 스토리 행이 **없을 때만** true다.
+     *
+     * 커밋이 서버에 반영됐는데 응답만 유실되면 예외가 나도 스토리와 `image_url`이 영구히 남는다. 그때 객체를 지우면
+     * DB가 가리키는 이미지가 깨져 사용자에게 보인다. 그래서 삭제 전에 트랜잭션 밖에서(이 시점엔 실패한 트랜잭션이
+     * 이미 끝나 있다) 스토리 존재를 확인하고, 남아 있으면 지우지 않는다.
+     *
+     * 확인 자체가 실패해도 지우지 않는다. **고아 객체(저장 비용)가 깨진 이미지(사용자 피해)보다 싸다**는 판단이다.
+     */
+    private fun isStoryAbsent(storyPublicId: UUID): Boolean = try {
+        val exists = storyRepository.existsByPublicId(storyPublicId)
+        if (exists) {
+            structuredLogger.event(
+                "character_image_cleanup_skipped",
+                "story_public_id" to storyPublicId.toString(),
+                "reason" to "story_exists",
+            )
+        }
+        !exists
+    } catch (exception: Exception) {
+        structuredLogger.event(
+            "character_image_cleanup_skipped",
+            "story_public_id" to storyPublicId.toString(),
+            "reason" to "lookup_failed",
+            "error_type" to (exception::class.simpleName ?: "UNKNOWN"),
+        )
+        false
     }
 
     /** 고아가 될 객체를 지운다. 삭제 실패는 로그만 남긴다 — 정리 실패가 원래 실패 원인을 가려서는 안 된다. */
