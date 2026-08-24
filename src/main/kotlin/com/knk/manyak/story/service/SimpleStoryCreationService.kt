@@ -15,7 +15,10 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.image.service.CharacterImageStorage
 import com.knk.manyak.story.client.AiCharacter
+import com.knk.manyak.story.client.AiCharacterAppearance
+import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
@@ -40,6 +43,7 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryCreationCharacter
 import com.knk.manyak.story.entity.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
@@ -60,6 +64,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
@@ -88,6 +93,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -107,6 +113,8 @@ class SimpleStoryCreationService(
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    private val storyCharacterRepository: StoryCharacterRepository,
+    private val characterImageStorage: CharacterImageStorage,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
     private val meterRegistry: MeterRegistry,
@@ -140,6 +148,14 @@ class SimpleStoryCreationService(
         // 주요 사건·엔딩 이름 컬럼(VARCHAR(100)) 초과를 방어적으로 자른다.
         const val STORY_MAIN_EVENT_NAME_MAX_LENGTH = 100
         const val STORY_ENDING_NAME_MAX_LENGTH = 100
+
+        // 인물 이름 컬럼(VARCHAR(100)) 초과 방어. 매칭 키라 절단 후 이름으로 이미지를 붙인다.
+        const val STORY_CHARACTER_NAME_MAX_LENGTH = 100
+
+        // 인물 이미지 객체 키 접두사·확장자(스펙 §4-4). AI는 WebP만 보낸다.
+        const val CHARACTER_IMAGE_KEY_PREFIX = "characters/generated"
+        const val CHARACTER_IMAGE_EXTENSION = "webp"
+        const val CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE = "image/webp"
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
@@ -993,145 +1009,281 @@ class SimpleStoryCreationService(
 
         val genre = genreTags.joinToString(separator = ", ") { it.name }.ifEmpty { null }
 
-        return transactionTemplate.execute {
-            val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
-                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
-            if (lockedSession.status == StoryCreationSessionStatus.STORY_CREATED) {
-                throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
-            }
+        // 스토리 public_id를 트랜잭션 밖에서 미리 확정한다 — 인물 이미지 객체 키가 이 값을 쓰는데,
+        // 업로드(네트워크 I/O)를 DB 트랜잭션 안에서 하면 커넥션을 수 초간 잡아 둔다.
+        val storyPublicId = UUID.randomUUID()
+        // 이름 정규화를 업로드보다 먼저 한 곳에서 끝낸다 — 저장 단계에서 걸러질 인물을 업로드하면 고아 객체가 된다.
+        val appearancesByName = normalizeByName(aiResponse.characterAppearances) { it.name }
+        val imagesByName = normalizeByName(aiResponse.characterImages) { it.name }
+        // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 story_characters에 저장한다.
+        val uploadedImages = uploadCharacterImages(storyPublicId, imagesByName)
 
-            selectedStoryline.isSelected = true
-            storyCreationStorylineRepository.save(selectedStoryline)
-
-            val story = storyRepository.save(
-                Story(
-                    userId = attributedUserId,
-                    title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
-                    oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
-                    description = aiResponse.stories.description,
-                    genre = genre,
-                    // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
-                    thumbnailImageKey = storyThumbnailLinker.linkFor(genreTags.map { it.name }),
-                    // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
-                    visibility = StoryVisibility.PRIVATE,
-                ),
-            )
-            storySettingRepository.save(
-                StorySetting(
-                    story = story,
-                    worldSetting = aiResponse.storySettings.worldSetting,
-                    characterSetting = aiResponse.storySettings.characterSetting,
-                    userRoleSetting = aiResponse.storySettings.userRoleSetting,
-                    ruleSetting = aiResponse.storySettings.ruleSetting,
-                ),
-            )
-            val startSetting = storyStartSettingRepository.save(
-                StoryStartSetting(
-                    story = story,
-                    name = aiResponse.storyStartSettings.name,
-                    prologue = aiResponse.storyStartSettings.prologue,
-                    startSituation = aiResponse.storyStartSettings.startSituation,
-                ),
-            )
-            val savedSuggestedInputs = storySuggestedInputRepository.saveAll(
-                aiResponse.storySuggestedInputs.mapIndexed { index, inputText ->
-                    StorySuggestedInput(
-                        startSetting = startSetting,
-                        inputText = inputText,
-                        inputOrder = (index + 1).toShort(),
-                    )
-                },
-            ).map { it.inputText }
-
-            // 전달한 로어북을 스토리에 연결한다(sort_order 1-based, ck_story_lorebooks_sort_order > 0).
-            if (selectedLorebooks.isNotEmpty()) {
-                storyLorebookRepository.saveAll(
-                    selectedLorebooks.mapIndexed { index, lorebook ->
-                        StoryLorebook(
-                            story = story,
-                            lorebook = lorebook,
-                            sortOrder = (index + 1).toShort(),
-                        )
-                    },
-                )
-            }
-
-            // 컴파일 산출물의 주요 사건(스토리 소유, sort_order 0-based)을 저작 경로와 같은 테이블에 저장한다.
-            if (aiResponse.storyMainEvents.isNotEmpty()) {
-                // 저장 이름(방어적 절단 후)이 스토리 안에서 유니크여야 이름 기반 완결·목표 매칭이 무모호하다.
-                // 중복은 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다(엔딩과 동일).
-                val mainEventNames = aiResponse.storyMainEvents.map { it.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH) }
-                if (mainEventNames.size != mainEventNames.toSet().size) {
-                    throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 주요 사건 이름이 중복됩니다.")
+        return runWithCharacterImageCleanup(storyPublicId, uploadedImages) {
+            transactionTemplate.execute {
+                val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
+                    ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
+                if (lockedSession.status == StoryCreationSessionStatus.STORY_CREATED) {
+                    throw ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
                 }
-                storyMainEventRepository.saveAll(
-                    aiResponse.storyMainEvents.mapIndexed { index, item ->
-                        StoryMainEvent(
-                            story = story,
-                            name = mainEventNames[index],
-                            description = item.description,
-                            keySentence = item.keySentence,
-                            sortOrder = index.toShort(),
-                        )
-                    },
-                )
-            }
 
-            // 컴파일 산출물의 엔딩(시작 설정 스코프, sort_order 1-based, ck_story_endings_order > 0)을 저장한다.
-            val savedEndings = if (aiResponse.storyEndings.isEmpty()) {
-                emptyList()
-            } else {
-                // 저장 이름(방어적 절단 후)이 시작 설정 안에서 유니크여야 이름 기반 도달 매칭이 무모호하다(제작·수정과 동일 불변식).
-                // 중복은 사용자 입력이 아니라 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다.
-                val endingNames = aiResponse.storyEndings.map { it.name.take(STORY_ENDING_NAME_MAX_LENGTH) }
-                if (endingNames.size != endingNames.toSet().size) {
-                    throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 엔딩 이름이 중복됩니다.")
-                }
-                storyEndingRepository.saveAll(
-                    aiResponse.storyEndings.mapIndexed { index, item ->
-                        StoryEnding(
+                selectedStoryline.isSelected = true
+                storyCreationStorylineRepository.save(selectedStoryline)
+
+                val story = storyRepository.save(
+                    Story(
+                        publicId = storyPublicId,
+                        userId = attributedUserId,
+                        title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
+                        oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
+                        description = aiResponse.stories.description,
+                        genre = genre,
+                        // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
+                        thumbnailImageKey = storyThumbnailLinker.linkFor(genreTags.map { it.name }),
+                        // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
+                        visibility = StoryVisibility.PRIVATE,
+                    ),
+                )
+                storySettingRepository.save(
+                    StorySetting(
+                        story = story,
+                        worldSetting = aiResponse.storySettings.worldSetting,
+                        characterSetting = aiResponse.storySettings.characterSetting,
+                        userRoleSetting = aiResponse.storySettings.userRoleSetting,
+                        ruleSetting = aiResponse.storySettings.ruleSetting,
+                    ),
+                )
+                val startSetting = storyStartSettingRepository.save(
+                    StoryStartSetting(
+                        story = story,
+                        name = aiResponse.storyStartSettings.name,
+                        prologue = aiResponse.storyStartSettings.prologue,
+                        startSituation = aiResponse.storyStartSettings.startSituation,
+                    ),
+                )
+                val savedSuggestedInputs = storySuggestedInputRepository.saveAll(
+                    aiResponse.storySuggestedInputs.mapIndexed { index, inputText ->
+                        StorySuggestedInput(
                             startSetting = startSetting,
-                            name = endingNames[index],
-                            minTurns = item.minTurns,
-                            achievementCondition = item.achievementCondition,
-                            epilogue = item.epilogue,
-                            sortOrder = (index + 1).toShort(),
+                            inputText = inputText,
+                            inputOrder = (index + 1).toShort(),
                         )
                     },
-                ).toList()
-            }
+                ).map { it.inputText }
 
-            // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
-            // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).
-            lockedSession.userId = attributedUserId
-            lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
-            lockedSession.storyId = story.id
-            // 회수 재실행 검증용 바인딩(KNK-644): 이 세션을 만든 요청의 request_id를 STORY_CREATED와 원자적으로 커밋한다.
-            lockedSession.creationRequestId = requestId
-            storyCreationSessionRepository.save(lockedSession)
+                // 전달한 로어북을 스토리에 연결한다(sort_order 1-based, ck_story_lorebooks_sort_order > 0).
+                if (selectedLorebooks.isNotEmpty()) {
+                    storyLorebookRepository.saveAll(
+                        selectedLorebooks.mapIndexed { index, lorebook ->
+                            StoryLorebook(
+                                story = story,
+                                lorebook = lorebook,
+                                sortOrder = (index + 1).toShort(),
+                            )
+                        },
+                    )
+                }
 
-            StoryCreationOutcome(
-                response = SimpleStoryCreateResponse(
-                    id = story.publicId.toString(),
-                    title = story.title,
-                    oneLineIntro = story.oneLineIntro,
-                    description = story.description,
-                    genres = genreTags.map { it.name },
-                    // 간편 제작은 시작 설정 1개다(KNK-515 복수화). 추천 입력·엔딩을 그 시작 설정에 종속시킨다.
-                    startSettings = listOf(
-                        StoryStartSettingResponse(
-                            id = startSetting.publicId.toString(),
-                            name = startSetting.name,
-                            prologue = startSetting.prologue,
-                            startSituation = startSetting.startSituation,
-                            suggestedInputs = savedSuggestedInputs,
-                            endings = savedEndings.map { it.toEndingResponse() },
+                // 컴파일 산출물의 주요 사건(스토리 소유, sort_order 0-based)을 저작 경로와 같은 테이블에 저장한다.
+                if (aiResponse.storyMainEvents.isNotEmpty()) {
+                    // 저장 이름(방어적 절단 후)이 스토리 안에서 유니크여야 이름 기반 완결·목표 매칭이 무모호하다.
+                    // 중복은 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다(엔딩과 동일).
+                    val mainEventNames = aiResponse.storyMainEvents.map { it.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH) }
+                    if (mainEventNames.size != mainEventNames.toSet().size) {
+                        throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 주요 사건 이름이 중복됩니다.")
+                    }
+                    storyMainEventRepository.saveAll(
+                        aiResponse.storyMainEvents.mapIndexed { index, item ->
+                            StoryMainEvent(
+                                story = story,
+                                name = mainEventNames[index],
+                                description = item.description,
+                                keySentence = item.keySentence,
+                                sortOrder = index.toShort(),
+                            )
+                        },
+                    )
+                }
+
+                // 컴파일 산출물의 엔딩(시작 설정 스코프, sort_order 1-based, ck_story_endings_order > 0)을 저장한다.
+                val savedEndings = if (aiResponse.storyEndings.isEmpty()) {
+                    emptyList()
+                } else {
+                    // 저장 이름(방어적 절단 후)이 시작 설정 안에서 유니크여야 이름 기반 도달 매칭이 무모호하다(제작·수정과 동일 불변식).
+                    // 중복은 사용자 입력이 아니라 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다.
+                    val endingNames = aiResponse.storyEndings.map { it.name.take(STORY_ENDING_NAME_MAX_LENGTH) }
+                    if (endingNames.size != endingNames.toSet().size) {
+                        throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 엔딩 이름이 중복됩니다.")
+                    }
+                    storyEndingRepository.saveAll(
+                        aiResponse.storyEndings.mapIndexed { index, item ->
+                            StoryEnding(
+                                startSetting = startSetting,
+                                name = endingNames[index],
+                                minTurns = item.minTurns,
+                                achievementCondition = item.achievementCondition,
+                                epilogue = item.epilogue,
+                                sortOrder = (index + 1).toShort(),
+                            )
+                        },
+                    ).toList()
+                }
+
+                persistStoryCharacters(story, appearancesByName, imagesByName.keys, uploadedImages)
+
+                // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
+                // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).
+                lockedSession.userId = attributedUserId
+                lockedSession.status = StoryCreationSessionStatus.STORY_CREATED
+                lockedSession.storyId = story.id
+                // 회수 재실행 검증용 바인딩(KNK-644): 이 세션을 만든 요청의 request_id를 STORY_CREATED와 원자적으로 커밋한다.
+                lockedSession.creationRequestId = requestId
+                storyCreationSessionRepository.save(lockedSession)
+
+                StoryCreationOutcome(
+                    response = SimpleStoryCreateResponse(
+                        id = story.publicId.toString(),
+                        title = story.title,
+                        oneLineIntro = story.oneLineIntro,
+                        description = story.description,
+                        genres = genreTags.map { it.name },
+                        // 간편 제작은 시작 설정 1개다(KNK-515 복수화). 추천 입력·엔딩을 그 시작 설정에 종속시킨다.
+                        startSettings = listOf(
+                            StoryStartSettingResponse(
+                                id = startSetting.publicId.toString(),
+                                name = startSetting.name,
+                                prologue = startSetting.prologue,
+                                startSituation = startSetting.startSituation,
+                                suggestedInputs = savedSuggestedInputs,
+                                endings = savedEndings.map { it.toEndingResponse() },
+                            ),
                         ),
                     ),
-                ),
-                aiCallLogId = recorded.aiCallLogId,
+                    aiCallLogId = recorded.aiCallLogId,
+                )
+            } ?: throw IllegalStateException("Story creation transaction result is empty")
+        }
+    }
+
+    /** 업로드한 객체 키와 그 서빙 URL. 저장 실패 시 보상 삭제에 객체 키가 필요해 URL만 들고 다니지 않는다. */
+    private data class UploadedCharacterImage(val objectKey: String, val url: String)
+
+    /**
+     * 인물 이름을 정규화해 `이름 → 항목` 맵으로 만든다(스펙 §5-3-3의 name 매칭 키).
+     *
+     * trim → 컬럼 길이(100자) 절단 → 빈 이름 제외 → 같은 이름은 **첫 항목만** 남긴다. 절단으로 앞 100자가
+     * 같아진 서로 다른 이름도 여기서 하나로 합쳐진다. 이 정규화를 업로드보다 먼저 한 곳에서 끝내야
+     * 저장되지 않을 인물의 이미지를 S3에 올려 고아로 남기는 일이 없다.
+     */
+    private fun <T> normalizeByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {
+        val normalized = LinkedHashMap<String, T>()
+        items.forEach { item ->
+            val name = nameOf(item).trim().take(STORY_CHARACTER_NAME_MAX_LENGTH)
+            if (name.isNotEmpty()) {
+                normalized.putIfAbsent(name, item)
+            }
+        }
+        return normalized
+    }
+
+    /**
+     * 컴파일이 생성한 인물 이미지를 S3에 올리고 `인물 이름 → 업로드 결과` 맵을 만든다(스펙 §4-4, KNK-966).
+     *
+     * **DB 트랜잭션 밖에서** 호출한다(네트워크 I/O가 커넥션을 붙잡지 않게). 디코딩·업로드 실패는 인물 단위로 흡수해
+     * 그 인물만 이미지 없이 저장되게 하고, 스토리 생성은 계속한다(graceful — 엔딩 빈 배열과 같은 원칙).
+     * [AiCharacterImage.error]가 있는 항목은 base64가 함께 와도 실패로 보고 건너뛴다(에러 코드가 우선).
+     */
+    private fun uploadCharacterImages(
+        storyPublicId: UUID,
+        imagesByName: Map<String, AiCharacterImage>,
+    ): Map<String, UploadedCharacterImage> = imagesByName.mapNotNull { (name, image) ->
+        if (image.error != null) {
+            return@mapNotNull null
+        }
+        val base64 = image.imageBase64?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val objectKey = "$CHARACTER_IMAGE_KEY_PREFIX/$storyPublicId/${UUID.randomUUID()}.$CHARACTER_IMAGE_EXTENSION"
+        val url = try {
+            characterImageStorage.upload(
+                objectKey,
+                Base64.getDecoder().decode(base64),
+                image.contentType?.takeIf { it.isNotBlank() } ?: CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE,
             )
-        } ?: throw IllegalStateException("Story creation transaction result is empty")
+        } catch (exception: Exception) {
+            // 이미지 한 장 때문에 스토리 생성이 실패해서는 안 된다. 사유만 남기고 이미지 없이 진행한다.
+            logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
+            null
+        }
+        url?.let { name to UploadedCharacterImage(objectKey, it) }
+    }.toMap()
+
+    /**
+     * [block]이 예외로 끝나면 이미 올린 인물 이미지를 best-effort로 지우고 원래 예외를 다시 던진다.
+     *
+     * 업로드는 트랜잭션보다 먼저 끝나므로, 저장이 409·502·DB 오류로 깨지면 객체 키가 어디에도 기록되지 않은
+     * 고아 객체가 남는다(키가 매번 UUID라 재시도로도 회수되지 않는다). 삭제 실패는 로그만 남긴다 —
+     * 정리 실패가 원래 실패 원인을 가려서는 안 된다.
+     */
+    private fun <T> runWithCharacterImageCleanup(
+        storyPublicId: UUID,
+        uploadedImages: Map<String, UploadedCharacterImage>,
+        block: () -> T,
+    ): T {
+        try {
+            return block()
+        } catch (throwable: Throwable) {
+            uploadedImages.values.forEach { uploaded ->
+                try {
+                    characterImageStorage.delete(uploaded.objectKey)
+                } catch (exception: Exception) {
+                    logCharacterImageEvent("character_image_cleanup_failed", storyPublicId, exception)
+                }
+            }
+            throw throwable
+        }
+    }
+
+    /** 인물 이미지 실패 관측용 구조화 로그. base64·URL은 싣지 않는다(개인정보·용량). */
+    private fun logCharacterImageEvent(eventName: String, storyPublicId: UUID, exception: Exception) {
+        structuredLogger.event(
+            eventName,
+            "story_public_id" to storyPublicId.toString(),
+            "error_type" to (exception::class.simpleName ?: "UNKNOWN"),
+        )
+    }
+
+    /**
+     * 컴파일 산출물의 인물을 `story_characters`에 저장한다(스펙 §4-4 · §5-3-3).
+     *
+     * 이름은 [normalizeByName]이 이미 정규화·중복 제거했다. `character_appearances`는 인물 전원,
+     * `character_images`는 외형이 있는 인물만이라 길이가 다를 수 있어 이름으로 매칭하며, 이미지만 있고 외형이
+     * 없는 이름도(계약상 없어야 하지만) 행을 만들어 업로드한 이미지를 잃지 않는다.
+     */
+    private fun persistStoryCharacters(
+        story: Story,
+        appearancesByName: Map<String, AiCharacterAppearance>,
+        imageNames: Set<String>,
+        uploadedImages: Map<String, UploadedCharacterImage>,
+    ) {
+        val names = (appearancesByName.keys + imageNames).toList()
+        if (names.isEmpty()) {
+            return
+        }
+        storyCharacterRepository.saveAll(
+            names.map { name ->
+                val appearance = appearancesByName[name]
+                StoryCharacter(
+                    story = story,
+                    name = name,
+                    imageUrl = uploadedImages[name]?.url,
+                    gender = appearance?.gender,
+                    age = appearance?.age,
+                    body = appearance?.body,
+                    face = appearance?.face,
+                    hair = appearance?.hair,
+                    outfit = appearance?.outfit,
+                    visualIdentity = appearance?.visualIdentity,
+                )
+            },
+        )
     }
 
     private fun findSelectedPredefinedTags(

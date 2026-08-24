@@ -106,6 +106,12 @@ manyak:
     # 인프라 쪽 인스턴스 교체 apply가 불필요하다. 전제: 자산 업로드가 main 릴리스보다 선행해야 한다.
     # 빈 값으로 덮으면 썸네일 URL은 null이 되고 프론트엔드가 placeholder를 표시한다(서버는 정상 기동).
     image-base-url: ${MANYAK_IMAGE_BASE_URL:https://cdn.manyak.app}
+    character-image:
+      # 컴파일이 생성한 인물 이미지(WebP)를 올릴 S3 버킷·리전(스펙 §4-4, KNK-966).
+      # 객체 키는 characters/generated/{storyPublicId}/{uuid}.webp이고, 서빙 URL은 위 image-base-url + 키다.
+      # 비워 두면(로컬·미구성) 업로드를 건너뛰고 image_url이 NULL인 인물로 저장한다 — 스토리 생성은 정상 진행된다.
+      bucket: ${MANYAK_CHARACTER_IMAGE_BUCKET:}
+      region: ${MANYAK_CHARACTER_IMAGE_REGION:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   credit:

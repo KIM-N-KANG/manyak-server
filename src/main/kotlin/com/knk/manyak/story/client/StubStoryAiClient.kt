@@ -61,6 +61,20 @@ class StubStoryAiClient : StoryAiClient {
                 AiStoryEnding("스텁 노말 엔딩", 4, "무난히 일상으로 돌아간다.", "잔잔한 마무리 가이드입니다."),
                 AiStoryEnding("스텁 배드 엔딩", 3, "돌이킬 수 없는 결말에 이른다.", "비극적 마무리 가이드입니다."),
             ),
+            // 인물 외형은 실어 보내고 이미지는 비운다 — 로컬 스텁은 그림을 만들 수 없고,
+            // 저장소도 미구성이라 image_url이 NULL인 인물로 저장되는 게 정상 경로다(스펙 §5-3-3).
+            characterAppearances = listOf(
+                AiCharacterAppearance(
+                    name = "스텁 주인공",
+                    gender = "FEMALE",
+                    age = "20대 초반",
+                    body = "보통 체형",
+                    face = "둥근 얼굴",
+                    hair = "검은 단발",
+                    outfit = "평상복",
+                    visualIdentity = "왼손목의 낡은 팔찌",
+                ),
+            ),
             meta = stubMeta(),
         )
 

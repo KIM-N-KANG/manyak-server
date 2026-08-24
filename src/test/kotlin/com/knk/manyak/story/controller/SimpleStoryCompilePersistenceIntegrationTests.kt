@@ -1,6 +1,9 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.observability.AiTraceLink
+import com.knk.manyak.image.service.CharacterImageStorage
+import com.knk.manyak.story.client.AiCharacterAppearance
+import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStoryCompileResponse
@@ -21,6 +24,7 @@ import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionTagRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
@@ -82,6 +86,27 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Volatile
         var mainEventsOverride: List<AiStoryMainEvent>? = null
 
+        // 유효한 base64면 충분하다(디코딩만 하고 내용은 보지 않는다).
+        const val WEBP_BASE64 = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA=="
+        const val WEBP_BYTE_LENGTH = 34
+        const val FAIL_ALL_UPLOADS = "FAIL_ALL"
+
+        @Volatile
+        var characterAppearances: List<AiCharacterAppearance> = emptyList()
+
+        @Volatile
+        var characterImages: List<AiCharacterImage> = emptyList()
+
+        // 스텁 스토리지가 받은 (objectKey, contentType, 바이트 길이)를 기록한다. 업로드 호출 여부·키 규칙 검증용.
+        val uploads = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, Int>>()
+
+        // 보상 삭제로 지운 객체 키. 저장 실패 시 고아 객체 정리 검증용.
+        val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+        // 값이 있으면 그 인물 이름의 업로드에서 예외를 던진다(S3 장애 재현).
+        @Volatile
+        var uploadFailureKeyMarker: String? = null
+
         // 세션 경합 재현용: 값이 있으면 compile 호출 도중 그 세션을 STORY_CREATED로 **커밋**한다.
         // 다른 requestId를 가진 동시 요청이 먼저 저장을 끝낸 상황과 같아, compile 후 잠금 시점에 409가 난다.
         @Volatile
@@ -116,8 +141,29 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storySuggestedInputs = listOf("추천1", "추천2", "추천3"),
                     storyMainEvents = mainEventsOverride ?: mainEvents,
                     storyEndings = endingsOverride ?: endings,
+                    characterAppearances = characterAppearances,
+                    characterImages = characterImages,
                     meta = AiResponseMeta(),
                 )
+            }
+        }
+
+        /** 실제 S3 대신 업로드를 기록하는 스텁. 반환 URL은 운영과 같은 `base-url + 객체 키` 모양이다. */
+        @Bean
+        @Primary
+        fun fakeCharacterImageStorage(): CharacterImageStorage = object : CharacterImageStorage {
+            override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
+                uploadFailureKeyMarker?.let { marker ->
+                    if (marker == FAIL_ALL_UPLOADS) {
+                        throw IllegalStateException("S3 업로드 실패(테스트)")
+                    }
+                }
+                uploads += Triple(objectKey, contentType, bytes.size)
+                return "https://cdn.test/$objectKey"
+            }
+
+            override fun delete(objectKey: String) {
+                deletes += objectKey
             }
         }
     }
@@ -133,6 +179,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @Autowired private lateinit var storyEndingRepository: StoryEndingRepository
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
+    @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
@@ -144,6 +191,11 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         endingsOverride = null
         mainEventsOverride = null
         flipSessionToCreatedId = null
+        characterAppearances = emptyList()
+        characterImages = emptyList()
+        uploads.clear()
+        deletes.clear()
+        uploadFailureKeyMarker = null
         databaseCleaner.cleanAll()
     }
 
@@ -288,6 +340,201 @@ class SimpleStoryCompilePersistenceIntegrationTests {
 
         assertThat(storyCreationTimerCount("rejected")).isEqualTo(beforeRejected + 1)
         assertThat(storyCreationTimerCount("failure")).isEqualTo(beforeFailure)
+    }
+
+    @Test
+    fun `컴파일 응답의 인물 외형과 이미지가 story_characters에 저장된다`() {
+        characterAppearances = listOf(
+            AiCharacterAppearance("서준", "MALE", "20대 초반", "마른 체형", "선한 눈매", "검은 단발", "교복", "왼쪽 눈 밑 점"),
+            AiCharacterAppearance("하나", "FEMALE", "20대 초반", "보통 체형", "둥근 얼굴", "갈색 장발", "코트", "빨간 목도리"),
+        )
+        characterImages = listOf(
+            AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"),
+            AiCharacterImage("하나", imageBase64 = WEBP_BASE64, contentType = "image/webp"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("서준", "하나")
+        // 외형 7필드가 그대로 저장된다(통글에 실리지 않는 별도 데이터).
+        val seojun = saved.first()
+        assertThat(seojun.gender).isEqualTo("MALE")
+        assertThat(seojun.age).isEqualTo("20대 초반")
+        assertThat(seojun.body).isEqualTo("마른 체형")
+        assertThat(seojun.face).isEqualTo("선한 눈매")
+        assertThat(seojun.hair).isEqualTo("검은 단발")
+        assertThat(seojun.outfit).isEqualTo("교복")
+        assertThat(seojun.visualIdentity).isEqualTo("왼쪽 눈 밑 점")
+        // 업로드된 URL이 인물에 붙는다.
+        assertThat(saved.map { it.imageUrl }).allSatisfy { url -> assertThat(url).startsWith("https://cdn.test/") }
+
+        // 객체 키는 characters/generated/{storyPublicId}/{uuid}.webp이고 Content-Type은 응답 값이다.
+        assertThat(uploads).hasSize(2)
+        assertThat(uploads.map { it.first })
+            .allSatisfy { key -> assertThat(key).matches("characters/generated/${story.publicId}/[0-9a-f-]{36}\\.webp") }
+        assertThat(uploads.map { it.second }).containsOnly("image/webp")
+        assertThat(uploads.map { it.third }).containsOnly(WEBP_BYTE_LENGTH)
+    }
+
+    @Test
+    fun `이미지 생성에 실패한 인물은 image_url 없이 저장되고 스토리 생성은 계속된다`() {
+        // 외형은 인물 전원, 이미지는 외형이 있는 인물만 → 두 배열의 길이가 다르고 name으로 매칭한다.
+        characterAppearances = listOf(
+            AiCharacterAppearance("서준", "MALE", "20대 초반"),
+            AiCharacterAppearance("하나", "FEMALE", "20대 초반"),
+            AiCharacterAppearance("외형없음"),
+        )
+        characterImages = listOf(
+            AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"),
+            AiCharacterImage("하나", error = "rate_limited"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        // 이미지 유무와 무관하게 인물 전원이 저장된다.
+        assertThat(saved.map { it.name }).containsExactly("서준", "하나", "외형없음")
+        assertThat(saved.single { it.name == "서준" }.imageUrl).startsWith("https://cdn.test/")
+        assertThat(saved.single { it.name == "하나" }.imageUrl).isNull()
+        assertThat(saved.single { it.name == "외형없음" }.imageUrl).isNull()
+        assertThat(uploads).hasSize(1)
+    }
+
+    @Test
+    fun `인물 배열이 비어 있으면 story_characters를 만들지 않고 스토리만 저장한다`() {
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)).isEmpty()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `S3 업로드가 실패해도 인물은 image_url 없이 저장되고 스토리 생성은 성공한다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE", "20대 초반"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        uploadFailureKeyMarker = FAIL_ALL_UPLOADS
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("서준")
+        assertThat(saved.single().imageUrl).isNull()
+    }
+
+    @Test
+    fun `이름이 중복된 인물은 첫 항목만 남고 중복분은 업로드하지 않는다`() {
+        characterAppearances = listOf(
+            AiCharacterAppearance("서준", "MALE", hair = "검은 단발"),
+            AiCharacterAppearance("서준", "FEMALE", hair = "금발"),
+        )
+        characterImages = listOf(
+            AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"),
+            AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved).hasSize(1)
+        assertThat(saved.single().hair).isEqualTo("검은 단발")
+        // 버려질 중복분은 업로드 자체를 하지 않는다(고아 객체 방지).
+        assertThat(uploads).hasSize(1)
+        assertThat(saved.single().imageUrl).isEqualTo("https://cdn.test/${uploads.single().first}")
+    }
+
+    @Test
+    fun `앞 100자가 같은 긴 이름은 하나로 합쳐지고 첫 항목이 남는다`() {
+        // 이름 컬럼이 VARCHAR(100)이라 절단 후 충돌한다. 이때도 중복과 같은 규칙(첫 항목 유지)을 따른다.
+        val prefix = "가".repeat(100)
+        characterAppearances = listOf(
+            AiCharacterAppearance(prefix + "첫번째", hair = "검은 단발"),
+            AiCharacterAppearance(prefix + "두번째", hair = "금발"),
+        )
+        characterImages = listOf(AiCharacterImage(prefix + "두번째", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved).hasSize(1)
+        assertThat(saved.single().name).isEqualTo(prefix)
+        assertThat(saved.single().hair).isEqualTo("검은 단발")
+        // 절단 후 같은 이름이라 이미지는 그 인물에 붙는다.
+        assertThat(saved.single().imageUrl).isNotNull()
+    }
+
+    @Test
+    fun `이름이 비어 있는 인물은 저장하지 않고 업로드도 하지 않는다`() {
+        characterAppearances = listOf(AiCharacterAppearance("   "))
+        characterImages = listOf(AiCharacterImage("", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)).isEmpty()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `base64가 깨진 인물은 이미지 없이 저장되고 스토리 생성은 성공한다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = "!!!not-base64!!!", contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single().imageUrl).isNull()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `error가 실린 인물은 base64가 함께 와도 업로드하지 않는다`() {
+        // 에러 코드가 우선이다 — 실패로 표시된 이미지를 올려 두면 쓰이지 않는 객체만 남는다.
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(
+            AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp", error = "rejected"),
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single().imageUrl).isNull()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `저장 트랜잭션이 실패하면 이미 올린 인물 이미지를 지운다`() {
+        // 엔딩 이름 중복으로 502를 내 저장을 롤백시킨다. 업로드는 트랜잭션보다 먼저 끝나 있으므로
+        // 정리하지 않으면 어디에도 기록되지 않은 고아 객체가 남는다(키가 매번 UUID라 재시도로도 회수 불가).
+        endingsOverride = listOf(
+            AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+            AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+        )
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyRepository.findAll()).isEmpty()
+        assertThat(uploads).hasSize(1)
+        assertThat(deletes).containsExactly(uploads.single().first)
     }
 
     private fun storyCreationTimerCount(outcome: String): Long =
