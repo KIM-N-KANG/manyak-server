@@ -2,11 +2,13 @@ package com.knk.manyak.image.service
 
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import java.time.Duration
 
 /**
  * 컴파일이 생성한 인물 이미지를 객체 저장소에 올리고 서빙 URL을 돌려주는 포트(KNK-966).
@@ -44,6 +46,16 @@ class S3CharacterImageStorage(
         } else {
             S3Client.builder()
                 .apply { if (region.isNotBlank()) region(Region.of(region)) }
+                // SDK 기본값에는 API 호출 타임아웃이 없어, S3가 느리거나 half-open이면 동기 putObject가 재시도까지
+                // 물고 늘어진다. 인물은 최대 5명이라 호출 전체 상한 10초면 최악 누적이 50초로 묶이고, 이는 compile
+                // (최대 180초) 뒤에 붙는 부가 작업이라 스토리 생성 요청 예산을 위협하지 않는다. 시도당 5초는 그 안에서
+                // 재시도 한 번을 허용하는 값이다. 업로드와 보상 삭제 모두 이 클라이언트를 쓰므로 같은 상한이 걸린다.
+                .overrideConfiguration(
+                    ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(API_CALL_TIMEOUT)
+                        .apiCallAttemptTimeout(API_CALL_ATTEMPT_TIMEOUT)
+                        .build(),
+                )
                 .build()
         }
     }
@@ -64,5 +76,13 @@ class S3CharacterImageStorage(
     override fun delete(objectKey: String) {
         val s3 = client ?: return
         s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(objectKey).build())
+    }
+
+    private companion object {
+        // 재시도를 포함한 호출 하나의 전체 상한.
+        val API_CALL_TIMEOUT: Duration = Duration.ofSeconds(10)
+
+        // 시도 하나의 상한. 전체 상한 안에서 재시도 한 번이 들어갈 수 있는 값이다.
+        val API_CALL_ATTEMPT_TIMEOUT: Duration = Duration.ofSeconds(5)
     }
 }
