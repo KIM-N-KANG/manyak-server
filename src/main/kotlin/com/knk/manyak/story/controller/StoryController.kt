@@ -121,6 +121,23 @@ class StoryController(
     ): List<LorebookListItemResponse> = storyService.getLorebooks(genre)
 
     @Operation(
+        summary = "오리지널 스토리 목록 조회",
+        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 피드·검색이 나오기 전까지 " +
+            "홈의 오리지널 섹션이 사용하며, 인증은 필요 없습니다. 공식 계정 미설정 환경은 빈 목록입니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공",
+                content = [Content(array = ArraySchema(schema = Schema(implementation = StorySummaryResponse::class)))],
+            ),
+        ],
+    )
+    @GetMapping("/originals")
+    fun getOriginalStories(): List<StorySummaryResponse> = storyService.getOriginalStories()
+
+    @Operation(
         summary = "스토리 상세 조회",
         description = "목록에서 선택한 스토리의 상세 정보와 플레이 시작에 필요한 정보를 조회합니다.",
     )

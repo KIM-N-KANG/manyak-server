@@ -1,6 +1,8 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -32,6 +34,13 @@ interface StoryRepository : JpaRepository<Story, Long> {
     fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): Story?
 
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<Story>
+
+    // KNK-975: 마냑 오리지널 스토리 목록. 공식 계정 소유의 공개(PUBLISHED∧PUBLIC)·미삭제 스토리를 등록순으로 조회한다.
+    fun findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
+        userId: Long,
+        status: StoryStatus,
+        visibility: StoryVisibility,
+    ): List<Story>
 
     /**
      * 게스트 스토리(user_id NULL)의 소유권을 원자적으로 클레임한다(KNK-389). 갱신한 행 수를 반환한다(1=성공, 0=이미 소유됨/선점됨).

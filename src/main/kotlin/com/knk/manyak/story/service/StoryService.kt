@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.entity.ImagePresetType
@@ -7,6 +8,7 @@ import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
+import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
@@ -18,7 +20,10 @@ import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -38,7 +43,14 @@ class StoryService(
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyChatRepository: StoryChatRepository,
     private val imageUrlResolver: ImageUrlResolver,
+    private val userRepository: UserRepository,
+    // 마냑 공식 계정(오리지널 스토리 소유자)의 user public_id. 미설정(빈 값)이면 오리지널 목록은 빈 배열이다(KNK-975).
+    @Value("\${manyak.official-user-public-id:}") officialUserPublicId: String,
 ) {
+
+    // 잘못된 UUID는 기동 시점에 실패시켜 조용한 빈 목록 오설정을 막는다.
+    private val officialUserPublicId: UUID? =
+        officialUserPublicId.takeIf { it.isNotBlank() }?.let(UUID::fromString)
 
     @Transactional(readOnly = true)
     fun getLorebooks(genre: String?): List<LorebookListItemResponse> {
@@ -75,6 +87,30 @@ class StoryService(
         storyRepository
             .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, limit))
             .toSummaryResponses()
+
+    /**
+     * 마냑 오리지널 스토리 목록(KNK-975). 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환한다.
+     * 피드·검색이 나오기 전까지 홈의 오리지널 섹션이 소비하며, 공식 계정 미설정 환경은 빈 목록이다.
+     */
+    @Transactional(readOnly = true)
+    fun getOriginalStories(): List<StorySummaryResponse> {
+        val publicId = officialUserPublicId ?: return emptyList()
+        val official = userRepository.findByPublicId(publicId) ?: return emptyList()
+        return storyRepository
+            .findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
+                official.id,
+                StoryStatus.PUBLISHED,
+                StoryVisibility.PUBLIC,
+            )
+            .toSummaryResponses(
+                // 내부 PK는 노출하지 않는다(IDOR 방지 원칙과 동일 취지).
+                author = StoryAuthorResponse(
+                    id = null,
+                    nickname = official.nickname,
+                    profileImageUrl = official.profileImageUrl,
+                ),
+            )
+    }
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
@@ -192,16 +228,16 @@ class StoryService(
             ?: emptyList()
 
     /** 스토리 목록을 카드 응답으로 매핑한다. turnCount는 한 번의 배치 집계로 채운다(N+1 방지). */
-    private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
+    private fun List<Story>.toSummaryResponses(author: StoryAuthorResponse? = null): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()
         }
         val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
             .associate { it.storyId to it.turnCount }
-        return map { it.toSummaryResponse(turnCount = turnCountByStoryId[it.id] ?: 0) }
+        return map { it.toSummaryResponse(turnCount = turnCountByStoryId[it.id] ?: 0, author = author) }
     }
 
-    private fun Story.toSummaryResponse(turnCount: Long): StorySummaryResponse =
+    private fun Story.toSummaryResponse(turnCount: Long, author: StoryAuthorResponse? = null): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
             // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형).
@@ -209,7 +245,7 @@ class StoryService(
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),
-            author = null,
+            author = author,
             turnCount = turnCount,
             likeCount = 0,
             status = this.status,
