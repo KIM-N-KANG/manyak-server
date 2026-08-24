@@ -130,6 +130,7 @@ erDiagram
 }
 "public.story_characters" {
   bigint id
+  uuid public_id
   bigint story_id FK
   varchar_100_ name
   text image_url

@@ -503,6 +503,24 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
+    fun `계약 상한을 넘는 인물은 앞 5명만 저장하고 초과분은 업로드하지 않는다`() {
+        // 스펙 §5-3-3의 인물 상한은 0~5명이다. 초과는 AI 응답의 결함이지만 502로 올리지 않고 버린다(graceful).
+        characterAppearances = (1..7).map { AiCharacterAppearance("인물$it", "MALE") }
+        characterImages = (1..7).map {
+            AiCharacterImage("인물$it", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        }
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("인물1", "인물2", "인물3", "인물4", "인물5")
+        // 버려질 인물의 이미지는 올리지도 않는다(고아 객체 방지).
+        assertThat(uploads).hasSize(5)
+    }
+
+    @Test
     fun `이름이 비어 있는 인물은 저장하지 않고 업로드도 하지 않는다`() {
         characterAppearances = listOf(AiCharacterAppearance("   "))
         characterImages = listOf(AiCharacterImage("", imageBase64 = WEBP_BASE64, contentType = "image/webp"))

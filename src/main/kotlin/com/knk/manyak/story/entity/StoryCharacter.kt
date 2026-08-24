@@ -11,6 +11,7 @@ import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
+import java.util.UUID
 
 /**
  * 스토리 인물(스토리 소유 1:N, 스펙 §4-4 · §5-3-3, KNK-414·KNK-966).
@@ -36,6 +37,10 @@ class StoryCharacter(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
+
+    // 외부에 노출하는 추측 불가능한 식별자(Story와 같은 앱 생성 패턴). 순차 PK는 FK·조인 내부용이다.
+    @Column(name = "public_id", nullable = false, unique = true, updatable = false)
+    val publicId: UUID = UUID.randomUUID(),
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "story_id", nullable = false)

@@ -16,6 +16,7 @@ import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.image.service.CharacterImageStorage
+import com.knk.manyak.image.service.ImageStageBudget
 import com.knk.manyak.story.client.AiCharacter
 import com.knk.manyak.story.client.AiCharacterAppearance
 import com.knk.manyak.story.client.AiCharacterImage
@@ -93,6 +94,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -151,6 +153,15 @@ class SimpleStoryCreationService(
 
         // 인물 이름 컬럼(VARCHAR(100)) 초과 방어. 매칭 키라 절단 후 이름으로 이미지를 붙인다.
         const val STORY_CHARACTER_NAME_MAX_LENGTH = 100
+
+        // 인물 수 계약 상한(스펙 §5-3-3: 0~5개). 초과분은 502로 올리지 않고 버린다 — 이미지·인물 저장이
+        // 스토리 생성을 막지 않는다는 graceful 원칙을 따른다.
+        const val CHARACTER_MAX_COUNT = 5
+
+        // 인물 이미지 단계(업로드 + 실패 즉시 삭제 + 보상 삭제) 전체 시간 예산.
+        // 정상 경로는 인물 5명 × 수백 ms 수준이라 30초는 여유롭게 남는다. 반대로 S3가 느리면 호출당 상한
+        // (apiCallTimeout 10초)이 5회 이상 누적될 수 있는데, 이 예산이 그 누적을 30초에서 끊는다.
+        val CHARACTER_IMAGE_STAGE_BUDGET: Duration = Duration.ofSeconds(30)
 
         // 인물 이미지 객체 키 접두사·확장자(스펙 §4-4). AI는 WebP만 보낸다.
         const val CHARACTER_IMAGE_KEY_PREFIX = "characters/generated"
@@ -1013,12 +1024,14 @@ class SimpleStoryCreationService(
         // 업로드(네트워크 I/O)를 DB 트랜잭션 안에서 하면 커넥션을 수 초간 잡아 둔다.
         val storyPublicId = UUID.randomUUID()
         // 이름 정규화를 업로드보다 먼저 한 곳에서 끝낸다 — 저장 단계에서 걸러질 인물을 업로드하면 고아 객체가 된다.
-        val appearancesByName = normalizeByName(aiResponse.characterAppearances) { it.name }
-        val imagesByName = normalizeByName(aiResponse.characterImages) { it.name }
+        val appearancesByName = normalizeByName(aiResponse.characterAppearances, storyPublicId, "appearances") { it.name }
+        val imagesByName = normalizeByName(aiResponse.characterImages, storyPublicId, "images") { it.name }
+        // 업로드와 보상 삭제가 같은 예산을 나눠 쓴다 — 이미지 단계 전체가 스토리 생성 요청을 끌고 가지 않게 한다.
+        val imageBudget = ImageStageBudget.startingNow(CHARACTER_IMAGE_STAGE_BUDGET)
         // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 story_characters에 저장한다.
-        val uploadedImages = uploadCharacterImages(storyPublicId, imagesByName)
+        val uploadedImages = uploadCharacterImages(storyPublicId, imagesByName, imageBudget)
 
-        return runWithCharacterImageCleanup(storyPublicId, uploadedImages) {
+        return runWithCharacterImageCleanup(storyPublicId, uploadedImages, imageBudget) {
             transactionTemplate.execute {
                 val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
                     ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -1174,7 +1187,12 @@ class SimpleStoryCreationService(
      * 같아진 서로 다른 이름도 여기서 하나로 합쳐진다. 이 정규화를 업로드보다 먼저 한 곳에서 끝내야
      * 저장되지 않을 인물의 이미지를 S3에 올려 고아로 남기는 일이 없다.
      */
-    private fun <T> normalizeByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {
+    private fun <T> normalizeByName(
+        items: List<T>,
+        storyPublicId: UUID,
+        field: String,
+        nameOf: (T) -> String,
+    ): Map<String, T> {
         val normalized = LinkedHashMap<String, T>()
         items.forEach { item ->
             val name = nameOf(item).trim().take(STORY_CHARACTER_NAME_MAX_LENGTH)
@@ -1182,7 +1200,17 @@ class SimpleStoryCreationService(
                 normalized.putIfAbsent(name, item)
             }
         }
-        return normalized
+        if (normalized.size <= CHARACTER_MAX_COUNT) {
+            return normalized
+        }
+        structuredLogger.event(
+            "character_limit_exceeded",
+            "story_public_id" to storyPublicId.toString(),
+            "field" to field,
+            "received" to normalized.size,
+            "kept" to CHARACTER_MAX_COUNT,
+        )
+        return normalized.entries.take(CHARACTER_MAX_COUNT).associate { it.key to it.value }
     }
 
     /**
@@ -1195,8 +1223,14 @@ class SimpleStoryCreationService(
     private fun uploadCharacterImages(
         storyPublicId: UUID,
         imagesByName: Map<String, AiCharacterImage>,
+        budget: ImageStageBudget,
     ): Map<String, UploadedCharacterImage> = imagesByName.mapNotNull { (name, image) ->
         if (image.error != null) {
+            return@mapNotNull null
+        }
+        if (!budget.hasRemaining()) {
+            // 예산이 끝났으면 남은 인물은 올리지 않는다 — 저장소 지연이 스토리 생성 요청을 끌고 가지 않게 한다.
+            logBudgetExhausted(storyPublicId, "upload")
             return@mapNotNull null
         }
         val base64 = image.imageBase64?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -1219,7 +1253,7 @@ class SimpleStoryCreationService(
             logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
             // 예외가 났어도 저장소는 객체를 받았을 수 있다(응답만 유실된 경우). 이 키는 반환값에 실리지 않아
             // 트랜잭션 보상 삭제가 닿지 못하므로 여기서 지운다. 실제로 안 올라갔으면 삭제는 무해한 no-op이다.
-            deleteCharacterImageQuietly(storyPublicId, objectKey)
+            deleteCharacterImageQuietly(storyPublicId, objectKey, budget)
             null
         }
         url?.let { name to UploadedCharacterImage(objectKey, it) }
@@ -1235,13 +1269,16 @@ class SimpleStoryCreationService(
     private fun <T> runWithCharacterImageCleanup(
         storyPublicId: UUID,
         uploadedImages: Map<String, UploadedCharacterImage>,
+        budget: ImageStageBudget,
         block: () -> T,
     ): T {
         try {
             return block()
         } catch (throwable: Throwable) {
             if (uploadedImages.isNotEmpty() && isStoryAbsent(storyPublicId)) {
-                uploadedImages.values.forEach { uploaded -> deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey) }
+                uploadedImages.values.forEach { uploaded ->
+                    deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey, budget)
+                }
             }
             throw throwable
         }
@@ -1276,13 +1313,28 @@ class SimpleStoryCreationService(
         false
     }
 
-    /** 고아가 될 객체를 지운다. 삭제 실패는 로그만 남긴다 — 정리 실패가 원래 실패 원인을 가려서는 안 된다. */
-    private fun deleteCharacterImageQuietly(storyPublicId: UUID, objectKey: String) {
+    /**
+     * 고아가 될 객체를 지운다. 삭제 실패는 로그만 남긴다 — 정리 실패가 원래 실패 원인을 가려서는 안 된다.
+     * 예산이 끝났으면 삭제도 건너뛴다(정리 때문에 요청이 더 늘어지면 안 된다 — 남은 객체는 고아로 수용).
+     */
+    private fun deleteCharacterImageQuietly(storyPublicId: UUID, objectKey: String, budget: ImageStageBudget) {
+        if (!budget.hasRemaining()) {
+            logBudgetExhausted(storyPublicId, "cleanup")
+            return
+        }
         try {
             characterImageStorage.delete(objectKey)
         } catch (exception: Exception) {
             logCharacterImageEvent("character_image_cleanup_failed", storyPublicId, exception)
         }
+    }
+
+    private fun logBudgetExhausted(storyPublicId: UUID, stage: String) {
+        structuredLogger.event(
+            "character_image_budget_exhausted",
+            "story_public_id" to storyPublicId.toString(),
+            "stage" to stage,
+        )
     }
 
     /** 인물 이미지 실패 관측용 구조화 로그. base64·URL은 싣지 않는다(개인정보·용량). */

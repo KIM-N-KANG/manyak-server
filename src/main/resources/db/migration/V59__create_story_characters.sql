@@ -3,6 +3,8 @@
 
 CREATE TABLE story_characters (
     id BIGSERIAL PRIMARY KEY,
+    -- 외부 노출 식별자. 순차 PK를 API에 노출하지 않는다(IDOR 방지, stories와 같은 관례).
+    public_id UUID NOT NULL UNIQUE,
     story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     -- 인물 식별자이자 컴파일 응답의 character_appearances[]·character_images[] 매칭 키.
     name VARCHAR(100) NOT NULL,

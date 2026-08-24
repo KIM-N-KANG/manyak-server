@@ -5,6 +5,7 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_characters_id_seq'::regclass) | false |  |  |  |
+| public_id | uuid |  | false |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | name | varchar(100) |  | false |  |  |  |
 | image_url | text |  | true |  |  |  |
@@ -23,6 +24,7 @@
 | ---- | ---- | ---------- |
 | story_characters_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_characters_pkey | PRIMARY KEY | PRIMARY KEY (id) |
+| story_characters_public_id_key | UNIQUE | UNIQUE (public_id) |
 | uq_story_characters_name | UNIQUE | UNIQUE (story_id, name) |
 
 ## Indexes
@@ -30,6 +32,7 @@
 | Name | Definition |
 | ---- | ---------- |
 | story_characters_pkey | CREATE UNIQUE INDEX story_characters_pkey ON public.story_characters USING btree (id) |
+| story_characters_public_id_key | CREATE UNIQUE INDEX story_characters_public_id_key ON public.story_characters USING btree (public_id) |
 | uq_story_characters_name | CREATE UNIQUE INDEX uq_story_characters_name ON public.story_characters USING btree (story_id, name) |
 
 ## Relations
@@ -41,6 +44,7 @@ erDiagram
 
 "public.story_characters" {
   bigint id
+  uuid public_id
   bigint story_id FK
   varchar_100_ name
   text image_url
