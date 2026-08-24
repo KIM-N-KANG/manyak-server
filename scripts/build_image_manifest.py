@@ -163,14 +163,33 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
     return entries
 
 
-def load_overlay(scanned_keys: set[str]) -> list[dict]:
-    """수동 오버레이 자산을 읽는다. 스캔 키와 충돌하면 실패시킨다(silent overwrite 방지)."""
+def load_overlay(assets_dir: pathlib.Path, scanned_keys: set[str]) -> list[dict]:
+    """수동 오버레이 자산을 읽는다. 스캔 경로와 같은 강도로 검증하고, 위반은 전부 모아 한 번에 실패시킨다.
+
+    원본(sourceFile)은 자산 아카이브 안에 함께 보관해야 한다 — 아카이브만으로 버킷을 재구성할 때
+    오버레이 자산이 빠지면 이 오버레이가 막으려는 404가 그대로 재발하기 때문이다.
+    """
     if not OVERLAY_PATH.exists():
         return []
     overlay = json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))
-    duplicated = [e["imageKey"] for e in overlay if e["imageKey"] in scanned_keys]
-    if duplicated:
-        print(f"오버레이 imageKey가 스캔 자산과 충돌합니다: {duplicated}", file=sys.stderr)
+    errors: list[str] = []
+    seen: set[str] = set()
+    for entry in overlay:
+        image_key = entry["imageKey"]
+        if image_key in scanned_keys:
+            errors.append(f"{image_key} — 스캔 자산과 imageKey가 충돌합니다")
+        if image_key in seen:
+            errors.append(f"{image_key} — 오버레이 안에서 imageKey가 중복됩니다")
+        seen.add(image_key)
+        # 스캔 경로(파생 _sm 객체 키 충돌 차단)와 같은 규칙을 오버레이에도 적용한다.
+        if image_key.endswith("_sm"):
+            errors.append(f"{image_key} — imageKey가 _sm으로 끝납니다")
+        if not (assets_dir / entry["sourceFile"]).exists():
+            errors.append(f"{image_key} — 원본이 아카이브에 없습니다: {entry['sourceFile']}")
+    if errors:
+        print(f"오버레이 {len(errors)}건이 규칙을 어겼습니다. 시드를 만들지 않습니다:", file=sys.stderr)
+        for message in errors:
+            print(f"  - {message}", file=sys.stderr)
         sys.exit(1)
     return overlay
 
@@ -232,7 +251,7 @@ def main() -> None:
     args = parser.parse_args()
 
     entries = parse_assets(args.assets_dir.expanduser())
-    overlay = load_overlay({e["imageKey"] for e in entries})
+    overlay = load_overlay(args.assets_dir.expanduser(), {e["imageKey"] for e in entries})
     combined = entries + overlay
     manifest = json.dumps(combined, ensure_ascii=False, indent=2) + "\n"
     seed_sql = render_seed_sql(entries)
