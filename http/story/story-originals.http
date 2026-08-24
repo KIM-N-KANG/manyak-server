@@ -1,0 +1,49 @@
+### 오리지널 스토리 목록(Story Originals) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-975] 마냑 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환합니다.
+###   피드·검색이 나오기 전까지 홈의 오리지널 섹션이 사용하며, 인증이 필요 없습니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동 (docker compose up -d)
+###   - 공식 계정 설정: 로컬 DB에 있는 회원의 public_id를 env로 주입하고 서버를 재기동합니다.
+###       SELECT public_id FROM users WHERE nickname = '<로컬 회원 닉네임>';
+###       export MANYAK_OFFICIAL_USER_PUBLIC_ID=<그 UUID>
+###     미설정 상태에서는 3번 응답이 항상 빈 배열([])입니다 — 이것도 정상 동작 검증입니다.
+###   - 공식 계정 소유의 공개 스토리가 필요하면 그 회원의 access token으로
+###     스토리를 하나 등록해 둡니다(http/story/story-general-create.http 참고).
+
+@baseUrl = http://localhost:8080
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. 오리지널 스토리 목록 조회 — 핵심 검증(인증 없음)
+# 공식 계정 미설정이면 빈 배열, 설정돼 있으면 그 계정의 공개 스토리만 등록순으로 옵니다.
+GET {{baseUrl}}/api/v1/stories/originals
+Accept: application/json
+
+> {%
+    client.test("오리지널 목록 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 배열이다", () => {
+        client.assert(Array.isArray(b), `배열이 아닙니다. actual=${JSON.stringify(b)}`);
+    });
+    client.test("모든 카드가 PUBLISHED이고 author 닉네임이 채워져 있다", () => {
+        for (let i = 0; i < b.length; i++) {
+            client.assert(b[i].status === "PUBLISHED",
+                `status가 PUBLISHED가 아닙니다. index=${i}, actual=${b[i].status}`);
+            client.assert(b[i].author !== null && typeof b[i].author.nickname === "string",
+                `author.nickname이 비었습니다. index=${i}, actual=${JSON.stringify(b[i].author)}`);
+        }
+    });
+%}
+
+### 2. 자유 조회 — 눈으로 확인
+# 운영·개발 서버 등 다른 환경을 볼 때 baseUrl만 바꿔 실행합니다.
+GET {{baseUrl}}/api/v1/stories/originals
+Accept: application/json

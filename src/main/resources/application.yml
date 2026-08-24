@@ -67,6 +67,9 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  # 마냑 공식 계정(오리지널 스토리 소유자)의 user public_id(UUID). 운영은 env로 주입하며,
+  # 미설정(빈 값)이면 GET /stories/originals는 빈 목록을 반환한다(KNK-975).
+  official-user-public-id: ${MANYAK_OFFICIAL_USER_PUBLIC_ID:}
   auth:
     jwt:
       # access JWT(HS256) 서명·검증용 대칭키. 운영은 env(MANYAK_AUTH_JWT_SECRET)로 주입한다.
