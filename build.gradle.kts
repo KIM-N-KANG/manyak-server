@@ -43,6 +43,8 @@ dependencies {
     // /actuator/prometheus로 export 내용을 눈으로 확인하는 용도이며 운영에서는 export를 끈다.
     implementation("io.micrometer:micrometer-registry-otlp")
     implementation("io.micrometer:micrometer-registry-prometheus")
+    // 컴파일이 생성한 인물 이미지를 S3에 올린다(KNK-966). 스프링 BOM이 관리하지 않아 버전을 명시한다.
+    implementation("software.amazon.awssdk:s3:2.46.7")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
     testRuntimeOnly("com.h2database:h2")

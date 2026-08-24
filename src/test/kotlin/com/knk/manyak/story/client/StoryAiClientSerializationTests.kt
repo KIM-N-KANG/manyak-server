@@ -6,10 +6,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import tools.jackson.databind.json.JsonMapper
+import tools.jackson.module.kotlin.kotlinModule
 
 class StoryAiClientSerializationTests {
 
-    private val objectMapper = JsonMapper.builder().build()
+    // 코틀린 모듈을 붙여 운영(Spring 자동 등록)과 같은 매퍼로 검증한다. 이게 없으면 응답에 없는 필드가
+    // 기본값 대신 null로 들어가, 하위호환(신규 필드를 아직 안 보내는 AI 버전) 검증이 성립하지 않는다.
+    private val objectMapper = JsonMapper.builder().addModule(kotlinModule()).build()
 
     // 실제 compile 응답은 story_main_events(항상 3~5)·story_endings(항상 존재)를 포함한다(AI 계약 §5-3-3).
     private val COMPILE_RESPONSE_JSON =
@@ -165,6 +168,55 @@ class StoryAiClientSerializationTests {
         assertEquals(5, ending.minTurns)
         assertEquals("적을 물리친다", ending.achievementCondition)
         assertEquals("따뜻한 에필로그", ending.epilogue)
+    }
+
+    @Test
+    fun `compile 응답의 인물 외형과 이미지를 snake case 필드로 역직렬화한다`() {
+        val response = objectMapper.readValue(
+            """
+            {
+              "stories": {"title": "제목", "one_line_intro": "소개", "description": "설명"},
+              "story_settings": {"world_setting": "w", "character_setting": "c", "user_role_setting": "u", "rule_setting": "r"},
+              "story_start_settings": {"name": "n", "start_situation": "s", "prologue": "p"},
+              "story_suggested_inputs": ["a"],
+              "character_appearances": [
+                {"name": "서준", "gender": "MALE", "age": "20대", "body": "마른 체형", "face": "선한 눈매",
+                 "hair": "검은 단발", "outfit": "교복", "visual_identity": "왼쪽 눈 밑 점"},
+                {"name": "외형없음"}
+              ],
+              "character_images": [
+                {"name": "서준", "image_base64": "AAAA", "content_type": "image/webp"},
+                {"name": "하나", "image_base64": null, "content_type": null, "error": "rate_limited"}
+              ]
+            }
+            """.trimIndent(),
+            AiStoryCompileResponse::class.java,
+        )
+
+        val appearance = response.characterAppearances.first()
+        assertEquals("서준", appearance.name)
+        assertEquals("MALE", appearance.gender)
+        assertEquals("왼쪽 눈 밑 점", appearance.visualIdentity)
+        // LLM이 못 채운 칸은 null이지만 항목 자체는 존재한다.
+        assertNull(response.characterAppearances[1].hair)
+
+        val success = response.characterImages.first()
+        assertEquals("AAAA", success.imageBase64)
+        assertEquals("image/webp", success.contentType)
+        assertNull(success.error)
+
+        val failed = response.characterImages[1]
+        assertNull(failed.imageBase64)
+        assertEquals("rate_limited", failed.error)
+    }
+
+    @Test
+    fun `인물 필드가 없는 compile 응답은 빈 배열로 역직렬화한다`() {
+        // 신규 필드를 아직 싣지 않는 AI 버전과의 하위호환(story_main_events와 같은 관례).
+        val response = objectMapper.readValue(COMPILE_RESPONSE_JSON, AiStoryCompileResponse::class.java)
+
+        assertTrue(response.characterAppearances.isEmpty())
+        assertTrue(response.characterImages.isEmpty())
     }
 
     @Test

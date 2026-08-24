@@ -137,7 +137,47 @@ data class AiStoryCompileResponse(
     @JsonProperty("story_endings")
     val storyEndings: List<AiStoryEnding> = emptyList(),
 
+    // 인물별 외형(인물 전원, 0~5개)과 인물별 이미지(외형이 있는 인물만). 두 배열의 길이는 다를 수 있고 name으로 매칭한다
+    // (스펙 §5-3-3, KNK-414·940). storyMainEvents와 같은 이유로 기본값 emptyList다.
+    @JsonProperty("character_appearances")
+    val characterAppearances: List<AiCharacterAppearance> = emptyList(),
+
+    @JsonProperty("character_images")
+    val characterImages: List<AiCharacterImage> = emptyList(),
+
     val meta: AiResponseMeta? = null,
+)
+
+/**
+ * 컴파일 LLM이 채운 인물 외형(스펙 §5-3-3). 통글에는 실리지 않는 별도 데이터이며,
+ * 인물 전원이 포함되되 LLM이 못 채운 칸은 null이다.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiCharacterAppearance(
+    val name: String,
+    val gender: String? = null,
+    val age: String? = null,
+    val body: String? = null,
+    val face: String? = null,
+    val hair: String? = null,
+    val outfit: String? = null,
+    @JsonProperty("visual_identity")
+    val visualIdentity: String? = null,
+)
+
+/**
+ * AI가 생성한 인물 이미지(스펙 §5-3-3). 성공하면 [imageBase64]에 WebP base64와 [contentType]이,
+ * 실패하면 [error]에 사유 코드(`timeout`·`rate_limited`·`rejected`·`appearance_missing`·`generation_failed`)가 실린다.
+ * 이미지 생성은 컴파일의 부가물이라 실패해도 컴파일 자체는 200이다.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiCharacterImage(
+    val name: String,
+    @JsonProperty("image_base64")
+    val imageBase64: String? = null,
+    @JsonProperty("content_type")
+    val contentType: String? = null,
+    val error: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
