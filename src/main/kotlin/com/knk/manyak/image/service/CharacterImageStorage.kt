@@ -39,10 +39,13 @@ class S3CharacterImageStorage(
     @param:Value("\${manyak.asset.character-image.region:}") private val region: String,
     // S3 호환 저장소(로컬 MinIO 등)를 쓸 때만 채운다. 비어 있으면 AWS 기본 엔드포인트를 그대로 쓴다.
     @param:Value("\${manyak.asset.character-image.endpoint:}") private val endpoint: String,
-    @param:Value("\${manyak.asset.image-base-url:}") private val baseUrl: String,
+    // 인물 이미지 전용 서빙 base URL. 전역 image-base-url(기본값이 운영 CDN)로 폴백하지 않는다 —
+    // dev에서 버킷만 바꾸면 dev DB에 운영 CDN 절대 URL이 저장돼 깨진 이미지가 남기 때문이다.
+    @param:Value("\${manyak.asset.character-image.base-url:}") private val baseUrl: String,
 ) : CharacterImageStorage {
 
-    // 버킷·base URL 중 하나라도 없으면 URL을 만들 수 없으니 아예 클라이언트를 띄우지 않는다.
+    // 버킷과 전용 base URL이 **둘 다** 있어야 활성화한다. 하나라도 비면 클라이언트를 만들지 않고 no-op으로
+    // 떨어진다 — 반쪽 설정으로 잘못된 URL이 DB에 굳는 것을 원천 차단한다(이미지 없이 저장되는 편이 안전하다).
     private val client: S3Client? by lazy {
         if (bucket.isBlank() || baseUrl.isBlank()) {
             null
