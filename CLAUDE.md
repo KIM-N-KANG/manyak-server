@@ -79,7 +79,7 @@
 ### 배포·릴리스
 
 - **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`). 흐름은 빌드가 ECR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 `:latest` 승격 → ECS `manyak-prod` 서비스에 `force-new-deployment` → 배포 id 폴링·컨테이너 헬스·`api.manyak.app` 스모크입니다. dev 머지는 프로덕션에 반영되지 않습니다.
-- **EC2+SSM 경로는 수동 `workflow_dispatch` 롤백 수단으로만 남아 있습니다**(KNK-963). 실행 전에 `manyak-terraform`에서 ALB 트래픽을 EC2로 되돌리는 것(`ecs_traffic_weight = 0`)이 전제이며, EC2를 회수하면 그 잡은 제거합니다. main push로는 돌지 않습니다.
+- **운영 EC2는 회수됐습니다**(KNK-971). EC2+SSM 배포·롤백 경로는 더 이상 없습니다. 배포 실패 시 워크플로가 `:latest`를 이전 digest로 되돌리고 재배포를 트리거하며, 그 외 롤백은 revert 커밋 릴리스 또는 ECR 이전 `:short-sha`를 `:latest`로 수동 재태깅 후 `force-new-deployment`입니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영. main/dev 직접 push 금지(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 와이어 계약(요청/응답 필드)이 바뀌는 릴리스는 manyak-web·manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.
