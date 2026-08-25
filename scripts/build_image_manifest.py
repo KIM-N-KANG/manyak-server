@@ -34,12 +34,23 @@ MIGRATION_DIR = REPO_ROOT / "src/main/resources/db/migration"
 MANIFEST_PATH = REPO_ROOT / "scripts/image-presets.manifest.json"
 SEED_SQL_PATH = MIGRATION_DIR / "V46__seed_image_presets.sql"
 RENAME_MAP_PATH = REPO_ROOT / "scripts/image-presets.rename.tsv"
+# 자산 아카이브 밖 수동 자산(오리지널 스토리 전용 아트웍 등)의 오버레이. 스캔 결과 뒤에 합쳐져
+# 매니페스트·리네임 맵에는 실리지만, V46 시드 SQL에는 넣지 않는다 — 이미 적용된 마이그레이션이고
+# 오버레이 자산의 DB 카탈로그 등록은 운영 시드(오리지널 스토리 시드 SQL)가 수행한다(KNK-934).
+OVERLAY_PATH = REPO_ROOT / "scripts/image-presets.overlay.json"
 
 # 디렉터리명 → (카탈로그 타입, imageKey 접두, S3 prefix)
 TYPES = {
     "thumbnail": ("THUMBNAIL", "thumb", "thumbnails"),
     "bg": ("BACKGROUND", "bg", "backgrounds"),
     "character": ("CHARACTER", "char", "characters"),
+}
+
+# 폐기(tombstone) imageKey. 교체된 자산의 구 키로, 버킷에는 immutable 캐시용 객체가 남아 있다.
+# 스캔의 일련번호 발급이 이 번호를 재사용하면 구 객체를 새 이미지로 덮어쓰게 되므로 영구 예약한다.
+RETIRED_IMAGE_KEYS = {
+    # 오리지널 썸네일 1차분(글자 위치 수정판 thumb_0056~0060으로 교체, KNK-934)
+    "thumb_0051", "thumb_0052", "thumb_0053", "thumb_0054", "thumb_0055",
 }
 
 # 파일명 장르 토큰 → GENRE 마스터 태그명. `판타지`는 조합 맥락으로 갈리므로 여기 두지 않는다.
@@ -90,8 +101,12 @@ def load_master_genres() -> set[str]:
     return names
 
 
-def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
-    """자산 파일명을 파싱해 매니페스트 항목으로 만든다. 규칙 위반은 전부 모아 한 번에 실패시킨다."""
+def parse_assets(assets_dir: pathlib.Path, reserved_keys: set[str]) -> list[dict]:
+    """자산 파일명을 파싱해 매니페스트 항목으로 만든다. 규칙 위반은 전부 모아 한 번에 실패시킨다.
+
+    일련번호 발급은 예약 키(폐기 tombstone + 오버레이 선점 키)를 건너뛴다 — 파일이 추가돼도
+    폐기·오버레이 번호를 재사용해 라이브 객체를 덮어쓰는 일이 없게 한다.
+    """
     entries: list[dict] = []
     errors: list[str] = []
     master = load_master_genres()
@@ -107,7 +122,8 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
             unicodedata.normalize("NFC", path.stem) for path in source_dir.glob("*.png")
         )
 
-        for index, stem in enumerate(stems, start=1):
+        next_serial = 1
+        for stem in stems:
             # thumbnail은 접두 뒤 언더스코어가 1개, bg·character는 2개다.
             body = re.sub(rf"^{dir_name}_+", "", stem)
             body = re.sub(r"__\d+$", "", body)  # 파일명 번호는 타입 안에서도 중복이라 버린다.
@@ -130,7 +146,11 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
                 errors.append(f"{dir_name}/{stem}.png — 마스터에 없는 장르: {off_master}")
                 continue
 
-            image_key = f"{key_prefix}_{index:04d}"
+            while True:
+                image_key = f"{key_prefix}_{next_serial:04d}"
+                next_serial += 1
+                if image_key not in reserved_keys:
+                    break
             # 썸네일 축소 변형의 파생 객체 키가 {imageKey}_sm.png라, 원본 키가 _sm으로 끝나면 서로 충돌한다
             # (스펙 §4-3-9 매니페스트 검증, KNK-548). 현재 키 형식상 발생할 수 없지만 규칙을 여기서 잠근다.
             if image_key.endswith("_sm"):
@@ -157,6 +177,64 @@ def parse_assets(assets_dir: pathlib.Path) -> list[dict]:
         sys.exit(1)
 
     return entries
+
+
+def load_overlay(assets_dir: pathlib.Path, scanned_keys: set[str]) -> list[dict]:
+    """수동 오버레이 자산을 읽는다. 스캔 경로와 같은 강도로 검증하고, 위반은 전부 모아 한 번에 실패시킨다.
+
+    원본(sourceFile)은 자산 아카이브 안에 함께 보관해야 한다 — 아카이브만으로 버킷을 재구성할 때
+    오버레이 자산이 빠지면 이 오버레이가 막으려는 404가 그대로 재발하기 때문이다.
+    """
+    if not OVERLAY_PATH.exists():
+        return []
+    overlay = json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    seen: set[str] = set()
+    for entry in overlay:
+        image_key = entry["imageKey"]
+        if image_key in scanned_keys:
+            errors.append(f"{image_key} — 스캔 자산과 imageKey가 충돌합니다")
+        if image_key in RETIRED_IMAGE_KEYS:
+            errors.append(f"{image_key} — 폐기(tombstone)된 imageKey입니다")
+        if image_key in seen:
+            errors.append(f"{image_key} — 오버레이 안에서 imageKey가 중복됩니다")
+        seen.add(image_key)
+        # 스캔 경로(파생 _sm 객체 키 충돌 차단)와 같은 규칙을 오버레이에도 적용한다.
+        if image_key.endswith("_sm"):
+            errors.append(f"{image_key} — imageKey가 _sm으로 끝납니다")
+        if not (assets_dir / entry["sourceFile"]).exists():
+            errors.append(f"{image_key} — 원본이 아카이브에 없습니다: {entry['sourceFile']}")
+    if errors:
+        print(f"오버레이 {len(errors)}건이 규칙을 어겼습니다. 시드를 만들지 않습니다:", file=sys.stderr)
+        for message in errors:
+            print(f"  - {message}", file=sys.stderr)
+        sys.exit(1)
+    return overlay
+
+
+def validate_object_keys(entries: list[dict]) -> None:
+    """병합된 전체 항목의 objectKey 규칙·유일성을 검증한다.
+
+    오버레이가 스캔 항목과 다른 imageKey로 같은 objectKey를 지정하면 rename 맵에서 서로 다른
+    원본이 같은 버킷 경로를 겨눠 업로드 순서에 따라 라이브 자산이 조용히 덮어써지므로 여기서 막는다.
+    """
+    prefix_by_type = {preset_type: s3_prefix for preset_type, _, s3_prefix in TYPES.values()}
+    errors: list[str] = []
+    owner_by_object_key: dict[str, str] = {}
+    for entry in entries:
+        expected = f"{prefix_by_type[entry['type']]}/{entry['imageKey']}.png"
+        if entry["objectKey"] != expected:
+            errors.append(f"{entry['imageKey']} — objectKey 규칙 위반: {entry['objectKey']} (기대 {expected})")
+        if entry["objectKey"] in owner_by_object_key:
+            errors.append(
+                f"{entry['objectKey']} — objectKey 중복: {owner_by_object_key[entry['objectKey']]} vs {entry['imageKey']}"
+            )
+        owner_by_object_key[entry["objectKey"]] = entry["imageKey"]
+    if errors:
+        print(f"objectKey {len(errors)}건이 규칙을 어겼습니다. 시드를 만들지 않습니다:", file=sys.stderr)
+        for message in errors:
+            print(f"  - {message}", file=sys.stderr)
+        sys.exit(1)
 
 
 def sql_literal(value: str) -> str:
@@ -215,13 +293,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    entries = parse_assets(args.assets_dir.expanduser())
-    manifest = json.dumps(entries, ensure_ascii=False, indent=2) + "\n"
+    # 오버레이 키는 스캔 전에 읽어 일련번호 발급에서 예약한다(폐기 키와 함께 재사용 금지).
+    overlay_keys: set[str] = set()
+    if OVERLAY_PATH.exists():
+        overlay_keys = {e["imageKey"] for e in json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))}
+    entries = parse_assets(args.assets_dir.expanduser(), RETIRED_IMAGE_KEYS | overlay_keys)
+    overlay = load_overlay(args.assets_dir.expanduser(), {e["imageKey"] for e in entries})
+    combined = entries + overlay
+    validate_object_keys(combined)
+    manifest = json.dumps(combined, ensure_ascii=False, indent=2) + "\n"
     seed_sql = render_seed_sql(entries)
-    rename_map = "".join(f"{e['sourceFile']}\t{e['objectKey']}\n" for e in entries)
+    rename_map = "".join(f"{e['sourceFile']}\t{e['objectKey']}\n" for e in combined)
 
     by_type: dict[str, int] = {}
-    for entry in entries:
+    for entry in combined:
         by_type[entry["type"]] = by_type.get(entry["type"], 0) + 1
 
     if args.check:
