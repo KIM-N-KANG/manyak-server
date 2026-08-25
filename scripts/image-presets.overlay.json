@@ -1,6 +1,6 @@
 [
   {
-    "imageKey": "thumb_0051",
+    "imageKey": "thumb_0056",
     "type": "THUMBNAIL",
     "genres": [
       "무협"
@@ -9,10 +9,10 @@
     "subject": "표국짐꾼",
     "prop": "유운검",
     "sourceFile": "오리지널 스토리/유운잔검기 썸네일.png",
-    "objectKey": "thumbnails/thumb_0051.png"
+    "objectKey": "thumbnails/thumb_0056.png"
   },
   {
-    "imageKey": "thumb_0052",
+    "imageKey": "thumb_0057",
     "type": "THUMBNAIL",
     "genres": [
       "학원"
@@ -21,10 +21,10 @@
     "subject": "교실",
     "prop": "자리뽑기",
     "sourceFile": "오리지널 스토리/연애는 대학 가서 썸네일.png",
-    "objectKey": "thumbnails/thumb_0052.png"
+    "objectKey": "thumbnails/thumb_0057.png"
   },
   {
-    "imageKey": "thumb_0053",
+    "imageKey": "thumb_0058",
     "type": "THUMBNAIL",
     "genres": [
       "로맨스 판타지"
@@ -33,10 +33,10 @@
     "subject": "대공성",
     "prop": "계약서",
     "sourceFile": "오리지널 스토리/대공님, 계약 위반입니다 썸네일.png",
-    "objectKey": "thumbnails/thumb_0053.png"
+    "objectKey": "thumbnails/thumb_0058.png"
   },
   {
-    "imageKey": "thumb_0054",
+    "imageKey": "thumb_0059",
     "type": "THUMBNAIL",
     "genres": [
       "현대 판타지"
@@ -45,10 +45,10 @@
     "subject": "멸망의밤",
     "prop": "균열",
     "sourceFile": "오리지널 스토리/나만 기억하는 멸망 썸네일.png",
-    "objectKey": "thumbnails/thumb_0054.png"
+    "objectKey": "thumbnails/thumb_0059.png"
   },
   {
-    "imageKey": "thumb_0055",
+    "imageKey": "thumb_0060",
     "type": "THUMBNAIL",
     "genres": [
       "탈출"
@@ -57,6 +57,6 @@
     "subject": "지하철",
     "prop": "안내방송",
     "sourceFile": "오리지널 스토리/0호선 썸네일.png",
-    "objectKey": "thumbnails/thumb_0055.png"
+    "objectKey": "thumbnails/thumb_0060.png"
   }
 ]
