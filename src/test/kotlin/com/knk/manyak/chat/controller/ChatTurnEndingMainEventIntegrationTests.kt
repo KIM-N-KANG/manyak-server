@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -67,7 +68,12 @@ class ChatTurnEndingMainEventIntegrationTests {
         var result: ChatTurnAiResult = ChatTurnAiResult(aiOutput = "응답 본문", choices = listOf("선택 1"))
 
         override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
-        override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult {
+        override fun streamTurn(
+        request: ChatTurnAiRequest,
+        traceLink: AiTraceLink,
+        onCharacterImage: (ChatCharacterImageEvent) -> Unit,
+        onToken: (String) -> Unit,
+    ): ChatTurnAiResult {
             lastRequest.set(request)
             onToken("응답")
             return result

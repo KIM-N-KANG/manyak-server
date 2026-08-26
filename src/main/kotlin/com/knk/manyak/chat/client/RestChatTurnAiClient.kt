@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.client
 
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonUnwrapped
@@ -47,6 +48,7 @@ class RestChatTurnAiClient(
     override fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink,
+        onCharacterImage: (ChatCharacterImageEvent) -> Unit,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         var result: ChatTurnAiResult? = null
@@ -72,6 +74,10 @@ class RestChatTurnAiClient(
                     val event = events.next()
                     when (event.event()) {
                         EVENT_TOKEN -> onToken(read(event.data(), TokenData::class.java).text)
+                        EVENT_CHARACTER_IMAGE -> {
+                            val data = read(event.data(), CharacterImageData::class.java)
+                            onCharacterImage(ChatCharacterImageEvent(name = data.name, imageUrl = data.imageUrl))
+                        }
                         EVENT_COMPLETED -> {
                             val data = read(event.data(), CompletedData::class.java)
                             result = ChatTurnAiResult(
@@ -126,6 +132,20 @@ class RestChatTurnAiClient(
 
     /** SSE `token` 이벤트 페이로드. */
     private data class TokenData(val text: String)
+
+    /**
+     * SSE `character_image` 이벤트 페이로드(KNK-943).
+     *
+     * URL 키를 **`imageUrl`·`image_url` 양쪽으로 받는다**. 스펙 표기는 `image_url`인데 AI 구현은 직렬화 별칭으로
+     * `imageUrl`을 내보내고 있어, 한쪽만 받으면 그 순간 이벤트가 통째로 유실된다(파싱 실패가 아니라 값 누락).
+     * 어느 쪽으로 정리되든 깨지지 않도록 별칭으로 둘 다 수용한다 — 관용적 수신이 이 자리에서 가장 싸다.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class CharacterImageData(
+        val name: String,
+        @JsonAlias("image_url")
+        val imageUrl: String,
+    )
 
     /**
      * SSE `completed` 이벤트 페이로드. 와이어 키는 camelCase(aiOutput)다.
@@ -224,6 +244,7 @@ class RestChatTurnAiClient(
         const val CHAT_TURNS_PATH = "/api/v1/chat/turns"
         const val CHAT_CHOICES_PATH = "/api/v1/chat/choices"
         const val EVENT_TOKEN = "token"
+        const val EVENT_CHARACTER_IMAGE = "character_image"
         const val EVENT_COMPLETED = "completed"
         const val EVENT_ERROR = "error"
         val SSE_TYPE = object : ParameterizedTypeReference<ServerSentEvent<String>>() {}

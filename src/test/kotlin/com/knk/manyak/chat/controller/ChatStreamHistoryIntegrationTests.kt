@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
@@ -54,6 +55,7 @@ class ChatStreamHistoryIntegrationTests {
         override fun streamTurn(
             request: ChatTurnAiRequest,
             traceLink: AiTraceLink,
+            onCharacterImage: (ChatCharacterImageEvent) -> Unit,
             onToken: (String) -> Unit,
         ): ChatTurnAiResult {
             lastRequest.set(request)
