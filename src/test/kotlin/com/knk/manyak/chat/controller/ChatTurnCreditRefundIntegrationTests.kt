@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiException
@@ -62,6 +63,7 @@ class ChatTurnCreditRefundIntegrationTests {
                 override fun streamTurn(
                     request: ChatTurnAiRequest,
                     traceLink: AiTraceLink,
+                    onCharacterImage: (ChatCharacterImageEvent) -> Unit,
                     onToken: (String) -> Unit,
                 ): ChatTurnAiResult {
                     onToken("검")

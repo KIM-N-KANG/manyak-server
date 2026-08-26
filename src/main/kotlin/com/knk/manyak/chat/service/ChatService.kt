@@ -2,6 +2,7 @@ package com.knk.manyak.chat.service
 
 import com.knk.manyak.chat.client.ChatHistoryMessage
 import com.knk.manyak.chat.client.ChatMessageRole
+import com.knk.manyak.chat.client.ChatCharacterImage
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -19,6 +20,7 @@ import com.knk.manyak.chat.dto.ChatShareTurnResponse
 import com.knk.manyak.chat.dto.ChatStreamCompletedEvent
 import com.knk.manyak.chat.dto.ChatStreamErrorEvent
 import com.knk.manyak.chat.dto.ChatStreamStartedEvent
+import com.knk.manyak.chat.dto.ChatStreamCharacterImageEvent
 import com.knk.manyak.chat.dto.ChatStreamTokenEvent
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ChatTurnResponse
@@ -55,6 +57,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -91,6 +94,8 @@ class ChatService(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
+    private val storyCharacterRepository: StoryCharacterRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
     // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
@@ -805,7 +810,26 @@ class ChatService(
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
                 ) {
-                    chatTurnAiClient.streamTurn(aiCall.request, aiCall.traceLink) { token ->
+                    chatTurnAiClient.streamTurn(
+                        aiCall.request,
+                        aiCall.traceLink,
+                        // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
+                        // 검증·변환은 하지 않는다 — 매핑 자체를 백엔드가 보냈으므로 돌아온 URL은 이미 검증된 값이다.
+                        onCharacterImage = { characterImage ->
+                            if (!Thread.currentThread().isInterrupted) {
+                                emitter.send(
+                                    SseEmitter.event()
+                                        .name("character_image")
+                                        .data(
+                                            ChatStreamCharacterImageEvent(
+                                                name = characterImage.name,
+                                                imageUrl = characterImage.imageUrl,
+                                            ),
+                                        ),
+                                )
+                            }
+                        },
+                    ) { token ->
                         if (Thread.currentThread().isInterrupted) {
                             return@streamTurn
                         }
@@ -1118,6 +1142,8 @@ class ChatService(
                 history = history,
                 userInput = userInput,
                 summary = "",
+                // 인물-이미지 매핑(KNK-943). 이어쓰기·재생성·선택지 생성이 이 조립을 공유하므로 세 경로 모두 같은 매핑을 싣는다.
+                characterImages = loadCharacterImages(chat.storyId),
                 userSource = userSource,
                 mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
                 targetMainEvent = targetMainEvent,
@@ -1141,6 +1167,19 @@ class ChatService(
         val request: ChatTurnAiRequest,
         val traceLink: AiTraceLink,
     )
+
+    /**
+     * 채팅 요청에 실을 인물-이미지 매핑을 조회한다(스펙 §4-3-3 "채팅 인물 이미지 전달", KNK-943).
+     *
+     * 이미지가 없는 인물(생성·업로드 실패로 `image_url`이 NULL)은 조회에서 제외한다 — AI는 이 매핑에 있는 인물만
+     * 태그로 만들 수 있으므로, 매핑에 없으면 태그가 삭제되고 이미지 없이 본문만 나간다.
+     * 인물이 없거나 전부 이미지가 없으면 빈 배열이며, 그때 AI는 인물 태그 규칙을 쓰지 않는다.
+     */
+    private fun loadCharacterImages(storyId: Long): List<ChatCharacterImage> =
+        storyCharacterRepository.findByStoryIdAndImageUrlIsNotNullOrderByIdAsc(storyId)
+            .mapNotNull { character ->
+                character.imageUrl?.let { ChatCharacterImage(name = character.name, imageUrl = it) }
+            }
 
     /** 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료). */
     private fun resolveOccurredMainEventNames(chatId: Long, mainEvents: List<StoryMainEvent>): List<String> {

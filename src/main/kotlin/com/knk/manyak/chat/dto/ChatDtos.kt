@@ -309,6 +309,22 @@ data class ChatStreamTokenEvent(
     val text: String,
 )
 
+/**
+ * SSE `character_image` 이벤트(스펙 §4-3-3, KNK-943). AI가 스트리밍 중 보낸 이벤트를 그대로 중계한다.
+ *
+ * URL 키는 `imageUrl`(camelCase)다. **스펙 표기(`image_url`)와 다르다** — 이 스트림의 다른 이벤트가 전부
+ * camelCase(`chatId`·`aiOutput`·`reachedEnding`)라 프론트가 이 이벤트만 다른 표기를 쓰게 할 이유가 없고,
+ * AI 구현도 직렬화 별칭으로 `imageUrl`을 내보내고 있어 실물과도 일치한다. 스펙 정정은 별도로 진행한다.
+ */
+@Schema(description = "SSE 인물 이미지 이벤트 예시")
+data class ChatStreamCharacterImageEvent(
+    @field:Schema(description = "인물 이름", example = "강진우")
+    val name: String,
+
+    @field:Schema(description = "인물 이미지 URL", example = "https://cdn.manyak.app/characters/generated/3f2504e0/9b1c.webp")
+    val imageUrl: String,
+)
+
 @Schema(description = "SSE 완료 이벤트 예시")
 data class ChatStreamCompletedEvent(
     @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")

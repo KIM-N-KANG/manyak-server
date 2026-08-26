@@ -32,6 +32,31 @@ class ChatTurnAiClientSerializationTests {
     }
 
     @Test
+    fun `인물 이미지 매핑을 character_images 배열로 직렬화한다`() {
+        val json = objectMapper.writeValueAsString(
+            sampleRequest().copy(
+                characterImages = listOf(
+                    ChatCharacterImage(name = "강진우", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
+                ),
+            ),
+        )
+
+        assertTrue(json.contains(""""character_images":[{"""))
+        assertTrue(json.contains(""""name":"강진우""""))
+        assertTrue(json.contains(""""image_url":"https://cdn.test/characters/generated/s/a.webp""""))
+        assertFalse(json.contains("imageUrl"))
+        assertFalse(json.contains("characterImages"))
+    }
+
+    @Test
+    fun `인물 이미지가 없으면 빈 배열로 직렬화한다`() {
+        // AI 구버전은 이 필드를 무시하면 그만이고, 신버전은 빈 배열을 매핑 없음으로 읽는다(하위호환).
+        val json = objectMapper.writeValueAsString(sampleRequest())
+
+        assertTrue(json.contains(""""character_images":[]"""))
+    }
+
+    @Test
     fun `history의 role은 대문자로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(sampleRequest())
 

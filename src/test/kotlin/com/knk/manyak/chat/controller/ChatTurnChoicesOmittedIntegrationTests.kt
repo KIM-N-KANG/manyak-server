@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -55,7 +56,12 @@ class ChatTurnChoicesOmittedIntegrationTests {
         @Bean
         @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
-            override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult {
+            override fun streamTurn(
+            request: ChatTurnAiRequest,
+            traceLink: AiTraceLink,
+            onCharacterImage: (ChatCharacterImageEvent) -> Unit,
+            onToken: (String) -> Unit,
+        ): ChatTurnAiResult {
                 onToken("생성 ")
                 return ChatTurnAiResult(aiOutput = "생성된 본문입니다.", choices = streamedChoices)
             }

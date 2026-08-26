@@ -115,11 +115,17 @@ Accept: application/json
 #   다음을 눈으로 확인하세요:
 #     - event: started   data: {"chatId":<chatId>}
 #     - event: token      data: {"text":"검"} … (여러 청크)
+#     - event: character_image data: {"name":"강진우","imageUrl":"https://…/characters/generated/…/….webp"}
+#       ← KNK-943. AI가 인물 태그를 감지한 턴에만, token 사이에 끼어 나옵니다. 서버는 검증 없이 그대로 중계합니다.
+#       인물 이미지가 없는 스토리(story_characters의 image_url이 전부 NULL)나 인물이 등장하지 않는 턴에는 나오지 않습니다.
+#       스텁 AI는 이 이벤트를 발행하지 않으므로 실연동(stub=false)에서만 확인할 수 있습니다.
 #     - event: completed data: {"chatId":<chatId>,"turnId":<n>,"aiOutput":"…","choices":[]}  ← choices는 빈 배열
 #   저장 결과(턴 1건 추가, choices 빈 배열, current_turn 증가)는 4번 실행 후 5번을 실행해 확인합니다.
 #
 #   ▶ 실연동(stub=false) 추가 확인:
 #     - token이 manyak-ai가 실제로 생성한 본문 청크인지(스텁 고정 문구가 아님).
+#     - 인물 이미지가 있는 스토리에서 인물이 등장하는 턴이면 character_image 이벤트가 오는지.
+#       (서버가 요청에 character_images 매핑을 실어야 AI가 태그를 치환할 수 있습니다 — 매핑이 비면 이벤트도 없습니다.)
 #     - AI가 오류를 내면 백엔드가 가공 없이 relay: event: error data: {"code":"<AI코드>","message":"<AI메시지>"}
 #       (백엔드 자체 오류는 code가 AI_STREAM_FAILED로 나옵니다.)
 POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
