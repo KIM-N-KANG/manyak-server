@@ -199,26 +199,41 @@ jobs:
           # 단발 검사는 안 된다. 배포 완료 시점에도 ai 는 아직 UNKNOWN 일 수 있다 —
           # 태스크 헬스체크에 start period 와 재시도가 있고, ai 는 essential=false 라
           # 배포 완료 판정이 ai 의 healthy 를 기다려 주지 않는다. 정상 기동 중인 컨테이너를
-          # 실패로 떨어뜨리지 않도록, 전부 HEALTHY 가 되거나 종료 상태가 될 때까지 폴링한다.
+          # 실패로 떨어뜨리지 않도록, 대상이 전부 HEALTHY 가 되거나 종료 상태가 될 때까지 폴링한다.
           # 문자열 매칭을 쓰지 않는다 — UNHEALTHY 도 "HEALTHY" 로 끝나서 부분일치로는 비정상을
           # 정상으로 오판한다. JMESPath 로 정확히 비교해 개수를 센다.
+          # 검사 대상은 healthCheck 가 정의된 server·ai 로 한정한다(운영 잡과 같은 규칙, KNK-1011).
+          # 개발 태스크에는 2026-08-22부터 로그 사이드카 log_router(aws-for-fluent-bit)가 있는데
+          # healthCheck 가 없어 healthStatus 가 영원히 UNKNOWN 이다 — 전 컨테이너를 검사하면
+          # 배포·이미지 승격이 성공해도 매 dev push 가 여기서 타임아웃한다(거짓 실패).
+          # 개발 서비스는 desiredCount 1(stop-then-start)이라 tasks[0] 한 개면 충분하다.
           for i in $(seq 1 20); do
             aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
               --query 'tasks[0].containers[].{name:name,status:lastStatus,health:healthStatus}' --output table
+            # 대상 컨테이너가 실제로 있는지 먼저 본다. 개수만 세면 이름이 바뀌거나 컨테이너가 빠졌을 때
+            # "대기 중 0개"로 통과해 버린다(검증하지 않는 검증).
+            read -r SERVER_COUNT AI_COUNT <<< "$(aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+              --query "[length(tasks[0].containers[?name=='server']), length(tasks[0].containers[?name=='ai'])]" \
+              --output text)"
+            if [ "$SERVER_COUNT" != "1" ] || [ "$AI_COUNT" != "1" ]; then
+              echo "::error::server=$SERVER_COUNT ai=$AI_COUNT 입니다 — 컨테이너 누락 또는 이름 변경. 태스크 정의 확인"
+              exit 1
+            fi
             PENDING=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
-              --query "length(tasks[0].containers[?healthStatus!='HEALTHY'])" --output text)
+              --query "length(tasks[0].containers[?(name=='server' || name=='ai') && healthStatus!='HEALTHY'])" --output text)
             if [ "$PENDING" = "0" ]; then
-              echo "✅ 컨테이너 전부 HEALTHY"; exit 0
+              echo "✅ server·ai 전부 HEALTHY"; exit 0
             fi
             BAD=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
-              --query "length(tasks[0].containers[?healthStatus=='UNHEALTHY' || lastStatus=='STOPPED'])" --output text)
+              --query "length(tasks[0].containers[?(name=='server' || name=='ai') && (healthStatus=='UNHEALTHY' || lastStatus=='STOPPED')])" --output text)
             if [ "$BAD" != "0" ]; then
               echo "::error::UNHEALTHY 또는 STOPPED 컨테이너가 있습니다 — CloudWatch /ecs/manyak-dev 로그 확인"
               exit 1
             fi
             echo "컨테이너 기동 대기 $i/20 (15s)..."; sleep 15
           done
-          echo "::error::제한 시간 안에 전부 HEALTHY 가 되지 않았습니다 — CloudWatch /ecs/manyak-dev 로그 확인"; exit 1
+          echo "::error::제한 시간 안에 server·ai 가 전부 HEALTHY 가 되지 않았습니다 — CloudWatch /ecs/manyak-dev 로그 확인"; exit 1
 
       - name: Smoke test (/actuator/health)
         if: steps.gate.outputs.skip != 'true'
