@@ -15,6 +15,7 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.image.service.CharacterImageObjectKeys
 import com.knk.manyak.image.service.CharacterImageStorage
 import com.knk.manyak.image.service.ImageStageBudget
 import com.knk.manyak.story.client.AiCharacter
@@ -163,9 +164,7 @@ class SimpleStoryCreationService(
         // (apiCallTimeout 10초)이 5회 이상 누적될 수 있는데, 이 예산이 그 누적을 30초에서 끊는다.
         val CHARACTER_IMAGE_STAGE_BUDGET: Duration = Duration.ofSeconds(30)
 
-        // 인물 이미지 객체 키 접두사·확장자(스펙 §4-4). AI는 WebP만 보낸다.
-        const val CHARACTER_IMAGE_KEY_PREFIX = "characters/generated"
-        const val CHARACTER_IMAGE_EXTENSION = "webp"
+        // 객체 키 형식은 [CharacterImageObjectKeys]가 소유한다(스펙 §4-4). AI는 WebP만 보낸다.
         const val CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE = "image/webp"
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
@@ -1250,7 +1249,9 @@ class SimpleStoryCreationService(
             logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
             return@mapNotNull null
         }
-        val objectKey = "$CHARACTER_IMAGE_KEY_PREFIX/$storyPublicId/${UUID.randomUUID()}.$CHARACTER_IMAGE_EXTENSION"
+        // 파일명에 인물 이름을 드러낸다(KNK-1010). 이름은 이미 정규화(trim·100자 절단)된 저장 이름이며,
+        // 키에 쓸 수 없는 문자는 [CharacterImageObjectKeys]가 걸러낸다.
+        val objectKey = CharacterImageObjectKeys.newObjectKey(storyPublicId, name)
         val url = try {
             characterImageStorage.upload(
                 objectKey,
