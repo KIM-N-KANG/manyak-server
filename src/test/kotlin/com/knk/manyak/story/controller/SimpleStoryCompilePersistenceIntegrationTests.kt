@@ -394,12 +394,32 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         // 업로드된 URL이 인물에 붙는다.
         assertThat(saved.map { it.imageUrl }).allSatisfy { url -> assertThat(url).startsWith("https://cdn.test/") }
 
-        // 객체 키는 characters/generated/{storyPublicId}/{uuid}.webp이고 Content-Type은 응답 값이다.
+        // 객체 키는 characters/generated/{storyPublicId}/{인물 이름}_{uuid 앞 8자리}.webp다(KNK-1010).
+        // 파일명에 인물 이름이 드러나야 운영에서 누구 이미지인지 바로 보인다.
         assertThat(uploads).hasSize(2)
         assertThat(uploads.map { it.first })
-            .allSatisfy { key -> assertThat(key).matches("characters/generated/${story.publicId}/[0-9a-f-]{36}\\.webp") }
+            .allSatisfy { key -> assertThat(key).matches("characters/generated/${story.publicId}/[가-힣A-Za-z0-9_]+_[0-9a-f]{8}\\.webp") }
+        assertThat(uploads.map { it.first })
+            .anySatisfy { key -> assertThat(key).contains("/서준_") }
         assertThat(uploads.map { it.second }).containsOnly("image/webp")
         assertThat(uploads.map { it.third }).containsOnly(WEBP_BYTE_LENGTH)
+    }
+
+    @Test
+    fun `인물 이름이 한글이어도 image_url을 인코딩 없이 그대로 저장한다`() {
+        // percent-encoding을 하지 않는다(KNK-1010): DB에는 raw 한글을 넣고 인코딩은 브라우저(img src)에 맡긴다.
+        // 서버가 미리 인코딩하면 클라이언트가 한 번 더 인코딩하는 이중 인코딩으로 404가 난다.
+        characterAppearances = listOf(AiCharacterAppearance("서준 기쁨", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준 기쁨", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single()
+        assertThat(saved.name).isEqualTo("서준 기쁨")
+        assertThat(saved.imageUrl).contains("/서준_기쁨_")
+        assertThat(saved.imageUrl).doesNotContain("%")
     }
 
     @Test
