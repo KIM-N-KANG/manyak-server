@@ -7,9 +7,11 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import java.util.UUID
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,6 +37,9 @@ class StoryLikeControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyRepository: StoryRepository
+
+    @Autowired
+    private lateinit var storyLikeRepository: StoryLikeRepository
 
     @Autowired
     private lateinit var userRepository: UserRepository
@@ -221,6 +226,28 @@ class StoryLikeControllerIntegrationTests {
             .expectBody()
             .jsonPath("$[0].likeCount").isEqualTo(2)
             .jsonPath("$[1].likeCount").isEqualTo(0)
+    }
+
+    @Test
+    fun `정지된 회원의 좋아요 등록·취소는 403이고 좋아요는 남지 않는다`() {
+        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 읽기(상세 조회)와 달리 쓰기 경로는 막는다.
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+        val story = publicStory()
+        val token = jwtTokenProvider.issueAccessToken(suspended.publicId)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/${story.publicId}/like")
+            .header("Authorization", "Bearer $token")
+            .exchange()
+            .expectStatus().isForbidden
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}/like")
+            .header("Authorization", "Bearer $token")
+            .exchange()
+            .expectStatus().isForbidden
+
+        assertEquals(0, storyLikeRepository.count())
     }
 
     private fun publicStory(title: String = "공개 스토리"): Story =

@@ -2,6 +2,7 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.entity.ImagePresetType
 import com.knk.manyak.image.service.ImageUrlResolver
@@ -42,6 +43,7 @@ class StoryService(
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyLikeRepository: StoryLikeRepository,
+    private val suspensionGuard: SuspensionGuard,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
@@ -172,6 +174,7 @@ class StoryService(
      * 유니크 위반을 잡는 순간 그 트랜잭션이 rollback-only로 오염돼, 경합을 흡수하고 응답하려는 순간 커밋이 터진다.
      */
     fun like(storyId: String, userId: Long) {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
         try {
             storyLikeRepository.saveAndFlush(StoryLike(userId = userId, storyId = story.id))
@@ -182,6 +185,7 @@ class StoryService(
 
     /** 스토리 좋아요 취소(스펙 §4-3-1, KNK-1017). 좋아요가 없는 스토리의 취소도 성공(204)이다. */
     fun unlike(storyId: String, userId: Long) {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
         storyLikeRepository.deleteByUserIdAndStoryId(userId, story.id)
     }
