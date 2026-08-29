@@ -106,6 +106,9 @@ data class StoryDetailResponse(
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
 
+    @field:Schema(description = "요청 회원이 이 스토리의 소유자인지. 게스트는 항상 false(KNK-1018).", example = "false")
+    val isOwner: Boolean,
+
     @field:ArraySchema(
         schema = Schema(implementation = StoryStartSettingResponse::class),
         arraySchema = Schema(

@@ -1,5 +1,9 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
@@ -46,9 +50,101 @@ class StoryDetailControllerIntegrationTests {
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jwtTokenProvider: JwtTokenProvider
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+    }
+
+    @Test
+    fun `작성자 있는 스토리는 상세 author에 닉네임·프로필을 싣고 내부 id는 노출하지 않는다`() {
+        val author = userRepository.save(
+            User(nickname = "글쓴이", profileImageUrl = "https://example.com/p.png", status = UserStatus.ACTIVE),
+        )
+        val story = storyRepository.save(
+            Story(
+                title = "작성자 있는 스토리",
+                userId = author.id,
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.author.nickname").isEqualTo("글쓴이")
+            .jsonPath("$.author.profileImageUrl").isEqualTo("https://example.com/p.png")
+            // 내부 PK 비노출 원칙: author.id는 항상 null이다.
+            .jsonPath("$.author.id").isEmpty
+
+        restTestClient.post()
+            .uri("/api/v1/stories/batch")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":["${story.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].author.nickname").isEqualTo("글쓴이")
+            .jsonPath("$[0].author.id").isEmpty
+    }
+
+    @Test
+    fun `상세 isOwner는 소유자만 true고 타인·게스트는 false다`() {
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        val other = userRepository.save(User(nickname = "타인", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(
+            Story(
+                title = "소유 판단 스토리",
+                userId = owner.id,
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isOwner").isEqualTo(true)
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(other.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isOwner").isEqualTo(false)
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isOwner").isEqualTo(false)
+    }
+
+    @Test
+    fun `게스트 스토리는 게스트 요청에도 isOwner false다`() {
+        val story = storyRepository.save(Story(title = "무소유 스토리"))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isOwner").isEqualTo(false)
+            // 작성자 없는 스토리의 author는 계속 null이다.
+            .jsonPath("$.author").isEmpty
     }
 
     @Test

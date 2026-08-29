@@ -102,14 +102,7 @@ class StoryService(
                 StoryStatus.PUBLISHED,
                 StoryVisibility.PUBLIC,
             )
-            .toSummaryResponses(
-                // 내부 PK는 노출하지 않는다(IDOR 방지 원칙과 동일 취지).
-                author = StoryAuthorResponse(
-                    id = null,
-                    nickname = official.nickname,
-                    profileImageUrl = official.profileImageUrl,
-                ),
-            )
+            .toSummaryResponses()
     }
 
     @Transactional(readOnly = true)
@@ -141,9 +134,12 @@ class StoryService(
             description = story.description,
             genres = story.toGenreNames(),
             hashtags = emptyList(),
-            author = null,
+            author = resolveAuthor(story.userId),
             turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
             likeCount = 0,
+            // 소유 판단은 서버가 내려준다(KNK-1018). 게스트(userId null)는 항상 false — 소유권 게이트(§4-5)와 달리
+            // 게스트 스토리의 게스트 요청도 false다(게스트끼리 구분 불가라 메뉴 노출 판단으로 부적합).
+            isOwner = userId != null && userId == story.userId,
             startSettings = startSettings,
             visibility = story.visibility,
             status = story.status,
@@ -227,14 +223,27 @@ class StoryService(
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    /** 스토리 목록을 카드 응답으로 매핑한다. turnCount는 한 번의 배치 집계로 채운다(N+1 방지). */
-    private fun List<Story>.toSummaryResponses(author: StoryAuthorResponse? = null): List<StorySummaryResponse> {
+    /** 작성자 카드 정보. 내부 PK는 노출하지 않으므로 id는 항상 null이다(IDOR 방지 원칙과 동일 취지). */
+    private fun resolveAuthor(userId: Long?): StoryAuthorResponse? =
+        userId
+            ?.let { userRepository.findById(it).orElse(null) }
+            ?.let { StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
+
+    /** 스토리 목록을 카드 응답으로 매핑한다. turnCount·author는 한 번의 배치 조회로 채운다(N+1 방지). */
+    private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()
         }
         val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
             .associate { it.storyId to it.turnCount }
-        return map { it.toSummaryResponse(turnCount = turnCountByStoryId[it.id] ?: 0, author = author) }
+        val authorByUserId = userRepository.findAllById(mapNotNull { it.userId }.distinct())
+            .associate { it.id to StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
+        return map {
+            it.toSummaryResponse(
+                turnCount = turnCountByStoryId[it.id] ?: 0,
+                author = it.userId?.let(authorByUserId::get),
+            )
+        }
     }
 
     private fun Story.toSummaryResponse(turnCount: Long, author: StoryAuthorResponse? = null): StorySummaryResponse =
