@@ -1,5 +1,6 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
@@ -38,6 +39,10 @@ data class StoryEditFormResponse(
 
     @field:ArraySchema(schema = Schema(implementation = StoryMainEventResponse::class))
     val mainEvents: List<StoryMainEventResponse>,
+
+    // 공개 전환(KNK-1021)이 수정 API의 부분 갱신이므로, 폼 왕복을 위해 현재 공개 범위도 함께 싣는다(스펙 §4-3-8).
+    @field:Schema(description = "공개 범위(PUBLIC · PRIVATE)", example = "PRIVATE")
+    val visibility: StoryVisibility,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -80,4 +85,9 @@ data class UpdateStoryRequest(
     @field:Valid
     @field:Size(max = MAX_MAIN_EVENTS, message = "주요 사건은 최대 ${MAX_MAIN_EVENTS}개까지 등록할 수 있습니다.")
     val mainEvents: List<@NotNull MainEventItem>? = null,
+
+    // 공개 전환(KNK-1021, 스펙 §4-3-8·B26). 별도 엔드포인트 없이 이 필드의 부분 갱신으로 PRIVATE↔PUBLIC을 오간다.
+    // 소유권 게이트는 수정 API의 것을 그대로 쓰고, 전환은 읽기 가시성(§4-3-1)에 즉시 반영된다.
+    @field:Schema(description = "공개 범위(PUBLIC · PRIVATE). 생략하면 현재 값을 유지한다.", example = "PUBLIC")
+    val visibility: StoryVisibility? = null,
 )
