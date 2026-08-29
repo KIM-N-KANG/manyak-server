@@ -2,6 +2,7 @@ package com.knk.manyak.auth.token
 
 import com.knk.manyak.auth.config.AuthProperties
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -117,6 +118,23 @@ class AuthTokenServiceTest {
             .isInstanceOf(ResponseStatusException::class.java)
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `탈퇴(DELETED) 계정의 refresh 회전은 401이고 family가 폐기된다`() {
+        // 탈퇴와 로그인이 겹쳐 폐기 이후 family가 생겨도, 회전 시점 상태 검사가 그 family를 닫는다(KNK-1019 Codex P1).
+        val user = registerUser(9L)
+        val issued = service.issueTokens(user)
+        user.status = UserStatus.DELETED
+
+        assertThatThrownBy { service.rotate(issued.refreshToken) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
+
+        // 방금 회전으로 나간 새 토큰을 포함해 family 전체가 폐기돼 재시도도 401이다.
+        assertThatThrownBy { service.rotate(issued.refreshToken) }
+            .isInstanceOf(ResponseStatusException::class.java)
     }
 
     @Test

@@ -130,6 +130,11 @@ class UserWithdrawalIntegrationTests {
         restTestClient.post().uri("/api/v1/users/me/credits/attendance")
             .header("Authorization", "Bearer $token")
             .exchange().expectStatus().isUnauthorized
+
+        // 리졸버를 우회해 Jwt를 직접 소비하는 auth/me도 같은 계약이다(KNK-1019 Codex P1).
+        restTestClient.get().uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.link.AccountLinkService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.SocialLoginService
@@ -138,6 +139,10 @@ class AuthController(
         val publicId = parsePublicId(jwt.subject)
         val user = userRepository.findByPublicId(publicId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        // 이 엔드포인트는 @CurrentUserId 리졸버를 거치지 않으므로 탈퇴 토큰 무효화(KNK-1019)를 여기서도 집행한다.
+        if (user.status == UserStatus.DELETED) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        }
         return MeResponse(
             id = user.publicId.toString(),
             nickname = user.nickname,
