@@ -11,7 +11,9 @@ import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -54,6 +56,7 @@ class StoryEditService(
         // 쓰기 락으로 스토리 애그리거트를 잠가 동시 PATCH의 자식 리스트 교체 경합을 직렬화한다.
         val story = resolveStoryForUpdate(storyId)
         requireOwnerAccess(story, userId)
+        requirePublishedForVisibilityChange(story, request.visibility)
 
         // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
         request.title?.let {
@@ -66,8 +69,7 @@ class StoryEditService(
         }
         request.description?.let { story.description = it }
         request.genres?.let { story.genre = it.joinToString(separator = ", ").ifBlank { null } }
-        // 공개 전환(KNK-1021): 상태 조건 없이 소유자면 언제든 오갈 수 있다. 등록 경로가 status를 항상 PUBLISHED로
-        // 저장해(초안 저장 경로 없음 — §4-3-8) DRAFT 게이트가 성립하지 않기 때문이다. 전환은 다음 읽기부터 즉시 반영된다.
+        // 공개 전환(KNK-1021). 전환 가능 여부는 위 requirePublishedForVisibilityChange가 이미 확정했다.
         request.visibility?.let { story.visibility = it }
 
         // 스토리 설정 통글 4필드 — 없으면 생성, 있으면 교체(제작 시 생성되므로 보통 존재).
@@ -211,6 +213,28 @@ class StoryEditService(
             mainEvents = mainEvents,
             visibility = story.visibility,
         )
+    }
+
+    /**
+     * 공개 범위 전환 게이트(KNK-1021). PUBLISHED가 아닌 스토리의 공개 범위 **변경**을 400으로 거부한다.
+     *
+     * 읽기 가시성이 `PUBLISHED && PUBLIC`(§4-3-1)이라 DRAFT에 PUBLIC을 저장하면 저장값은 공개인데 아무도 못 읽는
+     * 모순 상태가 남는다. 이 API는 편집이지 발행이 아니므로 status를 함께 올리지 않고 전환 자체를 거부한다
+     * (등록 경로가 status를 항상 PUBLISHED로 저장해 — 초안 저장 경로 없음, §4-3-8 — 실제 대상은 레거시 데이터다).
+     *
+     * **값이 같으면 통과시킨다.** 수정 폼 응답이 visibility를 싣기 때문에(폼 왕복) 프론트가 전체 폼을 되돌려보내면
+     * 값이 그대로 실려 오는데, 전환이 아닌 이 무변경 전송까지 막으면 DRAFT 스토리는 폼 저장 자체가 불가능해진다.
+     */
+    private fun requirePublishedForVisibilityChange(story: Story, requested: StoryVisibility?) {
+        if (requested == null || requested == story.visibility) {
+            return
+        }
+        if (story.status != StoryStatus.PUBLISHED) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "등록되지 않은(PUBLISHED가 아닌) 스토리는 공개 범위를 바꿀 수 없습니다.",
+            )
+        }
     }
 
     /**

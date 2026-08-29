@@ -9,6 +9,7 @@ import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
@@ -227,6 +228,58 @@ class StoryEditIntegrationTests {
             .exchange().expectStatus().isBadRequest
 
         assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+    }
+
+    @Test
+    fun `PUBLISHED가 아닌 스토리의 공개 범위 변경은 400이고 값이 바뀌지 않는다`() {
+        // 읽기 게이트가 PUBLISHED && PUBLIC이라 DRAFT에 PUBLIC을 저장하면 "공개인데 404"인 모순 상태가 된다.
+        // 발행(status 전환)은 이 API의 범위가 아니므로 전환 자체를 400으로 거부한다(KNK-1021 리뷰).
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange().expectStatus().isBadRequest
+
+        val reloaded = storyRepository.findById(story.id).get()
+        assertEquals(StoryVisibility.PRIVATE, reloaded.visibility)
+        assertEquals(StoryStatus.DRAFT, reloaded.status)
+    }
+
+    @Test
+    fun `PUBLISHED가 아닌 스토리도 visibility를 빼면 다른 필드는 정상 수정된다`() {
+        // 게이트는 공개 범위 변경만 막는다. DRAFT 스토리의 일반 편집까지 막으면 레거시 스토리를 손볼 수 없다.
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"title":"초안도 고칠 수 있다"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.title").isEqualTo("초안도 고칠 수 있다")
+            .jsonPath("$.visibility").isEqualTo("PRIVATE")
+
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+    }
+
+    @Test
+    fun `PUBLISHED가 아닌 스토리도 현재와 같은 visibility를 실어 보내면 통과한다`() {
+        // 수정 폼 응답이 visibility를 싣기 때문에(폼 왕복) 프론트가 전체 폼을 되돌려보내면 값이 그대로 실려 온다.
+        // 실제 전환이 아닌 이 무변경 전송까지 400으로 막으면 DRAFT 스토리는 폼 저장 자체가 불가능해진다.
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"title":"폼 왕복 저장","visibility":"PRIVATE"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.title").isEqualTo("폼 왕복 저장")
+            .jsonPath("$.visibility").isEqualTo("PRIVATE")
     }
 
     @Test
