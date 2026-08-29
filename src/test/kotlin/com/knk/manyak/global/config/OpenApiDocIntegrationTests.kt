@@ -43,6 +43,16 @@ class OpenApiDocIntegrationTests {
     }
 
     @Test
+    fun `StoryDetailResponse 스키마는 런타임 직렬화와 같은 isOwner 필드명으로 문서화된다`() {
+        // isNewUser와 같은 함정(KNK-1018): is 접두가 인트로스펙션에서 벗겨지지 않도록 JsonProperty로 고정했는지 검증한다.
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.StoryDetailResponse.properties.isOwner").exists()
+            .jsonPath("$.components.schemas.StoryDetailResponse.properties.owner").doesNotExist()
+    }
+
+    @Test
     fun `인증 필수 엔드포인트는 bearerAuth security를 갖고 공개 엔드포인트는 갖지 않는다`() {
         restTestClient.get().uri("/v3/api-docs").exchange()
             .expectStatus().isOk

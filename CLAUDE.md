@@ -60,7 +60,7 @@
 
 - **스토리 공개 읽기 게이트**: publicId로 스토리를 읽는 **모든 공개 소비자**(상세·batch·자식 리소스 GET·채팅 생성 등)는 `Story.isReadableBy(userId)`(PUBLISHED∧PUBLIC ∨ 소유자)를 반드시 적용합니다. 빠뜨리면 비공개 초안이 유출됩니다. 새 스토리 관련 엔드포인트 추가 시 이 게이트부터 확인하세요.
 - **외부 노출 식별자는 public_id(UUID)**: 순차 PK를 API에 노출하지 않습니다(IDOR 방지). 외부 노출 가능성이 있는 새 테이블은 public_id를 함께 설계합니다.
-- **쓰기 엔드포인트는 PATCH 대신 PUT**: CORS `allowedMethods`가 GET/POST/PUT/DELETE/OPTIONS만 허용합니다.
+- CORS `allowedMethods`는 GET/POST/PUT/PATCH/DELETE/OPTIONS를 허용합니다(스토리 수정이 PATCH 사용). 과거 "PATCH 금지" 규칙은 폐기됐습니다(2026-08-29 확인).
 - 컬렉션 전체 교체 PUT은 필드 누락을 400으로 거부해 silent wipe를 방지하고, `sort_order`는 1-based를 사용합니다.
 - refresh 토큰은 Redis(휘발성)에만 저장합니다 — `refresh_tokens` 테이블은 PG·ERD에 없는 게 맞습니다.
 

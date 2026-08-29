@@ -98,10 +98,14 @@ Accept: application/json
     client.test("MVP 기본값이 계약대로다", () => {
         // [KNK-515] coverImageUrl→thumbnailUrl(값 null 유지), chatCount→turnCount(채팅 없으면 0).
         client.assert(b.thumbnailUrl === null, "thumbnailUrl은 null이어야 합니다.");
-        client.assert(b.author === null, "author는 null이어야 합니다.");
+        // [KNK-1016] author는 실 작성자를 싣는다. 이 흐름은 게스트 생성이라 작성자가 없어 null이다.
+        client.assert(b.author === null, "게스트 생성 스토리의 author는 null이어야 합니다.");
         client.assert(b.turnCount === 0 && b.likeCount === 0, "turnCount/likeCount는 채팅 없으면 0이어야 합니다.");
         client.assert(b.visibility === "PRIVATE", "visibility는 PRIVATE이어야 합니다.");
         client.assert(b.status === "PUBLISHED", "status는 PUBLISHED여야 합니다.");
+    });
+    client.test("isOwner는 게스트 요청이면 false다(KNK-1018)", () => {
+        client.assert(b.isOwner === false, `isOwner가 false가 아닙니다. actual=${b.isOwner}`);
     });
     // [KNK-355] 로어북은 스토리 스코프로 top-level 배열이다(없으면 빈 배열).
     // [KNK-515] 엔딩은 시작 설정 스코프로 중첩된다(startSettings[].endings). 각 시작 설정마다 배열이다.
@@ -143,4 +147,12 @@ Accept: application/json
 ### 6. (자유 조회) 이미 알고 있는 storyId(공개 식별자 UUID)로 직접 조회
 # 위 흐름 없이 특정 public_id만 빠르게 확인하고 싶을 때 사용합니다. 자리표시 UUID를 실제 값으로 교체하세요.
 GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
+Accept: application/json
+
+### 7. (자유 조회) 회원 토큰으로 상세 조회 — author·isOwner 확인 (KNK-1016·1018)
+# 로그인(http/auth 참고)으로 얻은 액세스 토큰과, 그 회원이 소유한 storyId를 넣어 실행하세요.
+#   - 소유 스토리: isOwner === true, author.nickname === 내 닉네임, author.id === null(내부 PK 비노출)
+#   - 타인 공개 스토리: isOwner === false, author에 그 작성자 닉네임
+GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
+Authorization: Bearer <액세스 토큰>
 Accept: application/json
