@@ -66,6 +66,7 @@ class UserWithdrawalIntegrationTests {
 
         val reloaded = userRepository.findById(user.id).get()
         assertEquals(UserStatus.DELETED, reloaded.status)
+        org.junit.jupiter.api.Assertions.assertNotNull(reloaded.deletedAt)
         assertEquals("탈퇴한 사용자", reloaded.nickname)
         assertNull(reloaded.profileImageUrl)
         assertNull(reloaded.profileThumbnailBase64)

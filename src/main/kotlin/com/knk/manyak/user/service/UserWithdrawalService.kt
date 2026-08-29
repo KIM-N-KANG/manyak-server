@@ -33,6 +33,7 @@ class UserWithdrawalService(
         }
         // 재탈퇴는 여기 오기 전에 해석 계층(CurrentUserIdArgumentResolver)이 DELETED 토큰을 401로 끊는다.
         user.status = UserStatus.DELETED
+        user.deletedAt = java.time.Instant.now()
         user.nickname = ANONYMIZED_NICKNAME
         user.profileImageUrl = null
         user.profileThumbnailBase64 = null
