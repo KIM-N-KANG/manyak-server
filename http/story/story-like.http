@@ -1,0 +1,289 @@
+### 스토리 좋아요(Story Like) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### 위에서부터 순서대로 실행하면 스토리를 하나 만든 뒤 좋아요 등록(204) → 재등록 멱등(204) → 상세 likeCount·isLiked
+### → 취소(204) → 없는 좋아요 재취소 멱등(204) → 401·404 에러 케이스를 확인합니다.
+###
+### [KNK-1017] 스펙 §4-3-1 스토리 좋아요. like만 있고 dislike는 없습니다.
+###   - POST /api/v1/stories/{storyId}/like — 등록(204), DELETE — 취소(204). 둘 다 멱등입니다.
+###   - 인증 필수(게스트 불가, 미인증 401). 대상 스토리에 읽기 가시성(Story.isReadableBy)을 적용하며 읽을 수 없으면 404입니다.
+###   - 저장은 story_likes의 (user_id, story_id) UNIQUE 1행이고, likeCount는 실 집계·isLiked는 요청 회원의 행 존재 여부입니다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun (기본 포트 8080), Postgres 기동(docker compose up -d)
+###   - access 토큰 2개: auth-login-google.http 5번으로 회원 토큰을 받아 @accessToken 에,
+###     다른 계정 토큰을 @otherAccessToken 에 넣으세요(읽기 불가 404·타인 시점 isLiked 확인용).
+###     auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 아래 값을 덮어씁니다.
+
+@baseUrl = http://localhost:8080
+
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+@otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.test("서버가 떠 있다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 1. 좋아요 대상 스토리 준비 — 일반 제작으로 공개(PUBLIC) 스토리를 등록한다(AI 비호출).
+# 소유자(=@accessToken 회원)의 PUBLIC·PUBLISHED 스토리라 타인도 읽을 수 있습니다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "좋아요 검증용 스토리",
+  "oneLineIntro": "좋아요 등록·취소 멱등과 실 집계를 눈으로 확인하는 스토리",
+  "description": "주요 내용",
+  "genres": ["판타지"],
+  "visibility": "PUBLIC",
+  "storySettings": {
+    "worldSetting": "몰락한 왕국 아르덴",
+    "characterSetting": "기억을 잃은 마법사",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "마법은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "선왕의 장례식 날",
+      "prologue": "잿빛 비가 사흘째 왕성을 적신다",
+      "startSituation": "장례식이 끝난 늦은 밤",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"],
+      "endings": [
+        { "name": "왕좌를 되찾다", "requirement": { "minTurns": 10, "achievementCondition": "반란군을 규합해 왕좌를 되찾는다" }, "epilogue": "대관식을 장엄하게 묘사한다" }
+      ]
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("스토리 등록이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("likeStoryId", response.body.id);
+%}
+
+### 2. 좋아요 등록 전 상세 — likeCount 0, isLiked false가 기준선이다.
+# 1번을 먼저 실행해야 likeStoryId 변수가 설정됩니다.
+GET {{baseUrl}}/api/v1/stories/{{likeStoryId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("좋아요 전 기준선은 likeCount 0 · isLiked false다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.likeCount === 0, `likeCount가 0이 아닙니다. actual=${response.body.likeCount}`);
+        client.assert(response.body.isLiked === false, `isLiked가 false가 아닙니다. actual=${response.body.isLiked}`);
+    });
+%}
+
+### 3. (해피 패스) 좋아요 등록 → 204, 본문 없음
+POST {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("좋아요 등록은 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (멱등) 같은 회원이 같은 스토리를 다시 좋아요 → 여전히 204, 중복 행 없음
+POST {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("재등록도 204다(멱등)", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. 상세 재조회 — 재등록해도 likeCount는 1이고 isLiked는 true다.
+GET {{baseUrl}}/api/v1/stories/{{likeStoryId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("좋아요 실 집계가 1이고 isLiked가 true다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.likeCount === 1, `likeCount가 1이 아닙니다(멱등 위반 의심). actual=${response.body.likeCount}`);
+        client.assert(response.body.isLiked === true, `isLiked가 true가 아닙니다. actual=${response.body.isLiked}`);
+    });
+%}
+
+### 6. (게스트 시점) 미인증 상세 조회 — likeCount는 그대로 1, isLiked는 항상 false다.
+GET {{baseUrl}}/api/v1/stories/{{likeStoryId}}
+Accept: application/json
+
+> {%
+    client.test("게스트는 isLiked false지만 likeCount는 같은 실 집계다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.likeCount === 1, `likeCount가 1이 아닙니다. actual=${response.body.likeCount}`);
+        client.assert(response.body.isLiked === false, `게스트 isLiked가 false가 아닙니다. actual=${response.body.isLiked}`);
+    });
+%}
+
+### 7. (타인 시점) 좋아요하지 않은 회원의 상세 — isLiked false, likeCount 1
+# @otherAccessToken 을 채우지 않았다면 이 요청은 건너뛰세요.
+GET {{baseUrl}}/api/v1/stories/{{likeStoryId}}
+Authorization: Bearer {{otherAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("타인은 isLiked false다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.isLiked === false, `타인 isLiked가 false가 아닙니다. actual=${response.body.isLiked}`);
+    });
+%}
+
+### 8. 목록(batch)의 likeCount도 같은 실 집계다.
+POST {{baseUrl}}/api/v1/stories/batch
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyIds": ["{{likeStoryId}}"]
+}
+
+> {%
+    client.test("목록 카드 likeCount도 1이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body[0].likeCount === 1, `목록 likeCount가 1이 아닙니다. actual=${response.body[0].likeCount}`);
+    });
+%}
+
+### 9. (해피 패스) 좋아요 취소 → 204
+DELETE {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("좋아요 취소는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 10. (멱등) 좋아요가 없는 상태에서 다시 취소 → 여전히 204
+DELETE {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("좋아요 없는 취소도 204다(멱등)", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 11. 취소 후 상세 — likeCount 0, isLiked false로 되돌아온다.
+GET {{baseUrl}}/api/v1/stories/{{likeStoryId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("취소가 실 집계에 반영된다", () => {
+        client.assert(response.body.likeCount === 0, `likeCount가 0이 아닙니다. actual=${response.body.likeCount}`);
+        client.assert(response.body.isLiked === false, `isLiked가 false가 아닙니다. actual=${response.body.isLiked}`);
+    });
+%}
+
+### 12. (에러) 미인증 좋아요 등록 → 401. 게스트는 좋아요할 수 없습니다.
+POST {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+
+> {%
+    client.test("미인증 등록은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 13. (에러) 미인증 좋아요 취소 → 401
+DELETE {{baseUrl}}/api/v1/stories/{{likeStoryId}}/like
+
+> {%
+    client.test("미인증 취소는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 14. (에러) 존재하지 않는 스토리 좋아요 → 404
+POST {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("없는 스토리는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 15. (에러) 순차 정수 등 UUID가 아닌 식별자도 동일하게 404 — 존재 여부를 노출하지 않습니다(IDOR 차단).
+POST {{baseUrl}}/api/v1/stories/1/like
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("UUID가 아닌 식별자도 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 16. 읽기 불가 스토리 준비 — @accessToken 회원의 비공개(PRIVATE) 스토리를 만든다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "비공개 좋아요 검증용 스토리",
+  "oneLineIntro": "타인이 읽을 수 없어 좋아요도 404가 되는 스토리",
+  "genres": ["판타지"],
+  "visibility": "PRIVATE",
+  "storySettings": {
+    "worldSetting": "몰락한 왕국 아르덴",
+    "characterSetting": "기억을 잃은 마법사",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "마법은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "선왕의 장례식 날",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("비공개 스토리 등록이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("privateStoryId", response.body.id);
+%}
+
+### 17. (에러) 타인의 비공개 스토리 좋아요 → 404. 읽기 가시성 게이트가 존재 여부를 감춥니다.
+# @otherAccessToken 을 채워야 의미 있는 검증입니다(소유자 토큰으로 부르면 204가 정상입니다).
+POST {{baseUrl}}/api/v1/stories/{{privateStoryId}}/like
+Authorization: Bearer {{otherAccessToken}}
+
+> {%
+    client.test("읽을 수 없는 스토리 좋아요는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 18. (에러) 타인의 비공개 스토리 좋아요 취소도 같은 404다.
+DELETE {{baseUrl}}/api/v1/stories/{{privateStoryId}}/like
+Authorization: Bearer {{otherAccessToken}}
+
+> {%
+    client.test("읽을 수 없는 스토리 취소는 404다", () => {
+        client.assert(response.status === 404, `404가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 19. (자유 조회) 실제 DB에 있는 스토리 id를 직접 넣어 눈으로 확인합니다.
+# 위 시나리오는 "정확히 N건" 고정이라 임의 데이터로는 어서션이 깨집니다. 아래는 어서션 없이 확인용입니다.
+GET {{baseUrl}}/api/v1/stories/PUT_ANY_STORY_UUID_HERE
+Authorization: Bearer {{accessToken}}
+Accept: application/json

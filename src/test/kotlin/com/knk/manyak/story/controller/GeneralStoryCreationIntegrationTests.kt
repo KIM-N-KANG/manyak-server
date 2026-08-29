@@ -93,6 +93,22 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
+    fun `탈퇴한 회원이 일반 제작을 등록하면 401이고 저장되지 않는다`() {
+        // 정지(403)와 달리 탈퇴는 계정 무효라 401이다. 판정은 SuspensionGuard가 공유하므로 좋아요·채팅 등 다른 쓰기 경로도 같다.
+        val withdrawn = userRepository.save(User(nickname = "탈퇴회원", status = UserStatus.DELETED))
+
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(withdrawn.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body())
+            .exchange()
+            .expectStatus().isUnauthorized
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
     fun `익명 등록은 소유자 없이 기본 PRIVATE로 저장되고 응답은 간편 제작과 동일하다`() {
         restTestClient.post()
             .uri("/api/v1/stories/general")
