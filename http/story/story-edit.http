@@ -4,11 +4,18 @@
 ### [KNK-404] GET /api/v1/stories/{id}/edit · PATCH /api/v1/stories/{id} (스펙 §4-3-8).
 ###   - GET /edit : 수정 폼 조회(통글 4필드 포함). 인증 선택 — 회원 소유는 소유자만(타인·미인증 403), 게스트 스토리는 게스트(토큰 없음)만(회원 403, KNK-480 이관 후 접근).
 ###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
+###   - [KNK-1021] 공개 전환: 별도 엔드포인트 없이 PATCH의 visibility 부분 갱신으로 PRIVATE↔PUBLIC을 오간다(§4-3-8·B26). 소유자만 가능하고 전환은 읽기 가시성에 즉시 반영된다. GET /edit 응답에도 visibility가 실린다(폼 왕복).
 ###   - [KNK-515] 시작 설정 복수화: startSettings[]로 전체 교체(동기화). 각 원소 id(공개 식별자)가 기존과 일치하면 in-place 갱신(행 identity 보존), 없으면 추가, 빠진 기존은 삭제. 추천 입력·엔딩은 각 시작 설정에 중첩.
 ###
 ### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
+###   공개 전환 소유권 케이스(E12~E15)는 서로 다른 두 계정의 access 토큰이 필요합니다(아래 변수).
 
 @baseUrl = http://localhost:8080
+
+# 소유권 케이스(E12~E15)용. auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_OWNER_ACCESS_TOKEN_HERE
+# 소유자와 다른 계정의 토큰(타인 공개 전환 403 확인용).
+@otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
 GET {{baseUrl}}/actuator/health
@@ -104,4 +111,146 @@ Content-Type: application/json
 
 > {%
     client.test("없는 스토리 404", () => { client.assert(response.status === 404, `actual=${response.status}`); });
+%}
+
+###############################################################################
+### 공개 전환(KNK-1021) — E6~E11
+### E1이 만든 익명 스토리로 이어서 확인합니다(익명 스토리는 토큰 없이 수정 가능).
+### 회원 소유 스토리의 소유권 403은 E10~E11에서 별도 토큰으로 확인합니다.
+###############################################################################
+
+### E6. 현재 공개 범위 확인 — 수정 폼 응답에 visibility가 실린다(폼 왕복).
+# 일반 제작 등록 시 visibility를 생략했으므로 기본값 PRIVATE입니다.
+GET {{baseUrl}}/api/v1/stories/{{editStoryId}}/edit
+Accept: application/json
+
+> {%
+    client.test("수정 폼에 visibility가 실린다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PRIVATE", `기본값이 PRIVATE가 아닙니다. actual=${response.body.visibility}`);
+    });
+%}
+
+### E7. (해피 패스) 공개 전환 PRIVATE → PUBLIC
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{ "visibility": "PUBLIC" }
+
+> {%
+    client.test("공개 전환 200이고 응답이 PUBLIC이다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
+    });
+    client.test("visibility만 보내도 다른 필드는 유지된다(부분 갱신)", () => {
+        client.assert(response.body.title === "새 제목", `title이 바뀜. actual=${response.body.title}`);
+        client.assert(response.body.startSettings.length === 1, "startSettings가 유실됨");
+    });
+%}
+
+### E8. 전환이 읽기 가시성에 즉시 반영된다 — 미인증(타인 시점) 상세 조회가 이제 200이다.
+GET {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Accept: application/json
+
+> {%
+    client.test("공개 후에는 미인증 상세 조회가 200이다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
+    });
+%}
+
+### E9. (되돌림) PUBLIC → PRIVATE. 익명 스토리라 UUID 보유자는 계속 읽을 수 있으나(게스트 스토리 규칙),
+# 저장값이 PRIVATE로 되돌아오는지 확인합니다. 회원 소유 스토리라면 이 시점부터 타인 조회가 404가 됩니다.
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{ "visibility": "PRIVATE" }
+
+> {%
+    client.test("되돌림 200이고 응답이 PRIVATE이다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PRIVATE", `actual=${response.body.visibility}`);
+    });
+%}
+
+### E10. (부분 갱신) visibility를 생략하면 공개 범위는 바뀌지 않는다.
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{ "oneLineIntro": "공개 범위는 그대로여야 합니다" }
+
+> {%
+    client.test("미전송 visibility는 유지된다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PRIVATE", `visibility가 바뀜. actual=${response.body.visibility}`);
+        client.assert(response.body.oneLineIntro === "공개 범위는 그대로여야 합니다", "보낸 필드가 반영되지 않음");
+    });
+%}
+
+### E11. (에러) 알 수 없는 visibility 값 → 400
+PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+Content-Type: application/json
+
+{ "visibility": "EVERYONE" }
+
+> {%
+    client.test("알 수 없는 값은 400이다", () => { client.assert(response.status === 400, `actual=${response.status}`); });
+%}
+
+### E12. (소유권) 회원 소유 스토리 준비 — 소유자 토큰으로 등록해 id를 저장합니다.
+# auth-login-google.http 5번으로 accessToken을, 다른 계정 토큰을 otherAccessToken에 채운 뒤 실행하세요.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "공개 전환 소유권 검증용",
+  "oneLineIntro": "소유자만 공개 전환할 수 있는지 확인",
+  "genres": ["판타지"],
+  "visibility": "PRIVATE",
+  "storySettings": { "worldSetting": "세계", "characterSetting": "인물", "userRoleSetting": "역할", "ruleSetting": "규칙" },
+  "startSettings": [
+    { "name": "시작", "prologue": "도입", "startSituation": "상황", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("소유 스토리 등록 201", () => { client.assert(response.status === 201, `actual=${response.status}`); });
+    client.global.set("ownedStoryId", response.body.id);
+%}
+
+### E13. (에러) 타인이 공개 전환 시도 → 403
+PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+Authorization: Bearer {{otherAccessToken}}
+Content-Type: application/json
+
+{ "visibility": "PUBLIC" }
+
+> {%
+    client.test("타인의 공개 전환은 403이다", () => { client.assert(response.status === 403, `actual=${response.status}`); });
+%}
+
+### E14. (에러) 미인증 요청이 회원 소유 스토리를 공개 전환 시도 → 403
+PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+Content-Type: application/json
+
+{ "visibility": "PUBLIC" }
+
+> {%
+    client.test("미인증 공개 전환은 403이다", () => { client.assert(response.status === 403, `actual=${response.status}`); });
+%}
+
+### E15. (해피 패스) 소유자 본인의 공개 전환 → 200
+PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "visibility": "PUBLIC" }
+
+> {%
+    client.test("소유자 공개 전환 200", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
+    });
 %}

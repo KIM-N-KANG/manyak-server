@@ -66,6 +66,9 @@ class StoryEditService(
         }
         request.description?.let { story.description = it }
         request.genres?.let { story.genre = it.joinToString(separator = ", ").ifBlank { null } }
+        // 공개 전환(KNK-1021): 상태 조건 없이 소유자면 언제든 오갈 수 있다. 등록 경로가 status를 항상 PUBLISHED로
+        // 저장해(초안 저장 경로 없음 — §4-3-8) DRAFT 게이트가 성립하지 않기 때문이다. 전환은 다음 읽기부터 즉시 반영된다.
+        request.visibility?.let { story.visibility = it }
 
         // 스토리 설정 통글 4필드 — 없으면 생성, 있으면 교체(제작 시 생성되므로 보통 존재).
         request.storySettings?.let { input ->
@@ -206,6 +209,7 @@ class StoryEditService(
             ),
             startSettings = startSettings,
             mainEvents = mainEvents,
+            visibility = story.visibility,
         )
     }
 

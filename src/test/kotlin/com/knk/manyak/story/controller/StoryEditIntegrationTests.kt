@@ -10,6 +10,7 @@ import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -127,6 +128,105 @@ class StoryEditIntegrationTests {
         restTestClient.get().uri("/api/v1/stories/${story.publicId}/edit")
             .header("Authorization", "Bearer ${tokenFor(member)}")
             .exchange().expectStatus().isForbidden
+    }
+
+    @Test
+    fun `소유자는 수정 API로 공개 전환하고 되돌릴 수 있으며 읽기 가시성에 즉시 반영된다`() {
+        // 공개 전환은 별도 엔드포인트가 아니라 이 수정 API의 visibility 부분 갱신이다(스펙 §4-3-8·B26, KNK-1021).
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        val other = userRepository.save(User(nickname = "타인", status = UserStatus.ACTIVE))
+        val story = seedStory(userId = owner.id)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        // 비공개인 동안에는 타인이 상세를 볼 수 없다(존재 여부 비노출 404).
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(other)}")
+            .exchange().expectStatus().isNotFound
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(owner)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            // 응답(편집 폼)에도 실려 폼 왕복이 보장된다.
+            .jsonPath("$.visibility").isEqualTo("PUBLIC")
+
+        assertEquals(StoryVisibility.PUBLIC, storyRepository.findById(story.id).get().visibility)
+
+        // 전환 즉시 읽기 가시성에 반영된다 — 타인이 이제 상세를 볼 수 있다.
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(other)}")
+            .exchange().expectStatus().isOk
+
+        // 되돌림(PUBLIC → PRIVATE)도 같은 경로다.
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(owner)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PRIVATE"}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.visibility").isEqualTo("PRIVATE")
+
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(other)}")
+            .exchange().expectStatus().isNotFound
+    }
+
+    @Test
+    fun `타인은 공개 전환할 수 없고 403이며 공개 범위가 그대로다`() {
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        val other = userRepository.save(User(nickname = "타인", status = UserStatus.ACTIVE))
+        val story = seedStory(userId = owner.id)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(other)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange().expectStatus().isForbidden
+
+        // 익명 요청도 회원 소유 스토리는 수정할 수 없다(기존 수정 API 소유권 관례).
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange().expectStatus().isForbidden
+
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+    }
+
+    @Test
+    fun `visibility를 생략하면 공개 범위는 바뀌지 않는다`() {
+        // 부분 갱신 의미론: 미전송 필드는 유지다(null 명시 전송도 미전송과 동일).
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"title":"새 제목","visibility":null}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.title").isEqualTo("새 제목")
+            .jsonPath("$.visibility").isEqualTo("PRIVATE")
+
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+    }
+
+    @Test
+    fun `알 수 없는 visibility 값은 400이고 공개 범위는 그대로다`() {
+        // 새 와이어 enum이 역직렬화 실패로 500이 되지 않는지 고정한다(GlobalExceptionHandler가 400으로 변환).
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"EVERYONE"}""")
+            .exchange().expectStatus().isBadRequest
+
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
     }
 
     @Test
