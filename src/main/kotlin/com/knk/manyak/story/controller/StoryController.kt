@@ -170,13 +170,18 @@ class StoryController(
         summary = "스토리 좋아요 등록",
         description = "스토리에 좋아요를 등록합니다(like만 있고 dislike는 없습니다). 인증 필수이며(게스트 불가) " +
             "이미 좋아요한 스토리를 다시 등록해도 같은 204로 응답합니다(멱등). 읽을 수 없는 스토리(타인의 비공개·초안)는 " +
-            "존재 여부를 노출하지 않기 위해 404로 응답합니다.",
+            "존재 여부를 노출하지 않기 위해 404로 응답합니다. 계정 상태로는 정지 계정이 403, 탈퇴 계정이 401입니다(§4-5 B20).",
     )
     @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
     @ApiResponses(
         value = [
             ApiResponse(responseCode = "204", description = "등록 성공(재등록 포함)", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "401", description = "인증 실패(토큰 없음·만료·위조)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(
+                responseCode = "401",
+                description = "인증 실패(토큰 없음·만료·위조) 또는 사용자 없음·탈퇴 계정",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(responseCode = "403", description = "정지된 계정", content = [Content(schema = Schema(hidden = true))]),
             ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음(읽기 불가 포함)", content = [Content(schema = Schema(hidden = true))]),
         ],
     )
@@ -191,13 +196,19 @@ class StoryController(
     @Operation(
         summary = "스토리 좋아요 취소",
         description = "스토리 좋아요를 취소합니다. 인증 필수이며(게스트 불가) 좋아요하지 않은 스토리를 취소해도 " +
-            "같은 204로 응답합니다(멱등). 읽을 수 없는 스토리는 404로 응답합니다.",
+            "같은 204로 응답합니다(멱등). 읽을 수 없는 스토리는 404로 응답합니다. 계정 상태로는 정지 계정이 403, " +
+            "탈퇴 계정이 401입니다(§4-5 B20).",
     )
     @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
     @ApiResponses(
         value = [
             ApiResponse(responseCode = "204", description = "취소 성공(좋아요가 없던 경우 포함)", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "401", description = "인증 실패(토큰 없음·만료·위조)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(
+                responseCode = "401",
+                description = "인증 실패(토큰 없음·만료·위조) 또는 사용자 없음·탈퇴 계정",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(responseCode = "403", description = "정지된 계정", content = [Content(schema = Schema(hidden = true))]),
             ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음(읽기 불가 포함)", content = [Content(schema = Schema(hidden = true))]),
         ],
     )

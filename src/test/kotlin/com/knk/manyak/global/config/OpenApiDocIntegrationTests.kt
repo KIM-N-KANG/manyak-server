@@ -63,6 +63,18 @@ class OpenApiDocIntegrationTests {
     }
 
     @Test
+    fun `스토리 좋아요는 계정 상태 거부(401·403)를 실제 동작대로 문서화한다`() {
+        // SuspensionGuard가 정지를 403, 탈퇴를 401로 막는데 문서에는 403이 빠져 있었다(KNK-1017 3차 리뷰).
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].post.responses.401").exists()
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].post.responses.403").exists()
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].delete.responses.401").exists()
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].delete.responses.403").exists()
+    }
+
+    @Test
     fun `인증 필수 엔드포인트는 bearerAuth security를 갖고 공개 엔드포인트는 갖지 않는다`() {
         restTestClient.get().uri("/v3/api-docs").exchange()
             .expectStatus().isOk
