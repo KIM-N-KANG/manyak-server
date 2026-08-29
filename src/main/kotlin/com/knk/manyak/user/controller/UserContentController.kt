@@ -5,6 +5,7 @@ import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.StoryService
+import com.knk.manyak.user.service.UserWithdrawalService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -15,9 +16,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 
@@ -33,7 +36,33 @@ import org.springframework.web.server.ResponseStatusException
 class UserContentController(
     private val storyService: StoryService,
     private val chatService: ChatService,
+    private val userWithdrawalService: UserWithdrawalService,
 ) {
+
+    @Operation(
+        summary = "회원 탈퇴",
+        description = "계정을 soft delete(DELETED)로 전환하고 닉네임 익명화·프로필 이미지 제거·소셜 연결 삭제·refresh 전체 폐기를 수행합니다. " +
+            "소유 스토리는 공개 상태가 유지되며 작성자는 익명화된 닉네임으로 표시됩니다. 멱등 — 이미 탈퇴한 계정의 재요청도 204입니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "204",
+                description = "탈퇴 완료(멱등)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(
+                responseCode = "401",
+                description = "인증 실패(토큰 없음·만료·위조) 또는 사용자 없음",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @DeleteMapping
+    fun withdraw(@CurrentUserId userId: Long?) {
+        userWithdrawalService.withdraw(requireUser(userId))
+    }
 
     @Operation(
         summary = "내 스토리 목록 조회",
