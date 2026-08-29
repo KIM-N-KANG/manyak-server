@@ -113,7 +113,9 @@ class UserWithdrawalIntegrationTests {
     }
 
     @Test
-    fun `이미 탈퇴한 계정의 재탈퇴 요청은 멱등하게 204다`() {
+    fun `탈퇴한 계정의 잔여 access 토큰은 전면 401이다(재탈퇴·무가드 쓰기 경로 포함)`() {
+        // 탈퇴 후 잔여 토큰은 해석 계층(CurrentUserIdArgumentResolver)에서 전면 무효다(KNK-1019 Codex P1).
+        // SuspensionGuard를 거치지 않는 인증 쓰기 경로(출석 크레딧 등)까지 한 번에 닫힌다.
         val user = saveMember()
         val token = tokenFor(user)
 
@@ -123,7 +125,11 @@ class UserWithdrawalIntegrationTests {
 
         restTestClient.delete().uri("/api/v1/users/me")
             .header("Authorization", "Bearer $token")
-            .exchange().expectStatus().isNoContent
+            .exchange().expectStatus().isUnauthorized
+
+        restTestClient.post().uri("/api/v1/users/me/credits/attendance")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test

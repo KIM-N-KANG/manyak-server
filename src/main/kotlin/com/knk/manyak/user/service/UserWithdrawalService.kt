@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException
  * - 개인정보 파기(2026-08-30 팀 결정): 닉네임 익명화 + 프로필 이미지 제거 + 소셜 연결(social_accounts) 삭제.
  *   같은 소셜 계정으로 재가입하면 새 계정이 만들어진다.
  * - 소유 스토리는 공개 상태를 유지한다(팀 결정). 작성자 표기는 익명화된 닉네임이 자연 반영된다.
- * - refresh는 전 family 폐기, 잔여 access 토큰의 소모·쓰기는 공통 게이트(SuspensionGuard)가 401로 막는다.
+ * - refresh는 전 family 폐기, 잔여 access 토큰은 해석 계층(CurrentUserIdArgumentResolver)이 전면 401로 무효화한다.
  */
 @Service
 class UserWithdrawalService(
@@ -31,10 +31,7 @@ class UserWithdrawalService(
         val user = userRepository.findById(id).orElseThrow {
             ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         }
-        // 멱등: 잔여 access 토큰으로 재탈퇴가 들어와도 204다(SuspensionGuard를 걸면 401이 돼 멱등이 깨진다).
-        if (user.status == UserStatus.DELETED) {
-            return
-        }
+        // 재탈퇴는 여기 오기 전에 해석 계층(CurrentUserIdArgumentResolver)이 DELETED 토큰을 401로 끊는다.
         user.status = UserStatus.DELETED
         user.nickname = ANONYMIZED_NICKNAME
         user.profileImageUrl = null

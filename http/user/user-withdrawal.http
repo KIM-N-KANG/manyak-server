@@ -5,7 +5,7 @@
 ###   - soft delete: users.status = DELETED, 닉네임 "탈퇴한 사용자" 익명화, 프로필 이미지 제거
 ###   - social_accounts 행 삭제(같은 소셜 계정 재가입 = 새 계정), refresh 전 family 폐기
 ###   - 소유 스토리는 공개 상태 유지(작성자 표기는 익명화 닉네임이 자연 반영)
-###   - 멱등: 이미 탈퇴한 계정의 재요청도 204
+###   - 탈퇴 즉시 잔여 access 토큰 전면 무효 — 재탈퇴 포함 이후 요청은 전부 401
 ###
 ### 주의: 탈퇴는 비가역입니다. 실 DB에서는 버려도 되는 테스트 계정으로만 실행하세요.
 ###
@@ -44,14 +44,14 @@ Accept: application/json
     });
 %}
 
-### 3. 재탈퇴 → 멱등 204
+### 3. 재탈퇴 → 401 (잔여 토큰 전면 무효)
 DELETE {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 > {%
-    client.test("재탈퇴도 204다(멱등)", () => {
-        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    client.test("탈퇴한 토큰의 재탈퇴는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
     });
 %}
 

@@ -42,13 +42,14 @@ class UserContentController(
     @Operation(
         summary = "회원 탈퇴",
         description = "계정을 soft delete(DELETED)로 전환하고 닉네임 익명화·프로필 이미지 제거·소셜 연결 삭제·refresh 전체 폐기를 수행합니다. " +
-            "소유 스토리는 공개 상태가 유지되며 작성자는 익명화된 닉네임으로 표시됩니다. 멱등 — 이미 탈퇴한 계정의 재요청도 204입니다.",
+            "소유 스토리는 공개 상태가 유지되며 작성자는 익명화된 닉네임으로 표시됩니다. " +
+            "탈퇴 즉시 잔여 access 토큰은 전면 무효화되므로 재탈퇴를 포함한 이후 요청은 401입니다.",
     )
     @ApiResponses(
         value = [
             ApiResponse(
                 responseCode = "204",
-                description = "탈퇴 완료(멱등)",
+                description = "탈퇴 완료",
                 content = [Content(schema = Schema(hidden = true))],
             ),
             ApiResponse(
