@@ -42,14 +42,8 @@ class CurrentUserIdArgumentResolver(
             return null
         }
         val publicId = parsePublicIdOrNull(authentication.token.subject) ?: return null
-        val user = userRepository.findByPublicId(publicId) ?: return null
-        // 탈퇴(DELETED) 계정의 잔여 access 토큰은 전면 무효다(스펙 §4-3-5, KNK-1019).
-        // refresh는 탈퇴 시 폐기되지만 access는 만료까지 최대 30분 살아 있으므로, 해석 계층에서 창을 닫아
-        // SuspensionGuard를 거치지 않는 인증 경로(출석 크레딧·초대 redeem·이관 등)까지 한 번에 차단한다.
-        if (user.status == UserStatus.DELETED) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        }
-        return user.id
+        // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
+        return userRepository.findByPublicId(publicId)?.id
     }
 
     private fun parsePublicIdOrNull(subject: String?): UUID? {

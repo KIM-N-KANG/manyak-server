@@ -136,6 +136,11 @@ class UserWithdrawalIntegrationTests {
         restTestClient.get().uri("/api/v1/auth/me")
             .header("Authorization", "Bearer $token")
             .exchange().expectStatus().isUnauthorized
+
+        // @CurrentUserId를 아예 안 쓰는 공개 조회(optional 인증)도 필터가 같은 계약을 집행한다(4차 P2).
+        restTestClient.get().uri("/api/v1/stories/00000000-0000-0000-0000-000000000000")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
