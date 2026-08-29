@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.GeneralStartSettingInput
 import com.knk.manyak.story.dto.StoryEditFormResponse
@@ -41,6 +42,7 @@ class StoryEditService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
+    private val suspensionGuard: SuspensionGuard,
 ) {
 
     @Transactional(readOnly = true)
@@ -53,6 +55,7 @@ class StoryEditService(
     /** 부분 갱신: 보낸(non-null) 필드만 교체하고 나머지는 유지한다. 리스트는 보내면 전체 교체다. */
     @Transactional
     fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest): StoryEditFormResponse {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 공개 전환 포함 수정 전반이 대상.
         // 쓰기 락으로 스토리 애그리거트를 잠가 동시 PATCH의 자식 리스트 교체 경합을 직렬화한다.
         val story = resolveStoryForUpdate(storyId)
         requireOwnerAccess(story, userId)

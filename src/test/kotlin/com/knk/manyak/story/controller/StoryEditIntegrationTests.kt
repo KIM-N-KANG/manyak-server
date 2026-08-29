@@ -132,6 +132,35 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `정지된 소유자의 수정 요청은 403이고 탈퇴한 소유자는 401이며 값이 바뀌지 않는다`() {
+        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 공개 전환이 콘텐츠 공개 행위라 수정 API도 공통 게이트 대상이다.
+        val suspended = userRepository.save(User(nickname = "정지자", status = UserStatus.SUSPENDED))
+        val suspendedStory = seedStory(userId = suspended.id)
+
+        restTestClient.patch().uri("/api/v1/stories/${suspendedStory.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(suspended)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC","title":"바뀐 제목"}""")
+            .exchange().expectStatus().isForbidden
+
+        val deleted = userRepository.save(User(nickname = "탈퇴자", status = UserStatus.DELETED))
+        val deletedStory = seedStory(userId = deleted.id)
+
+        restTestClient.patch().uri("/api/v1/stories/${deletedStory.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(deleted)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC","title":"바뀐 제목"}""")
+            .exchange().expectStatus().isUnauthorized
+
+        val reloadedSuspended = storyRepository.findById(suspendedStory.id).get()
+        val reloadedDeleted = storyRepository.findById(deletedStory.id).get()
+        assertEquals(suspendedStory.title, reloadedSuspended.title)
+        assertEquals(suspendedStory.visibility, reloadedSuspended.visibility)
+        assertEquals(deletedStory.title, reloadedDeleted.title)
+        assertEquals(deletedStory.visibility, reloadedDeleted.visibility)
+    }
+
+    @Test
     fun `소유자는 수정 API로 공개 전환하고 되돌릴 수 있으며 읽기 가시성에 즉시 반영된다`() {
         // 공개 전환은 별도 엔드포인트가 아니라 이 수정 API의 visibility 부분 갱신이다(스펙 §4-3-8·B26, KNK-1021).
         val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
