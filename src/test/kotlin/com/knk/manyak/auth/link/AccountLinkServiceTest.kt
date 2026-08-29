@@ -41,7 +41,7 @@ import java.util.Optional
  * - `linkCode`는 **성공했을 때만** 소비한다. 403·409로 실패하면 미소비로 남아 TTL 안에서 재시도할 수 있다
  *   (실패할 때마다 재인증을 다시 요구하지 않는다 — 핸드오프와 같은 결).
  * - 신규 계정·신규 세션을 만들지 않는다(토큰·크레딧 협력자를 생성자에 두지 않아 구조적으로 불가능).
- * - `DELETED`·사용자 부재는 401, `SUSPENDED`는 403이다(`SuspensionGuard`는 DELETED를 통과시키므로 쓰지 않는다).
+ * - `DELETED`·사용자 부재는 401, `SUSPENDED`는 403이다(`SuspensionGuard`는 사용자 부재를 통과시키므로 쓰지 않는다).
  */
 class AccountLinkServiceTest {
 
@@ -250,7 +250,7 @@ class AccountLinkServiceTest {
 
     @Test
     fun `삭제된 계정은 401이다`() {
-        // SuspensionGuard는 DELETED를 통과시키므로 계정 상태를 직접 본다.
+        // SuspensionGuard는 사용자 부재를 통과시키므로 계정 상태를 직접 본다.
         `when`(userRepository.findById(USER_ID))
             .thenReturn(Optional.of(User(id = USER_ID, nickname = "탈퇴회원", status = UserStatus.DELETED)))
         givenValidLinkCode()

@@ -156,8 +156,9 @@ class AccountLinkService(
     }
 
     /**
-     * 연동 가능한 계정 상태인지 본다. `SuspensionGuard`를 쓰지 않는 이유는 그 판정이 `SUSPENDED`만 막고
-     * `DELETED`를 통과시키기 때문이다 — 탈퇴한 계정에 로그인 수단을 붙이면 되살아난다.
+     * 연동 가능한 계정 상태인지 본다. 상태별 코드(DELETED 401 · SUSPENDED 403)는 `SuspensionGuard`와 같지만,
+     * 그 가드는 **사용자 행이 없으면 통과**시킨다. 연동은 사용자 부재도 401로 막아야 하므로 여기서 직접 본다
+     * — 탈퇴했거나 사라진 계정에 로그인 수단을 붙이면 되살아난다.
      */
     private fun requireLinkableAccount(userId: Long) {
         val user = userRepository.findById(userId).orElse(null)

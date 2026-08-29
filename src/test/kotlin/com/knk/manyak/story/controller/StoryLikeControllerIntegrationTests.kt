@@ -250,6 +250,29 @@ class StoryLikeControllerIntegrationTests {
         assertEquals(0, storyLikeRepository.count())
     }
 
+    @Test
+    fun `탈퇴한 회원의 좋아요 등록·취소는 401이고 좋아요는 남지 않는다`() {
+        // 탈퇴 계정은 계정 자체가 무효라 사용자 부재와 같은 401이다(AccountLinkService.requireLinkableAccount 선례).
+        // access 토큰은 아직 만료되지 않았을 뿐이며, 정지(403 — 계정은 살아 있고 쓰기만 금지)와 코드가 갈린다.
+        val withdrawn = userRepository.save(User(nickname = "탈퇴회원", status = UserStatus.DELETED))
+        val story = publicStory()
+        val token = jwtTokenProvider.issueAccessToken(withdrawn.publicId)
+
+        restTestClient.post()
+            .uri("/api/v1/stories/${story.publicId}/like")
+            .header("Authorization", "Bearer $token")
+            .exchange()
+            .expectStatus().isUnauthorized
+
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}/like")
+            .header("Authorization", "Bearer $token")
+            .exchange()
+            .expectStatus().isUnauthorized
+
+        assertEquals(0, storyLikeRepository.count())
+    }
+
     private fun publicStory(title: String = "공개 스토리"): Story =
         storyRepository.save(
             Story(
