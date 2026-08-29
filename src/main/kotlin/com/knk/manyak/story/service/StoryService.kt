@@ -14,9 +14,11 @@ import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -24,6 +26,7 @@ import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -38,6 +41,7 @@ class StoryService(
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
+    private val storyLikeRepository: StoryLikeRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
@@ -107,12 +111,8 @@ class StoryService(
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
-        val story = resolveStory(storyId)
         // 공개 상세 조회는 공개(PUBLISHED∧PUBLIC) 스토리만, 단 소유자는 자신의 비공개·초안도 볼 수 있다(KNK-401).
-        // 존재 노출 최소화를 위해 접근 불가면 존재하지 않는 것과 동일하게 404로 통일한다.
-        if (!story.isReadableBy(userId)) {
-            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-        }
+        val story = resolveReadableStory(storyId, userId)
 
         // 내부 PK(story.id)로 자식 데이터를 조회한다. 외부 식별자(public_id)는 응답에만 노출한다.
         // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
@@ -136,10 +136,12 @@ class StoryService(
             hashtags = emptyList(),
             author = resolveAuthor(story.userId),
             turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
-            likeCount = 0,
+            likeCount = storyLikeRepository.countByStoryId(story.id),
             // 소유 판단은 서버가 내려준다(KNK-1018). 게스트(userId null)는 항상 false — 소유권 게이트(§4-5)와 달리
             // 게스트 스토리의 게스트 요청도 false다(게스트끼리 구분 불가라 메뉴 노출 판단으로 부적합).
             isOwner = userId != null && userId == story.userId,
+            // 좋아요 여부도 서버 판단이다(KNK-1017). 게스트는 좋아요할 수 없으므로 항상 false다.
+            isLiked = userId != null && storyLikeRepository.existsByUserIdAndStoryId(userId, story.id),
             startSettings = startSettings,
             visibility = story.visibility,
             status = story.status,
@@ -160,6 +162,28 @@ class StoryService(
             return emptyList()
         }
         return storyEndingRepository.findAllById(reachedIds).sortedBy { it.sortOrder }.map { it.name }
+    }
+
+    /**
+     * 스토리 좋아요 등록(스펙 §4-3-1, KNK-1017). 이미 좋아요한 스토리의 재등록도 성공(204)이다 — 멱등은
+     * `(user_id, story_id)` UNIQUE가 보장하므로 사전 조회 없이 삽입하고 유니크 위반을 흡수한다(동시 등록 경합 포함).
+     *
+     * **의도적으로 트랜잭션을 열지 않는다**([AccountLinkService.link]와 같은 이유): 바깥 트랜잭션이 있으면
+     * 유니크 위반을 잡는 순간 그 트랜잭션이 rollback-only로 오염돼, 경합을 흡수하고 응답하려는 순간 커밋이 터진다.
+     */
+    fun like(storyId: String, userId: Long) {
+        val story = resolveReadableStory(storyId, userId)
+        try {
+            storyLikeRepository.saveAndFlush(StoryLike(userId = userId, storyId = story.id))
+        } catch (ignored: DataIntegrityViolationException) {
+            // 이미 좋아요한 스토리(또는 동시 등록 경합). 계약대로 멱등하게 통과한다.
+        }
+    }
+
+    /** 스토리 좋아요 취소(스펙 §4-3-1, KNK-1017). 좋아요가 없는 스토리의 취소도 성공(204)이다. */
+    fun unlike(storyId: String, userId: Long) {
+        val story = resolveReadableStory(storyId, userId)
+        storyLikeRepository.deleteByUserIdAndStoryId(userId, story.id)
     }
 
     /**
@@ -188,6 +212,18 @@ class StoryService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+    }
+
+    /**
+     * [resolveStory]에 읽기 가시성 게이트([Story.isReadableBy])를 더해 조회한다. 읽을 수 없으면 존재하지 않는
+     * 것과 동일하게 404로 통일한다(존재 여부 비노출). 상세 조회·좋아요 등록·취소가 같은 게이트를 공유한다.
+     */
+    private fun resolveReadableStory(publicId: String, userId: Long?): Story {
+        val story = resolveStory(publicId)
+        if (!story.isReadableBy(userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+        }
+        return story
     }
 
     /** [resolveStory]와 같으나 행에 비관적 쓰기 락을 걸어 조회한다(삭제 소유권 검사의 마이그레이션 클레임 경쟁 차단 — KNK-69). */
@@ -236,17 +272,24 @@ class StoryService(
         }
         val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
             .associate { it.storyId to it.turnCount }
+        val likeCountByStoryId = storyLikeRepository.countByStoryIds(map { it.id })
+            .associate { it.storyId to it.likeCount }
         val authorByUserId = userRepository.findAllById(mapNotNull { it.userId }.distinct())
             .associate { it.id to StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
         return map {
             it.toSummaryResponse(
                 turnCount = turnCountByStoryId[it.id] ?: 0,
+                likeCount = likeCountByStoryId[it.id] ?: 0,
                 author = it.userId?.let(authorByUserId::get),
             )
         }
     }
 
-    private fun Story.toSummaryResponse(turnCount: Long, author: StoryAuthorResponse? = null): StorySummaryResponse =
+    private fun Story.toSummaryResponse(
+        turnCount: Long,
+        likeCount: Long,
+        author: StoryAuthorResponse? = null,
+    ): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
             // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형).
@@ -256,7 +299,7 @@ class StoryService(
             genres = toGenreNames(),
             author = author,
             turnCount = turnCount,
-            likeCount = 0,
+            likeCount = likeCount,
             status = this.status,
             createdAt = createdAt,
         )

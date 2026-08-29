@@ -37,6 +37,7 @@
 | [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 | [public.story_creation_characters](public.story_creation_characters.md) | 7 |  | BASE TABLE |
 | [public.story_characters](public.story_characters.md) | 13 |  | BASE TABLE |
+| [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -82,6 +83,8 @@ erDiagram
 "public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_creation_characters" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_characters" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -421,6 +424,12 @@ erDiagram
   text hair
   text outfit
   text visual_identity
+  timestamp_with_time_zone created_at
+}
+"public.story_likes" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
   timestamp_with_time_zone created_at
 }
 ```

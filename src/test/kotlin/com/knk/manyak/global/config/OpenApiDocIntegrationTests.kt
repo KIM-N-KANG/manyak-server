@@ -53,12 +53,25 @@ class OpenApiDocIntegrationTests {
     }
 
     @Test
+    fun `StoryDetailResponse 스키마는 런타임 직렬화와 같은 isLiked 필드명으로 문서화된다`() {
+        // isOwner와 같은 함정(KNK-1017): is 접두가 인트로스펙션에서 벗겨지지 않도록 JsonProperty로 고정했는지 검증한다.
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.StoryDetailResponse.properties.isLiked").exists()
+            .jsonPath("$.components.schemas.StoryDetailResponse.properties.liked").doesNotExist()
+    }
+
+    @Test
     fun `인증 필수 엔드포인트는 bearerAuth security를 갖고 공개 엔드포인트는 갖지 않는다`() {
         restTestClient.get().uri("/v3/api-docs").exchange()
             .expectStatus().isOk
             .expectBody()
             // 인증 필수: 크레딧 잔액 조회.
             .jsonPath("$.paths['/api/v1/users/me/credits'].get.security[0].bearerAuth").exists()
+            // 인증 필수: 스토리 좋아요 등록·취소(KNK-1017 — 게스트 불가).
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].post.security[0].bearerAuth").exists()
+            .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].delete.security[0].bearerAuth").exists()
             // 공개(permitAll·optional 인증): 스토리 상세 — security를 걸지 않는다.
             .jsonPath("$.paths['/api/v1/stories/{storyId}'].get.security").doesNotExist()
     }

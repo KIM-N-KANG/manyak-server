@@ -113,6 +113,11 @@ data class StoryDetailResponse(
     @field:Schema(description = "요청 회원이 이 스토리의 소유자인지. 게스트는 항상 false(KNK-1018).", example = "false")
     val isOwner: Boolean,
 
+    // isOwner와 같은 이유로 와이어 필드명을 JsonProperty로 고정한다(springdoc이 is 접두를 벗겨 liked로 문서화함).
+    @get:JsonProperty("isLiked")
+    @field:Schema(description = "요청 회원이 이 스토리에 좋아요를 눌렀는지. 게스트는 항상 false(KNK-1017).", example = "false")
+    val isLiked: Boolean,
+
     @field:ArraySchema(
         schema = Schema(implementation = StoryStartSettingResponse::class),
         arraySchema = Schema(

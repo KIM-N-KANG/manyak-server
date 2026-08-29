@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Stories", description = "스토리 API")
 @Validated
@@ -165,6 +167,49 @@ class StoryController(
     ): StoryDetailResponse = storyService.getStoryDetail(storyId, userId)
 
     @Operation(
+        summary = "스토리 좋아요 등록",
+        description = "스토리에 좋아요를 등록합니다(like만 있고 dislike는 없습니다). 인증 필수이며(게스트 불가) " +
+            "이미 좋아요한 스토리를 다시 등록해도 같은 204로 응답합니다(멱등). 읽을 수 없는 스토리(타인의 비공개·초안)는 " +
+            "존재 여부를 노출하지 않기 위해 404로 응답합니다.",
+    )
+    @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "204", description = "등록 성공(재등록 포함)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "401", description = "인증 실패(토큰 없음·만료·위조)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음(읽기 불가 포함)", content = [Content(schema = Schema(hidden = true))]),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PostMapping("/{storyId}/like")
+    fun likeStory(
+        @Parameter(description = "스토리 ID(공개 식별자)")
+        @PathVariable storyId: String,
+        @CurrentUserId userId: Long?,
+    ) = storyService.like(storyId, requireUser(userId))
+
+    @Operation(
+        summary = "스토리 좋아요 취소",
+        description = "스토리 좋아요를 취소합니다. 인증 필수이며(게스트 불가) 좋아요하지 않은 스토리를 취소해도 " +
+            "같은 204로 응답합니다(멱등). 읽을 수 없는 스토리는 404로 응답합니다.",
+    )
+    @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "204", description = "취소 성공(좋아요가 없던 경우 포함)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "401", description = "인증 실패(토큰 없음·만료·위조)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음(읽기 불가 포함)", content = [Content(schema = Schema(hidden = true))]),
+        ],
+    )
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @DeleteMapping("/{storyId}/like")
+    fun unlikeStory(
+        @Parameter(description = "스토리 ID(공개 식별자)")
+        @PathVariable storyId: String,
+        @CurrentUserId userId: Long?,
+    ) = storyService.unlike(storyId, requireUser(userId))
+
+    @Operation(
         summary = "스토리 삭제 (소프트 삭제)",
         description = "스토리를 소프트 삭제합니다. 행을 물리 삭제하지 않고 삭제 시각만 기록하며, 이후 목록·상세 조회에서 제외됩니다. " +
             "인증은 선택이며 회원 소유 스토리는 소유자만(타인·미인증 403), 소유자 없는 게스트 스토리는 허용합니다. " +
@@ -196,4 +241,8 @@ class StoryController(
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
     ) = storyService.deleteStory(storyId, userId)
+
+    // 좋아요 경로는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
+    private fun requireUser(userId: Long?): Long =
+        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 }
