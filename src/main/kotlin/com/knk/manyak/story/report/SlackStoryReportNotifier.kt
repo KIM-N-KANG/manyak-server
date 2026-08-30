@@ -67,9 +67,16 @@ class SlackStoryReportNotifier(
     private fun buildMessage(event: StoryReportedEvent): String =
         buildString {
             appendLine("🚨 스토리 신고 접수")
-            appendLine("- 스토리: ${event.storyTitle} (${event.storyPublicId})")
+            // 스토리 제목·상세는 사용자 입력이다. mrkdwn 멘션(<!channel>)·위장 링크로 파싱되지 않게 이스케이프한다(피드백 선례).
+            appendLine("- 스토리: ${escapeSlack(event.storyTitle)} (${event.storyPublicId})")
             appendLine("- 사유: ${event.reason}")
-            event.detail?.takeIf { it.isNotBlank() }?.let { appendLine("- 상세: $it") }
+            event.detail?.takeIf { it.isNotBlank() }?.let { appendLine("- 상세: ${escapeSlack(it)}") }
             append("- 접수 시각: ${event.createdAt}")
         }
+
+    // Slack mrkdwn 제어문자 이스케이프. 순서 중요: & 를 먼저 치환해 이중 이스케이프를 막는다(SlackFeedbackNotifier와 동일).
+    private fun escapeSlack(text: String): String =
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
 }
