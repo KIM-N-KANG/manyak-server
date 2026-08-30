@@ -146,6 +146,8 @@ manyak:
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
+    # 스토리 신고 알림용 Incoming Webhook URL(피드백과 채널 분리 — 조치가 필요한 운영 이벤트). 미설정이면 건너뛴다.
+    report-webhook-url: ${MANYAK_SLACK_REPORT_WEBHOOK_URL:}
   google-form:
     # 구글 폼 formResponse 베이스 URL(교체 불필요, 테스트에서만 mock 으로 override).
     base-url: ${MANYAK_GOOGLE_FORM_BASE_URL:https://docs.google.com}

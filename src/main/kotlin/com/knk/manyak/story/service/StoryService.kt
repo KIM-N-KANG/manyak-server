@@ -16,10 +16,13 @@ import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryLike
+import com.knk.manyak.story.entity.StoryReport
+import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
+import com.knk.manyak.story.repository.StoryReportRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -27,6 +30,8 @@ import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.beans.factory.annotation.Value
+import com.knk.manyak.story.report.StoryReportedEvent
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
@@ -43,6 +48,8 @@ class StoryService(
     private val lorebookRepository: LorebookRepository,
     private val storyLorebookRepository: StoryLorebookRepository,
     private val storyLikeRepository: StoryLikeRepository,
+    private val storyReportRepository: StoryReportRepository,
+    private val eventPublisher: ApplicationEventPublisher,
     private val suspensionGuard: SuspensionGuard,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
@@ -181,6 +188,34 @@ class StoryService(
         } catch (ignored: DataIntegrityViolationException) {
             // 이미 좋아요한 스토리(또는 동시 등록 경합). 계약대로 멱등하게 통과한다.
         }
+    }
+
+    /**
+     * 스토리 신고 등록(스펙 §4-3-1 스토리 신고, KNK-1020).
+     * 같은 회원의 같은 스토리 재신고는 멱등 흡수(201)하고 알림도 다시 보내지 않는다.
+     * 좋아요와 같은 이유로 트랜잭션을 열지 않는다(유니크 위반 흡수 시 rollback-only 오염 방지).
+     */
+    fun report(storyId: String, userId: Long, reason: StoryReportReason, detail: String?) {
+        suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
+        val story = resolveReadableStory(storyId, userId)
+        val saved = try {
+            storyReportRepository.saveAndFlush(
+                StoryReport(userId = userId, storyId = story.id, reason = reason, detail = detail),
+            )
+        } catch (ignored: DataIntegrityViolationException) {
+            // 이미 신고한 스토리(또는 동시 등록 경합). 멱등하게 통과하고 알림은 중복 발송하지 않는다.
+            return
+        }
+        eventPublisher.publishEvent(
+            StoryReportedEvent(
+                reportId = saved.id,
+                storyPublicId = story.publicId.toString(),
+                storyTitle = story.title,
+                reason = saved.reason,
+                detail = saved.detail,
+                createdAt = saved.createdAt,
+            ),
+        )
     }
 
     /** 스토리 좋아요 취소(스펙 §4-3-1, KNK-1017). 좋아요가 없는 스토리의 취소도 성공(204)이다. */
