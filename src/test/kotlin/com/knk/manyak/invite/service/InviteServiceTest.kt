@@ -1,12 +1,15 @@
 package com.knk.manyak.invite.service
 
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.credit.service.RewardOutcome
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.springframework.web.server.ResponseStatusException
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyLong
@@ -207,5 +210,17 @@ class InviteServiceTest {
         assertThat(response.balance).isEqualTo(120L)
         // 관계(평생 1회 소진)는 저장된다.
         assertThat(redeemer.inviterUserId).isEqualTo(5L)
+    }
+
+    @Test
+    fun `탈퇴한 계정의 코드 제출은 401이다`() {
+        // 인증 필터 통과 직후 탈퇴가 커밋되는 레이스(KNK-1019 Codex P2): 잠금 후 재검사가 마지막 방어선이다.
+        val deleted = User(id = 11L, nickname = "탈퇴자", status = UserStatus.DELETED)
+        `when`(userRepository.findByIdForUpdate(11L)).thenReturn(deleted)
+
+        assertThatThrownBy { service.redeem(11L, "GOOD5555") }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
     }
 }
