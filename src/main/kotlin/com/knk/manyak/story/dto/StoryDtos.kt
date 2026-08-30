@@ -1,6 +1,7 @@
 package com.knk.manyak.story.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -246,4 +247,14 @@ data class StoryStartSettingResponse(
         arraySchema = Schema(description = "이 시작 설정의 엔딩 목록. 없으면 빈 배열입니다."),
     )
     val endings: List<StoryEndingResponse>,
+)
+
+@Schema(description = "스토리 신고 요청(KNK-1020)")
+data class StoryReportRequest(
+    @field:Schema(description = "신고 사유", example = "SPAM")
+    val reason: StoryReportReason,
+
+    @field:Schema(description = "자유 서술(선택, 500자 이내). ETC 사유의 맥락 전달용.", example = "도배성 홍보 스토리입니다.", nullable = true)
+    @field:Size(max = 500, message = "신고 상세는 500자 이내여야 합니다.")
+    val detail: String? = null,
 )

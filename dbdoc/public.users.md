@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -49,6 +49,7 @@ erDiagram
 "public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.users" {
   bigint id
@@ -114,6 +115,14 @@ erDiagram
   bigint id
   bigint user_id FK
   bigint story_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_reports" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_20_ reason
+  text detail
   timestamp_with_time_zone created_at
 }
 ```

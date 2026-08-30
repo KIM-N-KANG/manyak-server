@@ -6,6 +6,7 @@ import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryService
@@ -219,6 +220,35 @@ class StoryController(
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
     ) = storyService.unlike(storyId, requireUser(userId))
+
+    @Operation(
+        summary = "스토리 신고 등록",
+        description = "스토리를 신고합니다. 인증 필수이며(게스트 불가) 같은 스토리를 다시 신고해도 같은 201로 응답합니다" +
+            "(멱등 — 행이 늘거나 알림이 중복 발송되지 않습니다). 읽을 수 없는 스토리(타인의 비공개·초안)는 존재 여부를 " +
+            "노출하지 않기 위해 404로 응답합니다. 계정 상태로는 정지 계정이 403, 탈퇴 계정이 401입니다(§4-5 B20).",
+    )
+    @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "201", description = "신고 접수(재신고 포함)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음(알 수 없는 사유, 상세 500자 초과)", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(
+                responseCode = "401",
+                description = "인증 실패(토큰 없음·만료·위조) 또는 사용자 없음·탈퇴 계정",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+            ApiResponse(responseCode = "403", description = "정지된 계정", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "404", description = "스토리를 찾을 수 없음(읽기 불가 포함)", content = [Content(schema = Schema(hidden = true))]),
+        ],
+    )
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/{storyId}/reports")
+    fun reportStory(
+        @Parameter(description = "스토리 ID(공개 식별자)")
+        @PathVariable storyId: String,
+        @CurrentUserId userId: Long?,
+        @Valid @RequestBody request: StoryReportRequest,
+    ) = storyService.report(storyId, requireUser(userId), request.reason, request.detail)
 
     @Operation(
         summary = "스토리 삭제 (소프트 삭제)",
