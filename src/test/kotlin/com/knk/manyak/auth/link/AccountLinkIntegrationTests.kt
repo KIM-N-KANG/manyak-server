@@ -356,6 +356,32 @@ class AccountLinkIntegrationTests {
             .jsonPath("$.linkedProviders[1]").isEqualTo("kakao")
     }
 
+    @Test
+    fun `탈퇴한 계정에 연결됐던 소셜 계정은 409 SOCIAL_ACCOUNT_WITHDRAWN이고 tombstone은 그대로다`() {
+        // KNK-1053: tombstone을 claim해 연동하면 재가입 경로에만 있는 게이트(초대 소진·보상 신원·정지·이관 시도 승계)를
+        // 통째로 우회하는 세탁 경로가 열린다. 그 신원으로 로그인(재가입)은 여전히 되고, 막히는 건 남의 계정에 붙이기뿐이다.
+        val withdrawnAccess = login("kakao", KAKAO_SUB)
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $withdrawnAccess")
+            .exchange().expectStatus().isNoContent
+        val tombstone = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, KAKAO_SUB)!!
+        val tombstoneOwnerId = tombstone.userId
+
+        val access = login("google", GOOGLE_SUB)
+        val code = issueLinkCode(access, idToken = GOOGLE_SUB)
+
+        linkExchange(access, "kakao", KAKAO_SUB, code)
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("SOCIAL_ACCOUNT_WITHDRAWN")
+
+        // tombstone은 소유자·deleted_at 모두 그대로다(claim되지 않았다). 새 행도 만들지 않는다.
+        val unchanged = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, KAKAO_SUB)!!
+        assertThat(unchanged.userId).isEqualTo(tombstoneOwnerId)
+        assertThat(unchanged.deletedAt).isNotNull()
+        assertThat(socialAccountRepository.count()).isEqualTo(2)
+    }
+
     private companion object {
         const val GOOGLE_SUB = "link-google-sub"
         const val KAKAO_SUB = "link-kakao-sub"

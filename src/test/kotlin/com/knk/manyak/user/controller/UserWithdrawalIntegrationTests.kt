@@ -27,7 +27,7 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
- * 회원 탈퇴(KNK-1019). soft delete(DELETED) + 개인정보 익명화 + 소셜 연결 삭제 + refresh 전체 폐기.
+ * 회원 탈퇴(KNK-1019). soft delete(DELETED) + 개인정보 익명화 + 소셜 연동 tombstone(KNK-1053) + refresh 전체 폐기.
  * 소유 스토리는 공개 상태를 유지한다(2026-08-30 팀 결정 — 작성자 표기는 익명화된 닉네임이 자연 반영).
  */
 @ActiveProfiles("test")
@@ -54,9 +54,16 @@ class UserWithdrawalIntegrationTests {
     private fun tokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
 
     @Test
-    fun `탈퇴하면 DELETED 전환과 함께 개인정보가 익명화되고 소셜 연결·refresh가 폐기된다`() {
+    fun `탈퇴하면 DELETED 전환과 함께 개인정보가 익명화되고 소셜 연동·refresh가 폐기된다`() {
         val user = saveMember()
-        socialAccountRepository.save(SocialAccount(userId = user.id, provider = SocialProvider.GOOGLE, providerUserId = "google-sub-1"))
+        socialAccountRepository.save(
+            SocialAccount(
+                userId = user.id,
+                provider = SocialProvider.GOOGLE,
+                providerUserId = "google-sub-1",
+                email = "user@example.com",
+            ),
+        )
         refreshTokenStore.createFamily("refresh-hash-1", user.id, Duration.ofHours(1))
 
         restTestClient.delete().uri("/api/v1/users/me")
@@ -70,7 +77,12 @@ class UserWithdrawalIntegrationTests {
         assertEquals("탈퇴한 사용자", reloaded.nickname)
         assertNull(reloaded.profileImageUrl)
         assertNull(reloaded.profileThumbnailBase64)
-        assertEquals(0, socialAccountRepository.count())
+        // 소셜 행은 지우지 않고 tombstone으로 남긴다(KNK-1053 — 재가입이 이 행을 재사용해야 1회성 혜택이 리셋되지 않는다).
+        // 개인정보 파기는 email NULL로 충족하고, provider_user_id는 재가입 매칭 키라 남긴다.
+        val tombstone = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "google-sub-1")
+        org.junit.jupiter.api.Assertions.assertNotNull(tombstone!!.deletedAt)
+        assertNull(tombstone.email)
+        assertEquals(user.id, tombstone.userId)
         // refresh family 전체 폐기 — 남은 토큰으로 회전하면 Invalid다.
         assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", Duration.ofHours(1)) is RotateResult.Invalid)
     }

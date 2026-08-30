@@ -51,8 +51,9 @@ class SocialAccount(
     val id: Long = 0,
 
     // 소유 사용자의 내부 PK. JPA 관계 매핑 대신 평문 컬럼으로 둔다(StoryChat.userId 선례).
+    // 재가입·계정 연동이 tombstone 행을 claim할 때 새 소유자로 갱신하므로 var다(KNK-1053).
     @Column(name = "user_id", nullable = false)
-    val userId: Long,
+    var userId: Long,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -66,7 +67,7 @@ class SocialAccount(
     var email: String? = null,
 
     @Column(name = "connected_at", nullable = false)
-    val connectedAt: Instant = Instant.now(),
+    var connectedAt: Instant = Instant.now(),
 
     @Column(name = "last_login_at")
     var lastLoginAt: Instant? = null,
@@ -76,6 +77,19 @@ class SocialAccount(
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
+
+    /**
+     * 탈퇴로 끊긴 연동의 tombstone 시각(KNK-1053). NULL이면 살아 있는 연동이다.
+     *
+     * 행을 하드 삭제하지 않는 이유: `(provider, provider_user_id)` 유니크를 남겨 두어야 같은 소셜 신원의 재가입이
+     * **이 행의 재사용**을 강제받는다. 삭제하면 재가입마다 완전히 새 `users` 행이 생겨 user_id에 매달린
+     * 1회성 혜택(가입 보상·초대 제출 자격)이 통째로 리셋된다.
+     *
+     * 개인정보 파기는 [email]을 NULL로 지워 충족한다. [providerUserId]는 제공자 없이는 식별 불가한
+     * pseudonymous ID이고 재가입 매칭 키라 남긴다.
+     */
+    @Column(name = "deleted_at")
+    var deletedAt: Instant? = null,
 ) {
     @PreUpdate
     fun updateTimestamp() {

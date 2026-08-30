@@ -8,6 +8,9 @@
 ###     제출 자격은 계정당 평생 1회(기존 회원도 가능). 코드는 trim·대문자 정규화 후 비교합니다.
 ###     오류 계약: 빈 값·형식 위반 400 / 매칭 없음 404 / 자기 코드 409(code=INVITE_SELF_CODE) /
 ###     재제출 409(code=INVITE_ALREADY_REDEEMED) / 정지 계정 403.
+###   - [KNK-1053] 초대자 상태 게이트: 초대자가 탈퇴면 409(code=INVITE_INVITER_WITHDRAWN),
+###     정지면 409(code=INVITE_INVITER_UNAVAILABLE). 탈퇴해도 invite_code 는 지우지 않으므로
+###     코드 자체는 매칭돼 404가 아니라 409로 사유를 구분합니다(11-1·11-2번).
 ###   - [KNK-581] KST 월 10회 상한은 초대자 몫에만 적용(적립 시점 월 귀속). 초대자가 상한이면 초대자 적립만
 ###     건너뛰고 제출자는 적립하며 응답은 200입니다. 제출자 몫은 평생 1회 자격이 유일한 제한이라 상한이 없습니다.
 ###   - [KNK-513·581] GET /users/me/invite 응답의 monthlyRewardCount(이번 KST 월에 초대자 역할로 수령한 건수 —
@@ -274,3 +277,47 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "code": "  ab3xk9qz  " }
+
+### 11-1. [KNK-1053] (에러) 초대자가 탈퇴한 코드 제출 → 409, code=INVITE_INVITER_WITHDRAWN
+# 준비: 코드를 발급받은 계정(2번)을 user-withdrawal.http 2번으로 탈퇴시킨 뒤,
+# 아직 코드를 입력한 적 없는 제3의 계정 토큰을 @freshRedeemerAccessToken 에 넣고 실행하세요.
+# @withdrawnInviteCode 는 그 탈퇴 계정이 쓰던 코드입니다.
+@freshRedeemerAccessToken = PUT_A_THIRD_ACCOUNTS_ACCESS_TOKEN_HERE
+@withdrawnInviteCode = PUT_THE_WITHDRAWN_INVITERS_CODE_HERE
+POST {{baseUrl}}/api/v1/users/me/invite/redeem
+Authorization: Bearer {{freshRedeemerAccessToken}}
+Content-Type: application/json
+
+{ "code": "{{withdrawnInviteCode}}" }
+
+> {%
+    client.test("탈퇴한 초대자의 코드는 409다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(초대자가 실제로 탈퇴 상태인지 확인). actual=${response.status}`);
+    });
+    client.test("바디 code 가 INVITE_INVITER_WITHDRAWN 다", () => {
+        client.assert(response.body.code === "INVITE_INVITER_WITHDRAWN",
+            `code 가 다릅니다(제출자가 이미 코드를 입력했으면 INVITE_ALREADY_REDEEMED 가 먼저 옵니다). actual=${response.body.code}`);
+    });
+%}
+
+### 11-2. [KNK-1053] (에러) 초대자가 정지된 코드 제출 → 409, code=INVITE_INVITER_UNAVAILABLE
+# 준비: 관리자 API가 없어(Phase 1 범위 밖) 초대자 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾸고,
+# 그 계정의 초대 코드를 @suspendedInviteCode 에 넣으세요. 제출자는 아직 코드를 입력한 적 없어야 합니다.
+@suspendedInviteCode = PUT_A_SUSPENDED_INVITERS_CODE_HERE
+POST {{baseUrl}}/api/v1/users/me/invite/redeem
+Authorization: Bearer {{freshRedeemerAccessToken}}
+Content-Type: application/json
+
+{ "code": "{{suspendedInviteCode}}" }
+
+> {%
+    client.test("정지된 초대자의 코드는 409다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(초대자가 실제로 정지 상태인지 확인). actual=${response.status}`);
+    });
+    client.test("바디 code 가 INVITE_INVITER_UNAVAILABLE 다", () => {
+        client.assert(response.body.code === "INVITE_INVITER_UNAVAILABLE",
+            `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}

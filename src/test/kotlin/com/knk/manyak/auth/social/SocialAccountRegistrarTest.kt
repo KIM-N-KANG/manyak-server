@@ -61,7 +61,7 @@ class SocialAccountRegistrarTest {
             email = "alice@example.com",
             lastLoginAt = before,
         )
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(provider, "social-sub-123"))
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(provider, "social-sub-123"))
             .thenReturn(social)
         `when`(userRepository.findById(42L)).thenReturn(Optional.of(existingUser))
 
@@ -75,16 +75,16 @@ class SocialAccountRegistrarTest {
     @Test
     fun `findExistingUser는 provider가 다르면 같은 sub라도 찾지 않는다`() {
         // 계정 통합은 도입하지 않는다(스펙 §4-5 결정 기록) — 조회 키는 (provider, provider_user_id)다.
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, "shared-sub"))
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.KAKAO, "shared-sub"))
             .thenReturn(null)
 
         assertThat(registrar.findExistingUser(SocialProvider.KAKAO, info("shared-sub"), Instant.now())).isNull()
-        verify(socialAccountRepository).findByProviderAndProviderUserId(SocialProvider.KAKAO, "shared-sub")
+        verify(socialAccountRepository).findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.KAKAO, "shared-sub")
     }
 
     @Test
     fun `findExistingUser는 연동이 없으면 null을 반환한다`() {
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(null)
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "sub")).thenReturn(null)
 
         assertThat(registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), Instant.now())).isNull()
     }
@@ -92,7 +92,7 @@ class SocialAccountRegistrarTest {
     @Test
     fun `findExistingUser는 연동이 가리키는 User가 없으면 401이다`() {
         val social = SocialAccount(userId = 99L, provider = SocialProvider.GOOGLE, providerUserId = "sub")
-        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "sub")).thenReturn(social)
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "sub")).thenReturn(social)
         `when`(userRepository.findById(99L)).thenReturn(Optional.empty())
 
         assertThatThrownBy { registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), Instant.now()) }
@@ -137,6 +137,8 @@ class SocialAccountRegistrarTest {
         assertThat(userCaptor.value.status).isEqualTo(UserStatus.ACTIVE)
         // 초대 관계는 가입이 아니라 코드 입력(redeem)에서 저장된다(KNK-567). 생성 시점엔 비어 있어야 한다.
         assertThat(userCaptor.value.inviterUserId).isNull()
+        // 순수 신규 가입은 재가입이 아니다(KNK-1053 — tombstone이 없으면 rejoined_at을 찍지 않는다).
+        assertThat(userCaptor.value.rejoinedAt).isNull()
 
         val socialCaptor = ArgumentCaptor.forClass(SocialAccount::class.java)
         verify(socialAccountRepository).save(socialCaptor.capture())

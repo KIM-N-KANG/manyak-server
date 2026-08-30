@@ -171,9 +171,15 @@ class AccountLinkService(
     }
 
     /**
-     * 연동을 막는 충돌을 확정한다. 그 소셜 계정 행이 이미 있으면 **소유자와 무관하게 409**다(티켓 확정 설계) —
+     * 연동을 막는 충돌을 확정한다. 그 소셜 계정 행이 있으면 **소유자·상태와 무관하게 409**다(티켓 확정 설계) —
      * 같은 식별자 재요청을 멱등 성공으로 흘리지 않는다. 최종 상태는 어느 쪽이든 같고, 클라이언트는 409를 받아도
      * `GET /auth/me`로 현재 연동 상태를 정확히 보여줄 수 있다.
+     *
+     * **tombstone(탈퇴로 끊긴 연동)도 409다**(KNK-1053, `SOCIAL_ACCOUNT_WITHDRAWN`). 그 행을 claim해 연동하면
+     * 재가입 경로에만 있는 게이트(초대 소진·보상 신원·정지 상태·이관 시도 승계)를 통째로 우회하는 세탁 경로가
+     * 열린다 — 소진된 신원을 깨끗한 계정에 연동해 tombstone을 없앤 뒤 그 계정을 탈퇴시키면, 그 신원의 재가입이
+     * 깨끗한 표식을 물려받아 자격이 부활한다. 탈퇴한 신원은 **로그인으로는 여전히 쓸 수 있으므로**(재가입 경로가
+     * 받는다) 막히는 건 "다른 계정에 붙이기"뿐이고, 그 드문 요구를 포기하는 편이 게이트를 우회 가능하게 두는 것보다 낫다.
      *
      * - 그 소셜 계정이 다른 회원 것: `SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER` — 이 경우가 곧 "이미 갈라진" 상태이고
      *   합치는 것은 merge라 범위 밖이다
@@ -187,10 +193,14 @@ class AccountLinkService(
     private fun requireNoConflict(userId: Long, provider: SocialProvider, providerUserId: String) {
         val existing = socialAccountRepository.findByProviderAndProviderUserId(provider, providerUserId)
         if (existing != null) {
-            throw if (existing.userId == userId) {
-                alreadyLinked()
-            } else {
-                CodedResponseStatusException(
+            throw when {
+                existing.deletedAt != null -> CodedResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCodes.SOCIAL_ACCOUNT_WITHDRAWN,
+                    "탈퇴한 계정에 연결됐던 소셜 계정입니다.",
+                )
+                existing.userId == userId -> alreadyLinked()
+                else -> CodedResponseStatusException(
                     HttpStatus.CONFLICT,
                     ApiErrorCodes.SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER,
                     "이미 다른 계정에 연동된 소셜 계정입니다.",

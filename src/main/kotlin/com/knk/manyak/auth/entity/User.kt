@@ -79,6 +79,35 @@ class User(
     // 기존(롤아웃 이전) 회원은 마이그레이션(V40)이 채워 스냅샷 대상에서 제외한다.
     @Column(name = "member_trial_seeded_at")
     var memberTrialSeededAt: Instant? = null,
+
+    // 탈퇴 계정의 소셜 신원으로 재가입해 만들어진 계정임을 표시한다(KNK-1053). NULL이면 순수 신규 가입이다.
+    // 회원 무료 체험 미부여 게이트(SocialLoginService)와 진단·분석에 쓴다. 1회성 보상 차단은 이 플래그가 아니라
+    // [rewardIdentityUserId]가 담당한다 — "재가입이면 무조건 스킵"은 최초 계정이 크래시로 못 받은 경우까지 막지만,
+    // 루트 키로 판정하면 "이 신원이 실제로 받은 적 있는가"를 원장이 답해 자가 복구 구조가 그대로 산다.
+    @Column(name = "rejoined_at")
+    var rejoinedAt: Instant? = null,
+
+    /**
+     * 1회성 보상 멱등 키의 스코프(KNK-1053). NULL이면 자기 자신이라 `rewardIdentityUserId ?: id`가 보상 신원이다.
+     *
+     * 재가입은 user_id를 갈아치우므로, 키가 user_id에 매여 있으면 `signup:{id}`·`attendance:{id}:{날짜}` 같은
+     * 1회성 키가 전부 리셋된다(출석 250은 하루에도 무제한 반복 가능했다). 재가입 계정에 **최초 계정의 id**를
+     * 심어 키를 신원에 묶는다. 재가입을 반복해도 루트를 복사하므로 체인이 길어지지 않는다.
+     *
+     * 기존 회원·순수 신규 가입은 NULL이라 키 문자열이 종전과 동일하다 — 이미 쌓인 원장 행과 호환된다.
+     */
+    @Column(name = "reward_identity_user_id")
+    var rewardIdentityUserId: Long? = null,
+
+    /**
+     * 탈퇴 직전 계정 상태(KNK-1053). 탈퇴하지 않은 계정은 NULL이다.
+     *
+     * 탈퇴는 [status]를 DELETED로 덮어써 "정지였다"는 사실을 지운다. 재가입 계정이 제재를 물려받으려면
+     * 그 사실이 어딘가 남아 있어야 해서 탈퇴 시점에 여기 기록한다 — 없으면 정지는 탈퇴·재가입 한 번으로 풀린다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "withdrawn_from_status", length = 20)
+    var withdrawnFromStatus: UserStatus? = null,
 ) {
     @PreUpdate
     fun updateTimestamp() {

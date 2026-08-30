@@ -30,6 +30,14 @@ interface UserRepository : JpaRepository<User, Long> {
     fun findByIdForUpdate(@Param("id") id: Long): User?
 
     /**
+     * [id] 회원의 **보상 신원**(`coalesce(reward_identity_user_id, id)`)을 돌려준다(KNK-1053).
+     * 1회성 보상의 멱등 키를 user_id가 아니라 이 값으로 만들어야, 재가입이 user_id를 갈아치워도 키가 리셋되지 않는다.
+     * 회원이 없으면 null(호출부가 원래 id로 폴백한다).
+     */
+    @Query("SELECT coalesce(u.rewardIdentityUserId, u.id) FROM User u WHERE u.id = :id")
+    fun findRewardIdentityUserId(@Param("id") id: Long): Long?
+
+    /**
      * 회원 체험 스냅샷 완료를 기록한다(스펙 §4-3-7 B13, KNK-504). 아직 미스냅샷(NULL)인 계정만 채워, 동시 첫
      * 로그인 경합·재시도에도 최초 1회만 유효하게 남는다(이미 채워진 값은 덮지 않는다). 갱신 행 수를 반환한다.
      */

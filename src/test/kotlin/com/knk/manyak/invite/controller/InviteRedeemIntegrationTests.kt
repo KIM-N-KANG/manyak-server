@@ -258,4 +258,40 @@ class InviteRedeemIntegrationTests {
 
         assertThat(inviteRewards(suspended.id)).isEmpty()
     }
+
+    @Test
+    fun `탈퇴한 회원의 초대 코드 제출은 409 INVITE_INVITER_WITHDRAWN이다`() {
+        // KNK-1053: 탈퇴해도 invite_code는 지우지 않는다(코드 재발급 충돌 방지). 사유별 메시지를 주기 위해 상태로 판정한다.
+        val withdrawn = userRepository.save(
+            User(nickname = "탈퇴한 사용자", status = UserStatus.DELETED, inviteCode = "GONECODE"),
+        )
+        val redeemer = saveUser("제출자")
+
+        redeem(tokenOf(redeemer), "GONECODE")
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("INVITE_INVITER_WITHDRAWN")
+
+        // 자격은 소진되지 않는다(관계 미저장·적립 없음).
+        assertThat(inviteRewards(withdrawn.id)).isEmpty()
+        assertThat(inviteRewards(redeemer.id)).isEmpty()
+        assertThat(userRepository.findById(redeemer.id).orElseThrow().inviterUserId).isNull()
+    }
+
+    @Test
+    fun `정지된 회원의 초대 코드 제출은 409 INVITE_INVITER_UNAVAILABLE이다`() {
+        val suspendedInviter = userRepository.save(
+            User(nickname = "정지초대자", status = UserStatus.SUSPENDED, inviteCode = "HALTCODE"),
+        )
+        val redeemer = saveUser("제출자")
+
+        redeem(tokenOf(redeemer), "HALTCODE")
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("INVITE_INVITER_UNAVAILABLE")
+
+        assertThat(inviteRewards(suspendedInviter.id)).isEmpty()
+        assertThat(inviteRewards(redeemer.id)).isEmpty()
+        assertThat(userRepository.findById(redeemer.id).orElseThrow().inviterUserId).isNull()
+    }
 }

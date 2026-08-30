@@ -1,5 +1,6 @@
 package com.knk.manyak.invite.service
 
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -77,7 +78,8 @@ class InviteService(
      * 잡아 같은 계정의 동시 제출을 직렬화하므로, 자격 판정·관계 저장·양측 적립이 원자적이다(로그인 self-heal 불필요).
      *
      * 오류 계약(입력값이라 사유를 구분해 응답한다): 형식 위반 400, 매칭 없음 404,
-     * 자기 코드 409 [ApiErrorCodes.INVITE_SELF_CODE], 재제출 409 [ApiErrorCodes.INVITE_ALREADY_REDEEMED].
+     * 자기 코드 409 [ApiErrorCodes.INVITE_SELF_CODE], 재제출 409 [ApiErrorCodes.INVITE_ALREADY_REDEEMED],
+     * 초대자 탈퇴 409 [ApiErrorCodes.INVITE_INVITER_WITHDRAWN], 초대자 정지 409 [ApiErrorCodes.INVITE_INVITER_UNAVAILABLE].
      *
      * 월 상한(적립 시점의 KST 월 귀속)은 초대자 몫에만 적용한다(KNK-581) — 초대자가 상한이면 초대자만 건너뛰고
      * 제출자는 적립하며 응답은 성공이다(상한 사실은 응답에 싣지 않음 — 초대자 쪽 진행 표시로 충분). 제출자 몫은
@@ -94,11 +96,11 @@ class InviteService(
         if (!CODE_FORMAT.matches(code)) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "초대 코드 형식이 올바르지 않습니다.")
         }
-        // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 주의(Codex P2, 잠재 결함): 이 컬럼은 초대자 자기참조
-        // FK가 ON DELETE SET NULL(V27)이라, 초대자 행이 물리 삭제되면 NULL로 되돌아가 소진 표식이 사라진다. 현재는
-        // 회원을 물리 삭제하는 경로가 없어(soft delete만: UserStatus.DELETED·deleted_at) 도달 불가하지만, 하드 삭제를
-        // 도입하면 이 계정이 재제출로 보상을 또 받을 수 있다. 그때는 삭제 안정적인 별도 소진 표식(예: invite_redeemed_at)을
-        // 두고 그 값으로 게이트해야 한다(관계 FK와 소진 플래그의 삭제 안정성 요구가 다름).
+        // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 이 컬럼은 초대자 자기참조 FK가 ON DELETE SET NULL(V27)
+        // 이라 초대자 행이 물리 삭제되면 표식이 사라지는데, 회원 물리 삭제 경로는 없다(탈퇴도 soft delete뿐).
+        // 실제로 뚫렸던 건 이쪽이 아니라 **제출자 행 자체가 바뀌는** 경로였다(KNK-1053): 탈퇴가 social_accounts를
+        // 하드 삭제해 같은 소셜 신원의 재가입이 새 users 행을 받으면 이 컬럼이 NULL로 초기화됐다. 이제 탈퇴는 소셜 행을
+        // tombstone으로 남기고 재가입이 이전 소유자의 inviter_user_id를 승계하므로, 그 우회로는 닫혀 있다.
         if (redeemer.inviterUserId != null) {
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
@@ -114,6 +116,25 @@ class InviteService(
                 ApiErrorCodes.INVITE_SELF_CODE,
                 "자기 자신의 초대 코드는 입력할 수 없습니다.",
             )
+        }
+        // 초대자 상태 게이트(KNK-1053). 탈퇴·정지 회원의 코드는 보상 대상이 아니다. 탈퇴 시 invite_code를 지우지
+        // 않는 이유는 코드 재발급 충돌을 피하고 여기서 사유별 메시지를 주기 위해서다(코드는 매칭되므로 404가 아니다).
+        //
+        // 초대자 행을 락으로 잡지 않으므로 이 검사는 **트랜잭션 경계의 보장이 아니라 정책 안내**다. 제출과 초대자 탈퇴가
+        // 겹치면 in-flight 1건이 통과할 수 있다. 초대자 락을 추가하면 지갑 락과의 획득 순서를 다시 설계해야 하고
+        // (KNK-587 데드락 방지), 막는 것은 경합 1건뿐이라 파밍 경로가 아니어서 비용이 이득을 넘는다.
+        when (inviter.status) {
+            UserStatus.DELETED -> throw CodedResponseStatusException(
+                HttpStatus.CONFLICT,
+                ApiErrorCodes.INVITE_INVITER_WITHDRAWN,
+                "탈퇴한 회원의 초대 코드입니다.",
+            )
+            UserStatus.SUSPENDED -> throw CodedResponseStatusException(
+                HttpStatus.CONFLICT,
+                ApiErrorCodes.INVITE_INVITER_UNAVAILABLE,
+                "현재 사용할 수 없는 초대 코드입니다.",
+            )
+            UserStatus.ACTIVE -> Unit
         }
         // 관계 저장(평생 1회 소진)과 양측 적립을 같은 트랜잭션에서 커밋한다. 적립 실패 시 관계도 함께 롤백된다.
         redeemer.inviterUserId = inviter.id
