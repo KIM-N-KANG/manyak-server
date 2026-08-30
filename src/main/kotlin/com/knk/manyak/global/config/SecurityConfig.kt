@@ -1,6 +1,8 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.DeletedAccountRejectionFilter
 import com.knk.manyak.global.security.OptionalJwtAuthenticationFilter
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.beans.factory.annotation.Value
@@ -19,6 +21,7 @@ import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
 import org.springframework.security.web.util.matcher.OrRequestMatcher
 import org.springframework.web.cors.CorsConfiguration
+import tools.jackson.databind.ObjectMapper
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
@@ -27,7 +30,13 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity, jwtDecoder: JwtDecoder, environment: Environment): SecurityFilterChain =
+    fun securityFilterChain(
+        http: HttpSecurity,
+        jwtDecoder: JwtDecoder,
+        environment: Environment,
+        userRepository: UserRepository,
+        objectMapper: ObjectMapper,
+    ): SecurityFilterChain =
         http
             .cors { }
             .csrf { it.disable() }
@@ -105,6 +114,12 @@ class SecurityConfig {
             // 401을 내지 않고, 인증 시도는 이 필터만 수행한다. RS 필터보다 앞에 둬 동일 요청에서 principal을 먼저 확정한다.
             .addFilterBefore(
                 OptionalJwtAuthenticationFilter(jwtDecoder, OrRequestMatcher(*OPTIONAL_AUTH_MATCHERS)),
+                BearerTokenAuthenticationFilter::class.java,
+            )
+            // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
+            // 인증 확정 이후에 놓아, 엔드포인트가 principal을 읽는 방식과 무관하게 같은 계약을 보장한다.
+            .addFilterAfter(
+                DeletedAccountRejectionFilter(userRepository, objectMapper),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.

@@ -7,7 +7,7 @@ import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.credit.service.RewardOutcome
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.isActiveAccessAllowed
+import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.invite.dto.InviteRedeemResponse
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.beans.factory.annotation.Value
@@ -49,10 +49,8 @@ class InviteService(
     fun getOrCreateInvite(userId: Long): InviteResponse {
         val user = userRepository.findByIdForUpdate(userId)
             ?: error("초대 코드를 발급할 사용자를 찾지 못했습니다: userId=$userId")
-        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 사용자 행을 이미 로드했으므로 추가 조회 없이 판정한다.
-        if (!isActiveAccessAllowed(user.status)) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
-        }
+        // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
+        requireActiveStatus(user.status)
         val code = user.inviteCode ?: generateUniqueCode().also { user.inviteCode = it }
         // 이번 KST 월의 초대 보상 진행을 함께 내려, 상한 도달 후 보상 없는 초대 공유의 혼란을 줄인다(스펙 §4-3-7 B22).
         // 집계는 월 상한 판정과 같은 창([현재 KST 월 시작, 다음달 시작))·같은 역할 필터(초대자 몫만 — KNK-581)를
@@ -89,9 +87,8 @@ class InviteService(
     fun redeem(userId: Long, rawCode: String): InviteRedeemResponse {
         val redeemer = userRepository.findByIdForUpdate(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        if (!isActiveAccessAllowed(redeemer.status)) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
-        }
+        // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
+        requireActiveStatus(redeemer.status)
         // 사람이 카카오톡 본문을 보고 타이핑하는 값이라 trim·대문자 정규화 후 비교한다(발급 코드는 대문자+숫자).
         val code = rawCode.trim().uppercase()
         if (!CODE_FORMAT.matches(code)) {

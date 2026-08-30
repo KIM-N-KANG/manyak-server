@@ -6,6 +6,7 @@ import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.link.AccountLinkService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.SocialLoginService
@@ -138,6 +139,7 @@ class AuthController(
         val publicId = parsePublicId(jwt.subject)
         val user = userRepository.findByPublicId(publicId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
         return MeResponse(
             id = user.publicId.toString(),
             nickname = user.nickname,

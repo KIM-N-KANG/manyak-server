@@ -5,7 +5,7 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.global.security.isActiveAccessAllowed
+import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
@@ -60,10 +60,8 @@ class GuestDataMigrationService(
         // userId는 컨트롤러에서 인증된 실 사용자 id이므로 조회는 항상 성공한다(방어적으로 없으면 401).
         val user = userRepository.findByIdForUpdate(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 사용자 행을 이미 로드했으므로 추가 조회 없이 판정한다.
-        if (!isActiveAccessAllowed(user.status)) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
-        }
+        // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
+        requireActiveStatus(user.status)
         if (user.migratedAt != null) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
         }
