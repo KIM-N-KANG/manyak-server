@@ -12,6 +12,7 @@ import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StoryCharacterResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -139,8 +140,8 @@ class StoryService(
         val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
             .map { StoryCharacterResponse(name = it.name, imageUrl = it.imageUrl) }
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
-        // 저장은 ending id 기준이라 무모호하며, 노출은 이름으로 한다(엔딩 목록과 이름으로 상관, KNK-462).
-        val reachedEndings = resolveReachedEndingNames(userId, story.id)
+        // 저장도 노출도 이름 기준이다(V70) — 프론트는 엔딩 목록과 이름으로 상관한다(KNK-462).
+        val reachedEndings = resolveReachedEndingNames(userId, story.id, startSettings)
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
@@ -170,16 +171,37 @@ class StoryService(
         )
     }
 
-    /** 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서(sort_order)로 반환한다. 게스트는 빈 목록. */
-    private fun resolveReachedEndingNames(userId: Long?, storyId: Long): List<String> {
+    /**
+     * 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서로 반환한다. 게스트는 빈 목록.
+     *
+     * 집계의 정본 식별자가 이름이므로(V70) 이름을 그대로 읽는다. 표시 순서는 [startSettings]에 실린 **현재**
+     * 엔딩 순서를 따른다 — 제작자가 지웠던 엔딩을 **같은 이름으로 다시 만들면 여기서 자연히 다시 이어진다.**
+     * 지금 스토리에 없는 이름(교체돼 사라진 엔딩)은 순서를 알 수 없어 뒤에 이름순으로 붙인다. 도달 기록은
+     * 사라지지 않으므로 화면에서 빠지지 않는다.
+     */
+    private fun resolveReachedEndingNames(
+        userId: Long?,
+        storyId: Long,
+        startSettings: List<StoryStartSettingResponse>,
+    ): List<String> {
         if (userId == null) {
             return emptyList()
         }
-        val reachedIds = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId).map { it.endingId }
-        if (reachedIds.isEmpty()) {
+        // 유니크가 (회원, 스토리, 이름)이라 중복이 없지만, 방어적으로 distinct한다.
+        val reachedNames = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
+            .map { it.endingNameSnapshot }
+            .distinct()
+        if (reachedNames.isEmpty()) {
             return emptyList()
         }
-        return storyEndingRepository.findAllById(reachedIds).sortedBy { it.sortOrder }.map { it.name }
+        // 시작 설정 순서 → 그 안의 엔딩 순서(assemble이 sort_order로 정렬해 준다). 동명이면 첫 등장이 이긴다.
+        val orderByName = startSettings
+            .flatMap { it.endings }
+            .map { it.name }
+            .withIndex()
+            .associate { (index, name) -> name to index }
+            .withDefault { Int.MAX_VALUE }
+        return reachedNames.sortedWith(compareBy({ orderByName.getValue(it) }, { it }))
     }
 
     /**

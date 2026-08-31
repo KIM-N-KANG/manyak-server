@@ -226,6 +226,28 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
         assertThat(reaches.map { it.endingId }).containsExactly(happyEnding.id)
+        assertThat(reaches.map { it.endingNameSnapshot }).containsExactly("해피")
+    }
+
+    @Test
+    fun `엔딩이 교체돼 id 없이 도달해도 회원 집계에 이름으로 남는다`() {
+        publish()
+        val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
+        creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 라이브 행에 '해피'가 없어 FK를 만족시킬 id를 얻지 못한다. 예전에는 이 경우 집계를 통째로 건너뛰어,
+        // 제작자가 그 엔딩을 다시 공개해도 영원히 복구되지 않았다(V70 이전).
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "엔딩", choices = emptyList(), endingName = "해피")
+
+        streamMember(chat.publicId.toString(), "끝을 낸다.", jwtTokenProvider.issueAccessToken(member.publicId))
+
+        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
+        assertThat(reaches).hasSize(1)
+        // 값이 갈라져 있다: id는 없고 이름만 남는다.
+        assertThat(reaches.single().endingId).isNull()
+        assertThat(reaches.single().endingNameSnapshot).isEqualTo("해피")
     }
 
     // ---- [KNK-1065 / PR #224 Codex P2] 저장 판정이 AI에게 보낸 것과 같은 출처를 본다 ----

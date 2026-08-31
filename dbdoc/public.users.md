@@ -117,6 +117,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.story_likes" {
   bigint id

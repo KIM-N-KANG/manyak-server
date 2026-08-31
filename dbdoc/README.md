@@ -30,7 +30,7 @@
 | [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
 | [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
 | [public.story_chat_main_events](public.story_chat_main_events.md) | 4 |  | BASE TABLE |
-| [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
+| [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 6 |  | BASE TABLE |
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
 | [public.story_creation_requests](public.story_creation_requests.md) | 12 |  | BASE TABLE |
@@ -80,7 +80,7 @@ erDiagram
 "public.story_chat_main_events" }o--|| "public.story_main_events" : "FOREIGN KEY (main_event_id) REFERENCES story_main_events(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
-"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--o| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
 "public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
@@ -383,6 +383,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.image_presets" {
   bigint id

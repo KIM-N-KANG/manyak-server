@@ -308,14 +308,13 @@ class ChatTurnPersister(
         // 비워져 스토리 스냅샷의 "엔딩 id → 이름" 사전을 조회할 키가 사라지므로, 서재는 이 값으로 복구한다.
         chat.reachedEndingNameSnapshot = reachedEnding.name
         chat.status = ChatStatus.ENDED
-        // 회원 도달 집계는 엔딩 id가 있어야 한다(user_story_ending_reaches.ending_id는 NOT NULL FK).
-        // id 없이 기록된 도달은 집계에서 빠진다 — 채팅의 도달 기록은 남으므로 사용자에게 보이는 손실은 없다.
-        val endingId = reachedEnding.id ?: return
+        // 회원 도달 집계도 **id 없이 이름만으로** 남긴다(V70). 집계의 정본 식별자가 이름이라 id가 없어도
+        // 기록이 성립하고, 나중에 같은 이름의 엔딩이 다시 생기면 읽기가 자연히 다시 이어진다.
         val userId = chat.userId ?: return
         // 회원 도달 집계는 독립 트랜잭션에서 기록한다. 동시 도달로 유니크 위반이 나도 그 트랜잭션만 롤백되고
         // 이 턴 저장은 유지된다. 위반은 다른 트랜잭션이 이미 같은 도달을 기록한 것이므로 멱등 결과로 흡수한다.
         try {
-            endingReachRecorder.record(userId, chat.storyId, endingId)
+            endingReachRecorder.record(userId, chat.storyId, reachedEnding.id, reachedEnding.name)
         } catch (_: DataIntegrityViolationException) {
             // 동시 도달로 (회원, 스토리, 엔딩)이 이미 기록됨 — 무시.
         }

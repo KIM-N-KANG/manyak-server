@@ -7,8 +7,9 @@
 | id | bigint | nextval('user_story_ending_reaches_id_seq'::regclass) | false |  |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
-| ending_id | bigint |  | false |  | [public.story_endings](public.story_endings.md) |  |
+| ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| ending_name_snapshot | varchar(100) |  | false |  |  | KNK-1065: 도달 시점의 엔딩 이름. 정본 식별자이며 유니크 키다. ending_id는 엔딩 교체로 비워질 수 있는 보조 참조. |
 
 ## Constraints
 
@@ -16,17 +17,17 @@
 | ---- | ---- | ---------- |
 | fk_user_story_ending_reaches_story | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | fk_user_story_ending_reaches_user | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
-| fk_user_story_ending_reaches_ending | FOREIGN KEY | FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE |
+| fk_user_story_ending_reaches_ending | FOREIGN KEY | FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | user_story_ending_reaches_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_user_story_ending_reaches | UNIQUE | UNIQUE (user_id, story_id, ending_id) |
+| uq_user_story_ending_reaches_name | UNIQUE | UNIQUE (user_id, story_id, ending_name_snapshot) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
 | user_story_ending_reaches_pkey | CREATE UNIQUE INDEX user_story_ending_reaches_pkey ON public.user_story_ending_reaches USING btree (id) |
-| uq_user_story_ending_reaches | CREATE UNIQUE INDEX uq_user_story_ending_reaches ON public.user_story_ending_reaches USING btree (user_id, story_id, ending_id) |
 | idx_user_story_ending_reaches_user_story | CREATE INDEX idx_user_story_ending_reaches_user_story ON public.user_story_ending_reaches USING btree (user_id, story_id) |
+| uq_user_story_ending_reaches_name | CREATE UNIQUE INDEX uq_user_story_ending_reaches_name ON public.user_story_ending_reaches USING btree (user_id, story_id, ending_name_snapshot) |
 
 ## Relations
 
@@ -35,7 +36,7 @@ erDiagram
 
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--o| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 
 "public.user_story_ending_reaches" {
   bigint id
@@ -43,6 +44,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.users" {
   bigint id

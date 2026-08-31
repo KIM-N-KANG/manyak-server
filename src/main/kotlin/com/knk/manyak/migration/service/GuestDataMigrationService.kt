@@ -12,6 +12,7 @@ import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.http.HttpStatus
@@ -43,6 +44,8 @@ class GuestDataMigrationService(
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val userRepository: UserRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    // 이름 스냅샷이 비어 있는 채팅(롤링 배포 창에 구버전이 만든 행)의 이름을 라이브 엔딩에서 해소한다.
+    private val storyEndingRepository: StoryEndingRepository,
     private val serverAnalytics: ServerAnalytics,
 ) {
 
@@ -170,10 +173,24 @@ class GuestDataMigrationService(
 
     /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 upsert한다. 도달 전이면 아무것도 하지 않는다. */
     private fun backfillEndingReach(userId: Long, chat: StoryChat) {
-        val endingId = chat.reachedEndingId ?: return
-        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, endingId)) {
+        // 이름이 정본이다(V70). 엔딩이 교체돼 chat.reachedEndingId가 비어도 이름 스냅샷으로 백필한다.
+        //
+        // 이름 스냅샷이 비어 있으면 라이브 엔딩에서 해소한다. **롤링 배포 창에서 실제로 생기는 상태다** —
+        // 이름 컬럼(V67)이 아직 릴리스되지 않아 구버전 태스크는 도달을 id로만 기록하고, 그 채팅이 이관되면
+        // 이름을 알 수 없어 집계가 조용히 빠진다. 둘 다 없으면 남길 근거가 없어 건너뛴다.
+        val endingName = chat.reachedEndingNameSnapshot
+            ?: chat.reachedEndingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
+            ?: return
+        if (!userStoryEndingReachRepository
+                .existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName)
+        ) {
             userStoryEndingReachRepository.save(
-                UserStoryEndingReach(userId = userId, storyId = chat.storyId, endingId = endingId),
+                UserStoryEndingReach(
+                    userId = userId,
+                    storyId = chat.storyId,
+                    endingNameSnapshot = endingName,
+                    endingId = chat.reachedEndingId,
+                ),
             )
         }
     }

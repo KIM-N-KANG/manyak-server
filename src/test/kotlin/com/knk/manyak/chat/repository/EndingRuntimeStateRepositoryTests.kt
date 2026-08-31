@@ -60,24 +60,52 @@ class EndingRuntimeStateRepositoryTests {
     }
 
     @Test
-    fun `회원의 스토리별 도달 엔딩을 조회하고 존재 여부를 판정한다`() {
-        endingReachRepository.save(UserStoryEndingReach(userId = 1, storyId = 100, endingId = 1000))
-        endingReachRepository.save(UserStoryEndingReach(userId = 1, storyId = 100, endingId = 1001))
-        endingReachRepository.save(UserStoryEndingReach(userId = 1, storyId = 200, endingId = 1000))
-        endingReachRepository.save(UserStoryEndingReach(userId = 2, storyId = 100, endingId = 1000))
+    fun `회원의 스토리별 도달 엔딩을 조회하고 존재 여부를 이름으로 판정한다`() {
+        endingReachRepository.save(reach(userId = 1, storyId = 100, name = "해피", endingId = 1000))
+        endingReachRepository.save(reach(userId = 1, storyId = 100, name = "새드", endingId = 1001))
+        endingReachRepository.save(reach(userId = 1, storyId = 200, name = "해피", endingId = 1000))
+        endingReachRepository.save(reach(userId = 2, storyId = 100, name = "해피", endingId = 1000))
 
         val user1Story100 = endingReachRepository.findByUserIdAndStoryId(1, 100)
-        assertEquals(setOf(1000L, 1001L), user1Story100.map { it.endingId }.toSet())
-        assertTrue(endingReachRepository.existsByUserIdAndStoryIdAndEndingId(1, 100, 1000))
-        assertFalse(endingReachRepository.existsByUserIdAndStoryIdAndEndingId(1, 100, 9999))
+        assertEquals(setOf("해피", "새드"), user1Story100.map { it.endingNameSnapshot }.toSet())
+        assertTrue(endingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(1, 100, "해피"))
+        assertFalse(endingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(1, 100, "없는 엔딩"))
     }
 
     @Test
-    fun `동일 회원-스토리-엔딩 도달을 중복 기록하면 UNIQUE 제약으로 거부된다`() {
-        endingReachRepository.saveAndFlush(UserStoryEndingReach(userId = 1, storyId = 100, endingId = 1000))
+    fun `엔딩 id 없이 이름만으로도 도달을 기록한다`() {
+        // 비공개 상태에서 엔딩이 교체된 뒤 도달하면 FK를 만족시킬 id가 없다. 이름만으로 집계가 성립해야 한다(V70).
+        endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = null))
 
+        assertTrue(endingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(1, 100, "해피"))
+    }
+
+    @Test
+    fun `동일 회원-스토리-엔딩이름 도달을 중복 기록하면 UNIQUE 제약으로 거부된다`() {
+        endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = 1000))
+
+        // **id가 달라도** 같은 이름이면 거부된다 — 엔딩 교체로 id가 갈려도 같은 도달임을 알아보는 것이 V70의 목적이다.
         assertThrows(DataIntegrityViolationException::class.java) {
-            endingReachRepository.saveAndFlush(UserStoryEndingReach(userId = 1, storyId = 100, endingId = 1000))
+            endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = 2000))
         }
     }
+
+    @Test
+    fun `id가 둘 다 NULL이어도 같은 이름이면 중복이 거부된다`() {
+        // PostgreSQL의 UNIQUE는 NULL을 서로 다르게 취급한다. 키를 ending_id로 뒀다면 NULL 도달이 무한히
+        // 쌓였을 자리다 — 이름을 NOT NULL 키로 올린 이유다.
+        endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = null))
+
+        assertThrows(DataIntegrityViolationException::class.java) {
+            endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = null))
+        }
+    }
+
+    private fun reach(userId: Long, storyId: Long, name: String, endingId: Long?) =
+        UserStoryEndingReach(
+            userId = userId,
+            storyId = storyId,
+            endingNameSnapshot = name,
+            endingId = endingId,
+        )
 }
