@@ -184,7 +184,8 @@ class ChatController(
         summary = "공유된 채팅 열람",
         description = "공유 토큰으로 공유된 채팅을 조회합니다(스펙 §4-3-11). **인증이 필요하지 않습니다** — 추측 불가 UUID 링크 " +
             "보유가 접근 수단입니다. 발급 시점 커트라인 이하의 턴만 반환하므로 이후 원본이 진행돼도 내용은 변하지 않으며, " +
-            "커트라인 이내 턴이 재생성되면 활성본이 반영됩니다. 스토리 제목·프롤로그는 조회 시점의 라이브 값입니다. " +
+            "커트라인 이내 턴이 재생성되면 활성본이 반영됩니다. 스토리 제목은 열람자가 그 스토리를 읽을 수 있을 때만 " +
+            "조회 시점의 값이고, 비공개로 전환됐거나 삭제됐으면 채팅 시작 시점의 스냅샷입니다(KNK-1059). 프롤로그도 같은 규칙입니다. " +
             "열람에 불필요한 choices·suggestedInputs와 원본 chatId는 싣지 않습니다.",
     )
     @ApiResponses(
@@ -205,7 +206,10 @@ class ChatController(
     fun getChatShare(
         @Parameter(description = "공유 열람 토큰(공개 식별자)")
         @PathVariable shareId: String,
-    ): ChatShareResponse = chatService.getChatShare(shareId)
+        // 인증은 필요 없지만, 토큰이 실려 있으면 그 요청자로 스토리 읽기 권한을 판정한다(KNK-1059).
+        // 익명 열람은 null이라 공개 스토리만 현재 제목을 본다.
+        @CurrentUserId userId: Long?,
+    ): ChatShareResponse = chatService.getChatShare(shareId, userId)
 
     @Operation(
         summary = "채팅 삭제",

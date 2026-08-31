@@ -73,6 +73,7 @@ import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.http.HttpStatus
@@ -146,6 +147,11 @@ class ChatService(
                 creationId = storyCreationSessionRepository
                     .findFirstByStoryIdOrderByIdAsc(story.id)
                     ?.storylineRequestId,
+                // 시작 시점의 제목·썸네일도 여기서 **한 번만** 박는다(KNK-1059). 소유자가 나중에 스토리를
+                // 비공개로 되돌리거나 지우면 서재·이용내역이 이 값에서 멈춘다.
+                storyTitleSnapshot = story.title,
+                storyThumbnailKeySnapshot = story.thumbnailImageKey,
+                storyPrologueSnapshot = startSetting?.prologue,
             ),
         )
         structuredLogger.event(
@@ -166,7 +172,10 @@ class ChatService(
         )
     }
 
-    @Transactional(readOnly = true)
+    // 게이트 판정(스토리)과 표시 값(채팅 스냅샷·엔딩)을 여러 쿼리로 나눠 읽으므로 한 스냅샷에 묶는다(KNK-1059).
+    // READ_COMMITTED에서는 쿼리 사이에 소유자의 "비공개 전환 + 수정" 커밋이 끼어들면 게이트는 옛 공개 상태로
+    // 열린 채 자식 데이터만 새 값이 나와, 막으려던 유출이 그 틈으로 다시 샌다.
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatsByIds(request: BatchChatRequest, userId: Long?): List<ChatSummaryResponse> {
         // 공개 식별자(UUID 문자열)로 받는다. 형식이 잘못된 값은 매칭될 수 없으므로 조용히 제외한다.
         val requestedPublicIds = request.chatIds.mapNotNull { parsePublicIdOrNull(it) }
@@ -182,24 +191,25 @@ class ChatService(
         val chats = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
             .filter { isOwnerAccessAllowed(it.userId, userId) }
             .sortedWith(compareByDescending<StoryChat> { it.updatedAt }.thenByDescending { it.id })
-        return toSummaryResponses(chats)
+        return toSummaryResponses(chats, userId)
     }
 
     /**
      * 회원 서재(KNK-447): 요청자가 소유한 채팅 카드를 최근 활동순(updatedAt)으로 반환한다. 소프트 삭제는 제외한다.
      * 카드 스키마는 [getChatsByIds](/chats/batch)와 동일하다([toSummaryResponses]).
      */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getMyChats(userId: Long, limit: Int): List<ChatSummaryResponse> =
         toSummaryResponses(
             storyChatRepository.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId, PageRequest.of(0, limit)),
+            userId,
         )
 
     /**
      * 채팅 목록을 카드 응답으로 매핑한다. 스토리 제목·마지막 프리뷰를 각각 한 번의 배치 조회로 채운다(N+1 방지).
      * 입력 순서를 그대로 보존하므로, 정렬은 호출부(요청 순서·최근 활동순)에서 결정한다.
      */
-    private fun toSummaryResponses(chats: List<StoryChat>): List<ChatSummaryResponse> {
+    private fun toSummaryResponses(chats: List<StoryChat>, userId: Long?): List<ChatSummaryResponse> {
         if (chats.isEmpty()) {
             return emptyList()
         }
@@ -216,22 +226,51 @@ class ChatService(
             .associate { it.id to it.name }
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
+            // 제목·썸네일은 요청자가 지금 그 스토리를 읽을 수 있을 때만 현재 값을 쓴다(KNK-1059).
+            // 비공개로 되돌렸거나 삭제됐으면 채팅에 박아둔 스냅샷에서 멈춘다. storyId(public_id)는
+            // 요청자가 원래 알던 값이라 그대로 둔다 — 새로 새는 정보가 없다.
+            val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
             ChatSummaryResponse(
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
-                storyTitle = story?.title.orEmpty(),
+                storyTitle = (if (showsCurrent) story.title else chat.storyTitleSnapshot).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
-                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(story?.thumbnailImageKey),
+                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(
+                    if (showsCurrent) story.thumbnailImageKey else chat.storyThumbnailKeySnapshot,
+                ),
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
-                reachedEndings = chat.reachedEndingId?.let { id -> endingNameById[id]?.let(::listOf) }.orEmpty(),
+                reachedEndings = reachedEndingNameFor(chat, showsCurrent, endingNameById)
+                    ?.let(::listOf)
+                    .orEmpty(),
                 updatedAt = chat.updatedAt,
             )
         }
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * 서재 카드의 도달 엔딩 이름(KNK-1059). 엔딩 이름도 제목·프롤로그와 같은 규칙이지만, "내가 도달한 결말"이라
+     * 게이트로 비우지 않고 스냅샷으로 폴백한다 — 비우면 사용자가 실제로 도달한 엔딩이 서재에서 사라진다.
+     *
+     * 엔딩 행이 사라져 [StoryChat.reachedEndingId]가 NULL이 된 채팅도 스냅샷으로 살린다. 스토리 수정의
+     * `endings[]`는 전체 교체라 행을 삭제·재생성하고, FK가 `ON DELETE SET NULL`이라 소유자가 엔딩을 손대는
+     * 것만으로 남의 도달 기록이 끊긴다. 이제 이름 스냅샷이 있으니 기록은 남길 수 있다.
+     *
+     * **여기만 살아나는 비대칭이 있다**: 턴 단위로 보여주는 상세·공유는 `story_messages.reached_ending_id`도
+     * 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다. 채팅당 하나인 이 스냅샷을 아무 턴에나 붙일 수
+     * 없으므로 그쪽은 복구하지 않는다([reachedEndingNameOf] 참고).
+     */
+    private fun reachedEndingNameFor(
+        chat: StoryChat,
+        showsCurrent: Boolean,
+        endingNameById: Map<Long, String>,
+    ): String? {
+        val endingId = chat.reachedEndingId ?: return chat.reachedEndingNameSnapshot
+        return if (showsCurrent) endingNameById[endingId] else chat.reachedEndingNameSnapshot
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
         val chat = resolveChat(chatId)
         // 소유권 게이트(§4-5, KNK-480): 소유 채팅은 소유자만, 게스트 채팅은 게스트만 조회한다.
@@ -241,7 +280,10 @@ class ChatService(
         }
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
-        val storyTitle = story?.title.orEmpty()
+        // 서재와 같은 스냅샷 규칙(KNK-1059). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
+        // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목·프롤로그가 보여선 안 된다.
+        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
+        val storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
@@ -264,20 +306,28 @@ class ChatService(
 
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
-        val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
+        //
+        // 스토리를 읽을 수 없으면 추천 입력도 내리지 않는다(PR #220 Codex P1). 제목·프롤로그와 같은 유출인데
+        // 여기만 **스냅샷이 아니라 게이트로** 막는다 — 추천 입력은 값 하나가 아니라 목록이라 스냅샷하려면
+        // JSON 컬럼이나 별도 테이블이 필요한 반면, 입력을 돕는 보조 장치라 없어도 채팅이 성립하기 때문이다.
+        val suggestedInputs = if (showsCurrentStory && turns.isEmpty()) {
+            loadSuggestedInputs(startSetting?.id)
+        } else {
+            emptyList()
+        }
 
         return ChatDetailResponse(
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
-            prologue = startSetting?.prologue.orEmpty(),
+            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
             turns = turns.map { assistant ->
                 ChatTurnResponse(
                     id = assistant.id,
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
-                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -319,13 +369,43 @@ class ChatService(
     }
 
     /**
+     * 턴에 실을 도달 엔딩 이름(KNK-1059). 스토리를 읽을 수 있으면 현재 이름, 아니면 채팅 스냅샷이다.
+     *
+     * 스냅샷은 채팅당 하나(최초 도달)뿐이라 **턴의 엔딩이 그 도달과 같을 때만** 쓴다. 도달은
+     * [ChatTurnPersister]가 `chat.reachedEndingId != null`이면 더 인정하지 않으므로 실제로는 어긋날 수 없지만,
+     * 어긋난 데이터를 만나면 남의 현재 엔딩 이름을 흘리거나 엉뚱한 스냅샷을 붙이는 대신 null로 둔다.
+     *
+     * 같은 이유로 엔딩 행이 삭제돼 FK가 끊긴 경우도 여기서는 복구하지 않는다 — 메시지의 `reached_ending_id`까지
+     * NULL이 되어 어느 턴이 도달 턴이었는지 알 수 없기 때문이다. 서재([reachedEndingNameFor])는 채팅 단위라
+     * 스냅샷만으로 복구되므로 **서재만 살아나는 비대칭**이 생긴다.
+     */
+    private fun reachedEndingNameOf(
+        chat: StoryChat,
+        turnEndingId: Long?,
+        showsCurrentStory: Boolean,
+        endingNameById: Map<Long, String>,
+    ): String? {
+        val endingId = turnEndingId ?: return null
+        if (showsCurrentStory) {
+            return endingNameById[endingId]
+        }
+        return if (endingId == chat.reachedEndingId) chat.reachedEndingNameSnapshot else null
+    }
+
+    /**
      * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
      *
      * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
-     * 스토리 제목·프롤로그는 채팅 상세와 동일하게 조회 시점의 라이브 값을 읽는다(공유만 별도 동결하지 않음).
+     *
+     * 스토리 제목은 채팅 상세·서재와 같은 스냅샷 규칙을 탄다(KNK-1059). 열람자는 링크만 가진 익명일 수 있으므로
+     * [userId]는 알 수 있으면 그 값, 아니면 null이다. 기본값을 두지 않아 호출부가 매번 명시하게 한다 —
+     * 새 호출부가 무심코 익명 판정으로 빠지면 읽을 수 있는 사용자에게까지 스냅샷이 나가기 때문이다.
+     * 판정 결과는 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
+     * 삭제됐으면 채팅 스냅샷에서 멈춘다. 이 게이트가 없으면 비공개로 돌린 스토리의 최신 제목이 링크를 가진
+     * 아무에게나 보인다. 프롤로그(스토리 도입부 본문)도 같은 규칙을 탄다 — 제목보다 유출 폭이 커서다.
      */
-    @Transactional(readOnly = true)
-    fun getChatShare(shareId: String): ChatShareResponse {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    fun getChatShare(shareId: String, userId: Long?): ChatShareResponse {
         val share = parsePublicIdOrNull(shareId)?.let { storyChatShareRepository.findByPublicId(it) }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
         // 공유에는 삭제 컬럼이 없다 — 유효성은 원본 채팅의 deleted_at에 종속된다(공유 해지 수단 = 채팅 삭제).
@@ -334,6 +414,7 @@ class ChatService(
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
@@ -346,13 +427,13 @@ class ChatService(
         return ChatShareResponse(
             id = share.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = story?.title.orEmpty(),
-            prologue = startSetting?.prologue.orEmpty(),
+            storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty(),
+            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
             turns = turns.map { assistant ->
                 ChatShareTurnResponse(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
-                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
                     createdAt = assistant.createdAt,
                 )
             },

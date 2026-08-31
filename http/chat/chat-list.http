@@ -297,3 +297,145 @@ Accept: application/json
 {
   "chatIds": ["ae578609-2e90-4923-af0e-64ba6a0a6f56"]
 }
+
+### ==================================================================
+### [KNK-1059] 스토리 스냅샷 시나리오 — 채팅 카드 (S1~S5)
+###
+### 채팅 카드(배치 조회 /chats/batch 와 서재 GET /users/me/chats)는 같은 조립 함수를 씁니다
+### (ChatService.toSummaryResponses). 그래서 여기서 확인하는 규칙이 서재에도 그대로 적용됩니다.
+###
+###   story.isCurrentMetadataVisibleTo(요청자) 가 참이면 → 스토리의 현재 제목·썸네일
+###   거짓이면(비공개·삭제)                              → 채팅 시작 시점의 스냅샷
+###
+### storyId(공개 식별자)는 요청자가 원래 알던 값이라 그대로 둡니다.
+###
+### 서재(/users/me/chats)로 같은 걸 확인하려면 계정이 둘 필요합니다(스토리 소유자 ≠ 채팅 소유자여야
+### 게이트가 닫힙니다). 배치 경로는 게스트 채팅으로 재현할 수 있어 토큰 하나로 끝나므로 여기 둡니다.
+###
+###
+### 도달 엔딩 이름(reachedEndings)도 같은 스냅샷 규칙을 탑니다. 엔딩 도달에는 AI 판정이 필요하고 스텁 AI는
+### 엔딩을 도달시키지 않아 자동 요청으로 넣지 못했습니다 — 실 AI로 도달시킨 뒤 스토리를 비공개로 되돌리고
+### DB에서 story_endings.name 을 바꿔 재조회하면, reachedEndings 가 변경 전 이름이어야 합니다.
+### 위 1~10번과 독립된 자체 준비 흐름입니다. S1부터 순서대로 실행하세요.
+### ==================================================================
+
+### S1. (준비 1/3) 소유자 토큰으로 공개 스토리 등록
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "원래 제목",
+  "oneLineIntro": "스냅샷 검증용 스토리",
+  "genres": ["판타지"],
+  "visibility": "PUBLIC",
+  "storySettings": { "worldSetting": "세계", "characterSetting": "인물", "userRoleSetting": "역할", "ruleSetting": "규칙" },
+  "startSettings": [
+    {
+      "name": "시작 장면",
+      "prologue": "원래 프롤로그",
+      "startSituation": "시작 상황",
+      "suggestedInputs": ["원래 추천 1", "원래 추천 2", "원래 추천 3"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("스토리 등록이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapStoryId", response.body.id);
+%}
+
+### S2. (준비 2/3) 게스트로 채팅 생성 — 이 시점 제목·썸네일이 스냅샷으로 박힌다
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{snapStoryId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(스토리가 PUBLIC인지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapChatId", response.body.id);
+%}
+
+### S3. (a) 공개 상태에서 배치 조회 → 현재 제목
+POST {{baseUrl}}/api/v1/chats/batch
+Content-Type: application/json
+Accept: application/json
+
+{
+  "chatIds": ["{{snapChatId}}"]
+}
+
+> {%
+    client.test("배치 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("공개 스토리는 현재 제목을 보여준다", () => {
+        client.assert(response.body.length === 1, `1건이어야 합니다. actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body[0].storyTitle === "원래 제목",
+            `storyTitle이 다릅니다. actual=${response.body[0].storyTitle}`);
+    });
+    // S5에서 썸네일이 그대로인지 대조하려고 현재 값을 저장한다(썸네일이 없는 스토리면 null일 수 있다).
+    client.global.set("snapThumbnailUrlSm", String(response.body[0].thumbnailUrlSm));
+%}
+
+### S4. (b) 소유자가 비공개로 되돌리고 제목을 바꾼다
+# 썸네일 키는 등록 시 1회 확정되는 값이라 수정 API로 바꿀 수 없습니다(§4-3-9). 그래서 이 시나리오는
+# 제목으로 규칙을 확인하고, 썸네일은 "값이 바뀌지 않는지"만 대조합니다.
+PATCH {{baseUrl}}/api/v1/stories/{{snapStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "바뀐 제목",
+  "visibility": "PRIVATE"
+}
+
+> {%
+    client.test("수정이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("스토리 쪽 제목은 실제로 바뀌었다", () => {
+        client.assert(response.body.title === "바뀐 제목", `title 미교체. actual=${response.body.title}`);
+    });
+%}
+
+### S5. (b) 비공개 전환 후 배치 재조회 → 스냅샷 제목
+# 카드가 사라지거나 회색으로 비지 않고, 변경 **전** 제목으로 멈춰 있어야 합니다.
+POST {{baseUrl}}/api/v1/chats/batch
+Content-Type: application/json
+Accept: application/json
+
+{
+  "chatIds": ["{{snapChatId}}"]
+}
+
+> {%
+    client.test("배치 재조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const card = response.body[0];
+    client.test("비공개 전환 뒤에도 카드는 남는다", () => {
+        client.assert(response.body.length === 1,
+            `카드가 사라졌습니다(스냅샷이 아니라 필터링되고 있음). actual=${JSON.stringify(response.body)}`);
+    });
+    client.test("제목은 스냅샷(변경 전)이다", () => {
+        client.assert(card.storyTitle === "원래 제목",
+            `비공개 전환 후 제목이 새고 있습니다. expected=원래 제목 actual=${card.storyTitle}`);
+    });
+    client.test("썸네일 URL도 그대로다", () => {
+        client.assert(String(card.thumbnailUrlSm) === client.global.get("snapThumbnailUrlSm"),
+            `썸네일이 바뀌었습니다. expected=${client.global.get("snapThumbnailUrlSm")} actual=${card.thumbnailUrlSm}`);
+    });
+%}

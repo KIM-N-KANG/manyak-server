@@ -44,6 +44,21 @@ class StoryChat(
     @Column(name = "creation_id", updatable = false)
     val creationId: UUID? = null,
 
+    // 채팅 시작 시점의 스토리 제목·썸네일 키(KNK-1059). creationId와 같은 성격의 1회 해석 값이다 —
+    // 소유자가 스토리를 비공개로 되돌리거나 지운 뒤에도 서재·이용내역이 보여줄 값이 있어야 하기 때문에 박아둔다.
+    // 원본 컬럼과 타입을 맞춘다(stories.title varchar(100), stories.thumbnail_image_key varchar(64)).
+    @Column(name = "story_title_snapshot", length = 100)
+    val storyTitleSnapshot: String? = null,
+
+    @Column(name = "story_thumbnail_key_snapshot", length = 64)
+    val storyThumbnailKeySnapshot: String? = null,
+
+    // 시작 설정의 프롤로그 본문도 같이 박는다. 제목보다 유출 폭이 커서다 — 공유 열람은 무인증 경로라
+    // 비공개로 되돌린 스토리의 도입부 본문이 링크만 가진 누구에게나 흘러갔다.
+    // 원본과 타입을 맞춘다(story_start_settings.prologue TEXT, nullable).
+    @Column(name = "story_prologue_snapshot", columnDefinition = "TEXT")
+    val storyPrologueSnapshot: String? = null,
+
     @Column(length = 100)
     var title: String? = null,
 
@@ -70,6 +85,12 @@ class StoryChat(
     // 최초 도달 엔딩(story_endings.id). 값이 있으면 이후 턴 요청에 엔딩 후보를 싣지 않아 채팅당 최초 1회를 보장한다.
     @Column(name = "reached_ending_id")
     var reachedEndingId: Long? = null,
+
+    // 도달 시점의 엔딩 이름 스냅샷(KNK-1059). 제목·프롤로그와 달리 채팅 생성 시점에는 정해지지 않아
+    // [reachedEndingId]를 박는 그 자리에서 함께 기록한다. 채팅당 도달 엔딩은 최초 1회뿐이라 컬럼 하나로
+    // 서재·상세·공유 세 경로를 모두 덮는다. 원본과 타입을 맞춘다(story_endings.name varchar(100)).
+    @Column(name = "reached_ending_name_snapshot", length = 100)
+    var reachedEndingNameSnapshot: String? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

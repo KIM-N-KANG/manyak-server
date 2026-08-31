@@ -84,4 +84,14 @@ class Story(
      */
     fun isReadableBy(userId: Long?): Boolean =
         isPubliclyVisible() || this.userId == null || (userId != null && userId == this.userId)
+
+    /**
+     * 이 스토리를 참조하는 카드·목록이 **현재** 제목·썸네일을 그대로 보여도 되는지(KNK-1059).
+     *
+     * [isReadableBy]는 삭제([deletedAt])를 보지 않으므로 여기서 함께 판정한다. 거짓이면 호출부는
+     * 스토리의 현재 값 대신 참조하는 쪽이 들고 있는 스냅샷을 쓴다 — 소유자가 공개를 거둔 뒤의 제목·썸네일이
+     * 이미 채팅을 시작한 남에게 계속 흘러가는 것을 막기 위해서다(PR #216 Codex P1).
+     */
+    fun isCurrentMetadataVisibleTo(userId: Long?): Boolean =
+        deletedAt == null && isReadableBy(userId)
 }

@@ -173,6 +173,9 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         val updated = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(updated.reachedEndingId).isEqualTo(happyEnding.id)
+        // 도달 시점 이름 스냅샷(KNK-1059). 나중에 스토리가 비공개로 돌아가고 엔딩 이름이 바뀌어도
+        // 이미 도달한 사용자에게는 이 값이 남는다.
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
         assertThat(updated.status).isEqualTo(ChatStatus.ENDED)
 
         // 도달 턴 ASSISTANT 메시지에 reached_ending_id 표식.
