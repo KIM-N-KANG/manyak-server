@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.observability.AiTraceLink
-import com.knk.manyak.image.service.CharacterImageStorage
+import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.story.client.AiCharacterAppearance
 import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiResponseMeta
@@ -14,6 +14,7 @@ import com.knk.manyak.story.client.AiStorySettings
 import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
+import com.knk.manyak.story.client.AiThumbnailImage
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.Lorebook
@@ -98,6 +99,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Volatile
         var characterImages: List<AiCharacterImage> = emptyList()
 
+        // 컴파일 응답의 표지 썸네일(KNK-1069). null이면 필드 자체를 보내지 않는 구버전 AI와 같은 상태다.
+        @Volatile
+        var thumbnailImage: AiThumbnailImage? = null
+
         // 스텁 스토리지가 받은 (objectKey, contentType, 바이트 길이)를 기록한다. 업로드 호출 여부·키 규칙 검증용.
         val uploads = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, Int>>()
 
@@ -152,6 +157,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storyEndings = endingsOverride ?: endings,
                     characterAppearances = characterAppearances,
                     characterImages = characterImages,
+                    thumbnailImage = thumbnailImage,
                     meta = AiResponseMeta(),
                 )
             }
@@ -160,10 +166,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         /** 실제 S3 대신 업로드를 기록하는 스텁. 반환 URL은 운영과 같은 `base-url + 객체 키` 모양이다. */
         @Bean
         @Primary
-        fun fakeCharacterImageStorage(
+        fun fakeGeneratedImageStorage(
             storyRepository: StoryRepository,
             transactionManager: PlatformTransactionManager,
-        ): CharacterImageStorage = object : CharacterImageStorage {
+        ): GeneratedImageStorage = object : GeneratedImageStorage {
             override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
                 attemptedUploadKeys += objectKey
                 if (commitStoryOnUpload) {
@@ -214,6 +220,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         flipSessionToCreatedId = null
         characterAppearances = emptyList()
         characterImages = emptyList()
+        thumbnailImage = null
         uploads.clear()
         deletes.clear()
         attemptedUploadKeys.clear()
@@ -641,6 +648,83 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         // 스토리 행이 남아 있으니 지우지 않는다(고아 객체 비용 < 깨진 이미지 피해).
         assertThat(deletes).isEmpty()
         assertThat(storyRepository.findAll()).hasSize(1)
+    }
+
+    @Test
+    fun `컴파일이 생성한 표지 썸네일을 올려 thumbnail_image_url에 저장하고 상세에 노출한다`() {
+        thumbnailImage = AiThumbnailImage(
+            imageName = "썸네일 기본",
+            imageBase64 = WEBP_BASE64,
+            contentType = "image/webp",
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        // 객체 키는 thumbnails/generated/{storyPublicId}/{이름}_{uuid 앞 8자리}.webp다(인물과 같은 규칙, 다른 prefix).
+        val thumbnailUpload = uploads.single { it.first.startsWith("thumbnails/generated/") }
+        assertThat(thumbnailUpload.first)
+            .matches("thumbnails/generated/${story.publicId}/썸네일_기본_[0-9a-f]{8}\\.webp")
+        assertThat(thumbnailUpload.second).isEqualTo("image/webp")
+        assertThat(thumbnailUpload.third).isEqualTo(WEBP_BYTE_LENGTH)
+        assertThat(story.thumbnailImageUrl).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
+
+        // 상세 응답의 thumbnailUrl은 프리셋이 아니라 생성 표지를 가리킨다.
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo("https://cdn.test/${thumbnailUpload.first}")
+    }
+
+    @Test
+    fun `표지 생성이 실패하면 URL 없이 저장하고 프리셋 경로에 남는다`() {
+        // 에러 코드가 있으면 base64가 함께 와도 실패로 본다(인물 이미지와 같은 원칙).
+        thumbnailImage = AiThumbnailImage(
+            imageName = "썸네일_기본",
+            imageBase64 = WEBP_BASE64,
+            contentType = "image/webp",
+            error = "generation_failed",
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `구버전 AI라 thumbnail_image가 없어도 스토리 생성은 그대로 성공한다`() {
+        // 운영 AI(v0.2.6)는 아직 이 필드를 보내지 않는다. 실패 케이스와 같은 결과여야 한다.
+        thumbnailImage = null
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(uploads).isEmpty()
+    }
+
+    @Test
+    fun `저장 트랜잭션이 실패하면 이미 올린 표지 썸네일도 지운다`() {
+        // 인물 이미지와 같은 보상 삭제 경로를 표지도 탄다(고아 객체 방지).
+        endingsOverride = listOf(
+            AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+            AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+        )
+        thumbnailImage = AiThumbnailImage(imageName = "썸네일", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyRepository.findAll()).isEmpty()
+        assertThat(uploads).hasSize(1)
+        assertThat(deletes).containsExactly(uploads.single().first)
     }
 
     private fun storyCreationTimerCount(outcome: String): Long =

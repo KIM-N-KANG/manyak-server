@@ -17,6 +17,7 @@
 | status | varchar(20) | 'PUBLISHED'::character varying | false |  |  |  |
 | visibility | varchar(20) | 'PUBLIC'::character varying | false |  |  |  |
 | thumbnail_image_key | varchar(64) |  | true |  | [public.image_presets](public.image_presets.md) |  |
+| thumbnail_image_url | text |  | true |  |  |  |
 
 ## Constraints
 
@@ -66,6 +67,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+  text thumbnail_image_url
 }
 "public.story_settings" {
   bigint id

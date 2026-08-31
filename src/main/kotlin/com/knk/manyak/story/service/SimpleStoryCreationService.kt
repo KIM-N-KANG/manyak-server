@@ -17,12 +17,13 @@ import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.image.service.CharacterImageObjectKeys
-import com.knk.manyak.image.service.CharacterImageStorage
+import com.knk.manyak.image.service.GeneratedImageObjectKeys
+import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.image.service.ImageStageBudget
 import com.knk.manyak.story.client.AiCharacter
 import com.knk.manyak.story.client.AiCharacterAppearance
 import com.knk.manyak.story.client.AiCharacterImage
+import com.knk.manyak.story.client.AiThumbnailImage
 import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
@@ -118,7 +119,7 @@ class SimpleStoryCreationService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
-    private val characterImageStorage: CharacterImageStorage,
+    private val generatedImageStorage: GeneratedImageStorage,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
     private val meterRegistry: MeterRegistry,
@@ -159,13 +160,13 @@ class SimpleStoryCreationService(
         // 스토리 생성을 막지 않는다는 graceful 원칙을 따른다.
         const val CHARACTER_MAX_COUNT = 5
 
-        // 인물 이미지 단계(업로드 + 실패 즉시 삭제 + 보상 삭제) 전체 시간 예산.
-        // 정상 경로는 인물 5명 × 수백 ms 수준이라 30초는 여유롭게 남는다. 반대로 S3가 느리면 호출당 상한
-        // (apiCallTimeout 10초)이 5회 이상 누적될 수 있는데, 이 예산이 그 누적을 30초에서 끊는다.
-        val CHARACTER_IMAGE_STAGE_BUDGET: Duration = Duration.ofSeconds(30)
+        // 생성 이미지 단계(업로드 + 실패 즉시 삭제 + 보상 삭제) 전체 시간 예산. 인물과 표지 썸네일이 **함께 쓴다**.
+        // 정상 경로는 인물 5명 + 표지 1장 × 수백 ms 수준이라 30초는 여유롭게 남는다. 반대로 S3가 느리면 호출당
+        // 상한(apiCallTimeout 10초)이 여러 번 누적될 수 있는데, 이 예산이 그 누적을 30초에서 끊는다.
+        val GENERATED_IMAGE_STAGE_BUDGET: Duration = Duration.ofSeconds(30)
 
-        // 객체 키 형식은 [CharacterImageObjectKeys]가 소유한다(스펙 §4-4). AI는 WebP만 보낸다.
-        const val CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE = "image/webp"
+        // 객체 키 형식은 [GeneratedImageObjectKeys]가 소유한다(스펙 §4-4). AI는 WebP만 보낸다.
+        const val GENERATED_IMAGE_DEFAULT_CONTENT_TYPE = "image/webp"
 
         // 크레딧 원장 소모·환불 행의 ref_type(연관 리소스 종류). 소모는 STORY 리소스를 가리킨다(스펙 §4-3-7).
         const val STORY_CREDIT_REF_TYPE = "STORY"
@@ -1037,11 +1038,15 @@ class SimpleStoryCreationService(
         val appearancesByName = normalizedAppearances.filterKeys(allowedNames::contains)
         val imagesByName = normalizedImages.filterKeys(allowedNames::contains)
         // 업로드와 보상 삭제가 같은 예산을 나눠 쓴다 — 이미지 단계 전체가 스토리 생성 요청을 끌고 가지 않게 한다.
-        val imageBudget = ImageStageBudget.startingNow(CHARACTER_IMAGE_STAGE_BUDGET)
-        // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 story_characters에 저장한다.
+        val imageBudget = ImageStageBudget.startingNow(GENERATED_IMAGE_STAGE_BUDGET)
+        // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 저장한다.
         val uploadedImages = uploadCharacterImages(storyPublicId, imagesByName, imageBudget)
+        // 표지 썸네일도 같은 예산을 나눠 쓴다(KNK-1069). 실패하면 null이고 노출은 프리셋 표지로 떨어진다.
+        val uploadedThumbnail = uploadThumbnailImage(storyPublicId, aiResponse.thumbnailImage, imageBudget)
+        // 보상 삭제 대상은 인물·표지를 가리지 않고 "이번에 올린 객체 전부"다.
+        val uploadedObjectKeys = uploadedImages.values.map { it.objectKey } + listOfNotNull(uploadedThumbnail?.objectKey)
 
-        return runWithCharacterImageCleanup(storyPublicId, uploadedImages, imageBudget) {
+        return runWithGeneratedImageCleanup(storyPublicId, uploadedObjectKeys, imageBudget) {
             transactionTemplate.execute {
                 val lockedSession = storyCreationSessionRepository.findByIdForUpdate(session.id)
                     ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "간편 제작 진행 정보를 찾을 수 없습니다.")
@@ -1062,6 +1067,9 @@ class SimpleStoryCreationService(
                         genre = genre,
                         // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
                         thumbnailImageKey = storyThumbnailLinker.linkFor(genreTags.map { it.name }),
+                        // 컴파일이 생성한 표지가 있으면 함께 굳힌다(KNK-1069). 프리셋 키는 생성 성공이어도 지우지
+                        // 않는다 — 생성 URL이 비면 노출이 자동으로 프리셋으로 떨어져야 한다(폴백은 ImageUrlResolver).
+                        thumbnailImageUrl = uploadedThumbnail?.url,
                         // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
                         visibility = StoryVisibility.PRIVATE,
                     ),
@@ -1188,7 +1196,7 @@ class SimpleStoryCreationService(
     }
 
     /** 업로드한 객체 키와 그 서빙 URL. 저장 실패 시 보상 삭제에 객체 키가 필요해 URL만 들고 다니지 않는다. */
-    private data class UploadedCharacterImage(val objectKey: String, val url: String)
+    private data class UploadedImage(val objectKey: String, val url: String)
 
     /**
      * 인물 이름을 정규화해 `이름 → 항목` 맵으로 만든다(스펙 §5-3-3의 name 매칭 키).
@@ -1238,13 +1246,13 @@ class SimpleStoryCreationService(
         storyPublicId: UUID,
         imagesByName: Map<String, AiCharacterImage>,
         budget: ImageStageBudget,
-    ): Map<String, UploadedCharacterImage> = imagesByName.mapNotNull { (name, image) ->
+    ): Map<String, UploadedImage> = imagesByName.mapNotNull { (name, image) ->
         if (image.error != null) {
             return@mapNotNull null
         }
         if (!budget.hasRoomForCall()) {
             // 예산이 끝났으면 남은 인물은 올리지 않는다 — 저장소 지연이 스토리 생성 요청을 끌고 가지 않게 한다.
-            logBudgetExhausted(storyPublicId, "upload")
+            logBudgetExhausted(storyPublicId, "character_image", "upload")
             return@mapNotNull null
         }
         val base64 = image.imageBase64?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -1252,48 +1260,102 @@ class SimpleStoryCreationService(
         val bytes = try {
             Base64.getDecoder().decode(base64)
         } catch (exception: Exception) {
-            logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
+            logGeneratedImageEvent("character_image_upload_failed", storyPublicId, exception)
             return@mapNotNull null
         }
         // 파일명에 인물 이름을 드러낸다(KNK-1010). 이름은 이미 정규화(trim·100자 절단)된 저장 이름이며,
-        // 키에 쓸 수 없는 문자는 [CharacterImageObjectKeys]가 걸러낸다.
-        val objectKey = CharacterImageObjectKeys.newObjectKey(storyPublicId, name)
+        // 키에 쓸 수 없는 문자는 [GeneratedImageObjectKeys]가 걸러낸다.
+        val objectKey = GeneratedImageObjectKeys.newObjectKey(
+            GeneratedImageObjectKeys.KEY_PREFIX_CHARACTER,
+            storyPublicId,
+            name,
+        )
         val url = try {
-            characterImageStorage.upload(
+            generatedImageStorage.upload(
                 objectKey,
                 bytes,
-                image.contentType?.takeIf { it.isNotBlank() } ?: CHARACTER_IMAGE_DEFAULT_CONTENT_TYPE,
+                image.contentType?.takeIf { it.isNotBlank() } ?: GENERATED_IMAGE_DEFAULT_CONTENT_TYPE,
             )
         } catch (exception: Exception) {
             // 이미지 한 장 때문에 스토리 생성이 실패해서는 안 된다. 사유만 남기고 이미지 없이 진행한다.
-            logCharacterImageEvent("character_image_upload_failed", storyPublicId, exception)
+            logGeneratedImageEvent("character_image_upload_failed", storyPublicId, exception)
             // 예외가 났어도 저장소는 객체를 받았을 수 있다(응답만 유실된 경우). 이 키는 반환값에 실리지 않아
             // 트랜잭션 보상 삭제가 닿지 못하므로 여기서 지운다. 실제로 안 올라갔으면 삭제는 무해한 no-op이다.
-            deleteCharacterImageQuietly(storyPublicId, objectKey, budget)
+            deleteGeneratedImageQuietly(storyPublicId, objectKey, budget)
             null
         }
-        url?.let { name to UploadedCharacterImage(objectKey, it) }
+        url?.let { name to UploadedImage(objectKey, it) }
     }.toMap()
 
     /**
-     * [block]이 예외로 끝나면 이미 올린 인물 이미지를 best-effort로 지우고 원래 예외를 다시 던진다.
+     * 컴파일이 생성한 표지 썸네일을 S3에 올린다(KNK-1069). 실패하면 null이고 노출은 프리셋 표지로 떨어진다.
+     *
+     * 인물 이미지와 같은 원칙이다 — **DB 트랜잭션 밖에서** 호출하고, 디코딩·업로드 실패는 흡수해 표지 없이
+     * 저장을 이어간다(표지 한 장 때문에 스토리 생성이 실패해서는 안 된다). [AiThumbnailImage.error]가 있으면
+     * base64가 함께 와도 실패로 본다(에러 코드가 우선). 구버전 AI는 필드 자체를 보내지 않아 [image]가 null이다.
+     */
+    private fun uploadThumbnailImage(
+        storyPublicId: UUID,
+        image: AiThumbnailImage?,
+        budget: ImageStageBudget,
+    ): UploadedImage? {
+        if (image == null || image.error != null) {
+            return null
+        }
+        if (!budget.hasRoomForCall()) {
+            logBudgetExhausted(storyPublicId, "thumbnail_image", "upload")
+            return null
+        }
+        val base64 = image.imageBase64?.takeIf { it.isNotBlank() } ?: return null
+        // 디코딩은 업로드 밖에서 먼저 끝낸다 — 깨진 base64는 올라간 객체가 없으니 보상 삭제도 필요 없다.
+        val bytes = try {
+            Base64.getDecoder().decode(base64)
+        } catch (exception: Exception) {
+            logGeneratedImageEvent("thumbnail_image_upload_failed", storyPublicId, exception)
+            return null
+        }
+        // 파일명은 AI가 준 image_name을 sanitize해 쓴다(비었으면 `thumbnail`). 이름은 LLM 산출물이라 신뢰 경계다.
+        val objectKey = GeneratedImageObjectKeys.newObjectKey(
+            GeneratedImageObjectKeys.KEY_PREFIX_THUMBNAIL,
+            storyPublicId,
+            image.imageName.orEmpty(),
+            GeneratedImageObjectKeys.FALLBACK_NAME_THUMBNAIL,
+        )
+        val url = try {
+            generatedImageStorage.upload(
+                objectKey,
+                bytes,
+                image.contentType?.takeIf { it.isNotBlank() } ?: GENERATED_IMAGE_DEFAULT_CONTENT_TYPE,
+            )
+        } catch (exception: Exception) {
+            logGeneratedImageEvent("thumbnail_image_upload_failed", storyPublicId, exception)
+            // 예외가 났어도 저장소는 객체를 받았을 수 있다(응답만 유실된 경우). 이 키는 반환값에 실리지 않아
+            // 트랜잭션 보상 삭제가 닿지 못하므로 여기서 지운다. 실제로 안 올라갔으면 삭제는 무해한 no-op이다.
+            deleteGeneratedImageQuietly(storyPublicId, objectKey, budget)
+            null
+        }
+        return url?.let { UploadedImage(objectKey, it) }
+    }
+
+    /**
+     * [block]이 예외로 끝나면 이번 요청에서 올린 생성 이미지(인물·표지)를 best-effort로 지우고 원래 예외를 다시 던진다.
      *
      * 업로드는 트랜잭션보다 먼저 끝나므로, 저장이 409·502·DB 오류로 깨지면 객체 키가 어디에도 기록되지 않은
      * 고아 객체가 남는다(키가 매번 UUID라 재시도로도 회수되지 않는다). 삭제 실패는 로그만 남긴다 —
      * 정리 실패가 원래 실패 원인을 가려서는 안 된다.
      */
-    private fun <T> runWithCharacterImageCleanup(
+    private fun <T> runWithGeneratedImageCleanup(
         storyPublicId: UUID,
-        uploadedImages: Map<String, UploadedCharacterImage>,
+        uploadedObjectKeys: List<String>,
         budget: ImageStageBudget,
         block: () -> T,
     ): T {
         try {
             return block()
         } catch (throwable: Throwable) {
-            if (uploadedImages.isNotEmpty() && isStoryAbsent(storyPublicId)) {
-                uploadedImages.values.forEach { uploaded ->
-                    deleteCharacterImageQuietly(storyPublicId, uploaded.objectKey, budget)
+            if (uploadedObjectKeys.isNotEmpty() && isStoryAbsent(storyPublicId)) {
+                uploadedObjectKeys.forEach { objectKey ->
+                    deleteGeneratedImageQuietly(storyPublicId, objectKey, budget)
                 }
             }
             throw throwable
@@ -1313,7 +1375,7 @@ class SimpleStoryCreationService(
         val exists = storyRepository.existsByPublicId(storyPublicId)
         if (exists) {
             structuredLogger.event(
-                "character_image_cleanup_skipped",
+                "generated_image_cleanup_skipped",
                 "story_public_id" to storyPublicId.toString(),
                 "reason" to "story_exists",
             )
@@ -1321,7 +1383,7 @@ class SimpleStoryCreationService(
         !exists
     } catch (exception: Exception) {
         structuredLogger.event(
-            "character_image_cleanup_skipped",
+            "generated_image_cleanup_skipped",
             "story_public_id" to storyPublicId.toString(),
             "reason" to "lookup_failed",
             "error_type" to (exception::class.simpleName ?: "UNKNOWN"),
@@ -1333,28 +1395,36 @@ class SimpleStoryCreationService(
      * 고아가 될 객체를 지운다. 삭제 실패는 로그만 남긴다 — 정리 실패가 원래 실패 원인을 가려서는 안 된다.
      * 예산이 끝났으면 삭제도 건너뛴다(정리 때문에 요청이 더 늘어지면 안 된다 — 남은 객체는 고아로 수용).
      */
-    private fun deleteCharacterImageQuietly(storyPublicId: UUID, objectKey: String, budget: ImageStageBudget) {
+    private fun deleteGeneratedImageQuietly(storyPublicId: UUID, objectKey: String, budget: ImageStageBudget) {
+        val kind = imageKindOf(objectKey)
         if (!budget.hasRoomForCall()) {
-            logBudgetExhausted(storyPublicId, "cleanup")
+            logBudgetExhausted(storyPublicId, kind, "cleanup")
             return
         }
         try {
-            characterImageStorage.delete(objectKey)
+            generatedImageStorage.delete(objectKey)
         } catch (exception: Exception) {
-            logCharacterImageEvent("character_image_cleanup_failed", storyPublicId, exception)
+            logGeneratedImageEvent("${kind}_cleanup_failed", storyPublicId, exception)
         }
     }
 
-    private fun logBudgetExhausted(storyPublicId: UUID, stage: String) {
+    /**
+     * 로그 이벤트 접두어를 객체 키에서 되읽는다. 인물·표지가 같은 정리 경로를 지나므로, 어느 쪽이 실패했는지는
+     * 키 prefix가 유일하게 남은 단서다(`character_image_*` · `thumbnail_image_*` 관례 유지).
+     */
+    private fun imageKindOf(objectKey: String): String =
+        if (objectKey.startsWith(GeneratedImageObjectKeys.KEY_PREFIX_THUMBNAIL)) "thumbnail_image" else "character_image"
+
+    private fun logBudgetExhausted(storyPublicId: UUID, kind: String, stage: String) {
         structuredLogger.event(
-            "character_image_budget_exhausted",
+            "${kind}_budget_exhausted",
             "story_public_id" to storyPublicId.toString(),
             "stage" to stage,
         )
     }
 
-    /** 인물 이미지 실패 관측용 구조화 로그. base64·URL은 싣지 않는다(개인정보·용량). */
-    private fun logCharacterImageEvent(eventName: String, storyPublicId: UUID, exception: Exception) {
+    /** 생성 이미지 실패 관측용 구조화 로그. base64·URL은 싣지 않는다(개인정보·용량). */
+    private fun logGeneratedImageEvent(eventName: String, storyPublicId: UUID, exception: Exception) {
         structuredLogger.event(
             eventName,
             "story_public_id" to storyPublicId.toString(),
@@ -1373,7 +1443,7 @@ class SimpleStoryCreationService(
         story: Story,
         appearancesByName: Map<String, AiCharacterAppearance>,
         imageNames: Set<String>,
-        uploadedImages: Map<String, UploadedCharacterImage>,
+        uploadedImages: Map<String, UploadedImage>,
     ) {
         val names = (appearancesByName.keys + imageNames).toList()
         if (names.isEmpty()) {
