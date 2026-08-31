@@ -106,6 +106,22 @@ class SocialAccountRegistrarTest {
     }
 
     @Test
+    fun `findExistingUser는 갱신 뒤 탈퇴가 커밋돼 계정이 DELETED면 null이다`() {
+        // Codex 5차 리뷰 P2: 갱신이 1행이어도 그 다음 조회 사이에 탈퇴가 커밋될 수 있다(새 statement라 READ
+        // COMMITTED에서 보인다). DELETED User를 돌려주면 로그인 200 → 이후 전부 401인 좀비 세션이 된다.
+        val social = SocialAccount(id = 12L, userId = 55L, provider = SocialProvider.GOOGLE, providerUserId = "late-withdraw-sub")
+        val deletedUser = User(id = 55L, nickname = "탈퇴한 사용자", status = UserStatus.DELETED)
+        val now = Instant.now()
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "late-withdraw-sub"))
+            .thenReturn(social)
+        `when`(socialAccountRepository.touchLastLoginAt(12L, now)).thenReturn(1)
+        `when`(userRepository.findById(55L)).thenReturn(Optional.of(deletedUser))
+
+        // 401이 아니라 null이다 — 그 신원은 재가입으로 계속 쓸 수 있고, 바깥이 그 경로를 탄다.
+        assertThat(registrar.findExistingUser(SocialProvider.GOOGLE, info("late-withdraw-sub"), now)).isNull()
+    }
+
+    @Test
     fun `findExistingUser는 연동이 없으면 null을 반환한다`() {
         `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "sub")).thenReturn(null)
 

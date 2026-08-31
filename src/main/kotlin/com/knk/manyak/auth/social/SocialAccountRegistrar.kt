@@ -37,10 +37,18 @@ class SocialAccountRegistrar(
      * - 없으면: null.
      * - 연동은 있는데 [User]가 사라진 비정상 상태: 401(존재 여부를 노출하지 않도록 통일).
      *
-     * 계약은 "**살아 있는** 연동을 찾으면 그 User"다. 조회와 갱신 사이에 탈퇴가 커밋되면 갱신이 0행이 되는데,
-     * 그때 이전 User를 돌려주면 DELETED 계정으로 토큰이 발급돼 **로그인은 200인데 이후 모든 요청이 401**인
-     * 좀비 세션이 된다(Codex 3차 리뷰 P2). 0행은 "그 시점에 살아 있는 연동이 없다"는 뜻이므로 null을 돌려
-     * 바깥이 [createUserAndAccount] 재가입 경로를 타게 한다.
+     * 계약은 "**살아 있는** 연동의 **살아 있는** 계정을 찾으면 그 User"다. 어긋나면 null을 돌려 바깥이
+     * [createUserAndAccount] 재가입 경로를 타게 한다. 어기고 DELETED 계정을 돌려주면 토큰이 발급돼
+     * **로그인은 200인데 이후 모든 요청이 401**인 좀비 세션이 된다. 두 지점에서 확인한다.
+     * 1. 갱신 0행 = 조회 이후 tombstone이 됐다(Codex 3차 리뷰 P2).
+     * 2. 로드한 User가 DELETED = 갱신 이후 탈퇴가 커밋됐다(Codex 5차 리뷰 P2). 갱신 다음의 조회는 새 statement라
+     *    READ COMMITTED에서 그 커밋이 보인다.
+     *
+     * **남는 창**: 이 조회 이후 토큰 발급 전에 탈퇴가 커밋되면 여전히 좀비 세션이다. 락으로 닫을 수 있지만
+     * 그러면 이 경로가 `social_accounts`(조건부 UPDATE) → `users`(FOR UPDATE) 순서가 되어 **탈퇴와 정확히 반대**다
+     * (탈퇴는 users → social_accounts). 전 경로가 `users → (wallets · social_accounts)` 단방향이라는 불변이 깨지고,
+     * 가장 뜨거운 인증 경로에 비관적 락을 상시로 다는 대가가 남은 창의 크기에 비해 크다. 결과도 데이터 손상이
+     * 아니라 "거부되는 토큰"이라 도입하지 않았다.
      */
     @Transactional
     fun findExistingUser(provider: SocialProvider, info: SocialUserInfo, now: Instant): User? {
@@ -55,9 +63,12 @@ class SocialAccountRegistrar(
         // 동시에 커밋된 탈퇴의 tombstone·이메일 파기를 되돌린다. 조건부 단일 컬럼 갱신으로 바꿨다.
         // 0행이면 위 조회 이후 탈퇴가 커밋된 것이다. User를 조회하지도 않고 null로 빠져 재가입 경로에 맡긴다.
         if (socialAccountRepository.touchLastLoginAt(social.id, now) == 0) return null
-        return userRepository.findById(ownerId).orElseThrow {
+        val user = userRepository.findById(ownerId).orElseThrow {
             ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         }
+        // 갱신 이후 탈퇴가 커밋됐으면 여기서 DELETED가 보인다. 401이 아니라 null이다 — 그 소셜 신원은
+        // 여전히 로그인에 쓸 수 있고(재가입), 바깥이 tombstone claim 재가입 경로로 이어 가면 된다.
+        return user.takeIf { it.status != UserStatus.DELETED }
     }
 
     /**
