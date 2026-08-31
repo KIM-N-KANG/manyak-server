@@ -147,6 +147,14 @@ data class StoryDetailResponse(
     val mainEvents: List<StoryMainEventResponse>,
 
     @field:ArraySchema(
+        schema = Schema(implementation = StoryCharacterResponse::class),
+        arraySchema = Schema(
+            description = "스토리 인물 목록(저장 순서 = 컴파일 응답 순서, KNK-1058). 인물이 없으면 빈 배열입니다.",
+        ),
+    )
+    val characters: List<StoryCharacterResponse>,
+
+    @field:ArraySchema(
         schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
         arraySchema = Schema(description = "요청 회원이 이 스토리에서 도달한 엔딩 이름 목록(엔딩은 이름으로 식별). 게스트는 빈 배열입니다."),
     )
@@ -154,6 +162,19 @@ data class StoryDetailResponse(
 
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
+)
+
+@Schema(description = "스토리 인물(이름과 인물 이미지). 외형 필드·인물 식별자는 노출하지 않는다.")
+data class StoryCharacterResponse(
+    @field:Schema(description = "인물 이름", example = "레이")
+    val name: String,
+
+    @field:Schema(
+        description = "인물 이미지 URL. 이미지 생성·업로드에 실패한 인물은 null이다.",
+        example = "https://cdn.manyak.app/characters/ray.png",
+        nullable = true,
+    )
+    val imageUrl: String?,
 )
 
 @Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전)")

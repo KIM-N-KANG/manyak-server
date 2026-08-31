@@ -7,9 +7,11 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -43,6 +45,9 @@ class StoryDetailControllerIntegrationTests {
 
     @Autowired
     private lateinit var storyEndingRepository: StoryEndingRepository
+
+    @Autowired
+    private lateinit var storyCharacterRepository: StoryCharacterRepository
 
     @Autowired
     private lateinit var storyChatRepository: StoryChatRepository
@@ -309,5 +314,53 @@ class StoryDetailControllerIntegrationTests {
             .jsonPath("$.startSettings[1].suggestedInputs.length()").isEqualTo(2)
             .jsonPath("$.startSettings[1].endings.length()").isEqualTo(1)
             .jsonPath("$.startSettings[1].endings[0].name").isEqualTo("둘째의 엔딩")
+    }
+
+    @Test
+    fun `상세 characters는 저장 순서로 실리고 이미지 없는 인물도 imageUrl null로 포함한다`() {
+        val story = storyRepository.save(
+            Story(
+                title = "인물 있는 스토리",
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+            ),
+        )
+        // 저장 순서(= 컴파일 응답 순서)를 보존하는지 보려고 이미지 있는 인물과 없는 인물을 섞어 넣는다.
+        storyCharacterRepository.save(
+            StoryCharacter(story = story, name = "레이", imageUrl = "https://cdn.manyak.app/characters/ray.png", gender = "남성"),
+        )
+        storyCharacterRepository.save(StoryCharacter(story = story, name = "카일", imageUrl = null))
+        storyCharacterRepository.save(
+            StoryCharacter(story = story, name = "미라", imageUrl = "https://cdn.manyak.app/characters/mira.png"),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(3)
+            .jsonPath("$.characters[0].name").isEqualTo("레이")
+            .jsonPath("$.characters[0].imageUrl").isEqualTo("https://cdn.manyak.app/characters/ray.png")
+            // 이미지 생성에 실패한 인물도 목록에서 빠지지 않고 imageUrl만 null이다.
+            .jsonPath("$.characters[1].name").isEqualTo("카일")
+            .jsonPath("$.characters[1].imageUrl").isEmpty
+            .jsonPath("$.characters[2].name").isEqualTo("미라")
+            .jsonPath("$.characters[2].imageUrl").isEqualTo("https://cdn.manyak.app/characters/mira.png")
+            // 인물 공개 식별자·외형 필드는 상세 응답에 노출하지 않는다.
+            .jsonPath("$.characters[0].id").doesNotExist()
+            .jsonPath("$.characters[0].gender").doesNotExist()
+    }
+
+    @Test
+    fun `인물 행이 없는 스토리의 characters는 빈 배열이다`() {
+        val story = storyRepository.save(Story(title = "인물 없는 스토리"))
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(0)
     }
 }
