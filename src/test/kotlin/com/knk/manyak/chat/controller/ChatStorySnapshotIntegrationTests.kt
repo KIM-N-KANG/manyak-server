@@ -24,9 +24,11 @@ import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -42,11 +44,16 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
 /**
- * 채팅 스토리 제목·썸네일 스냅샷 검증(KNK-1059, PR #216 Codex P1).
+ * 스토리 "마지막 공개 버전" 스냅샷의 읽기 경로 검증(KNK-1059 → KNK-1065).
  *
- * 규칙: `story.isReadableBy(userId)`이고 삭제되지 않았으면 스토리의 **현재** 값, 아니면 채팅에 박아둔 **스냅샷**.
- * 공개 스토리로 채팅한 뒤 소유자가 비공개로 되돌리고 제목을 바꾸면, 그 뒤 값이 남에게 계속 흘러가면 안 된다.
- * 서재(`GET /users/me/chats`)와 이용내역(`GET /users/me/credits/transactions`) 양쪽을 같은 규칙으로 고정한다.
+ * 규칙: `story.isCurrentMetadataVisibleTo(userId)`면 스토리의 **현재** 값, 아니면 그 스토리가 **마지막으로
+ * 공개(PUBLISHED∧PUBLIC)였던 시점**의 스냅샷(`stories.last_public_snapshot`)이다. 공개 스토리로 채팅한 뒤
+ * 소유자가 비공개로 되돌리고 고치면, 그 뒤 값이 남에게 계속 흘러가면 안 된다.
+ *
+ * 스냅샷이 채팅이 아니라 스토리에 있으므로 **공개 상태에서 이뤄진 밸런스 패치는 반영되고**, 비공개 전환
+ * 이후의 개작만 멈춘다(KNK-1059의 채팅별 스냅샷은 채팅 생성 시점으로 되돌려 보여줬다).
+ *
+ * 서재(`GET /users/me/chats`)·이용내역(`GET /users/me/credits/transactions`)·채팅 상세·공유 열람 넷을 같은 규칙으로 고정한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -64,6 +71,8 @@ class ChatStorySnapshotIntegrationTests {
     @Autowired private lateinit var messageRepository: StoryMessageRepository
     @Autowired private lateinit var endingRepository: StoryEndingRepository
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
+    @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var snapshotRowRepository: StoryPublicSnapshotRepository
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
@@ -77,11 +86,21 @@ class ChatStorySnapshotIntegrationTests {
 
     private fun token(user: User) = "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}"
 
+    /**
+     * 공개 상태 저장 = 마지막 공개 버전 스냅샷 갱신(KNK-1065). 실제로는 제작 등록·수정 API가 이 지점을 탄다
+     * ([com.knk.manyak.story.controller.StoryEditIntegrationTests]가 그 배선을 고정한다).
+     */
+    private fun publish(story: Story) {
+        val loaded = storyRepository.findById(story.id).orElseThrow()
+        snapshotService.refresh(loaded)
+        storyRepository.save(loaded)
+    }
+
     /** 소유자 A의 공개 스토리. 제목·썸네일 모두 나중에 바꿔칠 값이다. */
     private fun publicStory(owner: User): Story =
         storyRepository.save(
             Story(userId = owner.id, title = "원래 제목", thumbnailImageKey = "thumb_0001"),
-        )
+        ).also(::publish)
 
     /** 시작 설정(프롤로그)을 가진 공개 스토리. 프롤로그 스냅샷 검증에 쓴다. */
     private fun publicStoryWithPrologue(owner: User): Story {
@@ -89,6 +108,7 @@ class ChatStorySnapshotIntegrationTests {
         startSettingRepository.save(
             StoryStartSetting(story = story, name = "시작 장면", prologue = "원래 프롤로그"),
         )
+        publish(story)
         return story
     }
 
@@ -125,8 +145,12 @@ class ChatStorySnapshotIntegrationTests {
         val loaded = storyChatRepository.findById(chat.id).orElseThrow()
         loaded.currentTurn = 1
         loaded.reachedEndingId = ending.id
+        // 실 경로(ChatTurnPersister.applyEndingReach)가 id와 함께 박는 이름. 엔딩 행이 지워졌을 때의
+        // 유일한 복구 수단이라 여기서도 같이 심는다.
         loaded.reachedEndingNameSnapshot = ending.name
         storyChatRepository.save(loaded)
+        // 엔딩은 스토리가 아직 공개일 때 추가됐으므로 스냅샷에도 담긴다.
+        publish(story)
         return ending
     }
 
@@ -142,6 +166,21 @@ class ChatStorySnapshotIntegrationTests {
         jdbcTemplate.update("UPDATE story_chats SET reached_ending_id = NULL WHERE id = ?", chat.id)
         jdbcTemplate.update("UPDATE story_messages SET reached_ending_id = NULL WHERE chat_id = ?", chat.id)
         jdbcTemplate.update("DELETE FROM story_endings WHERE id = ?", ending.id)
+    }
+
+    /**
+     * 시작 설정 행이 삭제돼 참조가 끊긴 상태를 만든다(소유자가 편집 폼에서 시작 설정 항목을 뺐을 때).
+     *
+     * 운영에서는 `story_chats.start_setting_id`의 FK가 `ON DELETE SET NULL`이라 시작 설정을 지우면 참조가
+     * 자동으로 NULL이 된다. 테스트 스키마는 Flyway가 아니라 `ddl-auto`로 만들어져 그 삭제 동작이 없으므로,
+     * FK가 만들어내는 결과 상태를 직접 재현한다(참조 NULL + 시작 설정 행 부재).
+     */
+    private fun breakStartSettingReference(chat: StoryChat, story: Story) {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        jdbcTemplate.update("UPDATE story_chats SET start_setting_id = NULL WHERE id = ?", chat.id)
+        jdbcTemplate.update("DELETE FROM story_suggested_inputs WHERE start_setting_id = ?", setting.id)
+        jdbcTemplate.update("DELETE FROM story_endings WHERE start_setting_id = ?", setting.id)
+        jdbcTemplate.update("DELETE FROM story_start_settings WHERE id = ?", setting.id)
     }
 
     /**
@@ -164,6 +203,12 @@ class ChatStorySnapshotIntegrationTests {
         )
     }
 
+    /** 소유자가 **공개를 유지한 채** 프롤로그를 고친다(밸런스 패치). 스냅샷도 함께 갱신된다. */
+    private fun patchPrologueWhilePublic(story: Story, prologue: String) {
+        changePrologue(story, prologue)
+        publish(story)
+    }
+
     /** 소유자가 시작 설정의 프롤로그 본문을 고친다. */
     private fun changePrologue(story: Story, prologue: String) {
         val setting = startSettingRepository.findAll().first { it.story.id == story.id }
@@ -171,13 +216,18 @@ class ChatStorySnapshotIntegrationTests {
         startSettingRepository.save(setting)
     }
 
-    /** 실제 생성 API로 채팅을 만든다 — 스냅샷이 그 경로에서 박히는지까지 함께 검증하기 위해서다. */
-    private fun createChat(story: Story, user: User): StoryChat {
+    /** 실제 생성 API로 채팅을 만든다. [startSettingId]를 주면 그 시작 설정으로 시작한다(KNK-515 복수화). */
+    private fun createChat(story: Story, user: User, startSettingId: String? = null): StoryChat {
+        val body = if (startSettingId == null) {
+            """{"storyId":"${story.publicId}"}"""
+        } else {
+            """{"storyId":"${story.publicId}","startSettingId":"$startSettingId"}"""
+        }
         restTestClient.post()
             .uri("/api/v1/chats")
             .header("Authorization", token(user))
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"storyId":"${story.publicId}"}""")
+            .body(body)
             .exchange()
             .expectStatus().isCreated
         return storyChatRepository.findAll().first { it.userId == user.id && it.storyId == story.id }
@@ -209,18 +259,31 @@ class ChatStorySnapshotIntegrationTests {
         loaded.status = StoryStatus.PUBLISHED
         loaded.visibility = StoryVisibility.PUBLIC
         storyRepository.save(loaded)
+        publish(story)
     }
 
-    /** 공개 상태를 유지한 채 제목만 바꾼다(삭제 케이스에서 현재 값과 스냅샷을 구분하기 위해). */
+    /** 공개 상태를 유지한 채 제목만 바꾼다(밸런스 패치). 공개 저장이라 스냅샷도 이 값으로 옮겨간다. */
     private fun rename(story: Story, title: String) {
         val loaded = storyRepository.findById(story.id).orElseThrow()
         loaded.title = title
         storyRepository.save(loaded)
+        publish(story)
     }
 
     private fun softDelete(story: Story) {
         val loaded = storyRepository.findById(story.id).orElseThrow()
         loaded.deletedAt = Instant.now()
+        storyRepository.save(loaded)
+    }
+
+    /**
+     * 스토리를 지운 뒤 제목을 바꾼다. 삭제 상태의 저장은 스냅샷을 갱신하지 않으므로, 응답이 현재 값을 읽고 있으면
+     * 바로 드러난다. **공개 상태에서 바꾸면 그게 곧 마지막 공개 버전이라 두 값이 같아져 검증이 무의미해진다.**
+     */
+    private fun deleteAndRename(story: Story, title: String) {
+        softDelete(story)
+        val loaded = storyRepository.findById(story.id).orElseThrow()
+        loaded.title = title
         storyRepository.save(loaded)
     }
 
@@ -335,15 +398,65 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 스냅샷 기록 ----
 
     @Test
-    fun `채팅을 만들면 스토리 제목과 썸네일이 스냅샷으로 박힌다`() {
+    fun `채팅을 만들면 구버전용 채팅 스냅샷 컬럼도 계속 채운다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
-        val story = publicStory(owner)
+        val story = publicStoryWithPrologue(owner)
 
         val chat = createChat(story, reader)
 
+        // 이 셋은 아무도 읽지 않는다(읽기 정본은 stories.last_public_snapshot). 그래도 채워야 한다 —
+        // 롤링 배포 창의 구버전 태스크와 배포 되돌림이 이 값을 읽는다. 다음 릴리스의 DROP 대상이다.
         assertThat(chat.storyTitleSnapshot).isEqualTo("원래 제목")
         assertThat(chat.storyThumbnailKeySnapshot).isEqualTo("thumb_0001")
+        assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `공개 상태로 저장하면 스토리에 마지막 공개 버전 스냅샷이 박힌다`() {
+        val owner = saveUser("소유자")
+        val story = publicStory(owner)
+
+        val snapshot = snapshotService.findByStoryId(story.id)!!
+
+        assertThat(snapshot.title).isEqualTo("원래 제목")
+        assertThat(snapshot.thumbnailImageKey).isEqualTo("thumb_0001")
+    }
+
+    @Test
+    fun `공개 상태에서 고친 제목은 비공개 전환 뒤에도 마지막 공개 버전으로 보인다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        createChat(story, reader)
+
+        // 공개를 유지한 채 v2로 밸런스 패치 — 독자는 화면에서 이 값을 보고 있었다.
+        rename(story, "v2 제목")
+        // 그 뒤 감추고 개작한다.
+        hideAndRename(story, "비공개 개작 제목")
+
+        // 채팅 생성 시점(v1)이 아니라 마지막 공개 시점(v2)이어야 한다.
+        assertThat(libraryCard(reader).storyTitle).isEqualTo("v2 제목")
+    }
+
+    @Test
+    fun `스냅샷이 없는 스토리에서도 읽기 경로가 터지지 않는다`() {
+        // 백필 대상 밖(백필 시점에 이미 비공개)인 스토리를 재현한다 — last_public_snapshot이 NULL이다.
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        chargeFor(chat, reader.id)
+        // 백필 대상 밖(백필 시점에 이미 비공개)인 스토리를 재현한다 — story_public_snapshots에 행이 없다.
+        snapshotRowRepository.deleteById(story.id)
+        hideAndRename(story, "비공개 개작 제목")
+
+        val shareId = createShare(chat, reader)
+
+        assertThat(libraryCard(reader).storyTitle).isEmpty()
+        assertThat(historyTitle(reader)).isNull()
+        assertThat(detailTitle(chat, reader)).isEmpty()
+        assertThat(shareTitle(shareId)).isEmpty()
     }
 
     // ---- 서재 ----
@@ -381,9 +494,8 @@ class ChatStorySnapshotIntegrationTests {
         createChat(story, reader)
 
         // 삭제는 isReadableBy가 보지 않는 조건이라 호출부가 따로 판정해야 한다.
-        // 지우기 전에 제목을 바꿔둬야 "현재 값을 그대로 읽어도 통과"하는 무의미한 검증이 되지 않는다.
-        rename(story, "바뀐 제목")
-        softDelete(story)
+        // 지운 뒤 제목을 바꿔둬야 "현재 값을 그대로 읽어도 통과"하는 무의미한 검증이 되지 않는다.
+        deleteAndRename(story, "바뀐 제목")
 
         assertThat(libraryCard(reader).storyTitle).isEqualTo("원래 제목")
     }
@@ -401,10 +513,11 @@ class ChatStorySnapshotIntegrationTests {
 
     /**
      * KNK-1069: 컴파일이 생성한 표지가 있으면 서재 카드도 그 URL을 쓴다(축소본이 없어 원본 그대로).
-     * 비공개로 되돌리면 스냅샷에 URL이 없으므로 프리셋 표지로 내려앉는다 — 누수가 아니라 화면 열화라 수용한다.
+     * 비공개로 되돌려도 **생성 표지 URL이 유지된다**. KNK-1069은 채팅별 스냅샷에 URL 컬럼이 없어 프리셋으로
+     * 내려앉는 화면 열화를 수용했지만, KNK-1065의 스토리 스냅샷은 JSON이라 URL도 함께 담는다.
      */
     @Test
-    fun `생성 표지가 있으면 서재 카드도 그 URL을 쓰고 비공개 후에는 프리셋으로 떨어진다`() {
+    fun `생성 표지가 있으면 서재 카드는 비공개 후에도 마지막 공개 시점 URL을 쓴다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = storyRepository.save(
@@ -420,9 +533,12 @@ class ChatStorySnapshotIntegrationTests {
         assertThat(libraryCard(reader).thumbnailUrlSm)
             .isEqualTo("https://cdn.test/thumbnails/generated/s/썸네일_1a2b3c4d.webp")
 
+        // 공개 저장 시점의 스냅샷이 생성 표지 URL까지 담는다.
+        publish(story)
         hideAndRename(story, "바뀐 제목")
 
-        assertThat(libraryCard(reader).thumbnailUrlSm).isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
+        assertThat(libraryCard(reader).thumbnailUrlSm)
+            .isEqualTo("https://cdn.test/thumbnails/generated/s/썸네일_1a2b3c4d.webp")
     }
 
     @Test
@@ -474,8 +590,7 @@ class ChatStorySnapshotIntegrationTests {
         val chat = createChat(story, reader)
         chargeFor(chat, reader.id)
 
-        rename(story, "바뀐 제목")
-        softDelete(story)
+        deleteAndRename(story, "바뀐 제목")
 
         assertThat(historyTitle(reader)).isEqualTo("원래 제목")
     }
@@ -554,8 +669,7 @@ class ChatStorySnapshotIntegrationTests {
         val chat = createChat(story, reader)
         val shareId = createShare(chat, reader)
 
-        rename(story, "바뀐 제목")
-        softDelete(story)
+        deleteAndRename(story, "바뀐 제목")
 
         assertThat(shareTitle(shareId)).isEqualTo("원래 제목")
     }
@@ -579,14 +693,90 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 프롤로그 ----
 
     @Test
-    fun `채팅을 만들면 프롤로그도 스냅샷으로 박힌다`() {
+    fun `공개 상태로 저장하면 시작 설정의 프롤로그도 스냅샷에 담긴다`() {
+        val owner = saveUser("소유자")
+        val story = publicStoryWithPrologue(owner)
+        val startSettingId = startSettingRepository.findAll().first { it.story.id == story.id }.id
+
+        val snapshot = snapshotService.findByStoryId(story.id)!!
+
+        assertThat(snapshot.startSettingOf(startSettingId)?.prologue).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `시작 설정이 여러 개면 그 채팅이 시작한 시작 설정의 프롤로그를 준다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
+        val second = startSettingRepository.save(
+            StoryStartSetting(story = story, name = "두 번째 시작", prologue = "두 번째 프롤로그"),
+        )
+        publish(story)
 
+        // 두 번째 시작 설정으로 채팅을 시작한 뒤 감춘다. 스냅샷은 시작 설정 id로 찾아야 하므로,
+        // 첫 시작 설정을 집으면 남의 도입부가 나간다.
+        val chat = createChat(story, reader, second.publicId.toString())
+        hideAndRename(story, "바뀐 제목")
+        changePrologue(story, "비공개 개작 프롤로그")
+
+        assertThat(detailPrologue(chat, reader)).isEqualTo("두 번째 프롤로그")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊겨도 상세는 채팅 프롤로그로 복구한다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
         val chat = createChat(story, reader)
 
-        assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
+        hideAndRename(story, "바뀐 제목")
+        // 소유자가 편집 폼에서 시작 설정 항목을 뺐다 — 스냅샷을 찾을 id가 사라진다.
+        breakStartSettingReference(chat, story)
+
+        assertThat(detailPrologue(chat, reader)).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊겨도 공유 열람은 채팅 프롤로그로 복구한다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        breakStartSettingReference(chat, story)
+
+        assertThat(sharePrologue(shareId)).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `참조가 살아 있으면 프롤로그는 채팅이 아니라 스토리 스냅샷을 본다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        // 공개 상태 패치로 스토리 스냅샷만 v2가 되고, 채팅 컬럼은 채팅 생성 시점(v1)에 머문다.
+        patchPrologueWhilePublic(story, "v2 프롤로그")
+        hideAndRename(story, "바뀐 제목")
+
+        // 참조가 멀쩡하므로 폴백이 끼어들면 안 된다 — 끼어들면 v1로 되돌아간다.
+        assertThat(detailPrologue(chat, reader)).isEqualTo("v2 프롤로그")
+    }
+
+    @Test
+    fun `공개 상태에서 고친 프롤로그는 비공개 전환 뒤에도 마지막 공개 버전으로 보인다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        patchPrologueWhilePublic(story, "v2 프롤로그")
+        hideAndRename(story, "바뀐 제목")
+        changePrologue(story, "비공개 개작 프롤로그")
+
+        assertThat(detailPrologue(chat, reader)).isEqualTo("v2 프롤로그")
     }
 
     @Test
@@ -647,17 +837,53 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 추천 입력 ----
 
     @Test
-    fun `비공개로 되돌리고 추천 입력을 바꾸면 채팅 상세의 추천 입력은 비어 있다`() {
+    fun `비공개로 되돌리고 추천 입력을 바꾸면 채팅 상세는 마지막 공개 버전을 준다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
         seedSuggestedInput(story, "원래 추천 입력")
+        publish(story)
         val chat = createChat(story, reader)
 
         hideAndRename(story, "바뀐 제목")
         seedSuggestedInput(story, "바뀐 추천 입력")
 
-        // 추천 입력은 목록이라 스냅샷하지 않고 게이트로 막는다 — 입력을 돕는 보조 장치라 없어도 채팅이 성립한다.
+        // KNK-1059는 여기만 게이트로 비웠지만(목록이라 스냅샷 비용이 크다는 근거), KNK-1065의 스토리 스냅샷이
+        // 바로 그 JSON이라 근거가 사라졌다. 개작은 막되 독자가 보던 안내는 남긴다.
+        assertThat(detailSuggestedInputs(chat, reader)).containsExactly("원래 추천 입력")
+    }
+
+    @Test
+    fun `공개 상태에서 고친 추천 입력은 비공개 전환 뒤에도 마지막 공개 버전으로 보인다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "v1 추천 입력")
+        publish(story)
+        val chat = createChat(story, reader)
+
+        // 공개를 유지한 채 v2로 패치 — 독자는 이 값을 보고 있었다.
+        seedSuggestedInput(story, "v2 추천 입력")
+        publish(story)
+        hideAndRename(story, "바뀐 제목")
+        seedSuggestedInput(story, "비공개 개작 추천 입력")
+
+        assertThat(detailSuggestedInputs(chat, reader)).containsExactly("v2 추천 입력")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊기면 추천 입력은 빈 목록이다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "원래 추천 입력")
+        publish(story)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        // 스냅샷에서 찾을 키가 사라진다. 채팅에는 추천 입력 컬럼이 없어 프롤로그와 달리 폴백이 없다.
+        breakStartSettingReference(chat, story)
+
         assertThat(detailSuggestedInputs(chat, reader)).isEmpty()
     }
 
@@ -763,13 +989,31 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 엔딩 행이 사라져 FK가 끊긴 경우 ----
 
     @Test
-    fun `엔딩 행이 삭제돼 참조가 끊겨도 서재는 스냅샷 이름으로 도달 기록을 남긴다`() {
+    fun `공개 스토리의 엔딩을 수정해 참조가 끊겨도 서재는 도달 기록을 남긴다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
         val chat = createChat(story, reader)
         val ending = reachEnding(story, chat, "원래 엔딩")
 
+        // 스토리는 **공개 그대로**다. 제작자가 엔딩을 손보기만 해도 참조가 끊긴다 — 비공개 전환과 무관하게
+        // 그 스토리로 놀던 모든 독자에게 일어나는 일이라 여기가 이 폴백의 주 무대다.
+        breakEndingReference(chat, ending)
+
+        // 스토리 스냅샷은 "엔딩 id → 이름" 사전인데 FK(ON DELETE SET NULL)가 조회 키를 비웠다.
+        // 채팅에 박아둔 이름(story_chats.reached_ending_name_snapshot)이 유일한 복구 수단이다.
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `비공개로 되돌린 뒤 엔딩이 삭제돼도 서재는 도달 기록을 남긴다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        hideAndRename(story, "바뀐 제목")
         breakEndingReference(chat, ending)
 
         assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
@@ -785,13 +1029,15 @@ class ChatStorySnapshotIntegrationTests {
 
         breakEndingReference(chat, ending)
 
-        // 메시지의 reached_ending_id도 함께 NULL이 되어 어느 턴이 도달 턴이었는지 알 수 없다.
-        // 채팅당 하나인 스냅샷을 아무 턴에나 붙일 수 없으므로 서재만 살아나는 비대칭을 그대로 고정한다.
+        // 메시지의 reached_ending_id도 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다.
+        // "마지막 턴"으로 추정할 수도 없다: ENDED 채팅의 이어쓰기를 막는 가드가 없어(ChatService의 ENDED
+        // 검사는 재생성 경로에만 있다) 도달 뒤에도 턴이 붙을 수 있고, 공유는 커트라인이 도달 턴을 잘라낼 수
+        // 있다. 채팅당 하나인 이름을 엉뚱한 턴에 붙이느니 비워 두고, 서재만 살아나는 비대칭을 고정한다.
         assertThat(detailReachedEndings(chat, reader)).containsExactly(null as String?)
     }
 
     @Test
-    fun `도달한 적 없는 채팅은 참조도 스냅샷도 없어 서재가 비어 있다`() {
+    fun `도달한 적 없는 채팅은 서재가 비어 있다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)

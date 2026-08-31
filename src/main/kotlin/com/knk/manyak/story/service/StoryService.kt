@@ -12,6 +12,7 @@ import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StoryCharacterResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
@@ -139,8 +140,8 @@ class StoryService(
         val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
             .map { StoryCharacterResponse(name = it.name, imageUrl = it.imageUrl) }
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
-        // 저장은 ending id 기준이라 무모호하며, 노출은 이름으로 한다(엔딩 목록과 이름으로 상관, KNK-462).
-        val reachedEndings = resolveReachedEndingNames(userId, story.id)
+        // 저장도 노출도 이름 기준이다(V70) — 프론트는 엔딩 목록과 이름으로 상관한다(KNK-462).
+        val reachedEndings = resolveReachedEndingNames(userId, story.id, startSettings)
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
@@ -170,16 +171,44 @@ class StoryService(
         )
     }
 
-    /** 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서(sort_order)로 반환한다. 게스트는 빈 목록. */
-    private fun resolveReachedEndingNames(userId: Long?, storyId: Long): List<String> {
+    /**
+     * 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서로 반환한다. 게스트는 빈 목록.
+     *
+     * 집계의 정본 식별자가 이름이므로(V70) 이름을 그대로 읽는다. 표시 순서는 [startSettings]에 실린 **현재**
+     * 엔딩 순서를 따른다 — 제작자가 지웠던 엔딩을 **같은 이름으로 다시 만들면 여기서 자연히 다시 이어진다.**
+     * 지금 스토리에 없는 이름(교체돼 사라진 엔딩)은 순서를 알 수 없어 뒤에 이름순으로 붙인다. 도달 기록은
+     * 사라지지 않으므로 화면에서 빠지지 않는다.
+     */
+    private fun resolveReachedEndingNames(
+        userId: Long?,
+        storyId: Long,
+        startSettings: List<StoryStartSettingResponse>,
+    ): List<String> {
         if (userId == null) {
             return emptyList()
         }
-        val reachedIds = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId).map { it.endingId }
-        if (reachedIds.isEmpty()) {
+        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
+        // 이름이 비어 있는 행은 롤링 배포 창에 구버전 태스크가 쓴 것이다(이름 컬럼을 모른다 — V70 확장 단계).
+        // 그 행은 ending_id로 라이브 엔딩에서 이름을 해소한다. 둘 다 없으면 남길 근거가 없어 빠진다.
+        val legacyIds = reaches.filter { it.endingNameSnapshot == null }.mapNotNull { it.endingId }
+        val legacyNames = if (legacyIds.isEmpty()) {
+            emptyList()
+        } else {
+            storyEndingRepository.findAllById(legacyIds).map { it.name }
+        }
+        // 중복 제거가 방어가 아니라 실제로 필요하다: 창 동안 구버전 행과 신버전 행이 같은 도달을 두 번 남길 수
+        // 있고(V70 주석의 마지막 조합), 어떤 DB 제약으로도 막히지 않는다. 화면에는 한 번만 실려야 한다.
+        val reachedNames = (reaches.mapNotNull { it.endingNameSnapshot } + legacyNames).distinct()
+        if (reachedNames.isEmpty()) {
             return emptyList()
         }
-        return storyEndingRepository.findAllById(reachedIds).sortedBy { it.sortOrder }.map { it.name }
+        // 시작 설정 순서 → 그 안의 엔딩 순서(assemble이 sort_order로 정렬해 준다).
+        // 동명 엔딩은 **첫 등장**이 이긴다 — associate는 마지막 값을 남기므로 putIfAbsent로 첫 인덱스를 지킨다.
+        val orderByName = HashMap<String, Int>()
+        startSettings.flatMap { it.endings }.forEachIndexed { index, ending ->
+            orderByName.putIfAbsent(ending.name, index)
+        }
+        return reachedNames.sortedWith(compareBy({ orderByName[it] ?: Int.MAX_VALUE }, { it }))
     }
 
     /**

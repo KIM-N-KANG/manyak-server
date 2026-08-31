@@ -17,12 +17,14 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.support.DatabaseCleaner
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
@@ -43,6 +45,7 @@ class EndingReachExposureIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
+    @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var storyEndingRepository: StoryEndingRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var userStoryEndingReachRepository: UserStoryEndingReachRepository
@@ -68,7 +71,14 @@ class EndingReachExposureIntegrationTests {
 
     @Test
     fun `스토리 상세의 reachedEndings는 회원 집계이고 게스트는 빈 배열이다`() {
-        userStoryEndingReachRepository.save(UserStoryEndingReach(userId = member.id, storyId = story.id, endingId = ending.id))
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = ending.name,
+                endingId = ending.id,
+            ),
+        )
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}")
@@ -85,6 +95,187 @@ class EndingReachExposureIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.reachedEndings.length()").isEqualTo(0)
+    }
+
+    @Test
+    fun `엔딩을 같은 이름으로 교체해도 과거 도달 기록이 상세에 남는다`() {
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = ending.name,
+                endingId = ending.id,
+            ),
+        )
+
+        // 수정 API의 endings[] 전체 교체와 같은 결과: 행을 지우고 같은 이름으로 새로 만든다.
+        // 예전에는 FK가 ON DELETE CASCADE라 이 순간 집계 행이 통째로 삭제됐다(V70 이전).
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        jdbcTemplate.update("DELETE FROM story_endings WHERE id = ?", ending.id)
+        val recreated = storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "해피", minTurns = 1, achievementCondition = "이긴다", epilogue = "평화", sortOrder = 1),
+        )
+        assertThat(recreated.id).isNotEqualTo(ending.id) // 값이 갈라졌는지 확인
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.reachedEndings.length()").isEqualTo(1)
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+    }
+
+    @Test
+    fun `엔딩 id 없이 이름만 기록된 도달도 상세에 노출된다`() {
+        // 비공개 상태에서 엔딩이 교체된 뒤 도달하면 FK를 만족시킬 id가 없다. 그래도 집계에 남아야 한다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = "해피",
+                endingId = null,
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.reachedEndings.length()").isEqualTo(1)
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+    }
+
+    @Test
+    fun `스토리에 없는 이름으로 기록된 도달도 목록에서 빠지지 않는다`() {
+        // 제작자가 엔딩을 아예 다른 이름으로 갈아치운 경우. 순서를 알 수 없으니 뒤에 붙되 사라지지는 않는다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = "사라진 엔딩", endingId = null),
+        )
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = "해피", endingId = ending.id),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.reachedEndings.length()").isEqualTo(2)
+            // 현재 스토리에 있는 이름이 먼저, 사라진 이름이 뒤로.
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+            .jsonPath("$.reachedEndings[1]").isEqualTo("사라진 엔딩")
+    }
+
+    @Test
+    fun `이름이 비어 있는 구버전 도달 행도 상세에 노출된다`() {
+        // 롤링 배포 창에 구버전 태스크가 쓴 행(이름 컬럼을 모른다). 읽기가 터지지 않고 ending_id로 해소해야 한다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = null,
+                endingId = ending.id,
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.reachedEndings.length()").isEqualTo(1)
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+    }
+
+    @Test
+    fun `구버전 행과 신버전 행이 같은 도달을 남겨도 한 번만 노출된다`() {
+        // V70 확장 단계에서 어떤 제약으로도 막지 못하는 조합이다(구버전 id-only + 신버전 이름-only).
+        // 화면에는 한 번만 실려야 한다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = null, endingId = ending.id),
+        )
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = "해피", endingId = null),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.reachedEndings.length()").isEqualTo(1)
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+    }
+
+    @Test
+    fun `동명 엔딩이 있으면 표시 순서는 첫 등장 자리를 따른다`() {
+        // 시작 설정 A의 두 번째 엔딩과 시작 설정 B의 첫 엔딩이 같은 이름이다. associate는 마지막 값을 남겨
+        // B의 인덱스가 쓰였는데, 첫 등장(A의 두 번째)을 지켜야 '해피'가 '슬픔'보다 앞에 온다.
+        val startSettingA = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSettingA, name = "슬픔", minTurns = 1, achievementCondition = "c", epilogue = "e", sortOrder = 2),
+        )
+        val startSettingB = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "B"))
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSettingB, name = "해피", minTurns = 1, achievementCondition = "c", epilogue = "e", sortOrder = 1),
+        )
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = "슬픔", endingId = null),
+        )
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(userId = member.id, storyId = story.id, endingNameSnapshot = "해피", endingId = ending.id),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            // A: [해피(0), 슬픔(1)], B: [해피(2)] → 첫 등장 기준이면 해피(0) < 슬픔(1).
+            .jsonPath("$.reachedEndings[0]").isEqualTo("해피")
+            .jsonPath("$.reachedEndings[1]").isEqualTo("슬픔")
+    }
+
+    @Test
+    fun `구버전 집계 행이 있어도 게스트 채팅 이관이 실패하지 않는다`() {
+        // 롤링 배포 창에 구버전 태스크가 쓴 집계 행: ending_id는 있고 이름은 NULL이다.
+        // 이름 기준 존재 확인만 하면 이 행을 못 찾아 같은 ending_id로 다시 INSERT하고,
+        // 아직 살아 있는 옛 유니크(user_id, story_id, ending_id)를 위반해 **이관 요청 자체가 실패**한다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = null,
+                endingId = ending.id,
+            ),
+        )
+        val guestChat = storyChatRepository.save(
+            StoryChat(
+                storyId = story.id,
+                userId = null,
+                reachedEndingId = ending.id,
+                reachedEndingNameSnapshot = ending.name,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":[],"chatIds":["${guestChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+
+        // 구버전 행 하나만 남고 중복이 생기지 않는다.
+        assertThat(userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)).hasSize(1)
     }
 
     @Test

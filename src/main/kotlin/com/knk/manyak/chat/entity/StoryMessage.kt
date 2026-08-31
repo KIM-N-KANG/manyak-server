@@ -51,6 +51,19 @@ class StoryMessage(
     @Column(name = "reached_ending_id")
     val reachedEndingId: Long? = null,
 
+    /**
+     * 도달 시점의 엔딩 이름(PR #224 Codex P2 재리뷰). [reachedEndingId]가 `story_endings` FK
+     * `ON DELETE SET NULL`이라 소유자가 엔딩을 교체하면 비워지는데, 이 컬럼에는 FK가 없어 남는다.
+     *
+     * **이 컬럼이 곧 "이 턴이 도달 턴이었다"는 표식**이다. 그래서 상세·공유의 턴 단위 도달 표시가
+     * id 없이도 성립한다 — id만으로는 어느 턴이 도달 턴이었는지 알 수 없어 복구를 포기했던 자리다.
+     *
+     * 도달 판정이 라이브 엔딩 행을 못 찾아 id 없이 기록되는 경우([ChatTurnPersister.resolveReachedEnding])
+     * 에도 이름은 채운다.
+     */
+    @Column(name = "reached_ending_name_snapshot", length = 100)
+    val reachedEndingNameSnapshot: String? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

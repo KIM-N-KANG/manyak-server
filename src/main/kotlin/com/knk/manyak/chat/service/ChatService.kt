@@ -56,14 +56,17 @@ import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryMainEvent
+import com.knk.manyak.story.entity.EndingSnapshot
+import com.knk.manyak.story.entity.MainEventSnapshot
+import com.knk.manyak.story.entity.StartSettingSnapshot
+import com.knk.manyak.story.entity.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StorySettingRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.micrometer.core.instrument.Counter
@@ -93,12 +96,14 @@ class ChatService(
     @Qualifier("chatSseExecutor")
     private val chatSseExecutor: Executor,
     private val storyRepository: StoryRepository,
+    // 조립 재료를 현재 값·스냅샷 어느 쪽에서 오든 같은 모양으로 뜨는 몫(KNK-1065).
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
     private val imageUrlResolver: ImageUrlResolver,
-    private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
-    private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    // 목표 사건의 라이브 이름 해소용(스냅샷 분기에서 id가 빗나갈 때만 탄다).
+    private val storyMainEventRepository: StoryMainEventRepository,
     // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
     private val storyCharacterRepository: StoryCharacterRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
@@ -161,8 +166,9 @@ class ChatService(
                 creationId = storyCreationSessionRepository
                     .findFirstByStoryIdOrderByIdAsc(story.id)
                     ?.storylineRequestId,
-                // 시작 시점의 제목·썸네일도 여기서 **한 번만** 박는다(KNK-1059). 소유자가 나중에 스토리를
-                // 비공개로 되돌리거나 지우면 서재·이용내역이 이 값에서 멈춘다.
+                // 아래 셋은 **아무도 읽지 않는다** — 읽기 정본은 stories.last_public_snapshot이다(KNK-1065).
+                // 그래도 계속 채운다: 롤링 배포 창의 구버전 태스크와 배포 되돌림이 이 값을 읽는다.
+                // 다음 릴리스에서 컬럼과 함께 지운다([StoryChat] KDoc).
                 storyTitleSnapshot = story.title,
                 storyThumbnailKeySnapshot = story.thumbnailImageKey,
                 storyPrologueSnapshot = startSetting?.prologue,
@@ -186,7 +192,9 @@ class ChatService(
         )
     }
 
-    // 게이트 판정(스토리)과 표시 값(채팅 스냅샷·엔딩)을 여러 쿼리로 나눠 읽으므로 한 스냅샷에 묶는다(KNK-1059).
+    // 게이트 판정(스토리)과 표시 값(시작 설정·엔딩)을 여러 쿼리로 나눠 읽으므로 한 스냅샷에 묶는다(KNK-1059).
+    // 스토리 스냅샷은 게이트와 같은 행에 있어 이 경합에서 벗어났지만, **읽기가 허용된 분기는 여전히 자식 행을
+    // 따로 읽으므로** 격리는 그대로 필요하다.
     // READ_COMMITTED에서는 쿼리 사이에 소유자의 "비공개 전환 + 수정" 커밋이 끼어들면 게이트는 옛 공개 상태로
     // 열린 채 자식 데이터만 새 값이 나와, 막으려던 유출이 그 틈으로 다시 샌다.
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -238,29 +246,36 @@ class ChatService(
         val endingNameById = storyEndingRepository
             .findAllById(chats.mapNotNull { it.reachedEndingId })
             .associate { it.id to it.name }
+        // 스냅샷은 **읽을 수 없는 스토리에만** 필요하다. 별도 테이블이라 그 스토리들만 한 번에 조회한다
+        // (스토리 엔티티에 붙어 있었다면 목록 전체가 이 JSON을 함께 읽었다 — PR #224 Codex P2).
+        val snapshotByStoryId = storyPublicSnapshotService.findAllByStoryIds(
+            storiesByStoryId.values.filterNot { it.isCurrentMetadataVisibleTo(userId) }.map { it.id },
+        )
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
             // 제목·썸네일은 요청자가 지금 그 스토리를 읽을 수 있을 때만 현재 값을 쓴다(KNK-1059).
             // 비공개로 되돌렸거나 삭제됐으면 채팅에 박아둔 스냅샷에서 멈춘다. storyId(public_id)는
             // 요청자가 원래 알던 값이라 그대로 둔다 — 새로 새는 정보가 없다.
             val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
+            // 읽을 수 없으면 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷에서 멈춘다(KNK-1065).
+            val snapshot = if (showsCurrent) null else story?.let { snapshotByStoryId[it.id] }
             ChatSummaryResponse(
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
-                storyTitle = (if (showsCurrent) story.title else chat.storyTitleSnapshot).orEmpty(),
+                storyTitle = (if (showsCurrent) story.title else snapshot?.title).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
-                // 생성 표지(KNK-1069)는 현재 값을 보여도 될 때만 쓴다. 스냅샷은 프리셋 키뿐이라(URL 스냅샷 컬럼을
-                // 만들지 않았다) 비공개로 되돌린 스토리의 카드는 프리셋 표지로 내려앉는다 — 누수가 아니라 화면
-                // 열화이므로 수용한다(KNK-1059 규칙 유지).
+                // 생성 표지(KNK-1069)와 프리셋 키의 2단 폴백은 ImageUrlResolver가 소유한다.
+                // 읽을 수 없으면 **둘 다** 마지막 공개 버전 스냅샷에서 읽는다 — 스냅샷이 URL까지 담으므로
+                // 비공개로 되돌린 스토리의 카드가 프리셋 표지로 내려앉지 않는다(KNK-1069가 수용했던 화면 열화).
                 thumbnailUrlSm = if (showsCurrent) {
                     imageUrlResolver.thumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey)
                 } else {
-                    imageUrlResolver.thumbnailSmUrlFor(chat.storyThumbnailKeySnapshot)
+                    imageUrlResolver.thumbnailSmUrlFor(snapshot?.thumbnailImageUrl, snapshot?.thumbnailImageKey)
                 },
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
-                reachedEndings = reachedEndingNameFor(chat, showsCurrent, endingNameById)
+                reachedEndings = libraryReachedEndingName(chat, showsCurrent, endingNameById, snapshot)
                     ?.let(::listOf)
                     .orEmpty(),
                 updatedAt = chat.updatedAt,
@@ -269,25 +284,79 @@ class ChatService(
     }
 
     /**
-     * 서재 카드의 도달 엔딩 이름(KNK-1059). 엔딩 이름도 제목·프롤로그와 같은 규칙이지만, "내가 도달한 결말"이라
-     * 게이트로 비우지 않고 스냅샷으로 폴백한다 — 비우면 사용자가 실제로 도달한 엔딩이 서재에서 사라진다.
+     * 도달 엔딩 이름(KNK-1065). 제목·프롤로그와 같은 규칙이다 — 읽을 수 있으면 현재 이름, 아니면 그 스토리가
+     * 마지막으로 공개였던 시점의 스냅샷에서 이름을 찾는다. 서재(채팅 단위)와 상세·공유(턴 단위)가 이 하나를 공유한다.
      *
-     * 엔딩 행이 사라져 [StoryChat.reachedEndingId]가 NULL이 된 채팅도 스냅샷으로 살린다. 스토리 수정의
-     * `endings[]`는 전체 교체라 행을 삭제·재생성하고, FK가 `ON DELETE SET NULL`이라 소유자가 엔딩을 손대는
-     * 것만으로 남의 도달 기록이 끊긴다. 이제 이름 스냅샷이 있으니 기록은 남길 수 있다.
+     * **두 분기의 폴백 조건이 다르다.** 뿌리는 "라이브 id와 스냅샷 id는 서로 다른 세계"라는 사실이다 —
+     * 스토리 수정은 자식을 delete + re-insert하므로 이름이 같아도 id가 바뀐다.
      *
-     * **여기만 살아나는 비대칭이 있다**: 턴 단위로 보여주는 상세·공유는 `story_messages.reached_ending_id`도
-     * 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다. 채팅당 하나인 이 스냅샷을 아무 턴에나 붙일 수
-     * 없으므로 그쪽은 복구하지 않는다([reachedEndingNameOf] 참고).
+     * - **읽기 가능 분기**는 라이브 사전을 본다. 사전은 바로 그 id들로 조회해 만들고 FK가 행의 존재를
+     *   보장하므로 조회가 빗나갈 수 없다 — 여기서 폴백을 허용해도 실제로 타지는 않는다. 그래도 좁게 두는 건
+     *   방어다: 혹시 빗나가더라도 소유자가 공개 상태에서 바꾼 **현재** 이름을 도달 당시 이름으로 덮지 않는다.
+     * - **스냅샷 분기**는 다른 세계의 id를 본다. 저장은 새 id로 됐는데 사전은 옛 id를 들고 있어 조회가 영영
+     *   빗나가고, 좁은 조건이면 라벨이 통째로 사라진다. 그래서 **빗나가면 이름으로 떨어진다** — 저장 경로에서
+     *   이미 "id가 아니라 이름으로 맞춘다"고 정한 규칙을 읽기에도 적용하는 것이다(PR #224 Codex P2 재리뷰).
      */
     private fun reachedEndingNameFor(
+        endingId: Long?,
+        showsCurrent: Boolean,
+        endingNameById: Map<Long, String>,
+        snapshot: StoryPublicSnapshot?,
+        fallbackName: String?,
+    ): String? {
+        val id = endingId ?: return fallbackName
+        return if (showsCurrent) {
+            endingNameById[id]
+        } else {
+            snapshot?.endingNameById()?.get(id) ?: fallbackName
+        }
+    }
+
+    /**
+     * 서재 카드의 도달 엔딩 이름. [reachedEndingNameFor]와 같되, **참조가 끊긴 경우만** 채팅에 박아둔
+     * 이름([StoryChat.reachedEndingNameSnapshot])으로 복구한다.
+     *
+     * 스토리 수정의 `endings[]`는 전체 교체라 행을 삭제·재생성하고, FK가 `ON DELETE SET NULL`이라
+     * [StoryChat.reachedEndingId]가 비워진다. 스토리 스냅샷은 엔딩 id로 이름을 찾는 사전이라 조회 키가
+     * 사라지면 덮을 수 없다. **비공개 스토리만의 문제가 아니다** — 공개 스토리에서 제작자가 엔딩을 손보기만
+     * 해도 그 스토리로 놀던 모든 독자의 도달 기록이 사라진다.
+     *
+     * 턴 단위(상세·공유)도 이제 같은 방식으로 복구한다 — `story_messages`에 도달 시점 이름을 함께 박아
+     * **그 컬럼이 도달 턴 표식 역할**을 하기 때문이다(PR #224 Codex P2 재리뷰). 단, **이 배포 이후 새로
+     * 도달하는 건만** 그렇다. 배포 전에 이미 참조가 끊긴 과거 도달은 어느 턴이었는지조차 남아 있지 않아
+     * 서재만 살아나는 비대칭이 그대로다.
+     */
+    private fun libraryReachedEndingName(
         chat: StoryChat,
         showsCurrent: Boolean,
         endingNameById: Map<Long, String>,
+        snapshot: StoryPublicSnapshot?,
     ): String? {
-        val endingId = chat.reachedEndingId ?: return chat.reachedEndingNameSnapshot
-        return if (showsCurrent) endingNameById[endingId] else chat.reachedEndingNameSnapshot
+        return reachedEndingNameFor(
+            chat.reachedEndingId,
+            showsCurrent,
+            endingNameById,
+            snapshot,
+            fallbackName = chat.reachedEndingNameSnapshot,
+        )
     }
+
+    /**
+     * 읽을 수 없는 스토리의 프롤로그 폴백(PR #224 Codex P2).
+     *
+     * 스토리 스냅샷은 시작 설정을 **id로** 찾는데, 소유자가 편집 폼에서 시작 설정 항목을 빼면
+     * `story_start_settings` 행이 삭제되고 FK(`ON DELETE SET NULL`)가 [StoryChat.startSettingId]를 비운다.
+     * 조회 키가 사라지므로 사전으로는 덮을 수 없다 — 도달 엔딩 이름과 **완전히 같은 구조**의 파괴다.
+     * 그래서 같은 방식으로, **참조가 끊긴 경우만** 채팅에 박아둔 프롤로그로 복구한다.
+     *
+     * 조건을 좁게 잡는다: `start_setting_id`가 살아 있으면 기존대로 스냅샷 사전을 본다. 넓히면(사전에서 못
+     * 찾을 때마다 폴백) 공개 상태에서 프롤로그를 고친 정상 케이스까지 채팅 생성 시점 값으로 되돌린다.
+     *
+     * **부분 복구다.** AI 조립의 `startSettings`에는 프롤로그 말고 이름·시작 상황·추천 입력도 있는데 채팅
+     * 컬럼에는 프롤로그뿐이라 나머지는 빈 값으로 남는다(엔딩 후보도 시작 설정 스코프라 비어 있다).
+     */
+    private fun brokenReferencePrologue(chat: StoryChat): String? =
+        chat.storyPrologueSnapshot.takeIf { chat.startSettingId == null }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
@@ -299,10 +368,12 @@ class ChatService(
         }
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
-        // 서재와 같은 스냅샷 규칙(KNK-1059). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
+        // 서재와 같은 스냅샷 규칙(KNK-1059·1065). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
         // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목·프롤로그가 보여선 안 된다.
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
-        val storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty()
+        // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 스냅샷에서 멈춘다(KNK-1065).
+        val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
+        val storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
@@ -326,27 +397,41 @@ class ChatService(
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
         //
-        // 스토리를 읽을 수 없으면 추천 입력도 내리지 않는다(PR #220 Codex P1). 제목·프롤로그와 같은 유출인데
-        // 여기만 **스냅샷이 아니라 게이트로** 막는다 — 추천 입력은 값 하나가 아니라 목록이라 스냅샷하려면
-        // JSON 컬럼이나 별도 테이블이 필요한 반면, 입력을 돕는 보조 장치라 없어도 채팅이 성립하기 때문이다.
-        val suggestedInputs = if (showsCurrentStory && turns.isEmpty()) {
-            loadSuggestedInputs(startSetting?.id)
-        } else {
-            emptyList()
+        // 읽을 수 없는 스토리는 **제목·프롤로그와 같이 스냅샷에서** 낸다(PR #224 Codex P2). KNK-1059가 여기만
+        // 게이트로 비웠던 근거는 "목록이라 스냅샷하려면 JSON 컬럼이 필요하다"였는데, KNK-1065의 스토리
+        // 스냅샷이 바로 그 JSON이라 근거가 사라졌다. 비우면 개작 유출은 막지만 독자가 채팅을 시작할 때 보던
+        // 안내가 통째로 사라진다 — 마지막 공개 시점 값으로 내는 편이 맞다.
+        val suggestedInputs = when {
+            turns.isNotEmpty() -> emptyList()
+            showsCurrentStory -> loadSuggestedInputs(startSetting?.id)
+            // 시작 설정 참조가 끊긴 채팅은 스냅샷에서 찾을 키가 없다(채팅에는 추천 입력 컬럼이 없어 폴백도 없다).
+            else -> snapshot?.startSettingOf(chat.startSettingId)?.suggestedInputs.orEmpty()
         }
 
         return ChatDetailResponse(
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
-            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
+            prologue = (
+                if (showsCurrentStory) {
+                    startSetting?.prologue
+                } else {
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                }
+                ).orEmpty(),
             turns = turns.map { assistant ->
                 ChatTurnResponse(
                     id = assistant.id,
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
-                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
+                    reachedEnding = reachedEndingNameFor(
+                        assistant.reachedEndingId,
+                        showsCurrentStory,
+                        endingNameById,
+                        snapshot,
+                        fallbackName = assistant.reachedEndingNameSnapshot,
+                    ),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -388,35 +473,11 @@ class ChatService(
     }
 
     /**
-     * 턴에 실을 도달 엔딩 이름(KNK-1059). 스토리를 읽을 수 있으면 현재 이름, 아니면 채팅 스냅샷이다.
-     *
-     * 스냅샷은 채팅당 하나(최초 도달)뿐이라 **턴의 엔딩이 그 도달과 같을 때만** 쓴다. 도달은
-     * [ChatTurnPersister]가 `chat.reachedEndingId != null`이면 더 인정하지 않으므로 실제로는 어긋날 수 없지만,
-     * 어긋난 데이터를 만나면 남의 현재 엔딩 이름을 흘리거나 엉뚱한 스냅샷을 붙이는 대신 null로 둔다.
-     *
-     * 같은 이유로 엔딩 행이 삭제돼 FK가 끊긴 경우도 여기서는 복구하지 않는다 — 메시지의 `reached_ending_id`까지
-     * NULL이 되어 어느 턴이 도달 턴이었는지 알 수 없기 때문이다. 서재([reachedEndingNameFor])는 채팅 단위라
-     * 스냅샷만으로 복구되므로 **서재만 살아나는 비대칭**이 생긴다.
-     */
-    private fun reachedEndingNameOf(
-        chat: StoryChat,
-        turnEndingId: Long?,
-        showsCurrentStory: Boolean,
-        endingNameById: Map<Long, String>,
-    ): String? {
-        val endingId = turnEndingId ?: return null
-        if (showsCurrentStory) {
-            return endingNameById[endingId]
-        }
-        return if (endingId == chat.reachedEndingId) chat.reachedEndingNameSnapshot else null
-    }
-
-    /**
      * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
      *
      * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
      *
-     * 스토리 제목은 채팅 상세·서재와 같은 스냅샷 규칙을 탄다(KNK-1059). 열람자는 링크만 가진 익명일 수 있으므로
+     * 스토리 제목은 채팅 상세·서재와 같은 스냅샷 규칙을 탄다(KNK-1059·1065). 열람자는 링크만 가진 익명일 수 있으므로
      * [userId]는 알 수 있으면 그 값, 아니면 null이다. 기본값을 두지 않아 호출부가 매번 명시하게 한다 —
      * 새 호출부가 무심코 익명 판정으로 빠지면 읽을 수 있는 사용자에게까지 스냅샷이 나가기 때문이다.
      * 판정 결과는 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
@@ -434,6 +495,7 @@ class ChatService(
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
+        val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
@@ -446,13 +508,25 @@ class ChatService(
         return ChatShareResponse(
             id = share.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty(),
-            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
+            storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty(),
+            prologue = (
+                if (showsCurrentStory) {
+                    startSetting?.prologue
+                } else {
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                }
+                ).orEmpty(),
             turns = turns.map { assistant ->
                 ChatShareTurnResponse(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
-                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
+                    reachedEnding = reachedEndingNameFor(
+                        assistant.reachedEndingId,
+                        showsCurrentStory,
+                        endingNameById,
+                        snapshot,
+                        fallbackName = assistant.reachedEndingNameSnapshot,
+                    ),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -517,8 +591,9 @@ class ChatService(
                             id = message.id,
                             userInput = user.content,
                             content = message.content,
-                            // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id). 상세에서 이름으로 해소한다.
+                            // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id + 이름 스냅샷). 상세에서 이름으로 해소한다.
                             reachedEndingId = message.reachedEndingId,
+                            reachedEndingNameSnapshot = message.reachedEndingNameSnapshot,
                             createdAt = message.createdAt,
                         )
                     }
@@ -535,6 +610,8 @@ class ChatService(
         val userInput: String,
         val content: String,
         val reachedEndingId: Long?,
+        // 도달 시점 이름. reachedEndingId가 FK로 비워져도 남는 **도달 턴 표식**이다.
+        val reachedEndingNameSnapshot: String?,
         val createdAt: Instant,
     )
 
@@ -600,6 +677,9 @@ class ChatService(
                     // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(최대 180초) 동안 마지막 턴이 바뀐 경우를 놓친다.
                     // requestedAt은 그 판정의 세대 기준이다(위 진입 시점에 확정).
                     selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder, requestedAt),
+                    // 조립이 AI에게 보낸 그 목록. 저장 판정이 같은 출처를 봐야 비공개 전환 후 교체된
+                    // 스토리에서도 도달·사건이 누락되지 않는다(PR #224 Codex P2).
+                    judgmentSource = aiCall.judgmentSource,
                 )
             },
             onPersisted = { persistedTurn, aiCallLogId ->
@@ -1197,11 +1277,11 @@ class ChatService(
         )
 
     /**
-     * 스토리 설정·시작 설정과 주어진 [history]·[userInput]으로 AI 채팅 턴 요청을 조립한다.
+     * 스토리 조립 재료(설정·시작 설정·주요 사건·엔딩·장르)와 주어진 [history]·[userInput]으로 AI 채팅 턴 요청을 조립한다.
      * 이어쓰기는 전체 내역을, 재생성(§4-3-9)은 마지막 턴을 제외한 내역을 [history]로 넘긴다.
      *
-     * AI 호출 헤더로 나갈 연결 식별자([AiTraceLink], KNK-751)도 같은 조회 결과로 함께 만든다 —
-     * 시작 설정 public_id가 이 조립에 이미 필요해, 헤더를 위해 다시 조회하지 않기 위해서다.
+     * AI 호출 헤더로 나갈 연결 식별자([AiTraceLink], KNK-751)도 이 안에서 함께 만든다 — 조립과 같은 트랜잭션에서
+     * 읽어야 게이트와 다른 시점을 보지 않기 때문이다.
      */
     private fun buildAiRequest(
         chat: StoryChat,
@@ -1216,60 +1296,90 @@ class ChatService(
         // 스토리를 여기서 **다시** 읽는다. 호출부가 읽어둔 값을 쓰면 게이트 판정만 트랜잭션 밖 시점이 되어
         // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
         val story = storyRepository.findById(chat.storyId).orElse(null)
-        val genre = story?.genre.orEmpty()
-        val setting = storySettingRepository.findByStoryId(chat.storyId)
-        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
-        // 프롤로그는 생성 결과를 통해 독자에게 그대로 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064).
+        // 조립 재료는 생성 결과를 통해 독자에게 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064·1065).
         // 판정 주체는 **턴을 돌리는 사람**이고, 세 진입점(이어쓰기·재생성·선택지)이 모두 앞에서 requireChatOwner로
         // 요청자 == 채팅 소유자를 강제하므로 chat.userId가 곧 그 사람이다(게스트 채팅은 null).
         // 공개 스토리면 현재 값을 쓴다 — 제작자의 밸런스 패치가 진행 중인 채팅에도 반영돼야 한다. 비공개로
-        // 되돌렸거나 삭제됐으면 스냅샷이다 — 화면에서 막아놓은 개작 내용이 생성 결과로 새면 안 된다.
+        // 되돌렸거나 삭제됐으면 마지막 공개 버전 스냅샷이다 — 화면에서 막아놓은 개작이 생성 결과로 새면 안 된다.
+        //
+        // 두 경우를 **같은 모양(StoryPublicSnapshot)** 으로 만들어 아래 조립이 한 갈래로 흐르게 한다. 갈래를
+        // 나누면 한쪽만 고치는 순간 유출이 되살아난다 — KNK-1059가 프롤로그만 막고 설정·사건·엔딩을 놓친 방식이다.
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(chat.userId) == true
+        val material = if (showsCurrentStory) {
+            // 이 채팅이 고른 시작 설정 하나만 읽는다(PR #224 Codex P2). 전체 캡처는 스토리의 모든 시작 설정과
+            // 각 추천 입력·엔딩 본문을 뜨는데, 턴 조립은 매 턴 도는 경로이고 시작 설정 개수에 상한이 없다.
+            story?.let { storyPublicSnapshotService.captureTurnMaterial(it, chat.startSettingId) }
+        } else {
+            // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V69 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
+            // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이
+            // 함께 가므로 재료가 비는 손해가 비공개 개작을 흘리는 손해보다 작다.
+            story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
+        }
+        val startSetting = material?.startSettingOf(chat.startSettingId)
+        val mainEvents = material?.mainEvents.orEmpty()
 
-        // 주요 사건·엔딩 런타임 재료(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
-        val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(chat.storyId)
+        // 주요 사건 런타임 상태(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
+        //
+        // 목표는 **라이브 id**로 저장되는데([ChatTurnPersister.applyMainEventState]) 이 목록은 스냅샷일 수
+        // 있다. 스토리 수정이 자식을 delete + re-insert해 id를 갈아치우므로, id로만 비교하면 매 턴 빗나가
+        // 목표와 진행 턴 수가 계속 사라진다(PR #224 Codex P2 재리뷰). id가 맞으면 그대로 쓰고(읽기 가능
+        // 분기·미변경 스냅샷은 여기서 끝난다), 빗나가면 라이브 행에서 이름을 얻어 **이름으로** 맞춘다.
         val targetMainEvent = chat.targetMainEventId?.let { targetId ->
-            mainEvents.firstOrNull { it.id == targetId }
+            (
+                mainEvents.firstOrNull { it.id == targetId }
+                    ?: storyMainEventRepository.findById(targetId).orElse(null)
+                        ?.let { live -> mainEvents.firstOrNull { it.name == live.name } }
+                )
                 ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
         }
+        // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
+        val endings = eligibleEndings(chat, startSetting)
 
         AiTurnCall(
             request = ChatTurnAiRequest(
-                genre = genre,
+                genre = material?.genre.orEmpty(),
                 storySettings = ChatTurnStorySettings(
-                    worldSetting = setting?.worldSetting.orEmpty(),
-                    characterSetting = setting?.characterSetting.orEmpty(),
-                    userRoleSetting = setting?.userRoleSetting.orEmpty(),
-                    ruleSetting = setting?.ruleSetting.orEmpty(),
+                    worldSetting = material?.storySettings?.worldSetting.orEmpty(),
+                    characterSetting = material?.storySettings?.characterSetting.orEmpty(),
+                    userRoleSetting = material?.storySettings?.userRoleSetting.orEmpty(),
+                    ruleSetting = material?.storySettings?.ruleSetting.orEmpty(),
                 ),
                 startSettings = ChatTurnStartSettings(
                     name = startSetting?.name.orEmpty(),
-                    // 스냅샷이 NULL이면(롤링 배포 창에 만들어진 채팅) 빈 문자열이다. 현재 값으로 되돌리지 않는다 —
-                    // 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역(history)이 함께
-                    // 가므로 도입부 한 줄이 비는 손해가 비공개 개작을 흘리는 손해보다 작다.
-                    prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
+                    // 시작 설정 참조가 끊겼으면(항목 삭제 → FK로 start_setting_id NULL) 채팅에 박아둔
+                    // 프롤로그로 복구한다. 이름·시작 상황은 채팅에 없어 빈 값으로 남는 부분 복구다.
+                    prologue = (
+                        startSetting?.prologue
+                            ?: if (showsCurrentStory) null else brokenReferencePrologue(chat)
+                        ).orEmpty(),
                     startSituation = startSetting?.startSituation.orEmpty(),
                 ),
                 history = history,
                 userInput = userInput,
                 summary = "",
                 // 인물-이미지 매핑(KNK-943). 이어쓰기·재생성·선택지 생성이 이 조립을 공유하므로 세 경로 모두 같은 매핑을 싣는다.
+                // 스냅샷 대상이 아니다 — story_characters는 전 컬럼이 불변이고 수정 API가 손대지 않아 개작될 수 없다.
                 characterImages = loadCharacterImages(chat.storyId),
                 userSource = userSource,
                 mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
                 targetMainEvent = targetMainEvent,
-                occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
-                endings = loadEligibleEndings(chat),
+                occurredMainEventNames = resolveOccurredMainEventNames(chat, mainEvents),
+                endings = endings.map { ChatTurnEnding(it.name, it.achievementCondition, it.epilogue) },
             ),
             traceLink = AiTraceLink(
                 // 간편 제작 스토리만 값이 있다(채팅 생성 시 1회 해석해 박아 둔 값). 일반 제작은 null이라 헤더가 생략된다.
                 creationId = chat.creationId,
                 storyId = story?.publicId,
                 chatId = chat.publicId,
-                startSettingId = startSetting?.publicId,
+                // trace 연결용 식별자는 스냅샷이 아니라 실제 행에서 읽는다 — 열람자에게 가는 값이 아니라
+                // Langfuse에서 이 턴이 어느 시작 설정 행을 탔는지 되짚는 관측 키다.
+                startSettingId = chat.startSettingId
+                    ?.let { storyStartSettingRepository.findById(it).orElse(null) }
+                    ?.publicId,
                 turnNumber = turnNumber,
                 isRegenerated = isRegenerated,
             ),
+            judgmentSource = TurnJudgmentSource(endings = endings, mainEvents = mainEvents),
         )
     } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
 
@@ -1277,6 +1387,12 @@ class ChatService(
     private data class AiTurnCall(
         val request: ChatTurnAiRequest,
         val traceLink: AiTraceLink,
+        /**
+         * 이 요청에 **실제로 실어 보낸** 엔딩·주요 사건(PR #224 Codex P2). 저장 판정이 요청과 같은 출처를
+         * 보게 하려고 조립 결과에 함께 실어 [ChatTurnPersister.persistTurn]까지 흘린다. 저장 시점에 다시
+         * 읽으면 조립이 스냅샷을 봤는지 현재 값을 봤는지 알 수 없어 매칭이 갈라진다.
+         */
+        val judgmentSource: TurnJudgmentSource,
     )
 
     /**
@@ -1292,28 +1408,48 @@ class ChatService(
                 character.imageUrl?.let { ChatCharacterImage(name = character.name, imageUrl = it) }
             }
 
-    /** 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료). */
-    private fun resolveOccurredMainEventNames(chatId: Long, mainEvents: List<StoryMainEvent>): List<String> {
+    /**
+     * 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료).
+     *
+     * 정본은 조인 테이블(`story_chat_main_events`)이지만, 그 `main_event_id`가 `story_main_events` FK
+     * **ON DELETE CASCADE**라 소유자가 주요 사건을 교체하면 행이 통째로 사라진다. 그러면 AI에게 옛 사건을
+     * 후보로 보내면서 "이미 완결했다"는 사실은 못 보내, 독자가 **이미 지난 사건을 다시 겪는다**(PR #224 Codex P2).
+     * 그래서 채팅에 박아둔 이름 스냅샷과 **합집합**으로 채운다.
+     *
+     * 합집합인 이유: 조인 행만 보면 CASCADE 삭제를 못 살리고, 이름 스냅샷만 보면 소유자가 공개 상태에서
+     * 사건 이름을 바꾼 경우(조인 행은 살아 있고 새 이름이 정답)를 놓친다.
+     *
+     * 결과는 항상 [mainEvents](이번 요청에 실은 목록)로 걸러 그 표시 순서로 낸다 — AI가 모르는 이름을
+     * "이미 완결했다"고 보내면 판정이 엉킨다.
+     */
+    private fun resolveOccurredMainEventNames(chat: StoryChat, mainEvents: List<MainEventSnapshot>): List<String> {
         if (mainEvents.isEmpty()) {
             return emptyList()
         }
-        val occurredIds = storyChatMainEventRepository.findByChatId(chatId).map { it.mainEventId }.toSet()
-        return mainEvents.filter { it.id in occurredIds }.map { it.name }
+        // 이 id 비교는 **읽기 가능 분기에서만** 기여한다. 스냅샷 분기에서는 조인 행의 라이브 id와 스냅샷 id가
+        // 다른 세계라 맞지 않는데, 사건이 교체되면 FK(ON DELETE CASCADE)가 조인 행을 함께 지워 occurredIds가
+        // 비고 아래 이름 합집합이 덮는다. 그래서 틀린 결과가 나오지 않는다(PR #224 Codex P2 전수 확인).
+        val occurredIds = storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId }.toSet()
+        val occurredNames = mainEvents.filter { it.id in occurredIds }.map { it.name }
+            .plus(chat.occurredMainEventNamesSnapshot.orEmpty())
+            .toSet()
+        return mainEvents.filter { it.name in occurredNames }.map { it.name }
     }
 
     /**
      * 이번 턴 도달 후보 엔딩만 싣는다: 이미 도달한 채팅(reached_ending_id != null)이면 빈 목록(재판정 차단),
-     * 그 외엔 이번 턴(current_turn + 1)이 최소 턴 수를 충족하는 활성 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
+     * 그 외엔 이번 턴(current_turn + 1)이 최소 턴 수를 충족하는 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
+     *
+     * [startSetting]은 조립 재료(현재 값 또는 마지막 공개 버전 스냅샷)에서 온다. 스냅샷은 활성 엔딩만 담으므로
+     * 라이브 조회(`enabled = true`)와 결과가 같다([StoryPublicSnapshotService.capture]).
      */
-    private fun loadEligibleEndings(chat: StoryChat): List<ChatTurnEnding> {
-        if (chat.reachedEndingId != null) {
+    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?): List<EndingSnapshot> {
+        // 최초 1회 가드. id가 비어도(엔딩 행 교체로 id 없이 기록된 도달) 이름 스냅샷이 남으므로 둘 다 본다.
+        if (chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return emptyList()
         }
-        val startSettingId = chat.startSettingId ?: return emptyList()
         val turnBeingGenerated = chat.currentTurn + 1
-        return storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSettingId)
-            .filter { it.minTurns <= turnBeingGenerated }
-            .map { ChatTurnEnding(name = it.name, achievementCondition = it.achievementCondition, epilogue = it.epilogue) }
+        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnBeingGenerated }
     }
 
     /** AI completed 결과의 판정 필드를 저장 트랜잭션용 [TurnJudgment]로 변환한다. */

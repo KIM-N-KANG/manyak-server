@@ -299,13 +299,14 @@ Accept: application/json
 }
 
 ### ==================================================================
-### [KNK-1059] 스토리 스냅샷 시나리오 — 채팅 카드 (S1~S5)
+### [KNK-1059·1065] 스토리 스냅샷 시나리오 — 채팅 카드 (S1~S5)
 ###
 ### 채팅 카드(배치 조회 /chats/batch 와 서재 GET /users/me/chats)는 같은 조립 함수를 씁니다
 ### (ChatService.toSummaryResponses). 그래서 여기서 확인하는 규칙이 서재에도 그대로 적용됩니다.
 ###
 ###   story.isCurrentMetadataVisibleTo(요청자) 가 참이면 → 스토리의 현재 제목·썸네일
-###   거짓이면(비공개·삭제)                              → 채팅 시작 시점의 스냅샷
+###   거짓이면(비공개·삭제)                              → 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷
+###                                                        (stories.last_public_snapshot, KNK-1065)
 ###
 ### storyId(공개 식별자)는 요청자가 원래 알던 값이라 그대로 둡니다.
 ###
@@ -351,7 +352,7 @@ Accept: application/json
     client.global.set("snapStoryId", response.body.id);
 %}
 
-### S2. (준비 2/3) 게스트로 채팅 생성 — 이 시점 제목·썸네일이 스냅샷으로 박힌다
+### S2. (준비 2/3) 게스트로 채팅 생성 — 스냅샷은 채팅이 아니라 스토리 행에 있다(KNK-1065)
 POST {{baseUrl}}/api/v1/chats
 Content-Type: application/json
 Accept: application/json
@@ -430,7 +431,7 @@ Accept: application/json
         client.assert(response.body.length === 1,
             `카드가 사라졌습니다(스냅샷이 아니라 필터링되고 있음). actual=${JSON.stringify(response.body)}`);
     });
-    client.test("제목은 스냅샷(변경 전)이다", () => {
+    client.test("제목은 마지막 공개 버전(변경 전)이다", () => {
         client.assert(card.storyTitle === "원래 제목",
             `비공개 전환 후 제목이 새고 있습니다. expected=원래 제목 actual=${card.storyTitle}`);
     });

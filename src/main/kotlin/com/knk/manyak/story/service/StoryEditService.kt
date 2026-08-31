@@ -42,6 +42,7 @@ class StoryEditService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
     private val suspensionGuard: SuspensionGuard,
 ) {
 
@@ -106,6 +107,10 @@ class StoryEditService(
 
         // 시작 설정 전체 교체(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정에 종속되므로 함께 동기화한다.
         request.startSettings?.let { inputs -> syncStartSettings(story, inputs) }
+
+        // 자식 교체까지 모두 끝난 뒤에 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 공개 상태가 아니면 no-op이라
+        // 비공개 개작은 스냅샷에 들어가지 않는다. 여기가 스토리 애그리거트를 바꾸는 유일한 수정 경로다.
+        storyPublicSnapshotService.refresh(story)
 
         return buildEditForm(story)
     }

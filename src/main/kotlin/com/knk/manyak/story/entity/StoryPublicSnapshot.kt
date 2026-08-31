@@ -1,0 +1,128 @@
+package com.knk.manyak.story.entity
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+
+/**
+ * 스토리가 **마지막으로 공개(PUBLISHED∧PUBLIC)였던 시점**의 표시·생성 재료(KNK-1065).
+ *
+ * `story_public_snapshots.snapshot`(jsonb)에 통째로 담긴다([StoryPublicSnapshotRow]). 읽을 수 없는 스토리를 참조하는 채팅 경로
+ * (서재·이용내역·상세·공유·AI 턴 요청 조립)는 스토리의 현재 값 대신 이 스냅샷을 쓴다 — 제작자가 스토리를
+ * 감추고 뜯어고치는 중이면 그 개작이 이미 채팅을 시작한 독자에게, 또 생성 결과를 통해 새어 나가기 때문이다.
+ *
+ * 채팅별이 아니라 **스토리별**이라 "마지막으로 보이던 값"이 하나로 유지된다. KNK-1059의 채팅별 스냅샷은
+ * 채팅 생성 시점에 박혀, 공개 상태에서 이뤄진 밸런스 패치를 비공개 전환 시 되돌려 보여주는 문제가 있었다.
+ *
+ * **모든 필드에 기본값이 있고 미지 필드를 무시한다.** 스키마가 나중에 늘어도 옛 JSON을 그대로 읽을 수 있어야
+ * 하기 때문이다 — 이 값은 마이그레이션 대상이 아니라 과거 기록이다.
+ *
+ * 목록의 **순서가 곧 표시 순서**다(시작 설정 id 오름차순, 추천 입력 input_order, 엔딩·주요 사건 sort_order).
+ * 그래서 sort_order를 따로 담지 않는다.
+ *
+ * ## id 취급 규칙 — 새 필드를 추가하기 전에 반드시 읽을 것
+ *
+ * **여기 담긴 id는 스냅샷 내부 연결에만 쓴다. DB에 저장된 라이브 id와는 id가 아니라 이름으로 맞춘다.**
+ *
+ * 스토리 수정(`StoryEditService`)은 자식(엔딩·주요 사건·추천 입력)을 전체 교체하면서 **delete + re-insert**
+ * 한다. 이름을 한 글자도 안 바꿔도 행이 새로 생겨 id가 달라진다. 그래서 저장은 새 라이브 id로 되는데
+ * 스냅샷은 옛 id를 들고 있고, 둘을 직접 비교하면 매칭이 **영영** 실패한다. 증상은 조용하다 — 예외가 아니라
+ * 라벨이 사라지거나 목표가 매 턴 초기화되는 식이다(PR #224 Codex P2가 이 뿌리에서 네 건 나왔다).
+ *
+ * 그래서 저장 경로(`ChatTurnPersister`)는 후보를 이름으로 판정한 뒤 라이브 행을 **이름으로** 다시 찾아 id를
+ * 얻고, 읽기 경로(`ChatService`)는 스냅샷 분기에서 id 조회가 빗나가면 이름으로 떨어진다.
+ *
+ * **유일한 예외는 시작 설정이다**([startSettingOf]). 수정 API가 id 매칭 시 in-place 갱신해 행 identity를
+ * 보존하고(KNK-515 — 진행 중 채팅의 참조 유지가 설계 의도), 요청에서 빠지면 행이 지워지며
+ * FK(`ON DELETE SET NULL`, V5)가 `story_chats.start_setting_id`를 비운다. "id가 바뀐 채 살아 있는" 제3의
+ * 상태가 없어 id 비교가 빗나갈 수 없다.
+ *
+ * **id를 담는 필드를 새로 추가한다면** 그 부모가 전체 교체 대상인지 먼저 보고, 맞다면 읽는 쪽에 이름 폴백을
+ * 함께 넣어라.
+ *
+ * ## 같은 뿌리의 짝 — `story_endings`·`story_main_events`를 참조하는 컬럼을 새로 만들 때
+ *
+ * 위 규칙이 "스냅샷 안의 id"를 다룬다면, 이쪽은 **DB에 저장한 참조 컬럼**이다. 뿌리는 같다 — 전체 교체가
+ * 행을 갈아치우면 그 행을 가리키던 것이 성립하지 않는다. **PR #224 Codex P2가 이 하나에서 다섯 건 나왔다.**
+ *
+ * FK의 삭제 규칙에 따라 증상만 다르고 대응은 같다.
+ * - `ON DELETE CASCADE`면 **참조하는 행이 통째로 사라진다.** 기록 자체가 없어져 조용하다
+ *   (`user_story_ending_reaches`가 이 경우였다 — 제작자가 엔딩을 한 번 손보면 그 스토리 회원 전원의 과거
+ *   도달 집계가 삭제됐다).
+ * - `ON DELETE SET NULL`이면 **행은 남고 조회 키만 빈다.** 라벨이 사라지거나 목표가 매 턴 초기화된다.
+ *
+ * 어느 쪽이든 해법은 하나다: **이름 스냅샷을 같은 행에 함께 남기고, 읽을 때 이름으로 다시 잇는다.**
+ * 이름은 FK가 없어 살아남고, 전체 교체가 이름을 유지한 채 행만 새로 만드는 것이 흔해 id보다 잘 버틴다.
+ * 쓰기는 "라이브 id가 있으면 id + 이름, 없으면 이름만", 읽기는 "id 조회가 빗나가면 이름으로 폴백"이다.
+ *
+ * 지금까지 그렇게 처리한 자리 넷 — 새 참조를 만들 때 선례로 볼 것:
+ * - `story_chats.reached_ending_name_snapshot` — 채팅 단위 도달 엔딩 이름(서재)
+ * - `story_chats.occurred_main_event_names_snapshot` — 완결 주요 사건 이름 목록(AI 요청의 완결 표기)
+ * - `story_messages.reached_ending_name_snapshot` — 턴 단위 도달 엔딩 이름(상세·공유). **이 컬럼이 곧
+ *   "이 턴이 도달 턴이었다"는 표식**이라 id 없이도 턴을 특정한다
+ * - `user_story_ending_reaches.ending_name_snapshot` — 회원 도달 집계. 여기서는 이름이 **유니크 키**다
+ *   (NOT NULL이어야 한다 — PostgreSQL의 UNIQUE는 NULL을 서로 다르게 취급한다)
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StoryPublicSnapshot(
+    val title: String = "",
+    val thumbnailImageKey: String? = null,
+    // 컴파일이 생성한 표지의 절대 URL(KNK-1069). 프리셋 키와 공존하며 2단 폴백은 ImageUrlResolver가 소유한다.
+    val thumbnailImageUrl: String? = null,
+    val genre: String? = null,
+    val storySettings: StorySettingsSnapshot = StorySettingsSnapshot(),
+    val startSettings: List<StartSettingSnapshot> = emptyList(),
+    val mainEvents: List<MainEventSnapshot> = emptyList(),
+) {
+    /**
+     * [chatStartSettingId]가 가리키는 시작 설정. 시작 설정이 지워져 참조가 끊긴 채팅은 null이다.
+     *
+     * **id로 맞춰도 되는 유일한 자리다** — 위 "id 취급 규칙"의 예외. 근거는 그 문단에 있다.
+     */
+    fun startSettingOf(chatStartSettingId: Long?): StartSettingSnapshot? =
+        chatStartSettingId?.let { id -> startSettings.firstOrNull { it.id == id } }
+
+    /**
+     * 스냅샷이 담은 모든 시작 설정의 엔딩 id→이름. 도달 엔딩 이름을 되찾는 데 쓴다.
+     *
+     * **여기 없는 id는 "그런 엔딩이 없다"가 아니라 "행이 교체돼 id가 갈렸다"일 수 있다**(위 "id 취급 규칙").
+     * 호출부는 조회가 빗나가면 이름 스냅샷으로 떨어져야 한다.
+     */
+    fun endingNameById(): Map<Long, String> =
+        startSettings.flatMap { it.endings }.associate { it.id to it.name }
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StorySettingsSnapshot(
+    val worldSetting: String? = null,
+    val characterSetting: String? = null,
+    val userRoleSetting: String? = null,
+    val ruleSetting: String? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StartSettingSnapshot(
+    // 채팅이 참조하는 story_start_settings.id. 외부로 나가지 않는 서버 내부 JSON이라 순차 PK를 그대로 쓴다
+    // (외부 노출 식별자는 public_id라는 규칙의 대상이 아니다). 채팅의 start_setting_id로 곧장 찾기 위해서다.
+    val id: Long = 0,
+    val name: String = "",
+    val prologue: String? = null,
+    val startSituation: String? = null,
+    val suggestedInputs: List<String> = emptyList(),
+    val endings: List<EndingSnapshot> = emptyList(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class EndingSnapshot(
+    val id: Long = 0,
+    val name: String = "",
+    val minTurns: Int = 0,
+    val achievementCondition: String = "",
+    val epilogue: String = "",
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class MainEventSnapshot(
+    val id: Long = 0,
+    val name: String = "",
+    val description: String = "",
+    val keySentence: String = "",
+)
