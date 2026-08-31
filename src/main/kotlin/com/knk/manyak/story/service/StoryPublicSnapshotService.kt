@@ -5,7 +5,10 @@ import com.knk.manyak.story.entity.MainEventSnapshot
 import com.knk.manyak.story.entity.StartSettingSnapshot
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.entity.StoryEnding
+import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
+import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StorySettingsSnapshot
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
@@ -69,6 +72,41 @@ class StoryPublicSnapshotService(
         return storyPublicSnapshotRepository.findAllById(storyIds).associate { it.storyId to it.snapshot }
     }
 
+    /**
+     * **턴 조립 전용 부분 캡처**: 채팅이 고른 시작 설정 하나와 그 엔딩만 뜬다(PR #224 Codex P2).
+     *
+     * [capture]는 스토리의 **모든** 시작 설정과 각 추천 입력·엔딩 본문을 읽는다. 스냅샷을 쓰는 쪽에서는 한 번
+     * 뜨고 끝이지만 턴 조립은 **매 턴** 도는 경로이고 시작 설정 개수에 상한이 없어, 조립 코드를 한 갈래로
+     * 유지하려고 치르는 값이 너무 커진다. 그래서 읽기 가능 분기는 필요한 만큼만 읽는다 — 모양은 그대로라
+     * 조립 코드는 여전히 한 갈래다.
+     *
+     * 추천 입력은 담지 않는다: 턴 요청(`ChatTurnAiRequest`)에 실리지 않는다.
+     */
+    fun captureTurnMaterial(story: Story, startSettingId: Long?): StoryPublicSnapshot {
+        val startSetting = startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+        return StoryPublicSnapshot(
+            title = story.title,
+            thumbnailImageKey = story.thumbnailImageKey,
+            thumbnailImageUrl = story.thumbnailImageUrl,
+            genre = story.genre,
+            storySettings = storySettingRepository.findByStoryId(story.id).toSnapshot(),
+            startSettings = listOfNotNull(
+                startSetting?.let {
+                    StartSettingSnapshot(
+                        id = it.id,
+                        name = it.name,
+                        prologue = it.prologue,
+                        startSituation = it.startSituation,
+                        endings = storyEndingRepository
+                            .findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(it.id)
+                            .map(::toSnapshot),
+                    )
+                },
+            ),
+            mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map(::toSnapshot),
+        )
+    }
+
     /** 스토리의 현재 표시·생성 재료를 스냅샷 모양으로 모은다. */
     fun capture(story: Story): StoryPublicSnapshot {
         val setting = storySettingRepository.findByStoryId(story.id)
@@ -97,12 +135,7 @@ class StoryPublicSnapshotService(
             thumbnailImageKey = story.thumbnailImageKey,
             thumbnailImageUrl = story.thumbnailImageUrl,
             genre = story.genre,
-            storySettings = StorySettingsSnapshot(
-                worldSetting = setting?.worldSetting,
-                characterSetting = setting?.characterSetting,
-                userRoleSetting = setting?.userRoleSetting,
-                ruleSetting = setting?.ruleSetting,
-            ),
+            storySettings = setting.toSnapshot(),
             startSettings = startSettings.map { startSetting ->
                 StartSettingSnapshot(
                     id = startSetting.id,
@@ -110,25 +143,32 @@ class StoryPublicSnapshotService(
                     prologue = startSetting.prologue,
                     startSituation = startSetting.startSituation,
                     suggestedInputs = inputsByStartSettingId[startSetting.id].orEmpty(),
-                    endings = endingsByStartSettingId[startSetting.id].orEmpty().map { ending ->
-                        EndingSnapshot(
-                            id = ending.id,
-                            name = ending.name,
-                            minTurns = ending.minTurns,
-                            achievementCondition = ending.achievementCondition,
-                            epilogue = ending.epilogue,
-                        )
-                    },
+                    endings = endingsByStartSettingId[startSetting.id].orEmpty().map(::toSnapshot),
                 )
             },
-            mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map {
-                MainEventSnapshot(
-                    id = it.id,
-                    name = it.name,
-                    description = it.description,
-                    keySentence = it.keySentence,
-                )
-            },
+            mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map(::toSnapshot),
         )
     }
+
+    private fun StorySetting?.toSnapshot() = StorySettingsSnapshot(
+        worldSetting = this?.worldSetting,
+        characterSetting = this?.characterSetting,
+        userRoleSetting = this?.userRoleSetting,
+        ruleSetting = this?.ruleSetting,
+    )
+
+    private fun toSnapshot(ending: StoryEnding) = EndingSnapshot(
+        id = ending.id,
+        name = ending.name,
+        minTurns = ending.minTurns,
+        achievementCondition = ending.achievementCondition,
+        epilogue = ending.epilogue,
+    )
+
+    private fun toSnapshot(event: StoryMainEvent) = MainEventSnapshot(
+        id = event.id,
+        name = event.name,
+        description = event.description,
+        keySentence = event.keySentence,
+    )
 }

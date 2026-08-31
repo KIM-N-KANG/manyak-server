@@ -187,21 +187,28 @@ class StoryService(
         if (userId == null) {
             return emptyList()
         }
-        // 유니크가 (회원, 스토리, 이름)이라 중복이 없지만, 방어적으로 distinct한다.
-        val reachedNames = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
-            .map { it.endingNameSnapshot }
-            .distinct()
+        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
+        // 이름이 비어 있는 행은 롤링 배포 창에 구버전 태스크가 쓴 것이다(이름 컬럼을 모른다 — V70 확장 단계).
+        // 그 행은 ending_id로 라이브 엔딩에서 이름을 해소한다. 둘 다 없으면 남길 근거가 없어 빠진다.
+        val legacyIds = reaches.filter { it.endingNameSnapshot == null }.mapNotNull { it.endingId }
+        val legacyNames = if (legacyIds.isEmpty()) {
+            emptyList()
+        } else {
+            storyEndingRepository.findAllById(legacyIds).map { it.name }
+        }
+        // 중복 제거가 방어가 아니라 실제로 필요하다: 창 동안 구버전 행과 신버전 행이 같은 도달을 두 번 남길 수
+        // 있고(V70 주석의 마지막 조합), 어떤 DB 제약으로도 막히지 않는다. 화면에는 한 번만 실려야 한다.
+        val reachedNames = (reaches.mapNotNull { it.endingNameSnapshot } + legacyNames).distinct()
         if (reachedNames.isEmpty()) {
             return emptyList()
         }
-        // 시작 설정 순서 → 그 안의 엔딩 순서(assemble이 sort_order로 정렬해 준다). 동명이면 첫 등장이 이긴다.
-        val orderByName = startSettings
-            .flatMap { it.endings }
-            .map { it.name }
-            .withIndex()
-            .associate { (index, name) -> name to index }
-            .withDefault { Int.MAX_VALUE }
-        return reachedNames.sortedWith(compareBy({ orderByName.getValue(it) }, { it }))
+        // 시작 설정 순서 → 그 안의 엔딩 순서(assemble이 sort_order로 정렬해 준다).
+        // 동명 엔딩은 **첫 등장**이 이긴다 — associate는 마지막 값을 남기므로 putIfAbsent로 첫 인덱스를 지킨다.
+        val orderByName = HashMap<String, Int>()
+        startSettings.flatMap { it.endings }.forEachIndexed { index, ending ->
+            orderByName.putIfAbsent(ending.name, index)
+        }
+        return reachedNames.sortedWith(compareBy({ orderByName[it] ?: Int.MAX_VALUE }, { it }))
     }
 
     /**

@@ -1304,7 +1304,9 @@ class ChatService(
         // 나누면 한쪽만 고치는 순간 유출이 되살아난다 — KNK-1059가 프롤로그만 막고 설정·사건·엔딩을 놓친 방식이다.
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(chat.userId) == true
         val material = if (showsCurrentStory) {
-            story?.let(storyPublicSnapshotService::capture)
+            // 이 채팅이 고른 시작 설정 하나만 읽는다(PR #224 Codex P2). 전체 캡처는 스토리의 모든 시작 설정과
+            // 각 추천 입력·엔딩 본문을 뜨는데, 턴 조립은 매 턴 도는 경로이고 시작 설정 개수에 상한이 없다.
+            story?.let { storyPublicSnapshotService.captureTurnMaterial(it, chat.startSettingId) }
         } else {
             // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V69 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
             // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이

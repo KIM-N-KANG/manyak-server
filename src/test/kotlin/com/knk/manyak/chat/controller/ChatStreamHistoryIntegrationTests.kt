@@ -59,6 +59,8 @@ import java.util.concurrent.atomic.AtomicReference
 @TestPropertySource(
     properties = [
         "spring.datasource.url=jdbc:h2:mem:manyak-history-capture;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
+        // 턴 조립이 **몇 행을 읽는지** 재기 위해 Hibernate 통계를 켠다(부분 캡처 회귀 가드).
+        "spring.jpa.properties.hibernate.generate_statistics=true",
     ],
 )
 class ChatStreamHistoryIntegrationTests {
@@ -125,6 +127,15 @@ class ChatStreamHistoryIntegrationTests {
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var entityManagerFactory: jakarta.persistence.EntityManagerFactory
+
+    private fun statistics() =
+        entityManagerFactory.unwrap(org.hibernate.SessionFactory::class.java).statistics
+
+    private fun endingLoadCount() =
+        statistics().getEntityStatistics("com.knk.manyak.story.entity.StoryEnding").loadCount
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -394,6 +405,42 @@ class ChatStreamHistoryIntegrationTests {
         assertThat(captured.storySettings.worldSetting).isEmpty()
         assertThat(captured.mainEvents).isEmpty()
         assertThat(captured.endings).isEmpty()
+    }
+
+    @Test
+    fun `턴 조립은 이 채팅이 고른 시작 설정만 읽는다`() {
+        val (story, chat) = seedChatOnPublicStory()
+        // 이 채팅과 무관한 시작 설정을 여럿 붙인다. 전체 캡처였다면 이것들과 각 엔딩·추천 입력까지 읽었다.
+        repeat(3) { index ->
+            val other = startSettingRepository.save(
+                StoryStartSetting(story = story, name = "다른 시작 $index", prologue = "다른 프롤로그 $index"),
+            )
+            endingRepository.save(
+                StoryEnding(
+                    startSetting = other,
+                    name = "다른 엔딩 $index",
+                    minTurns = 1,
+                    achievementCondition = "조건",
+                    epilogue = "에필로그",
+                    sortOrder = 1,
+                ),
+            )
+        }
+        publish(story)
+        // 시드가 읽은 것은 세지 않는다 — 측정 구간은 아래 턴 하나다.
+        statistics().clear()
+
+        stream(chat.publicId.toString(), "다음 행동을 한다.")
+
+        val captured = capturingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        // 결과값만 보면 전체 캡처와 구분되지 않는다(어차피 id로 골라내므로). **몇 행을 읽었는지**가 차이다.
+        assertThat(captured.startSettings.prologue).isEqualTo("원래 프롤로그")
+        assertThat(endingLoadCount())
+            .withFailMessage(
+                "턴 조립이 남의 시작 설정 엔딩까지 읽었습니다(%d행). 이 채팅의 시작 설정에는 엔딩이 없으므로 0이어야 합니다.",
+                endingLoadCount(),
+            )
+            .isZero()
     }
 
     private fun regenerate(chatId: String, turnId: Long): String =
