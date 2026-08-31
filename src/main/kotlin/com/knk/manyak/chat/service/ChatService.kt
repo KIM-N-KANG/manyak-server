@@ -56,6 +56,7 @@ import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.EndingSnapshot
 import com.knk.manyak.story.entity.MainEventSnapshot
 import com.knk.manyak.story.entity.StartSettingSnapshot
 import com.knk.manyak.story.entity.StoryPublicSnapshot
@@ -310,6 +311,23 @@ class ChatService(
         return reachedEndingNameFor(endingId, showsCurrent, endingNameById, snapshot)
     }
 
+    /**
+     * 읽을 수 없는 스토리의 프롤로그 폴백(PR #224 Codex P2).
+     *
+     * 스토리 스냅샷은 시작 설정을 **id로** 찾는데, 소유자가 편집 폼에서 시작 설정 항목을 빼면
+     * `story_start_settings` 행이 삭제되고 FK(`ON DELETE SET NULL`)가 [StoryChat.startSettingId]를 비운다.
+     * 조회 키가 사라지므로 사전으로는 덮을 수 없다 — 도달 엔딩 이름과 **완전히 같은 구조**의 파괴다.
+     * 그래서 같은 방식으로, **참조가 끊긴 경우만** 채팅에 박아둔 프롤로그로 복구한다.
+     *
+     * 조건을 좁게 잡는다: `start_setting_id`가 살아 있으면 기존대로 스냅샷 사전을 본다. 넓히면(사전에서 못
+     * 찾을 때마다 폴백) 공개 상태에서 프롤로그를 고친 정상 케이스까지 채팅 생성 시점 값으로 되돌린다.
+     *
+     * **부분 복구다.** AI 조립의 `startSettings`에는 프롤로그 말고 이름·시작 상황·추천 입력도 있는데 채팅
+     * 컬럼에는 프롤로그뿐이라 나머지는 빈 값으로 남는다(엔딩 후보도 시작 설정 스코프라 비어 있다).
+     */
+    private fun brokenReferencePrologue(chat: StoryChat): String? =
+        chat.storyPrologueSnapshot.takeIf { chat.startSettingId == null }
+
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
         val chat = resolveChat(chatId)
@@ -363,7 +381,11 @@ class ChatService(
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
             prologue = (
-                if (showsCurrentStory) startSetting?.prologue else snapshot?.startSettingOf(chat.startSettingId)?.prologue
+                if (showsCurrentStory) {
+                    startSetting?.prologue
+                } else {
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                }
                 ).orEmpty(),
             turns = turns.map { assistant ->
                 ChatTurnResponse(
@@ -450,7 +472,11 @@ class ChatService(
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty(),
             prologue = (
-                if (showsCurrentStory) startSetting?.prologue else snapshot?.startSettingOf(chat.startSettingId)?.prologue
+                if (showsCurrentStory) {
+                    startSetting?.prologue
+                } else {
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                }
                 ).orEmpty(),
             turns = turns.map { assistant ->
                 ChatShareTurnResponse(
@@ -604,6 +630,9 @@ class ChatService(
                     // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(최대 180초) 동안 마지막 턴이 바뀐 경우를 놓친다.
                     // requestedAt은 그 판정의 세대 기준이다(위 진입 시점에 확정).
                     selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder, requestedAt),
+                    // 조립이 AI에게 보낸 그 목록. 저장 판정이 같은 출처를 봐야 비공개 전환 후 교체된
+                    // 스토리에서도 도달·사건이 누락되지 않는다(PR #224 Codex P2).
+                    judgmentSource = aiCall.judgmentSource,
                 )
             },
             onPersisted = { persistedTurn, aiCallLogId ->
@@ -1245,6 +1274,8 @@ class ChatService(
             mainEvents.firstOrNull { it.id == targetId }
                 ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
         }
+        // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
+        val endings = eligibleEndings(chat, startSetting)
 
         AiTurnCall(
             request = ChatTurnAiRequest(
@@ -1257,7 +1288,12 @@ class ChatService(
                 ),
                 startSettings = ChatTurnStartSettings(
                     name = startSetting?.name.orEmpty(),
-                    prologue = startSetting?.prologue.orEmpty(),
+                    // 시작 설정 참조가 끊겼으면(항목 삭제 → FK로 start_setting_id NULL) 채팅에 박아둔
+                    // 프롤로그로 복구한다. 이름·시작 상황은 채팅에 없어 빈 값으로 남는 부분 복구다.
+                    prologue = (
+                        startSetting?.prologue
+                            ?: if (showsCurrentStory) null else brokenReferencePrologue(chat)
+                        ).orEmpty(),
                     startSituation = startSetting?.startSituation.orEmpty(),
                 ),
                 history = history,
@@ -1270,7 +1306,7 @@ class ChatService(
                 mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
                 targetMainEvent = targetMainEvent,
                 occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
-                endings = eligibleEndings(chat, startSetting),
+                endings = endings.map { ChatTurnEnding(it.name, it.achievementCondition, it.epilogue) },
             ),
             traceLink = AiTraceLink(
                 // 간편 제작 스토리만 값이 있다(채팅 생성 시 1회 해석해 박아 둔 값). 일반 제작은 null이라 헤더가 생략된다.
@@ -1285,6 +1321,7 @@ class ChatService(
                 turnNumber = turnNumber,
                 isRegenerated = isRegenerated,
             ),
+            judgmentSource = TurnJudgmentSource(endings = endings, mainEvents = mainEvents),
         )
     } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
 
@@ -1292,6 +1329,12 @@ class ChatService(
     private data class AiTurnCall(
         val request: ChatTurnAiRequest,
         val traceLink: AiTraceLink,
+        /**
+         * 이 요청에 **실제로 실어 보낸** 엔딩·주요 사건(PR #224 Codex P2). 저장 판정이 요청과 같은 출처를
+         * 보게 하려고 조립 결과에 함께 실어 [ChatTurnPersister.persistTurn]까지 흘린다. 저장 시점에 다시
+         * 읽으면 조립이 스냅샷을 봤는지 현재 값을 봤는지 알 수 없어 매칭이 갈라진다.
+         */
+        val judgmentSource: TurnJudgmentSource,
     )
 
     /**
@@ -1323,14 +1366,13 @@ class ChatService(
      * [startSetting]은 조립 재료(현재 값 또는 마지막 공개 버전 스냅샷)에서 온다. 스냅샷은 활성 엔딩만 담으므로
      * 라이브 조회(`enabled = true`)와 결과가 같다([StoryPublicSnapshotService.capture]).
      */
-    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?): List<ChatTurnEnding> {
-        if (chat.reachedEndingId != null) {
+    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?): List<EndingSnapshot> {
+        // 최초 1회 가드. id가 비어도(엔딩 행 교체로 id 없이 기록된 도달) 이름 스냅샷이 남으므로 둘 다 본다.
+        if (chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return emptyList()
         }
         val turnBeingGenerated = chat.currentTurn + 1
-        return startSetting?.endings.orEmpty()
-            .filter { it.minTurns <= turnBeingGenerated }
-            .map { ChatTurnEnding(name = it.name, achievementCondition = it.achievementCondition, epilogue = it.epilogue) }
+        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnBeingGenerated }
     }
 
     /** AI completed 결과의 판정 필드를 저장 트랜잭션용 [TurnJudgment]로 변환한다. */

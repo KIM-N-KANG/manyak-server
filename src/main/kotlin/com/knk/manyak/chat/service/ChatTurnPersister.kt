@@ -13,6 +13,8 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.story.entity.EndingSnapshot
+import com.knk.manyak.story.entity.MainEventSnapshot
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import org.slf4j.LoggerFactory
@@ -64,6 +66,9 @@ class ChatTurnPersister(
         judgment: TurnJudgment = TurnJudgment(),
         // 사용자가 고른 직전 턴 선택지(§4-3-3, KNK-819). 프론트가 안 보내면 두 값이 null이라 기록하지 않는다.
         selection: ChoiceSelection = ChoiceSelection(),
+        // AI에게 **실제로 보낸** 엔딩·주요 사건 목록(KNK-1065, PR #224 Codex P2). 기본값을 두지 않아 호출부가
+        // 매번 명시하게 한다 — 빠뜨리면 후보가 비어 도달·사건 판정이 조용히 전부 누락된다.
+        judgmentSource: TurnJudgmentSource,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -72,7 +77,7 @@ class ChatTurnPersister(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
 
         // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
-        val reachedEnding = resolveReachedEnding(chat, judgment.endingName)
+        val reachedEnding = resolveReachedEnding(chat, judgment.endingName, judgmentSource)
 
         // 선택 기록은 아래 insert보다 **먼저** 해야 한다 — 새 ASSISTANT를 넣고 나면 그게 마지막 턴이 돼 판정이 뒤집힌다.
         recordChoiceSelection(chatId, selection, userInput)
@@ -113,7 +118,7 @@ class ChatTurnPersister(
             )
         }
 
-        applyMainEventState(chat, judgment)
+        applyMainEventState(chat, judgment, judgmentSource)
         applyEndingReach(chat, reachedEnding)
 
         chat.currentTurn += 1
@@ -187,35 +192,60 @@ class ChatTurnPersister(
     }
 
     /**
-     * AI가 이름으로 지목한 도달 엔딩을 채팅의 시작 설정 스코프에서 id로 해소한다.
-     * 시작 설정이 없거나 이미 도달한 채팅이면 null(최초 1회 가드는 요청 단계에서 후보를 비워 이미 걸리지만 방어적으로 재확인).
+     * AI가 이름으로 지목한 도달 엔딩을 해소한다.
      *
-     * 최소 턴 수는 백엔드가 결정적으로 판정하는 하드 조건이다(§4-3-10). loadEligibleEndings가 요청 후보를 거르지만
-     * 권위 있는 write-side 가드가 아니므로, AI가 아직 문턱을 넘지 않은 엔딩 이름을 잘못/앞질러 보내도 여기서 재확인해
-     * 이번 턴(current_turn + 1)이 min_turns를 충족할 때만 도달로 인정한다(환각·stale로 조기 ENDED·도달 기록 방지).
+     * **후보 판정은 AI에게 보낸 목록([judgmentSource])에서 한다**(PR #224 Codex P2). 예전에는 현재
+     * `story_endings`에서 이름으로 찾았는데, KNK-1065가 요청 재료를 스토리 스냅샷으로 바꾸면서 출처가 갈렸다 —
+     * 비공개로 전환한 뒤 엔딩을 교체한 스토리에서는 AI가 스냅샷의 옛 이름을 돌려주고 현재 행에는 그 이름이 없어
+     * 매칭이 통째로 실패했다. 사용자가 엔딩에 도달해도 기록이 남지 않는 셈이다.
+     *
+     * 저장은 **id를 얻을 수 있을 때만** id를 남긴다. `story_chats`·`story_messages`의 `reached_ending_id`는
+     * `story_endings` FK라 없는 행을 가리키면 저장 자체가 터진다. 그래서 현재 행을 **이름으로** 다시 찾아본다 —
+     * 엔딩은 시작 설정 안에서 이름이 유니크한 식별자이고(§4-3-10), 수정 API의 `endings[]` 전체 교체가 이름을
+     * 유지한 채 행만 새로 만드는 것이 흔하기 때문에 id보다 이름이 잘 살아남는다.
+     * 현재 행이 없으면(소유자가 이름까지 바꿨거나 지웠다) **id 없이 이름만** 남긴다 — 도달 기록은 지켜지고
+     * FK도 만족한다([applyEndingReach]).
+     *
+     * 최소 턴 수는 백엔드가 결정적으로 판정하는 하드 조건이다(§4-3-10). 요청 후보를 거르는
+     * `eligibleEndings`는 권위 있는 write-side 가드가 아니므로, AI가 문턱을 넘지 않은 이름을 앞질러 보내도
+     * 여기서 재확인한다. 기준값은 **AI에게 보낸 그 목록의 min_turns**다(요청과 같은 출처).
      */
-    private fun resolveReachedEnding(chat: StoryChat, endingName: String?): ReachedEnding? {
-        val startSettingId = chat.startSettingId
-        if (endingName == null || startSettingId == null || chat.reachedEndingId != null) {
+    private fun resolveReachedEnding(
+        chat: StoryChat,
+        endingName: String?,
+        judgmentSource: TurnJudgmentSource,
+    ): ReachedEnding? {
+        // 최초 1회 가드. id가 비어도(행 교체로 id 없이 기록된 도달) 이름 스냅샷이 남으므로 둘 다 본다.
+        if (endingName == null || chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return null
         }
-        val ending = storyEndingRepository
-            .findFirstByStartSettingIdAndNameAndEnabledTrue(startSettingId, endingName)
-            ?: return null
-        if (ending.minTurns > chat.currentTurn + 1) {
+        val candidate = judgmentSource.endings.firstOrNull { it.name == endingName } ?: return null
+        if (candidate.minTurns > chat.currentTurn + 1) {
             return null
         }
-        return ReachedEnding(id = ending.id, name = ending.name)
+        val liveId = chat.startSettingId
+            ?.let { storyEndingRepository.findFirstByStartSettingIdAndNameAndEnabledTrue(it, candidate.name) }
+            ?.id
+        return ReachedEnding(id = liveId, name = candidate.name)
     }
 
-    /** 목표 사건 상태(선정·교체·해제)와 이번 턴 완결 사건 기록을 반영한다. 이름은 사건 id로 해소한다. */
-    private fun applyMainEventState(chat: StoryChat, judgment: TurnJudgment) {
+    /**
+     * 목표 사건 상태(선정·교체·해제)와 이번 턴 완결 사건 기록을 반영한다.
+     *
+     * 도달 엔딩과 같은 이유로 **후보 판정은 AI에게 보낸 목록([judgmentSource])에서** 한다(PR #224 Codex P2).
+     * 그 뒤 현재 행을 이름으로 찾아 id를 얻는다 — 사건도 스토리 안에서 이름이 유니크한 식별자다(KNK-523).
+     *
+     * 현재 행이 없으면(소유자가 이름을 바꿨거나 지웠다) 완결 기록은 **건너뛴다**.
+     * `story_chat_main_events.main_event_id`가 NOT NULL FK라 엔딩처럼 이름만 남길 자리가 없다.
+     * 목표 사건도 같은 이유로 해제된다(진행 0) — 다음 턴에 AI가 다시 지목하면 그때 다시 잡힌다.
+     */
+    private fun applyMainEventState(chat: StoryChat, judgment: TurnJudgment, judgmentSource: TurnJudgmentSource) {
         // 완결 사건 기록(최초 1회 upsert). 같은 채팅에서 같은 사건은 유니크로 한 번만 남는다.
         judgment.occurredMainEventName?.let { name ->
-            storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.let { event ->
-                if (!storyChatMainEventRepository.existsByChatIdAndMainEventId(chat.id, event.id)) {
+            resolveLiveMainEventId(chat, name, judgmentSource)?.let { eventId ->
+                if (!storyChatMainEventRepository.existsByChatIdAndMainEventId(chat.id, eventId)) {
                     storyChatMainEventRepository.save(
-                        StoryChatMainEvent(chatId = chat.id, mainEventId = event.id),
+                        StoryChatMainEvent(chatId = chat.id, mainEventId = eventId),
                     )
                 }
             }
@@ -223,9 +253,9 @@ class ChatTurnPersister(
 
         // 목표 사건: AI가 지목하면 그 사건·진행 턴 수로, null이면 목표 해제(진행 0).
         val target = judgment.targetMainEvent
-        val targetEvent = target?.let { storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, it.name) }
-        if (target != null && targetEvent != null) {
-            chat.targetMainEventId = targetEvent.id
+        val targetEventId = target?.let { resolveLiveMainEventId(chat, it.name, judgmentSource) }
+        if (target != null && targetEventId != null) {
+            chat.targetMainEventId = targetEventId
             chat.targetProgressTurns = target.progressTurns.coerceAtLeast(0)
         } else {
             chat.targetMainEventId = null
@@ -233,21 +263,33 @@ class ChatTurnPersister(
         }
     }
 
+    /** AI가 지목한 사건 이름이 **보낸 목록에 있었는지** 확인하고, 현재 행의 id를 이름으로 해소한다. */
+    private fun resolveLiveMainEventId(chat: StoryChat, name: String, judgmentSource: TurnJudgmentSource): Long? {
+        if (judgmentSource.mainEvents.none { it.name == name }) {
+            return null
+        }
+        return storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.id
+    }
+
     /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계. 게스트는 집계하지 않는다. */
     private fun applyEndingReach(chat: StoryChat, reachedEnding: ReachedEnding?) {
         if (reachedEnding == null) {
             return
         }
+        // id는 현재 행을 찾았을 때만 있다(FK 제약). 못 찾아도 이름·ENDED는 남겨 도달 기록 자체는 지킨다.
         chat.reachedEndingId = reachedEnding.id
         // 도달 시점의 이름을 함께 박는다(KNK-1059). 엔딩 행이 지워지면 [StoryChat.reachedEndingId]가 FK로
         // 비워져 스토리 스냅샷의 "엔딩 id → 이름" 사전을 조회할 키가 사라지므로, 서재는 이 값으로 복구한다.
         chat.reachedEndingNameSnapshot = reachedEnding.name
         chat.status = ChatStatus.ENDED
+        // 회원 도달 집계는 엔딩 id가 있어야 한다(user_story_ending_reaches.ending_id는 NOT NULL FK).
+        // id 없이 기록된 도달은 집계에서 빠진다 — 채팅의 도달 기록은 남으므로 사용자에게 보이는 손실은 없다.
+        val endingId = reachedEnding.id ?: return
         val userId = chat.userId ?: return
         // 회원 도달 집계는 독립 트랜잭션에서 기록한다. 동시 도달로 유니크 위반이 나도 그 트랜잭션만 롤백되고
         // 이 턴 저장은 유지된다. 위반은 다른 트랜잭션이 이미 같은 도달을 기록한 것이므로 멱등 결과로 흡수한다.
         try {
-            endingReachRecorder.record(userId, chat.storyId, reachedEnding.id)
+            endingReachRecorder.record(userId, chat.storyId, endingId)
         } catch (_: DataIntegrityViolationException) {
             // 동시 도달로 (회원, 스토리, 엔딩)이 이미 기록됨 — 무시.
         }
@@ -389,7 +431,11 @@ class ChatTurnPersister(
         val reachedEnding: ReachedEnding? = null,
     )
 
-    data class ReachedEnding(val id: Long, val name: String)
+    /**
+     * 이번 턴에 도달한 엔딩. [id]는 현재 `story_endings` 행을 찾았을 때만 있다 — 소유자가 엔딩을 교체하고
+     * 이름까지 바꾼 스토리에서는 이름만 남는다(FK를 만족시킬 id가 없다).
+     */
+    data class ReachedEnding(val id: Long?, val name: String)
 
     companion object {
         /**
@@ -435,3 +481,15 @@ data class TurnJudgment(
 )
 
 data class TargetMainEventJudgment(val name: String, val progressTurns: Int)
+
+/**
+ * AI 턴 요청에 **실제로 실어 보낸** 엔딩 후보와 주요 사건 목록(KNK-1065, PR #224 Codex P2).
+ *
+ * 저장 판정이 요청과 같은 출처를 보게 하는 것이 존재 이유다. 읽을 수 있는 스토리면 현재 값을 뜬 것이고,
+ * 아니면 그 스토리의 마지막 공개 버전 스냅샷이다 — 어느 쪽이든 AI가 고를 수 있었던 이름의 전부다.
+ * 여기 없는 이름은 AI 환각이거나 낡은 값이므로 판정에 반영하지 않는다.
+ */
+data class TurnJudgmentSource(
+    val endings: List<EndingSnapshot> = emptyList(),
+    val mainEvents: List<MainEventSnapshot> = emptyList(),
+)

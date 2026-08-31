@@ -167,6 +167,21 @@ class ChatStorySnapshotIntegrationTests {
     }
 
     /**
+     * 시작 설정 행이 삭제돼 참조가 끊긴 상태를 만든다(소유자가 편집 폼에서 시작 설정 항목을 뺐을 때).
+     *
+     * 운영에서는 `story_chats.start_setting_id`의 FK가 `ON DELETE SET NULL`이라 시작 설정을 지우면 참조가
+     * 자동으로 NULL이 된다. 테스트 스키마는 Flyway가 아니라 `ddl-auto`로 만들어져 그 삭제 동작이 없으므로,
+     * FK가 만들어내는 결과 상태를 직접 재현한다(참조 NULL + 시작 설정 행 부재).
+     */
+    private fun breakStartSettingReference(chat: StoryChat, story: Story) {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        jdbcTemplate.update("UPDATE story_chats SET start_setting_id = NULL WHERE id = ?", chat.id)
+        jdbcTemplate.update("DELETE FROM story_suggested_inputs WHERE start_setting_id = ?", setting.id)
+        jdbcTemplate.update("DELETE FROM story_endings WHERE start_setting_id = ?", setting.id)
+        jdbcTemplate.update("DELETE FROM story_start_settings WHERE id = ?", setting.id)
+    }
+
+    /**
      * 소유자가 엔딩 이름을 바꾼다.
      *
      * `StoryEnding.name`은 `val`이고 수정 API의 `endings[]`는 전체 교체라 행이 새로 생긴다(채팅이 참조하던
@@ -672,6 +687,49 @@ class ChatStorySnapshotIntegrationTests {
         changePrologue(story, "비공개 개작 프롤로그")
 
         assertThat(detailPrologue(chat, reader)).isEqualTo("두 번째 프롤로그")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊겨도 상세는 채팅 프롤로그로 복구한다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        // 소유자가 편집 폼에서 시작 설정 항목을 뺐다 — 스냅샷을 찾을 id가 사라진다.
+        breakStartSettingReference(chat, story)
+
+        assertThat(detailPrologue(chat, reader)).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊겨도 공유 열람은 채팅 프롤로그로 복구한다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        breakStartSettingReference(chat, story)
+
+        assertThat(sharePrologue(shareId)).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `참조가 살아 있으면 프롤로그는 채팅이 아니라 스토리 스냅샷을 본다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        // 공개 상태 패치로 스토리 스냅샷만 v2가 되고, 채팅 컬럼은 채팅 생성 시점(v1)에 머문다.
+        patchPrologueWhilePublic(story, "v2 프롤로그")
+        hideAndRename(story, "바뀐 제목")
+
+        // 참조가 멀쩡하므로 폴백이 끼어들면 안 된다 — 끼어들면 v1로 되돌아간다.
+        assertThat(detailPrologue(chat, reader)).isEqualTo("v2 프롤로그")
     }
 
     @Test

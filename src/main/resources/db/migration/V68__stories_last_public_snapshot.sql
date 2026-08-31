@@ -106,11 +106,13 @@ WHERE s.status = 'PUBLISHED'
 -- 서재·채팅 상세·공유 열람·이프 이용내역의 SELECT가 통째로 실패해 500이 된다. 컬럼 추가와 달리 DROP은
 -- 하위 호환이 아니다. 같은 이유로 배포를 되돌릴 때도 구버전이 그대로 뜬다.
 --
--- 이유 2 — **reached_ending_name_snapshot은 아직 실제로 쓰인다.** 스토리 스냅샷은 "엔딩 id → 이름" 사전인데,
--- 수정 API의 endings[] 전체 교체가 행을 삭제·재생성하면 FK(ON DELETE SET NULL, V41)가 story_chats·
--- story_messages의 reached_ending_id를 **동시에** 비운다. 사전을 조회할 키가 사라지므로 사전으로는 덮을 수
--- 없다. 이건 비공개 스토리만의 문제가 아니다 — 공개 스토리에서 제작자가 엔딩을 손보기만 해도 그 스토리로
--- 놀던 **모든 독자의 도달 기록**이 날아간다. 그래서 이 컬럼은 서재 폴백으로 계속 읽는다.
+-- 이유 2 — **둘은 아직 실제로 쓰인다.** 스토리 스냅샷은 자식을 id로 찾는 사전인데, 수정 API의 전체 교체가
+-- 행을 삭제·재생성하면 FK(ON DELETE SET NULL, V41·KNK-515)가 그 조회 키를 비운다. 사전으로는 덮을 수 없다.
+--   - reached_ending_name_snapshot: endings[] 교체가 story_chats·story_messages의 reached_ending_id를
+--     **동시에** 비운다. 비공개 스토리만의 문제가 아니다 — 공개 스토리에서 제작자가 엔딩을 손보기만 해도
+--     그 스토리로 놀던 **모든 독자의 도달 기록**이 날아간다. 서재 폴백으로 계속 읽는다.
+--   - story_prologue_snapshot: 편집 폼에서 시작 설정 항목을 빼면 story_chats.start_setting_id가 비어
+--     스냅샷의 시작 설정을 찾을 수 없다. 상세·공유·AI 조립의 프롤로그 폴백으로 계속 읽는다.
 --
--- 나머지 셋(story_title_snapshot·story_thumbnail_key_snapshot·story_prologue_snapshot)은 읽지 않지만
--- 채팅 생성 시 계속 채운다. 배포를 되돌리면 구버전이 그 값을 읽기 때문이다. 다음 릴리스의 DROP 대상이다.
+-- 나머지 둘(story_title_snapshot·story_thumbnail_key_snapshot)은 읽지 않지만 채팅 생성 시 계속 채운다.
+-- 배포를 되돌리면 구버전이 그 값을 읽기 때문이다. **다음 릴리스의 DROP 대상은 이 둘뿐이다.**

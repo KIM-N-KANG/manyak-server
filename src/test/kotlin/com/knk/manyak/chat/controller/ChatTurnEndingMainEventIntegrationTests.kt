@@ -28,6 +28,7 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -38,6 +39,7 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -100,6 +102,8 @@ class ChatTurnEndingMainEventIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var creditWalletService: CreditWalletService
+    @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var databaseCleaner: com.knk.manyak.support.DatabaseCleaner
 
     private lateinit var story: Story
@@ -218,6 +222,178 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
         assertThat(reaches.map { it.endingId }).containsExactly(happyEnding.id)
+    }
+
+    // ---- [KNK-1065 / PR #224 Codex P2] 저장 판정이 AI에게 보낸 것과 같은 출처를 본다 ----
+
+    /** 공개 상태 저장 = 마지막 공개 버전 스냅샷 갱신. 비공개 전환 후 이 값이 AI 요청 재료가 된다. */
+    private fun publish() {
+        val loaded = storyRepository.findById(story.id).orElseThrow()
+        snapshotService.refresh(loaded)
+        storyRepository.save(loaded)
+    }
+
+    /**
+     * 스토리를 소유자에게 귀속시키고 비공개로 내린다.
+     *
+     * **소유자를 붙이는 게 핵심이다.** `Story.isReadableBy`는 소유자가 없는(게스트 제작) 스토리를 누구에게나
+     * 열어 주므로(§KNK-464), user_id가 NULL인 채로 비공개로 내리면 게이트가 닫히지 않아 조립이 계속 현재 값을
+     * 본다. `Story.userId`가 val이라 SQL로 갱신한다.
+     */
+    private fun hideStoryFromReaders() {
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        jdbcTemplate.update(
+            "UPDATE stories SET user_id = ?, status = 'DRAFT', visibility = 'PRIVATE' WHERE id = ?",
+            owner.id,
+            story.id,
+        )
+    }
+
+    /** 수정 API의 endings[] 전체 교체와 같은 결과(행 삭제 후 재생성)를 만든다. */
+    private fun replaceEndings(vararg names: String) {
+        jdbcTemplate.update("DELETE FROM story_endings WHERE start_setting_id = ?", startSetting.id)
+        names.forEachIndexed { index, name ->
+            storyEndingRepository.save(
+                StoryEnding(
+                    startSetting = startSetting,
+                    name = name,
+                    minTurns = 1,
+                    achievementCondition = "조건",
+                    epilogue = "에필로그",
+                    sortOrder = (index + 1).toShort(),
+                ),
+            )
+        }
+    }
+
+    /** 수정 API의 mainEvents[] 전체 교체와 같은 결과. */
+    private fun replaceMainEvents(vararg names: String) {
+        jdbcTemplate.update("DELETE FROM story_chat_main_events")
+        jdbcTemplate.update("DELETE FROM story_main_events WHERE story_id = ?", story.id)
+        names.forEachIndexed { index, name ->
+            storyMainEventRepository.save(
+                StoryMainEvent(story = story, name = name, description = "설명", keySentence = "문장", sortOrder = index.toShort()),
+            )
+        }
+    }
+
+    @Test
+    fun `비공개 전환 후 엔딩이 교체돼도 스냅샷 이름으로 도달을 기록한다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 엔딩을 통째로 갈았다. AI에게는 스냅샷의 옛 이름("해피")이 나가므로 AI도 그 이름을 돌려준다.
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "마침내 평화가 찾아왔다.", choices = emptyList(), endingName = "해피")
+
+        val body = streamGuest(chat.publicId.toString(), "최후의 일격을 가한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        // 예전에는 현재 story_endings에서 "해피"를 찾다 실패해 **도달이 통째로 누락**됐다.
+        assertThat(updated.status).isEqualTo(ChatStatus.ENDED)
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
+        // 현재 행에 그 이름이 없으므로 id는 남기지 못한다 — reached_ending_id는 story_endings FK다.
+        assertThat(updated.reachedEndingId).isNull()
+        assertThat(body).contains("\"해피\"")
+    }
+
+    @Test
+    fun `엔딩 행이 교체돼도 이름이 같으면 도달 id까지 되찾는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 수정 API는 이름을 그대로 둬도 행을 지우고 새로 만든다. 이름으로 다시 찾으므로 id가 살아난다.
+        replaceEndings("해피")
+        val recreated = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single()
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격을 가한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.reachedEndingId).isEqualTo(recreated.id)
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
+    }
+
+    @Test
+    fun `AI가 요청에 없던 엔딩 이름을 보내면 도달로 인정하지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 현재 행에는 있지만 **AI에게 보낸 스냅샷에는 없는** 이름이다. 후보 판정은 보낸 목록이 한다.
+        replaceEndings("비공개 신작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "끝.", choices = emptyList(), endingName = "비공개 신작 엔딩")
+
+        streamGuest(chat.publicId.toString(), "일격.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.status).isEqualTo(ChatStatus.ACTIVE)
+        assertThat(updated.reachedEndingId).isNull()
+        assertThat(updated.reachedEndingNameSnapshot).isNull()
+    }
+
+    @Test
+    fun `비공개 전환 후 주요 사건 행이 교체돼도 이름이 같으면 완결 기록이 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("발단", "절정")
+        val recreated = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isEqualTo(recreated.first { it.name == "절정" }.id)
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId })
+            .containsExactly(recreated.first { it.name == "발단" }.id)
+    }
+
+    @Test
+    fun `비공개 전환 후 주요 사건 이름이 바뀌면 완결 기록을 남기지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        // story_chat_main_events.main_event_id는 NOT NULL FK라 엔딩처럼 이름만 남길 자리가 없다.
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isNull()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+    }
+
+    @Test
+    fun `AI가 요청에 없던 주요 사건 이름을 보내면 기록하지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 현재 행에는 있지만 **AI에게 보낸 스냅샷에는 없는** 이름이다. 엔딩과 같은 규칙 —
+        // 후보 판정은 보낸 목록이 하고, 현재 행 조회는 FK용 id를 얻는 데만 쓴다.
+        replaceMainEvents("비공개 신작 사건")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "비공개 신작 사건", progressTurns = 2),
+            occurredMainEventName = "비공개 신작 사건",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isNull()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
     }
 
     private fun streamGuest(chatId: String, userInput: String): String =
