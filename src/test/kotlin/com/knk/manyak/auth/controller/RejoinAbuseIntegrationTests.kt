@@ -514,4 +514,34 @@ class RejoinAbuseIntegrationTests {
             .expectBody()
             .jsonPath("$.status").isEqualTo("ACTIVE")
     }
+
+    @Test
+    fun `탈퇴는 이미 커밋된 초대 소진 표식을 되돌리지 않는다`() {
+        // Codex 4차 리뷰 P1: 탈퇴가 사용자 행을 잠그지 않고 읽으면, 읽은 뒤 커밋된 redeem의 inviter_user_id가
+        // 탈퇴의 전 컬럼 UPDATE에 NULL로 덮인다. 그러면 그 tombstone으로 재가입한 계정이 초대 보상을 다시 받는다.
+        // 진짜 경합은 스레드로 만들지 않고, "제출 커밋 → 탈퇴 → 재가입"에서 표식이 살아남는지로 고정한다.
+        val inviter = userRepository.save(User(nickname = "초대자", status = UserStatus.ACTIVE, inviteCode = "LOCKED01"))
+        val token = login("withdraw-lock-sub")
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"LOCKED01"}""")
+            .exchange().expectStatus().isOk
+        val redeemerId = userIdOf("withdraw-lock-sub")
+
+        withdraw(token)
+
+        // 탈퇴한 계정에도 소진 표식이 남아 있어야 재가입이 그걸 승계한다.
+        assertThat(userRepository.findById(redeemerId).orElseThrow().inviterUserId).isEqualTo(inviter.id)
+        val rejoinToken = login("withdraw-lock-sub")
+        assertThat(userRepository.findById(userIdOf("withdraw-lock-sub")).orElseThrow().inviterUserId)
+            .isEqualTo(inviter.id)
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $rejoinToken")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"LOCKED01"}""")
+            .exchange()
+            .expectStatus().isEqualTo(409)
+            .expectBody().jsonPath("$.code").isEqualTo("INVITE_ALREADY_REDEEMED")
+    }
 }
