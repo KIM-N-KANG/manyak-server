@@ -59,7 +59,7 @@ class InviteController(
 
     @Operation(
         summary = "초대 코드 입력·보상 적립",
-        description = "다른 회원의 초대 코드를 제출해 초대자·제출자 양쪽에 초대 보상 크레딧을 적립합니다(스펙 §4-3-7, KNK-567). " +
+        description = "다른 회원의 초대 코드를 제출해 초대자·제출자 양쪽에 초대 보상 이프를 적립합니다(스펙 §4-3-7, KNK-567). " +
             "적립액과 월 상한은 **운영 중 조정 가능한 정책값**이라 이 문서가 계약이 아닙니다 — 적립액은 응답 amount로, " +
             "월 상한은 GET /users/me/invite의 monthlyRewardLimit으로 확인하세요(KNK-1056). " +
             "제출 자격은 계정당 평생 1회이며, 코드는 trim·대문자 정규화 후 비교합니다. " +
@@ -69,7 +69,7 @@ class InviteController(
         value = [
             ApiResponse(
                 responseCode = "200",
-                description = "적립 성공. amount는 제출자에게 적립된 크레딧(제출자가 월 상한이면 0), balance는 적립 후 잔액.",
+                description = "적립 성공. amount는 제출자에게 적립된 이프(제출자가 월 상한이면 0), balance는 적립 후 잔액.",
                 content = [Content(schema = Schema(implementation = InviteRedeemResponse::class))],
             ),
             ApiResponse(

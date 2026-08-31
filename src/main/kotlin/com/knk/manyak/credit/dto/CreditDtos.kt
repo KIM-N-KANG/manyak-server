@@ -4,9 +4,9 @@ import com.knk.manyak.credit.entity.CreditReason
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
-@Schema(description = "크레딧 잔액")
+@Schema(description = "이프 잔액")
 data class CreditBalanceResponse(
-    @Schema(description = "현재 크레딧 잔액. 지갑이 없으면 0")
+    @Schema(description = "현재 이프 잔액. 지갑이 없으면 0")
     val balance: Long,
 )
 
@@ -14,7 +14,7 @@ data class CreditBalanceResponse(
 data class CreditAttendanceResponse(
     @Schema(description = "이번 요청으로 보상을 지급했는지. 오늘 이미 받았으면 false(멱등)")
     val rewarded: Boolean,
-    @Schema(description = "이번 요청으로 적립한 크레딧. 이미 받았으면 0")
+    @Schema(description = "이번 요청으로 적립한 이프. 이미 받았으면 0")
     val amount: Long,
     @Schema(description = "지급 후 현재 잔액")
     val balance: Long,
@@ -61,7 +61,7 @@ enum class CreditTransactionType {
     }
 }
 
-@Schema(description = "크레딧 이용내역 한 건")
+@Schema(description = "이프 이용내역 한 건")
 data class CreditTransactionResponse(
     @Schema(description = "화면 분류. 필터 칩과 같은 값")
     val type: CreditTransactionType,
@@ -77,7 +77,7 @@ data class CreditTransactionResponse(
     val createdAt: Instant,
 )
 
-@Schema(description = "크레딧 이용내역 페이지")
+@Schema(description = "이프 이용내역 페이지")
 data class CreditTransactionPageResponse(
     val items: List<CreditTransactionResponse>,
     @Schema(description = "다음 페이지 커서. 더 없으면 null")
