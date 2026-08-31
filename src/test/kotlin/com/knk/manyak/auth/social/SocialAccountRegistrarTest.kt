@@ -53,7 +53,8 @@ class SocialAccountRegistrarTest {
 
     private fun assertFindsExistingUser(provider: SocialProvider) {
         val existingUser = User(id = 42L, nickname = "기존닉")
-        val before = Instant.now().minusSeconds(3600)
+        val now = Instant.now()
+        val before = now.minusSeconds(3600)
         val social = SocialAccount(
             id = 7L,
             userId = 42L,
@@ -64,9 +65,10 @@ class SocialAccountRegistrarTest {
         )
         `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(provider, "social-sub-123"))
             .thenReturn(social)
+        // 갱신이 1행이면 그 연동은 아직 살아 있다(mock 기본값 0은 "그 사이 탈퇴됨"을 뜻해 null로 빠진다).
+        `when`(socialAccountRepository.touchLastLoginAt(7L, now)).thenReturn(1)
         `when`(userRepository.findById(42L)).thenReturn(Optional.of(existingUser))
 
-        val now = Instant.now()
         val user = registrar.findExistingUser(provider, info("social-sub-123"), now)
 
         assertThat(user).isSameAs(existingUser)
@@ -88,6 +90,22 @@ class SocialAccountRegistrarTest {
     }
 
     @Test
+    fun `findExistingUser는 조회 뒤 탈퇴가 커밋돼 갱신이 0행이면 null이다`() {
+        // Codex 3차 리뷰 P2: 0행은 "그 시점에 살아 있는 연동이 없다"는 뜻이다. 여기서 DELETED User를 돌려주면
+        // 로그인은 200인데 이후 모든 요청이 401인 좀비 세션이 된다. null로 빠져 바깥이 재가입 경로를 타야 한다.
+        val social = SocialAccount(id = 11L, userId = 42L, provider = SocialProvider.GOOGLE, providerUserId = "raced-sub")
+        val now = Instant.now()
+        `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "raced-sub"))
+            .thenReturn(social)
+        `when`(socialAccountRepository.touchLastLoginAt(11L, now)).thenReturn(0)
+
+        assertThat(registrar.findExistingUser(SocialProvider.GOOGLE, info("raced-sub"), now)).isNull()
+
+        // User를 조회하지도 않는다(DELETED 계정을 꺼낼 이유가 없다).
+        verify(userRepository, never()).findById(42L)
+    }
+
+    @Test
     fun `findExistingUser는 연동이 없으면 null을 반환한다`() {
         `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "sub")).thenReturn(null)
 
@@ -96,11 +114,13 @@ class SocialAccountRegistrarTest {
 
     @Test
     fun `findExistingUser는 연동이 가리키는 User가 없으면 401이다`() {
-        val social = SocialAccount(userId = 99L, provider = SocialProvider.GOOGLE, providerUserId = "sub")
+        val social = SocialAccount(id = 3L, userId = 99L, provider = SocialProvider.GOOGLE, providerUserId = "sub")
         `when`(socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(SocialProvider.GOOGLE, "sub")).thenReturn(social)
+        val now = Instant.now()
+        `when`(socialAccountRepository.touchLastLoginAt(3L, now)).thenReturn(1)
         `when`(userRepository.findById(99L)).thenReturn(Optional.empty())
 
-        assertThatThrownBy { registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), Instant.now()) }
+        assertThatThrownBy { registrar.findExistingUser(SocialProvider.GOOGLE, info("sub"), now) }
             .isInstanceOf(ResponseStatusException::class.java)
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")

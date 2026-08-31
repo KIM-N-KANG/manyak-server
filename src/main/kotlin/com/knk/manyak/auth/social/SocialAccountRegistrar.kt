@@ -36,6 +36,11 @@ class SocialAccountRegistrar(
      * - 있으면: `lastLoginAt`을 [now]로 갱신하고 연결된 [User]를 반환한다.
      * - 없으면: null.
      * - 연동은 있는데 [User]가 사라진 비정상 상태: 401(존재 여부를 노출하지 않도록 통일).
+     *
+     * 계약은 "**살아 있는** 연동을 찾으면 그 User"다. 조회와 갱신 사이에 탈퇴가 커밋되면 갱신이 0행이 되는데,
+     * 그때 이전 User를 돌려주면 DELETED 계정으로 토큰이 발급돼 **로그인은 200인데 이후 모든 요청이 401**인
+     * 좀비 세션이 된다(Codex 3차 리뷰 P2). 0행은 "그 시점에 살아 있는 연동이 없다"는 뜻이므로 null을 돌려
+     * 바깥이 [createUserAndAccount] 재가입 경로를 타게 한다.
      */
     @Transactional
     fun findExistingUser(provider: SocialProvider, info: SocialUserInfo, now: Instant): User? {
@@ -48,9 +53,8 @@ class SocialAccountRegistrar(
         val ownerId = social.userId
         // 엔티티에 직접 대입하지 않는다(KNK-1053, Codex 재리뷰 P2) — dirty checking UPDATE는 전 컬럼을 덮어
         // 동시에 커밋된 탈퇴의 tombstone·이메일 파기를 되돌린다. 조건부 단일 컬럼 갱신으로 바꿨다.
-        // 0행이면 조회와 갱신 사이에 탈퇴가 커밋된 것이다. 이 로그인은 그대로 흘려보내고(그 계정은 다음 요청부터
-        // 해석 계층이 401로 끊는다) tombstone만 건드리지 않는다.
-        socialAccountRepository.touchLastLoginAt(social.id, now)
+        // 0행이면 위 조회 이후 탈퇴가 커밋된 것이다. User를 조회하지도 않고 null로 빠져 재가입 경로에 맡긴다.
+        if (socialAccountRepository.touchLastLoginAt(social.id, now) == 0) return null
         return userRepository.findById(ownerId).orElseThrow {
             ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         }

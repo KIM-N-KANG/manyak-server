@@ -490,4 +490,28 @@ class RejoinAbuseIntegrationTests {
         assertThat(unchanged.userId).isEqualTo(ownerId)
         assertThat(unchanged.lastLoginAt).isEqualTo(tombstone.lastLoginAt)
     }
+
+    @Test
+    fun `탈퇴가 로그인 조회와 겹쳐도 재가입 계정으로 로그인되고 좀비 세션이 생기지 않는다`() {
+        // Codex 3차 리뷰 P2: findExistingUser가 살아 있는 행을 잡은 뒤 탈퇴가 먼저 커밋되면 lastLoginAt 갱신이
+        // 0행이 된다. 그때 이전 User를 돌려주면 DELETED 계정으로 토큰이 나가 "로그인 200 → 이후 전부 401"이 된다.
+        // 경합을 스레드로 만들지 않고, 탈퇴가 이미 커밋된 상태에서 같은 신원으로 로그인해 재가입 경로가 도는지로 고정한다.
+        val token = login("raced-withdrawal-sub")
+        val deletedUserId = userIdOf("raced-withdrawal-sub")
+        withdraw(token)
+
+        val rejoinToken = login("raced-withdrawal-sub")
+
+        // 새 계정이 생기고 토큰도 그 계정 것이다(탈퇴 계정 토큰이 아니다).
+        val rejoinedUserId = userIdOf("raced-withdrawal-sub")
+        assertThat(rejoinedUserId).isNotEqualTo(deletedUserId)
+        assertThat(userRepository.findById(deletedUserId).orElseThrow().status).isEqualTo(UserStatus.DELETED)
+        // 발급된 토큰이 실제로 쓸 수 있어야 한다 — 좀비 세션이면 여기서 401이 난다.
+        restTestClient.get().uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $rejoinToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.status").isEqualTo("ACTIVE")
+    }
 }
