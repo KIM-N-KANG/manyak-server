@@ -13,6 +13,7 @@
 | last_login_at | timestamp with time zone |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| deleted_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -50,6 +51,7 @@ erDiagram
   timestamp_with_time_zone last_login_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
 }
 "public.users" {
   bigint id
@@ -66,6 +68,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 ```
 

@@ -92,7 +92,8 @@ class InviteController(
             ),
             ApiResponse(
                 responseCode = "409",
-                description = "자기 코드 제출(code=INVITE_SELF_CODE) 또는 재제출(code=INVITE_ALREADY_REDEEMED) — 바디 code로 구분",
+                description = "자기 코드 제출(code=INVITE_SELF_CODE), 재제출(code=INVITE_ALREADY_REDEEMED), " +
+                    "초대자 탈퇴(code=INVITE_INVITER_WITHDRAWN), 초대자 정지(code=INVITE_INVITER_UNAVAILABLE) — 바디 code로 구분",
                 content = [Content(schema = Schema(hidden = true))],
             ),
         ],

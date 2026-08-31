@@ -29,22 +29,29 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
     ): Long
 
     /**
-     * 위 구간 집계에 멱등 키 접두 필터를 더한 판정(스펙 §4-6, KNK-581). 초대 보상 월 상한은 초대자 몫에만
-     * 적용되는데, 원장에 역할 컬럼이 없어 초대자 역할 행을 키 접두(`invite:{초대자userId}:`)로 식별한다.
-     * 접두 뒤 콜론까지 포함해 매칭하므로 userId의 십진 접두 충돌(1 vs 12)이 없다.
+     * 위 구간 집계에 멱등 키 접두·접미 필터를 더한 판정(스펙 §4-6, KNK-581). 초대 보상 월 상한은 초대자 몫에만
+     * 적용되는데, 원장에 역할 컬럼이 없어 초대자 역할 행을 키 모양(`invite:{초대자}:{피초대자}:{수혜자}`)으로 식별한다.
+     * 접두 `invite:{X}:`가 "초대자가 X", 접미 `:{X}`가 "수혜자가 X"를 뜻해 둘을 함께 걸면 X의 초대자 몫만 남는다.
+     * 접두·접미 모두 콜론을 포함해 매칭하므로 십진 접두·접미 충돌(1 vs 12, 1 vs 11)이 없다.
+     *
+     * **`user_id`로 좁히지 않는다**(KNK-1053). 탈퇴 후 재가입은 새 `users` 행을 만들므로, 소유 계정으로 좁히면
+     * 이전 계정 명의의 행을 못 세어 월 상한이 재가입마다 리셋된다. 키가 이미 **보상 신원**
+     * (`coalesce(reward_identity_user_id, id)`)을 담고 있어, 접두·접미만으로 신원 단위 집계가 된다.
+     * 재가입이 없던 계정은 신원 = 자기 자신이라 종전과 같은 행 집합을 센다(집계 결과 불변).
      */
     @Query(
         """
         SELECT COUNT(t) FROM CreditTransaction t
-        WHERE t.userId = :userId AND t.reason = :reason
+        WHERE t.reason = :reason
           AND t.idempotencyKey LIKE CONCAT(:idempotencyKeyPrefix, '%')
+          AND t.idempotencyKey LIKE CONCAT('%', :idempotencyKeySuffix)
           AND t.createdAt >= :start AND t.createdAt < :end
         """,
     )
-    fun countByReasonAndKeyPrefixInWindow(
-        @Param("userId") userId: Long,
+    fun countByReasonAndKeyShapeInWindow(
         @Param("reason") reason: CreditReason,
         @Param("idempotencyKeyPrefix") idempotencyKeyPrefix: String,
+        @Param("idempotencyKeySuffix") idempotencyKeySuffix: String,
         @Param("start") start: Instant,
         @Param("end") end: Instant,
     ): Long

@@ -21,7 +21,8 @@ data class RewardOutcome(val rewarded: Boolean, val balance: Long)
 
 /**
  * 사유별 월 상한(스펙 §4-3-7 초대 보상 월 한도). [cap]회 미만일 때만 적립하고, 집계 구간은 KST 월 등 호출부가 정한 [windowStart, windowEnd)다.
- * [idempotencyKeyPrefix]를 주면 그 접두의 원장 행만 집계한다(KNK-581 — 초대자 역할 행만 세는 초대 월 상한).
+ * [idempotencyKeyPrefix]·[idempotencyKeySuffix]를 주면 그 모양의 원장 행만 집계한다(KNK-581 — 초대자 역할 행만
+ * 세는 초대 월 상한). 이 필터를 주면 집계는 **소유 계정이 아니라 키가 담은 보상 신원 단위**다(KNK-1053).
  * 판정은 지갑 행 락 안에서 수행되므로(같은 사용자 동시 적립이 직렬화됨) 경계에서의 초과 적립을 막는다.
  */
 data class MonthlyRewardCap(
@@ -30,6 +31,7 @@ data class MonthlyRewardCap(
     val windowStart: Instant,
     val windowEnd: Instant,
     val idempotencyKeyPrefix: String? = null,
+    val idempotencyKeySuffix: String? = null,
 )
 
 /**
@@ -62,7 +64,8 @@ class CreditWalletService(
 
     /**
      * [userId]가 [reason] 사유로 집계 구간 [windowStart, windowEnd)에 수령한 원장 건수를 센다(조회 전용).
-     * [idempotencyKeyPrefix]를 주면 그 접두의 행만 센다(KNK-581 — 초대자 역할 수령분만 세는 진행 표시).
+     * [idempotencyKeyPrefix]·[idempotencyKeySuffix]를 주면 그 모양의 행만 센다(KNK-581 — 초대자 역할 수령분만 세는
+     * 진행 표시). 이때는 [userId]로 좁히지 않는다 — 키가 보상 신원을 담고 있어 재가입으로 계정이 바뀌어도 이어 센다.
      * [reward]의 [MonthlyRewardCap] 판정과 **같은 카운트**라, 초대 보상 월 진행 표시가 상한 스킵 경계와 정확히 일치한다
      * (스펙 §4-3-7 초대 상한 진행 표시, B22).
      */
@@ -73,7 +76,8 @@ class CreditWalletService(
         windowStart: Instant,
         windowEnd: Instant,
         idempotencyKeyPrefix: String? = null,
-    ): Long = countInWindow(userId, reason, windowStart, windowEnd, idempotencyKeyPrefix)
+        idempotencyKeySuffix: String? = null,
+    ): Long = countInWindow(userId, reason, windowStart, windowEnd, idempotencyKeyPrefix, idempotencyKeySuffix)
 
     private fun countInWindow(
         userId: Long,
@@ -81,9 +85,16 @@ class CreditWalletService(
         windowStart: Instant,
         windowEnd: Instant,
         idempotencyKeyPrefix: String?,
+        idempotencyKeySuffix: String?,
     ): Long =
-        if (idempotencyKeyPrefix != null) {
-            transactionRepository.countByReasonAndKeyPrefixInWindow(userId, reason, idempotencyKeyPrefix, windowStart, windowEnd)
+        if (idempotencyKeyPrefix != null && idempotencyKeySuffix != null) {
+            transactionRepository.countByReasonAndKeyShapeInWindow(
+                reason,
+                idempotencyKeyPrefix,
+                idempotencyKeySuffix,
+                windowStart,
+                windowEnd,
+            )
         } else {
             transactionRepository.countByUserIdAndReasonAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
                 userId,
@@ -136,6 +147,7 @@ class CreditWalletService(
                 monthlyCap.windowStart,
                 monthlyCap.windowEnd,
                 monthlyCap.idempotencyKeyPrefix,
+                monthlyCap.idempotencyKeySuffix,
             )
             if (countInWindow >= monthlyCap.cap) {
                 return RewardOutcome(rewarded = false, balance = wallet.balance)

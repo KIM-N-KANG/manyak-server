@@ -1,5 +1,7 @@
 package com.knk.manyak.invite.service
 
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -61,7 +63,8 @@ class InviteService(
             reason = CreditReason.INVITE_REWARD,
             windowStart = monthStart,
             windowEnd = monthEnd,
-            idempotencyKeyPrefix = inviterRoleKeyPrefix(userId),
+            idempotencyKeyPrefix = inviterRoleKeyPrefix(user.rewardIdentity()),
+            idempotencyKeySuffix = inviterRoleKeySuffix(user.rewardIdentity()),
         )
         return InviteResponse(
             inviteCode = code,
@@ -77,7 +80,8 @@ class InviteService(
      * 잡아 같은 계정의 동시 제출을 직렬화하므로, 자격 판정·관계 저장·양측 적립이 원자적이다(로그인 self-heal 불필요).
      *
      * 오류 계약(입력값이라 사유를 구분해 응답한다): 형식 위반 400, 매칭 없음 404,
-     * 자기 코드 409 [ApiErrorCodes.INVITE_SELF_CODE], 재제출 409 [ApiErrorCodes.INVITE_ALREADY_REDEEMED].
+     * 자기 코드 409 [ApiErrorCodes.INVITE_SELF_CODE], 재제출 409 [ApiErrorCodes.INVITE_ALREADY_REDEEMED],
+     * 초대자 탈퇴 409 [ApiErrorCodes.INVITE_INVITER_WITHDRAWN], 초대자 정지 409 [ApiErrorCodes.INVITE_INVITER_UNAVAILABLE].
      *
      * 월 상한(적립 시점의 KST 월 귀속)은 초대자 몫에만 적용한다(KNK-581) — 초대자가 상한이면 초대자만 건너뛰고
      * 제출자는 적립하며 응답은 성공이다(상한 사실은 응답에 싣지 않음 — 초대자 쪽 진행 표시로 충분). 제출자 몫은
@@ -94,11 +98,11 @@ class InviteService(
         if (!CODE_FORMAT.matches(code)) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "초대 코드 형식이 올바르지 않습니다.")
         }
-        // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 주의(Codex P2, 잠재 결함): 이 컬럼은 초대자 자기참조
-        // FK가 ON DELETE SET NULL(V27)이라, 초대자 행이 물리 삭제되면 NULL로 되돌아가 소진 표식이 사라진다. 현재는
-        // 회원을 물리 삭제하는 경로가 없어(soft delete만: UserStatus.DELETED·deleted_at) 도달 불가하지만, 하드 삭제를
-        // 도입하면 이 계정이 재제출로 보상을 또 받을 수 있다. 그때는 삭제 안정적인 별도 소진 표식(예: invite_redeemed_at)을
-        // 두고 그 값으로 게이트해야 한다(관계 FK와 소진 플래그의 삭제 안정성 요구가 다름).
+        // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 이 컬럼은 초대자 자기참조 FK가 ON DELETE SET NULL(V27)
+        // 이라 초대자 행이 물리 삭제되면 표식이 사라지는데, 회원 물리 삭제 경로는 없다(탈퇴도 soft delete뿐).
+        // 실제로 뚫렸던 건 이쪽이 아니라 **제출자 행 자체가 바뀌는** 경로였다(KNK-1053): 탈퇴가 social_accounts를
+        // 하드 삭제해 같은 소셜 신원의 재가입이 새 users 행을 받으면 이 컬럼이 NULL로 초기화됐다. 이제 탈퇴는 소셜 행을
+        // tombstone으로 남기고 재가입이 이전 소유자의 inviter_user_id를 승계하므로, 그 우회로는 닫혀 있다.
         if (redeemer.inviterUserId != null) {
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
@@ -115,23 +119,57 @@ class InviteService(
                 "자기 자신의 초대 코드는 입력할 수 없습니다.",
             )
         }
+        // 초대자 상태 게이트(KNK-1053). 탈퇴·정지 회원의 코드는 보상 대상이 아니다. 탈퇴 시 invite_code를 지우지
+        // 않는 이유는 코드 재발급 충돌을 피하고 여기서 사유별 메시지를 주기 위해서다(코드는 매칭되므로 404가 아니다).
+        //
+        // 초대자 행을 락으로 잡지 않으므로 이 검사는 **트랜잭션 경계의 보장이 아니라 정책 안내**다. 제출과 초대자 탈퇴가
+        // 겹치면 in-flight 1건이 통과할 수 있다. 초대자 락을 추가하면 지갑 락과의 획득 순서를 다시 설계해야 하고
+        // (KNK-587 데드락 방지), 막는 것은 경합 1건뿐이라 파밍 경로가 아니어서 비용이 이득을 넘는다.
+        when (inviter.status) {
+            UserStatus.DELETED -> throw CodedResponseStatusException(
+                HttpStatus.CONFLICT,
+                ApiErrorCodes.INVITE_INVITER_WITHDRAWN,
+                "탈퇴한 회원의 초대 코드입니다.",
+            )
+            UserStatus.SUSPENDED -> throw CodedResponseStatusException(
+                HttpStatus.CONFLICT,
+                ApiErrorCodes.INVITE_INVITER_UNAVAILABLE,
+                "현재 사용할 수 없는 초대 코드입니다.",
+            )
+            UserStatus.ACTIVE -> Unit
+        }
         // 관계 저장(평생 1회 소진)과 양측 적립을 같은 트랜잭션에서 커밋한다. 적립 실패 시 관계도 함께 롤백된다.
         redeemer.inviterUserId = inviter.id
         val (monthStart, monthEnd) = kstMonthRangeOf(clock.instant())
-        // 초대자 몫: 초대자 역할 수령분(멱등 키 접두로 식별)만 세는 월 상한 안에서 적립한다(KNK-581). 멱등(쌍당 1회)과
+        // 초대자 몫: 초대자 역할 수령분(멱등 키 접두·접미로 식별)만 세는 월 상한 안에서 적립한다(KNK-581). 멱등(쌍당 1회)과
         // 월 상한 판정은 모두 지갑 행 락 안에서 수행돼(카운트·insert가 같은 락 구간), 동시 적립이 경계에서 상한을 넘기지 못한다.
+        //
+        // 알려진 한계(Codex 4차 리뷰 P2, 수용): 집계 범위는 **보상 신원 전체**인데 직렬화는 여전히 **현재 계정의 지갑
+        // 단위**다. 이전 계정의 초대 보상이 in-flight인 사이 그 초대자가 탈퇴·재가입해 새 계정에서 또 초대 보상이
+        // 시작되면, 둘이 서로 다른 지갑을 잡고 각자 `cap - 1`을 봐서 월 상한을 1건 초과할 수 있다.
+        // 보상 신원 공통 행을 잠그지 않는 이유: redeem이 제출자 행에 더해 초대자 루트 행까지 잠가야 하는데,
+        // 서로의 코드를 동시에 제출한 두 계정이 사용자 행에서 교차 대기하는 새 데드락 경로가 생긴다(지갑 락에서
+        // KNK-587이 겪은 것과 같은 문제이며, 사용자 행에도 전역 순서를 새로 설계해야 한다).
+        // (in-flight 초대 보상 × 그 사이 탈퇴 × 재가입 × 새 계정의 초대 보상)이 겹쳐야 하고 피해는 1건 초과라,
+        // 드문 1건을 막으려 데드락 표면을 넓히지 않는다.
+        // 키는 user_id가 아니라 **보상 신원**으로 만든다(KNK-1053). 재가입은 user_id를 갈아치우므로 user_id 키면
+        // 초대자가 상한을 채운 뒤 탈퇴·재가입하는 것만으로 월 상한이 0으로 리셋된다(크레딧을 미리 쓰고 나가면 지갑
+        // 소멸도 페널티가 아니다). 기존 회원·신규 가입은 신원 = 자기 자신이라 키 문자열이 종전과 같아 원장과 호환된다.
+        val inviterIdentity = inviter.rewardIdentity()
+        val redeemerIdentity = redeemer.rewardIdentity()
         val rewardInviter = {
             creditWalletService.reward(
                 userId = inviter.id,
                 amount = inviteReward,
                 reason = CreditReason.INVITE_REWARD,
-                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = inviter.id),
+                idempotencyKey = idempotencyKeyOf(inviterIdentity, redeemerIdentity, rewardedIdentity = inviterIdentity),
                 monthlyCap = MonthlyRewardCap(
                     reason = CreditReason.INVITE_REWARD,
                     cap = inviteMonthlyCap,
                     windowStart = monthStart,
                     windowEnd = monthEnd,
-                    idempotencyKeyPrefix = inviterRoleKeyPrefix(inviter.id),
+                    idempotencyKeyPrefix = inviterRoleKeyPrefix(inviterIdentity),
+                    idempotencyKeySuffix = inviterRoleKeySuffix(inviterIdentity),
                 ),
             )
         }
@@ -141,7 +179,7 @@ class InviteService(
                 userId = redeemer.id,
                 amount = inviteReward,
                 reason = CreditReason.INVITE_REWARD,
-                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = redeemer.id),
+                idempotencyKey = idempotencyKeyOf(inviterIdentity, redeemerIdentity, rewardedIdentity = redeemerIdentity),
             )
         }
         // 두 적립은 user id 오름차순으로 실행한다(Codex P2 데드락 방지). reward가 잡는 지갑 행 락은 이 트랜잭션
@@ -160,17 +198,24 @@ class InviteService(
     }
 
     /**
-     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`(KNK-477). 원장 idempotency_key가 전역 유니크라
-     * 두 적립 행이 같은 키를 쓸 수 없어 수혜자 id를 접미사로 구분한다(쌍당 1회 보장은 유지).
+     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`(KNK-477). 세 자리 모두 **보상 신원**이다(KNK-1053).
+     * 원장 idempotency_key가 전역 유니크라 두 적립 행이 같은 키를 쓸 수 없어 수혜자를 접미사로 구분한다.
+     * 신원 기준이라 쌍당 1회 보장이 오히려 강해진다 — 어느 쪽이 재가입해도 같은 쌍은 같은 키다.
      */
-    private fun idempotencyKeyOf(inviterId: Long, inviteeId: Long, rewardedUserId: Long): String =
-        "invite:$inviterId:$inviteeId:$rewardedUserId"
+    private fun idempotencyKeyOf(inviterIdentity: Long, inviteeIdentity: Long, rewardedIdentity: Long): String =
+        "invite:$inviterIdentity:$inviteeIdentity:$rewardedIdentity"
 
     /**
-     * [userId]가 초대자 역할로 받은 원장 행의 멱등 키 접두(KNK-581). 접두 뒤 콜론까지 포함해 십진 접두 충돌이 없고,
-     * 자기 코드 제출이 막혀 있어 제출자 몫 행(`invite:{타인}:{userId}:{userId}`)과 겹치지 않는다.
+     * 초대자 역할 행의 키 접두·접미(KNK-581). 접두 `invite:{신원}:`는 "초대자가 이 신원", 접미 `:{신원}`는
+     * "수혜자가 이 신원"이라, 둘을 함께 걸어야 제출자 몫 행(`invite:{신원}:{제출자}:{제출자}`)이 빠진다.
+     * 콜론을 포함해 매칭하므로 십진 접두·접미 충돌(1 vs 12, 1 vs 11)이 없다.
      */
-    private fun inviterRoleKeyPrefix(userId: Long): String = "invite:$userId:"
+    private fun inviterRoleKeyPrefix(rewardIdentity: Long): String = "invite:$rewardIdentity:"
+
+    private fun inviterRoleKeySuffix(rewardIdentity: Long): String = ":$rewardIdentity"
+
+    /** 1회성·상한 대상 보상의 스코프(KNK-1053). NULL이면 자기 자신이라 재가입 없는 계정은 종전 값과 같다. */
+    private fun User.rewardIdentity(): Long = rewardIdentityUserId ?: id
 
     /** [instant]가 속한 KST 월의 [시작, 다음달 시작) 구간을 Instant로 반환한다(월 상한 집계 경계). */
     private fun kstMonthRangeOf(instant: Instant): Pair<Instant, Instant> {
