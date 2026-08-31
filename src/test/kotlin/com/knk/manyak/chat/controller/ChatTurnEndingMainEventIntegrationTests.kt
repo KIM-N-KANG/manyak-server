@@ -12,6 +12,7 @@ import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.client.ChatTurnTargetMainEventResult
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatShareResponse
+import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
@@ -585,6 +586,87 @@ class ChatTurnEndingMainEventIntegrationTests {
             .expectBody(ChatDetailResponse::class.java)
             .returnResult().responseBody!!
         assertThat(detail.turns.map { it.reachedEnding }).containsExactly("새 해피")
+    }
+
+    // ---- [PR #224 Codex P2 재리뷰] 라이브 id ↔ 스냅샷 id는 서로 다른 세계다 ----
+
+    @Test
+    fun `엔딩을 같은 이름으로 교체한 뒤 도달해도 상세에 엔딩 이름이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // **이름은 그대로, 행만 새로.** 수정 API의 endings[] 전체 교체가 매번 만드는 상태다.
+        // 저장은 새 id로 되는데 스냅샷 사전은 옛 id를 들고 있어, id로만 조회하면 영영 빗나간다.
+        replaceEndings("해피")
+        val recreated = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single()
+        assertThat(recreated.id).isNotEqualTo(happyEnding.id) // 값이 갈라졌는지 확인
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        // 저장은 **새 라이브 id**로 됐다. 이름 폴백이 'id가 NULL일 때만'이면 여기서 라벨이 사라진다.
+        assertThat(assistant.reachedEndingId).isEqualTo(recreated.id)
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("해피")
+    }
+
+    @Test
+    fun `엔딩을 같은 이름으로 교체한 뒤 도달해도 서재에 도달 기록이 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceEndings("해피")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        // 서재(채팅 단위)도 같은 판정 함수를 쓰므로 같이 확인한다.
+        val cards = restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${chat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Array<ChatSummaryResponse>::class.java)
+            .returnResult().responseBody!!
+        assertThat(cards.single().reachedEndings).containsExactly("해피")
+    }
+
+    @Test
+    fun `주요 사건을 같은 이름으로 교체해도 목표 사건과 진행 턴 수가 유지된다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 이름은 그대로, 행만 새로. 저장은 새 id로 되는데 조립의 mainEvents는 스냅샷의 옛 id다.
+        replaceMainEvents("발단", "절정")
+        val recreated = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+        assertThat(recreated.map { it.id }).doesNotContainAnyElementsOf(listOf(eventBaldan.id, eventJeoljeong.id))
+
+        // 1턴: AI가 '절정'을 목표로 지목한다 → chat.target_main_event_id = 새 id.
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+        )
+        streamGuest(chat.publicId.toString(), "1턴.")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().targetMainEventId)
+            .isEqualTo(recreated.first { it.name == "절정" }.id)
+
+        // 2턴: 조립이 id로만 비교하면 빗나가 목표가 통째로 사라진다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "2턴.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.targetMainEvent?.name).isEqualTo("절정")
+        assertThat(captured.targetMainEvent?.progressTurns).isEqualTo(2)
     }
 
     private fun streamGuest(chatId: String, userInput: String): String =

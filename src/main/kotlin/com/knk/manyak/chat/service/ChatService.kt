@@ -64,6 +64,7 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -101,6 +102,8 @@ class ChatService(
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    // 목표 사건의 라이브 이름 해소용(스냅샷 분기에서 id가 빗나갈 때만 탄다).
+    private val storyMainEventRepository: StoryMainEventRepository,
     // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
     private val storyCharacterRepository: StoryCharacterRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
@@ -284,9 +287,15 @@ class ChatService(
      * 도달 엔딩 이름(KNK-1065). 제목·프롤로그와 같은 규칙이다 — 읽을 수 있으면 현재 이름, 아니면 그 스토리가
      * 마지막으로 공개였던 시점의 스냅샷에서 이름을 찾는다. 서재(채팅 단위)와 상세·공유(턴 단위)가 이 하나를 공유한다.
      *
-     * [fallbackName]은 **참조가 끊겼을 때만**(=[endingId]가 NULL) 쓰는 이름 스냅샷이다. 조건을 좁게 잡는다 —
-     * id가 살아 있으면 기존대로 사전을 본다. 넓히면 소유자가 공개 상태에서 엔딩 이름을 바꾼 정상 케이스까지
-     * 도달 당시 이름으로 되돌린다.
+     * **두 분기의 폴백 조건이 다르다.** 뿌리는 "라이브 id와 스냅샷 id는 서로 다른 세계"라는 사실이다 —
+     * 스토리 수정은 자식을 delete + re-insert하므로 이름이 같아도 id가 바뀐다.
+     *
+     * - **읽기 가능 분기**는 라이브 사전을 본다. 사전은 바로 그 id들로 조회해 만들고 FK가 행의 존재를
+     *   보장하므로 조회가 빗나갈 수 없다 — 여기서 폴백을 허용해도 실제로 타지는 않는다. 그래도 좁게 두는 건
+     *   방어다: 혹시 빗나가더라도 소유자가 공개 상태에서 바꾼 **현재** 이름을 도달 당시 이름으로 덮지 않는다.
+     * - **스냅샷 분기**는 다른 세계의 id를 본다. 저장은 새 id로 됐는데 사전은 옛 id를 들고 있어 조회가 영영
+     *   빗나가고, 좁은 조건이면 라벨이 통째로 사라진다. 그래서 **빗나가면 이름으로 떨어진다** — 저장 경로에서
+     *   이미 "id가 아니라 이름으로 맞춘다"고 정한 규칙을 읽기에도 적용하는 것이다(PR #224 Codex P2 재리뷰).
      */
     private fun reachedEndingNameFor(
         endingId: Long?,
@@ -296,7 +305,11 @@ class ChatService(
         fallbackName: String?,
     ): String? {
         val id = endingId ?: return fallbackName
-        return if (showsCurrent) endingNameById[id] else snapshot?.endingNameById()?.get(id)
+        return if (showsCurrent) {
+            endingNameById[id]
+        } else {
+            snapshot?.endingNameById()?.get(id) ?: fallbackName
+        }
     }
 
     /**
@@ -1302,8 +1315,17 @@ class ChatService(
         val mainEvents = material?.mainEvents.orEmpty()
 
         // 주요 사건 런타임 상태(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
+        //
+        // 목표는 **라이브 id**로 저장되는데([ChatTurnPersister.applyMainEventState]) 이 목록은 스냅샷일 수
+        // 있다. 스토리 수정이 자식을 delete + re-insert해 id를 갈아치우므로, id로만 비교하면 매 턴 빗나가
+        // 목표와 진행 턴 수가 계속 사라진다(PR #224 Codex P2 재리뷰). id가 맞으면 그대로 쓰고(읽기 가능
+        // 분기·미변경 스냅샷은 여기서 끝난다), 빗나가면 라이브 행에서 이름을 얻어 **이름으로** 맞춘다.
         val targetMainEvent = chat.targetMainEventId?.let { targetId ->
-            mainEvents.firstOrNull { it.id == targetId }
+            (
+                mainEvents.firstOrNull { it.id == targetId }
+                    ?: storyMainEventRepository.findById(targetId).orElse(null)
+                        ?.let { live -> mainEvents.firstOrNull { it.name == live.name } }
+                )
                 ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
         }
         // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
