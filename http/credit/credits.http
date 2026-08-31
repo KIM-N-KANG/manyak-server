@@ -229,4 +229,8 @@ Accept: application/json
 ###
 ### 키 목록(코드 CreditPolicyKey 와 1:1):
 ###    signup_reward · invite_reward · invite_monthly_cap · attendance_reward · story_creation_cost · chat_turn_cost
+###
+### 키를 오타 내거나(예: attendence_reward) 최소값 미만(보상·소모는 1 이상)을 넣으면 그 행은 무시되고 기본값이
+### 쓰이지만, **조용히 넘어가지 않고 서버 warn 로그로 드러납니다** — 오버라이드를 넣은 뒤 값이 안 바뀌면
+### `credit_policy_override_unknown_key`(유효한 키 목록이 함께 찍힙니다) · `credit_policy_override_rejected` 를 찾아보세요.
 ### ---------------------------------------------------------------------------

@@ -97,6 +97,8 @@ class CreditPolicyService(
         }
     }
 
+    private val knownKeys = CreditPolicyKey.entries.joinToString(", ") { it.storageKey }
+
     private val refreshLock = Any()
 
     @Volatile
@@ -142,13 +144,29 @@ class CreditPolicyService(
     }
 
     /**
-     * 최소값을 지키지 못하는 오버라이드를 걸러낸다. 예외를 던지지 않는다 — 운영 SQL 실수로 크레딧 경로가
-     * 죽으면 안 되므로 그 키만 기본값으로 되돌린다. 읽을 때가 아니라 적재할 때 거르므로 warn은 갱신마다 한 번이다.
+     * 쓸 수 없는 오버라이드(모르는 키·최소값 미만)를 걸러낸다. 예외를 던지지 않는다 — 운영 SQL 실수로
+     * 크레딧 경로가 죽으면 안 되므로 그 행만 버리고 기본값으로 되돌린다.
+     *
+     * 두 실수 모두 **버리되 반드시 warn으로 드러낸다**. 운영 SQL이 유일한 변경 수단이라 키 오타
+     * (`attendence_reward`)는 DB CHECK를 통과하는데, 조용히 무시하면 잘못된 정책 변경이 이벤트 기간 내내
+     * 미적용인 채 지나간다. 두 사유를 같은 자리·같은 레벨로 남겨 운영자가 같은 방식으로 발견하게 한다.
+     *
+     * 읽을 때가 아니라 적재할 때 거르므로 warn은 갱신마다 한 번이다(요청마다 찍히면 로그가 폭주한다).
      */
     private fun validOverrides(loaded: List<CreditPolicy>): List<CreditPolicy> {
         val byKey = CreditPolicyKey.entries.associateBy { it.storageKey }
         return loaded.filter { override ->
-            val key = byKey[override.policyKey] ?: return@filter false
+            val key = byKey[override.policyKey]
+            if (key == null) {
+                // 유효한 키 목록을 함께 실어 오타를 바로 잡을 수 있게 한다.
+                logger.warn(
+                    "credit_policy_override_unknown_key key={} amount={} — 무시하고 기본값을 쓴다. 유효한 키: {}",
+                    override.policyKey,
+                    override.amount,
+                    knownKeys,
+                )
+                return@filter false
+            }
             val valid = override.amount >= key.minimumAmount
             if (!valid) {
                 logger.warn(

@@ -1,14 +1,21 @@
 package com.knk.manyak.credit.service
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -28,6 +35,21 @@ class CreditPolicyServiceTest {
         override fun getZone() = ZoneOffset.UTC
         override fun withZone(zone: java.time.ZoneId) = this
         override fun instant() = now
+    }
+
+    // 잘못된 오버라이드가 조용히 버려지지 않는지 보려면 로그를 봐야 한다(StructuredLoggerTests 와 같은 방식).
+    private val logger = LoggerFactory.getLogger(CreditPolicyService::class.java) as Logger
+    private val appender = ListAppender<ILoggingEvent>()
+
+    @BeforeEach
+    fun attachAppender() {
+        appender.start()
+        logger.addAppender(appender)
+    }
+
+    @AfterEach
+    fun detachAppender() {
+        logger.detachAppender(appender)
     }
 
     private fun service() = CreditPolicyService(
@@ -147,10 +169,44 @@ class CreditPolicyServiceTest {
     }
 
     @Test
-    fun `모르는 policy_key 행은 무시한다`() {
-        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "attendanceReward", amount = 700)))
+    fun `모르는 policy_key 행은 무시하고 나머지 오버라이드는 정상 적용한다`() {
+        `when`(repository.findAll()).thenReturn(
+            listOf(
+                // 운영 SQL 오타. DB CHECK 는 이걸 통과시킨다.
+                CreditPolicy(policyKey = "attendence_reward", amount = 700),
+                CreditPolicy(policyKey = "chat_turn_cost", amount = 33),
+            ),
+        )
+        val service = service()
 
-        assertThat(service().amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+        // 모르는 키 하나가 전체 적재를 망치지 않는다.
+        assertThat(service.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(33)
+    }
+
+    @Test
+    fun `모르는 policy_key 는 warn 로그로 드러난다`() {
+        // 조용히 무시하면 오타 난 정책 변경이 이벤트 기간 내내 미적용인 채 지나간다(Codex 리뷰 P2).
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "attendence_reward", amount = 700)))
+
+        service().amountOf(CreditPolicyKey.ATTENDANCE_REWARD)
+
+        val warning = appender.list.single { it.level == Level.WARN }
+        assertThat(warning.formattedMessage)
+            .contains("credit_policy_override_unknown_key")
+            .contains("attendence_reward")
+            // 유효한 키 목록이 함께 나와야 오타를 바로 잡을 수 있다.
+            .contains("attendance_reward")
+    }
+
+    @Test
+    fun `최소값 미만 오버라이드도 같은 레벨의 warn 으로 드러난다`() {
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_turn_cost", amount = 0)))
+
+        service().amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+        val warning = appender.list.single { it.level == Level.WARN }
+        assertThat(warning.formattedMessage).contains("credit_policy_override_rejected").contains("chat_turn_cost")
     }
 
     private companion object {
