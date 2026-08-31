@@ -114,6 +114,18 @@ Accept: application/json
         client.assert(Array.isArray(b.startSettings[0].endings), `startSettings[0].endings가 배열이 아닙니다. actual=${JSON.stringify(b.startSettings[0].endings)}`);
     });
 
+    // [KNK-1058] characters: 스토리 인물 목록(저장 순서 = 컴파일 응답 순서). 인물 행이 없으면 빈 배열이고,
+    // 이미지 생성에 실패한 인물도 목록에서 빠지지 않고 imageUrl만 null이다. 실제 컴파일을 거친 이 흐름에서는
+    // 보통 1건 이상이며, 인물 공개 식별자·외형 7필드는 노출하지 않는다.
+    client.test("characters가 {name, imageUrl}만 담은 배열이다", () => {
+        client.assert(Array.isArray(b.characters), `characters가 배열이 아닙니다. actual=${JSON.stringify(b.characters)}`);
+        b.characters.forEach((c, i) => {
+            client.assert(typeof c.name === "string" && c.name.length > 0, `characters[${i}].name이 없습니다. actual=${JSON.stringify(c)}`);
+            client.assert(c.imageUrl === null || typeof c.imageUrl === "string", `characters[${i}].imageUrl이 문자열·null이 아닙니다. actual=${JSON.stringify(c.imageUrl)}`);
+            client.assert(Object.keys(c).sort().join(",") === "imageUrl,name", `characters[${i}]에 노출하면 안 되는 필드가 있습니다. actual=${JSON.stringify(Object.keys(c))}`);
+        });
+    });
+
     // [KNK-523] reachedEndings: 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(엔딩은 이름으로 식별). 게스트·미도달이면 빈 배열.
     // 값이 채워지려면 실제 AI 판정으로 엔딩에 도달한 채팅이 있어야 하므로(스텁 불가) 여기서는 빈 배열이며, 런타임은 통합 테스트로 검증한다.
     client.test("reachedEndings가 배열로 응답된다", () => {
@@ -153,6 +165,7 @@ Accept: application/json
 # 로그인(http/auth 참고)으로 얻은 액세스 토큰과, 그 회원이 소유한 storyId를 넣어 실행하세요.
 #   - 소유 스토리: isOwner === true, author.nickname === 내 닉네임, author.id === null(내부 PK 비노출)
 #   - 타인 공개 스토리: isOwner === false, author에 그 작성자 닉네임
+#   - characters: 인물 이미지 생성까지 끝난 스토리면 imageUrl이 CDN 주소로 채워집니다(실패 인물은 null 유지, KNK-1058)
 GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
 Authorization: Bearer <액세스 토큰>
 Accept: application/json

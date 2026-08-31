@@ -10,6 +10,7 @@ import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryAuthorResponse
+import com.knk.manyak.story.dto.StoryCharacterResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
@@ -20,6 +21,7 @@ import com.knk.manyak.story.entity.StoryReport
 import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryReportRepository
@@ -53,6 +55,7 @@ class StoryService(
     private val suspensionGuard: SuspensionGuard,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
+    private val storyCharacterRepository: StoryCharacterRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyChatRepository: StoryChatRepository,
     private val imageUrlResolver: ImageUrlResolver,
@@ -131,6 +134,10 @@ class StoryService(
             .map { it.toLorebookResponse() }
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
+        // 인물은 저장 순서(= 컴파일 응답 순서)로 싣는다(KNK-1058). 이미지 생성에 실패한 인물도 imageUrl null로 포함해
+        // 프론트가 인물 구성을 그대로 보여줄 수 있게 한다(채팅 요청 매핑과 달리 URL 없는 인물을 거르지 않는다).
+        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+            .map { StoryCharacterResponse(name = it.name, imageUrl = it.imageUrl) }
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
         // 저장은 ending id 기준이라 무모호하며, 노출은 이름으로 한다(엔딩 목록과 이름으로 상관, KNK-462).
         val reachedEndings = resolveReachedEndingNames(userId, story.id)
@@ -156,6 +163,7 @@ class StoryService(
             status = story.status,
             lorebooks = lorebooks,
             mainEvents = mainEvents,
+            characters = characters,
             reachedEndings = reachedEndings,
             createdAt = story.createdAt,
         )
