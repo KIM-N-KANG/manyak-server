@@ -279,7 +279,15 @@ class ChatService(
 
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
-        val suggestedInputs = if (turns.isEmpty()) loadSuggestedInputs(startSetting?.id) else emptyList()
+        //
+        // 스토리를 읽을 수 없으면 추천 입력도 내리지 않는다(PR #220 Codex P1). 제목·프롤로그와 같은 유출인데
+        // 여기만 **스냅샷이 아니라 게이트로** 막는다 — 추천 입력은 값 하나가 아니라 목록이라 스냅샷하려면
+        // JSON 컬럼이나 별도 테이블이 필요한 반면, 입력을 돕는 보조 장치라 없어도 채팅이 성립하기 때문이다.
+        val suggestedInputs = if (showsCurrentStory && turns.isEmpty()) {
+            loadSuggestedInputs(startSetting?.id)
+        } else {
+            emptyList()
+        }
 
         return ChatDetailResponse(
             id = chat.publicId.toString(),

@@ -16,10 +16,12 @@ import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -52,6 +54,7 @@ class ChatStorySnapshotIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var startSettingRepository: StoryStartSettingRepository
+    @Autowired private lateinit var suggestedInputRepository: StorySuggestedInputRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
@@ -80,6 +83,15 @@ class ChatStorySnapshotIntegrationTests {
             StoryStartSetting(story = story, name = "시작 장면", prologue = "원래 프롤로그"),
         )
         return story
+    }
+
+    /** 시작 설정에 추천 입력을 심는다. `inputText`가 그대로 상세 응답에 실린다. */
+    private fun seedSuggestedInput(story: Story, text: String) {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        suggestedInputRepository.deleteAll(suggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(setting.id))
+        suggestedInputRepository.save(
+            StorySuggestedInput(startSetting = setting, inputText = text, inputOrder = 1),
+        )
     }
 
     /** 소유자가 시작 설정의 프롤로그 본문을 고친다. */
@@ -195,6 +207,15 @@ class ChatStorySnapshotIntegrationTests {
             .expectStatus().isOk
             .expectBody(ChatShareResponse::class.java)
             .returnResult().responseBody!!.storyTitle
+
+    private fun detailSuggestedInputs(chat: StoryChat, user: User): List<String> =
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", token(user))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!.suggestedInputs
 
     private fun detailPrologue(chat: StoryChat, user: User): String =
         restTestClient.get()
@@ -507,5 +528,46 @@ class ChatStorySnapshotIntegrationTests {
         changePrologue(story, "바뀐 프롤로그")
 
         assertThat(sharePrologue(shareId)).isEqualTo("바뀐 프롤로그")
+    }
+
+    // ---- 추천 입력 ----
+
+    @Test
+    fun `비공개로 되돌리고 추천 입력을 바꾸면 채팅 상세의 추천 입력은 비어 있다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "원래 추천 입력")
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        seedSuggestedInput(story, "바뀐 추천 입력")
+
+        // 추천 입력은 목록이라 스냅샷하지 않고 게이트로 막는다 — 입력을 돕는 보조 장치라 없어도 채팅이 성립한다.
+        assertThat(detailSuggestedInputs(chat, reader)).isEmpty()
+    }
+
+    @Test
+    fun `소유자 본인은 비공개 스토리도 상세에서 현재 추천 입력을 본다`() {
+        val owner = saveUser("소유자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "원래 추천 입력")
+        val chat = createChat(story, owner)
+
+        hideAndRename(story, "바뀐 제목")
+        seedSuggestedInput(story, "바뀐 추천 입력")
+
+        assertThat(detailSuggestedInputs(chat, owner)).containsExactly("바뀐 추천 입력")
+    }
+
+    @Test
+    fun `공개 스토리라면 상세에 현재 추천 입력이 그대로 실린다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "원래 추천 입력")
+        val chat = createChat(story, reader)
+
+        assertThat(detailSuggestedInputs(chat, reader)).containsExactly("원래 추천 입력")
     }
 }
