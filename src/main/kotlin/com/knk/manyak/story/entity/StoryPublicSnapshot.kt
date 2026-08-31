@@ -37,6 +37,29 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
  *
  * **id를 담는 필드를 새로 추가한다면** 그 부모가 전체 교체 대상인지 먼저 보고, 맞다면 읽는 쪽에 이름 폴백을
  * 함께 넣어라.
+ *
+ * ## 같은 뿌리의 짝 — `story_endings`·`story_main_events`를 참조하는 컬럼을 새로 만들 때
+ *
+ * 위 규칙이 "스냅샷 안의 id"를 다룬다면, 이쪽은 **DB에 저장한 참조 컬럼**이다. 뿌리는 같다 — 전체 교체가
+ * 행을 갈아치우면 그 행을 가리키던 것이 성립하지 않는다. **PR #224 Codex P2가 이 하나에서 다섯 건 나왔다.**
+ *
+ * FK의 삭제 규칙에 따라 증상만 다르고 대응은 같다.
+ * - `ON DELETE CASCADE`면 **참조하는 행이 통째로 사라진다.** 기록 자체가 없어져 조용하다
+ *   (`user_story_ending_reaches`가 이 경우였다 — 제작자가 엔딩을 한 번 손보면 그 스토리 회원 전원의 과거
+ *   도달 집계가 삭제됐다).
+ * - `ON DELETE SET NULL`이면 **행은 남고 조회 키만 빈다.** 라벨이 사라지거나 목표가 매 턴 초기화된다.
+ *
+ * 어느 쪽이든 해법은 하나다: **이름 스냅샷을 같은 행에 함께 남기고, 읽을 때 이름으로 다시 잇는다.**
+ * 이름은 FK가 없어 살아남고, 전체 교체가 이름을 유지한 채 행만 새로 만드는 것이 흔해 id보다 잘 버틴다.
+ * 쓰기는 "라이브 id가 있으면 id + 이름, 없으면 이름만", 읽기는 "id 조회가 빗나가면 이름으로 폴백"이다.
+ *
+ * 지금까지 그렇게 처리한 자리 넷 — 새 참조를 만들 때 선례로 볼 것:
+ * - `story_chats.reached_ending_name_snapshot` — 채팅 단위 도달 엔딩 이름(서재)
+ * - `story_chats.occurred_main_event_names_snapshot` — 완결 주요 사건 이름 목록(AI 요청의 완결 표기)
+ * - `story_messages.reached_ending_name_snapshot` — 턴 단위 도달 엔딩 이름(상세·공유). **이 컬럼이 곧
+ *   "이 턴이 도달 턴이었다"는 표식**이라 id 없이도 턴을 특정한다
+ * - `user_story_ending_reaches.ending_name_snapshot` — 회원 도달 집계. 여기서는 이름이 **유니크 키**다
+ *   (NOT NULL이어야 한다 — PostgreSQL의 UNIQUE는 NULL을 서로 다르게 취급한다)
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class StoryPublicSnapshot(
