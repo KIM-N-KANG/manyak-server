@@ -837,17 +837,53 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 추천 입력 ----
 
     @Test
-    fun `비공개로 되돌리고 추천 입력을 바꾸면 채팅 상세의 추천 입력은 비어 있다`() {
+    fun `비공개로 되돌리고 추천 입력을 바꾸면 채팅 상세는 마지막 공개 버전을 준다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
         seedSuggestedInput(story, "원래 추천 입력")
+        publish(story)
         val chat = createChat(story, reader)
 
         hideAndRename(story, "바뀐 제목")
         seedSuggestedInput(story, "바뀐 추천 입력")
 
-        // 추천 입력은 목록이라 스냅샷하지 않고 게이트로 막는다 — 입력을 돕는 보조 장치라 없어도 채팅이 성립한다.
+        // KNK-1059는 여기만 게이트로 비웠지만(목록이라 스냅샷 비용이 크다는 근거), KNK-1065의 스토리 스냅샷이
+        // 바로 그 JSON이라 근거가 사라졌다. 개작은 막되 독자가 보던 안내는 남긴다.
+        assertThat(detailSuggestedInputs(chat, reader)).containsExactly("원래 추천 입력")
+    }
+
+    @Test
+    fun `공개 상태에서 고친 추천 입력은 비공개 전환 뒤에도 마지막 공개 버전으로 보인다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "v1 추천 입력")
+        publish(story)
+        val chat = createChat(story, reader)
+
+        // 공개를 유지한 채 v2로 패치 — 독자는 이 값을 보고 있었다.
+        seedSuggestedInput(story, "v2 추천 입력")
+        publish(story)
+        hideAndRename(story, "바뀐 제목")
+        seedSuggestedInput(story, "비공개 개작 추천 입력")
+
+        assertThat(detailSuggestedInputs(chat, reader)).containsExactly("v2 추천 입력")
+    }
+
+    @Test
+    fun `시작 설정이 삭제돼 참조가 끊기면 추천 입력은 빈 목록이다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        seedSuggestedInput(story, "원래 추천 입력")
+        publish(story)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        // 스냅샷에서 찾을 키가 사라진다. 채팅에는 추천 입력 컬럼이 없어 프롤로그와 달리 폴백이 없다.
+        breakStartSettingReference(chat, story)
+
         assertThat(detailSuggestedInputs(chat, reader)).isEmpty()
     }
 

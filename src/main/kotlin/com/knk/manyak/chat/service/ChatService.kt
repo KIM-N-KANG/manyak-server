@@ -397,13 +397,15 @@ class ChatService(
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
         //
-        // 스토리를 읽을 수 없으면 추천 입력도 내리지 않는다(PR #220 Codex P1). 제목·프롤로그와 같은 유출인데
-        // 여기만 **스냅샷이 아니라 게이트로** 막는다 — 추천 입력은 값 하나가 아니라 목록이라 스냅샷하려면
-        // JSON 컬럼이나 별도 테이블이 필요한 반면, 입력을 돕는 보조 장치라 없어도 채팅이 성립하기 때문이다.
-        val suggestedInputs = if (showsCurrentStory && turns.isEmpty()) {
-            loadSuggestedInputs(startSetting?.id)
-        } else {
-            emptyList()
+        // 읽을 수 없는 스토리는 **제목·프롤로그와 같이 스냅샷에서** 낸다(PR #224 Codex P2). KNK-1059가 여기만
+        // 게이트로 비웠던 근거는 "목록이라 스냅샷하려면 JSON 컬럼이 필요하다"였는데, KNK-1065의 스토리
+        // 스냅샷이 바로 그 JSON이라 근거가 사라졌다. 비우면 개작 유출은 막지만 독자가 채팅을 시작할 때 보던
+        // 안내가 통째로 사라진다 — 마지막 공개 시점 값으로 내는 편이 맞다.
+        val suggestedInputs = when {
+            turns.isNotEmpty() -> emptyList()
+            showsCurrentStory -> loadSuggestedInputs(startSetting?.id)
+            // 시작 설정 참조가 끊긴 채팅은 스냅샷에서 찾을 키가 없다(채팅에는 추천 입력 컬럼이 없어 폴백도 없다).
+            else -> snapshot?.startSettingOf(chat.startSettingId)?.suggestedInputs.orEmpty()
         }
 
         return ChatDetailResponse(

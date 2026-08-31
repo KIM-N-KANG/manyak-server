@@ -28,7 +28,7 @@ class EndingReachRecorder(
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun record(userId: Long, storyId: Long, endingId: Long?, endingName: String) {
-        if (userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName)) {
+        if (alreadyRecorded(userId, storyId, endingId, endingName)) {
             return
         }
         // saveAndFlush로 위반을 이 메서드 경계 안에서 즉시 드러낸다. 예외는 이 REQUIRES_NEW 트랜잭션만 롤백시키고
@@ -42,4 +42,19 @@ class EndingReachRecorder(
             ),
         )
     }
+
+    /**
+     * 이미 기록된 도달인지 **이름과 id 양쪽**으로 확인한다.
+     *
+     * 이름이 정본이지만, 롤링 배포 창에 구버전 태스크가 쓴 행은 `ending_name_snapshot`이 NULL이라 이름으로는
+     * 찾지 못한다. 그 상태에서 같은 `ending_id`로 다시 넣으면 아직 살아 있는 옛 유니크를 위반한다.
+     * 이 경로는 호출부가 위반을 흡수하므로 터지지는 않지만(불필요한 예외와 롤백을 태울 뿐이고),
+     * 흡수 장치가 없는 이관 백필에서는 요청 자체가 실패한다 —
+     * [com.knk.manyak.migration.service.GuestDataMigrationService]가 같은 판정을 쓴다.
+     *
+     * KNK-1084(후속 contract)의 재백필이 끝나면 이름 NULL 행이 사라져 id 쪽 확인은 불필요해진다.
+     */
+    private fun alreadyRecorded(userId: Long, storyId: Long, endingId: Long?, endingName: String): Boolean =
+        userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName) ||
+            (endingId != null && userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, storyId, endingId))
 }

@@ -181,9 +181,16 @@ class GuestDataMigrationService(
         val endingName = chat.reachedEndingNameSnapshot
             ?: chat.reachedEndingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
             ?: return
-        if (!userStoryEndingReachRepository
-                .existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName)
-        ) {
+        // **이름과 id 양쪽으로** 확인한다. 롤링 배포 창에 구버전 태스크가 쓴 집계 행은 ending_name_snapshot이
+        // NULL이라 이름으로는 못 찾는데, 같은 ending_id로 다시 넣으면 아직 살아 있는 옛 유니크를 위반한다.
+        // 이 경로에는 위반을 흡수하는 장치가 없어 **이관 요청 자체가 실패**한다(단순 중복이 아니라 오류 경로다).
+        // KNK-1084(후속 contract)의 재백필이 끝나면 id 쪽 확인은 불필요해진다.
+        val alreadyRecorded = userStoryEndingReachRepository
+            .existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName) ||
+            chat.reachedEndingId?.let {
+                userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, it)
+            } == true
+        if (!alreadyRecorded) {
             userStoryEndingReachRepository.save(
                 UserStoryEndingReach(
                     userId = userId,

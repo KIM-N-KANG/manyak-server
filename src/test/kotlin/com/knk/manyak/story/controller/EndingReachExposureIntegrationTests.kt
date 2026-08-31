@@ -245,6 +245,40 @@ class EndingReachExposureIntegrationTests {
     }
 
     @Test
+    fun `구버전 집계 행이 있어도 게스트 채팅 이관이 실패하지 않는다`() {
+        // 롤링 배포 창에 구버전 태스크가 쓴 집계 행: ending_id는 있고 이름은 NULL이다.
+        // 이름 기준 존재 확인만 하면 이 행을 못 찾아 같은 ending_id로 다시 INSERT하고,
+        // 아직 살아 있는 옛 유니크(user_id, story_id, ending_id)를 위반해 **이관 요청 자체가 실패**한다.
+        userStoryEndingReachRepository.save(
+            UserStoryEndingReach(
+                userId = member.id,
+                storyId = story.id,
+                endingNameSnapshot = null,
+                endingId = ending.id,
+            ),
+        )
+        val guestChat = storyChatRepository.save(
+            StoryChat(
+                storyId = story.id,
+                userId = null,
+                reachedEndingId = ending.id,
+                reachedEndingNameSnapshot = ending.name,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":[],"chatIds":["${guestChat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+
+        // 구버전 행 하나만 남고 중복이 생기지 않는다.
+        assertThat(userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)).hasSize(1)
+    }
+
+    @Test
     fun `채팅 카드의 reachedEndings는 그 채팅이 도달한 엔딩 이름이다`() {
         val chat = storyChatRepository.save(
             StoryChat(storyId = story.id, userId = member.id, reachedEndingId = ending.id),
