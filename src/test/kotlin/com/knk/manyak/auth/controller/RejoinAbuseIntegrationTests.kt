@@ -407,4 +407,87 @@ class RejoinAbuseIntegrationTests {
             .expectStatus().isEqualTo(409)
             .expectBody().jsonPath("$.code").isEqualTo("INVITE_ALREADY_REDEEMED")
     }
+
+    @Test
+    fun `초대자가 상한을 채운 뒤 재가입해도 월 상한이 리셋되지 않는다`() {
+        // Codex 재리뷰 P1: 초대자 몫 키·집계가 user_id 기준이면, 크레딧을 다 쓰고 탈퇴·재가입하는 것만으로
+        // 월 상한이 0으로 초기화된다(지갑 소멸이 페널티가 아니다). 키를 보상 신원에 묶어 신원 단위로 이어 센다.
+        val token = login("cap-rejoin-sub")
+        val inviterId = userIdOf("cap-rejoin-sub")
+        // 이번 달 초대자 역할 보상을 상한(10)까지 채운다 — 실제 키 모양 invite:{초대자}:{피초대자}:{초대자}.
+        repeat(10) { i ->
+            creditWalletService.reward(inviterId, 500, CreditReason.INVITE_REWARD, "invite:$inviterId:${900_000L + i}:$inviterId")
+        }
+
+        withdraw(token)
+        val rejoinToken = login("cap-rejoin-sub")
+
+        // 재가입 계정의 진행 표시가 이전 계정 수령분을 그대로 이어받는다(상한 도달 상태).
+        restTestClient.get().uri("/api/v1/users/me/invite")
+            .header("Authorization", "Bearer $rejoinToken")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.monthlyRewardCount").isEqualTo(10)
+            .jsonPath("$.monthlyRewardLimit").isEqualTo(10)
+
+        // 실제 적립도 계속 스킵된다 — 재가입 계정이 새 코드로 초대해도 초대자 몫은 안 준다(제출자만 받는다).
+        val inviteCode = restTestClient.get().uri("/api/v1/users/me/invite")
+            .header("Authorization", "Bearer $rejoinToken")
+            .exchange().expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["inviteCode"] as String
+        val redeemerToken = login("cap-redeemer-sub")
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $redeemerToken")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"$inviteCode"}""")
+            .exchange().expectStatus().isOk
+
+        val rejoinedInviterId = userIdOf("cap-rejoin-sub")
+        // 재가입 계정 명의로는 초대자 몫 원장이 한 건도 생기지 않는다(상한 스킵).
+        assertThat(idempotencyKeysOf(rejoinedInviterId, CreditReason.INVITE_REWARD)).isEmpty()
+    }
+
+    @Test
+    fun `순수 신규 가입의 초대 멱등 키 문자열은 종전과 같다`() {
+        // 회귀(원장 호환): reward_identity_user_id 가 NULL 이면 키가 invite:{초대자id}:{제출자id}:{수혜자id} 그대로다.
+        val inviterToken = login("legacy-invite-inviter-sub")
+        val inviteCode = restTestClient.get().uri("/api/v1/users/me/invite")
+            .header("Authorization", "Bearer $inviterToken")
+            .exchange().expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["inviteCode"] as String
+        val redeemerToken = login("legacy-invite-redeemer-sub")
+
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $redeemerToken")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"$inviteCode"}""")
+            .exchange().expectStatus().isOk
+
+        val inviterId = userIdOf("legacy-invite-inviter-sub")
+        val redeemerId = userIdOf("legacy-invite-redeemer-sub")
+        assertThat(idempotencyKeysOf(inviterId, CreditReason.INVITE_REWARD))
+            .containsExactly("invite:$inviterId:$redeemerId:$inviterId")
+        assertThat(idempotencyKeysOf(redeemerId, CreditReason.INVITE_REWARD))
+            .containsExactly("invite:$inviterId:$redeemerId:$redeemerId")
+    }
+
+    @Test
+    fun `tombstone 소셜 행에는 로그인 시각 갱신이 아무것도 바꾸지 않는다`() {
+        // Codex 재리뷰 P2: 로그인이 엔티티 dirty checking으로 lastLoginAt을 쓰면 UPDATE가 전 컬럼을 덮어,
+        // 동시에 커밋된 탈퇴의 tombstone·이메일 파기를 되돌린다. 조건부 단일 컬럼 갱신이라 tombstone은 불변이어야 한다.
+        val token = login("touch-tombstone-sub")
+        withdraw(token)
+        val tombstone = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "touch-tombstone-sub")!!
+        val ownerId = tombstone.userId
+        val deletedAt = tombstone.deletedAt
+
+        assertThat(socialAccountRepository.touchLastLoginAt(tombstone.id, Instant.now())).isEqualTo(0)
+
+        val unchanged = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "touch-tombstone-sub")!!
+        assertThat(unchanged.deletedAt).isEqualTo(deletedAt)
+        assertThat(unchanged.email).isNull()
+        assertThat(unchanged.userId).isEqualTo(ownerId)
+        assertThat(unchanged.lastLoginAt).isEqualTo(tombstone.lastLoginAt)
+    }
 }

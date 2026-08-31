@@ -1,5 +1,6 @@
 package com.knk.manyak.invite.service
 
+import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
@@ -62,7 +63,8 @@ class InviteService(
             reason = CreditReason.INVITE_REWARD,
             windowStart = monthStart,
             windowEnd = monthEnd,
-            idempotencyKeyPrefix = inviterRoleKeyPrefix(userId),
+            idempotencyKeyPrefix = inviterRoleKeyPrefix(user.rewardIdentity()),
+            idempotencyKeySuffix = inviterRoleKeySuffix(user.rewardIdentity()),
         )
         return InviteResponse(
             inviteCode = code,
@@ -141,18 +143,24 @@ class InviteService(
         val (monthStart, monthEnd) = kstMonthRangeOf(clock.instant())
         // 초대자 몫: 초대자 역할 수령분(멱등 키 접두로 식별)만 세는 월 상한 안에서 적립한다(KNK-581). 멱등(쌍당 1회)과
         // 월 상한 판정은 모두 지갑 행 락 안에서 수행돼(카운트·insert가 같은 락 구간), 동시 적립이 경계에서 상한을 넘기지 못한다.
+        // 키는 user_id가 아니라 **보상 신원**으로 만든다(KNK-1053). 재가입은 user_id를 갈아치우므로 user_id 키면
+        // 초대자가 상한을 채운 뒤 탈퇴·재가입하는 것만으로 월 상한이 0으로 리셋된다(크레딧을 미리 쓰고 나가면 지갑
+        // 소멸도 페널티가 아니다). 기존 회원·신규 가입은 신원 = 자기 자신이라 키 문자열이 종전과 같아 원장과 호환된다.
+        val inviterIdentity = inviter.rewardIdentity()
+        val redeemerIdentity = redeemer.rewardIdentity()
         val rewardInviter = {
             creditWalletService.reward(
                 userId = inviter.id,
                 amount = inviteReward,
                 reason = CreditReason.INVITE_REWARD,
-                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = inviter.id),
+                idempotencyKey = idempotencyKeyOf(inviterIdentity, redeemerIdentity, rewardedIdentity = inviterIdentity),
                 monthlyCap = MonthlyRewardCap(
                     reason = CreditReason.INVITE_REWARD,
                     cap = inviteMonthlyCap,
                     windowStart = monthStart,
                     windowEnd = monthEnd,
-                    idempotencyKeyPrefix = inviterRoleKeyPrefix(inviter.id),
+                    idempotencyKeyPrefix = inviterRoleKeyPrefix(inviterIdentity),
+                    idempotencyKeySuffix = inviterRoleKeySuffix(inviterIdentity),
                 ),
             )
         }
@@ -162,7 +170,7 @@ class InviteService(
                 userId = redeemer.id,
                 amount = inviteReward,
                 reason = CreditReason.INVITE_REWARD,
-                idempotencyKey = idempotencyKeyOf(inviterId = inviter.id, inviteeId = redeemer.id, rewardedUserId = redeemer.id),
+                idempotencyKey = idempotencyKeyOf(inviterIdentity, redeemerIdentity, rewardedIdentity = redeemerIdentity),
             )
         }
         // 두 적립은 user id 오름차순으로 실행한다(Codex P2 데드락 방지). reward가 잡는 지갑 행 락은 이 트랜잭션
@@ -181,17 +189,24 @@ class InviteService(
     }
 
     /**
-     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`(KNK-477). 원장 idempotency_key가 전역 유니크라
-     * 두 적립 행이 같은 키를 쓸 수 없어 수혜자 id를 접미사로 구분한다(쌍당 1회 보장은 유지).
+     * 멱등 키 `invite:{초대자}:{피초대자}:{수혜자}`(KNK-477). 세 자리 모두 **보상 신원**이다(KNK-1053).
+     * 원장 idempotency_key가 전역 유니크라 두 적립 행이 같은 키를 쓸 수 없어 수혜자를 접미사로 구분한다.
+     * 신원 기준이라 쌍당 1회 보장이 오히려 강해진다 — 어느 쪽이 재가입해도 같은 쌍은 같은 키다.
      */
-    private fun idempotencyKeyOf(inviterId: Long, inviteeId: Long, rewardedUserId: Long): String =
-        "invite:$inviterId:$inviteeId:$rewardedUserId"
+    private fun idempotencyKeyOf(inviterIdentity: Long, inviteeIdentity: Long, rewardedIdentity: Long): String =
+        "invite:$inviterIdentity:$inviteeIdentity:$rewardedIdentity"
 
     /**
-     * [userId]가 초대자 역할로 받은 원장 행의 멱등 키 접두(KNK-581). 접두 뒤 콜론까지 포함해 십진 접두 충돌이 없고,
-     * 자기 코드 제출이 막혀 있어 제출자 몫 행(`invite:{타인}:{userId}:{userId}`)과 겹치지 않는다.
+     * 초대자 역할 행의 키 접두·접미(KNK-581). 접두 `invite:{신원}:`는 "초대자가 이 신원", 접미 `:{신원}`는
+     * "수혜자가 이 신원"이라, 둘을 함께 걸어야 제출자 몫 행(`invite:{신원}:{제출자}:{제출자}`)이 빠진다.
+     * 콜론을 포함해 매칭하므로 십진 접두·접미 충돌(1 vs 12, 1 vs 11)이 없다.
      */
-    private fun inviterRoleKeyPrefix(userId: Long): String = "invite:$userId:"
+    private fun inviterRoleKeyPrefix(rewardIdentity: Long): String = "invite:$rewardIdentity:"
+
+    private fun inviterRoleKeySuffix(rewardIdentity: Long): String = ":$rewardIdentity"
+
+    /** 1회성·상한 대상 보상의 스코프(KNK-1053). NULL이면 자기 자신이라 재가입 없는 계정은 종전 값과 같다. */
+    private fun User.rewardIdentity(): Long = rewardIdentityUserId ?: id
 
     /** [instant]가 속한 KST 월의 [시작, 다음달 시작) 구간을 Instant로 반환한다(월 상한 집계 경계). */
     private fun kstMonthRangeOf(instant: Instant): Pair<Instant, Instant> {

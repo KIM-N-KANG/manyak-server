@@ -66,10 +66,14 @@ class SocialAccountRegistrarTest {
             .thenReturn(social)
         `when`(userRepository.findById(42L)).thenReturn(Optional.of(existingUser))
 
-        val user = registrar.findExistingUser(provider, info("social-sub-123"), Instant.now())
+        val now = Instant.now()
+        val user = registrar.findExistingUser(provider, info("social-sub-123"), now)
 
         assertThat(user).isSameAs(existingUser)
-        assertThat(social.lastLoginAt).isAfter(before)
+        // 엔티티 대입이 아니라 조건부 단일 컬럼 갱신으로 기록한다(KNK-1053) — dirty checking UPDATE는 전 컬럼을 덮어
+        // 동시에 커밋된 탈퇴의 tombstone·이메일 파기를 되돌린다.
+        verify(socialAccountRepository).touchLastLoginAt(7L, now)
+        assertThat(social.lastLoginAt).isEqualTo(before)
         verify(userRepository, never()).save(any(User::class.java))
     }
 

@@ -34,7 +34,8 @@ import java.time.ZonedDateTime
  *   KNK-581), 제출자 몫은 상한 없이 위임한다. 여기서는 올바른 멱등 키·상한·집계 구간 전달까지만 검증하고,
  *   상한 스킵 자체는 지갑 서비스 통합 테스트가 검증한다.
  *
- * 멱등 키는 `invite:{초대자}:{피초대자}:{수혜자}`로 각 수혜자당 1회다.
+ * 멱등 키는 `invite:{초대자}:{피초대자}:{수혜자}`로 각 수혜자당 1회이고, 세 자리 모두 **보상 신원**이다
+ * (`reward_identity_user_id ?: id` — KNK-1053. 재가입이 없는 계정은 신원 = 자기 자신이라 문자열이 종전과 같다).
  * 월 상한 집계 구간은 **적립(redeem) 시점의 KST 월**이다(KNK-567 — 가입 월 귀속 특례 폐기).
  */
 class InviteServiceTest {
@@ -113,9 +114,11 @@ class InviteServiceTest {
         val user = User(id = 7L, nickname = "진행", inviteCode = "PROG7777")
         `when`(userRepository.findByIdForUpdate(7L)).thenReturn(user)
         // 집계 구간은 시계(2026-07-15)가 속한 KST 월 [7/1, 8/1)이고, 초대자 역할 행만 세도록
-        // 멱등 키 접두(invite:{요청자}:)를 전달해야 한다(월 상한 판정과 같은 창·같은 필터 — KNK-581).
+        // 멱등 키 접두·접미(invite:{요청자}: / :{요청자})를 전달해야 한다(월 상한 판정과 같은 창·같은 필터 — KNK-581).
         `when`(
-            creditWalletService.countRewardsInWindow(7L, CreditReason.INVITE_REWARD, julyStart, augustStart, "invite:7:"),
+            creditWalletService.countRewardsInWindow(
+                7L, CreditReason.INVITE_REWARD, julyStart, augustStart, "invite:7:", ":7",
+            ),
         ).thenReturn(3L)
 
         val response = service.getOrCreateInvite(7L)
@@ -149,7 +152,9 @@ class InviteServiceTest {
         assertThat(inviterReward.getArgument<String>(3)).isEqualTo("invite:5:9:5")
         // 월 상한은 초대자 몫에만 MonthlyRewardCap으로 위임한다(지갑 락 안 판정, 초대자 역할 행만 집계 — KNK-581).
         assertThat(inviterReward.getArgument<MonthlyRewardCap>(6))
-            .isEqualTo(MonthlyRewardCap(CreditReason.INVITE_REWARD, inviteMonthlyCap, julyStart, augustStart, "invite:5:"))
+            .isEqualTo(
+                MonthlyRewardCap(CreditReason.INVITE_REWARD, inviteMonthlyCap, julyStart, augustStart, "invite:5:", ":5"),
+            )
 
         val redeemerReward = rewards.single { it.getArgument<Long>(0) == 9L }
         assertThat(redeemerReward.getArgument<String>(3)).isEqualTo("invite:5:9:9")
@@ -191,7 +196,11 @@ class InviteServiceTest {
         // 상한은 초대자 몫에만 걸리므로(KNK-581) 초대자(5) 위임의 집계 창으로 검증한다.
         val inviterReward = rewardInvocations().single { it.getArgument<Long>(0) == 5L }
         assertThat(inviterReward.getArgument<MonthlyRewardCap>(6))
-            .isEqualTo(MonthlyRewardCap(CreditReason.INVITE_REWARD, inviteMonthlyCap, augustStart, kstMonthStart(2026, 9), "invite:5:"))
+            .isEqualTo(
+                MonthlyRewardCap(
+                    CreditReason.INVITE_REWARD, inviteMonthlyCap, augustStart, kstMonthStart(2026, 9), "invite:5:", ":5",
+                ),
+            )
     }
 
     @Test

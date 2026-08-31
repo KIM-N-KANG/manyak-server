@@ -45,8 +45,13 @@ class SocialAccountRegistrar(
             info.providerUserId,
         ) ?: return null
 
-        social.lastLoginAt = now
-        return userRepository.findById(social.userId).orElseThrow {
+        val ownerId = social.userId
+        // 엔티티에 직접 대입하지 않는다(KNK-1053, Codex 재리뷰 P2) — dirty checking UPDATE는 전 컬럼을 덮어
+        // 동시에 커밋된 탈퇴의 tombstone·이메일 파기를 되돌린다. 조건부 단일 컬럼 갱신으로 바꿨다.
+        // 0행이면 조회와 갱신 사이에 탈퇴가 커밋된 것이다. 이 로그인은 그대로 흘려보내고(그 계정은 다음 요청부터
+        // 해석 계층이 401로 끊는다) tombstone만 건드리지 않는다.
+        socialAccountRepository.touchLastLoginAt(social.id, now)
+        return userRepository.findById(ownerId).orElseThrow {
             ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         }
     }
