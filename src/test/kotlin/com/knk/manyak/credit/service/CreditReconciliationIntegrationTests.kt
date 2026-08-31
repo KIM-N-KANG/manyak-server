@@ -12,9 +12,15 @@ import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.support.DatabaseCleaner
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
@@ -49,10 +55,24 @@ class CreditReconciliationIntegrationTests {
     private val cost = 3L
     private val threshold: Duration = Duration.ofMinutes(15)
 
+    // 혼합 단가 경고는 구조화 로그로만 나오므로 로그를 봐야 한다(StructuredLoggerTests 와 같은 방식).
+    private val structuredLoggerAppender = ListAppender<ILoggingEvent>()
+    private val structuredLoggerBackend = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        structuredLoggerAppender.start()
+        structuredLoggerBackend.addAppender(structuredLoggerAppender)
     }
+
+    @AfterEach
+    fun detachAppender() {
+        structuredLoggerBackend.detachAppender(structuredLoggerAppender)
+    }
+
+    private fun mixedUnitWarnings(): List<ILoggingEvent> = structuredLoggerAppender.list
+        .filter { it.level == Level.WARN && "credit_reconciliation_mixed_unit_amount" in it.formattedMessage }
 
     // 미래 시계: 시드한 charge(실제 now)가 cutoff(미래 now − 15m) 이전이 되게 해 "정지 상태"로 대사한다.
     private fun serviceAsOf(now: Instant) = CreditReconciliationService(
@@ -69,8 +89,8 @@ class CreditReconciliationIntegrationTests {
         creditWalletService.reward(userId, amount, CreditReason.SIGNUP_REWARD, "signup:$userId")
     }
 
-    private fun chargeChat(userId: Long, chatPk: Long) =
-        creditWalletService.deduct(userId, cost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
+    private fun chargeChat(userId: Long, chatPk: Long, amount: Long = cost) =
+        creditWalletService.deduct(userId, amount, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
 
     private fun chargeStory(userId: Long, sessionId: Long) =
         creditWalletService.deduct(userId, cost, CreditReason.STORY_CREATION, refType = "STORY", refId = sessionId)
@@ -92,6 +112,56 @@ class CreditReconciliationIntegrationTests {
 
     private fun refundCount(userId: Long, refType: String, refId: Long): Long =
         transactionRepository.countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND)
+
+    @Test
+    fun `혼합 단가 그룹에 환불을 발행하면 경고를 남긴다`() {
+        // KNK-1056: 정책 오버라이드가 채팅 수명 도중 바뀌면 그룹 안에 서로 다른 차감액이 섞인다.
+        // 환불은 최소액으로 나가 회원이 차액만큼 미보상되므로, 그 사실이 조용히 지나가면 안 된다.
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0)
+        chargeChat(userId, chatPk, amount = 3)
+        chargeChat(userId, chatPk, amount = 20)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(2)
+        val warning = mixedUnitWarnings().single()
+        assertThat(warning.formattedMessage)
+            .contains("min_unit_amount=3")
+            .contains("max_unit_amount=20")
+            .contains("refunds_emitted=2")
+    }
+
+    @Test
+    fun `혼합 단가여도 환불이 발행되지 않으면 경고하지 않는다`() {
+        // 오경보 차단(Codex 리뷰 P2). in-flight 경로가 이미 각 차감액대로 정확히 환불한 그룹도
+        // targetRefundCount 는 양수로 남는다 — 발행 여부는 reconcileRefunds 안에서야 판정되므로,
+        // 그 앞에서 경고하면 미보상이 없는 그룹이 매 배치마다 같은 오경보를 반복한다.
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0)
+        chargeChat(userId, chatPk, amount = 3)
+        chargeChat(userId, chatPk, amount = 20)
+        inflightRefund(userId, "CHAT", chatPk)
+        inflightRefund(userId, "CHAT", chatPk)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(mixedUnitWarnings()).isEmpty()
+    }
+
+    @Test
+    fun `균일 단가 그룹은 환불을 발행해도 경고하지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0)
+        chargeChat(userId, chatPk)
+
+        assertThat(serviceAsOf(future).reconcile().refundsEmitted).isEqualTo(1)
+        assertThat(mixedUnitWarnings()).isEmpty()
+    }
 
     @Test
     fun `완료도 환불도 없는 채팅 턴 차감은 환불된다`() {

@@ -9,4 +9,4 @@ class InsufficientCreditException(
     val userId: Long,
     val required: Long,
     val balance: Long,
-) : RuntimeException("크레딧이 부족합니다. required=$required, balance=$balance")
+) : RuntimeException("이프가 부족합니다. required=$required, balance=$balance")

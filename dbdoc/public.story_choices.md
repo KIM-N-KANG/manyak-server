@@ -70,6 +70,11 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
+  varchar_100_ story_title_snapshot
+  varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
+  varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -79,6 +84,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
 }
 ```
 

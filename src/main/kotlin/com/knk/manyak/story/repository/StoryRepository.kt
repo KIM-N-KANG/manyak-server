@@ -21,6 +21,10 @@ interface StoryRepository : JpaRepository<Story, Long> {
 
     fun findAllByIdInAndDeletedAtIsNull(ids: Collection<Long>): List<Story>
 
+    // 인물 이미지 보상 삭제 판정(KNK-966): 커밋이 반영됐는데 응답만 유실된 모호한 실패에서 스토리 행이 남았는지 본다.
+    // 삭제 여부를 가리지 않는다 — 행이 남아 있으면 image_url도 남아 있으므로 객체를 지우면 안 된다.
+    fun existsByPublicId(publicId: UUID): Boolean
+
     // KNK-256: API 외부 식별자(public_id) 기준 조회. 순차 PK 열거(IDOR) 차단.
     // 삭제된 스토리 제외라 KNK-257(삭제 스토리 채팅 생성 차단)도 이 조회로 함께 해결된다.
     fun findByPublicIdAndDeletedAtIsNull(publicId: UUID): Story?

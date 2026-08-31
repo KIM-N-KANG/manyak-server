@@ -9,18 +9,18 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 13 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 14 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 17 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 22 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 8 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
-| [public.users](public.users.md) | 14 |  | BASE TABLE |
-| [public.social_accounts](public.social_accounts.md) | 9 |  | BASE TABLE |
+| [public.users](public.users.md) | 17 |  | BASE TABLE |
+| [public.social_accounts](public.social_accounts.md) | 10 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
 | [public.story_endings](public.story_endings.md) | 13 |  | BASE TABLE |
@@ -30,12 +30,17 @@
 | [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
 | [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
 | [public.story_chat_main_events](public.story_chat_main_events.md) | 4 |  | BASE TABLE |
-| [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 5 |  | BASE TABLE |
+| [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 6 |  | BASE TABLE |
 | [public.image_presets](public.image_presets.md) | 8 |  | BASE TABLE |
 | [public.image_preset_genres](public.image_preset_genres.md) | 2 |  | BASE TABLE |
 | [public.story_creation_requests](public.story_creation_requests.md) | 12 |  | BASE TABLE |
 | [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 | [public.story_creation_characters](public.story_creation_characters.md) | 7 |  | BASE TABLE |
+| [public.story_characters](public.story_characters.md) | 13 |  | BASE TABLE |
+| [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
+| [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
+| [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
+| [public.story_public_snapshots](public.story_public_snapshots.md) | 4 | KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다. | BASE TABLE |
 
 ## Relations
 
@@ -75,11 +80,17 @@ erDiagram
 "public.story_chat_main_events" }o--|| "public.story_main_events" : "FOREIGN KEY (main_event_id) REFERENCES story_main_events(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
-"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--o| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.image_preset_genres" }o--|| "public.image_presets" : "FOREIGN KEY (image_preset_id) REFERENCES image_presets(id) ON DELETE CASCADE"
 "public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_creation_characters" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_characters" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -138,6 +149,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+  text thumbnail_image_url
 }
 "public.story_settings" {
   bigint id
@@ -184,6 +196,11 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
+  varchar_100_ story_title_snapshot
+  varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
+  varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -193,6 +210,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
 }
 "public.story_choices" {
   bigint id
@@ -261,6 +279,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 "public.social_accounts" {
   bigint id
@@ -272,6 +293,7 @@ erDiagram
   timestamp_with_time_zone last_login_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
 }
 "public.lorebooks" {
   bigint id
@@ -361,6 +383,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.image_presets" {
   bigint id
@@ -405,6 +428,47 @@ erDiagram
   varchar_10_ gender
   smallint sort_order
   timestamp_with_time_zone created_at
+}
+"public.story_characters" {
+  bigint id
+  uuid public_id
+  bigint story_id FK
+  varchar_100_ name
+  text image_url
+  text gender
+  text age
+  text body
+  text face
+  text hair
+  text outfit
+  text visual_identity
+  timestamp_with_time_zone created_at
+}
+"public.story_likes" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_reports" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_20_ reason
+  text detail
+  timestamp_with_time_zone created_at
+}
+"public.credit_policies" {
+  varchar_50_ policy_key
+  bigint amount
+  timestamp_with_time_zone effective_until
+  timestamp_with_time_zone updated_at
+}
+"public.story_public_snapshots" {
+  bigint story_id FK
+  jsonb snapshot
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

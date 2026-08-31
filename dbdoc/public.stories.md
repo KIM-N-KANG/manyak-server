@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) |  |  |
+| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_characters](public.story_characters.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.story_public_snapshots](public.story_public_snapshots.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
@@ -17,6 +17,7 @@
 | status | varchar(20) | 'PUBLISHED'::character varying | false |  |  |  |
 | visibility | varchar(20) | 'PUBLIC'::character varying | false |  |  |  |
 | thumbnail_image_key | varchar(64) |  | true |  | [public.image_presets](public.image_presets.md) |  |
+| thumbnail_image_url | text |  | true |  |  |  |
 
 ## Constraints
 
@@ -47,6 +48,10 @@ erDiagram
 "public.story_lorebooks" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_characters" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
 
 "public.stories" {
@@ -63,6 +68,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+  text thumbnail_image_url
 }
 "public.story_settings" {
   bigint id
@@ -102,6 +108,11 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
+  varchar_100_ story_title_snapshot
+  varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
+  varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_lorebooks" {
   bigint id
@@ -126,6 +137,42 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
+}
+"public.story_characters" {
+  bigint id
+  uuid public_id
+  bigint story_id FK
+  varchar_100_ name
+  text image_url
+  text gender
+  text age
+  text body
+  text face
+  text hair
+  text outfit
+  text visual_identity
+  timestamp_with_time_zone created_at
+}
+"public.story_likes" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_reports" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_20_ reason
+  text detail
+  timestamp_with_time_zone created_at
+}
+"public.story_public_snapshots" {
+  bigint story_id FK
+  jsonb snapshot
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 "public.image_presets" {
   bigint id

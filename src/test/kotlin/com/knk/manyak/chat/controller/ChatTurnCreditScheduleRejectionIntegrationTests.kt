@@ -8,6 +8,8 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
@@ -81,6 +83,14 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+    // 여러 턴을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = chatTurnCost * 10
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
@@ -90,7 +100,7 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
     fun `스케줄 거부 시 선차감분이 환불돼 순잔액이 원복된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("스케줄거부회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         // 제출 거부는 SseEmitter 반환 전에 동기로 던져지므로, 스트림 200이 아니라 오류 상태로 응답한다.
@@ -104,12 +114,12 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
             .expectStatus().is5xxServerError
 
         // 선차감(-10)과 환불(+10)이 남아 순잔액은 원복되고, 턴은 저장되지 않는다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(10)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(chatTurnCost)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
-        assertThat(refund.first().amount).isEqualTo(10)
+        assertThat(refund.first().amount).isEqualTo(chatTurnCost)
         assertThat(refund.first().refType).isEqualTo("CHAT")
         assertThat(refund.first().refId).isEqualTo(chat.id)
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()

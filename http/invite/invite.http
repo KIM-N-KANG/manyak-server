@@ -4,10 +4,13 @@
 ### [KNK-565, 스펙 §4-3-7 KNK-567 개편] 초대 코드 발급·코드 입력 적립:
 ###   - GET /users/me/invite: 내 초대 코드 조회(없으면 최초 조회 시 발급, 이후 동일 코드). 인증 필수 → 토큰 없으면 401.
 ###     코드는 혼동 문자(O·0, I·1·L)를 제외한 대문자+숫자 8자입니다. inviteUrl 필드는 폐기됐습니다(코드 공유 방식).
-###   - POST /users/me/invite/redeem: 다른 회원의 초대 코드를 제출하면 초대자·제출자 양쪽에 각 500 크레딧 적립.
+###   - POST /users/me/invite/redeem: 다른 회원의 초대 코드를 제출하면 초대자·제출자 양쪽에 각 2000 크레딧 적립(KNK-1056 기본값).
 ###     제출 자격은 계정당 평생 1회(기존 회원도 가능). 코드는 trim·대문자 정규화 후 비교합니다.
 ###     오류 계약: 빈 값·형식 위반 400 / 매칭 없음 404 / 자기 코드 409(code=INVITE_SELF_CODE) /
 ###     재제출 409(code=INVITE_ALREADY_REDEEMED) / 정지 계정 403.
+###   - [KNK-1053] 초대자 상태 게이트: 초대자가 탈퇴면 409(code=INVITE_INVITER_WITHDRAWN),
+###     정지면 409(code=INVITE_INVITER_UNAVAILABLE). 탈퇴해도 invite_code 는 지우지 않으므로
+###     코드 자체는 매칭돼 404가 아니라 409로 사유를 구분합니다(11-1·11-2번).
 ###   - [KNK-581] KST 월 10회 상한은 초대자 몫에만 적용(적립 시점 월 귀속). 초대자가 상한이면 초대자 적립만
 ###     건너뛰고 제출자는 적립하며 응답은 200입니다. 제출자 몫은 평생 1회 자격이 유일한 제한이라 상한이 없습니다.
 ###   - [KNK-513·581] GET /users/me/invite 응답의 monthlyRewardCount(이번 KST 월에 초대자 역할로 수령한 건수 —
@@ -121,7 +124,7 @@ Accept: application/json
     client.global.set("redeemerRewardCountBefore", response.body.monthlyRewardCount);
 %}
 
-### 4. (해피 패스) 제출자가 초대자의 코드를 입력 → 200, 양쪽 각 500 적립
+### 4. (해피 패스) 제출자가 초대자의 코드를 입력 → 200, 양쪽 각 2000 적립
 # 2번을 먼저 실행해 myInviteCode 를 채우고, @redeemerAccessToken 에 아직 코드를 입력한 적 없는
 # 다른 계정의 토큰을 넣은 뒤 실행하세요. 적립 상세는 credits.http 의 잔액 조회로도 확인할 수 있습니다.
 POST {{baseUrl}}/api/v1/users/me/invite/redeem
@@ -136,9 +139,10 @@ Content-Type: application/json
             `200이 아닙니다(제출자 토큰·코드 확인, 이미 입력한 계정이면 409). actual=${response.status}`);
     });
     const b = response.body;
-    // [KNK-581] 제출자 몫에는 월 상한이 없어 첫 제출의 amount 는 항상 500입니다.
-    client.test("amount 는 제출자 적립액(500)이다", () => {
-        client.assert(b.amount === 500, `amount 가 500이 아닙니다. actual=${b.amount}`);
+    // [KNK-581] 제출자 몫에는 월 상한이 없어 첫 제출의 amount 는 항상 초대 보상 전액입니다.
+    client.test("amount 는 제출자 적립액(2000)이다", () => {
+        // [KNK-1056] 초대 보상 기본값 2000. credit_policies 의 invite_reward 오버라이드를 걸었다면 그 값입니다.
+        client.assert(b.amount === 2000, `amount 가 2000이 아닙니다(오버라이드를 걸었다면 기대값을 바꾸세요). actual=${b.amount}`);
     });
     client.test("balance 는 적립 후 잔액(양수)이다", () => {
         client.assert(Number.isInteger(b.balance) && b.balance >= b.amount,
@@ -274,3 +278,47 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "code": "  ab3xk9qz  " }
+
+### 11-1. [KNK-1053] (에러) 초대자가 탈퇴한 코드 제출 → 409, code=INVITE_INVITER_WITHDRAWN
+# 준비: 코드를 발급받은 계정(2번)을 user-withdrawal.http 2번으로 탈퇴시킨 뒤,
+# 아직 코드를 입력한 적 없는 제3의 계정 토큰을 @freshRedeemerAccessToken 에 넣고 실행하세요.
+# @withdrawnInviteCode 는 그 탈퇴 계정이 쓰던 코드입니다.
+@freshRedeemerAccessToken = PUT_A_THIRD_ACCOUNTS_ACCESS_TOKEN_HERE
+@withdrawnInviteCode = PUT_THE_WITHDRAWN_INVITERS_CODE_HERE
+POST {{baseUrl}}/api/v1/users/me/invite/redeem
+Authorization: Bearer {{freshRedeemerAccessToken}}
+Content-Type: application/json
+
+{ "code": "{{withdrawnInviteCode}}" }
+
+> {%
+    client.test("탈퇴한 초대자의 코드는 409다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(초대자가 실제로 탈퇴 상태인지 확인). actual=${response.status}`);
+    });
+    client.test("바디 code 가 INVITE_INVITER_WITHDRAWN 다", () => {
+        client.assert(response.body.code === "INVITE_INVITER_WITHDRAWN",
+            `code 가 다릅니다(제출자가 이미 코드를 입력했으면 INVITE_ALREADY_REDEEMED 가 먼저 옵니다). actual=${response.body.code}`);
+    });
+%}
+
+### 11-2. [KNK-1053] (에러) 초대자가 정지된 코드 제출 → 409, code=INVITE_INVITER_UNAVAILABLE
+# 준비: 관리자 API가 없어(Phase 1 범위 밖) 초대자 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾸고,
+# 그 계정의 초대 코드를 @suspendedInviteCode 에 넣으세요. 제출자는 아직 코드를 입력한 적 없어야 합니다.
+@suspendedInviteCode = PUT_A_SUSPENDED_INVITERS_CODE_HERE
+POST {{baseUrl}}/api/v1/users/me/invite/redeem
+Authorization: Bearer {{freshRedeemerAccessToken}}
+Content-Type: application/json
+
+{ "code": "{{suspendedInviteCode}}" }
+
+> {%
+    client.test("정지된 초대자의 코드는 409다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(초대자가 실제로 정지 상태인지 확인). actual=${response.status}`);
+    });
+    client.test("바디 code 가 INVITE_INVITER_UNAVAILABLE 다", () => {
+        client.assert(response.body.code === "INVITE_INVITER_UNAVAILABLE",
+            `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}

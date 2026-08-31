@@ -60,7 +60,7 @@
 
 - **스토리 공개 읽기 게이트**: publicId로 스토리를 읽는 **모든 공개 소비자**(상세·batch·자식 리소스 GET·채팅 생성 등)는 `Story.isReadableBy(userId)`(PUBLISHED∧PUBLIC ∨ 소유자)를 반드시 적용합니다. 빠뜨리면 비공개 초안이 유출됩니다. 새 스토리 관련 엔드포인트 추가 시 이 게이트부터 확인하세요.
 - **외부 노출 식별자는 public_id(UUID)**: 순차 PK를 API에 노출하지 않습니다(IDOR 방지). 외부 노출 가능성이 있는 새 테이블은 public_id를 함께 설계합니다.
-- **쓰기 엔드포인트는 PATCH 대신 PUT**: CORS `allowedMethods`가 GET/POST/PUT/DELETE/OPTIONS만 허용합니다.
+- CORS `allowedMethods`는 GET/POST/PUT/PATCH/DELETE/OPTIONS를 허용합니다(스토리 수정이 PATCH 사용). 과거 "PATCH 금지" 규칙은 폐기됐습니다(2026-08-29 확인).
 - 컬렉션 전체 교체 PUT은 필드 누락을 400으로 거부해 silent wipe를 방지하고, `sort_order`는 1-based를 사용합니다.
 - refresh 토큰은 Redis(휘발성)에만 저장합니다 — `refresh_tokens` 테이블은 PG·ERD에 없는 게 맞습니다.
 
@@ -79,7 +79,7 @@
 ### 배포·릴리스
 
 - **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`). 흐름은 빌드가 ECR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 `:latest` 승격 → ECS `manyak-prod` 서비스에 `force-new-deployment` → 배포 id 폴링·컨테이너 헬스·`api.manyak.app` 스모크입니다. dev 머지는 프로덕션에 반영되지 않습니다.
-- **EC2+SSM 경로는 수동 `workflow_dispatch` 롤백 수단으로만 남아 있습니다**(KNK-963). 실행 전에 `manyak-terraform`에서 ALB 트래픽을 EC2로 되돌리는 것(`ecs_traffic_weight = 0`)이 전제이며, EC2를 회수하면 그 잡은 제거합니다. main push로는 돌지 않습니다.
+- **운영 EC2는 회수됐습니다**(KNK-971). EC2+SSM 배포·롤백 경로는 더 이상 없습니다. 배포 실패 시 워크플로가 `:latest`를 이전 digest로 되돌리고 재배포를 트리거하며, 그 외 롤백은 revert 커밋 릴리스 또는 ECR 이전 `:short-sha`를 `:latest`로 수동 재태깅 후 `force-new-deployment`입니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영. main/dev 직접 push 금지(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 와이어 계약(요청/응답 필드)이 바뀌는 릴리스는 manyak-web·manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.

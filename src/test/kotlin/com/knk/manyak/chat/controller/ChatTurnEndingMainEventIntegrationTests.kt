@@ -4,11 +4,16 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.client.ChatTurnTargetMainEventResult
+import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
+import com.knk.manyak.chat.dto.ChatSummaryResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
@@ -27,6 +32,7 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -37,6 +43,7 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -67,7 +74,12 @@ class ChatTurnEndingMainEventIntegrationTests {
         var result: ChatTurnAiResult = ChatTurnAiResult(aiOutput = "응답 본문", choices = listOf("선택 1"))
 
         override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
-        override fun streamTurn(request: ChatTurnAiRequest, traceLink: AiTraceLink, onToken: (String) -> Unit): ChatTurnAiResult {
+        override fun streamTurn(
+        request: ChatTurnAiRequest,
+        traceLink: AiTraceLink,
+        onCharacterImage: (ChatCharacterImageEvent) -> Unit,
+        onToken: (String) -> Unit,
+    ): ChatTurnAiResult {
             lastRequest.set(request)
             onToken("응답")
             return result
@@ -94,6 +106,8 @@ class ChatTurnEndingMainEventIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var creditWalletService: CreditWalletService
+    @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var databaseCleaner: com.knk.manyak.support.DatabaseCleaner
 
     private lateinit var story: Story
@@ -167,6 +181,9 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         val updated = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(updated.reachedEndingId).isEqualTo(happyEnding.id)
+        // 도달 시점 이름(KNK-1059). 엔딩 행이 지워지면 reached_ending_id가 FK로 비워져 스토리 스냅샷의
+        // "엔딩 id → 이름" 사전을 조회할 키가 사라지므로, 서재는 이 값으로 도달 기록을 복구한다.
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
         assertThat(updated.status).isEqualTo(ChatStatus.ENDED)
 
         // 도달 턴 ASSISTANT 메시지에 reached_ending_id 표식.
@@ -209,6 +226,469 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
         assertThat(reaches.map { it.endingId }).containsExactly(happyEnding.id)
+        assertThat(reaches.map { it.endingNameSnapshot }).containsExactly("해피")
+    }
+
+    @Test
+    fun `엔딩이 교체돼 id 없이 도달해도 회원 집계에 이름으로 남는다`() {
+        publish()
+        val member = userRepository.save(User(nickname = "회원", status = UserStatus.ACTIVE))
+        creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 라이브 행에 '해피'가 없어 FK를 만족시킬 id를 얻지 못한다. 예전에는 이 경우 집계를 통째로 건너뛰어,
+        // 제작자가 그 엔딩을 다시 공개해도 영원히 복구되지 않았다(V70 이전).
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "엔딩", choices = emptyList(), endingName = "해피")
+
+        streamMember(chat.publicId.toString(), "끝을 낸다.", jwtTokenProvider.issueAccessToken(member.publicId))
+
+        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
+        assertThat(reaches).hasSize(1)
+        // 값이 갈라져 있다: id는 없고 이름만 남는다.
+        assertThat(reaches.single().endingId).isNull()
+        assertThat(reaches.single().endingNameSnapshot).isEqualTo("해피")
+    }
+
+    // ---- [KNK-1065 / PR #224 Codex P2] 저장 판정이 AI에게 보낸 것과 같은 출처를 본다 ----
+
+    /** 공개 상태 저장 = 마지막 공개 버전 스냅샷 갱신. 비공개 전환 후 이 값이 AI 요청 재료가 된다. */
+    private fun publish() {
+        val loaded = storyRepository.findById(story.id).orElseThrow()
+        snapshotService.refresh(loaded)
+        storyRepository.save(loaded)
+    }
+
+    /**
+     * 스토리를 소유자에게 귀속시키고 비공개로 내린다.
+     *
+     * **소유자를 붙이는 게 핵심이다.** `Story.isReadableBy`는 소유자가 없는(게스트 제작) 스토리를 누구에게나
+     * 열어 주므로(§KNK-464), user_id가 NULL인 채로 비공개로 내리면 게이트가 닫히지 않아 조립이 계속 현재 값을
+     * 본다. `Story.userId`가 val이라 SQL로 갱신한다.
+     */
+    private fun hideStoryFromReaders() {
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        jdbcTemplate.update(
+            "UPDATE stories SET user_id = ?, status = 'DRAFT', visibility = 'PRIVATE' WHERE id = ?",
+            owner.id,
+            story.id,
+        )
+    }
+
+    /** 수정 API의 endings[] 전체 교체와 같은 결과(행 삭제 후 재생성)를 만든다. */
+    private fun replaceEndings(vararg names: String) {
+        jdbcTemplate.update("DELETE FROM story_endings WHERE start_setting_id = ?", startSetting.id)
+        names.forEachIndexed { index, name ->
+            storyEndingRepository.save(
+                StoryEnding(
+                    startSetting = startSetting,
+                    name = name,
+                    minTurns = 1,
+                    achievementCondition = "조건",
+                    epilogue = "에필로그",
+                    sortOrder = (index + 1).toShort(),
+                ),
+            )
+        }
+    }
+
+    /** 수정 API의 mainEvents[] 전체 교체와 같은 결과. */
+    private fun replaceMainEvents(vararg names: String) {
+        jdbcTemplate.update("DELETE FROM story_chat_main_events")
+        jdbcTemplate.update("DELETE FROM story_main_events WHERE story_id = ?", story.id)
+        names.forEachIndexed { index, name ->
+            storyMainEventRepository.save(
+                StoryMainEvent(story = story, name = name, description = "설명", keySentence = "문장", sortOrder = index.toShort()),
+            )
+        }
+    }
+
+    @Test
+    fun `비공개 전환 후 엔딩이 교체돼도 스냅샷 이름으로 도달을 기록한다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 엔딩을 통째로 갈았다. AI에게는 스냅샷의 옛 이름("해피")이 나가므로 AI도 그 이름을 돌려준다.
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "마침내 평화가 찾아왔다.", choices = emptyList(), endingName = "해피")
+
+        val body = streamGuest(chat.publicId.toString(), "최후의 일격을 가한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        // 예전에는 현재 story_endings에서 "해피"를 찾다 실패해 **도달이 통째로 누락**됐다.
+        assertThat(updated.status).isEqualTo(ChatStatus.ENDED)
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
+        // 현재 행에 그 이름이 없으므로 id는 남기지 못한다 — reached_ending_id는 story_endings FK다.
+        assertThat(updated.reachedEndingId).isNull()
+        assertThat(body).contains("\"해피\"")
+    }
+
+    @Test
+    fun `엔딩 행이 교체돼도 이름이 같으면 도달 id까지 되찾는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 수정 API는 이름을 그대로 둬도 행을 지우고 새로 만든다. 이름으로 다시 찾으므로 id가 살아난다.
+        replaceEndings("해피")
+        val recreated = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single()
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격을 가한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.reachedEndingId).isEqualTo(recreated.id)
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("해피")
+    }
+
+    @Test
+    fun `AI가 요청에 없던 엔딩 이름을 보내면 도달로 인정하지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 현재 행에는 있지만 **AI에게 보낸 스냅샷에는 없는** 이름이다. 후보 판정은 보낸 목록이 한다.
+        replaceEndings("비공개 신작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "끝.", choices = emptyList(), endingName = "비공개 신작 엔딩")
+
+        streamGuest(chat.publicId.toString(), "일격.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.status).isEqualTo(ChatStatus.ACTIVE)
+        assertThat(updated.reachedEndingId).isNull()
+        assertThat(updated.reachedEndingNameSnapshot).isNull()
+    }
+
+    @Test
+    fun `비공개 전환 후 주요 사건 행이 교체돼도 이름이 같으면 완결 기록이 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("발단", "절정")
+        val recreated = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isEqualTo(recreated.first { it.name == "절정" }.id)
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId })
+            .containsExactly(recreated.first { it.name == "발단" }.id)
+    }
+
+    @Test
+    fun `비공개 전환 후 주요 사건 이름이 바뀌면 완결 기록을 남기지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        // story_chat_main_events.main_event_id는 NOT NULL FK라 엔딩처럼 이름만 남길 자리가 없다.
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isNull()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+    }
+
+    @Test
+    fun `AI가 요청에 없던 주요 사건 이름을 보내면 기록하지 않는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 현재 행에는 있지만 **AI에게 보낸 스냅샷에는 없는** 이름이다. 엔딩과 같은 규칙 —
+        // 후보 판정은 보낸 목록이 하고, 현재 행 조회는 FK용 id를 얻는 데만 쓴다.
+        replaceMainEvents("비공개 신작 사건")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "비공개 신작 사건", progressTurns = 2),
+            occurredMainEventName = "비공개 신작 사건",
+        )
+
+        streamGuest(chat.publicId.toString(), "결전을 준비한다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.targetMainEventId).isNull()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+    }
+
+    @Test
+    fun `완결 사건 기록은 이름 스냅샷으로도 남는다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 조인 행(정본)과 이름 스냅샷(복구용)을 둘 다 남긴다(PR #224 Codex P2).
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId })
+            .containsExactly(eventBaldan.id)
+        assertThat(updated.occurredMainEventNamesSnapshot).containsExactly("발단")
+    }
+
+    @Test
+    fun `주요 사건이 교체돼 완결 기록이 cascade 삭제돼도 다음 턴 요청에 완결 사건이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        // 1턴: '발단'을 완결한다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단")
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 소유자가 감춘 채 주요 사건을 통째로 간다. story_chat_main_events.main_event_id는 CASCADE FK라
+        // 조인 행이 함께 사라진다 — 완결 기록의 정본이 통째로 날아간다.
+        hideStoryFromReaders()
+        jdbcTemplate.update("DELETE FROM story_chat_main_events")
+        jdbcTemplate.update("DELETE FROM story_main_events WHERE story_id = ?", story.id)
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+
+        // 2턴: AI에게는 스냅샷의 옛 사건이 후보로 나가야 하고, '발단'은 **이미 완결했다**고 함께 나가야 한다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.mainEvents.map { it.name }).containsExactly("발단", "절정")
+        // 이 값이 비면 독자가 이미 지난 사건을 다시 겪는다.
+        assertThat(captured.occurredMainEventNames).containsExactly("발단")
+    }
+
+    @Test
+    fun `공개 상태에서 사건 이름을 바꾸면 완결 표기도 현재 이름을 따라간다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단")
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 공개 상태라 조인 행이 살아 있고, 이름만 바뀌었다. 이름 스냅샷("발단")이 아니라 현재 이름이 나가야 한다.
+        jdbcTemplate.update("UPDATE story_main_events SET name = ? WHERE id = ?", "새 발단", eventBaldan.id)
+
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.occurredMainEventNames).containsExactly("새 발단")
+    }
+
+    @Test
+    fun `비공개 전환 후 사건 이름이 바뀌어도 새 완결은 이름 스냅샷으로 남고 다음 턴에 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 사건 이름을 통째로 갈았다. AI에게는 스냅샷의 옛 이름('발단'·'절정')이 나간다.
+        // 라이브 행에는 그 이름이 없으므로 조인 행을 만들 수 없다 — 그래도 완결 기록은 남아야 한다.
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        // 조인 행은 못 만든다(main_event_id는 NOT NULL FK인데 '발단' 행이 없다).
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+        // 이름은 남는다. 이 기록이 없으면 독자가 이미 지난 사건을 다시 겪는다.
+        assertThat(updated.occurredMainEventNamesSnapshot).containsExactly("발단")
+
+        // 다음 턴 요청에 완결 목록으로 실린다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.mainEvents.map { it.name }).containsExactly("발단", "절정")
+        assertThat(captured.occurredMainEventNames).containsExactly("발단")
+    }
+
+    @Test
+    fun `같은 사건을 두 번 완결로 보고해도 이름 스냅샷에 한 번만 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "1턴.")
+        streamGuest(chat.publicId.toString(), "2턴.")
+
+        // 조인 행이 없어 유니크 제약이 막아주지 못하므로 이름 기준 중복 방지가 유일한 가드다.
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().occurredMainEventNamesSnapshot)
+            .containsExactly("발단")
+    }
+
+    @Test
+    fun `엔딩이 교체된 뒤 도달하면 상세와 공유의 그 턴에도 엔딩 이름이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 엔딩을 갈았다. AI에게는 스냅샷의 옛 이름("해피")이 나가고, 라이브 행에는 없다.
+        // 도달은 id 없이 이름만으로 기록되는데, 턴 표식이 없으면 상세·공유에서 그 턴이 비어 보인다.
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화가 찾아왔다.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        // 값을 갈라놓는다: FK용 id는 없고(라이브 행에 "해피"가 없다) 이름만 남는다.
+        assertThat(assistant.reachedEndingId).isNull()
+        assertThat(assistant.reachedEndingNameSnapshot).isEqualTo("해피")
+
+        // 상세: 그 턴에 엔딩 이름이 실려야 한다. 라이브 엔딩은 "개작 엔딩"뿐이라 값이 갈라져 있다.
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("해피")
+
+        // 공유: 같은 규칙.
+        val shareId = restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/shares")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(CreateChatShareResponse::class.java)
+            .returnResult().responseBody!!.shareId
+        val share = restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatShareResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(share.turns.map { it.reachedEnding }).containsExactly("해피")
+    }
+
+    @Test
+    fun `도달하지 않은 턴에는 엔딩 이름이 실리지 않는다`() {
+        // 이름 폴백이 "id가 NULL이면 무조건"으로 넓어지면 모든 평범한 턴에 엔딩이 붙는다.
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "계속된다.", choices = listOf("선택 1"))
+
+        streamGuest(chat.publicId.toString(), "걷는다.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        assertThat(assistant.reachedEndingNameSnapshot).isNull()
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly(null as String?)
+    }
+
+    @Test
+    fun `공개 상태에서 엔딩 이름을 바꾸면 상세의 그 턴도 현재 이름을 따라간다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        // 참조가 살아 있다 — 이름 폴백이 끼어들면 도달 당시 이름("해피")으로 되돌아간다.
+        jdbcTemplate.update("UPDATE story_endings SET name = ? WHERE id = ?", "새 해피", happyEnding.id)
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("새 해피")
+    }
+
+    // ---- [PR #224 Codex P2 재리뷰] 라이브 id ↔ 스냅샷 id는 서로 다른 세계다 ----
+
+    @Test
+    fun `엔딩을 같은 이름으로 교체한 뒤 도달해도 상세에 엔딩 이름이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // **이름은 그대로, 행만 새로.** 수정 API의 endings[] 전체 교체가 매번 만드는 상태다.
+        // 저장은 새 id로 되는데 스냅샷 사전은 옛 id를 들고 있어, id로만 조회하면 영영 빗나간다.
+        replaceEndings("해피")
+        val recreated = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single()
+        assertThat(recreated.id).isNotEqualTo(happyEnding.id) // 값이 갈라졌는지 확인
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        // 저장은 **새 라이브 id**로 됐다. 이름 폴백이 'id가 NULL일 때만'이면 여기서 라벨이 사라진다.
+        assertThat(assistant.reachedEndingId).isEqualTo(recreated.id)
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("해피")
+    }
+
+    @Test
+    fun `엔딩을 같은 이름으로 교체한 뒤 도달해도 서재에 도달 기록이 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceEndings("해피")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        // 서재(채팅 단위)도 같은 판정 함수를 쓰므로 같이 확인한다.
+        val cards = restTestClient.post()
+            .uri("/api/v1/chats/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["${chat.publicId}"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Array<ChatSummaryResponse>::class.java)
+            .returnResult().responseBody!!
+        assertThat(cards.single().reachedEndings).containsExactly("해피")
+    }
+
+    @Test
+    fun `주요 사건을 같은 이름으로 교체해도 목표 사건과 진행 턴 수가 유지된다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 이름은 그대로, 행만 새로. 저장은 새 id로 되는데 조립의 mainEvents는 스냅샷의 옛 id다.
+        replaceMainEvents("발단", "절정")
+        val recreated = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
+        assertThat(recreated.map { it.id }).doesNotContainAnyElementsOf(listOf(eventBaldan.id, eventJeoljeong.id))
+
+        // 1턴: AI가 '절정'을 목표로 지목한다 → chat.target_main_event_id = 새 id.
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답",
+            choices = listOf("선택 1"),
+            targetMainEvent = ChatTurnTargetMainEventResult(name = "절정", progressTurns = 2),
+        )
+        streamGuest(chat.publicId.toString(), "1턴.")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().targetMainEventId)
+            .isEqualTo(recreated.first { it.name == "절정" }.id)
+
+        // 2턴: 조립이 id로만 비교하면 빗나가 목표가 통째로 사라진다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "2턴.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.targetMainEvent?.name).isEqualTo("절정")
+        assertThat(captured.targetMainEvent?.progressTurns).isEqualTo(2)
     }
 
     private fun streamGuest(chatId: String, userInput: String): String =

@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -18,6 +18,9 @@
 | migrated_at | timestamp with time zone |  | true |  |  |  |
 | migration_attempts | integer | 0 | false |  |  |  |
 | member_trial_seeded_at | timestamp with time zone |  | true |  |  |  |
+| rejoined_at | timestamp with time zone |  | true |  |  |  |
+| reward_identity_user_id | bigint |  | true |  |  |  |
+| withdrawn_from_status | varchar(20) |  | true |  |  |  |
 
 ## Constraints
 
@@ -48,6 +51,8 @@ erDiagram
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.users" {
   bigint id
@@ -64,6 +69,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 "public.social_accounts" {
   bigint id
@@ -75,6 +83,7 @@ erDiagram
   timestamp_with_time_zone last_login_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
 }
 "public.credit_wallets" {
   bigint id
@@ -107,6 +116,21 @@ erDiagram
   bigint user_id FK
   bigint story_id FK
   bigint ending_id FK
+  timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
+}
+"public.story_likes" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  timestamp_with_time_zone created_at
+}
+"public.story_reports" {
+  bigint id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_20_ reason
+  text detail
   timestamp_with_time_zone created_at
 }
 ```

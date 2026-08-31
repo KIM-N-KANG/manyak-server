@@ -19,10 +19,14 @@ interface ChatTurnAiClient {
      *
      * [traceLink]는 Langfuse trace를 스토리 여정으로 묶는 도메인 연결 식별자다(KNK-751).
      * MDC 상관관계 헤더와 달리 도메인 값이라 호출부가 인자로 넘긴다.
+     *
+     * [onCharacterImage]는 AI가 스트리밍 도중 인물 태그를 감지해 보내는 `character_image` 이벤트를 받는다(KNK-943).
+     * 기본값이 no-op이라, 이 이벤트를 보내지 않는 AI 구버전·스텁에서도 계약이 그대로 성립한다.
      */
     fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink = AiTraceLink(),
+        onCharacterImage: (ChatCharacterImageEvent) -> Unit = {},
         onToken: (String) -> Unit,
     ): ChatTurnAiResult
 
@@ -60,6 +64,12 @@ data class ChatTurnAiRequest(
     val userInput: String,
     val summary: String,
 
+    // 인물 이름 → 이미지 URL 매핑(스펙 §5-3-4, KNK-943). 백엔드가 story_characters에서 조회해 싣고,
+    // AI는 이 매핑이 있어야 본문의 인물 태그를 character_image 이벤트로 치환할 수 있다.
+    // 이미지가 없는 인물은 애초에 담지 않는다 — URL 없는 태그를 만들 수 없어야 한다.
+    @JsonProperty("character_images")
+    val characterImages: List<ChatCharacterImage> = emptyList(),
+
     // 사용자 입력의 출처(choice | edited_choice | typed). 프론트가 준 값을 서버가 추론 없이 통과시키기만 한다(KNK-751).
     // 없으면 필드를 통째로 생략해, 값을 모를 때 AI가 임의 기본값으로 오해하지 않게 한다.
     @get:JsonInclude(JsonInclude.Include.NON_NULL)
@@ -76,6 +86,22 @@ data class ChatTurnAiRequest(
     @JsonProperty("occurred_main_event_names")
     val occurredMainEventNames: List<String> = emptyList(),
     val endings: List<ChatTurnEnding> = emptyList(),
+)
+
+/** 채팅 요청에 싣는 인물-이미지 매핑 한 건(스펙 §5-3-4). 와이어 키는 snake_case다. */
+data class ChatCharacterImage(
+    val name: String,
+    @JsonProperty("image_url")
+    val imageUrl: String,
+)
+
+/**
+ * AI가 스트리밍 중 발행하는 `character_image` 이벤트(스펙 §5-3-4, KNK-943).
+ * 백엔드는 검증·변환 없이 프론트에 그대로 중계한다 — 매핑 자체를 백엔드가 보냈으므로 URL은 이미 검증된 값이다.
+ */
+data class ChatCharacterImageEvent(
+    val name: String,
+    val imageUrl: String,
 )
 
 data class ChatTurnMainEvent(

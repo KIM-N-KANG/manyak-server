@@ -1,4 +1,4 @@
-### 크레딧 잔액 조회 API 수동 검증 — GET /api/v1/users/me/credits
+### 크레딧 API 수동 검증 — 잔액 / 출석체크 / 이용내역
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ###
 ### [KNK-87] 크레딧 잔액 조회:
@@ -10,9 +10,10 @@
 ###   - Postgres 기동: docker compose up -d
 ###   - access 토큰: auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져 아래 {{accessToken}} 에 재사용됩니다.
 ###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
-###   - 잔액이 0보다 크려면 그 계정에 크레딧 적립이 있어야 합니다(가입 보상 500 등, KNK-477 확정).
-###   - [KNK-477] 정책값 확정: 가입 500 · 초대 양쪽 각 500(계정별 KST 월 10회) · 출석 250,
-###     스토리 생성 20 · 채팅 턴 10(재생성 포함) · 스토리라인 생성은 무료(manyak.credit.*).
+###   - 잔액이 0보다 크려면 그 계정에 크레딧 적립이 있어야 합니다(가입 보상 등).
+###   - [KNK-1056] 기본값(2026-08-31 재확정): 가입 1000 · 초대 양쪽 각 2000(계정별 KST 월 10회) · 출석 350,
+###     스토리 생성 200 · 채팅 턴 20(재생성 포함) · 스토리라인 생성은 무료(application.yml manyak.credit.*).
+###   - [KNK-1056] 이 수치는 릴리스 없이 `credit_policies` 오버라이드로 바꿉니다. 아래 "정책 오버라이드 확인 절차" 참고.
 
 @baseUrl = http://localhost:8080
 
@@ -78,8 +79,167 @@ Accept: application/json
     client.test("미지급(이미 받음)이면 amount 는 0 이다", () => {
         client.assert(b.rewarded || b.amount === 0, `rewarded=false 인데 amount 가 0 이 아닙니다. actual=${b.amount}`);
     });
-    // [KNK-477] 출석 보상 확정값: 250.
-    client.test("지급됐다면 amount 는 250 이다", () => {
-        client.assert(!b.rewarded || b.amount === 250, `rewarded=true 인데 amount 가 250 이 아닙니다. actual=${b.amount}`);
+    // [KNK-1056] 출석 보상 기본값 350. credit_policies 에 attendance_reward 오버라이드를 걸었다면 그 값이 나옵니다.
+    client.test("지급됐다면 amount 는 350 이다", () => {
+        client.assert(!b.rewarded || b.amount === 350, `rewarded=true 인데 amount 가 350 이 아닙니다(오버라이드를 걸었다면 기대값을 바꾸세요). actual=${b.amount}`);
     });
 %}
+
+### ------------------------------------------------------------------
+### [KNK-1044] 크레딧 이용내역 조회 — GET /api/v1/users/me/credits/transactions
+###   - 최신순(created_at DESC, id DESC) 커서 페이지: 응답은 {items, nextCursor} 객체다(평평한 배열이 아니다).
+###   - type: ALL(기본)·SPEND·EARN·EXPIRE. REFUND 는 EARN, PURCHASE 는 ALL 에서도 제외한다(구매내역 탭 몫).
+###   - limit: 1~100 으로 보정(기본 50). cursor: 이전 응답의 nextCursor 를 그대로 전달.
+###   - nextCursor 는 실제로 다음 페이지가 있을 때만 채워진다(limit+1 판정). 총 건수가 limit 의 배수여도 빈 페이지를 더 부르지 않는다.
+###   - title 은 관련 스토리 제목(보상·소멸 행이거나 삭제된 스토리면 null).
+###   - [KNK-1059·1065] 채팅 턴·환불 행의 title 은 스토리를 읽을 수 있을 때만 현재 제목이고, 비공개로
+###     전환됐거나 삭제됐으면 그 스토리가 **마지막으로 공개였던 시점**의 제목(stories.last_public_snapshot)
+###     입니다(서재·채팅 상세와 같은 규칙).
+###     눈으로 확인하려면: http/chat/chat-detail.http 의 S1~S3으로 공개 스토리·채팅을 만들고 그 채팅으로
+###     턴을 한 번 진행해 CHAT_TURN 행을 만든 뒤(chat-stream.http 참고 — 크레딧이 실제로 차감돼야 원장 행이
+###     생깁니다), S5처럼 스토리를 비공개로 되돌리고 제목을 바꾼 다음 아래 6번을 다시 조회하면 됩니다.
+###     그때 items[].title 이 "바뀐 제목"이 아니라 변경 전 제목이어야 합니다.
+###     (턴 진행·크레딧 차감이 얽혀 있어 이 파일에는 자동 어서션으로 넣지 않았습니다.)
+###   - 소멸(EXPIRE) 행의 createdAt 은 회수가 기록된 시각이라 실제 만료일과 다르다. 날짜는 expiresAt 을 본다.
+###   - 눈으로 확인하려면 그 계정에 증감 이력이 있어야 한다: 위 4번(출석체크)을 한 번 눌러 EARN 행을 만든 뒤 조회.
+### ------------------------------------------------------------------
+
+### 5. (에러) 토큰 없이 이용내역 조회 → 401
+GET {{baseUrl}}/api/v1/users/me/credits/transactions
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 이용내역 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6. (해피 패스) 이용내역 첫 페이지 → 200, {items, nextCursor}
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?limit=2
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("이용내역 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 {items, nextCursor} 구조다", () => {
+        client.assert(Array.isArray(b.items), `items 가 배열이 아닙니다. actual=${JSON.stringify(b.items)}`);
+        client.assert(b.nextCursor === null || typeof b.nextCursor === "string",
+            `nextCursor 가 문자열이나 null 이 아닙니다. actual=${b.nextCursor}`);
+    });
+    client.test("각 항목이 {type, reason, amount, title, expiresAt, createdAt} 구조다", () => {
+        b.items.forEach((it) => {
+            client.assert(["SPEND", "EARN", "EXPIRE"].includes(it.type), `type 가 3분류가 아닙니다. actual=${it.type}`);
+            client.assert(it.reason !== "PURCHASE", `PURCHASE 는 이용내역에서 제외돼야 합니다. actual=${it.reason}`);
+            client.assert(typeof it.amount === "number", `amount 가 숫자가 아닙니다. actual=${it.amount}`);
+            client.assert(it.title === null || typeof it.title === "string", `title 이 문자열이나 null 이 아닙니다. actual=${it.title}`);
+            client.assert(typeof it.createdAt === "string", `createdAt 이 없습니다. actual=${it.createdAt}`);
+            client.assert(it.type !== "SPEND" || it.expiresAt === null, `소모 행의 expiresAt 은 null 이어야 합니다. actual=${it.expiresAt}`);
+        });
+    });
+    client.test("최신순(createdAt 내림차순)이다", () => {
+        for (let i = 1; i < b.items.length; i++) {
+            client.assert(b.items[i - 1].createdAt >= b.items[i].createdAt,
+                `최신순이 아닙니다. ${b.items[i - 1].createdAt} < ${b.items[i].createdAt}`);
+        }
+    });
+    // 8번(다음 페이지)에서 쓸 쿼리스트링을 통째로 저장한다. nextCursor 가 null 이어도 미치환 변수가 남지 않는다.
+    client.global.set("creditNextPageQuery",
+        b.nextCursor ? `?limit=2&cursor=${encodeURIComponent(b.nextCursor)}` : "?limit=2");
+%}
+
+### 7. (필터) 사용 내역만 → 200, 모든 항목 type=SPEND
+# type 을 EARN / EXPIRE 로 바꿔가며 각 칩을 확인합니다.
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=SPEND
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("필터 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("모든 항목이 SPEND 다", () => {
+        response.body.items.forEach((it) => {
+            client.assert(it.type === "SPEND", `SPEND 가 아닌 항목이 섞였습니다. actual=${it.type}`);
+        });
+    });
+%}
+
+### 8. (페이징) 다음 페이지 — 6번의 nextCursor 를 그대로 사용
+# 6번을 먼저 실행해야 {{creditNextPageQuery}} 가 채워집니다. 원장이 2건 미만이면 커서 없이 첫 페이지를 다시 부릅니다.
+GET {{baseUrl}}/api/v1/users/me/credits/transactions{{creditNextPageQuery}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("다음 페이지 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("요청한 limit(2)을 넘지 않는다", () => {
+        client.assert(response.body.items.length <= 2, `2건을 넘었습니다. actual=${response.body.items.length}`);
+    });
+%}
+
+### 9. (에러) 잘못된 커서 → 400
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?cursor=not-a-cursor
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("잘못된 커서는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 10. (에러) 지원하지 않는 type → 400
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=GIFT
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("지원하지 않는 type 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### ---------------------------------------------------------------------------
+### [KNK-1056] 정책 오버라이드 확인 절차 (수동)
+###
+### 수치는 application.yml 기본값이고, `credit_policies` 행이 있으면 그 값이 이깁니다.
+### 서버 재기동 없이 바뀌지만, 서버가 스냅샷을 **주기적으로(기본 60초, manyak.credit.policy-refresh.interval-ms)**
+### 다시 읽는 구조라 넣고 뺀 직후엔 1분 기다렸다 다시 호출하세요.
+### (단, effective_until 만료는 읽는 시점 판정이라 이 주기와 무관하게 즉시 반영됩니다.)
+###
+### 1) 부팅 로그에서 현재 유효값 확인: `credit_policy_effective` 한 줄을 찾습니다.
+###
+### 2) 출석 보상을 출시 이벤트 값(700)으로 올린다 — 종료일 미정이라 effective_until 은 NULL:
+###    INSERT INTO credit_policies (policy_key, amount, effective_until, updated_at)
+###    VALUES ('attendance_reward', 700, NULL, now())
+###    ON CONFLICT (policy_key) DO UPDATE SET amount = EXCLUDED.amount,
+###      effective_until = EXCLUDED.effective_until, updated_at = now();
+###
+### 3) 60초 뒤 위 4번(출석체크)을 **다음 날 KST** 또는 새 계정으로 호출 → amount 가 700 인지 확인.
+###    (같은 날 재호출은 멱등으로 rewarded=false, amount=0 이라 수치가 보이지 않습니다.)
+###    서버 로그에 `credit_policy_changed key=attendance_reward from=350 to=700` 이 남습니다.
+###
+### 4) 종료일을 걸어 자동 복귀를 확인한다(예: 2분 뒤):
+###    UPDATE credit_policies SET effective_until = now() + interval '2 minutes', updated_at = now()
+###    WHERE policy_key = 'attendance_reward';
+###    → 2분이 지나면 다음 호출부터 기본값 350 으로 돌아옵니다.
+###
+### 5) 원복(오버라이드 제거):
+###    DELETE FROM credit_policies WHERE policy_key = 'attendance_reward';
+###
+### 상한 방어 확인(실 PostgreSQL 에서만 — 테스트 H2 에는 CHECK 가 없습니다):
+###    INSERT INTO credit_policies (policy_key, amount, updated_at) VALUES ('signup_reward', 10001, now());
+###    → ck_credit_policies_amount 위반으로 거부돼야 합니다(자릿수 오타 방어. 원장은 append-only 라 회수 불가).
+###
+### 키 목록(코드 CreditPolicyKey 와 1:1):
+###    signup_reward · invite_reward · invite_monthly_cap · attendance_reward · story_creation_cost · chat_turn_cost
+###
+### 키를 오타 내거나(예: attendence_reward) 최소값 미만(보상·소모는 1 이상)을 넣으면 그 행은 무시되고 기본값이
+### 쓰이지만, **조용히 넘어가지 않고 서버 warn 로그로 드러납니다** — 오버라이드를 넣은 뒤 값이 안 바뀌면
+### `credit_policy_override_unknown_key`(유효한 키 목록이 함께 찍힙니다) · `credit_policy_override_rejected` 를 찾아보세요.
+### ---------------------------------------------------------------------------

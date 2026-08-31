@@ -17,6 +17,8 @@ class StubChatTurnAiClient : ChatTurnAiClient {
     override fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink,
+        // 스텁은 인물 태그를 만들지 않아 이벤트를 발행하지 않는다(구버전 AI와 같은 모습).
+        onCharacterImage: (ChatCharacterImageEvent) -> Unit,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         val aiOutput = buildAiOutput(request)

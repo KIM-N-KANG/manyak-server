@@ -31,6 +31,7 @@
 | uq_credit_transactions_idempotency | CREATE UNIQUE INDEX uq_credit_transactions_idempotency ON public.credit_transactions USING btree (idempotency_key) |
 | idx_credit_transactions_user | CREATE INDEX idx_credit_transactions_user ON public.credit_transactions USING btree (user_id) |
 | idx_credit_transactions_ref | CREATE INDEX idx_credit_transactions_ref ON public.credit_transactions USING btree (user_id, ref_type, ref_id) |
+| idx_credit_transactions_user_history | CREATE INDEX idx_credit_transactions_user_history ON public.credit_transactions USING btree (user_id, created_at DESC, id DESC) |
 
 ## Relations
 
@@ -74,6 +75,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 ```
 

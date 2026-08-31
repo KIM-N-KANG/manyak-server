@@ -38,6 +38,7 @@ class GeneralStoryCreationService(
     private val storyEndingRepository: StoryEndingRepository,
     private val suspensionGuard: SuspensionGuard,
     private val storyThumbnailLinker: StoryThumbnailLinker,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
 ) {
 
     /**
@@ -91,6 +92,9 @@ class GeneralStoryCreationService(
 
         // 시작 설정별로 저장한다(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정 스코프다.
         val startSettingResponses = request.startSettings.map { input -> persistStartSetting(story, input) }
+
+        // 공개(PUBLIC)로 등록하면 지금이 곧 마지막 공개 시점이다(KNK-1065). 비공개 등록이면 no-op이다.
+        storyPublicSnapshotService.refresh(story)
 
         return SimpleStoryCreateResponse(
             id = story.publicId.toString(),

@@ -1,0 +1,173 @@
+### 회원 탈퇴 API 수동 검증 — DELETE /api/v1/users/me (KNK-1019)
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### 계약(스펙 §4-3-5):
+###   - soft delete: users.status = DELETED, 닉네임 "탈퇴한 사용자" 익명화, 프로필 이미지 제거
+###   - social_accounts 행은 **삭제하지 않고 tombstone**(deleted_at 기록, email NULL) — KNK-1053.
+###     같은 소셜 계정 재가입은 여전히 **새 계정**이지만, tombstone 행을 재사용해 1회성 혜택을 리셋하지 않는다.
+###   - refresh 전 family 폐기
+###   - 소유 스토리는 공개 상태 유지(작성자 표기는 익명화 닉네임이 자연 반영)
+###   - 탈퇴 즉시 잔여 access 토큰 전면 무효 — 재탈퇴 포함 이후 요청은 전부 401
+###
+### [KNK-1053] 재가입 어뷰징 차단(6~10번): 탈퇴 후 같은 소셜 신원으로 다시 로그인하면 새 user 행이 생기지만,
+###   user_id 에 매달려 재가입으로 리셋되던 것들을 전부 승계한다.
+###   - reward_identity_user_id(최초 계정 id) 승계 → 1회성 보상 멱등 키가 `signup:{최초id}`·`attendance:{최초id}:{날짜}`
+###     로 고정된다. **가입 보상·출석 보상을 재수령하지 못한다**(7·9번).
+###   - inviter_user_id 승계 → 초대 코드 재제출이 409 INVITE_ALREADY_REDEEMED(8번).
+###   - 회원 무료 체험 미부여 → 디바이스 헤더를 보내도 소진 상태로 시드된다(스토리 1편·채팅 5턴 반복 수령 차단).
+###   - withdrawn_from_status 승계 → 정지(SUSPENDED) 회원이 탈퇴·재가입해도 새 계정이 정지다(10번).
+###     탈퇴 자체는 계속 허용한다(앱 심사 요건).
+###
+### 주의: 탈퇴는 비가역입니다. 실 DB에서는 버려도 되는 테스트 계정으로만 실행하세요.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080), Postgres·Redis 기동: docker compose up -d
+###   - access 토큰: auth-login-google.http 5번을 먼저 실행하면 전역 accessToken 이 채워집니다.
+###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+
+@baseUrl = http://localhost:8080
+
+# auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 탈퇴 → 401
+DELETE {{baseUrl}}/api/v1/users/me
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 탈퇴는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. 탈퇴 (핵심 검증) — 버려도 되는 계정인지 다시 확인하세요
+DELETE {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("탈퇴는 204다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 3. 재탈퇴 → 401 (잔여 토큰 전면 무효)
+DELETE {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("탈퇴한 토큰의 재탈퇴는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. 잔여 access 토큰의 쓰기 요청 → 401 (공통 게이트, §4-5 B20 확장)
+# storyId 는 아무 공개 스토리의 publicId 로 교체하세요.
+POST {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301/like
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("탈퇴 계정의 쓰기 요청은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (자유 조회) 탈퇴자가 만든 공개 스토리 확인 — author 가 "탈퇴한 사용자"로 보이는지
+# 탈퇴 전 그 계정이 소유했던 공개 스토리의 publicId 로 교체하세요.
+GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
+Accept: application/json
+
+### 6. [KNK-1053] 탈퇴한 소셜 신원으로 재로그인 → 200, 새 계정(isNewUser=true)
+# 2번에서 탈퇴시킨 계정과 **같은 Google ID 토큰**으로 다시 로그인합니다(ID 토큰은 발급 후 1시간 내 유효).
+# auth-login-google.http 5번에 쓴 토큰을 @googleIdToken 에 그대로 넣으세요.
+# 디바이스 헤더를 일부러 붙입니다 — 재가입은 이 값을 무시하고 무료 체험을 소진 상태로 시드해야 합니다.
+@googleIdToken = PUT_THE_SAME_GOOGLE_ID_TOKEN_USED_BEFORE_WITHDRAWAL
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+Accept: application/json
+X-Manyak-Device-Id: brand-new-device-after-rejoin
+
+{ "idToken": "{{googleIdToken}}" }
+
+> {%
+    client.test("탈퇴한 신원의 재로그인은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(ID 토큰 만료 여부 확인). actual=${response.status}`);
+    });
+    // 계정 부활이 아니라 새 계정이다(탈퇴한 스토리·크레딧이 되살아나면 앱 심사에서 삭제 미이행으로 읽힌다).
+    client.test("재가입은 새 계정이라 isNewUser 가 true 다", () => {
+        client.assert(response.body.isNewUser === true, `isNewUser 가 true 가 아닙니다. actual=${response.body.isNewUser}`);
+    });
+    client.global.set("rejoinAccessToken", response.body.accessToken);
+%}
+
+### 7. [KNK-1053] 재가입 계정의 잔액 → 0 (가입 보상 재지급 없음)
+# 6번을 먼저 실행하세요. 탈퇴 전 계정이 이미 가입 보상을 받았으므로 재가입 계정에는 지급하지 않습니다.
+GET {{baseUrl}}/api/v1/users/me/credits
+Authorization: Bearer {{rejoinAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("잔액 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(6번을 먼저 실행했는지 확인). actual=${response.status}`);
+    });
+    client.test("재가입 계정에 가입 보상이 재지급되지 않았다", () => {
+        client.assert(response.body.balance === 0,
+            `잔액이 0이 아닙니다 — 재가입 보상 구멍이 다시 열렸을 수 있습니다. actual=${response.body.balance}`);
+    });
+%}
+
+### 8. [KNK-1053] 재가입 계정의 초대 코드 재제출 → 409, code=INVITE_ALREADY_REDEEMED
+# 탈퇴 전 계정이 초대 코드를 입력한 적이 있을 때만 유효한 검증입니다(승계된 inviter_user_id 가 막습니다).
+# 입력한 적 없는 계정이면 정상 200이 나옵니다 — 그건 정상 동작입니다.
+POST {{baseUrl}}/api/v1/users/me/invite/redeem
+Authorization: Bearer {{rejoinAccessToken}}
+Content-Type: application/json
+
+{ "code": "PUT_AN_INVITE_CODE_HERE" }
+
+> {%
+    client.test("승계된 소진 표식으로 재제출이 막힌다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(탈퇴 전 계정이 코드를 입력한 적 있는지 확인). actual=${response.status}`);
+        client.assert(response.body.code === "INVITE_ALREADY_REDEEMED",
+            `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}
+
+### 9. [KNK-1053] 재가입 계정의 출석 보상 → rewarded=false (같은 날 재수령 불가)
+# 탈퇴 전 계정이 **오늘(KST) 출석을 이미 받았을 때만** 유효한 검증입니다.
+# 2번 탈퇴 전에 credits.http(또는 아래 요청)로 한 번 출석시켜 두세요.
+# 출석 멱등 키가 user_id 기준이면 재가입마다 새 키가 되어 출석 보상을 무제한 반복 수령할 수 있었습니다.
+POST {{baseUrl}}/api/v1/users/me/credits/attendance
+Authorization: Bearer {{rejoinAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("재가입 계정의 출석 재수령은 막힌다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.rewarded === false,
+            `rewarded 가 false 가 아닙니다(탈퇴 전 계정이 오늘 출석했는지 확인). actual=${response.body.rewarded}`);
+        client.assert(response.body.amount === 0, `amount 가 0이 아닙니다. actual=${response.body.amount}`);
+    });
+%}
+
+### 10. [KNK-1053] 정지 회원의 재가입은 정지를 승계한다 → 403
+# 준비: 탈퇴시킬 계정을 DB에서 users.status='SUSPENDED' 로 바꾼 뒤 2번(탈퇴) → 6번(재로그인)을 실행하세요.
+# 탈퇴는 정지 회원에게도 허용되지만(앱 심사 요건), 재가입 계정이 제재를 물려받아 쓰기·소모 경로가 403이어야 합니다.
+# (정지 계정으로 준비하지 않았다면 이 요청은 200이 나옵니다 — 그건 정상입니다.)
+GET {{baseUrl}}/api/v1/users/me/invite
+Authorization: Bearer {{rejoinAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("정지를 승계한 재가입 계정은 403이다", () => {
+        client.assert(response.status === 403,
+            `403이 아닙니다(탈퇴 전 계정을 SUSPENDED 로 만들었는지 확인). actual=${response.status}`);
+    });
+%}

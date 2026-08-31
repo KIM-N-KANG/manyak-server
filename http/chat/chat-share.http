@@ -354,3 +354,189 @@ Accept: application/json
 # 아래 UUID를 실제 발급된 공유 토큰으로 바꿔 실행하세요. 인증 헤더 없이 열려야 합니다.
 GET {{baseUrl}}/api/v1/shares/ae578609-2e90-4923-af0e-64ba6a0a6f56
 Accept: application/json
+
+### ==================================================================
+### [KNK-1059·1065] 스토리 스냅샷 시나리오 — 공유 열람 (S1~S7)
+###
+### 공유 열람은 **인증이 필요 없는 경로**라 이 유출이 가장 큽니다: 소유자가 비공개로 되돌린 스토리의
+### 제목과 프롤로그(도입부 본문)가 링크만 가진 누구에게나 보였습니다.
+###
+### 규칙은 상세·서재와 같습니다.
+###   story.isCurrentMetadataVisibleTo(열람자) 가 참이면 → 현재 제목·프롤로그
+###   거짓이면(비공개·삭제)                              → 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷
+###                                                        (stories.last_public_snapshot, KNK-1065)
+###
+### 열람자 판정은 토큰이 실려 있으면 그 요청자로, 없으면 익명(null)으로 합니다. 그래서 같은 링크라도
+### 스토리 소유자가 열면 현재 값을, 익명이 열면 스냅샷을 봅니다(S7에서 둘을 나란히 확인).
+###
+###
+### 도달 엔딩 이름(turns[].reachedEnding)도 같은 스냅샷 규칙을 탑니다. 다만 이 시나리오에 자동 요청으로
+### 넣지는 못했습니다 — 엔딩 도달은 AI 판정이 필요한데 스텁 AI(기본값)는 엔딩을 도달시키지 않기 때문입니다.
+### 실 AI로 확인하려면: 실제 AI 모드로 전환(chat-stream.http 상단)해 엔딩에 도달할 때까지 턴을 진행한 뒤,
+### S5처럼 스토리를 비공개로 되돌리고 엔딩 이름을 바꿔(엔딩 이름은 수정 API의 endings[] 전체 교체라 행이
+### 새로 생기므로 DB에서 story_endings.name 을 직접 바꿔야 합니다) 공유를 재열람하면 됩니다.
+### 그때 turns[].reachedEnding 이 변경 전 이름이어야 합니다.
+### 위 1~22번과 독립된 자체 준비 흐름입니다. S1부터 순서대로 실행하세요.
+### 토큰은 @accessToken(스토리 소유자) 하나면 됩니다. 채팅·공유는 게스트(토큰 없음)로 만듭니다.
+### ==================================================================
+
+### S1. (준비 1/4) 소유자 토큰으로 공개 스토리 등록
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "원래 제목",
+  "oneLineIntro": "스냅샷 검증용 스토리",
+  "genres": ["판타지"],
+  "visibility": "PUBLIC",
+  "storySettings": { "worldSetting": "세계", "characterSetting": "인물", "userRoleSetting": "역할", "ruleSetting": "규칙" },
+  "startSettings": [
+    {
+      "name": "시작 장면",
+      "prologue": "원래 프롤로그",
+      "startSituation": "시작 상황",
+      "suggestedInputs": ["원래 추천 1", "원래 추천 2", "원래 추천 3"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("스토리 등록이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapStoryId", response.body.id);
+%}
+
+### S2. (준비 2/4) 수정 폼 조회 — 시작 설정 공개 id 확보
+# S5의 PATCH에서 이 id를 실어야 시작 설정이 in-place 갱신됩니다(id 없이 보내면 행이 교체돼
+# 채팅이 참조하던 start_setting_id가 끊어집니다).
+GET {{baseUrl}}/api/v1/stories/{{snapStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("수정 폼 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("snapStartSettingId", response.body.startSettings[0].id);
+%}
+
+### S3. (준비 3/4) 게스트로 채팅 생성 — 스냅샷은 채팅이 아니라 스토리 행에 있다(KNK-1065)
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{snapStoryId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(스토리가 PUBLIC인지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapChatId", response.body.id);
+%}
+
+### S4. (준비 4/4) 게스트로 공유 발급
+# 게스트 채팅의 공유는 게스트(토큰 없음)가 발급합니다(§4-5 발급 접근 규칙).
+POST {{baseUrl}}/api/v1/chats/{{snapChatId}}/shares
+Accept: application/json
+
+> {%
+    client.test("공유 발급이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("snapShareId", response.body.shareId);
+%}
+
+### S5. (a) 공개 상태에서 무인증 공유 열람 → 현재 제목·프롤로그
+GET {{baseUrl}}/api/v1/shares/{{snapShareId}}
+Accept: application/json
+
+> {%
+    client.test("공유 열람이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("공개 스토리는 현재 제목·프롤로그를 보여준다", () => {
+        client.assert(b.storyTitle === "원래 제목", `storyTitle이 다릅니다. actual=${b.storyTitle}`);
+        client.assert(b.prologue === "원래 프롤로그", `prologue가 다릅니다. actual=${b.prologue}`);
+    });
+%}
+
+### S6. (b) 소유자가 비공개로 되돌리고 제목·프롤로그를 바꾼다
+PATCH {{baseUrl}}/api/v1/stories/{{snapStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "바뀐 제목",
+  "visibility": "PRIVATE",
+  "startSettings": [
+    {
+      "id": "{{snapStartSettingId}}",
+      "name": "시작 장면",
+      "prologue": "바뀐 프롤로그",
+      "startSituation": "시작 상황",
+      "suggestedInputs": ["바뀐 추천 1", "바뀐 추천 2", "바뀐 추천 3"],
+      "endings": []
+    }
+  ]
+}
+
+> {%
+    client.test("수정이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("스토리 쪽 값은 실제로 바뀌었다", () => {
+        client.assert(response.body.title === "바뀐 제목", `title 미교체. actual=${response.body.title}`);
+        client.assert(response.body.visibility === "PRIVATE", `visibility 미교체. actual=${response.body.visibility}`);
+    });
+%}
+
+### S7-1. (b) 비공개 전환 후 익명으로 공유 열람 → 스냅샷 제목·프롤로그
+# 링크만 가진 익명 열람자입니다. Authorization 헤더가 없습니다.
+# "바뀐 …"이 보이면 비공개로 되돌린 스토리의 도입부가 링크 보유자에게 새고 있는 것입니다.
+GET {{baseUrl}}/api/v1/shares/{{snapShareId}}
+Accept: application/json
+
+> {%
+    client.test("무인증 공유 열람이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("익명 열람자에게는 마지막 공개 버전(변경 전) 제목이 나간다", () => {
+        client.assert(b.storyTitle === "원래 제목",
+            `비공개 전환 후 제목이 새고 있습니다. expected=원래 제목 actual=${b.storyTitle}`);
+    });
+    client.test("익명 열람자에게는 마지막 공개 버전(변경 전) 프롤로그가 나간다", () => {
+        client.assert(b.prologue === "원래 프롤로그",
+            `비공개 전환 후 프롤로그가 새고 있습니다. expected=원래 프롤로그 actual=${b.prologue}`);
+    });
+%}
+
+### S7-2. (c) 같은 링크를 스토리 소유자 토큰으로 열람 → 현재 제목·프롤로그
+# 열람자 판정에 요청자 userId가 실제로 쓰이는지 확인합니다. 소유자는 비공개 스토리도 읽을 수 있으므로
+# 게이트가 열리고 현재 값이 보여야 합니다. 여기서 "원래 …"가 나오면 판정이 항상 익명으로 굳은 것입니다.
+GET {{baseUrl}}/api/v1/shares/{{snapShareId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("소유자 토큰 공유 열람이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("소유자에게는 현재 제목·프롤로그가 보인다", () => {
+        client.assert(b.storyTitle === "바뀐 제목",
+            `소유자에게 현재 제목이 보여야 합니다. actual=${b.storyTitle}`);
+        client.assert(b.prologue === "바뀐 프롤로그",
+            `소유자에게 현재 프롤로그가 보여야 합니다. actual=${b.prologue}`);
+    });
+%}

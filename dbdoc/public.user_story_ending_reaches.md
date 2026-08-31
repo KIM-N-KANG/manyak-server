@@ -7,8 +7,9 @@
 | id | bigint | nextval('user_story_ending_reaches_id_seq'::regclass) | false |  |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
-| ending_id | bigint |  | false |  | [public.story_endings](public.story_endings.md) |  |
+| ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| ending_name_snapshot | varchar(100) |  | true |  |  | KNK-1065: 도달 시점의 엔딩 이름. 다음 릴리스에서 NOT NULL + 유니크 키로 승격한다. ending_id는 엔딩 교체로 비워질 수 있는 보조 참조. |
 
 ## Constraints
 
@@ -16,7 +17,7 @@
 | ---- | ---- | ---------- |
 | fk_user_story_ending_reaches_story | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | fk_user_story_ending_reaches_user | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
-| fk_user_story_ending_reaches_ending | FOREIGN KEY | FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE |
+| fk_user_story_ending_reaches_ending | FOREIGN KEY | FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | user_story_ending_reaches_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_user_story_ending_reaches | UNIQUE | UNIQUE (user_id, story_id, ending_id) |
 
@@ -35,7 +36,7 @@ erDiagram
 
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_story_ending_reaches" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
-"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--o| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 
 "public.user_story_ending_reaches" {
   bigint id
@@ -43,6 +44,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.users" {
   bigint id
@@ -59,6 +61,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 "public.stories" {
   bigint id
@@ -74,6 +79,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+  text thumbnail_image_url
 }
 "public.story_endings" {
   bigint id

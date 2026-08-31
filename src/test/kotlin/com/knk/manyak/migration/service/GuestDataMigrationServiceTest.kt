@@ -1,6 +1,7 @@
 package com.knk.manyak.migration.service
 
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -42,12 +43,14 @@ class GuestDataMigrationServiceTest {
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val userStoryEndingReachRepository: com.knk.manyak.story.repository.UserStoryEndingReachRepository =
         mock(com.knk.manyak.story.repository.UserStoryEndingReachRepository::class.java)
+    private val storyEndingRepository: com.knk.manyak.story.repository.StoryEndingRepository =
+        mock(com.knk.manyak.story.repository.StoryEndingRepository::class.java)
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
         mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
     private val service =
         GuestDataMigrationService(
             storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
-            userStoryEndingReachRepository, serverAnalytics,
+            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics,
         )
 
     private val userId = 10L
@@ -274,5 +277,17 @@ class GuestDataMigrationServiceTest {
         service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
         assertThat(loaded.migratedAt).isNull()
+    }
+
+    @Test
+    fun `탈퇴한 계정의 이관은 401이다`() {
+        // 인증 필터 통과 직후 탈퇴가 커밋되는 레이스(KNK-1019 Codex P2): 잠금 후 재검사가 마지막 방어선이다.
+        org.mockito.Mockito.`when`(userRepository.findByIdForUpdate(userId))
+            .thenReturn(User(id = userId, nickname = "탈퇴자", status = UserStatus.DELETED))
+
+        assertThatThrownBy { service.migrate(userId, MigrationRequest(storyIds = emptyList(), chatIds = emptyList())) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
     }
 }

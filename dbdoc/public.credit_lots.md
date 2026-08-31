@@ -28,6 +28,7 @@
 | ---- | ---------- |
 | credit_lots_pkey | CREATE UNIQUE INDEX credit_lots_pkey ON public.credit_lots USING btree (id) |
 | idx_credit_lots_user_active | CREATE INDEX idx_credit_lots_user_active ON public.credit_lots USING btree (user_id, expires_at) WHERE (remaining > 0) |
+| idx_credit_lots_transaction | CREATE INDEX idx_credit_lots_transaction ON public.credit_lots USING btree (transaction_id) |
 
 ## Relations
 
@@ -61,6 +62,9 @@ erDiagram
   timestamp_with_time_zone migrated_at
   integer migration_attempts
   timestamp_with_time_zone member_trial_seeded_at
+  timestamp_with_time_zone rejoined_at
+  bigint reward_identity_user_id
+  varchar_20_ withdrawn_from_status
 }
 "public.credit_transactions" {
   bigint id

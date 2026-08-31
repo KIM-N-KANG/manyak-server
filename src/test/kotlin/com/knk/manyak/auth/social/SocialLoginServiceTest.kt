@@ -57,6 +57,7 @@ class SocialLoginServiceTest {
         mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
 
     private val signupReward = 100L
+    private val creditPolicyService = com.knk.manyak.support.fixedCreditPolicyService(signupReward = signupReward)
 
     /** 검증기는 GOOGLE·KAKAO 두 provider에만 매핑한다(운영 배선과 동일 — 나머지는 fail-closed). */
     private fun serviceWith(verifier: SocialIdTokenVerifier): SocialLoginService {
@@ -65,7 +66,7 @@ class SocialLoginServiceTest {
         return SocialLoginService(
             mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier),
             registrar, authTokenService, creditWalletService, guestTrialLimitService,
-            loginHandoffService, userRepository, serverAnalytics, signupReward,
+            loginHandoffService, userRepository, serverAnalytics, creditPolicyService,
         )
     }
 

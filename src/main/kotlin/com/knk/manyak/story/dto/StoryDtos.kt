@@ -1,5 +1,7 @@
 package com.knk.manyak.story.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -34,7 +36,8 @@ data class StorySummaryResponse(
     val id: String,
 
     @field:Schema(
-        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null.",
+        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null. " +
+            "컴파일이 생성한 표지가 있으면 축소본 없이 그 원본 URL(webp)이 실린다(KNK-1069).",
         example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
         nullable = true,
     )
@@ -73,7 +76,11 @@ data class StoryDetailResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "썸네일 이미지 URL(§4-3-9). 소스가 없으면 null.", example = "https://example.com/thumbnails/moon-contract.png", nullable = true)
+    @field:Schema(
+        description = "썸네일 이미지 URL(§4-3-9). 컴파일이 생성한 표지가 있으면 그 URL(webp), 없으면 프리셋 표지(png). 소스가 없으면 null.",
+        example = "https://example.com/thumbnails/moon-contract.png",
+        nullable = true,
+    )
     val thumbnailUrl: String?,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")
@@ -106,6 +113,17 @@ data class StoryDetailResponse(
     @field:Schema(description = "좋아요 수", example = "32")
     val likeCount: Long,
 
+    // springdoc 인트로스펙션(Jackson 2 빈 규약)은 is 접두를 떼고 owner로 문서화하지만 런타임(Jackson 3
+    // Kotlin 모듈)은 isOwner로 직렬화하므로, 양쪽이 모두 읽는 JsonProperty로 와이어 필드명을 고정한다(isNewUser와 동일).
+    @get:JsonProperty("isOwner")
+    @field:Schema(description = "요청 회원이 이 스토리의 소유자인지. 게스트는 항상 false(KNK-1018).", example = "false")
+    val isOwner: Boolean,
+
+    // isOwner와 같은 이유로 와이어 필드명을 JsonProperty로 고정한다(springdoc이 is 접두를 벗겨 liked로 문서화함).
+    @get:JsonProperty("isLiked")
+    @field:Schema(description = "요청 회원이 이 스토리에 좋아요를 눌렀는지. 게스트는 항상 false(KNK-1017).", example = "false")
+    val isLiked: Boolean,
+
     @field:ArraySchema(
         schema = Schema(implementation = StoryStartSettingResponse::class),
         arraySchema = Schema(
@@ -134,6 +152,14 @@ data class StoryDetailResponse(
     val mainEvents: List<StoryMainEventResponse>,
 
     @field:ArraySchema(
+        schema = Schema(implementation = StoryCharacterResponse::class),
+        arraySchema = Schema(
+            description = "스토리 인물 목록(저장 순서 = 컴파일 응답 순서, KNK-1058). 인물이 없으면 빈 배열입니다.",
+        ),
+    )
+    val characters: List<StoryCharacterResponse>,
+
+    @field:ArraySchema(
         schema = Schema(description = "도달한 엔딩 이름", example = "왕좌를 되찾다"),
         arraySchema = Schema(description = "요청 회원이 이 스토리에서 도달한 엔딩 이름 목록(엔딩은 이름으로 식별). 게스트는 빈 배열입니다."),
     )
@@ -141,6 +167,19 @@ data class StoryDetailResponse(
 
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
+)
+
+@Schema(description = "스토리 인물(이름과 인물 이미지). 외형 필드·인물 식별자는 노출하지 않는다.")
+data class StoryCharacterResponse(
+    @field:Schema(description = "인물 이름", example = "레이")
+    val name: String,
+
+    @field:Schema(
+        description = "인물 이미지 URL. 이미지 생성·업로드에 실패한 인물은 null이다.",
+        example = "https://cdn.manyak.app/characters/ray.png",
+        nullable = true,
+    )
+    val imageUrl: String?,
 )
 
 @Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전)")
@@ -234,4 +273,14 @@ data class StoryStartSettingResponse(
         arraySchema = Schema(description = "이 시작 설정의 엔딩 목록. 없으면 빈 배열입니다."),
     )
     val endings: List<StoryEndingResponse>,
+)
+
+@Schema(description = "스토리 신고 요청(KNK-1020)")
+data class StoryReportRequest(
+    @field:Schema(description = "신고 사유", example = "SPAM")
+    val reason: StoryReportReason,
+
+    @field:Schema(description = "자유 서술(선택, 500자 이내). ETC 사유의 맥락 전달용.", example = "도배성 홍보 스토리입니다.", nullable = true)
+    @field:Size(max = 500, message = "신고 상세는 500자 이내여야 합니다.")
+    val detail: String? = null,
 )

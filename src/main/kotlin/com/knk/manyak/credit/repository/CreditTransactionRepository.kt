@@ -2,6 +2,7 @@ package com.knk.manyak.credit.repository
 
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -29,22 +30,29 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
     ): Long
 
     /**
-     * 위 구간 집계에 멱등 키 접두 필터를 더한 판정(스펙 §4-6, KNK-581). 초대 보상 월 상한은 초대자 몫에만
-     * 적용되는데, 원장에 역할 컬럼이 없어 초대자 역할 행을 키 접두(`invite:{초대자userId}:`)로 식별한다.
-     * 접두 뒤 콜론까지 포함해 매칭하므로 userId의 십진 접두 충돌(1 vs 12)이 없다.
+     * 위 구간 집계에 멱등 키 접두·접미 필터를 더한 판정(스펙 §4-6, KNK-581). 초대 보상 월 상한은 초대자 몫에만
+     * 적용되는데, 원장에 역할 컬럼이 없어 초대자 역할 행을 키 모양(`invite:{초대자}:{피초대자}:{수혜자}`)으로 식별한다.
+     * 접두 `invite:{X}:`가 "초대자가 X", 접미 `:{X}`가 "수혜자가 X"를 뜻해 둘을 함께 걸면 X의 초대자 몫만 남는다.
+     * 접두·접미 모두 콜론을 포함해 매칭하므로 십진 접두·접미 충돌(1 vs 12, 1 vs 11)이 없다.
+     *
+     * **`user_id`로 좁히지 않는다**(KNK-1053). 탈퇴 후 재가입은 새 `users` 행을 만들므로, 소유 계정으로 좁히면
+     * 이전 계정 명의의 행을 못 세어 월 상한이 재가입마다 리셋된다. 키가 이미 **보상 신원**
+     * (`coalesce(reward_identity_user_id, id)`)을 담고 있어, 접두·접미만으로 신원 단위 집계가 된다.
+     * 재가입이 없던 계정은 신원 = 자기 자신이라 종전과 같은 행 집합을 센다(집계 결과 불변).
      */
     @Query(
         """
         SELECT COUNT(t) FROM CreditTransaction t
-        WHERE t.userId = :userId AND t.reason = :reason
+        WHERE t.reason = :reason
           AND t.idempotencyKey LIKE CONCAT(:idempotencyKeyPrefix, '%')
+          AND t.idempotencyKey LIKE CONCAT('%', :idempotencyKeySuffix)
           AND t.createdAt >= :start AND t.createdAt < :end
         """,
     )
-    fun countByReasonAndKeyPrefixInWindow(
-        @Param("userId") userId: Long,
+    fun countByReasonAndKeyShapeInWindow(
         @Param("reason") reason: CreditReason,
         @Param("idempotencyKeyPrefix") idempotencyKeyPrefix: String,
+        @Param("idempotencyKeySuffix") idempotencyKeySuffix: String,
         @Param("start") start: Instant,
         @Param("end") end: Instant,
     ): Long
@@ -57,13 +65,14 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
      * 지금 대사하면 진행 중 턴을 성급히 환불할 수 있다. 그룹의 마지막 charge가 [cutoff] 이전이면 그 그룹의 모든
      * 차감은 이미 완료·환불·유실 중 하나로 확정됐으므로(정지 상태) 개수 대조가 정확하다.
      *
-     * 환불 단위액은 `MIN(ABS(amount))`이다 — 균일 단가에선 실제 단가라 정확하고, 혼합 단가(드묾)에선 서버가
-     * 초과 환불하지 않도록 의도적으로 보수 편향한다(근거는 [StuckChargeGroup] 참고).
+     * 환불 단위액은 `MIN(ABS(amount))`이다 — 균일 단가에선 실제 단가라 정확하고, 혼합 단가에선 서버가
+     * 초과 환불하지 않도록 의도적으로 보수 편향한다(근거는 [StuckChargeGroup] 참고). `MAX(ABS(amount))`도 함께
+     * 뽑는 이유는 그 편향이 실제로 발동한 그룹을 대사 쪽에서 탐지해 로그로 남기기 위해서다(KNK-1056).
      */
     @Query(
         """
         SELECT new com.knk.manyak.credit.repository.StuckChargeGroup(
-            t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)))
+            t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)), MAX(ABS(t.amount)))
         FROM CreditTransaction t
         WHERE t.reason IN :reasons AND t.refType IS NOT NULL AND t.refId IS NOT NULL
         GROUP BY t.userId, t.refType, t.refId
@@ -74,4 +83,41 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
         @Param("reasons") reasons: Collection<CreditReason>,
         @Param("cutoff") cutoff: Instant,
     ): List<StuckChargeGroup>
+
+    /**
+     * 이용내역 첫 페이지(KNK-1044). 최신순 `created_at DESC, id DESC`로 [pageable] 크기만큼 가져온다.
+     * [reasons]가 노출 대상 사유를 통제한다(PURCHASE는 호출부가 애초에 넣지 않는다).
+     */
+    @Query(
+        """
+        SELECT t FROM CreditTransaction t
+        WHERE t.userId = :userId AND t.reason IN :reasons
+        ORDER BY t.createdAt DESC, t.id DESC
+        """,
+    )
+    fun findHistoryFirstPage(
+        @Param("userId") userId: Long,
+        @Param("reasons") reasons: Collection<CreditReason>,
+        pageable: Pageable,
+    ): List<CreditTransaction>
+
+    /**
+     * 이용내역 다음 페이지. 커서는 `(createdAt, id)` 복합이다 — 단일 id 커서는 동시 트랜잭션에서 커밋 순서가
+     * `created_at` 순서와 어긋날 수 있어(정렬 키와 커서 키 불일치) 페이지 경계에서 행을 빠뜨릴 수 있다.
+     */
+    @Query(
+        """
+        SELECT t FROM CreditTransaction t
+        WHERE t.userId = :userId AND t.reason IN :reasons
+          AND (t.createdAt < :cursorCreatedAt OR (t.createdAt = :cursorCreatedAt AND t.id < :cursorId))
+        ORDER BY t.createdAt DESC, t.id DESC
+        """,
+    )
+    fun findHistoryAfterCursor(
+        @Param("userId") userId: Long,
+        @Param("reasons") reasons: Collection<CreditReason>,
+        @Param("cursorCreatedAt") cursorCreatedAt: Instant,
+        @Param("cursorId") cursorId: Long,
+        pageable: Pageable,
+    ): List<CreditTransaction>
 }

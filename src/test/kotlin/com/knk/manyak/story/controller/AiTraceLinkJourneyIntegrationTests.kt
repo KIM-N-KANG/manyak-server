@@ -1,5 +1,6 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -85,6 +86,7 @@ class AiTraceLinkJourneyIntegrationTests {
         override fun streamTurn(
             request: ChatTurnAiRequest,
             traceLink: AiTraceLink,
+            onCharacterImage: (ChatCharacterImageEvent) -> Unit,
             onToken: (String) -> Unit,
         ): ChatTurnAiResult {
             turnLink.set(traceLink)

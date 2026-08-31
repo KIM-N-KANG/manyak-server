@@ -38,4 +38,7 @@ interface CreditLotRepository : JpaRepository<CreditLot, Long> {
         """,
     )
     fun sumActiveRemaining(@Param("userId") userId: Long, @Param("now") now: Instant): Long
+
+    /** 적립 행 → 그 적립이 만든 로트(1:1). 이용내역의 획득 행 만료일을 N+1 없이 배치 해석한다(KNK-1044). */
+    fun findByTransactionIdIn(transactionIds: Collection<Long>): List<CreditLot>
 }

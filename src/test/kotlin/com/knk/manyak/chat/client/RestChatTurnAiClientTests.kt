@@ -64,6 +64,98 @@ class RestChatTurnAiClientTests {
     }
 
     @Test
+    fun `character_image 이벤트를 콜백으로 그대로 넘긴다`() {
+        server.enqueue(sseResponse(
+            """
+            event: token
+            data: {"text":"문이 열렸다."}
+
+            event: character_image
+            data: {"name":"강진우","image_url":"https://cdn.test/characters/generated/s/a.webp"}
+
+            event: completed
+            data: {"aiOutput":"문이 열렸다.","choices":[]}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val images = mutableListOf<ChatCharacterImageEvent>()
+        val tokens = mutableListOf<String>()
+        client().streamTurn(sampleRequest(), onCharacterImage = images::add, onToken = tokens::add)
+
+        assertEquals(1, images.size)
+        assertEquals("강진우", images.single().name)
+        assertEquals("https://cdn.test/characters/generated/s/a.webp", images.single().imageUrl)
+        // 인물 이미지 이벤트는 본문 토큰을 대체하지 않는다(본문에는 마커가 없다).
+        assertEquals(listOf("문이 열렸다."), tokens)
+    }
+
+    @Test
+    fun `character_image의 URL 키가 camelCase여도 받는다`() {
+        // AI 구현이 직렬화 별칭으로 imageUrl을 내보낸다(스펙 표기는 image_url). 한쪽만 받으면 이벤트가 유실되므로
+        // 양쪽을 다 수용한다 — 어느 쪽으로 정리되든 안 깨진다.
+        server.enqueue(sseResponse(
+            """
+            event: character_image
+            data: {"name":"강진우","imageUrl":"https://cdn.test/characters/generated/s/a.webp"}
+
+            event: completed
+            data: {"aiOutput":"끝","choices":[]}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val images = mutableListOf<ChatCharacterImageEvent>()
+        client().streamTurn(sampleRequest(), onCharacterImage = images::add, onToken = {})
+
+        assertEquals("https://cdn.test/characters/generated/s/a.webp", images.single().imageUrl)
+    }
+
+    @Test
+    fun `선택지 생성 요청 본문에도 인물 이미지 매핑을 싣는다`() {
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"choices":["a","b","c"]}"""),
+        )
+
+        client().generateChoices(
+            sampleRequest().copy(
+                characterImages = listOf(
+                    ChatCharacterImage(name = "강진우", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
+                ),
+            ),
+            aiOutput = "생성된 본문",
+        )
+
+        // 선택지 생성은 턴 요청 스키마를 평탄화해 보내므로(§5-3-5) 매핑도 그대로 실려야 한다.
+        // 요청 본문 키는 이벤트와 달리 계약대로 snake_case다.
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains(""""character_images":[{"""), "선택지 요청 본문에 character_images가 없다: $body")
+        assertTrue(body.contains(""""image_url":"https://cdn.test/characters/generated/s/a.webp""""), body)
+        assertTrue(body.contains(""""ai_output":"생성된 본문""""), body)
+    }
+
+    @Test
+    fun `모르는 이벤트는 무시하고 스트림을 계속 읽는다`() {
+        // AI가 ping 등 새 이벤트를 흘려도 turn 결과 매핑이 깨지지 않아야 한다(하위호환).
+        server.enqueue(sseResponse(
+            """
+            event: ping
+            data: {}
+
+            event: completed
+            data: {"aiOutput":"끝","choices":[]}
+
+            """.trimIndent() + "\n",
+        ))
+
+        val result = client().streamTurn(sampleRequest(), onToken = {})
+
+        assertEquals("끝", result.aiOutput)
+    }
+
+    @Test
     fun `completed에 choices가 없으면 빈 목록으로 처리한다`() {
         server.enqueue(sseResponse(
             """

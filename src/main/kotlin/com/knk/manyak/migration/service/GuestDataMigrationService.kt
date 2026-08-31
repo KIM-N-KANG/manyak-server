@@ -5,13 +5,14 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.global.security.isActiveAccessAllowed
+import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.http.HttpStatus
@@ -43,6 +44,8 @@ class GuestDataMigrationService(
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val userRepository: UserRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    // 이름 스냅샷이 비어 있는 채팅(롤링 배포 창에 구버전이 만든 행)의 이름을 라이브 엔딩에서 해소한다.
+    private val storyEndingRepository: StoryEndingRepository,
     private val serverAnalytics: ServerAnalytics,
 ) {
 
@@ -60,10 +63,8 @@ class GuestDataMigrationService(
         // userId는 컨트롤러에서 인증된 실 사용자 id이므로 조회는 항상 성공한다(방어적으로 없으면 401).
         val user = userRepository.findByIdForUpdate(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 사용자 행을 이미 로드했으므로 추가 조회 없이 판정한다.
-        if (!isActiveAccessAllowed(user.status)) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
-        }
+        // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
+        requireActiveStatus(user.status)
         if (user.migratedAt != null) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
         }
@@ -172,10 +173,31 @@ class GuestDataMigrationService(
 
     /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 upsert한다. 도달 전이면 아무것도 하지 않는다. */
     private fun backfillEndingReach(userId: Long, chat: StoryChat) {
-        val endingId = chat.reachedEndingId ?: return
-        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, endingId)) {
+        // 이름이 정본이다(V70). 엔딩이 교체돼 chat.reachedEndingId가 비어도 이름 스냅샷으로 백필한다.
+        //
+        // 이름 스냅샷이 비어 있으면 라이브 엔딩에서 해소한다. **롤링 배포 창에서 실제로 생기는 상태다** —
+        // 이름 컬럼(V67)이 아직 릴리스되지 않아 구버전 태스크는 도달을 id로만 기록하고, 그 채팅이 이관되면
+        // 이름을 알 수 없어 집계가 조용히 빠진다. 둘 다 없으면 남길 근거가 없어 건너뛴다.
+        val endingName = chat.reachedEndingNameSnapshot
+            ?: chat.reachedEndingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
+            ?: return
+        // **이름과 id 양쪽으로** 확인한다. 롤링 배포 창에 구버전 태스크가 쓴 집계 행은 ending_name_snapshot이
+        // NULL이라 이름으로는 못 찾는데, 같은 ending_id로 다시 넣으면 아직 살아 있는 옛 유니크를 위반한다.
+        // 이 경로에는 위반을 흡수하는 장치가 없어 **이관 요청 자체가 실패**한다(단순 중복이 아니라 오류 경로다).
+        // KNK-1084(후속 contract)의 재백필이 끝나면 id 쪽 확인은 불필요해진다.
+        val alreadyRecorded = userStoryEndingReachRepository
+            .existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName) ||
+            chat.reachedEndingId?.let {
+                userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, it)
+            } == true
+        if (!alreadyRecorded) {
             userStoryEndingReachRepository.save(
-                UserStoryEndingReach(userId = userId, storyId = chat.storyId, endingId = endingId),
+                UserStoryEndingReach(
+                    userId = userId,
+                    storyId = chat.storyId,
+                    endingNameSnapshot = endingName,
+                    endingId = chat.reachedEndingId,
+                ),
             )
         }
     }

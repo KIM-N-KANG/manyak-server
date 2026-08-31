@@ -9,6 +9,8 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
@@ -110,6 +112,14 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+    // 여러 턴을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = chatTurnCost * 10
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
@@ -119,7 +129,7 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
     fun `저장된 턴은 종료 단계가 실패해도 환불되지 않고 차감이 유지된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("저장확정회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         // 스텁 AI는 정상 반환 → persistTurn이 실제로 저장(차감 확정) → 직후 attachTurnNumber가 던져 completed 미도달.
@@ -138,7 +148,7 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
         assertThat(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
 
         // 저장된 턴이므로 환불하지 않는다: CHAT_TURN(-10) 1건만 있고 REFUND는 없다. 잔액은 90으로 유지된다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance - chatTurnCost)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(all.none { it.reason == CreditReason.REFUND }).isTrue()

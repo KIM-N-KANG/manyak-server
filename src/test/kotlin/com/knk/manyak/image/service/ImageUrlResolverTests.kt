@@ -59,4 +59,40 @@ class ImageUrlResolverTests {
         assertThat(resolver.thumbnailSmUrlFor("thumb_0001"))
             .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0001_sm.png")
     }
+
+    /** KNK-1069: 컴파일이 생성한 표지가 있으면 프리셋 키보다 우선한다(2단 폴백은 리졸버가 소유). */
+    @Test
+    fun `생성 표지 URL이 있으면 프리셋 키보다 우선한다`() {
+        assertThat(resolver.thumbnailUrlFor("https://cdn.test/thumbnails/generated/s/t_1a2b3c4d.webp", "thumb_0012"))
+            .isEqualTo("https://cdn.test/thumbnails/generated/s/t_1a2b3c4d.webp")
+    }
+
+    @Test
+    fun `생성 표지 URL이 없거나 공백이면 프리셋 키로 떨어진다`() {
+        assertThat(resolver.thumbnailUrlFor(null, "thumb_0012"))
+            .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012.png")
+        assertThat(resolver.thumbnailUrlFor("   ", "thumb_0012"))
+            .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012.png")
+    }
+
+    @Test
+    fun `생성 표지도 프리셋 키도 없으면 null이다`() {
+        assertThat(resolver.thumbnailUrlFor(null, null)).isNull()
+    }
+
+    /** 축소 변형 자리에도 생성 표지는 **원본 URL 그대로** 쓴다(생성 표지는 `_sm` 파생본을 만들지 않는다). */
+    @Test
+    fun `축소 변형 자리에는 생성 표지 원본 URL을 그대로 쓴다`() {
+        assertThat(resolver.thumbnailSmUrlFor("https://cdn.test/thumbnails/generated/s/t_1a2b3c4d.webp", "thumb_0012"))
+            .isEqualTo("https://cdn.test/thumbnails/generated/s/t_1a2b3c4d.webp")
+    }
+
+    @Test
+    fun `축소 변형도 생성 표지가 없으면 프리셋 _sm으로 떨어진다`() {
+        assertThat(resolver.thumbnailSmUrlFor(null, "thumb_0012"))
+            .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012_sm.png")
+        assertThat(resolver.thumbnailSmUrlFor("  ", "thumb_0012"))
+            .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012_sm.png")
+        assertThat(resolver.thumbnailSmUrlFor(null, null)).isNull()
+    }
 }

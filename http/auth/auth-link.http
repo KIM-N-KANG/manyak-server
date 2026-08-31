@@ -24,6 +24,10 @@
 ###   - 403 code=SOCIAL_TOKEN_INVALID    연동할 소셜 ID 토큰 자체가 무효
 ###   - 409 code=SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER  그 소셜 계정이 이미 다른 회원에게 연동됨
 ###   - 409 code=PROVIDER_ALREADY_LINKED 내 계정에 그 provider가 이미 연동됨(같은 소셜 계정 재요청 포함)
+###   - 409 code=SOCIAL_ACCOUNT_WITHDRAWN [KNK-1053] 탈퇴한 계정에 연결됐던 소셜 계정(tombstone). 그 신원으로
+###                                      **로그인(재가입)은 여전히 가능**하고, 막히는 건 다른 계정에 붙이는 것뿐입니다.
+###                                      claim을 허용하면 재가입 게이트(초대 소진·보상 신원·정지·이관 시도 승계)를
+###                                      통째로 우회하는 세탁 경로가 열려 거부합니다.
 ###   - 400 지원하지 않는 provider(apple·naver 등)·빈 idToken
 ###   - 401 세션 없음·만료·위조, 또는 탈퇴(DELETED) 계정 / 403 정지(SUSPENDED) 계정
 ###   세션이 유효한 상태의 실패에는 401을 쓰지 않습니다(401은 클라이언트가 세션 만료로 오인해 로그아웃합니다).
@@ -193,3 +197,27 @@ Content-Type: application/json
 Accept: application/json
 
 { "provider": "KAKAO", "idToken": "PASTE_A_FRESH_KAKAO_ID_TOKEN" }
+
+### 9. [KNK-1053] (에러) 탈퇴한 계정에 연결됐던 소셜 계정을 연동하면 409 SOCIAL_ACCOUNT_WITHDRAWN
+# 준비: @targetIdToken 이 가리키는 소셜 계정으로 한 번 로그인해 계정을 만든 뒤
+#       user-withdrawal.http 2번으로 그 계정을 탈퇴시키세요(social_accounts 행이 tombstone으로 남습니다).
+#       그다음 다른 계정으로 2번(재인증)을 실행해 새 linkCode 를 받고 이 요청을 누릅니다.
+# 실패해도 링크 코드는 소비되지 않으므로 만료 전까지 다른 연동에 다시 쓸 수 있습니다.
+POST {{baseUrl}}/api/v1/auth/links/kakao
+Authorization: Bearer {{accessToken}}
+X-Manyak-Link-Code: {{linkCode}}
+Content-Type: application/json
+Accept: application/json
+
+{ "idToken": "{{targetIdToken}}" }
+
+> {%
+    client.test("tombstone 소셜 계정 연동은 409다", () => {
+        client.assert(response.status === 409,
+            `409가 아닙니다(대상 계정을 실제로 탈퇴시켰는지 확인). actual=${response.status}`);
+    });
+    client.test("바디 code 가 SOCIAL_ACCOUNT_WITHDRAWN 다", () => {
+        client.assert(response.body.code === "SOCIAL_ACCOUNT_WITHDRAWN",
+            `code 가 다릅니다(살아 있는 계정이면 SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER). actual=${response.body.code}`);
+    });
+%}

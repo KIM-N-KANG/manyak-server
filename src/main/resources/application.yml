@@ -106,16 +106,35 @@ manyak:
     # 인프라 쪽 인스턴스 교체 apply가 불필요하다. 전제: 자산 업로드가 main 릴리스보다 선행해야 한다.
     # 빈 값으로 덮으면 썸네일 URL은 null이 되고 프론트엔드가 placeholder를 표시한다(서버는 정상 기동).
     image-base-url: ${MANYAK_IMAGE_BASE_URL:https://cdn.manyak.app}
+    character-image:
+      # 컴파일이 생성한 인물 이미지(WebP)를 올릴 S3 버킷·리전(스펙 §4-4, KNK-966).
+      # 객체 키는 characters/generated/{storyPublicId}/{uuid}.webp이고, 서빙 URL은 위 image-base-url + 키다.
+      # 비워 두면(로컬·미구성) 업로드를 건너뛰고 image_url이 NULL인 인물로 저장한다 — 스토리 생성은 정상 진행된다.
+      bucket: ${MANYAK_CHARACTER_IMAGE_BUCKET:}
+      region: ${MANYAK_CHARACTER_IMAGE_REGION:}
+      # 인물 이미지 서빙 base URL(= CloudFront 등에서 이 버킷을 노출하는 주소). 위 image-base-url로 폴백하지
+      # 않는다: 그 기본값이 운영 CDN이라, dev에서 버킷만 바꾸면 dev DB에 운영 CDN URL이 저장돼 깨진다.
+      # 버킷과 이 값이 둘 다 있어야 업로드가 동작하고, 하나라도 비면 image_url NULL로 저장된다.
+      base-url: ${MANYAK_CHARACTER_IMAGE_BASE_URL:}
+      # S3 호환 저장소 엔드포인트(로컬 MinIO 검증용). 값이 있으면 path-style로 그 주소에 붙고,
+      # 비어 있으면 AWS 기본 엔드포인트를 쓴다. 운영은 비워 둔다.
+      endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   credit:
-    # 적립·소모 정책값(스펙 §4-3-7, KNK-477 확정 · KNK-449). 서비스 @Value 기본값과 같은 수치를 명시해 운영 조정 경로를 남긴다.
-    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:500}
-    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:500}
+    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-08-31 재확정 · KNK-1056). 여기 값은 CreditPolicyService가
+    # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).
+    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:1000}
+    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:2000}
     invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
-    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
-    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:20}
-    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:10}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:350}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:200}
+    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
+    policy-refresh:
+      # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이
+      # 반영되기까지의 최대 지연"이다. effective_until 만료는 읽는 시점 판정이라 이 주기와 무관하게 즉시 반영된다.
+      enabled: ${MANYAK_CREDIT_POLICY_REFRESH_ENABLED:true}
+      interval-ms: ${MANYAK_CREDIT_POLICY_REFRESH_INTERVAL_MS:60000}
     reconciliation:
       # 선차감 대사 배치 on/off(스펙 §4-3-7, KNK-448). 유실 환불을 사후 보정한다. 테스트 프로파일은 끈다.
       enabled: ${MANYAK_CREDIT_RECONCILIATION_ENABLED:true}
@@ -133,6 +152,8 @@ manyak:
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
+    # 스토리 신고 알림용 Incoming Webhook URL(피드백과 채널 분리 — 조치가 필요한 운영 이벤트). 미설정이면 건너뛴다.
+    report-webhook-url: ${MANYAK_SLACK_REPORT_WEBHOOK_URL:}
   google-form:
     # 구글 폼 formResponse 베이스 URL(교체 불필요, 테스트에서만 mock 으로 override).
     base-url: ${MANYAK_GOOGLE_FORM_BASE_URL:https://docs.google.com}

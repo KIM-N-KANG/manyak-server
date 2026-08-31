@@ -43,7 +43,7 @@ erDiagram
 
 "public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
-"public.user_story_ending_reaches" }o--|| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE CASCADE"
+"public.user_story_ending_reaches" }o--o| "public.story_endings" : "FOREIGN KEY (ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_endings" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 
 "public.story_endings" {
@@ -79,6 +79,11 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
+  varchar_100_ story_title_snapshot
+  varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
+  varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -88,6 +93,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
 }
 "public.user_story_ending_reaches" {
   bigint id
@@ -95,6 +101,7 @@ erDiagram
   bigint story_id FK
   bigint ending_id FK
   timestamp_with_time_zone created_at
+  varchar_100_ ending_name_snapshot
 }
 "public.story_start_settings" {
   bigint id

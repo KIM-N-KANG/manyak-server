@@ -8,12 +8,13 @@ import com.knk.manyak.auth.handoff.LoginHandoffService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -38,7 +39,7 @@ import java.time.Instant
  * 그래서 동시 첫 로그인으로 생성이 유니크 위반([DataIntegrityViolationException])이면,
  * 실패한 내부 트랜잭션과 무관하게 한 번 더 조회해 상대 요청이 만든 계정을 재사용한다(아래 참고).
  *
- * 가입 보상은 **매 로그인마다** 해석된 User에 시도하되 멱등 키(signup:{userId})로 회원당 최대 1회만 적립한다.
+ * 가입 보상은 **매 로그인마다** 해석된 User에 시도하되 멱등 키(`signup:{보상신원}` — KNK-1053)로 신원당 최대 1회만 적립한다.
  * 이유(자가 복구): 계정 생성 트랜잭션(REQUIRES_NEW)은 커밋됐는데 보상 적립 전에 실패·크래시가 나면 계정만 남고
  * 보상은 없다. 다음 로그인부턴 [SocialAccountRegistrar.findExistingUser]가 그 계정을 찾아 생성 경로를 다시
  * 타지 않으므로, 보상을 생성 경로에만 두면 유실이 영구화된다. 매 로그인 멱등 적립이면 원장 행이 없는 첫 로그인이
@@ -54,8 +55,8 @@ class SocialLoginService(
     private val loginHandoffService: LoginHandoffService,
     private val userRepository: UserRepository,
     private val serverAnalytics: ServerAnalytics,
-    // 가입 보상 지급량(스펙 §4-3-7, KNK-477 확정: 500).
-    @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
+    // 가입 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
+    private val creditPolicyService: CreditPolicyService,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -87,8 +88,12 @@ class SocialLoginService(
             // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
             // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
             // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
+            // 재가입 계정(KNK-1053)은 디바이스를 넘기지 않아 "미증명" 경로로 흘린다 → 한도값 시드 = 무료 체험 미부여.
+            // 이전 계정이 회원 체험을 이미 썼는지 알 방법이 없고, 안 쓴 경우까지 부여하면 탈퇴·재가입 반복으로
+            // 무료 스토리 1편 + 채팅 5턴을 무한히 얻는다. 과소 부여가 파밍 허용보다 안전하다.
+            val snapshotDeviceId = effectiveDeviceId.takeIf { user.rejoinedAt == null }
             val seeded = user.memberTrialSeededAt != null ||
-                guestTrialLimitService.snapshotTrialAtSignup(user.id, effectiveDeviceId).also { snapshotted ->
+                guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId).also { snapshotted ->
                     if (snapshotted) userRepository.markMemberTrialSeeded(user.id, Instant.now())
                 }
             // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
@@ -172,15 +177,20 @@ class SocialLoginService(
     }
 
     /**
-     * 회원에게 가입 보상을 멱등하게 적립한다(매 로그인 호출). signup:{userId} 멱등 키로 회원당 최대 1회만 지급한다.
+     * 회원에게 가입 보상을 멱등하게 적립한다(매 로그인 호출). `signup:{보상신원}` 멱등 키로 신원당 최대 1회만 지급한다.
      * 원장 행이 없는 첫 로그인이 적립하고, 이후 로그인은 값싼 no-op(rewarded=false)이다.
+     *
+     * 키의 스코프가 user_id가 아니라 [User.rewardIdentityUserId](NULL이면 자기 자신)인 이유(KNK-1053):
+     * 재가입은 user_id를 갈아치우므로 user_id 키는 재가입마다 새 키가 되어 보상이 리셋된다. 루트에 고정하면
+     * "재가입이면 무조건 스킵"보다 정확하다 — 최초 계정이 크래시로 보상을 못 받았으면 재가입 계정이 받는다.
+     * 기존 회원·순수 신규 가입은 NULL이라 키 문자열이 종전(`signup:{id}`)과 같아 원장 호환이 유지된다.
      */
     private fun rewardSignup(user: User) {
         creditWalletService.reward(
             user.id,
-            signupReward,
+            creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD),
             CreditReason.SIGNUP_REWARD,
-            "signup:${user.id}",
+            "signup:${user.rewardIdentityUserId ?: user.id}",
         )
     }
 }
