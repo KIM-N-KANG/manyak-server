@@ -12,8 +12,15 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.AiTraceLink
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStartSetting
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -87,6 +94,12 @@ class ChatStreamHistoryIntegrationTests {
     private lateinit var storyMessageRepository: StoryMessageRepository
 
     @Autowired
+    private lateinit var startSettingRepository: StoryStartSettingRepository
+
+    @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -133,6 +146,97 @@ class ChatStreamHistoryIntegrationTests {
         // 메모리(summary)는 아직 미적용 → 빈 문자열.
         assertThat(captured.summary).isEmpty()
     }
+
+    // ---- [KNK-1064] 프롤로그 스냅샷 ----
+
+    /** 회원 소유 공개 스토리 + 시작 설정 + 그 스토리로 시작한 게스트 채팅. 채팅 생성은 스냅샷을 박는 실제 API로 한다. */
+    private fun seedChatOnPublicStory(): Pair<Story, StoryChat> {
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(Story(userId = owner.id, title = "프롤로그 스냅샷 스토리", genre = "판타지"))
+        startSettingRepository.save(
+            StoryStartSetting(story = story, name = "시작 장면", prologue = "원래 프롤로그"),
+        )
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+        return story to storyChatRepository.findAll().first { it.storyId == story.id }
+    }
+
+    private fun changePrologue(story: Story, prologue: String) {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        setting.prologue = prologue
+        startSettingRepository.save(setting)
+    }
+
+    private fun hideStory(story: Story) {
+        val loaded = storyRepository.findById(story.id).orElseThrow()
+        loaded.status = StoryStatus.DRAFT
+        loaded.visibility = StoryVisibility.PRIVATE
+        storyRepository.save(loaded)
+    }
+
+    @Test
+    fun `공개 스토리의 프롤로그를 고치면 다음 턴 요청에 현재 값이 실린다`() {
+        val (story, chat) = seedChatOnPublicStory()
+
+        changePrologue(story, "바뀐 프롤로그")
+
+        stream(chat.publicId.toString(), "다음 행동을 한다.")
+
+        // 공개 스토리는 제작자의 밸런스 패치가 진행 중인 채팅에도 반영돼야 한다.
+        assertThat(capturingAiClient.lastRequest.get().startSettings.prologue).isEqualTo("바뀐 프롤로그")
+    }
+
+    @Test
+    fun `비공개로 되돌린 뒤 프롤로그를 고치면 다음 턴 요청에는 스냅샷이 실린다`() {
+        val (story, chat) = seedChatOnPublicStory()
+
+        hideStory(story)
+        changePrologue(story, "바뀐 프롤로그")
+
+        stream(chat.publicId.toString(), "다음 행동을 한다.")
+
+        // 화면에서 막아놓은 개작 내용이 생성 결과를 통해 새어 나가면 안 된다.
+        assertThat(capturingAiClient.lastRequest.get().startSettings.prologue).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `재생성 경로도 같은 조립부를 써서 비공개 스토리에는 스냅샷을 싣는다`() {
+        val (story, chat) = seedChatOnPublicStory()
+        // 재생성 대상이 될 마지막 턴 1건.
+        storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "첫 입력", messageOrder = 1),
+        )
+        val lastTurn = storyMessageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "첫 응답", messageOrder = 2),
+        )
+        storyChatRepository.save(chat.also { it.currentTurn = 1 })
+
+        hideStory(story)
+        changePrologue(story, "바뀐 프롤로그")
+
+        regenerate(chat.publicId.toString(), lastTurn.id)
+
+        // 이어쓰기·재생성·선택지가 buildAiRequest 하나를 공유하므로 규칙이 갈라지지 않는다.
+        assertThat(capturingAiClient.lastRequest.get().startSettings.prologue).isEqualTo("원래 프롤로그")
+    }
+
+    private fun regenerate(chatId: String, turnId: Long): String =
+        restTestClient.post()
+            .uri("/api/v1/chats/$chatId/turns/regenerate/stream")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"turnId":$turnId}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(String::class.java)
+            .returnResult()
+            .responseBody
+            ?: error("재생성 스트리밍 응답 본문이 비어 있습니다.")
 
     private fun stream(chatId: String, userInput: String): String =
         restTestClient.post()

@@ -1203,6 +1203,12 @@ class ChatService(
         val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(chat.storyId)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+        // 프롤로그는 생성 결과를 통해 독자에게 그대로 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064).
+        // 판정 주체는 **턴을 돌리는 사람**이고, 세 진입점(이어쓰기·재생성·선택지)이 모두 앞에서 requireChatOwner로
+        // 요청자 == 채팅 소유자를 강제하므로 chat.userId가 곧 그 사람이다(게스트 채팅은 null).
+        // 공개 스토리면 현재 값을 쓴다 — 제작자의 밸런스 패치가 진행 중인 채팅에도 반영돼야 한다. 비공개로
+        // 되돌렸거나 삭제됐으면 스냅샷이다 — 화면에서 막아놓은 개작 내용이 생성 결과로 새면 안 된다.
+        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(chat.userId) == true
 
         // 주요 사건·엔딩 런타임 재료(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(chat.storyId)
@@ -1222,7 +1228,10 @@ class ChatService(
                 ),
                 startSettings = ChatTurnStartSettings(
                     name = startSetting?.name.orEmpty(),
-                    prologue = startSetting?.prologue.orEmpty(),
+                    // 스냅샷이 NULL이면(롤링 배포 창에 만들어진 채팅) 빈 문자열이다. 현재 값으로 되돌리지 않는다 —
+                    // 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역(history)이 함께
+                    // 가므로 도입부 한 줄이 비는 손해가 비공개 개작을 흘리는 손해보다 작다.
+                    prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
                     startSituation = startSetting?.startSituation.orEmpty(),
                 ),
                 history = history,
