@@ -2,9 +2,7 @@ package com.knk.manyak.auth.repository
 
 import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
-import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
@@ -28,18 +26,15 @@ interface SocialAccountRepository : JpaRepository<SocialAccount, Long> {
     ): SocialAccount?
 
     /**
-     * 재가입 claim 대상 행을 비관적 쓰기 락으로 잡는다(KNK-1053, `UserRepository.findByIdForUpdate` 관례).
-     *
-     * claim은 insert가 아니라 **기존 행 UPDATE**라, 신규 가입 경합을 막던 `(provider, provider_user_id)` 유니크가
-     * 방어선이 되지 못한다(같은 행을 두 트랜잭션이 갱신하면 뒤가 그냥 덮어쓴다). 락으로 직렬화해야
-     * 뒤늦은 요청이 "이미 claim됨"을 보고 기존 경합 복구 경로로 빠질 수 있다.
+     * 그 소셜 신원을 소유한 회원 id만 돌려준다(KNK-1053). 엔티티가 아니라 스칼라라 **영속성 컨텍스트에 올라가지
+     * 않는다** — 재가입은 이 값으로 소유자 행을 먼저 잠근 뒤 소셜 행들을 처음 읽어야 잠금 이후의 커밋 상태를 본다
+     * (엔티티를 미리 읽어 두면 1차 캐시가 잠금 전 스냅샷을 돌려준다).
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT s FROM SocialAccount s WHERE s.provider = :provider AND s.providerUserId = :providerUserId")
-    fun findByProviderAndProviderUserIdForUpdate(
+    @Query("SELECT s.userId FROM SocialAccount s WHERE s.provider = :provider AND s.providerUserId = :providerUserId")
+    fun findOwnerUserId(
         @Param("provider") provider: SocialProvider,
         @Param("providerUserId") providerUserId: String,
-    ): SocialAccount?
+    ): Long?
 
     /**
      * 그 회원의 연동 전부(tombstone 포함). 탈퇴가 이 목록을 tombstone으로 바꾸므로 필터를 두지 않는다.

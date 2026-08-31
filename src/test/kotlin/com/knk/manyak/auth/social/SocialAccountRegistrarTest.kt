@@ -11,6 +11,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.doReturn
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
@@ -112,7 +113,12 @@ class SocialAccountRegistrarTest {
     }
 
     private fun assertCreatesUserAndAccount(provider: SocialProvider) {
+        // 순수 신규 가입: 그 소셜 신원의 소유자가 없다. mock 기본값이 0L이라 명시 스텁이 필요하다
+        // (스텁이 없으면 "소유자 0번"으로 읽혀 재가입 분기를 탄다).
+        doReturn(null).`when`(socialAccountRepository).findOwnerUserId(provider, "social-sub-123")
         `when`(userRepository.save(any(User::class.java))).thenAnswer { it.arguments[0] as User }
+        // 저장소 save는 저장된 엔티티를 돌려준다(실제 구현이 null을 주지 않는다). 반환값에 null을 두면 코틀린 null 검사에 걸린다.
+        `when`(socialAccountRepository.save(any(SocialAccount::class.java))).thenAnswer { it.arguments[0] as SocialAccount }
         `when`(profileImagePresetService.imageUrlFor(GENERATED_NOUN)).thenReturn(PRESET_URL)
         `when`(profileImagePresetService.thumbnailBase64For(GENERATED_NOUN)).thenReturn(PRESET_THUMBNAIL)
 

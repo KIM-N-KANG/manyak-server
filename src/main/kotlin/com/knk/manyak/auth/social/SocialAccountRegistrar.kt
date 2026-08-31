@@ -65,28 +65,47 @@ class SocialAccountRegistrar(
      * 소셜 행은 tombstone을 **재사용**한다. `(provider, provider_user_id)` 유니크가 새 행 insert를 막으므로
      * DB가 이 재사용을 강제하며, 그래서 우회 경로가 생기지 않는다.
      *
+     * 재가입은 이전 소유자의 **tombstone을 전부** 새 계정으로 옮긴다(Codex 리뷰 P2). 로그인한 provider의 행 하나만
+     * 옮기면, 두 provider를 연동했던 계정이 탈퇴한 뒤 나머지 행이 계속 옛 소유자를 가리켜 재가입 이후에 쌓인 표식
+     * (초대 소진·이관 시도·정지)이 형제에게 보이지 않는다 — 다른 provider로 로그인하면 표식 없는 또 하나의 ACTIVE
+     * 계정이 생긴다. 묶음째 옮기면 탈퇴 전 연동 구성이 재가입 계정에 복원되고, 이후 다른 provider 로그인은
+     * tombstone이 아니라 **살아 있는 연동**을 만나 [findExistingUser]가 같은 계정을 돌려준다.
+     *
      * 독립 트랜잭션([Propagation.REQUIRES_NEW]): 동시 요청이 같은 계정을 둘 다 insert하면
      * 한쪽이 `social_accounts (provider, provider_user_id)` 유니크 위반으로 실패하는데,
      * 그 실패(rollback-only)를 이 트랜잭션 안에 가둬 바깥 로그인 트랜잭션이 재조회로 복구할 수 있게 한다.
      *
      * **재가입 경합은 유니크가 못 막는다**(KNK-1053): claim은 insert가 아니라 기존 행 UPDATE라, 동시 요청 둘이
      * 같은 tombstone을 갱신해도 뒤가 앞을 덮어쓸 뿐 위반이 나지 않는다. 그러면 양쪽 다 커밋해 `User`가 둘 생기고
-     * 먼저 커밋한 쪽은 소셜 행 없는 orphan이 되는데 토큰은 이미 나간 뒤다. 그래서 tombstone을 비관적 락으로 잡고,
-     * 락 획득 후 재검사에서 남이 이미 claim했으면 [DataIntegrityViolationException]으로 같은 복구 경로에 태운다.
+     * 먼저 커밋한 쪽은 소셜 행 없는 orphan이 되는데 토큰은 이미 나간 뒤다.
+     *
+     * 그래서 **이전 소유자의 `users` 행 하나**를 비관적 락으로 잡아 그 소유자의 tombstone 이동 전체를 직렬화한다.
+     * 소셜 행들을 각각 잠그지 않는 이유는 순서 때문이다 — 요청된 행부터 잠그면 provider A·B로 동시에 들어온 두
+     * 재가입이 서로가 쥔 행을 교차 대기해 데드락이 난다(고정 순서를 정해도 첫 락이 요청 provider라 어긋난다).
+     * 소유자 행은 어느 provider로 들어오든 같은 한 행이라 순서 문제가 아예 없다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun createUserAndAccount(provider: SocialProvider, info: SocialUserInfo, now: Instant): User {
-        // 상태 무관 조회 + 행 락 — 여기 걸리는 행은 tombstone뿐이다(살아 있는 연동은 호출 전 findExistingUser가 이미 잡는다).
-        val tombstone = socialAccountRepository.findByProviderAndProviderUserIdForUpdate(provider, info.providerUserId)
-        // 락 획득 후 재검사: 살아 있는 행이면 findExistingUser 조회 이후 누군가 claim(재가입)·연동한 것이다.
-        // User를 만들기 전에 끊어야 orphan이 남지 않는다. 바깥은 재조회로 상대가 만든 계정을 재사용한다.
-        if (tombstone != null && tombstone.deletedAt == null) {
-            throw DataIntegrityViolationException(
-                "이미 사용 중인 소셜 연동입니다: provider=$provider",
-            )
+        // 소유자 id만 스칼라로 읽는다(엔티티를 1차 캐시에 올리지 않는다 — 아래 락 이후 조회가 최신 커밋을 봐야 한다).
+        // 없으면 순수 신규 가입이라 잠글 대상도 없다(경합은 종전대로 유니크가 막는다).
+        val previousOwner = socialAccountRepository.findOwnerUserId(provider, info.providerUserId)
+            ?.let { ownerId ->
+                // 이전 소유자 행을 잠가 이 소유자의 tombstone 이동을 직렬화한다. 잠근 뒤 처음 읽어야
+                // 상대 요청이 이미 옮겼는지를 정확히 본다.
+                userRepository.findByIdForUpdate(ownerId) ?: throw DataIntegrityViolationException(
+                    "소셜 연동이 가리키는 회원이 없습니다: userId=$ownerId",
+                )
+            }
+        // 이 소유자의 연동 전부(tombstone 포함). 요청된 행이 여기 없거나 이미 살아 있으면, 조회 이후 상대 요청이
+        // 먼저 옮겼거나 누가 연동한 것이다. User를 만들기 전에 끊어야 orphan이 남지 않는다.
+        val bundle = previousOwner?.let { owner -> socialAccountRepository.findByUserId(owner.id) }.orEmpty()
+        val tombstone = if (previousOwner == null) {
+            null
+        } else {
+            bundle.firstOrNull { it.provider == provider && it.providerUserId == info.providerUserId }
+                ?.takeIf { it.deletedAt != null }
+                ?: throw DataIntegrityViolationException("이미 사용 중인 소셜 연동입니다: provider=$provider")
         }
-        // 재가입이면 이전 소유자를 한 번만 읽어 승계 항목 전부(초대 소진·보상 신원·정지 상태)를 여기서 뽑는다.
-        val previousOwner = tombstone?.let { userRepository.findById(it.userId).orElse(null) }
         // 실명·외부 사진 노출을 피하기 위해 소셜 `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
         val nickname = nicknameGenerator.generate()
         val user = userRepository.save(
@@ -109,22 +128,29 @@ class SocialAccountRegistrar(
                 rejoinedAt = now.takeIf { tombstone != null },
             ),
         )
-        socialAccountRepository.save(
-            tombstone?.apply {
-                userId = user.id
-                deletedAt = null
-                email = info.email
-                connectedAt = now
-                lastLoginAt = now
-            } ?: SocialAccount(
-                userId = user.id,
-                provider = provider,
-                providerUserId = info.providerUserId,
-                email = info.email,
-                connectedAt = now,
-                lastLoginAt = now,
-            ),
-        )
+        if (tombstone == null) {
+            socialAccountRepository.save(
+                SocialAccount(
+                    userId = user.id,
+                    provider = provider,
+                    providerUserId = info.providerUserId,
+                    email = info.email,
+                    connectedAt = now,
+                    lastLoginAt = now,
+                ),
+            )
+        } else {
+            tombstone.email = info.email
+            tombstone.connectedAt = now
+            // 이번 로그인은 이 provider로 들어왔다. 함께 옮기는 형제 행은 로그인한 게 아니라 lastLoginAt·email을 두지 않는다.
+            tombstone.lastLoginAt = now
+            // 묶음째 이동: 이전 소유자의 tombstone을 전부 새 계정으로 옮겨 연동 구성을 복원한다.
+            // (소유자가 DELETED라 살아 있는 행은 없지만, 방어적으로 tombstone만 고른다.)
+            bundle.filter { it.deletedAt != null }.forEach { social ->
+                social.userId = user.id
+                social.deletedAt = null
+            }
+        }
         return user
     }
 

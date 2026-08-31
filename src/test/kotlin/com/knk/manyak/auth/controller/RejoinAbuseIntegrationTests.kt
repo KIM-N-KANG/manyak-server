@@ -65,14 +65,22 @@ class RejoinAbuseIntegrationTests {
             .expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody!!["accessToken"] as String
 
+    /** 카카오 로그인(같은 가짜 검증기 — sub = idToken 문자열). 두 provider 묶음 시나리오에 쓴다. */
+    private fun loginKakao(sub: String) =
+        restTestClient.post()
+            .uri("/api/v1/auth/login/kakao")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"$sub"}""")
+            .exchange()
+
     private fun withdraw(accessToken: String) {
         restTestClient.delete().uri("/api/v1/users/me")
             .header("Authorization", "Bearer $accessToken")
             .exchange().expectStatus().isNoContent
     }
 
-    private fun userIdOf(sub: String): Long =
-        socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, sub)!!.userId
+    private fun userIdOf(sub: String, provider: SocialProvider = SocialProvider.GOOGLE): Long =
+        socialAccountRepository.findByProviderAndProviderUserId(provider, sub)!!.userId
 
     private fun claimAttendance(accessToken: String) =
         restTestClient.post().uri("/api/v1/users/me/credits/attendance")
@@ -313,5 +321,90 @@ class RejoinAbuseIntegrationTests {
         // migrated_at은 "이 계정이 게스트 콘텐츠를 가져갔다"는 계정 단위 잠금이라 새 계정에는 다시 열어 준다
         // (재가입자가 새로 만든 게스트 콘텐츠를 가져갈 길을 막지 않는다. 이관은 크레딧을 주지 않아 파밍 실익도 없다).
         assertThat(rejoined.migratedAt).isNull()
+    }
+
+    /** 구글·카카오를 연동한 계정을 만든다(재인증 → 링크 코드 → 연동). 반환값은 그 계정의 access 토큰. */
+    private fun loginWithBothProviders(googleSub: String, kakaoSub: String): String {
+        val access = login(googleSub)
+        val linkCode = restTestClient.post().uri("/api/v1/auth/links/reauth")
+            .header("Authorization", "Bearer $access")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"provider":"GOOGLE","idToken":"$googleSub"}""")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(Map::class.java).returnResult().responseBody!!["linkCode"] as String
+        restTestClient.post().uri("/api/v1/auth/links/kakao")
+            .header("Authorization", "Bearer $access")
+            .header("X-Manyak-Link-Code", linkCode)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"$kakaoSub"}""")
+            .exchange().expectStatus().isCreated
+        return access
+    }
+
+    @Test
+    fun `두 provider를 연동한 계정이 탈퇴하면 재가입이 tombstone 묶음 전체를 가져온다`() {
+        // Codex P2: 로그인한 provider의 행 하나만 옮기면 나머지가 옛 소유자를 계속 가리켜,
+        // 재가입 이후 쌓인 표식이 형제에게 보이지 않는다.
+        val access = loginWithBothProviders("bundle-google-sub", "bundle-kakao-sub")
+        withdraw(access)
+
+        login("bundle-google-sub")
+
+        val rejoinedUserId = userIdOf("bundle-google-sub")
+        val kakao = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, "bundle-kakao-sub")!!
+        assertThat(kakao.userId).isEqualTo(rejoinedUserId)
+        assertThat(kakao.deletedAt).isNull()
+        // 로그인하지 않은 형제 행은 lastLoginAt을 찍지 않는다(연동만 복원).
+        assertThat(kakao.lastLoginAt).isNull()
+        assertThat(socialAccountRepository.count()).isEqualTo(2)
+    }
+
+    @Test
+    fun `묶음을 가져온 뒤 다른 provider로 로그인해도 새 계정이 생기지 않는다`() {
+        val access = loginWithBothProviders("sibling-google-sub", "sibling-kakao-sub")
+        withdraw(access)
+        login("sibling-google-sub")
+        val rejoinedUserId = userIdOf("sibling-google-sub")
+        val usersBefore = userRepository.count()
+
+        // 카카오 행이 tombstone이 아니라 살아 있는 연동이라 findExistingUser가 같은 계정을 돌려준다.
+        loginKakao("sibling-kakao-sub")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.isNewUser").isEqualTo(false)
+
+        assertThat(userRepository.count()).isEqualTo(usersBefore)
+        assertThat(userIdOf("sibling-kakao-sub", SocialProvider.KAKAO)).isEqualTo(rejoinedUserId)
+    }
+
+    @Test
+    fun `재가입 계정이 초대 코드를 소진하면 형제 provider 로그인도 자격을 얻지 못한다`() {
+        // 표식의 출처가 하나로 모였는지 확인하는 가드 — 형제 행이 옛 소유자에 남아 있으면 표식 없는 계정이 생긴다.
+        val inviter = userRepository.save(User(nickname = "초대자", status = UserStatus.ACTIVE, inviteCode = "BUNDLE01"))
+        val access = loginWithBothProviders("mark-google-sub", "mark-kakao-sub")
+        withdraw(access)
+        val rejoinToken = login("mark-google-sub")
+
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $rejoinToken")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"BUNDLE01"}""")
+            .exchange().expectStatus().isOk
+
+        val kakaoToken = loginKakao("mark-kakao-sub")
+            .expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["accessToken"] as String
+
+        assertThat(userIdOf("mark-kakao-sub", SocialProvider.KAKAO)).isEqualTo(userIdOf("mark-google-sub"))
+        assertThat(userRepository.findById(userIdOf("mark-kakao-sub", SocialProvider.KAKAO)).orElseThrow().inviterUserId)
+            .isEqualTo(inviter.id)
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header("Authorization", "Bearer $kakaoToken")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"code":"BUNDLE01"}""")
+            .exchange()
+            .expectStatus().isEqualTo(409)
+            .expectBody().jsonPath("$.code").isEqualTo("INVITE_ALREADY_REDEEMED")
     }
 }
