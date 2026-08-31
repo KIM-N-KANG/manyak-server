@@ -68,6 +68,7 @@ erDiagram
   uuid creation_id
   varchar_100_ story_title_snapshot
   varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
 }
 "public.story_chat_main_events" {
   bigint id

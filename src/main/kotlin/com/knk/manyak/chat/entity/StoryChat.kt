@@ -53,6 +53,12 @@ class StoryChat(
     @Column(name = "story_thumbnail_key_snapshot", length = 64)
     val storyThumbnailKeySnapshot: String? = null,
 
+    // 시작 설정의 프롤로그 본문도 같이 박는다. 제목보다 유출 폭이 커서다 — 공유 열람은 무인증 경로라
+    // 비공개로 되돌린 스토리의 도입부 본문이 링크만 가진 누구에게나 흘러갔다.
+    // 원본과 타입을 맞춘다(story_start_settings.prologue TEXT, nullable).
+    @Column(name = "story_prologue_snapshot", columnDefinition = "TEXT")
+    val storyPrologueSnapshot: String? = null,
+
     @Column(length = 100)
     var title: String? = null,
 

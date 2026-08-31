@@ -15,9 +15,11 @@ import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -49,6 +51,7 @@ class ChatStorySnapshotIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var startSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
@@ -69,6 +72,22 @@ class ChatStorySnapshotIntegrationTests {
         storyRepository.save(
             Story(userId = owner.id, title = "원래 제목", thumbnailImageKey = "thumb_0001"),
         )
+
+    /** 시작 설정(프롤로그)을 가진 공개 스토리. 프롤로그 스냅샷 검증에 쓴다. */
+    private fun publicStoryWithPrologue(owner: User): Story {
+        val story = publicStory(owner)
+        startSettingRepository.save(
+            StoryStartSetting(story = story, name = "시작 장면", prologue = "원래 프롤로그"),
+        )
+        return story
+    }
+
+    /** 소유자가 시작 설정의 프롤로그 본문을 고친다. */
+    private fun changePrologue(story: Story, prologue: String) {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        setting.prologue = prologue
+        startSettingRepository.save(setting)
+    }
 
     /** 실제 생성 API로 채팅을 만든다 — 스냅샷이 그 경로에서 박히는지까지 함께 검증하기 위해서다. */
     private fun createChat(story: Story, user: User): StoryChat {
@@ -176,6 +195,24 @@ class ChatStorySnapshotIntegrationTests {
             .expectStatus().isOk
             .expectBody(ChatShareResponse::class.java)
             .returnResult().responseBody!!.storyTitle
+
+    private fun detailPrologue(chat: StoryChat, user: User): String =
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", token(user))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!.prologue
+
+    private fun sharePrologue(shareId: String, viewer: User? = null): String =
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .headers { headers -> viewer?.let { headers.set("Authorization", token(it)) } }
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatShareResponse::class.java)
+            .returnResult().responseBody!!.prologue
 
     private fun historyTitle(user: User): String? =
         restTestClient.get()
@@ -402,5 +439,73 @@ class ChatStorySnapshotIntegrationTests {
         assertThat(shareTitle(shareId, viewer = owner)).isEqualTo("바뀐 제목")
         // 익명 열람자는 그대로 스냅샷에서 멈춘다.
         assertThat(shareTitle(shareId)).isEqualTo("원래 제목")
+    }
+
+    // ---- 프롤로그 ----
+
+    @Test
+    fun `채팅을 만들면 프롤로그도 스냅샷으로 박힌다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+
+        val chat = createChat(story, reader)
+
+        assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `비공개로 되돌리고 프롤로그를 바꿔도 채팅 상세는 스냅샷 프롤로그를 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        changePrologue(story, "바뀐 프롤로그")
+
+        assertThat(detailPrologue(chat, reader)).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `소유자 본인은 비공개 스토리도 상세에서 현재 프롤로그를 본다`() {
+        val owner = saveUser("소유자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, owner)
+
+        hideAndRename(story, "바뀐 제목")
+        changePrologue(story, "바뀐 프롤로그")
+
+        assertThat(detailPrologue(chat, owner)).isEqualTo("바뀐 프롤로그")
+    }
+
+    @Test
+    fun `비공개로 되돌리고 프롤로그를 바꾸면 공유 열람은 스냅샷 프롤로그를 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        changePrologue(story, "바뀐 프롤로그")
+
+        // 프롤로그는 스토리 도입부 본문이라 제목보다 유출 폭이 크다. 무인증 링크로 새면 안 된다.
+        assertThat(sharePrologue(shareId)).isEqualTo("원래 프롤로그")
+        // 같은 링크라도 스토리 소유자가 열면 현재 본문을 본다.
+        assertThat(sharePrologue(shareId, viewer = owner)).isEqualTo("바뀐 프롤로그")
+    }
+
+    @Test
+    fun `공개 스토리의 공유 열람은 현재 프롤로그를 따라간다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        changePrologue(story, "바뀐 프롤로그")
+
+        assertThat(sharePrologue(shareId)).isEqualTo("바뀐 프롤로그")
     }
 }

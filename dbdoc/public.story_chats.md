@@ -23,6 +23,7 @@
 | creation_id | uuid |  | true |  |  | KNK-751: 이 채팅이 시작한 스토리의 간편 제작 creation_id(story_creation_sessions.storyline_request_id). 일반 제작 스토리는 NULL. |
 | story_title_snapshot | varchar(100) |  | true |  |  |  |
 | story_thumbnail_key_snapshot | varchar(64) |  | true |  |  |  |
+| story_prologue_snapshot | text |  | true |  |  |  |
 
 ## Constraints
 
@@ -81,6 +82,7 @@ erDiagram
   uuid creation_id
   varchar_100_ story_title_snapshot
   varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
 }
 "public.story_messages" {
   bigint id

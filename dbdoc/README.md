@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 19 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 20 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -195,6 +195,7 @@ erDiagram
   uuid creation_id
   varchar_100_ story_title_snapshot
   varchar_64_ story_thumbnail_key_snapshot
+  text story_prologue_snapshot
 }
 "public.story_messages" {
   bigint id

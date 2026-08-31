@@ -150,6 +150,7 @@ class ChatService(
                 // 비공개로 되돌리거나 지우면 서재·이용내역이 이 값에서 멈춘다.
                 storyTitleSnapshot = story.title,
                 storyThumbnailKeySnapshot = story.thumbnailImageKey,
+                storyPrologueSnapshot = startSetting?.prologue,
             ),
         )
         structuredLogger.event(
@@ -253,10 +254,9 @@ class ChatService(
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
         // 서재와 같은 스냅샷 규칙(KNK-1059). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
-        // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목이 보여선 안 된다.
-        val storyTitle = (
-            if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
-            ).orEmpty()
+        // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목·프롤로그가 보여선 안 된다.
+        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
+        val storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
@@ -285,7 +285,7 @@ class ChatService(
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
             storyTitle = storyTitle,
-            prologue = startSetting?.prologue.orEmpty(),
+            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
             turns = turns.map { assistant ->
                 ChatTurnResponse(
                     id = assistant.id,
@@ -343,7 +343,7 @@ class ChatService(
      * 새 호출부가 무심코 익명 판정으로 빠지면 읽을 수 있는 사용자에게까지 스냅샷이 나가기 때문이다.
      * 판정 결과는 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
      * 삭제됐으면 채팅 스냅샷에서 멈춘다. 이 게이트가 없으면 비공개로 돌린 스토리의 최신 제목이 링크를 가진
-     * 아무에게나 보인다. 프롤로그는 시작 설정에 종속돼 이 규칙 밖이다.
+     * 아무에게나 보인다. 프롤로그(스토리 도입부 본문)도 같은 규칙을 탄다 — 제목보다 유출 폭이 커서다.
      */
     @Transactional(readOnly = true)
     fun getChatShare(shareId: String, userId: Long?): ChatShareResponse {
@@ -355,6 +355,7 @@ class ChatService(
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
@@ -367,10 +368,8 @@ class ChatService(
         return ChatShareResponse(
             id = share.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = (
-                if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
-                ).orEmpty(),
-            prologue = startSetting?.prologue.orEmpty(),
+            storyTitle = (if (showsCurrentStory) story.title else chat.storyTitleSnapshot).orEmpty(),
+            prologue = (if (showsCurrentStory) startSetting?.prologue else chat.storyPrologueSnapshot).orEmpty(),
             turns = turns.map { assistant ->
                 ChatShareTurnResponse(
                     userInput = assistant.userInput,
