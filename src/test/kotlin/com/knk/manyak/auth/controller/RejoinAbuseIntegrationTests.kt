@@ -10,6 +10,8 @@ import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -31,7 +33,7 @@ import java.time.Instant
  * 탈퇴 → 재가입 어뷰징 차단(KNK-1053).
  *
  * 탈퇴가 `social_accounts`를 하드 삭제하던 시절엔 같은 소셜 신원으로 재가입할 때마다 완전히 새 `users` 행이 생겨
- * user_id에 매달린 1회성 혜택(가입 보상 500 · 초대 제출 보상 500)이 통째로 리셋됐다. 이제 탈퇴는 그 행을
+ * user_id에 매달린 1회성 혜택(가입 보상 · 초대 제출 보상)이 통째로 리셋됐다. 이제 탈퇴는 그 행을
  * tombstone(`deleted_at` 기록)으로 보존하고, 재가입은 그 행을 재사용하면서 소진 표식을 새 계정으로 승계한다.
  */
 @ActiveProfiles("test")
@@ -48,6 +50,12 @@ class RejoinAbuseIntegrationTests {
     @Autowired private lateinit var creditTransactionRepository: CreditTransactionRepository
     @Autowired private lateinit var redisTemplate: StringRedisTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val signupReward: Long get() = creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD)
+    private val attendanceReward: Long get() = creditPolicyService.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)
 
     @BeforeEach
     fun setUp() {
@@ -95,7 +103,7 @@ class RejoinAbuseIntegrationTests {
     fun `탈퇴 후 같은 소셜 신원으로 재가입하면 새 계정이지만 가입 보상은 다시 주지 않는다`() {
         val token = login("rejoin-reward-sub")
         val firstUserId = userIdOf("rejoin-reward-sub")
-        assertThat(creditWalletService.balanceOf(firstUserId)).isEqualTo(500)
+        assertThat(creditWalletService.balanceOf(firstUserId)).isEqualTo(signupReward)
 
         withdraw(token)
         login("rejoin-reward-sub")
@@ -198,7 +206,7 @@ class RejoinAbuseIntegrationTests {
 
     @Test
     fun `재가입해도 같은 날 출석 보상을 다시 받지 못한다`() {
-        // 출석 멱등 키가 user_id 기준이면 재가입 1회당 250을 하루에도 무제한 반복 수령할 수 있었다.
+        // 출석 멱등 키가 user_id 기준이면 재가입 1회당 출석 보상을 하루에도 무제한 반복 수령할 수 있었다.
         // 키를 보상 신원(최초 계정)으로 묶어 막는다.
         val token = login("attendance-rejoin-sub")
         claimAttendance(token).expectStatus().isOk.expectBody().jsonPath("$.rewarded").isEqualTo(true)
@@ -228,7 +236,7 @@ class RejoinAbuseIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.rewarded").isEqualTo(true)
-            .jsonPath("$.amount").isEqualTo(250)
+            .jsonPath("$.amount").isEqualTo(attendanceReward)
     }
 
     @Test
@@ -249,7 +257,7 @@ class RejoinAbuseIntegrationTests {
         login("signup-lost-sub")
 
         val rejoinedUserId = userIdOf("signup-lost-sub")
-        assertThat(creditWalletService.balanceOf(rejoinedUserId)).isEqualTo(500)
+        assertThat(creditWalletService.balanceOf(rejoinedUserId)).isEqualTo(signupReward)
         // 키는 새 user_id가 아니라 최초 계정(보상 신원)으로 찍힌다.
         assertThat(idempotencyKeysOf(rejoinedUserId, CreditReason.SIGNUP_REWARD))
             .containsExactly("signup:${crashed.id}")

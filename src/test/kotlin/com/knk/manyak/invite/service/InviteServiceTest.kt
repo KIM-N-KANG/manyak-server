@@ -45,6 +45,10 @@ class InviteServiceTest {
 
     private val inviteReward = 500L
     private val inviteMonthlyCap = 10L
+    private val creditPolicyService = com.knk.manyak.support.fixedCreditPolicyService(
+        inviteReward = inviteReward,
+        inviteMonthlyCap = inviteMonthlyCap,
+    )
 
     // 기준 시계: KST 2026-07-15 09:00(UTC 00:00). 이 시각이 속한 KST 월 [7/1, 8/1)이 상한 집계 구간이다.
     private val clockInJuly = Clock.fixed(Instant.parse("2026-07-15T00:00:00Z"), ZoneOffset.UTC)
@@ -54,7 +58,7 @@ class InviteServiceTest {
     private val augustStart = kstMonthStart(2026, 8)
 
     private fun serviceAt(clock: Clock): InviteService =
-        InviteService(userRepository, creditWalletService, inviteReward, inviteMonthlyCap, clock)
+        InviteService(userRepository, creditWalletService, creditPolicyService, clock)
 
     private fun kstMonthStart(year: Int, month: Int): Instant =
         ZonedDateTime.of(year, month, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()

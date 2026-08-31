@@ -12,8 +12,12 @@ import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
@@ -66,6 +70,8 @@ class ChatTurnCreditRefundIntegrationTests {
                     onCharacterImage: (ChatCharacterImageEvent) -> Unit,
                     onToken: (String) -> Unit,
                 ): ChatTurnAiResult {
+                    // 선차감은 이 호출 전에 이미 끝났다. 차감과 환불 사이에 무언가를 끼워 넣는 유일한 지점이다.
+                    afterCharge()
                     onToken("검")
                     throw ChatTurnAiException(code = "AI_TIMEOUT", message = "AI 응답이 시간 내에 도착하지 않았습니다.")
                 }
@@ -100,9 +106,31 @@ class ChatTurnCreditRefundIntegrationTests {
     @Autowired
     private lateinit var meterRegistry: MeterRegistry
 
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    @Autowired private lateinit var creditPolicyRepository: CreditPolicyRepository
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+    // 여러 턴을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = chatTurnCost * 10
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        afterCharge = {}
+    }
+
+    companion object {
+        /**
+         * 선차감 직후·환불 직전에 실행되는 테스트 훅. AI 스텁 빈(@Primary)이 호출한다.
+         * 스텁은 SSE 워커 스레드에서 도므로 @Volatile 이어야 한다. 새 @TestConfiguration 을 만들지 않으려고
+         * 정적 훅을 쓴다(중첩 설정 하나가 스프링 컨텍스트 하나다 — SpringContextBudgetGuardTests).
+         */
+        @Volatile
+        @JvmStatic
+        var afterCharge: () -> Unit = {}
     }
 
     @Test
@@ -111,7 +139,7 @@ class ChatTurnCreditRefundIntegrationTests {
         // 남아, 사용자가 실패한 턴에 과금된 채로 남는 상황을 지표로 볼 수 없었다.
         val story = storyRepository.save(Story(title = "지표 스토리", genre = "판타지"))
         val member = saveUser("실패지표회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
         // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 카운터가 누적된다. 절대값이 아니라 증가분을 본다.
         val beforeFailure = chatTurnResultCount("failure")
@@ -158,7 +186,7 @@ class ChatTurnCreditRefundIntegrationTests {
     fun `실패한 턴은 CHAT_TURN을 환불해 순잔액이 원복된다`() {
         val story = storyRepository.save(Story(title = "설정 미완 스토리", genre = "판타지"))
         val member = saveUser("환불회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         val body = restTestClient.post()
@@ -181,16 +209,54 @@ class ChatTurnCreditRefundIntegrationTests {
 
         // 환불은 SSE 종료 콜백(비동기 워커)에서 일어나므로 순잔액 원복을 잠깐 기다린다.
         await().atMost(Duration.ofSeconds(5)).untilAsserted {
-            assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(10)
+            assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(chatTurnCost)
         }
         // 원장에는 CHAT_TURN(-10)과 REFUND(+10)가 각각 정확히 1건씩 남는다(차감 1회·환불 1회).
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
-        assertThat(refund.first().amount).isEqualTo(10)
+        assertThat(refund.first().amount).isEqualTo(chatTurnCost)
         assertThat(refund.first().refType).isEqualTo("CHAT")
         assertThat(refund.first().refId).isEqualTo(chat.id)
+    }
+
+    @Test
+    fun `차감 후 정책이 바뀌어도 환불액은 원 차감액과 같다`() {
+        // KNK-1056 의 핵심 불변식. 차감액과 환불액은 반드시 같아야 한다 — 어긋나면 사용자가 손해를 보거나
+        // 이득을 본다. 소비자는 요청 진입부에서 정책을 한 번만 읽어 차감·환불에 같은 값을 넘겨야 하고,
+        // 환불 시점에 다시 읽으면 이 테스트가 깨진다.
+        // (테스트 프로파일은 policy-cache-ttl=PT0S 라 정책 변경이 다음 조회에 즉시 보인다.)
+        creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 41))
+        val story = storyRepository.save(Story(title = "정책 변경 스토리", genre = "판타지"))
+        val member = saveUser("정책변경회원")
+        creditWalletService.reward(member.id, 500, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+        // 차감이 끝난 뒤, 환불이 일어나기 전에 단가를 바꾼다.
+        afterCharge = {
+            creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 7))
+        }
+
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"userInput":"정책이 바뀌는 동안 이어쓴다."}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(String::class.java)
+            .returnResult()
+
+        // 순잔액이 정확히 원복돼야 한다. 환불이 바뀐 단가(7)를 쓰면 34 가 빈다.
+        await().atMost(Duration.ofSeconds(5)).untilAsserted {
+            assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(500)
+        }
+        val all = transactionRepository.findAll()
+        assertThat(all.first { it.reason == CreditReason.CHAT_TURN }.amount).isEqualTo(-41)
+        assertThat(all.first { it.reason == CreditReason.REFUND }.amount).isEqualTo(41)
+        // 정책 자체는 실제로 바뀌어 있어야 한다(훅이 안 돌았는데 통과하는 위양성 방지).
+        assertThat(creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(7)
     }
 
     @Autowired

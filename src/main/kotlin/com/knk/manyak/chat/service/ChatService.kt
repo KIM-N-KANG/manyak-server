@@ -41,6 +41,8 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.AiTraceLink
@@ -69,7 +71,6 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -111,9 +112,8 @@ class ChatService(
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
-    // 채팅 턴 1회 소모량(스펙 §4-3-7, KNK-477 확정: 10. 재생성도 동일 값·사유를 공유).
-    @param:Value("\${manyak.credit.chat-turn-cost:10}")
-    private val chatTurnCost: Long,
+    // 채팅 턴 1회 소모량(재생성도 동일 값·사유를 공유). 운영 중 조정 가능한 정책값이라 턴마다 해석한다(KNK-1056).
+    private val creditPolicyService: CreditPolicyService,
     private val meterRegistry: MeterRegistry,
 ) {
 
@@ -725,6 +725,9 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
+        // 소모 정책값은 이 턴 안에서 한 번만 읽어 차감·환불에 같은 값을 쓴다(KNK-1056). 차감과 환불 사이에
+        // 정책이 바뀌면 금액이 어긋나 사용자가 손해를 보거나 이득을 본다(환불은 원장 행이 아니라 이 값을 쓴다).
+        val chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
         // 선차감·한도 예약은 SseEmitter를 만들기 전 동기 구간이다. 여기서 나는 402/400은 AI를 부르기 전 거부라
         // AI 타이머(manyak.ai.call.duration)에도 Langfuse에도 남지 않으므로 rejected로 세어 둔다(KNK-811).
         val (memberTrialCovered, guestDeviceId) = try {
@@ -917,7 +920,7 @@ class ChatService(
                 // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
                 recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
-                    refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
+                    refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
                 }
             }
         }, chatSseExecutor)
@@ -927,7 +930,7 @@ class ChatService(
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
             recordChatTurnResult(OUTCOME_FAILURE)
-            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
+            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
                 "chat_turn_schedule_rejected",
@@ -953,7 +956,7 @@ class ChatService(
                 // 워커의 `success` 1건이 함께 남아 합계만 하나 늘 뿐, **저장·과금된 턴이 실패로 굳지 않는다**.
                 // 잠정 판정을 failure로 세고 게이트로 잠그면 그 오분류가 영구히 남는다(그쪽이 더 나쁘다).
                 recordChatTurnResult(OUTCOME_CANCELLED)
-                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate)
+                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
             }
         }
 
@@ -975,6 +978,8 @@ class ChatService(
         chatPk: Long,
         refundKey: String,
         gate: AtomicBoolean,
+        // 차감 때 쓴 금액. 환불은 반드시 같은 값이어야 한다(KNK-1056).
+        amount: Long,
     ) {
         if (userId == null && guestDeviceId == null) return
         if (!gate.compareAndSet(false, true)) return
@@ -986,7 +991,7 @@ class ChatService(
             } else if (userId != null) {
                 creditWalletService.reward(
                     userId = userId,
-                    amount = chatTurnCost,
+                    amount = amount,
                     reason = CreditReason.REFUND,
                     idempotencyKey = refundKey,
                     refType = "CHAT",

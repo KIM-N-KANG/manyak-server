@@ -6,6 +6,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -39,6 +41,11 @@ class InviteRedeemIntegrationTests {
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val inviteReward: Long get() = creditPolicyService.amountOf(CreditPolicyKey.INVITE_REWARD)
 
     @BeforeEach
     fun setUp() {
@@ -77,8 +84,8 @@ class InviteRedeemIntegrationTests {
         redeem(tokenOf(redeemer), "REDEEM77")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.amount").isEqualTo(500)
-            .jsonPath("$.balance").isEqualTo(500)
+            .jsonPath("$.amount").isEqualTo(inviteReward)
+            .jsonPath("$.balance").isEqualTo(inviteReward)
 
         // 초대자·제출자 각 1건, 수혜자별 멱등 키(invite:{초대자}:{피초대자}:{수혜자}).
         val inviterRows = inviteRewards(inviter.id)
@@ -175,7 +182,7 @@ class InviteRedeemIntegrationTests {
     private fun seedInviterRoleRewards(userId: Long, count: Int) {
         repeat(count) { i ->
             val fakeInviteeId = 900_000L + i
-            creditWalletService.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:$userId:$fakeInviteeId:$userId")
+            creditWalletService.reward(userId, inviteReward, CreditReason.INVITE_REWARD, "invite:$userId:$fakeInviteeId:$userId")
         }
     }
 
@@ -189,7 +196,7 @@ class InviteRedeemIntegrationTests {
         redeem(tokenOf(redeemer), "CAPPED77")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.amount").isEqualTo(500)
+            .jsonPath("$.amount").isEqualTo(inviteReward)
 
         // 초대자는 상한 스킵(10건 그대로), 제출자는 적립. 관계는 저장된다.
         assertThat(inviteRewards(inviter.id)).hasSize(10)
@@ -200,7 +207,7 @@ class InviteRedeemIntegrationTests {
     @Test
     fun `제출자가 초대자 역할 월 상한을 채운 상태여도 제출 보상은 적립한다`() {
         // KNK-581: 월 상한은 초대자 몫에만 적용된다. 제출자 몫은 평생 1회 자격이 유일한 제한이라,
-        // 그 달 초대자로 상한을 채운 계정의 코드 입력도 500을 적립해야 한다(자격만 소진되는 영구 손실 방지).
+        // 그 달 초대자로 상한을 채운 계정의 코드 입력도 초대 보상을 적립해야 한다(자격만 소진되는 영구 손실 방지).
         val inviter = saveUser("초대자", inviteCode = "GIVER777")
         val redeemer = saveUser("바쁜초대자겸제출자")
         seedInviterRoleRewards(redeemer.id, 10)
@@ -208,7 +215,7 @@ class InviteRedeemIntegrationTests {
         redeem(tokenOf(redeemer), "GIVER777")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.amount").isEqualTo(500)
+            .jsonPath("$.amount").isEqualTo(inviteReward)
 
         assertThat(inviteRewards(redeemer.id)).hasSize(11)
         assertThat(inviteRewards(inviter.id)).hasSize(1)

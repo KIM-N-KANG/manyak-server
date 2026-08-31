@@ -8,12 +8,13 @@ import com.knk.manyak.auth.handoff.LoginHandoffService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -54,8 +55,8 @@ class SocialLoginService(
     private val loginHandoffService: LoginHandoffService,
     private val userRepository: UserRepository,
     private val serverAnalytics: ServerAnalytics,
-    // 가입 보상 지급량(스펙 §4-3-7, KNK-477 확정: 500).
-    @Value("\${manyak.credit.signup-reward:500}") private val signupReward: Long,
+    // 가입 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
+    private val creditPolicyService: CreditPolicyService,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -187,7 +188,7 @@ class SocialLoginService(
     private fun rewardSignup(user: User) {
         creditWalletService.reward(
             user.id,
-            signupReward,
+            creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD),
             CreditReason.SIGNUP_REWARD,
             "signup:${user.rewardIdentityUserId ?: user.id}",
         )

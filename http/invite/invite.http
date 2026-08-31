@@ -4,7 +4,7 @@
 ### [KNK-565, 스펙 §4-3-7 KNK-567 개편] 초대 코드 발급·코드 입력 적립:
 ###   - GET /users/me/invite: 내 초대 코드 조회(없으면 최초 조회 시 발급, 이후 동일 코드). 인증 필수 → 토큰 없으면 401.
 ###     코드는 혼동 문자(O·0, I·1·L)를 제외한 대문자+숫자 8자입니다. inviteUrl 필드는 폐기됐습니다(코드 공유 방식).
-###   - POST /users/me/invite/redeem: 다른 회원의 초대 코드를 제출하면 초대자·제출자 양쪽에 각 500 크레딧 적립.
+###   - POST /users/me/invite/redeem: 다른 회원의 초대 코드를 제출하면 초대자·제출자 양쪽에 각 2000 크레딧 적립(KNK-1056 기본값).
 ###     제출 자격은 계정당 평생 1회(기존 회원도 가능). 코드는 trim·대문자 정규화 후 비교합니다.
 ###     오류 계약: 빈 값·형식 위반 400 / 매칭 없음 404 / 자기 코드 409(code=INVITE_SELF_CODE) /
 ###     재제출 409(code=INVITE_ALREADY_REDEEMED) / 정지 계정 403.
@@ -124,7 +124,7 @@ Accept: application/json
     client.global.set("redeemerRewardCountBefore", response.body.monthlyRewardCount);
 %}
 
-### 4. (해피 패스) 제출자가 초대자의 코드를 입력 → 200, 양쪽 각 500 적립
+### 4. (해피 패스) 제출자가 초대자의 코드를 입력 → 200, 양쪽 각 2000 적립
 # 2번을 먼저 실행해 myInviteCode 를 채우고, @redeemerAccessToken 에 아직 코드를 입력한 적 없는
 # 다른 계정의 토큰을 넣은 뒤 실행하세요. 적립 상세는 credits.http 의 잔액 조회로도 확인할 수 있습니다.
 POST {{baseUrl}}/api/v1/users/me/invite/redeem
@@ -139,9 +139,10 @@ Content-Type: application/json
             `200이 아닙니다(제출자 토큰·코드 확인, 이미 입력한 계정이면 409). actual=${response.status}`);
     });
     const b = response.body;
-    // [KNK-581] 제출자 몫에는 월 상한이 없어 첫 제출의 amount 는 항상 500입니다.
-    client.test("amount 는 제출자 적립액(500)이다", () => {
-        client.assert(b.amount === 500, `amount 가 500이 아닙니다. actual=${b.amount}`);
+    // [KNK-581] 제출자 몫에는 월 상한이 없어 첫 제출의 amount 는 항상 초대 보상 전액입니다.
+    client.test("amount 는 제출자 적립액(2000)이다", () => {
+        // [KNK-1056] 초대 보상 기본값 2000. credit_policies 의 invite_reward 오버라이드를 걸었다면 그 값입니다.
+        client.assert(b.amount === 2000, `amount 가 2000이 아닙니다(오버라이드를 걸었다면 기대값을 바꾸세요). actual=${b.amount}`);
     });
     client.test("balance 는 적립 후 잔액(양수)이다", () => {
         client.assert(Number.isInteger(b.balance) && b.balance >= b.amount,

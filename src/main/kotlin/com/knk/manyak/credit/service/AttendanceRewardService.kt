@@ -2,7 +2,6 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
@@ -19,7 +18,7 @@ data class AttendanceOutcome(val rewarded: Boolean, val amount: Long, val balanc
  * KST 경계 판정을 위해 [Clock]을 주입받는다(테스트에서 고정 시계로 날짜 경계를 검증).
  *
  * 키를 user_id가 아니라 **보상 신원**(`coalesce(reward_identity_user_id, id)` — KNK-1053)으로 잡는다:
- * 탈퇴 후 재가입은 user_id를 갈아치우므로, user_id 키면 같은 사람이 하루에도 재가입만으로 250을 무한 반복 수령한다.
+ * 탈퇴 후 재가입은 user_id를 갈아치우므로, user_id 키면 같은 사람이 하루에도 재가입만으로 출석 보상을 무한 반복 수령한다.
  * 기존 회원·신규 가입은 `reward_identity_user_id`가 NULL이라 키 문자열이 종전과 같아 원장 호환이 유지된다.
  * 시그니처는 그대로 두고 서비스 안에서 해석한다(호출부 [com.knk.manyak.credit.controller.CreditController]·
  * [com.knk.manyak.auth.controller.AuthController]가 각각 id·User만 들고 있어 계약을 흔들지 않는다).
@@ -28,14 +27,15 @@ data class AttendanceOutcome(val rewarded: Boolean, val amount: Long, val balanc
 class AttendanceRewardService(
     private val creditWalletService: CreditWalletService,
     private val userRepository: UserRepository,
-    // 출석 보상 지급량(스펙 §4-3-7, KNK-477 확정: 250).
-    @param:Value("\${manyak.credit.attendance-reward:250}")
-    private val attendanceReward: Long,
+    // 출석 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
+    private val creditPolicyService: CreditPolicyService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
     @Transactional
     fun claimDailyAttendance(userId: Long): AttendanceOutcome {
+        // 지급액과 응답 amount가 반드시 같도록 한 번만 읽어 재사용한다.
+        val attendanceReward = creditPolicyService.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)
         val outcome = creditWalletService.reward(
             userId = userId,
             amount = attendanceReward,

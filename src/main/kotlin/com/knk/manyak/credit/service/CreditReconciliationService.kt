@@ -32,6 +32,10 @@ data class ReconciliationResult(val groupsScanned: Int, val refundsEmitted: Int)
  *   않는다. 게스트·회원이 섞인 채팅은 완료 수가 회원 charge보다 클 수 있어 과대평가되면 target이 음수→0이 되어
  *   미환불된다(fail-safe: 서버가 절대 초과 환불하지 않음, 순수 회원 채팅은 정확). 리소스가 사라졌으면(삭제) 완료로 간주해 환불하지 않는다.
  * - STORY: 세션 status가 STORY_CREATED면 1, 아니면 0(세션은 charge보다 먼저 생기므로 유실 charge엔 항상 존재).
+ *
+ * 환불 단위액은 그룹의 최소 차감액이다. 수치가 런타임 정책값이 된 뒤로(KNK-1056) 한 그룹에 여러 단가가 섞일 수
+ * 있는데, 그때는 최소액으로 보수 편향해 초과 환불을 막는 대신 회원이 차액만큼 미보상된다. 계산은 그대로 두고
+ * 그 상황을 `credit_reconciliation_mixed_unit_amount` warn 이벤트로 관측 가능하게만 만들었다(근거는 [StuckChargeGroup]).
  */
 @Service
 class CreditReconciliationService(
@@ -59,6 +63,20 @@ class CreditReconciliationService(
                 // 있어야 할 총 환불 수 = charge − 완료. 음수(완료 과다)면 발행하지 않는다(fail-safe).
                 val targetRefundCount = group.chargeCount - completed
                 if (targetRefundCount <= 0) continue
+                // 혼합 단가 탐지(KNK-1056): 정책 오버라이드가 채팅/세션 수명 도중 바뀌면 그룹 안에 서로 다른
+                // 차감액이 섞인다. 환불은 계속 최소액으로(초과 환불 금지) 내되, 그때 회원이 단가 차액만큼
+                // 덜 받는다는 사실이 조용히 지나가지 않도록 남긴다. 계산은 바꾸지 않는다 — 관측만 추가한다.
+                if (group.unitAmount != group.maxUnitAmount) {
+                    structuredLogger.warn(
+                        "credit_reconciliation_mixed_unit_amount",
+                        "user_id" to group.userId,
+                        "ref_type" to group.refType,
+                        "ref_id" to group.refId,
+                        "min_unit_amount" to group.unitAmount,
+                        "max_unit_amount" to group.maxUnitAmount,
+                        "target_refund_count" to targetRefundCount,
+                    )
+                }
                 refundsEmitted += creditWalletService.reconcileRefunds(
                     userId = group.userId,
                     refType = group.refType,

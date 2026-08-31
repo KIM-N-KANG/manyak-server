@@ -6,8 +6,12 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
@@ -66,6 +70,16 @@ class ChatTurnCreditIntegrationTests {
     @Autowired
     private lateinit var meterRegistry: MeterRegistry
 
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    @Autowired private lateinit var creditPolicyRepository: CreditPolicyRepository
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+    // 여러 턴을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = chatTurnCost * 10
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
@@ -75,7 +89,7 @@ class ChatTurnCreditIntegrationTests {
     fun `정지된 회원은 채팅 턴 진행이 403이고 크레딧이 차감되지 않는다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
-        creditWalletService.reward(suspended.id, 100, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
+        creditWalletService.reward(suspended.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = suspended.id))
 
         restTestClient.post()
@@ -87,41 +101,60 @@ class ChatTurnCreditIntegrationTests {
             .exchange()
             .expectStatus().isForbidden
 
-        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(100)
+        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(seedBalance)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
     @Test
-    fun `회원이 충분한 잔액으로 이어쓰면 턴이 진행되고 CHAT_TURN 10이 차감된다`() {
+    fun `회원이 충분한 잔액으로 이어쓰면 턴이 진행되고 CHAT_TURN 1턴분이 차감된다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("차감회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         val body = streamAsMember(chat.publicId.toString(), member, "마법수정에 손을 올린다.")
 
         // 턴 정상 진행: completed 이벤트 도달
         assertThat(body).contains("completed")
-        // 잔액 10 차감(100 → 90)
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
+        // 1턴분 차감
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance - chatTurnCost)
         // CHAT_TURN 소모 원장 1건: 음수 amount, CHAT 참조
         val consumption = transactionRepository.findAll().first { it.reason == CreditReason.CHAT_TURN }
-        assertThat(consumption.amount).isEqualTo(-10)
+        assertThat(consumption.amount).isEqualTo(-chatTurnCost)
         assertThat(consumption.refType).isEqualTo("CHAT")
         assertThat(consumption.refId).isEqualTo(chat.id)
+    }
+
+    @Test
+    fun `chat_turn_cost 오버라이드가 실제 차감액에 반영된다`() {
+        // KNK-1056. 기대값과 시드를 같은 정책 서비스에서 읽는 다른 테스트들은 소비자가 수치를 하드코딩해도
+        // 통과한다. 여기서만 **리터럴 기대값**을 쓴다 — 오버라이드가 ChatService 까지 도달하는지 보는 게 목적이다.
+        // (테스트 프로파일은 policy-cache-ttl=PT0S 라 저장 즉시 다음 조회에 반영된다.)
+        creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 37))
+        val story = storyRepository.save(Story(title = "오버라이드 스토리", genre = "판타지"))
+        val member = saveUser("오버라이드회원")
+        creditWalletService.reward(member.id, 500, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
+
+        val body = streamAsMember(chat.publicId.toString(), member, "오버라이드 턴을 이어쓴다.")
+
+        assertThat(body).contains("completed")
+        val consumption = transactionRepository.findAll().first { it.reason == CreditReason.CHAT_TURN }
+        assertThat(consumption.amount).isEqualTo(-37)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(500 - 37)
     }
 
     @Test
     fun `정상 완료된 턴은 환불되지 않는다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("완료회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         streamAsMember(chat.publicId.toString(), member, "앞으로 나선다.")
 
-        // 정상 완료: CHAT_TURN 1건만 있고 REFUND 행은 없다. 잔액은 90으로 유지된다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
+        // 정상 완료: CHAT_TURN 1건만 있고 REFUND 행은 없다. 잔액은 1턴분만 빠진 채 유지된다.
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance - chatTurnCost)
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.REFUND }).isTrue()
     }
@@ -135,7 +168,7 @@ class ChatTurnCreditIntegrationTests {
     fun `턴이 저장까지 끝나면 chat_turn_result의 success를 올리고 failure·rejected는 올리지 않는다`() {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("성공지표회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
         // @SpringBootTest 컨텍스트는 클래스 간 캐시 공유라 카운터가 누적된다. 절대값이 아니라 증가분을 본다.
         val beforeSuccess = chatTurnResultCount("success")
@@ -185,14 +218,14 @@ class ChatTurnCreditIntegrationTests {
         // 체험 잔여가 있는 신규 회원은 직접 생성해 체험 우선 소진을 검증한다.
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = userRepository.save(User(nickname = "체험회원", status = UserStatus.ACTIVE))
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
 
         val body = streamAsMember(chat.publicId.toString(), member, "체험으로 진행한다.")
 
         assertThat(body).contains("completed")
         // 크레딧은 차감되지 않고(잔액 유지), CHAT_TURN 소모 원장도 남지 않는다(체험 잔여로 무료 처리).
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(100)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
@@ -252,7 +285,7 @@ class ChatTurnCreditIntegrationTests {
         // 우회 차단(스펙 §4-5): owned 채팅에 토큰을 빼고(게스트로 위장) 이어써 무료 턴을 얻으려는 시도를 막는다.
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val owner = saveUser("소유회원")
-        creditWalletService.reward(owner.id, 10, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        creditWalletService.reward(owner.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
 
         restTestClient.post()
@@ -267,7 +300,7 @@ class ChatTurnCreditIntegrationTests {
         // 스트림이 열리지 않아 턴이 저장되지 않고, 소유자 지갑도 차감되지 않는다.
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloaded.currentTurn).isZero()
-        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(10)
+        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(chatTurnCost)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
@@ -276,8 +309,8 @@ class ChatTurnCreditIntegrationTests {
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val owner = saveUser("소유자A")
         val intruder = saveUser("침입자B")
-        creditWalletService.reward(owner.id, 10, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
-        creditWalletService.reward(intruder.id, 10, CreditReason.SIGNUP_REWARD, "signup:${intruder.id}")
+        creditWalletService.reward(owner.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        creditWalletService.reward(intruder.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${intruder.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = owner.id))
 
         restTestClient.post()
@@ -292,8 +325,8 @@ class ChatTurnCreditIntegrationTests {
         // 소유자·침입자 어느 쪽도 차감되지 않고 턴도 저장되지 않는다.
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloaded.currentTurn).isZero()
-        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(10)
-        assertThat(creditWalletService.balanceOf(intruder.id)).isEqualTo(10)
+        assertThat(creditWalletService.balanceOf(owner.id)).isEqualTo(chatTurnCost)
+        assertThat(creditWalletService.balanceOf(intruder.id)).isEqualTo(chatTurnCost)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
@@ -302,7 +335,7 @@ class ChatTurnCreditIntegrationTests {
         // 교차 접근 차단(§4-5, KNK-480): 인증 회원은 게스트가 만든 NULL 소유 채팅에 이어쓸 수 없다(이관 후 접근).
         val story = storyRepository.save(Story(title = "크레딧 스토리", genre = "판타지"))
         val member = saveUser("회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val guestChat = storyChatRepository.save(StoryChat(storyId = story.id))
 
         restTestClient.post()
@@ -316,7 +349,7 @@ class ChatTurnCreditIntegrationTests {
 
         val reloaded = storyChatRepository.findById(guestChat.id).orElseThrow()
         assertThat(reloaded.currentTurn).isZero()
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(100)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance)
     }
 
     @Autowired

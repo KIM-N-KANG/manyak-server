@@ -2,6 +2,8 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.error.ApiErrorCodes
@@ -85,7 +87,6 @@ import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -131,9 +132,8 @@ class SimpleStoryCreationService(
     private val storyCreationRequestRepository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
     private val deviceIdHasher: DeviceIdHasher,
-    // 간편 제작 1회 소모 크레딧(스펙 §4-3-7, KNK-477 확정: 20).
-    @param:Value("\${manyak.credit.story-creation-cost:20}")
-    private val storyCreationCost: Long,
+    // 간편 제작 1회 소모 크레딧. 운영 중 조정 가능한 정책값이라 요청마다 해석한다(KNK-1056).
+    private val creditPolicyService: CreditPolicyService,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -814,6 +814,9 @@ class SimpleStoryCreationService(
         // 세션 단위 고정 키를 쓰면 두 번째 환불이 첫 환불 키와 충돌해 미적립(rewarded=false)되어 크레딧이 유실된다(Codex P1).
         // 시도별 키면 각 시도의 차감·환불이 독립적으로 짝지어져 재시도에도 유실이 없다.
         val chargeAttemptId = UUID.randomUUID().toString()
+        // 소모 정책값은 이 요청 안에서 한 번만 읽어 차감·환불에 같은 값을 쓴다(KNK-1056). 차감과 환불 사이에
+        // 정책이 바뀌면 금액이 어긋나 사용자가 손해를 보거나 이득을 본다(환불은 원장 행이 아니라 이 값을 쓴다).
+        val storyCreationCost = creditPolicyService.amountOf(CreditPolicyKey.STORY_CREATION_COST)
         val guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(
             attributedUserId,
             deviceId,
@@ -823,7 +826,7 @@ class SimpleStoryCreationService(
         val memberTrialCovered = attributedUserId != null &&
             guestTrialLimitService.reserveMember(attributedUserId, GuestTrialLimitService.Counter.STORY_CREATION)
         if (attributedUserId != null && !memberTrialCovered) {
-            chargeStoryCreation(attributedUserId, refId = session.id)
+            chargeStoryCreation(attributedUserId, refId = session.id, amount = storyCreationCost)
         }
 
         return runWithRefundOnFailure(
@@ -832,6 +835,7 @@ class SimpleStoryCreationService(
             memberTrialCovered = memberTrialCovered,
             refId = session.id,
             chargeAttemptId = chargeAttemptId,
+            amount = storyCreationCost,
         ) {
             compileAndPersist(
                 session,
@@ -927,11 +931,11 @@ class SimpleStoryCreationService(
     }
 
     /** 회원 선차감. 잔액 부족([InsufficientCreditException])은 동기 402로 변환한다. */
-    private fun chargeStoryCreation(userId: Long, refId: Long) {
+    private fun chargeStoryCreation(userId: Long, refId: Long, amount: Long) {
         try {
             creditWalletService.deduct(
                 userId = userId,
-                amount = storyCreationCost,
+                amount = amount,
                 reason = CreditReason.STORY_CREATION,
                 refType = STORY_CREDIT_REF_TYPE,
                 refId = refId,
@@ -961,6 +965,8 @@ class SimpleStoryCreationService(
         memberTrialCovered: Boolean,
         refId: Long,
         chargeAttemptId: String,
+        // 차감 때 쓴 금액. 환불은 반드시 같은 값이어야 한다(KNK-1056).
+        amount: Long,
         block: () -> T,
     ): T {
         try {
@@ -970,17 +976,17 @@ class SimpleStoryCreationService(
                 // 체험 잔여로 무료 처리됐으면 크레딧 환불이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
                 userId?.let { guestTrialLimitService.restoreMember(it, GuestTrialLimitService.Counter.STORY_CREATION) }
             } else {
-                userId?.let { refundStoryCreation(it, refId, chargeAttemptId) }
+                userId?.let { refundStoryCreation(it, refId, chargeAttemptId, amount) }
             }
             guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORY_CREATION) }
             throw throwable
         }
     }
 
-    private fun refundStoryCreation(userId: Long, refId: Long, chargeAttemptId: String) {
+    private fun refundStoryCreation(userId: Long, refId: Long, chargeAttemptId: String, amount: Long) {
         creditWalletService.reward(
             userId = userId,
-            amount = storyCreationCost,
+            amount = amount,
             reason = CreditReason.REFUND,
             idempotencyKey = "refund:story:$chargeAttemptId",
             refType = STORY_CREDIT_REF_TYPE,

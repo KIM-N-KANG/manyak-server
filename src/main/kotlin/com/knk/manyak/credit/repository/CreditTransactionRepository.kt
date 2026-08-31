@@ -65,13 +65,14 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
      * 지금 대사하면 진행 중 턴을 성급히 환불할 수 있다. 그룹의 마지막 charge가 [cutoff] 이전이면 그 그룹의 모든
      * 차감은 이미 완료·환불·유실 중 하나로 확정됐으므로(정지 상태) 개수 대조가 정확하다.
      *
-     * 환불 단위액은 `MIN(ABS(amount))`이다 — 균일 단가에선 실제 단가라 정확하고, 혼합 단가(드묾)에선 서버가
-     * 초과 환불하지 않도록 의도적으로 보수 편향한다(근거는 [StuckChargeGroup] 참고).
+     * 환불 단위액은 `MIN(ABS(amount))`이다 — 균일 단가에선 실제 단가라 정확하고, 혼합 단가에선 서버가
+     * 초과 환불하지 않도록 의도적으로 보수 편향한다(근거는 [StuckChargeGroup] 참고). `MAX(ABS(amount))`도 함께
+     * 뽑는 이유는 그 편향이 실제로 발동한 그룹을 대사 쪽에서 탐지해 로그로 남기기 위해서다(KNK-1056).
      */
     @Query(
         """
         SELECT new com.knk.manyak.credit.repository.StuckChargeGroup(
-            t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)))
+            t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)), MAX(ABS(t.amount)))
         FROM CreditTransaction t
         WHERE t.reason IN :reasons AND t.refType IS NOT NULL AND t.refId IS NOT NULL
         GROUP BY t.userId, t.refType, t.refId

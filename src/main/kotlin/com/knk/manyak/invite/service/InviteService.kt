@@ -4,6 +4,8 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.credit.service.RewardOutcome
@@ -12,7 +14,6 @@ import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.invite.dto.InviteRedeemResponse
 import com.knk.manyak.invite.dto.InviteResponse
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -30,14 +31,13 @@ import java.time.ZoneId
  *   KST 월 상한(기본 10회)은 초대자 몫에만 적용해 넘으면 초대자 적립만 조용히 건너뛴다(오류 아님 — KNK-581).
  *   제출자 몫은 평생 1회 자격이 유일한 제한이라 월 상한 판정·집계 대상이 아니다.
  *
- * 지급량·월 상한은 KNK-477로 확정됐다(설정[manyak.credit.invite-reward]·[manyak.credit.invite-monthly-cap]).
+ * 지급량·월 상한은 운영 중 조정 가능한 정책값이다(KNK-1056 — yml 기본값 + credit_policies 오버라이드).
  */
 @Service
 class InviteService(
     private val userRepository: UserRepository,
     private val creditWalletService: CreditWalletService,
-    @param:Value("\${manyak.credit.invite-reward:500}") private val inviteReward: Long,
-    @param:Value("\${manyak.credit.invite-monthly-cap:10}") private val inviteMonthlyCap: Long,
+    private val creditPolicyService: CreditPolicyService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
@@ -69,7 +69,7 @@ class InviteService(
         return InviteResponse(
             inviteCode = code,
             monthlyRewardCount = monthlyRewardCount,
-            monthlyRewardLimit = inviteMonthlyCap,
+            monthlyRewardLimit = creditPolicyService.amountOf(CreditPolicyKey.INVITE_MONTHLY_CAP),
         )
     }
 
@@ -140,6 +140,10 @@ class InviteService(
         }
         // 관계 저장(평생 1회 소진)과 양측 적립을 같은 트랜잭션에서 커밋한다. 적립 실패 시 관계도 함께 롤백된다.
         redeemer.inviterUserId = inviter.id
+        // 정책값은 이 요청 안에서 한 번만 읽어 재사용한다(KNK-1056). 초대자·제출자 적립 사이에 값이 바뀌면
+        // 같은 초대 한 건에서 양쪽 지급액이 어긋나고, 상한 판정과 응답 amount도 서로 다른 기준을 보게 된다.
+        val inviteReward = creditPolicyService.amountOf(CreditPolicyKey.INVITE_REWARD)
+        val inviteMonthlyCap = creditPolicyService.amountOf(CreditPolicyKey.INVITE_MONTHLY_CAP)
         val (monthStart, monthEnd) = kstMonthRangeOf(clock.instant())
         // 초대자 몫: 초대자 역할 수령분(멱등 키 접두·접미로 식별)만 세는 월 상한 안에서 적립한다(KNK-581). 멱등(쌍당 1회)과
         // 월 상한 판정은 모두 지갑 행 락 안에서 수행돼(카운트·insert가 같은 락 구간), 동시 적립이 경계에서 상한을 넘기지 못한다.

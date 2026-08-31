@@ -15,6 +15,8 @@ import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StorySetting
@@ -83,6 +85,14 @@ class ChatRegenerateControllerIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+    // 여러 턴을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = chatTurnCost * 10
 
     @BeforeEach
     fun setUp() {
@@ -257,7 +267,7 @@ class ChatRegenerateControllerIntegrationTests {
     fun `정지된 회원은 재생성이 403이고 크레딧이 차감되지 않는다`() {
         val story = seedStory()
         val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
-        creditWalletService.reward(suspended.id, 100, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
+        creditWalletService.reward(suspended.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${suspended.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = suspended.id, currentTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
@@ -271,7 +281,7 @@ class ChatRegenerateControllerIntegrationTests {
             .exchange()
             .expectStatus().isForbidden
 
-        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(100)
+        assertThat(creditWalletService.balanceOf(suspended.id)).isEqualTo(seedBalance)
         assertThat(transactionRepository.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
     }
 
@@ -279,7 +289,7 @@ class ChatRegenerateControllerIntegrationTests {
     fun `회원 소유 채팅 재생성은 1턴분을 선차감하고 성공 시 환불하지 않는다`() {
         val story = seedStory()
         val member = saveUser("재생성회원")
-        creditWalletService.reward(member.id, 100, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, currentTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
@@ -299,7 +309,7 @@ class ChatRegenerateControllerIntegrationTests {
 
         assertThat(body).contains("completed")
         // 성공 저장이므로 CHAT_TURN(-10)만 남고 REFUND는 없다 → 순잔액 90.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(90)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(seedBalance - chatTurnCost)
         val all = transactionRepository.findAll()
         assertThat(all.count { it.reason == CreditReason.CHAT_TURN }).isEqualTo(1)
         assertThat(all.count { it.reason == CreditReason.REFUND }).isZero()
@@ -309,7 +319,7 @@ class ChatRegenerateControllerIntegrationTests {
     fun `낡은 turnId 재생성은 선차감 전에 거절되어 크레딧을 소모하지 않는다`() {
         val story = seedStory()
         val member = saveUser("무차감회원")
-        creditWalletService.reward(member.id, 10, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        creditWalletService.reward(member.id, chatTurnCost, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, currentTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2))
@@ -324,7 +334,7 @@ class ChatRegenerateControllerIntegrationTests {
             .expectStatus().isEqualTo(409)
 
         // 검증(409)은 선차감 전이므로 잔액·원장 모두 그대로다.
-        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(10)
+        assertThat(creditWalletService.balanceOf(member.id)).isEqualTo(chatTurnCost)
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.CHAT_TURN }).isZero()
     }
 
