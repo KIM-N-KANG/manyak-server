@@ -237,7 +237,12 @@ class ChatService(
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
-                reachedEndings = chat.reachedEndingId?.let { id -> endingNameById[id]?.let(::listOf) }.orEmpty(),
+                // 엔딩 이름도 같은 규칙이다(KNK-1059). 다만 "내가 도달한 결말"이라 게이트로 비우지 않고
+                // 스냅샷으로 폴백한다 — 비우면 사용자가 실제로 도달한 엔딩이 서재에서 사라진다.
+                reachedEndings = chat.reachedEndingId
+                    ?.let { id -> if (showsCurrent) endingNameById[id] else chat.reachedEndingNameSnapshot }
+                    ?.let(::listOf)
+                    .orEmpty(),
                 updatedAt = chat.updatedAt,
             )
         }
@@ -300,7 +305,7 @@ class ChatService(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
-                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -339,6 +344,26 @@ class ChatService(
             turnCount = share.turnCutoff,
             createdAt = share.createdAt,
         )
+    }
+
+    /**
+     * 턴에 실을 도달 엔딩 이름(KNK-1059). 스토리를 읽을 수 있으면 현재 이름, 아니면 채팅 스냅샷이다.
+     *
+     * 스냅샷은 채팅당 하나(최초 도달)뿐이라 **턴의 엔딩이 그 도달과 같을 때만** 쓴다. 도달은
+     * [ChatTurnPersister]가 `chat.reachedEndingId != null`이면 더 인정하지 않으므로 실제로는 어긋날 수 없지만,
+     * 어긋난 데이터를 만나면 남의 현재 엔딩 이름을 흘리거나 엉뚱한 스냅샷을 붙이는 대신 null로 둔다.
+     */
+    private fun reachedEndingNameOf(
+        chat: StoryChat,
+        turnEndingId: Long?,
+        showsCurrentStory: Boolean,
+        endingNameById: Map<Long, String>,
+    ): String? {
+        val endingId = turnEndingId ?: return null
+        if (showsCurrentStory) {
+            return endingNameById[endingId]
+        }
+        return if (endingId == chat.reachedEndingId) chat.reachedEndingNameSnapshot else null
     }
 
     /**
@@ -382,7 +407,7 @@ class ChatService(
                 ChatShareTurnResponse(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
-                    reachedEnding = assistant.reachedEndingId?.let { endingNameById[it] },
+                    reachedEnding = reachedEndingNameOf(chat, assistant.reachedEndingId, showsCurrentStory, endingNameById),
                     createdAt = assistant.createdAt,
                 )
             },

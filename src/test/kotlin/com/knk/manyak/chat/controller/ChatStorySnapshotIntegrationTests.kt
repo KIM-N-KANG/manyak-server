@@ -8,17 +8,22 @@ import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
+import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -56,6 +61,8 @@ class ChatStorySnapshotIntegrationTests {
     @Autowired private lateinit var startSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var suggestedInputRepository: StorySuggestedInputRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
+    @Autowired private lateinit var messageRepository: StoryMessageRepository
+    @Autowired private lateinit var endingRepository: StoryEndingRepository
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -83,6 +90,55 @@ class ChatStorySnapshotIntegrationTests {
             StoryStartSetting(story = story, name = "시작 장면", prologue = "원래 프롤로그"),
         )
         return story
+    }
+
+    /**
+     * 엔딩에 도달한 상태를 만든다. 실제 도달(AI 판정 → ChatTurnPersister)은
+     * [com.knk.manyak.chat.controller.ChatTurnEndingMainEventIntegrationTests]가 실 경로로 덮으므로,
+     * 여기서는 읽기 규칙만 보려고 도달 결과를 직접 심는다.
+     */
+    private fun reachEnding(story: Story, chat: StoryChat, endingName: String): StoryEnding {
+        val setting = startSettingRepository.findAll().first { it.story.id == story.id }
+        val ending = endingRepository.save(
+            StoryEnding(
+                startSetting = setting,
+                name = endingName,
+                minTurns = 1,
+                achievementCondition = "조건",
+                epilogue = "에필로그",
+                sortOrder = 1,
+            ),
+        )
+        // 턴 1건(USER + 도달 표식이 붙은 ASSISTANT). 상세·공유의 turns[]가 이 메시지를 읽는다.
+        messageRepository.save(
+            StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "마지막 일격", messageOrder = 1),
+        )
+        messageRepository.save(
+            StoryMessage(
+                chatId = chat.id,
+                role = MessageRole.ASSISTANT,
+                content = "이야기가 끝났다.",
+                messageOrder = 2,
+                reachedEndingId = ending.id,
+            ),
+        )
+        val loaded = storyChatRepository.findById(chat.id).orElseThrow()
+        loaded.currentTurn = 1
+        loaded.reachedEndingId = ending.id
+        loaded.reachedEndingNameSnapshot = ending.name
+        storyChatRepository.save(loaded)
+        return ending
+    }
+
+    /**
+     * 소유자가 엔딩 이름을 바꾼다.
+     *
+     * `StoryEnding.name`은 `val`이고 수정 API의 `endings[]`는 전체 교체라 행이 새로 생긴다(채팅이 참조하던
+     * `reached_ending_id`가 끊어진다). 응답이 엔딩 행이 아니라 채팅 스냅샷을 읽는지 가리는 게 목적이므로
+     * 컬럼을 직접 갱신해 "엔딩 쪽 값만 달라진 상태"를 만든다.
+     */
+    private fun renameEnding(ending: StoryEnding, name: String) {
+        jdbcTemplate.update("UPDATE story_endings SET name = ? WHERE id = ?", name, ending.id)
     }
 
     /** 시작 설정에 추천 입력을 심는다. `inputText`가 그대로 상세 응답에 실린다. */
@@ -207,6 +263,24 @@ class ChatStorySnapshotIntegrationTests {
             .expectStatus().isOk
             .expectBody(ChatShareResponse::class.java)
             .returnResult().responseBody!!.storyTitle
+
+    private fun detailReachedEndings(chat: StoryChat, user: User): List<String?> =
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", token(user))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!.turns.map { it.reachedEnding }
+
+    private fun shareReachedEndings(shareId: String, viewer: User? = null): List<String?> =
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .headers { headers -> viewer?.let { headers.set("Authorization", token(it)) } }
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatShareResponse::class.java)
+            .returnResult().responseBody!!.turns.map { it.reachedEnding }
 
     private fun detailSuggestedInputs(chat: StoryChat, user: User): List<String> =
         restTestClient.get()
@@ -569,5 +643,80 @@ class ChatStorySnapshotIntegrationTests {
         val chat = createChat(story, reader)
 
         assertThat(detailSuggestedInputs(chat, reader)).containsExactly("원래 추천 입력")
+    }
+
+
+    // ---- 도달 엔딩 이름 ----
+
+    @Test
+    fun `비공개로 되돌리고 엔딩 이름을 바꿔도 서재는 스냅샷 이름을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        hideAndRename(story, "바뀐 제목")
+        renameEnding(ending, "바뀐 엔딩")
+
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `비공개로 되돌리고 엔딩 이름을 바꿔도 채팅 상세는 스냅샷 이름을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        hideAndRename(story, "바뀐 제목")
+        renameEnding(ending, "바뀐 엔딩")
+
+        assertThat(detailReachedEndings(chat, reader)).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `비공개로 되돌리고 엔딩 이름을 바꾸면 공유 열람은 스냅샷 이름을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+        renameEnding(ending, "바뀐 엔딩")
+
+        // 무인증 링크로 새면 안 된다.
+        assertThat(shareReachedEndings(shareId)).containsExactly("원래 엔딩")
+        // 스토리 소유자가 열면 현재 이름을 본다.
+        assertThat(shareReachedEndings(shareId, viewer = owner)).containsExactly("바뀐 엔딩")
+    }
+
+    @Test
+    fun `공개 스토리면 엔딩 이름은 현재 값을 따라간다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        renameEnding(ending, "바뀐 엔딩")
+
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("바뀐 엔딩")
+        assertThat(detailReachedEndings(chat, reader)).containsExactly("바뀐 엔딩")
+    }
+
+    @Test
+    fun `엔딩에 도달하지 않은 채팅은 그대로 비어 있다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(libraryCard(reader).reachedEndings).isEmpty()
     }
 }

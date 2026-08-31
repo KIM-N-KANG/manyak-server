@@ -10,6 +10,11 @@ ALTER TABLE story_chats ADD COLUMN story_thumbnail_key_snapshot VARCHAR(64);
 -- 비공개로 되돌린 스토리의 도입부가 링크만 가진 누구에게나 보였다.
 -- 원본과 타입을 맞춘다: story_start_settings.prologue TEXT(nullable).
 ALTER TABLE story_chats ADD COLUMN story_prologue_snapshot TEXT;
+-- 도달 엔딩 이름도 같은 이유로 박는다. 다만 이건 "내가 도달한 결말"이라 게이트로 비우지 않고 스냅샷으로
+-- 폴백한다 — 비우면 사용자가 실제로 도달한 엔딩이 서재에서 사라진다.
+-- 도달 엔딩은 채팅당 최초 1회뿐이라(reached_ending_id) 컬럼 하나로 서재·상세·공유를 모두 덮는다.
+-- 원본과 타입을 맞춘다: story_endings.name varchar(100).
+ALTER TABLE story_chats ADD COLUMN reached_ending_name_snapshot VARCHAR(100);
 
 -- 기존 행 백필. 과거 시점 값은 복원할 수 없으니 현재 값이 최선치다. 게스트 소유(user_id IS NULL) 행도 채운다.
 UPDATE story_chats sc
@@ -25,5 +30,11 @@ UPDATE story_chats sc
 SET story_prologue_snapshot = ss.prologue
 FROM story_start_settings ss
 WHERE sc.start_setting_id = ss.id;
+
+-- 도달 엔딩 이름은 reached_ending_id로 조인해 채운다. 미도달 채팅(reached_ending_id IS NULL)은 그대로 NULL이다.
+UPDATE story_chats sc
+SET reached_ending_name_snapshot = se.name
+FROM story_endings se
+WHERE sc.reached_ending_id = se.id;
 
 -- FK는 걸지 않는다: 스냅샷은 스토리가 바뀌거나 사라져도 남아야 하는 값이라 참조 무결성 대상이 아니다.

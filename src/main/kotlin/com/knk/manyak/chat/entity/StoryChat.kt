@@ -86,6 +86,12 @@ class StoryChat(
     @Column(name = "reached_ending_id")
     var reachedEndingId: Long? = null,
 
+    // 도달 시점의 엔딩 이름 스냅샷(KNK-1059). 제목·프롤로그와 달리 채팅 생성 시점에는 정해지지 않아
+    // [reachedEndingId]를 박는 그 자리에서 함께 기록한다. 채팅당 도달 엔딩은 최초 1회뿐이라 컬럼 하나로
+    // 서재·상세·공유 세 경로를 모두 덮는다. 원본과 타입을 맞춘다(story_endings.name varchar(100)).
+    @Column(name = "reached_ending_name_snapshot", length = 100)
+    var reachedEndingNameSnapshot: String? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: ChatStatus = ChatStatus.ACTIVE,

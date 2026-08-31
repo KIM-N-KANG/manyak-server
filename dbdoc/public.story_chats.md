@@ -24,6 +24,7 @@
 | story_title_snapshot | varchar(100) |  | true |  |  |  |
 | story_thumbnail_key_snapshot | varchar(64) |  | true |  |  |  |
 | story_prologue_snapshot | text |  | true |  |  |  |
+| reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
 
 ## Constraints
 
@@ -83,6 +84,7 @@ erDiagram
   varchar_100_ story_title_snapshot
   varchar_64_ story_thumbnail_key_snapshot
   text story_prologue_snapshot
+  varchar_100_ reached_ending_name_snapshot
 }
 "public.story_messages" {
   bigint id
