@@ -399,6 +399,32 @@ class ChatStorySnapshotIntegrationTests {
         assertThat(libraryCard(owner).storyTitle).isEqualTo("바뀐 제목")
     }
 
+    /**
+     * KNK-1069: 컴파일이 생성한 표지가 있으면 서재 카드도 그 URL을 쓴다(축소본이 없어 원본 그대로).
+     * 비공개로 되돌리면 스냅샷에 URL이 없으므로 프리셋 표지로 내려앉는다 — 누수가 아니라 화면 열화라 수용한다.
+     */
+    @Test
+    fun `생성 표지가 있으면 서재 카드도 그 URL을 쓰고 비공개 후에는 프리셋으로 떨어진다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "원래 제목",
+                thumbnailImageKey = "thumb_0001",
+                thumbnailImageUrl = "https://cdn.test/thumbnails/generated/s/썸네일_1a2b3c4d.webp",
+            ),
+        )
+        createChat(story, reader)
+
+        assertThat(libraryCard(reader).thumbnailUrlSm)
+            .isEqualTo("https://cdn.test/thumbnails/generated/s/썸네일_1a2b3c4d.webp")
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(libraryCard(reader).thumbnailUrlSm).isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
+    }
+
     @Test
     fun `비공개로 되돌린 뒤 썸네일이 바뀌어도 서재는 스냅샷 썸네일 URL을 준다`() {
         val owner = saveUser("소유자")

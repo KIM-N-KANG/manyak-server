@@ -86,7 +86,8 @@ data class ChatSummaryResponse(
     val storyTitle: String,
 
     @field:Schema(
-        description = "참조 스토리 썸네일의 축소 변형 URL(§4-3-9 반응형 변형). 소스가 없으면 null.",
+        description = "참조 스토리 썸네일의 축소 변형 URL(§4-3-9 반응형 변형). 소스가 없으면 null. " +
+            "생성 표지(KNK-1069)는 현재 값을 보여도 될 때만 원본 URL로 실리고, 그 외에는 스냅샷 프리셋 표지가 실린다.",
         example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
         nullable = true,
     )

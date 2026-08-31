@@ -144,7 +144,8 @@ class StoryService(
 
         return StoryDetailResponse(
             id = story.publicId.toString(),
-            thumbnailUrl = imageUrlResolver.urlFor(story.thumbnailImageKey, ImagePresetType.THUMBNAIL),
+            // 생성 표지가 있으면 그것을, 없으면 프리셋 키로 조합한다(2단 폴백은 리졸버 소유, KNK-1069).
+            thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
@@ -339,8 +340,9 @@ class StoryService(
     ): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
-            // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형).
-            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageKey),
+            // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형). 단 생성 표지는 축소본이
+            // 없어 원본 URL이 그대로 실린다(KNK-1069, 무게는 후속 과제).
+            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageUrl, thumbnailImageKey),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),
