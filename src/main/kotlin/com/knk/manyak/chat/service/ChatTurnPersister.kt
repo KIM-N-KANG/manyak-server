@@ -235,12 +235,13 @@ class ChatTurnPersister(
      * 도달 엔딩과 같은 이유로 **후보 판정은 AI에게 보낸 목록([judgmentSource])에서** 한다(PR #224 Codex P2).
      * 그 뒤 현재 행을 이름으로 찾아 id를 얻는다 — 사건도 스토리 안에서 이름이 유니크한 식별자다(KNK-523).
      *
-     * 현재 행이 없으면(소유자가 이름을 바꿨거나 지웠다) 완결 기록은 **건너뛴다**.
-     * `story_chat_main_events.main_event_id`가 NOT NULL FK라 엔딩처럼 이름만 남길 자리가 없다.
-     * 목표 사건도 같은 이유로 해제된다(진행 0) — 다음 턴에 AI가 다시 지목하면 그때 다시 잡힌다.
+     * **완결은 엔딩과 같은 구조로 남긴다: 라이브 행이 있으면 조인 행 + 이름, 없으면 이름만.**
+     * `story_chat_main_events.main_event_id`는 NOT NULL FK라 라이브 행이 없으면 조인 행을 만들 수 없지만,
+     * [StoryChat.occurredMainEventNamesSnapshot]에는 FK가 없어 이름만으로도 기록이 성립한다.
+     * 정작 이 스냅샷이 필요한 경우가 **행이 사라진 뒤**라, 이름 기록을 라이브 id 분기 안에 두면 반쪽만 고친
+     * 셈이 된다(PR #224 Codex P2 재리뷰).
      *
-     * 기록에 성공한 완결 사건은 이름도 [StoryChat.occurredMainEventNamesSnapshot]에 남긴다. 조인 행 자체가
-     * CASCADE로 사라지는 경우를 대비한 복구 수단이다(PR #224 Codex P2).
+     * 목표 사건은 라이브 id가 없으면 해제된다(진행 0) — 다음 턴에 AI가 다시 지목하면 그때 다시 잡힌다.
      *
      * **목표 사건은 이름을 남기지 않는다**(의도된 선택). 완결 기록은 누적 이력이라 한 번 잃으면 되살아나지
      * 않지만, 목표 사건은 **매 턴 AI 판정으로 다시 정해진다** — 행이 사라져 해제돼도 다음 턴에 AI가 다시
@@ -248,27 +249,33 @@ class ChatTurnPersister(
      * 서버가 보존해야 할 권위값이 아니다. 잃는 것은 한 턴의 연속성뿐이라 컬럼·읽기 경로를 늘릴 값이 없다.
      */
     private fun applyMainEventState(chat: StoryChat, judgment: TurnJudgment, judgmentSource: TurnJudgmentSource) {
-        // 완결 사건 기록(최초 1회 upsert). 같은 채팅에서 같은 사건은 유니크로 한 번만 남는다.
-        judgment.occurredMainEventName?.let { name ->
-            resolveLiveMainEventId(chat, name, judgmentSource)?.let { eventId ->
-                if (!storyChatMainEventRepository.existsByChatIdAndMainEventId(chat.id, eventId)) {
-                    storyChatMainEventRepository.save(
-                        StoryChatMainEvent(chatId = chat.id, mainEventId = eventId),
-                    )
-                }
-                // 이름도 채팅에 남긴다. story_chat_main_events는 main_event_id가 CASCADE FK라 소유자가
-                // 주요 사건을 교체하면 행이 통째로 사라지고, 그러면 "이미 완결했다"는 기록이 없어져
-                // 독자가 이미 지난 사건을 다시 겪는다(PR #224 Codex P2).
+        // 완결 사건 기록(최초 1회 upsert). 이름 스냅샷은 이름으로, 조인 행은 (chat_id, main_event_id)
+        // 유니크로 각각 중복을 막는다.
+        judgment.occurredMainEventName
+            // 후보 판정은 AI에게 보낸 목록이 한다(엔딩과 같은 규칙). 없는 이름은 환각·낡은 값이다.
+            ?.takeIf { name -> judgmentSource.mainEvents.any { it.name == name } }
+            ?.let { name ->
+                // 이름 먼저 남긴다. FK가 없어 라이브 행이 없어도 쓸 수 있고, 이 스냅샷이 정작 필요한 경우가
+                // 소유자가 사건을 교체·삭제해 조인 행을 만들 수 없는 바로 그 상황이다.
                 val kept = chat.occurredMainEventNamesSnapshot.orEmpty()
                 if (name !in kept) {
                     chat.occurredMainEventNamesSnapshot = kept + name
                 }
+                // 조인 행(정본)은 라이브 id가 있을 때만. main_event_id는 NOT NULL FK다.
+                liveMainEventId(chat, name)?.let { eventId ->
+                    if (!storyChatMainEventRepository.existsByChatIdAndMainEventId(chat.id, eventId)) {
+                        storyChatMainEventRepository.save(
+                            StoryChatMainEvent(chatId = chat.id, mainEventId = eventId),
+                        )
+                    }
+                }
             }
-        }
 
         // 목표 사건: AI가 지목하면 그 사건·진행 턴 수로, null이면 목표 해제(진행 0).
+        // 목표는 FK 컬럼 하나뿐이라 라이브 id가 없으면 남길 자리가 없다(이름을 남기지 않는 이유는 위 KDoc).
         val target = judgment.targetMainEvent
-        val targetEventId = target?.let { resolveLiveMainEventId(chat, it.name, judgmentSource) }
+            ?.takeIf { t -> judgmentSource.mainEvents.any { it.name == t.name } }
+        val targetEventId = target?.let { liveMainEventId(chat, it.name) }
         if (target != null && targetEventId != null) {
             chat.targetMainEventId = targetEventId
             chat.targetProgressTurns = target.progressTurns.coerceAtLeast(0)
@@ -278,13 +285,14 @@ class ChatTurnPersister(
         }
     }
 
-    /** AI가 지목한 사건 이름이 **보낸 목록에 있었는지** 확인하고, 현재 행의 id를 이름으로 해소한다. */
-    private fun resolveLiveMainEventId(chat: StoryChat, name: String, judgmentSource: TurnJudgmentSource): Long? {
-        if (judgmentSource.mainEvents.none { it.name == name }) {
-            return null
-        }
-        return storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.id
-    }
+    /**
+     * 사건 이름으로 **현재** 행의 id를 해소한다(FK를 만족시킬 값이 필요할 때만 쓴다).
+     *
+     * 후보 자격 판정과는 별개다 — 자격은 AI에게 보낸 목록이 정하고, 여기는 "지금 그 이름의 행이 있는가"만 본다.
+     * 수정 API의 `mainEvents[]` 전체 교체가 이름을 유지한 채 행만 새로 만들기 때문에 id보다 이름이 잘 살아남는다.
+     */
+    private fun liveMainEventId(chat: StoryChat, name: String): Long? =
+        storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.id
 
     /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계. 게스트는 집계하지 않는다. */
     private fun applyEndingReach(chat: StoryChat, reachedEnding: ReachedEnding?) {

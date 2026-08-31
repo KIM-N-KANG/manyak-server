@@ -455,6 +455,53 @@ class ChatTurnEndingMainEventIntegrationTests {
         assertThat(captured.occurredMainEventNames).containsExactly("새 발단")
     }
 
+    @Test
+    fun `비공개 전환 후 사건 이름이 바뀌어도 새 완결은 이름 스냅샷으로 남고 다음 턴에 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 사건 이름을 통째로 갈았다. AI에게는 스냅샷의 옛 이름('발단'·'절정')이 나간다.
+        // 라이브 행에는 그 이름이 없으므로 조인 행을 만들 수 없다 — 그래도 완결 기록은 남아야 한다.
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        // 조인 행은 못 만든다(main_event_id는 NOT NULL FK인데 '발단' 행이 없다).
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+        // 이름은 남는다. 이 기록이 없으면 독자가 이미 지난 사건을 다시 겪는다.
+        assertThat(updated.occurredMainEventNamesSnapshot).containsExactly("발단")
+
+        // 다음 턴 요청에 완결 목록으로 실린다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.mainEvents.map { it.name }).containsExactly("발단", "절정")
+        assertThat(captured.occurredMainEventNames).containsExactly("발단")
+    }
+
+    @Test
+    fun `같은 사건을 두 번 완결로 보고해도 이름 스냅샷에 한 번만 남는다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        replaceMainEvents("개작 발단", "개작 절정")
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "1턴.")
+        streamGuest(chat.publicId.toString(), "2턴.")
+
+        // 조인 행이 없어 유니크 제약이 막아주지 못하므로 이름 기준 중복 방지가 유일한 가드다.
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().occurredMainEventNamesSnapshot)
+            .containsExactly("발단")
+    }
+
     private fun streamGuest(chatId: String, userInput: String): String =
         stream(chatId, userInput, authorization = null)
 
