@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 
-@Tag(name = "Credits", description = "크레딧 API")
+@Tag(name = "Credits", description = "이프 API")
 @SecurityRequirement(name = "bearerAuth") // 크레딧 API는 인증 필수(스웨거 자물쇠·Authorize 대상). 스킴은 OpenApiConfig.SECURITY_SCHEME_NAME.
 @RestController
 @RequestMapping("/api/v1/users/me")
@@ -33,8 +33,8 @@ class CreditController(
 ) {
 
     @Operation(
-        summary = "크레딧 잔액 조회",
-        description = "요청자의 현재 크레딧 잔액을 반환합니다. 지갑이 없으면 0입니다. 인증 필수입니다.",
+        summary = "이프 잔액 조회",
+        description = "요청자의 현재 이프 잔액을 반환합니다. 지갑이 없으면 0입니다. 인증 필수입니다.",
     )
     @ApiResponses(
         value = [
@@ -61,7 +61,7 @@ class CreditController(
 
     @Operation(
         summary = "출석체크 보상",
-        description = "출석 보상 크레딧을 지급합니다. KST 자정 기준 1일 1회이며, 오늘 이미 받았으면 rewarded=false로 200을 반환합니다(멱등). 인증 필수입니다.",
+        description = "출석 보상 이프를 지급합니다. KST 자정 기준 1일 1회이며, 오늘 이미 받았으면 rewarded=false로 200을 반환합니다(멱등). 인증 필수입니다.",
     )
     @ApiResponses(
         value = [
@@ -92,7 +92,7 @@ class CreditController(
     }
 
     @Operation(
-        summary = "크레딧 이용내역 조회",
+        summary = "이프 이용내역 조회",
         description = """
             요청자의 크레딧 증감 내역을 최신순으로 반환합니다. 인증 필수입니다.
 

@@ -129,7 +129,7 @@ class SimpleStoryCreationController(
             ),
             ApiResponse(
                 responseCode = "402",
-                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. AI 호출 전 동기 응답입니다.",
+                description = "이프 잔액 부족(회원) 또는 게스트 체험 한도 소진. AI 호출 전 동기 응답입니다.",
                 content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(

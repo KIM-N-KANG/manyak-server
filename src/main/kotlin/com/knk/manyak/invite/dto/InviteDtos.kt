@@ -38,11 +38,11 @@ data class InviteRedeemRequest(
 @Schema(description = "초대 코드 입력 결과")
 data class InviteRedeemResponse(
     @field:Schema(
-        description = "이번 입력으로 제출자에게 적립된 크레딧. 제출자가 월 상한에 도달한 상태면 0이다(요청은 성공). " +
+        description = "이번 입력으로 제출자에게 적립된 이프. 제출자가 월 상한에 도달한 상태면 0이다(요청은 성공). " +
             "적립액은 운영 중 조정 가능한 정책값이라 example은 현재 기본값일 뿐 계약이 아니다(KNK-1056).",
         example = "2000",
     )
     val amount: Long,
-    @field:Schema(description = "적립 후 제출자의 크레딧 잔액(만료분 제외).", example = "3000")
+    @field:Schema(description = "적립 후 제출자의 이프 잔액(만료분 제외).", example = "3000")
     val balance: Long,
 )

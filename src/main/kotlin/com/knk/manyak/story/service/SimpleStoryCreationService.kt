@@ -945,7 +945,7 @@ class SimpleStoryCreationService(
             throw CodedResponseStatusException(
                 HttpStatus.PAYMENT_REQUIRED,
                 ApiErrorCodes.INSUFFICIENT_CREDIT,
-                "크레딧이 부족합니다.",
+                "이프가 부족합니다.",
                 exception,
             )
         }

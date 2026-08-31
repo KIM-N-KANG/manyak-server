@@ -266,7 +266,7 @@ class ChatController(
             ),
             ApiResponse(
                 responseCode = "402",
-                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
+                description = "이프 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
                 content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
@@ -310,7 +310,7 @@ class ChatController(
             throw CodedResponseStatusException(
                 HttpStatus.PAYMENT_REQUIRED,
                 ApiErrorCodes.INSUFFICIENT_CREDIT,
-                "크레딧이 부족합니다.",
+                "이프가 부족합니다.",
                 exception,
             )
         }
@@ -392,7 +392,7 @@ class ChatController(
             ),
             ApiResponse(
                 responseCode = "402",
-                description = "크레딧 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
+                description = "이프 잔액 부족(회원) 또는 게스트 체험 한도 소진. SSE를 열기 전 동기 JSON으로 응답합니다.",
                 content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
@@ -435,7 +435,7 @@ class ChatController(
             throw CodedResponseStatusException(
                 HttpStatus.PAYMENT_REQUIRED,
                 ApiErrorCodes.INSUFFICIENT_CREDIT,
-                "크레딧이 부족합니다.",
+                "이프가 부족합니다.",
                 exception,
             )
         }
