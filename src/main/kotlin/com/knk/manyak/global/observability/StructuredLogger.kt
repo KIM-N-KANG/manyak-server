@@ -30,4 +30,16 @@ open class StructuredLogger {
     fun event(eventName: String, vararg fields: Pair<String, Any?>) {
         event(eventName, fields.toMap())
     }
+
+    /** [event]와 같되 WARN으로 남긴다. 조용히 지나가면 안 되는 상태(사후 보정이 부정확할 수 있는 경우 등)에 쓴다. */
+    open fun warn(eventName: String, fields: Map<String, Any?>) {
+        val payload = LinkedHashMap<String, Any?>()
+        payload["event_name"] = eventName
+        payload.putAll(fields)
+        log.warn("{}", StructuredArguments.entries(payload))
+    }
+
+    fun warn(eventName: String, vararg fields: Pair<String, Any?>) {
+        warn(eventName, fields.toMap())
+    }
 }

@@ -122,13 +122,19 @@ manyak:
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   credit:
-    # 적립·소모 정책값(스펙 §4-3-7, KNK-477 확정 · KNK-449). 서비스 @Value 기본값과 같은 수치를 명시해 운영 조정 경로를 남긴다.
-    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:500}
-    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:500}
+    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-08-31 재확정 · KNK-1056). 여기 값은 CreditPolicyService가
+    # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).
+    signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:1000}
+    invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:2000}
     invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
-    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
-    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:20}
-    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:10}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:350}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:200}
+    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
+    policy-refresh:
+      # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이
+      # 반영되기까지의 최대 지연"이다. effective_until 만료는 읽는 시점 판정이라 이 주기와 무관하게 즉시 반영된다.
+      enabled: ${MANYAK_CREDIT_POLICY_REFRESH_ENABLED:true}
+      interval-ms: ${MANYAK_CREDIT_POLICY_REFRESH_INTERVAL_MS:60000}
     reconciliation:
       # 선차감 대사 배치 on/off(스펙 §4-3-7, KNK-448). 유실 환불을 사후 보정한다. 테스트 프로파일은 끈다.
       enabled: ${MANYAK_CREDIT_RECONCILIATION_ENABLED:true}

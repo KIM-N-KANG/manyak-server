@@ -6,7 +6,8 @@
 # 잘못된 예: export MANYAK_AI_BASE_URL=localhost:8000
 
 # [KNK-398·KNK-477] 간편 제작 크레딧·게스트 체험 한도(스펙 §4-3-7):
-#   - 회원(유효 토큰)만 compile 시작 전에 스토리 제작 크레딧 1회분(manyak.credit.story-creation-cost, 기본 20)을 선차감합니다.
+#   - 회원(유효 토큰)만 compile 시작 전에 스토리 제작 크레딧 1회분(manyak.credit.story-creation-cost, 기본 200)을 선차감합니다.
+#     [KNK-1056] 이 수치는 릴리스 없이 credit_policies 의 story_creation_cost 오버라이드로 바꿉니다(절차는 credit/credits.http).
 #   - compile/저장이 실패하면 전액 환불되어 순 잔액은 변하지 않습니다(REFUND 원장 행).
 #   - 잔액이 부족하면 compile 없이 동기 402(PAYMENT_REQUIRED)로 즉시 실패합니다.
 #   - 게스트(토큰 없음/무효 토큰)는 크레딧을 차감하지 않는 대신, 디바이스 ID별 체험 한도 카운터를 씁니다
@@ -15,7 +16,7 @@
 #   - 이 파일의 게스트 요청은 -1번 응답 핸들러가 실행 시각 기반으로 매번 새 deviceId를 발급해 재실행 시
 #     한도 소진으로 실패하지 않게 합니다(10번 섹션은 예외 — 한도 소진을 일부러 재현합니다).
 #   - 402(크레딧) 재현(9번 섹션)에는 로그인 회원 토큰이 필요합니다. auth-login-google.http 5번으로 accessToken을 채우거나
-#     아래 @memberAccessToken에 직접 붙여넣으세요. 잔액은 그 회원 지갑이 비용(기본 20) 미만이어야 402가 납니다
+#     아래 @memberAccessToken에 직접 붙여넣으세요. 잔액은 그 회원 지갑이 비용(기본 200) 미만이어야 402가 납니다
 #     (지갑 적립 정책은 KNK-392 등 별도 티켓 소관이라 이 파일에서는 만들지 않습니다).
 
 # [KNK-631] 백그라운드 생성 복구·멱등(스펙 §4-3-8):
@@ -706,7 +707,7 @@ Accept: application/json
 %}
 
 ### 9-1. [KNK-398] (크레딧) 잔액 부족 회원이 최종 생성하면 402
-# 9번을 먼저 실행하세요. 이 회원 지갑 잔액이 스토리 제작 비용(manyak.credit.story-creation-cost, 기본 20) 미만이면
+# 9번을 먼저 실행하세요. 이 회원 지갑 잔액이 스토리 제작 비용(manyak.credit.story-creation-cost, 기본 200) 미만이면
 # compile 없이 동기 402로 실패합니다. 잔액이 충분하면 이 요청은 대신 201이 되고 비용만큼 차감됩니다(그 경우 402 재현 불가).
 POST {{baseUrl}}/api/v1/stories/simple
 Authorization: Bearer {{memberAccessToken}}

@@ -6,6 +6,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.client.AiResponseMeta
@@ -109,8 +111,14 @@ class SimpleStoryCreationCreditIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
-    // application.yml 기본값(스펙 §4-3-7, KNK-477 확정: 20)이 그대로 적용된다.
-    private val storyCreationCost = 20L
+    @Autowired private lateinit var creditPolicyService: CreditPolicyService
+
+    // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
+    // 오버라이드 행이 없으면 application.yml 기본값이다.
+    private val storyCreationCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.STORY_CREATION_COST)
+
+    // 재시도 2회분 차감을 견디는 충분한 잔액.
+    private val seedBalance: Long get() = storyCreationCost * 5
 
     @BeforeEach
     fun setUp() {
@@ -135,12 +143,12 @@ class SimpleStoryCreationCreditIntegrationTests {
     @Test
     fun `회원이 충분한 잔액으로 간편 제작하면 201과 함께 잔액이 비용만큼 줄고 STORY_CREATION 원장 행이 남는다`() {
         val user = saveUser()
-        creditWalletService.reward(user.id, 100, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
         val storyline = persistStorylineOwnedBy(user.id)
 
         postSimpleStory(storyline, "Bearer ${validToken(user)}").expectStatus().isCreated
 
-        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(100 - storyCreationCost)
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
         val consumption = creditTransactionRepository.findAll()
             .filter { it.reason == CreditReason.STORY_CREATION }
         assertThat(consumption).hasSize(1)
@@ -173,15 +181,15 @@ class SimpleStoryCreationCreditIntegrationTests {
     @Test
     fun `compile이 실패하면 502이고 선차감이 전액 환불되어 순 잔액이 그대로다`() {
         val user = saveUser()
-        creditWalletService.reward(user.id, 100, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
         val storyline = persistStorylineOwnedBy(user.id)
         failCompile = true
 
         postSimpleStory(storyline, "Bearer ${validToken(user)}")
             .expectStatus().isEqualTo(502)
 
-        // 선차감(-10)과 환불(+10)이 모두 원장에 남고 순 잔액은 100 그대로.
-        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(100)
+        // 선차감과 환불이 모두 원장에 남고 순 잔액은 시드 그대로.
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance)
         val all = creditTransactionRepository.findAll()
         val deduct = all.first { it.reason == CreditReason.STORY_CREATION }
         assertThat(deduct.amount).isEqualTo(-storyCreationCost)
@@ -198,7 +206,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         // 환불 멱등 키가 세션 단위면 두 번째 환불이 첫 환불 키와 충돌해 미적립 → 크레딧 유실(Codex P1).
         // 시도별 키면 각 차감이 자기 환불과 짝지어져, 재시도 실패에도 유실이 없다.
         val user = saveUser()
-        creditWalletService.reward(user.id, 100, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
         val storyline = persistStorylineOwnedBy(user.id)
         failCompile = true
 
@@ -207,8 +215,8 @@ class SimpleStoryCreationCreditIntegrationTests {
         // 둘째 시도: 같은 세션으로 재시도 → 또 compile 실패 → 502.
         postSimpleStory(storyline, "Bearer ${validToken(user)}").expectStatus().isEqualTo(502)
 
-        // 두 번 차감(-10, -10)과 두 번 환불(+10, +10)이 모두 원장에 남고 순 잔액은 100 그대로.
-        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(100)
+        // 두 번 차감과 두 번 환불이 모두 원장에 남고 순 잔액은 시드 그대로.
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance)
         val all = creditTransactionRepository.findAll()
         val deducts = all.filter { it.reason == CreditReason.STORY_CREATION }
         assertThat(deducts).hasSize(2)

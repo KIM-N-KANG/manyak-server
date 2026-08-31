@@ -39,6 +39,7 @@
 | [public.story_characters](public.story_characters.md) | 13 |  | BASE TABLE |
 | [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
+| [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -446,6 +447,12 @@ erDiagram
   varchar_20_ reason
   text detail
   timestamp_with_time_zone created_at
+}
+"public.credit_policies" {
+  varchar_50_ policy_key
+  bigint amount
+  timestamp_with_time_zone effective_until
+  timestamp_with_time_zone updated_at
 }
 ```
 

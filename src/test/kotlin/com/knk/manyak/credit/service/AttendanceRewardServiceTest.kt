@@ -2,6 +2,7 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.support.fixedCreditPolicyService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -24,7 +25,7 @@ class AttendanceRewardServiceTest {
 
     // 2026-07-05T16:00Z = KST(+9) 2026-07-06 01:00 → KST 날짜는 07-06(UTC 날짜 07-05와 다른 경계).
     private val clock = Clock.fixed(Instant.parse("2026-07-05T16:00:00Z"), ZoneOffset.UTC)
-    private val service = AttendanceRewardService(creditWalletService, userRepository, attendanceReward = 10, clock = clock)
+    private val service = AttendanceRewardService(creditWalletService, userRepository, fixedCreditPolicyService(attendanceReward = 10), clock)
 
     @BeforeEach
     fun stubRewardIdentity() {

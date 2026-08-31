@@ -22,7 +22,8 @@
 ###   엔딩 도달 후 채팅은 ENDED가 되어 재생성이 409로 막히며(이어쓰기는 계속 가능), 스토리에 주요 사건·엔딩이 저장돼 있어야 판정이 동작합니다.
 ###
 ### [KNK-399·KNK-477] 크레딧 차감·게스트 체험 한도(스펙 §4-3-7)·소유권(스펙 §4-5):
-###   - 회원(유효 access 토큰)만 이어쓰기 1회당 채팅 턴 크레딧을 선차감합니다(기본 10, manyak.credit.chat-turn-cost).
+###   - 회원(유효 access 토큰)만 이어쓰기 1회당 채팅 턴 크레딧을 선차감합니다(기본 20, manyak.credit.chat-turn-cost).
+###     [KNK-1056] 이 수치는 릴리스 없이 credit_policies 의 chat_turn_cost 오버라이드로 바꿉니다(절차는 credit/credits.http).
 ###   - 잔액이 부족하면 SSE를 열기 전에 동기 402(JSON)로 응답합니다(스트림 안 error 이벤트가 아님). 아래 11번 참고.
 ###   - 턴이 completed 없이 끝나면(AI error·연결 끊김·스케줄 거부) 선차감분을 전액 환불합니다(정상 완료 턴은 환불 없음).
 ###   - 소유권: 회원 소유 채팅(생성 시 토큰을 실어 만든 채팅)은 소유자만 이어쓸 수 있습니다. 토큰을 빼거나
@@ -240,8 +241,9 @@ Authorization: Bearer {{accessToken}}
     client.global.set("memberChatId", response.body.id);
 %}
 
-### 10. (해피 패스) 회원이 충분한 잔액으로 이어쓰기 → 200 스트리밍 + 크레딧 10 차감
-# started → token… → completed 로 정상 종료하면 채팅 턴 크레딧 10이 차감됩니다(잔액은 회원 계정 원장에서 확인).
+### 10. (해피 패스) 회원이 충분한 잔액으로 이어쓰기 → 200 스트리밍 + 채팅 턴 1회분 차감(기본 20)
+# started → token… → completed 로 정상 종료하면 채팅 턴 크레딧 20이 차감됩니다(잔액은 회원 계정 원장에서 확인).
+# chat_turn_cost 오버라이드를 걸었다면 그 값만큼입니다.
 POST {{baseUrl}}/api/v1/chats/{{memberChatId}}/turns/stream
 Content-Type: application/json
 Accept: text/event-stream, application/json
