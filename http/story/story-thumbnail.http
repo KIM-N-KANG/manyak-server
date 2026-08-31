@@ -191,3 +191,128 @@ Accept: application/json
 ### 6. (자유 조회) 실제 DB의 스토리 id 를 직접 넣어 눈으로 확인한다. 위 어서션과 무관하다.
 GET {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
 Accept: application/json
+
+### ─────────────────────────────────────────────────────────────────────────────
+### [KNK-1069] 컴파일이 생성한 표지 썸네일(생성 표지 우선, 프리셋 폴백)
+###   - manyak-ai가 컴파일 응답에 thumbnail_image(768x1024 세로 WebP 1장)를 실어 보내면, 서버가 S3에 올리고
+###     stories.thumbnail_image_url(TEXT)에 절대 URL을 굳힌다. 객체 키는 thumbnails/generated/{storyPublicId}/{이름}_{uuid8}.webp.
+###   - 프리셋 자동 연결(thumbnail_image_key)은 생성 성공이어도 그대로 남는다. 생성 URL이 비면(구버전 AI·생성 실패·
+###     일반 제작·기존 스토리) 노출이 자동으로 프리셋으로 떨어진다(2단 폴백은 ImageUrlResolver 한 곳이 소유).
+###   - 생성 표지는 _sm 축소본을 만들지 않는다. 목록·채팅 카드의 thumbnailUrlSm에도 같은 원본 URL이 실린다.
+###
+### 사전 준비(위 1~6번과 별개):
+###   - manyak-ai를 KNK-1047 이후 버전으로 띄우고 MANYAK_AI_BASE_URL을 scheme까지 포함해 주입(http://localhost:8000)
+###   - S3 호환 저장소 설정: MANYAK_CHARACTER_IMAGE_BUCKET · MANYAK_CHARACTER_IMAGE_BASE_URL
+###     (설정 키 이름은 인물 이미지 시절 그대로다 — 표지도 같은 버킷·설정을 쓴다)
+###     둘 중 하나라도 비면 업로드는 no-op이라 thumbnail_image_url 이 null 이고 프리셋 표지가 그대로 보인다(정상 폴백).
+###   - 아래 7~11번은 위에서부터 순서대로 실행한다(7 → 8 → 9 → 10 → 11).
+
+### 7. 간편 제작 태그 조회 → 장르 태그 ID 확보
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+
+> {%
+    client.test("태그 목록 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const genres = (response.body || []).filter((tag) => tag.category === "GENRE");
+    client.test("장르 태그가 최소 1개 있다", () => {
+        client.assert(genres.length > 0, "GENRE 태그가 없습니다. 시드(V57)를 확인하세요.");
+    });
+    client.global.set("genreTagId", genres[0].id);
+    client.global.set("thumbDeviceId", "manual-thumb-" + Date.now());
+%}
+
+### 8. 스토리라인 생성(게스트) → 세션·스토리라인 ID 확보
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{thumbDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": { "name": "아린", "gender": "FEMALE", "features": ["기억상실"] },
+  "supportingCharacters": []
+}
+
+> {%
+    client.test("스토리라인 생성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    client.global.set("thumbCreationId", response.body.simpleCreationId);
+    client.global.set("thumbStorylineId", response.body.storylines[0].id);
+%}
+
+### 9. 스토리 완성 → 컴파일 응답의 표지가 업로드된다(AI 생성이라 30~180초 걸릴 수 있음)
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{thumbDeviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{thumbCreationId}},
+  "storylineId": {{thumbStorylineId}},
+  "additionalInfos": []
+}
+
+> {%
+    client.test("스토리 완성은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+    client.global.set("generatedStoryId", response.body.id);
+%}
+
+### 10. 상세 조회 → thumbnailUrl 이 생성 표지(webp) 또는 프리셋 표지(png) 중 하나다
+GET {{baseUrl}}/api/v1/stories/{{generatedStoryId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+
+    const url = response.body.thumbnailUrl;
+    client.global.set("generatedDetailThumbnailUrl", String(url));
+
+    client.test("thumbnailUrl 은 생성 표지(webp)이거나 프리셋(png)이거나 null 이다", () => {
+        const isGenerated = typeof url === "string" && /\/thumbnails\/generated\/[0-9a-f-]{36}\/.+\.webp$/.test(url);
+        const isPreset = typeof url === "string" && /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url);
+        client.assert(url === null || isGenerated || isPreset, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+    });
+
+    // 어느 경로를 탔는지 눈으로 확인한다. 생성 표지가 아니면 AI 버전 또는 S3 설정을 점검한다.
+    if (typeof url === "string" && url.indexOf("/thumbnails/generated/") >= 0) {
+        client.log("생성 표지가 실렸습니다: " + url);
+    } else {
+        client.log("프리셋 표지로 폴백했습니다(구버전 AI · 생성 실패 · S3 미설정 중 하나). actual=" + JSON.stringify(url));
+    }
+%}
+
+### 11. 목록 항목(batch) 조회 → 생성 표지면 thumbnailUrlSm 이 상세와 **같은 원본 URL** 이다(_sm 파생 없음)
+POST {{baseUrl}}/api/v1/stories/batch
+Content-Type: application/json
+
+{ "storyIds": ["{{generatedStoryId}}"] }
+
+> {%
+    client.test("batch 조회는 200이고 1건이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.length === 1, `1건이 아닙니다. actual=${response.body.length}`);
+    });
+
+    const smUrl = response.body[0].thumbnailUrlSm;
+    const detailUrl = client.global.get("generatedDetailThumbnailUrl");
+
+    client.test("생성 표지면 목록도 같은 원본 URL, 프리셋이면 _sm 파생 URL이다", () => {
+        if (detailUrl === "null") {
+            client.assert(smUrl === null, `상세가 null 인데 목록은 ${JSON.stringify(smUrl)} 입니다.`);
+            return;
+        }
+        const expected = detailUrl.indexOf("/thumbnails/generated/") >= 0
+            ? detailUrl
+            : detailUrl.replace(/\.png$/, "_sm.png");
+        client.assert(smUrl === expected, `기대=${expected} actual=${JSON.stringify(smUrl)}`);
+    });
+%}
