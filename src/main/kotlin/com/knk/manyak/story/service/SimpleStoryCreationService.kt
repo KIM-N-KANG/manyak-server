@@ -23,10 +23,10 @@ import com.knk.manyak.image.service.ImageStageBudget
 import com.knk.manyak.story.client.AiCharacter
 import com.knk.manyak.story.client.AiCharacterAppearance
 import com.knk.manyak.story.client.AiCharacterImage
-import com.knk.manyak.story.client.AiThumbnailImage
 import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
+import com.knk.manyak.story.client.AiThumbnailImage
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
