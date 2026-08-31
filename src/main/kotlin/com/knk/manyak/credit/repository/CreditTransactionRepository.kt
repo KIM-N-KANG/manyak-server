@@ -2,6 +2,7 @@ package com.knk.manyak.credit.repository
 
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -74,4 +75,41 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
         @Param("reasons") reasons: Collection<CreditReason>,
         @Param("cutoff") cutoff: Instant,
     ): List<StuckChargeGroup>
+
+    /**
+     * 이용내역 첫 페이지(KNK-1044). 최신순 `created_at DESC, id DESC`로 [pageable] 크기만큼 가져온다.
+     * [reasons]가 노출 대상 사유를 통제한다(PURCHASE는 호출부가 애초에 넣지 않는다).
+     */
+    @Query(
+        """
+        SELECT t FROM CreditTransaction t
+        WHERE t.userId = :userId AND t.reason IN :reasons
+        ORDER BY t.createdAt DESC, t.id DESC
+        """,
+    )
+    fun findHistoryFirstPage(
+        @Param("userId") userId: Long,
+        @Param("reasons") reasons: Collection<CreditReason>,
+        pageable: Pageable,
+    ): List<CreditTransaction>
+
+    /**
+     * 이용내역 다음 페이지. 커서는 `(createdAt, id)` 복합이다 — 단일 id 커서는 동시 트랜잭션에서 커밋 순서가
+     * `created_at` 순서와 어긋날 수 있어(정렬 키와 커서 키 불일치) 페이지 경계에서 행을 빠뜨릴 수 있다.
+     */
+    @Query(
+        """
+        SELECT t FROM CreditTransaction t
+        WHERE t.userId = :userId AND t.reason IN :reasons
+          AND (t.createdAt < :cursorCreatedAt OR (t.createdAt = :cursorCreatedAt AND t.id < :cursorId))
+        ORDER BY t.createdAt DESC, t.id DESC
+        """,
+    )
+    fun findHistoryAfterCursor(
+        @Param("userId") userId: Long,
+        @Param("reasons") reasons: Collection<CreditReason>,
+        @Param("cursorCreatedAt") cursorCreatedAt: Instant,
+        @Param("cursorId") cursorId: Long,
+        pageable: Pageable,
+    ): List<CreditTransaction>
 }

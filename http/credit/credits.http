@@ -1,4 +1,4 @@
-### 크레딧 잔액 조회 API 수동 검증 — GET /api/v1/users/me/credits
+### 크레딧 API 수동 검증 — 잔액 / 출석체크 / 이용내역
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ###
 ### [KNK-87] 크레딧 잔액 조회:
@@ -81,5 +81,116 @@ Accept: application/json
     // [KNK-477] 출석 보상 확정값: 250.
     client.test("지급됐다면 amount 는 250 이다", () => {
         client.assert(!b.rewarded || b.amount === 250, `rewarded=true 인데 amount 가 250 이 아닙니다. actual=${b.amount}`);
+    });
+%}
+
+### ------------------------------------------------------------------
+### [KNK-1044] 크레딧 이용내역 조회 — GET /api/v1/users/me/credits/transactions
+###   - 최신순(created_at DESC, id DESC) 커서 페이지: 응답은 {items, nextCursor} 객체다(평평한 배열이 아니다).
+###   - type: ALL(기본)·SPEND·EARN·EXPIRE. REFUND 는 EARN, PURCHASE 는 ALL 에서도 제외한다(구매내역 탭 몫).
+###   - limit: 1~100 으로 보정(기본 50). cursor: 이전 응답의 nextCursor 를 그대로 전달.
+###   - nextCursor 는 실제로 다음 페이지가 있을 때만 채워진다(limit+1 판정). 총 건수가 limit 의 배수여도 빈 페이지를 더 부르지 않는다.
+###   - title 은 관련 스토리 제목(보상·소멸 행이거나 삭제된 스토리면 null).
+###   - 소멸(EXPIRE) 행의 createdAt 은 회수가 기록된 시각이라 실제 만료일과 다르다. 날짜는 expiresAt 을 본다.
+###   - 눈으로 확인하려면 그 계정에 증감 이력이 있어야 한다: 위 4번(출석체크)을 한 번 눌러 EARN 행을 만든 뒤 조회.
+### ------------------------------------------------------------------
+
+### 5. (에러) 토큰 없이 이용내역 조회 → 401
+GET {{baseUrl}}/api/v1/users/me/credits/transactions
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 이용내역 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6. (해피 패스) 이용내역 첫 페이지 → 200, {items, nextCursor}
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?limit=2
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("이용내역 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("응답이 {items, nextCursor} 구조다", () => {
+        client.assert(Array.isArray(b.items), `items 가 배열이 아닙니다. actual=${JSON.stringify(b.items)}`);
+        client.assert(b.nextCursor === null || typeof b.nextCursor === "string",
+            `nextCursor 가 문자열이나 null 이 아닙니다. actual=${b.nextCursor}`);
+    });
+    client.test("각 항목이 {type, reason, amount, title, expiresAt, createdAt} 구조다", () => {
+        b.items.forEach((it) => {
+            client.assert(["SPEND", "EARN", "EXPIRE"].includes(it.type), `type 가 3분류가 아닙니다. actual=${it.type}`);
+            client.assert(it.reason !== "PURCHASE", `PURCHASE 는 이용내역에서 제외돼야 합니다. actual=${it.reason}`);
+            client.assert(typeof it.amount === "number", `amount 가 숫자가 아닙니다. actual=${it.amount}`);
+            client.assert(it.title === null || typeof it.title === "string", `title 이 문자열이나 null 이 아닙니다. actual=${it.title}`);
+            client.assert(typeof it.createdAt === "string", `createdAt 이 없습니다. actual=${it.createdAt}`);
+            client.assert(it.type !== "SPEND" || it.expiresAt === null, `소모 행의 expiresAt 은 null 이어야 합니다. actual=${it.expiresAt}`);
+        });
+    });
+    client.test("최신순(createdAt 내림차순)이다", () => {
+        for (let i = 1; i < b.items.length; i++) {
+            client.assert(b.items[i - 1].createdAt >= b.items[i].createdAt,
+                `최신순이 아닙니다. ${b.items[i - 1].createdAt} < ${b.items[i].createdAt}`);
+        }
+    });
+    // 8번(다음 페이지)에서 쓸 쿼리스트링을 통째로 저장한다. nextCursor 가 null 이어도 미치환 변수가 남지 않는다.
+    client.global.set("creditNextPageQuery",
+        b.nextCursor ? `?limit=2&cursor=${encodeURIComponent(b.nextCursor)}` : "?limit=2");
+%}
+
+### 7. (필터) 사용 내역만 → 200, 모든 항목 type=SPEND
+# type 을 EARN / EXPIRE 로 바꿔가며 각 칩을 확인합니다.
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=SPEND
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("필터 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("모든 항목이 SPEND 다", () => {
+        response.body.items.forEach((it) => {
+            client.assert(it.type === "SPEND", `SPEND 가 아닌 항목이 섞였습니다. actual=${it.type}`);
+        });
+    });
+%}
+
+### 8. (페이징) 다음 페이지 — 6번의 nextCursor 를 그대로 사용
+# 6번을 먼저 실행해야 {{creditNextPageQuery}} 가 채워집니다. 원장이 2건 미만이면 커서 없이 첫 페이지를 다시 부릅니다.
+GET {{baseUrl}}/api/v1/users/me/credits/transactions{{creditNextPageQuery}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("다음 페이지 조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("요청한 limit(2)을 넘지 않는다", () => {
+        client.assert(response.body.items.length <= 2, `2건을 넘었습니다. actual=${response.body.items.length}`);
+    });
+%}
+
+### 9. (에러) 잘못된 커서 → 400
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?cursor=not-a-cursor
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("잘못된 커서는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 10. (에러) 지원하지 않는 type → 400
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=GIFT
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("지원하지 않는 type 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
     });
 %}
