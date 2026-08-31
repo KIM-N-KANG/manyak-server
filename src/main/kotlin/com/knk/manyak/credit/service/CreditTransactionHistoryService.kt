@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.util.Base64
 
 /**
  * 크레딧 이용내역 조회(KNK-1044). 원장([CreditTransaction])을 최신순 커서 페이지로 읽어 화면용 DTO로 조립한다.
@@ -34,6 +33,7 @@ class CreditTransactionHistoryService(
     private val storyRepository: StoryRepository,
     private val storyChatRepository: StoryChatRepository,
     private val sessionRepository: StoryCreationSessionRepository,
+    private val cursorCodec: CreditCursorCodec,
 ) {
 
     @Transactional(readOnly = true)
@@ -47,7 +47,7 @@ class CreditTransactionHistoryService(
         val fetched = if (decoded == null) {
             transactionRepository.findHistoryFirstPage(userId, reasons, pageable)
         } else {
-            transactionRepository.findHistoryAfterCursor(userId, reasons, decoded.first, decoded.second, pageable)
+            transactionRepository.findHistoryAfterCursor(userId, reasons, decoded.createdAt, decoded.id, pageable)
         }
         val hasMore = fetched.size > pageSize
         val rows = if (hasMore) fetched.subList(0, pageSize) else fetched
@@ -65,7 +65,7 @@ class CreditTransactionHistoryService(
                 )
             },
             // 초과분이 있었다면 다음 페이지가 있다. 이 페이지의 마지막 행이 곧 다음 페이지의 시작 경계다.
-            nextCursor = if (hasMore) encodeCursor(rows.last()) else null,
+            nextCursor = if (hasMore) cursorCodec.encode(CreditCursor(rows.last().createdAt, rows.last().id)) else null,
         )
     }
 
@@ -136,22 +136,15 @@ class CreditTransactionHistoryService(
     }
 
     /**
-     * 순차 PK를 그대로 노출하지 않도록 `(createdAt, id)`를 base64로 감싼다(불투명 커서).
+     * 커서 문자열 → 원장 위치. 봉인 해제 실패(형식 오류·변조·다른 키)는 모두 400이다.
      *
-     * 시각은 **초 + 나노초로 쪼개 정밀도를 보존한다**. 밀리초로 절삭하면 커서 `C`가 실제 시각보다 앞서게 되어
+     * 커서에는 정렬 타이브레이커인 순차 PK가 들어가므로 인코딩이 아니라 암호화한다([CreditCursorCodec]).
+     * 시각은 초와 나노초로 쪼개 정밀도를 보존한다 — 밀리초로 절삭하면 커서 `C`가 실제 시각보다 앞서게 되어
      * `C ≤ created_at < 실제값` 구간의 행이 `< C`에도 `= C`에도 걸리지 않고 다음 페이지에서 누락된다
      * (`created_at`은 마이크로초 정밀도다).
      */
-    private fun encodeCursor(row: CreditTransaction): String =
-        Base64.getUrlEncoder().withoutPadding()
-            .encodeToString("${row.createdAt.epochSecond}:${row.createdAt.nano}:${row.id}".toByteArray())
-
-    private fun decodeCursor(cursor: String): Pair<Instant, Long> = runCatching {
-        val (second, nano, id) = String(Base64.getUrlDecoder().decode(cursor)).split(":", limit = 3)
-        Instant.ofEpochSecond(second.toLong(), nano.toLong()) to id.toLong()
-    }.getOrElse {
-        throw ResponseStatusException(HttpStatus.BAD_REQUEST, "커서가 올바르지 않습니다.")
-    }
+    private fun decodeCursor(cursor: String): CreditCursor = runCatching { cursorCodec.decode(cursor) }
+        .getOrElse { throw ResponseStatusException(HttpStatus.BAD_REQUEST, "커서가 올바르지 않습니다.") }
 
     private companion object {
         const val ALL = "ALL"

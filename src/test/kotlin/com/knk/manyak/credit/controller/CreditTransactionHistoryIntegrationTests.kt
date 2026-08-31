@@ -27,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
+import java.util.Base64
 import java.util.UUID
 
 /**
@@ -346,6 +347,56 @@ class CreditTransactionHistoryIntegrationTests {
         restTestClient.get().uri("/api/v1/users/me/credits/transactions?cursor=not-a-cursor")
             .header("Authorization", token(user))
             .exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `커서를 디코딩해도 원장 id가 드러나지 않는다`() {
+        val user = saveUser()
+        val first = tx(user.id, 1, CreditReason.ATTENDANCE_REWARD, createdAt = base)
+        tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
+
+        val cursor = get(user, "?limit=1").nextCursor
+        assertThat(cursor).isNotNull()
+
+        // 커서가 가리키는 행은 2번째 행이지만, 원장 id가 평문으로 남지 않는지 두 id 모두로 확인한다.
+        val plain = String(Base64.getUrlDecoder().decode(cursor), Charsets.ISO_8859_1)
+        assertThat(plain).doesNotContain("${first.id}")
+        assertThat(plain).doesNotContain("${first.id + 1}")
+        // 초 단위 시각도 그대로 드러나면 안 된다(봉인 대상은 (createdAt, id) 쌍 전체다).
+        assertThat(plain).doesNotContain("${base.epochSecond}")
+    }
+
+    @Test
+    fun `변조된 커서는 400이다`() {
+        val user = saveUser()
+        tx(user.id, 1, CreditReason.ATTENDANCE_REWARD, createdAt = base)
+        tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
+
+        val cursor = get(user, "?limit=1").nextCursor!!
+        // 마지막 글자를 바꿔 인증 태그를 깨뜨린다. GCM이 위조를 잡아 복호화 자체가 실패해야 한다.
+        val tampered = cursor.dropLast(1) + if (cursor.last() == 'A') 'B' else 'A'
+
+        restTestClient.get().uri("/api/v1/users/me/credits/transactions?cursor=$tampered")
+            .header("Authorization", token(user))
+            .exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `같은 위치의 커서라도 매번 다른 문자열이지만 같은 페이지를 준다`() {
+        val user = saveUser()
+        tx(user.id, 1, CreditReason.ATTENDANCE_REWARD, createdAt = base)
+        tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
+        tx(user.id, 3, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(20))
+
+        val one = get(user, "?limit=1").nextCursor!!
+        val two = get(user, "?limit=1").nextCursor!!
+
+        // IV가 매번 새로 뽑히므로 같은 (createdAt, id)를 가리켜도 문자열은 달라진다.
+        assertThat(one).isNotEqualTo(two)
+        // 그래도 둘 다 같은 위치를 복원해 같은 다음 페이지를 준다.
+        assertThat(get(user, "?limit=2&cursor=$one").items.map { it.amount })
+            .isEqualTo(get(user, "?limit=2&cursor=$two").items.map { it.amount })
+            .containsExactly(2L, 1L)
     }
 
     @Test
