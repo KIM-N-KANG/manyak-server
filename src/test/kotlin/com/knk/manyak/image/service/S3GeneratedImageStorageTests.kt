@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
  * DB에 굳으므로, 아예 S3 클라이언트를 만들지 않고 null을 돌려 이미지 없이 저장되게 한다. AWS 자격증명이 없는
  * 환경에서도 이 경로가 예외 없이 도는지가 이 테스트의 요지다.
  */
-class S3CharacterImageStorageTests {
+class S3GeneratedImageStorageTests {
 
     @Test
     fun `버킷과 base URL이 모두 비면 업로드가 no-op이다`() {
@@ -42,7 +42,7 @@ class S3CharacterImageStorageTests {
     }
 
     private fun storage(bucket: String, baseUrl: String) =
-        S3CharacterImageStorage(bucket = bucket, region = "", endpoint = "", baseUrl = baseUrl)
+        S3GeneratedImageStorage(bucket = bucket, region = "", endpoint = "", baseUrl = baseUrl)
 
     private companion object {
         val BYTES = byteArrayOf(1, 2, 3)

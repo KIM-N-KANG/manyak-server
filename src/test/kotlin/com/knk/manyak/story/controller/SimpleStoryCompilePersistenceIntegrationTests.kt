@@ -1,7 +1,10 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.observability.AiTraceLink
-import com.knk.manyak.image.service.CharacterImageStorage
+import com.knk.manyak.image.entity.ImagePreset
+import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.repository.ImagePresetRepository
+import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.story.client.AiCharacterAppearance
 import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiResponseMeta
@@ -14,8 +17,11 @@ import com.knk.manyak.story.client.AiStorySettings
 import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
+import com.knk.manyak.story.client.AiThumbnailImage
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
+import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -50,6 +56,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -63,6 +70,9 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// 프리셋 폴백 URL을 결정적으로 만든다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
+// 다르게 둬 어느 경로를 탔는지 어서션만 보고도 구분된다.
+@TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.preset.test"])
 class SimpleStoryCompilePersistenceIntegrationTests {
 
     companion object {
@@ -97,6 +107,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
 
         @Volatile
         var characterImages: List<AiCharacterImage> = emptyList()
+
+        // 컴파일 응답의 표지 썸네일(KNK-1069). null이면 필드 자체를 보내지 않는 구버전 AI와 같은 상태다.
+        @Volatile
+        var thumbnailImage: AiThumbnailImage? = null
 
         // 스텁 스토리지가 받은 (objectKey, contentType, 바이트 길이)를 기록한다. 업로드 호출 여부·키 규칙 검증용.
         val uploads = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, Int>>()
@@ -152,6 +166,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storyEndings = endingsOverride ?: endings,
                     characterAppearances = characterAppearances,
                     characterImages = characterImages,
+                    thumbnailImage = thumbnailImage,
                     meta = AiResponseMeta(),
                 )
             }
@@ -160,10 +175,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         /** 실제 S3 대신 업로드를 기록하는 스텁. 반환 URL은 운영과 같은 `base-url + 객체 키` 모양이다. */
         @Bean
         @Primary
-        fun fakeCharacterImageStorage(
+        fun fakeGeneratedImageStorage(
             storyRepository: StoryRepository,
             transactionManager: PlatformTransactionManager,
-        ): CharacterImageStorage = object : CharacterImageStorage {
+        ): GeneratedImageStorage = object : GeneratedImageStorage {
             override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
                 attemptedUploadKeys += objectKey
                 if (commitStoryOnUpload) {
@@ -201,6 +216,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
+    @Autowired private lateinit var imagePresetRepository: ImagePresetRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
@@ -214,6 +230,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         flipSessionToCreatedId = null
         characterAppearances = emptyList()
         characterImages = emptyList()
+        thumbnailImage = null
         uploads.clear()
         deletes.clear()
         attemptedUploadKeys.clear()
@@ -642,6 +659,125 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(deletes).isEmpty()
         assertThat(storyRepository.findAll()).hasSize(1)
     }
+
+    @Test
+    fun `컴파일이 생성한 표지 썸네일을 올려 thumbnail_image_url에 저장하고 상세에 노출한다`() {
+        thumbnailImage = AiThumbnailImage(
+            imageName = "썸네일 기본",
+            imageBase64 = WEBP_BASE64,
+            contentType = "image/webp",
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+        // 프리셋도 붙는 상태로 둔다 — 생성 표지가 프리셋을 이기는지까지 와이어로 본다.
+        seedThumbnailPreset("로맨스", "thumb_0001")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        // 객체 키는 thumbnails/generated/{storyPublicId}/{이름}_{uuid 앞 8자리}.webp다(인물과 같은 규칙, 다른 prefix).
+        val thumbnailUpload = uploads.single { it.first.startsWith("thumbnails/generated/") }
+        assertThat(thumbnailUpload.first)
+            .matches("thumbnails/generated/${story.publicId}/썸네일_기본_[0-9a-f]{8}\\.webp")
+        assertThat(thumbnailUpload.second).isEqualTo("image/webp")
+        assertThat(thumbnailUpload.third).isEqualTo(WEBP_BYTE_LENGTH)
+        assertThat(story.thumbnailImageUrl).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
+        // 프리셋 연결은 생성 성공이어도 그대로 남는다(생성 URL이 비면 자동으로 여기로 떨어져야 한다).
+        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
+
+        // 상세 응답의 thumbnailUrl은 프리셋이 아니라 생성 표지를 가리킨다.
+        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
+        // 목록 카드도 축소본 없이 같은 원본 URL을 받는다(생성 표지는 _sm 파생본이 없다).
+        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
+    }
+
+    @Test
+    fun `표지 생성이 실패하면 URL 없이 저장하고 프리셋 경로에 남는다`() {
+        // 에러 코드가 있으면 base64가 함께 와도 실패로 본다(인물 이미지와 같은 원칙).
+        thumbnailImage = AiThumbnailImage(
+            imageName = "썸네일_기본",
+            imageBase64 = WEBP_BASE64,
+            contentType = "image/webp",
+            error = "generation_failed",
+        )
+        val storyline = persistStorylineWithGenre("로맨스")
+        seedThumbnailPreset("로맨스", "thumb_0001")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(uploads).isEmpty()
+        // 프리셋 자동 연결은 그대로 살아 있고, 노출도 프리셋 URL로 떨어진다.
+        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
+        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
+        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+    }
+
+    @Test
+    fun `구버전 AI라 thumbnail_image가 없어도 스토리 생성은 그대로 성공한다`() {
+        // 운영 AI(v0.2.6)는 아직 이 필드를 보내지 않는다. 실패 케이스와 같은 결과여야 한다.
+        thumbnailImage = null
+        val storyline = persistStorylineWithGenre("로맨스")
+        seedThumbnailPreset("로맨스", "thumb_0001")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().first()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(uploads).isEmpty()
+        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
+        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
+        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+    }
+
+    @Test
+    fun `저장 트랜잭션이 실패하면 이미 올린 표지 썸네일도 지운다`() {
+        // 인물 이미지와 같은 보상 삭제 경로를 표지도 탄다(고아 객체 방지).
+        endingsOverride = listOf(
+            AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+            AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+        )
+        thumbnailImage = AiThumbnailImage(imageName = "썸네일", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(storyRepository.findAll()).isEmpty()
+        assertThat(uploads).hasSize(1)
+        assertThat(deletes).containsExactly(uploads.single().first)
+    }
+
+    /**
+     * 장르에 맞는 프리셋 표지를 **1장만** 심어 랜덤 선택을 결정적으로 만든다(자동 연결 규칙 자체는
+     * StoryThumbnailLinkerIntegrationTests가 덮는다). 장르 태그는 [persistStorylineWithGenre]가 만든 것을 쓴다.
+     */
+    private fun seedThumbnailPreset(genre: String, imageKey: String): ImagePreset {
+        val genreTag = tagRepository.findAll()
+            .first { it.category == SimpleStoryTagCategory.GENRE && it.name == genre }
+        return imagePresetRepository.save(
+            ImagePreset(imageKey = imageKey, type = ImagePresetType.THUMBNAIL, genres = setOf(genreTag)),
+        )
+    }
+
+    /** 상세 응답의 thumbnailUrl(원본). 게스트 제작 스토리는 PRIVATE여도 UUID를 아는 요청자가 읽을 수 있다. */
+    private fun detailThumbnailUrl(storyPublicId: java.util.UUID): String? =
+        restTestClient.get()
+            .uri("/api/v1/stories/$storyPublicId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(StoryDetailResponse::class.java)
+            .returnResult().responseBody!!.thumbnailUrl
+
+    /** 목록 카드(batch) 응답의 thumbnailUrlSm(축소 변형 자리). */
+    private fun listThumbnailUrlSm(storyPublicId: java.util.UUID): String? =
+        restTestClient.post()
+            .uri("/api/v1/stories/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds":["$storyPublicId"]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(Array<StorySummaryResponse>::class.java)
+            .returnResult().responseBody!!.single().thumbnailUrlSm
 
     private fun storyCreationTimerCount(outcome: String): Long =
         meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L

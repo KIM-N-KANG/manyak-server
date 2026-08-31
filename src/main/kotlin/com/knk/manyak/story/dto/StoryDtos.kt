@@ -36,7 +36,8 @@ data class StorySummaryResponse(
     val id: String,
 
     @field:Schema(
-        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null.",
+        description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null. " +
+            "컴파일이 생성한 표지가 있으면 축소본 없이 그 원본 URL(webp)이 실린다(KNK-1069).",
         example = "https://cdn.manyak.app/thumbnails/thumb_0012_sm.png",
         nullable = true,
     )
@@ -75,7 +76,11 @@ data class StoryDetailResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
-    @field:Schema(description = "썸네일 이미지 URL(§4-3-9). 소스가 없으면 null.", example = "https://example.com/thumbnails/moon-contract.png", nullable = true)
+    @field:Schema(
+        description = "썸네일 이미지 URL(§4-3-9). 컴파일이 생성한 표지가 있으면 그 URL(webp), 없으면 프리셋 표지(png). 소스가 없으면 null.",
+        example = "https://example.com/thumbnails/moon-contract.png",
+        nullable = true,
+    )
     val thumbnailUrl: String?,
 
     @field:Schema(description = "제목", example = "달빛 아래의 계약")

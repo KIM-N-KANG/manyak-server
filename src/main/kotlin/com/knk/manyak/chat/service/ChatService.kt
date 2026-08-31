@@ -249,9 +249,14 @@ class ChatService(
                 storyId = story?.publicId?.toString().orEmpty(),
                 storyTitle = (if (showsCurrent) story.title else chat.storyTitleSnapshot).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
-                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(
-                    if (showsCurrent) story.thumbnailImageKey else chat.storyThumbnailKeySnapshot,
-                ),
+                // 생성 표지(KNK-1069)는 현재 값을 보여도 될 때만 쓴다. 스냅샷은 프리셋 키뿐이라(URL 스냅샷 컬럼을
+                // 만들지 않았다) 비공개로 되돌린 스토리의 카드는 프리셋 표지로 내려앉는다 — 누수가 아니라 화면
+                // 열화이므로 수용한다(KNK-1059 규칙 유지).
+                thumbnailUrlSm = if (showsCurrent) {
+                    imageUrlResolver.thumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey)
+                } else {
+                    imageUrlResolver.thumbnailSmUrlFor(chat.storyThumbnailKeySnapshot)
+                },
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,

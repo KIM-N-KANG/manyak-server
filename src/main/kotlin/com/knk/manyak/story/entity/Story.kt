@@ -46,6 +46,13 @@ class Story(
     @Column(name = "thumbnail_image_key", length = 64)
     val thumbnailImageKey: String? = null,
 
+    // 컴파일이 생성한 표지의 절대 URL(KNK-1069). 등록 시 1회 확정이라 val이다.
+    // 프리셋 키(thumbnailImageKey)와 **공존한다** — 생성 성공이어도 프리셋 연결은 지우지 않아, 이 값이
+    // 비면(구버전 AI·생성 실패·일반 제작·기존 스토리) 노출이 자동으로 프리셋으로 떨어진다.
+    // 2단 폴백 판정은 ImageUrlResolver 한 곳이 소유한다(호출부에 분기를 흩뿌리지 않는다).
+    @Column(name = "thumbnail_image_url", columnDefinition = "TEXT")
+    val thumbnailImageUrl: String? = null,
+
     // 등록 상태(초안/발행). 일반 모드 초안 저장은 DRAFT로 시작하고, 발행 시 PUBLISHED가 된다(KNK-401).
     // 기존 행·간편 제작 스토리는 기본값 PUBLISHED다.
     @Enumerated(EnumType.STRING)
