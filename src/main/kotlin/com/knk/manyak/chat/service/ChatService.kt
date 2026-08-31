@@ -252,7 +252,11 @@ class ChatService(
         }
 
         val story = storyRepository.findById(chat.storyId).orElse(null)
-        val storyTitle = story?.title.orEmpty()
+        // 서재와 같은 스냅샷 규칙(KNK-1059). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
+        // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목이 보여선 안 된다.
+        val storyTitle = (
+            if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
+            ).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
 
@@ -333,10 +337,14 @@ class ChatService(
      * 공유된 채팅을 조회한다(스펙 §4-3-11). **인증 불필요** — 추측 불가 공유 토큰 보유가 접근 수단이다.
      *
      * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
-     * 스토리 제목·프롤로그는 채팅 상세와 동일하게 조회 시점의 라이브 값을 읽는다(공유만 별도 동결하지 않음).
+     *
+     * 스토리 제목은 채팅 상세·서재와 같은 스냅샷 규칙을 탄다(KNK-1059). 열람자는 링크만 가진 익명일 수 있으므로
+     * [userId]는 알 수 있으면 그 값, 아니면 null이다 — 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
+     * 삭제됐으면 채팅 스냅샷에서 멈춘다. 이 게이트가 없으면 비공개로 돌린 스토리의 최신 제목이 링크를 가진
+     * 아무에게나 보인다. 프롤로그는 시작 설정에 종속돼 이 규칙 밖이다.
      */
     @Transactional(readOnly = true)
-    fun getChatShare(shareId: String): ChatShareResponse {
+    fun getChatShare(shareId: String, userId: Long? = null): ChatShareResponse {
         val share = parsePublicIdOrNull(shareId)?.let { storyChatShareRepository.findByPublicId(it) }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
         // 공유에는 삭제 컬럼이 없다 — 유효성은 원본 채팅의 deleted_at에 종속된다(공유 해지 수단 = 채팅 삭제).
@@ -357,7 +365,9 @@ class ChatService(
         return ChatShareResponse(
             id = share.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = story?.title.orEmpty(),
+            storyTitle = (
+                if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
+                ).orEmpty(),
             prologue = startSetting?.prologue.orEmpty(),
             turns = turns.map { assistant ->
                 ChatShareTurnResponse(

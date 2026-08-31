@@ -4,7 +4,10 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
@@ -141,6 +144,38 @@ class ChatStorySnapshotIntegrationTests {
             .expectStatus().isOk
             .expectBody(Array<ChatSummaryResponse>::class.java)
             .returnResult().responseBody!!.first()
+
+    private fun detailTitle(chat: StoryChat, user: User): String? =
+        restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", token(user))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!.storyTitle
+
+    /** 채팅 소유자가 공유 링크를 발급하고, 그 열람 토큰을 돌려준다. */
+    private fun createShare(chat: StoryChat, user: User): String =
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/shares")
+            .header("Authorization", token(user))
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(CreateChatShareResponse::class.java)
+            .returnResult().responseBody!!.shareId
+
+    /**
+     * 공유 열람은 인증이 필요 없다 — [viewer]가 없으면 링크만 가진 익명 열람자를 그대로 재현한다.
+     * 토큰을 실으면 그 요청자로 스토리 읽기 권한을 판정해야 한다.
+     */
+    private fun shareTitle(shareId: String, viewer: User? = null): String? =
+        restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .headers { headers -> viewer?.let { headers.set("Authorization", token(it)) } }
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatShareResponse::class.java)
+            .returnResult().responseBody!!.storyTitle
 
     private fun historyTitle(user: User): String? =
         restTestClient.get()
@@ -283,5 +318,89 @@ class ChatStorySnapshotIntegrationTests {
         hideAndRename(story, "바뀐 제목")
 
         assertThat(historyTitle(owner)).isEqualTo("바뀐 제목")
+    }
+
+    // ---- 채팅 상세 ----
+
+    @Test
+    fun `비공개로 되돌리고 제목을 바꿔도 채팅 상세는 스냅샷 제목을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(detailTitle(chat, reader)).isEqualTo("원래 제목")
+    }
+
+    @Test
+    fun `소유자 본인은 비공개 스토리도 채팅 상세에서 현재 제목으로 본다`() {
+        val owner = saveUser("소유자")
+        val story = publicStory(owner)
+        val chat = createChat(story, owner)
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(detailTitle(chat, owner)).isEqualTo("바뀐 제목")
+    }
+
+    // ---- 공유 열람 ----
+
+    @Test
+    fun `비공개로 되돌리고 제목을 바꾸면 공유 열람은 스냅샷 제목을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+
+        // 링크만 가진 익명 열람자에게 비공개로 되돌린 스토리의 최신 제목이 새면 안 된다.
+        assertThat(shareTitle(shareId)).isEqualTo("원래 제목")
+    }
+
+    @Test
+    fun `공개 스토리의 공유 열람은 현재 제목을 따라간다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        rename(story, "바뀐 제목")
+
+        assertThat(shareTitle(shareId)).isEqualTo("바뀐 제목")
+    }
+
+    @Test
+    fun `스토리가 삭제되면 공유 열람은 스냅샷 제목을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        rename(story, "바뀐 제목")
+        softDelete(story)
+
+        assertThat(shareTitle(shareId)).isEqualTo("원래 제목")
+    }
+
+    @Test
+    fun `공유 열람에 토큰이 실리면 그 요청자로 읽기 권한을 판정한다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+        val shareId = createShare(chat, reader)
+
+        hideAndRename(story, "바뀐 제목")
+
+        // 같은 링크라도 스토리 소유자가 열면 읽기가 허용되므로 현재 제목을 본다.
+        assertThat(shareTitle(shareId, viewer = owner)).isEqualTo("바뀐 제목")
+        // 익명 열람자는 그대로 스냅샷에서 멈춘다.
+        assertThat(shareTitle(shareId)).isEqualTo("원래 제목")
     }
 }
