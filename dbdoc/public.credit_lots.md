@@ -28,6 +28,7 @@
 | ---- | ---------- |
 | credit_lots_pkey | CREATE UNIQUE INDEX credit_lots_pkey ON public.credit_lots USING btree (id) |
 | idx_credit_lots_user_active | CREATE INDEX idx_credit_lots_user_active ON public.credit_lots USING btree (user_id, expires_at) WHERE (remaining > 0) |
+| idx_credit_lots_transaction | CREATE INDEX idx_credit_lots_transaction ON public.credit_lots USING btree (transaction_id) |
 
 ## Relations
 
