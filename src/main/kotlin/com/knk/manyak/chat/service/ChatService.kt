@@ -1422,6 +1422,9 @@ class ChatService(
         if (mainEvents.isEmpty()) {
             return emptyList()
         }
+        // 이 id 비교는 **읽기 가능 분기에서만** 기여한다. 스냅샷 분기에서는 조인 행의 라이브 id와 스냅샷 id가
+        // 다른 세계라 맞지 않는데, 사건이 교체되면 FK(ON DELETE CASCADE)가 조인 행을 함께 지워 occurredIds가
+        // 비고 아래 이름 합집합이 덮는다. 그래서 틀린 결과가 나오지 않는다(PR #224 Codex P2 전수 확인).
         val occurredIds = storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId }.toSet()
         val occurredNames = mainEvents.filter { it.id in occurredIds }.map { it.name }
             .plus(chat.occurredMainEventNamesSnapshot.orEmpty())
