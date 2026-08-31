@@ -8,7 +8,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
 
 /**
@@ -46,22 +45,22 @@ enum class CreditPolicyKey(val storageKey: String, val minimumAmount: Long) {
  * 하드코딩된 숫자가 조용히 먹어서 정본이 둘이 된다. 키가 없으면 부팅이 실패하는 게 맞다.
  * (환경변수 폴백 `${MANYAK_CREDIT_*:기본값}`은 application.yml에 있고, 그쪽이 정본이다.)
  *
- * 캐시: 보상·소모 경로마다 쿼리가 늘면 안 되므로 전건을 [cacheTtl] 동안 스냅샷으로 들고 있는다. 정책 6개짜리
- * 테이블이라 부분 조회·무효화 장치가 필요 없다. `effective_until` 판정은 캐시가 아니라 **읽을 때** 하므로,
- * 만료는 TTL을 기다리지 않고 즉시 반영된다.
+ * **읽기는 순수 메모리 연산이다.** [amountOf]는 DB를 만지지 않고, 적재는 부팅 1회
+ * ([preloadAndLogOnStartup])와 주기 갱신([com.knk.manyak.credit.scheduler.CreditPolicyRefreshScheduler])만 한다.
+ * 크레딧 경로는 `@Transactional` 안에서 이 값을 읽는데(출석 적립·초대 제출·턴 차감), 그 안에서 DB I/O를 하면
+ * 두 가지가 따라온다(Codex 리뷰 P2 두 라운드):
+ * - 조회 실패가 **바깥 트랜잭션을 rollback-only로 찍어** 기본값 폴백이 있어도 커밋이 대신 실패한다.
+ * - `REQUIRES_NEW`로 그걸 피하면 이번엔 바깥 커넥션을 쥔 채 **두 번째 커넥션을 기다려**, 풀이 포화된 순간
+ *   돈 경로가 connection timeout까지 멈춘다.
+ * 호출자 트랜잭션에서 아예 조회하지 않으면 두 문제가 함께 사라진다. 그래서 락도 핫 경로엔 없다
+ * ([refreshLock]은 갱신끼리만 부딪친다).
  *
- * 갱신은 single-flight다(`synchronized` + 이중 검사). `@Volatile`은 참조 가시성만 보장할 뿐 갱신을 단일화하지
- * 않아서, 느린 조회가 늦게 돌아와 **최신 스냅샷을 옛 값으로 덮을 수 있다**(그 상태가 TTL 내내 지속된다).
- * 금액 정책에서 이건 성능이 아니라 정확성 문제라 락으로 막는다(6행 조회라 경합 비용은 무시 가능).
+ * 만료(`effective_until`)는 캐시가 아니라 **읽을 때** 판정하므로 갱신 주기를 기다리지 않고 즉시 반영된다.
  *
- * 장애 내성: 조회가 실패해도 요청을 막지 않는다(크레딧 경로가 정책 조회 때문에 죽으면 안 된다). warn 로그를
- * 남기고 직전 스냅샷을 유지한 채 TTL만 미룬다 — 스냅샷이 아직 없으면 자연히 yml 기본값이 된다.
- * 이 폴백이 실제로 성립하려면 예외를 잡는 것만으로는 부족하다: 정책 읽기는 호출자의 `@Transactional` 안에서
- * 일어나므로, 조회가 그 트랜잭션에 참여하면 실패가 바깥을 rollback-only로 찍어 **커밋이 대신 실패**한다.
- * 그래서 적재 조회는 [CreditPolicyRepository.findAll]에서 독립 트랜잭션(REQUIRES_NEW)으로 격리한다
- * (회귀 가드: `CreditPolicyTransactionIsolationIntegrationTest`).
- * 실패마다 기본값으로 떨어뜨리지 않는 이유: 진행 중인 이벤트 수치가 DB 순단마다 조용히 되돌아가면 안 된다.
- * **한계**: 그래서 DB가 끊긴 동안에는 `effective_until`이 NULL인 영구 오버라이드를 철회할 수 없다(행을 지워도
+ * 장애 내성: 적재가 실패해도 요청을 막지 않는다. warn 로그를 남기고 직전 스냅샷을 유지하며, 스냅샷이 아직
+ * 없으면(부팅 첫 적재 실패) 자연히 yml 기본값이 된다. 실패마다 기본값으로 떨어뜨리지 않는 이유는 진행 중인
+ * 이벤트 수치가 DB 순단마다 조용히 되돌아가면 안 되기 때문이다.
+ * **한계**: DB가 끊긴 동안에는 `effective_until`이 NULL인 영구 오버라이드를 철회할 수 없다(행을 지워도
  * 스냅샷이 남는다). 유한 `effective_until`은 판정이 읽는 시점이라 장애 중에도 정상 만료된다. 영구 오버라이드
  * 철회가 급한데 DB만 끊긴 상황은 좁아서, 요청을 막지 않는다는 요구를 우선한다(회복 수단은 재기동).
  */
@@ -75,7 +74,6 @@ class CreditPolicyService(
     @param:Value("\${manyak.credit.attendance-reward}") attendanceReward: Long,
     @param:Value("\${manyak.credit.story-creation-cost}") storyCreationCost: Long,
     @param:Value("\${manyak.credit.chat-turn-cost}") chatTurnCost: Long,
-    @param:Value("\${manyak.credit.policy-cache-ttl:PT60S}") private val cacheTtl: Duration,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -99,62 +97,62 @@ class CreditPolicyService(
                 "크레딧 정책 기본값이 최소값 미만입니다: ${key.storageKey}=$amount (최소 ${key.minimumAmount})"
             }
         }
-        // 음수 TTL은 만료 시각을 항상 과거로 만들어 **모든** amountOf가 findAll을 돌고 refreshLock에서 직렬화된다.
-        // 환경변수 오타 하나가 채팅·출석·초대 경로를 DB 병목으로 바꾸므로 부팅에서 거부한다.
-        // 0은 허용한다 — 매 조회 재적재라는 뜻이고 테스트 프로파일이 그걸 쓴다.
-        require(!cacheTtl.isNegative) { "크레딧 정책 캐시 TTL은 음수일 수 없습니다: $cacheTtl" }
     }
 
     private val knownKeys = CreditPolicyKey.entries.joinToString(", ") { it.storageKey }
 
+    // 갱신끼리만 직렬화한다(부팅 선적재 · 스케줄러). 읽기 경로는 이 락을 잡지 않는다.
     private val refreshLock = Any()
 
     @Volatile
-    private var snapshot: Snapshot = Snapshot(overrides = emptyList(), expiresAt = Instant.MIN)
+    private var overrides: List<CreditPolicy> = emptyList()
 
-    // 직전 갱신에서 **관측한** 유효값. 변경 로그의 비교 기준이며 refreshLock이 지킨다(락 안에서만 읽고 쓴다).
-    // 스냅샷의 원본 행을 다시 평가해 비교하면 안 된다: effective_until 만료는 캐시 도중 일어나고,
+    // 직전 갱신에서 **관측한** 유효값. 변경 로그의 비교 기준이며 refreshLock이 지킨다.
+    // 스냅샷의 원본 행을 다시 평가해 비교하면 안 된다: effective_until 만료는 갱신 사이에 일어나고,
     // 다음 갱신에서 before·after를 같은 now로 재평가하면 둘 다 기본값이라 차이가 사라져
     // 만료가 영영 로그에 남지 않는다(= 한시 이벤트가 끝났는지 확인할 신호가 없다).
     private var lastEffective: Map<CreditPolicyKey, Long>? = null
 
     /**
      * [key]의 현재 유효값. 오버라이드가 없거나 만료됐거나 최소값 미만이면 yml 기본값이다.
+     * **DB를 조회하지 않는다**(메모리 스냅샷 읽기 + 만료 판정뿐).
      *
      * 소모 경로는 한 요청 안에서 이 값을 **한 번만 읽어 재사용**해야 한다(차감액과 환불액이 어긋나면
      * 사용자가 손해를 보거나 이득을 본다). 호출부가 지역 변수로 붙잡아 차감·환불에 같은 값을 넘긴다.
      */
     fun amountOf(key: CreditPolicyKey): Long {
         val now = clock.instant()
-        return amountIn(overridesAt(now), key, now)
+        return amountIn(overrides, key, now)
     }
 
-    /** 부팅 시 지금 유효한 전체 수치를 한 줄로 남긴다. 코드만 봐서는 운영에 뭐가 걸려 있는지 알 수 없기 때문이다. */
-    @EventListener(ApplicationReadyEvent::class)
-    fun logEffectivePoliciesOnStartup() {
-        val now = clock.instant()
-        logger.info("credit_policy_effective {}", effectiveOf(overridesAt(now), now))
-    }
-
-    private fun overridesAt(now: Instant): List<CreditPolicy> {
-        val cached = snapshot
-        if (now.isBefore(cached.expiresAt)) return cached.overrides
-        // 갱신은 한 번에 하나만. 락 안에서 TTL을 다시 확인해 이미 갱신됐으면 조회하지 않는다.
+    /**
+     * 오버라이드 스냅샷을 다시 적재한다. 부팅 선적재와 주기 스케줄러가 호출하며, **예외를 밖으로 내보내지 않는다**
+     * (스케줄러가 한 번의 예외로 영구 중단되지 않도록, 그리고 부팅이 DB 사정으로 실패하지 않도록).
+     */
+    fun refresh() {
         synchronized(refreshLock) {
-            val current = snapshot
-            if (now.isBefore(current.expiresAt)) return current.overrides
-            return try {
+            val now = clock.instant()
+            try {
                 val loaded = validOverrides(creditPolicyRepository.findAll())
-                snapshot = Snapshot(loaded, now.plus(cacheTtl))
+                overrides = loaded
                 logChanges(after = loaded, now = now)
-                loaded
             } catch (exception: Exception) {
-                // 정책 조회 실패로 크레딧 지급·차감을 막지 않는다. 직전 스냅샷을 유지하고 TTL만 미뤄 재조회를 늦춘다.
+                // 정책 적재 실패로 크레딧 지급·차감을 막지 않는다. 직전 스냅샷(없으면 빈 목록 = 기본값)을 유지한다.
                 logger.warn("credit_policy_load_failed: 직전 스냅샷을 유지한다", exception)
-                snapshot = Snapshot(current.overrides, now.plus(cacheTtl))
-                current.overrides
+                // 첫 적재가 실패했으면 **지금 쓰는 폴백 값**을 관측값으로 심는다. 비워 두면 DB 복구 후 첫 갱신이
+                // "최초 관측"으로 보여 아무것도 남기지 않고, 시작 장애 뒤 정책이 조용히 활성화된다.
+                if (lastEffective == null) {
+                    lastEffective = effectiveOf(overrides, now)
+                }
             }
         }
+    }
+
+    /** 부팅 시 한 번 선적재하고, 지금 유효한 전체 수치를 한 줄로 남긴다(코드만 봐서는 운영에 뭐가 걸렸는지 알 수 없다). */
+    @EventListener(ApplicationReadyEvent::class)
+    fun preloadAndLogOnStartup() {
+        refresh()
+        logger.info("credit_policy_effective {}", effectiveOf(overrides, clock.instant()))
     }
 
     /**
@@ -197,15 +195,14 @@ class CreditPolicyService(
 
     /**
      * 직전에 관측한 유효값과 견줘 바뀐 키만 남긴다. 오버라이드 적용·철회뿐 아니라 **`effective_until` 자동 만료**도
-     * 여기서 드러난다(만료는 갱신마다 최대 [cacheTtl] 늦게 로그에 남지만, 실제 값은 읽는 즉시 되돌아간다).
+     * 여기서 드러난다(만료는 갱신 주기만큼 늦게 로그에 남지만, 실제 값은 읽는 즉시 되돌아간다).
      *
      * 첫 갱신은 비교 대상이 없어 아무것도 남기지 않는다 — 그 시점의 전체 유효값은 부팅 로그
-     * [logEffectivePoliciesOnStartup]가 한 줄로 찍는다.
+     * [preloadAndLogOnStartup]가 한 줄로 찍는다.
      */
     private fun logChanges(after: List<CreditPolicy>, now: Instant) {
         val current = effectiveOf(after, now)
         val previous = lastEffective
-        // 적재 실패 회차는 갱신하지 않는다(직전 스냅샷을 그대로 쓰므로 관측값도 그대로다).
         lastEffective = current
         if (previous == null) return
         CreditPolicyKey.entries
@@ -219,6 +216,4 @@ class CreditPolicyService(
     private fun amountIn(overrides: List<CreditPolicy>, key: CreditPolicyKey, now: Instant): Long =
         overrides.firstOrNull { it.policyKey == key.storageKey && it.isEffectiveAt(now) }?.amount
             ?: defaults.getValue(key)
-
-    private class Snapshot(val overrides: List<CreditPolicy>, val expiresAt: Instant)
 }

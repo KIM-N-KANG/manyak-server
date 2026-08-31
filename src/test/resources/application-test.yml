@@ -40,9 +40,10 @@ manyak:
   cors:
     allowed-origins: http://localhost:3000,http://192.168.0.12:3000
   credit:
-    # 정책 캐시를 끈다(매 조회가 DB를 본다). 컨텍스트 싱글턴이 60초 스냅샷을 들고 있으면 테스트가 넣은
-    # 오버라이드가 소비자 경로에 도달하는지 검증할 수 없다.
-    policy-cache-ttl: PT0S
+    policy-refresh:
+      # 정책 주기 갱신 스케줄러를 끈다. 테스트는 오버라이드를 넣은 뒤 CreditPolicyService.refresh()를 직접
+      # 호출해 반영 시점을 스스로 정한다(주기에 기대면 시점 의존이 생긴다).
+      enabled: false
     reconciliation:
       # 테스트는 대사 배치 스케줄러를 끈다. 대사 로직은 CreditReconciliationIntegrationTests가 서비스를 직접 호출해 검증한다.
       enabled: false

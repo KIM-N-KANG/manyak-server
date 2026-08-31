@@ -241,7 +241,7 @@ Authorization: Bearer {{accessToken}}
     client.global.set("memberChatId", response.body.id);
 %}
 
-### 10. (해피 패스) 회원이 충분한 잔액으로 이어쓰기 → 200 스트리밍 + 크레딧 10 차감
+### 10. (해피 패스) 회원이 충분한 잔액으로 이어쓰기 → 200 스트리밍 + 채팅 턴 1회분 차감(기본 20)
 # started → token… → completed 로 정상 종료하면 채팅 턴 크레딧 20이 차감됩니다(잔액은 회원 계정 원장에서 확인).
 # chat_turn_cost 오버라이드를 걸었다면 그 값만큼입니다.
 POST {{baseUrl}}/api/v1/chats/{{memberChatId}}/turns/stream

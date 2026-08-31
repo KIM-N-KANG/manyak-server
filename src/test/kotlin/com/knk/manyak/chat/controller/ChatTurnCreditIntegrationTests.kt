@@ -83,6 +83,8 @@ class ChatTurnCreditIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        // 공유 컨텍스트의 정책 스냅샷을 빈 테이블 상태로 맞춘다(앞 테스트의 오버라이드가 남지 않게).
+        creditPolicyService.refresh()
     }
 
     @Test
@@ -129,8 +131,10 @@ class ChatTurnCreditIntegrationTests {
     fun `chat_turn_cost 오버라이드가 실제 차감액에 반영된다`() {
         // KNK-1056. 기대값과 시드를 같은 정책 서비스에서 읽는 다른 테스트들은 소비자가 수치를 하드코딩해도
         // 통과한다. 여기서만 **리터럴 기대값**을 쓴다 — 오버라이드가 ChatService 까지 도달하는지 보는 게 목적이다.
-        // (테스트 프로파일은 policy-cache-ttl=PT0S 라 저장 즉시 다음 조회에 반영된다.)
+        // 읽기는 메모리라 저장만으로는 반영되지 않는다. 운영에선 스케줄러가 하는 적재를 테스트가 직접 유발한다
+        // (테스트 프로파일은 policy-refresh 스케줄러를 꺼 반영 시점을 테스트가 정한다).
         creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 37))
+        creditPolicyService.refresh()
         val story = storyRepository.save(Story(title = "오버라이드 스토리", genre = "판타지"))
         val member = saveUser("오버라이드회원")
         creditWalletService.reward(member.id, 500, CreditReason.SIGNUP_REWARD, "signup:${member.id}")

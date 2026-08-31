@@ -119,6 +119,8 @@ class ChatTurnCreditRefundIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        // 공유 컨텍스트의 정책 스냅샷을 빈 테이블 상태로 맞춘다(앞 테스트의 오버라이드가 남지 않게).
+        creditPolicyService.refresh()
         afterCharge = {}
     }
 
@@ -226,8 +228,9 @@ class ChatTurnCreditRefundIntegrationTests {
         // KNK-1056 의 핵심 불변식. 차감액과 환불액은 반드시 같아야 한다 — 어긋나면 사용자가 손해를 보거나
         // 이득을 본다. 소비자는 요청 진입부에서 정책을 한 번만 읽어 차감·환불에 같은 값을 넘겨야 하고,
         // 환불 시점에 다시 읽으면 이 테스트가 깨진다.
-        // (테스트 프로파일은 policy-cache-ttl=PT0S 라 정책 변경이 다음 조회에 즉시 보인다.)
+        // 읽기는 메모리라 저장 후 적재를 유발해야 반영된다(운영에선 스케줄러 몫).
         creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 41))
+        creditPolicyService.refresh()
         val story = storyRepository.save(Story(title = "정책 변경 스토리", genre = "판타지"))
         val member = saveUser("정책변경회원")
         creditWalletService.reward(member.id, 500, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
@@ -235,6 +238,8 @@ class ChatTurnCreditRefundIntegrationTests {
         // 차감이 끝난 뒤, 환불이 일어나기 전에 단가를 바꾼다.
         afterCharge = {
             creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 7))
+            // 적재까지 해 둔다 — 환불이 그 시점 정책을 다시 읽는 구현이면 7 을 보고 금액이 어긋나야 red 가 된다.
+            creditPolicyService.refresh()
         }
 
         restTestClient.post()

@@ -200,8 +200,9 @@ Accept: application/json
 ### [KNK-1056] 정책 오버라이드 확인 절차 (수동)
 ###
 ### 수치는 application.yml 기본값이고, `credit_policies` 행이 있으면 그 값이 이깁니다.
-### 서버 재기동 없이 바뀌지만 **최대 60초 캐시**가 있으니 넣고 뺀 직후엔 1분 기다렸다 다시 호출하세요.
-### (단, effective_until 만료는 캐시와 무관하게 즉시 반영됩니다.)
+### 서버 재기동 없이 바뀌지만, 서버가 스냅샷을 **주기적으로(기본 60초, manyak.credit.policy-refresh.interval-ms)**
+### 다시 읽는 구조라 넣고 뺀 직후엔 1분 기다렸다 다시 호출하세요.
+### (단, effective_until 만료는 읽는 시점 판정이라 이 주기와 무관하게 즉시 반영됩니다.)
 ###
 ### 1) 부팅 로그에서 현재 유효값 확인: `credit_policy_effective` 한 줄을 찾습니다.
 ###

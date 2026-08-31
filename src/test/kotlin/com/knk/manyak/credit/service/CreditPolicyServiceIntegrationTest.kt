@@ -16,9 +16,8 @@ import org.springframework.test.context.ActiveProfiles
  * 여기서만 볼 수 있는 것: **application.yml의 기본값이 실제로 서비스에 붙는지**. 수치는 팀이 조정하는 값이라
  * 코드 상수가 아니라 yml이 정본이고, 오타나 키 개명은 조용히 "@Value 폴백"으로 가려진다.
  *
- * `credit_policies`에 행이 있을 때의 동작은 [CreditPolicyServiceTest]가 mock으로 본다 — 컨텍스트 싱글턴은
- * 60초 캐시를 이미 채워 둔 상태라, 통합 테스트에서 행을 넣어도 그 순간 반영된다고 보장할 수 없다.
- * 대신 여기서는 저장·재조회가 실 매핑(컬럼명·타입)으로 도는지만 확인한다.
+ * `credit_policies`에 행이 있을 때의 해석 규칙은 [CreditPolicyServiceTest]가 mock으로 본다.
+ * 여기서는 저장·재조회가 실 매핑(컬럼명·타입)으로 도는지만 확인한다.
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -33,6 +32,8 @@ class CreditPolicyServiceIntegrationTest {
     @BeforeEach
     fun clean() {
         databaseCleaner.cleanAll()
+        // 공유 컨텍스트의 스냅샷이 앞 테스트의 오버라이드를 들고 있을 수 있어 빈 테이블 상태로 맞춘다.
+        creditPolicyService.refresh()
     }
 
     @Test
