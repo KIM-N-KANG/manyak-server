@@ -339,12 +339,14 @@ class ChatService(
      * 형식 오류·부재·원본 채팅의 소프트 삭제를 모두 404로 통일해 존재 여부를 노출하지 않는다.
      *
      * 스토리 제목은 채팅 상세·서재와 같은 스냅샷 규칙을 탄다(KNK-1059). 열람자는 링크만 가진 익명일 수 있으므로
-     * [userId]는 알 수 있으면 그 값, 아니면 null이다 — 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
+     * [userId]는 알 수 있으면 그 값, 아니면 null이다. 기본값을 두지 않아 호출부가 매번 명시하게 한다 —
+     * 새 호출부가 무심코 익명 판정으로 빠지면 읽을 수 있는 사용자에게까지 스냅샷이 나가기 때문이다.
+     * 판정 결과는 공개 스토리면 현재 제목을 따라가고, 비공개로 되돌렸거나
      * 삭제됐으면 채팅 스냅샷에서 멈춘다. 이 게이트가 없으면 비공개로 돌린 스토리의 최신 제목이 링크를 가진
      * 아무에게나 보인다. 프롤로그는 시작 설정에 종속돼 이 규칙 밖이다.
      */
     @Transactional(readOnly = true)
-    fun getChatShare(shareId: String, userId: Long? = null): ChatShareResponse {
+    fun getChatShare(shareId: String, userId: Long?): ChatShareResponse {
         val share = parsePublicIdOrNull(shareId)?.let { storyChatShareRepository.findByPublicId(it) }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
         // 공유에는 삭제 컬럼이 없다 — 유효성은 원본 채팅의 deleted_at에 종속된다(공유 해지 수단 = 채팅 삭제).
