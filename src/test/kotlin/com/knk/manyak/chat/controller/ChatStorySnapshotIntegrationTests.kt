@@ -131,6 +131,20 @@ class ChatStorySnapshotIntegrationTests {
     }
 
     /**
+     * 엔딩 행이 삭제돼 참조가 끊긴 상태를 만든다(스토리 수정의 `endings[]` 전체 교체가 일으키는 상황).
+     *
+     * 운영에서는 `story_chats.reached_ending_id`·`story_messages.reached_ending_id`의 FK가
+     * `ON DELETE SET NULL`이라(V41) 엔딩 행을 지우면 두 참조가 자동으로 NULL이 된다. 그런데 **테스트 스키마는
+     * Flyway가 아니라 `ddl-auto`로 만들어져 그 삭제 동작이 없으므로**, 여기서는 FK가 만들어내는 결과 상태를
+     * 직접 재현한다(참조 NULL + 엔딩 행 부재).
+     */
+    private fun breakEndingReference(chat: StoryChat, ending: StoryEnding) {
+        jdbcTemplate.update("UPDATE story_chats SET reached_ending_id = NULL WHERE id = ?", chat.id)
+        jdbcTemplate.update("UPDATE story_messages SET reached_ending_id = NULL WHERE chat_id = ?", chat.id)
+        jdbcTemplate.update("DELETE FROM story_endings WHERE id = ?", ending.id)
+    }
+
+    /**
      * 소유자가 엔딩 이름을 바꾼다.
      *
      * `StoryEnding.name`은 `val`이고 수정 API의 `endings[]`는 전체 교체라 행이 새로 생긴다(채팅이 참조하던
@@ -716,6 +730,46 @@ class ChatStorySnapshotIntegrationTests {
         val chat = createChat(story, reader)
 
         hideAndRename(story, "바뀐 제목")
+
+        assertThat(libraryCard(reader).reachedEndings).isEmpty()
+    }
+
+    // ---- 엔딩 행이 사라져 FK가 끊긴 경우 ----
+
+    @Test
+    fun `엔딩 행이 삭제돼 참조가 끊겨도 서재는 스냅샷 이름으로 도달 기록을 남긴다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        breakEndingReference(chat, ending)
+
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `엔딩 행이 삭제되면 상세의 턴 단위 도달 표식은 복구하지 않는다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        breakEndingReference(chat, ending)
+
+        // 메시지의 reached_ending_id도 함께 NULL이 되어 어느 턴이 도달 턴이었는지 알 수 없다.
+        // 채팅당 하나인 스냅샷을 아무 턴에나 붙일 수 없으므로 서재만 살아나는 비대칭을 그대로 고정한다.
+        assertThat(detailReachedEndings(chat, reader)).containsExactly(null as String?)
+    }
+
+    @Test
+    fun `도달한 적 없는 채팅은 참조도 스냅샷도 없어 서재가 비어 있다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        createChat(story, reader)
 
         assertThat(libraryCard(reader).reachedEndings).isEmpty()
     }

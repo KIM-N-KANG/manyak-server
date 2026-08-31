@@ -37,4 +37,8 @@ SET reached_ending_name_snapshot = se.name
 FROM story_endings se
 WHERE sc.reached_ending_id = se.id;
 
+-- 한계(수용): 롤링 배포 중 이 마이그레이션이 적용된 뒤 구버전 인스턴스가 만든 채팅은 스냅샷 컬럼이 NULL로
+-- 남는다(구버전 코드는 값을 채우지 않는다). 배포 한 번의 짧은 창이고, 필요하면 다음 릴리스에서 같은 UPDATE로
+-- 정리한다. 그 채팅들은 그동안 제목·프롤로그가 빈 문자열로, 엔딩 이름은 비어 보인다.
+
 -- FK는 걸지 않는다: 스냅샷은 스토리가 바뀌거나 사라져도 남아야 하는 값이라 참조 무결성 대상이 아니다.
