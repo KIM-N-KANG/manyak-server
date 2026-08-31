@@ -221,3 +221,162 @@ Accept: application/json
         client.assert(response.status === 403, `403이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
     });
 %}
+
+### ==================================================================
+### [KNK-1059] 스토리 스냅샷·게이트 시나리오 (S1~S6)
+###
+### 공개 스토리로 채팅한 뒤 소유자가 비공개로 되돌리고 제목·프롤로그를 바꾸면, 그 뒤 값이 채팅 주인에게
+### 계속 흘러가면 안 됩니다. 규칙은 하나입니다:
+###   story.isCurrentMetadataVisibleTo(요청자) 가 참이면 → 스토리의 현재 값
+###   거짓이면(비공개·삭제)                              → 채팅 시작 시점의 스냅샷
+###
+###   - storyTitle · prologue : 채팅 생성 시 story_chats 에 박아둔 스냅샷으로 폴백합니다.
+###   - suggestedInputs       : 스냅샷하지 않고 **빈 배열로 게이트**합니다(목록이라 스냅샷 비용이 크고,
+###                             입력을 돕는 보조 장치라 없어도 채팅이 성립합니다).
+###
+### 위 1~10번과 독립된 자체 준비 흐름입니다. S1부터 순서대로 실행하세요.
+### 토큰은 하나만 있으면 됩니다: **스토리 소유자**가 @accessToken 이고, 채팅은 게스트(토큰 없음)로 만듭니다.
+### 그래야 "스토리를 못 읽는 요청자"가 재현됩니다 — 소유자 본인이 만든 채팅으로는 게이트가 열려 있어
+### 스냅샷 폴백을 볼 수 없습니다.
+### ==================================================================
+
+### S1. (준비 1/3) 소유자 토큰으로 공개 스토리 등록
+# AI 없이 바로 만드는 일반 등록을 씁니다. visibility=PUBLIC 이어야 게스트가 이 스토리로 채팅할 수 있습니다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "원래 제목",
+  "oneLineIntro": "스냅샷 검증용 스토리",
+  "genres": ["판타지"],
+  "visibility": "PUBLIC",
+  "storySettings": { "worldSetting": "세계", "characterSetting": "인물", "userRoleSetting": "역할", "ruleSetting": "규칙" },
+  "startSettings": [
+    {
+      "name": "시작 장면",
+      "prologue": "원래 프롤로그",
+      "startSituation": "시작 상황",
+      "suggestedInputs": ["원래 추천 1", "원래 추천 2", "원래 추천 3"],
+      "endings": []
+    }
+  ],
+  "mainEvents": []
+}
+
+> {%
+    client.test("스토리 등록이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapStoryId", response.body.id);
+%}
+
+### S2. (준비 2/3) 수정 폼 조회 — 시작 설정 공개 id 확보
+# S5의 PATCH에서 이 id를 실어야 시작 설정이 in-place 갱신됩니다. id 없이 보내면 기존 행이 삭제되고 새로
+# 생겨서, 채팅이 참조하던 start_setting_id가 끊어져 프롤로그 폴백이 아니라 빈 문자열이 됩니다.
+GET {{baseUrl}}/api/v1/stories/{{snapStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("수정 폼 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("snapStartSettingId", response.body.startSettings[0].id);
+%}
+
+### S3. (준비 3/3) 게스트로 채팅 생성 — 이 시점의 제목·프롤로그가 스냅샷으로 박힌다
+# 토큰을 싣지 않습니다. 게스트 채팅이라 이후 상세도 토큰 없이 조회할 수 있습니다(소유권 게이트 통과).
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+Accept: application/json
+
+{
+  "storyId": "{{snapStoryId}}"
+}
+
+> {%
+    client.test("채팅 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(스토리가 PUBLIC인지 확인). actual=${response.status}`);
+    });
+    client.global.set("snapChatId", response.body.id);
+%}
+
+### S4. (a) 공개 상태 상세 조회 → 현재 제목·프롤로그, 추천 입력 3건
+GET {{baseUrl}}/api/v1/chats/{{snapChatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("공개 스토리는 현재 제목·프롤로그를 보여준다", () => {
+        client.assert(b.storyTitle === "원래 제목", `storyTitle이 다릅니다. actual=${b.storyTitle}`);
+        client.assert(b.prologue === "원래 프롤로그", `prologue가 다릅니다. actual=${b.prologue}`);
+    });
+    client.test("공개 스토리는 추천 입력이 그대로 실린다", () => {
+        client.assert(b.suggestedInputs.length === 3,
+            `추천 입력이 3건이어야 합니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+    });
+%}
+
+### S5. (b) 소유자가 비공개로 되돌리고 제목·프롤로그·추천 입력을 바꾼다
+# PATCH 하나로 visibility·title·startSettings를 함께 갱신합니다(§4-3-8 부분 갱신).
+# startSettings에 S2에서 저장한 id를 실어 시작 설정 행 identity를 보존합니다(KNK-515).
+PATCH {{baseUrl}}/api/v1/stories/{{snapStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "바뀐 제목",
+  "visibility": "PRIVATE",
+  "startSettings": [
+    {
+      "id": "{{snapStartSettingId}}",
+      "name": "시작 장면",
+      "prologue": "바뀐 프롤로그",
+      "startSituation": "시작 상황",
+      "suggestedInputs": ["바뀐 추천 1", "바뀐 추천 2", "바뀐 추천 3"],
+      "endings": []
+    }
+  ]
+}
+
+> {%
+    client.test("수정이 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("스토리 쪽 값은 실제로 바뀌었다", () => {
+        client.assert(response.body.title === "바뀐 제목", `title 미교체. actual=${response.body.title}`);
+        client.assert(response.body.visibility === "PRIVATE", `visibility 미교체. actual=${response.body.visibility}`);
+    });
+%}
+
+### S6. (b)(d) 비공개 전환 후 상세 재조회 → 스냅샷 제목·프롤로그, 추천 입력은 빈 배열
+# 여기가 이 시나리오의 핵심입니다. 스토리 쪽은 S5에서 분명히 바뀌었는데, 이 응답에는 변경 **전** 값이
+# 나와야 합니다. "바뀐 …"이 하나라도 보이면 유출입니다.
+GET {{baseUrl}}/api/v1/chats/{{snapChatId}}
+Accept: application/json
+
+> {%
+    client.test("상세 재조회가 성공한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const b = response.body;
+    client.test("제목은 스냅샷(변경 전)이다", () => {
+        client.assert(b.storyTitle === "원래 제목",
+            `비공개 전환 후 제목이 새고 있습니다. expected=원래 제목 actual=${b.storyTitle}`);
+    });
+    client.test("프롤로그는 스냅샷(변경 전)이다", () => {
+        client.assert(b.prologue === "원래 프롤로그",
+            `비공개 전환 후 프롤로그가 새고 있습니다. expected=원래 프롤로그 actual=${b.prologue}`);
+    });
+    client.test("추천 입력은 빈 배열이다(스냅샷이 아니라 게이트)", () => {
+        client.assert(Array.isArray(b.suggestedInputs) && b.suggestedInputs.length === 0,
+            `추천 입력이 비어 있어야 합니다. actual=${JSON.stringify(b.suggestedInputs)}`);
+    });
+%}

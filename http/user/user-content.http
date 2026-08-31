@@ -6,6 +6,15 @@
 ###   - GET /users/me/chats   — 요청자 소유 채팅 카드(최근 활동순). 스키마는 POST /chats/batch 와 동일.
 ###   - 소프트 삭제 제외, limit(기본 100, 최대 100). 인증 필수(anyRequest().authenticated()) → 토큰 없으면 401.
 ###
+### [KNK-1059] 채팅 카드의 제목·썸네일은 스토리를 읽을 수 있을 때만 현재 값입니다.
+###   - story.isCurrentMetadataVisibleTo(요청자) 가 참이면 스토리의 현재 값, 거짓이면(비공개 전환·삭제)
+###     채팅 시작 시점의 스냅샷(story_chats.story_title_snapshot·story_thumbnail_key_snapshot)입니다.
+###   - 그래서 남의 공개 스토리로 채팅한 뒤 그 스토리가 비공개로 돌아가도 카드는 사라지지 않고
+###     시작 당시 제목·썸네일로 멈춥니다(다시 공개되면 현재 값으로 복귀).
+###   - 이 규칙의 실행 가능한 시나리오는 http/chat/chat-list.http 의 S1~S5에 있습니다. 서재와 배치 조회는
+###     같은 조립 함수(ChatService.toSummaryResponses)를 쓰므로 동작이 같고, 배치 쪽은 게스트 채팅으로
+###     재현되어 토큰 하나로 끝나기 때문입니다(서재로 하려면 스토리 소유자·채팅 소유자 두 계정이 필요합니다).
+###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
 ###   - Postgres 기동: docker compose up -d
