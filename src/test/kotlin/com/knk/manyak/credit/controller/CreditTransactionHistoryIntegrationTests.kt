@@ -350,20 +350,24 @@ class CreditTransactionHistoryIntegrationTests {
     }
 
     @Test
-    fun `커서를 디코딩해도 원장 id가 드러나지 않는다`() {
+    fun `커서를 디코딩해도 원장 위치가 드러나지 않는다`() {
         val user = saveUser()
-        val first = tx(user.id, 1, CreditReason.ATTENDANCE_REWARD, createdAt = base)
-        tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
+        tx(user.id, 1, CreditReason.ATTENDANCE_REWARD, createdAt = base)
+        val newest = tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
 
         val cursor = get(user, "?limit=1").nextCursor
         assertThat(cursor).isNotNull()
 
-        // 커서가 가리키는 행은 2번째 행이지만, 원장 id가 평문으로 남지 않는지 두 id 모두로 확인한다.
-        val plain = String(Base64.getUrlDecoder().decode(cursor), Charsets.ISO_8859_1)
-        assertThat(plain).doesNotContain("${first.id}")
-        assertThat(plain).doesNotContain("${first.id + 1}")
-        // 초 단위 시각도 그대로 드러나면 안 된다(봉인 대상은 (createdAt, id) 쌍 전체다).
-        assertThat(plain).doesNotContain("${base.epochSecond}")
+        // 봉인 없이 인코딩만 했다면 나왔을 문자열과 달라야 한다. 커서는 이 페이지의 마지막 행(=최신 행)을 가리킨다.
+        val stored = transactionRepository.findById(newest.id).orElseThrow().createdAt
+        val unsealed = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("${stored.epochSecond}:${stored.nano}:${newest.id}".toByteArray())
+        assertThat(cursor).isNotEqualTo(unsealed)
+
+        // 디코딩해도 `초:나노:id` 형태로 파싱되지 않는다. 개별 글자의 우연 일치를 검사하면 flaky해진다 —
+        // 랜덤 IV와 암호문 40여 바이트 중 하나가 우연히 ASCII '1'일 확률만 15% 남짓이다.
+        val parts = String(Base64.getUrlDecoder().decode(cursor), Charsets.ISO_8859_1).split(":")
+        assertThat(parts.size == 3 && parts.all { it.toLongOrNull() != null }).isFalse()
     }
 
     @Test
@@ -373,8 +377,11 @@ class CreditTransactionHistoryIntegrationTests {
         tx(user.id, 2, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
 
         val cursor = get(user, "?limit=1").nextCursor!!
-        // 마지막 글자를 바꿔 인증 태그를 깨뜨린다. GCM이 위조를 잡아 복호화 자체가 실패해야 한다.
-        val tampered = cursor.dropLast(1) + if (cursor.last() == 'A') 'B' else 'A'
+        // GCM 인증 태그의 마지막 바이트에서 한 비트를 뒤집는다. base64 문자열의 끝 글자를 바꾸는 방식은
+        // 마지막 글자에 여분 비트가 있어(payload 길이 mod 3에 따라) 디코딩 결과가 그대로일 수 있다.
+        val raw = Base64.getUrlDecoder().decode(cursor)
+        raw[raw.size - 1] = (raw[raw.size - 1].toInt() xor 0x01).toByte()
+        val tampered = Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
 
         restTestClient.get().uri("/api/v1/users/me/credits/transactions?cursor=$tampered")
             .header("Authorization", token(user))
