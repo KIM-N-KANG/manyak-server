@@ -73,8 +73,11 @@ import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.http.HttpStatus
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
@@ -116,7 +119,18 @@ class ChatService(
     // 채팅 턴 1회 소모량(재생성도 동일 값·사유를 공유). 운영 중 조정 가능한 정책값이라 턴마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     private val meterRegistry: MeterRegistry,
+    transactionManager: PlatformTransactionManager,
 ) {
+
+    /**
+     * AI 턴 요청 **조립 구간 전용** 트랜잭션(KNK-1064 Codex P2).
+     *
+     * 턴 경로(이어쓰기·재생성·선택지)에는 트랜잭션이 없다 — AI 호출·스트리밍이 수십 초 커넥션을 붙드는 것을
+     * 피하려는 의도된 설계다. 그래서 메서드에 `@Transactional`을 붙이는 대신(게다가 [buildAiRequest]는 private이라
+     * self-invocation으로 프록시를 타지 못해 애초에 먹지도 않는다) 조립 구간만 이 템플릿으로 짧게 묶는다.
+     * **조립이 끝나면 즉시 커밋되고 그 뒤에 AI를 부른다** — 트랜잭션이 AI 호출·스트리밍으로 넘어가지 않는다.
+     */
+    private val assemblyTransactionTemplate = assemblyTransactionTemplate(transactionManager)
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
@@ -557,7 +571,6 @@ class ChatService(
         // 이어쓰기가 만들 턴 번호의 예측치는 current_turn + 1이다(권위값은 저장이 확정하는 ai_call_logs.turn_number).
         val aiCall = assembleAiRequest(
             chat = chat,
-            story = story,
             userInput = request.userInput,
             turnNumber = chat.currentTurn + 1,
             userSource = request.userSource,
@@ -636,7 +649,6 @@ class ChatService(
         // 재생성은 새 턴을 만들지 않고 마지막 턴을 교체하므로, 대상 턴 번호는 current_turn 그대로다(+1 아님).
         val aiCall = buildAiRequest(
             chat = chat,
-            story = story,
             history = target.history,
             userInput = target.userInput,
             turnNumber = chat.currentTurn,
@@ -698,7 +710,6 @@ class ChatService(
         // 선택지는 이미 저장된 마지막 턴에 붙으므로 대상 턴 번호는 current_turn이다(새 턴을 만들지 않는다).
         val aiCall = buildAiRequest(
             chat = chat,
-            story = story,
             history = target.history,
             userInput = target.userInput,
             turnNumber = chat.currentTurn,
@@ -1167,14 +1178,12 @@ class ChatService(
      */
     private fun assembleAiRequest(
         chat: StoryChat,
-        story: Story?,
         userInput: String,
         turnNumber: Int,
         userSource: String?,
     ): AiTurnCall =
         buildAiRequest(
             chat = chat,
-            story = story,
             history = assembleHistory(chat.id),
             userInput = userInput,
             turnNumber = turnNumber,
@@ -1191,7 +1200,6 @@ class ChatService(
      */
     private fun buildAiRequest(
         chat: StoryChat,
-        story: Story?,
         history: List<ChatHistoryMessage>,
         userInput: String,
         // 이번 호출이 만들 턴 번호의 **예측치**다(이어쓰기 current_turn + 1, 재생성·선택지는 그 턴 자체인 current_turn).
@@ -1199,7 +1207,10 @@ class ChatService(
         turnNumber: Int,
         isRegenerated: Boolean,
         userSource: String? = null,
-    ): AiTurnCall {
+    ): AiTurnCall = assemblyTransactionTemplate.execute {
+        // 스토리를 여기서 **다시** 읽는다. 호출부가 읽어둔 값을 쓰면 게이트 판정만 트랜잭션 밖 시점이 되어
+        // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
+        val story = storyRepository.findById(chat.storyId).orElse(null)
         val genre = story?.genre.orEmpty()
         val setting = storySettingRepository.findByStoryId(chat.storyId)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
@@ -1217,7 +1228,7 @@ class ChatService(
                 ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
         }
 
-        return AiTurnCall(
+        AiTurnCall(
             request = ChatTurnAiRequest(
                 genre = genre,
                 storySettings = ChatTurnStorySettings(
@@ -1255,7 +1266,7 @@ class ChatService(
                 isRegenerated = isRegenerated,
             ),
         )
-    }
+    } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
 
     /** AI 채팅 턴 호출 한 번에 필요한 요청 본문과 연결 식별자 헤더 재료(KNK-751). */
     private data class AiTurnCall(
@@ -1443,6 +1454,19 @@ class ChatService(
     // [ChatTurnRefundMeters]가 메트릭 이름·outcome 값을 공유해야 해서 private이 아니다.
     // 사전 등록과 increment가 같은 상수를 봐야 미터 신원이 갈리지 않는다.
     internal companion object {
+        /**
+         * 조립 구간 트랜잭션 설정. 게이트 판정에 쓰는 스토리와 그 자식 데이터(시작 설정·설정·사건·엔딩)를
+         * **한 스냅샷에서** 읽어야 하기 때문에 REPEATABLE_READ다 — READ_COMMITTED에서는 쿼리 사이에 제작자의
+         * "비공개 전환 + 수정" 커밋이 끼면 게이트는 옛 공개 상태로 열린 채 새 프롤로그가 AI 요청에 실린다.
+         * 읽기 전용이라 PostgreSQL에서 락을 잡지 않는다. 회귀 가드(`ChatAssemblyTransactionGuardTests`)가 이 설정을 고정한다.
+         */
+        internal fun assemblyTransactionTemplate(
+            transactionManager: PlatformTransactionManager,
+        ): TransactionTemplate = TransactionTemplate(transactionManager).apply {
+            isReadOnly = true
+            isolationLevel = TransactionDefinition.ISOLATION_REPEATABLE_READ
+        }
+
         // SseEmitter 전체(MVC async) 상한. 턴 스트림은 본문 스트리밍 뒤 곧바로 completed를 보낸다(선택지는 전용 엔드포인트로
         // 분리 — B23). stopgap 동안 본문+내부 선택지 호출까지 덮으려 160s로 상향했던 값을 낮추되, AI 스트림의 이벤트 간 idle
         // 타임아웃(manyak.ai.chat.stream-timeout, 기본 60s)과 같게 두지 않는다: idle은 토큰 간격 상한이라 토큰이 계속 오면
