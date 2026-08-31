@@ -70,6 +70,7 @@ erDiagram
   varchar_64_ story_thumbnail_key_snapshot
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_chat_main_events" {
   bigint id
@@ -91,7 +92,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
-  jsonb last_public_snapshot
+  text thumbnail_image_url
 }
 ```
 

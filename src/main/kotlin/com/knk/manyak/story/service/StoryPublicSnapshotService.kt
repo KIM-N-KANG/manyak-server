@@ -95,6 +95,7 @@ class StoryPublicSnapshotService(
         return StoryPublicSnapshot(
             title = story.title,
             thumbnailImageKey = story.thumbnailImageKey,
+            thumbnailImageUrl = story.thumbnailImageUrl,
             genre = story.genre,
             storySettings = StorySettingsSnapshot(
                 worldSetting = setting?.worldSetting,

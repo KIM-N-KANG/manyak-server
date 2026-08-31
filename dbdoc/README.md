@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 21 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 22 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -40,6 +40,7 @@
 | [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
+| [public.story_public_snapshots](public.story_public_snapshots.md) | 4 | KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다. | BASE TABLE |
 
 ## Relations
 
@@ -89,6 +90,7 @@ erDiagram
 "public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -147,7 +149,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
-  jsonb last_public_snapshot
+  text thumbnail_image_url
 }
 "public.story_settings" {
   bigint id
@@ -198,6 +200,7 @@ erDiagram
   varchar_64_ story_thumbnail_key_snapshot
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -457,6 +460,12 @@ erDiagram
   varchar_50_ policy_key
   bigint amount
   timestamp_with_time_zone effective_until
+  timestamp_with_time_zone updated_at
+}
+"public.story_public_snapshots" {
+  bigint story_id FK
+  jsonb snapshot
+  timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }
 ```

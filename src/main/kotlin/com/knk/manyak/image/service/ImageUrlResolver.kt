@@ -35,6 +35,25 @@ class ImageUrlResolver(
     fun thumbnailSmUrlFor(imageKey: String?): String? =
         urlFor(imageKey?.let { "${it}$SM_SUFFIX" }, ImagePresetType.THUMBNAIL)
 
+    /**
+     * 상세용 표지 URL. 컴파일이 생성한 표지가 있으면 그것을, 없으면 프리셋 키로 조합한 URL을 쓴다(KNK-1069).
+     *
+     * **2단 폴백을 여기 한 곳에만 둔다.** 생성 성공이어도 프리셋 연결(`thumbnail_image_key`)은 지우지 않으므로
+     * 두 값이 함께 존재하는 게 정상이고, 어느 쪽을 보여줄지 판정은 호출부마다 흩어지면 곧 어긋난다.
+     * 공백 문자열은 값이 없는 것으로 본다(빈 URL이 저장돼도 프리셋으로 떨어지게).
+     */
+    fun thumbnailUrlFor(generatedUrl: String?, imageKey: String?): String? =
+        generatedUrl?.takeIf { it.isNotBlank() } ?: urlFor(imageKey, ImagePresetType.THUMBNAIL)
+
+    /**
+     * 목록·카드용 표지 URL. 생성 표지가 있으면 **원본 URL을 그대로** 쓰고, 없으면 프리셋의 `_sm` 변형을 쓴다.
+     *
+     * ponytail: 생성 표지는 축소본을 만들지 않는다 — 목록 카드가 768x1024 원본을 받는다. 카드 무게가 문제가
+     * 되면 업로드 시 `_sm` 파생본을 함께 올리고(또는 CDN 이미지 리사이즈를 붙이고) 여기서 그 URL을 쓴다.
+     */
+    fun thumbnailSmUrlFor(generatedUrl: String?, imageKey: String?): String? =
+        generatedUrl?.takeIf { it.isNotBlank() } ?: thumbnailSmUrlFor(imageKey)
+
     private companion object {
         const val SM_SUFFIX = "_sm"
     }

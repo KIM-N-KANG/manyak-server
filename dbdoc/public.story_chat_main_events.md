@@ -62,6 +62,7 @@ erDiagram
   varchar_64_ story_thumbnail_key_snapshot
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
+  jsonb occurred_main_event_names_snapshot
 }
 "public.story_main_events" {
   bigint id

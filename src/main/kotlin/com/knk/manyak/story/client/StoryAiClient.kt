@@ -145,7 +145,29 @@ data class AiStoryCompileResponse(
     @JsonProperty("character_images")
     val characterImages: List<AiCharacterImage> = emptyList(),
 
+    // 컴파일이 생성한 표지 썸네일 1장(KNK-1047). AI 계약에서는 필수 객체지만 여기서는 **nullable + 기본값 null**이다 —
+    // 운영 AI(v0.2.6)는 아직 이 필드를 보내지 않아, 필수로 두면 컴파일 응답 역직렬화가 통째로 깨진다.
+    // characterImages = emptyList()와 같은 이유의 전방 호환 기본값이다.
+    @JsonProperty("thumbnail_image")
+    val thumbnailImage: AiThumbnailImage? = null,
+
     val meta: AiResponseMeta? = null,
+)
+
+/**
+ * AI가 생성한 표지 썸네일(스펙 §5-3-3, KNK-1047). 768x1024 세로 WebP 1장이며 인물 이미지와 동시에 생성된다.
+ * 성공하면 [imageBase64]와 [contentType]이, 실패하면 [error]에 사유 코드
+ * (`timeout`·`rate_limited`·`rejected`·`generation_failed`)가 실린다. 실패해도 컴파일 자체는 200이다.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiThumbnailImage(
+    @JsonProperty("image_name")
+    val imageName: String? = null,
+    @JsonProperty("image_base64")
+    val imageBase64: String? = null,
+    @JsonProperty("content_type")
+    val contentType: String? = null,
+    val error: String? = null,
 )
 
 /**

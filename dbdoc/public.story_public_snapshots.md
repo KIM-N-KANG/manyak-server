@@ -1,15 +1,15 @@
-# public.story_settings
+# public.story_public_snapshots
+
+## Description
+
+KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다.
 
 ## Columns
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_settings_id_seq'::regclass) | false |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
-| world_setting | text |  | true |  |  |  |
-| character_setting | text |  | true |  |  |  |
-| user_role_setting | text |  | true |  |  |  |
-| rule_setting | text |  | true |  |  |  |
+| snapshot | jsonb |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 
@@ -17,31 +17,25 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| story_settings_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
-| story_settings_pkey | PRIMARY KEY | PRIMARY KEY (id) |
-| uq_story_settings_story | UNIQUE | UNIQUE (story_id) |
+| fk_story_public_snapshots_story | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
+| story_public_snapshots_pkey | PRIMARY KEY | PRIMARY KEY (story_id) |
 
 ## Indexes
 
 | Name | Definition |
 | ---- | ---------- |
-| story_settings_pkey | CREATE UNIQUE INDEX story_settings_pkey ON public.story_settings USING btree (id) |
-| uq_story_settings_story | CREATE UNIQUE INDEX uq_story_settings_story ON public.story_settings USING btree (story_id) |
+| story_public_snapshots_pkey | CREATE UNIQUE INDEX story_public_snapshots_pkey ON public.story_public_snapshots USING btree (story_id) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
-"public.story_settings" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
-"public.story_settings" {
-  bigint id
+"public.story_public_snapshots" {
   bigint story_id FK
-  text world_setting
-  text character_setting
-  text user_role_setting
-  text rule_setting
+  jsonb snapshot
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }

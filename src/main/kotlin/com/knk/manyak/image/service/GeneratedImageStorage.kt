@@ -12,12 +12,12 @@ import java.net.URI
 import java.time.Duration
 
 /**
- * 컴파일이 생성한 인물 이미지를 객체 저장소에 올리고 서빙 URL을 돌려주는 포트(KNK-966).
+ * 컴파일이 생성한 이미지(인물·표지 썸네일)를 객체 저장소에 올리고 서빙 URL을 돌려주는 포트(KNK-966, KNK-1069).
  *
  * 저장소가 미구성이면 null을 돌려 이미지 없이 진행하게 한다(로컬·테스트). 업로드 실패는 예외로 던지고
- * 호출부가 인물 단위로 흡수한다 — 이미지 한 장 때문에 스토리 생성이 실패해서는 안 된다.
+ * 호출부가 이미지 단위로 흡수한다 — 이미지 한 장 때문에 스토리 생성이 실패해서는 안 된다.
  */
-interface CharacterImageStorage {
+interface GeneratedImageStorage {
     fun upload(objectKey: String, bytes: ByteArray, contentType: String): String?
 
     /**
@@ -30,11 +30,15 @@ interface CharacterImageStorage {
 /**
  * S3 구현. 버킷이 비어 있으면(로컬·테스트) 클라이언트를 만들지 않고 no-op으로 동작한다.
  *
+ * **설정 키가 클래스 이름과 어긋나 있다**: 인물 이미지 전용으로 시작해(KNK-966) 표지 썸네일까지 같은 버킷을
+ * 쓰게 됐지만(KNK-1069) `manyak.asset.character-image.*`와 대응 환경변수는 그대로 둔다 — 이름을 바꾸면
+ * terraform apply(ECS 태스크 정의)와 동반 배포가 필요해지고, 그동안 반쪽 설정으로 업로드가 죽는다.
+ *
  * 서빙 URL은 저장하지 않는 프리셋([ImageUrlResolver])과 달리 생성 자산이라 키가 UUID다. 그래서 조합 규칙을
- * 카탈로그에 두지 않고 업로드 시점에 `image-base-url + 객체 키`로 만들어 `story_characters.image_url`에 굳힌다.
+ * 카탈로그에 두지 않고 업로드 시점에 `image-base-url + 객체 키`로 만들어 `story_characters.image_url`에 굳힌다(썸네일은 `stories.thumbnail_image_url`).
  */
 @Component
-class S3CharacterImageStorage(
+class S3GeneratedImageStorage(
     @param:Value("\${manyak.asset.character-image.bucket:}") private val bucket: String,
     @param:Value("\${manyak.asset.character-image.region:}") private val region: String,
     // S3 호환 저장소(로컬 MinIO 등)를 쓸 때만 채운다. 비어 있으면 AWS 기본 엔드포인트를 그대로 쓴다.
@@ -42,7 +46,7 @@ class S3CharacterImageStorage(
     // 인물 이미지 전용 서빙 base URL. 전역 image-base-url(기본값이 운영 CDN)로 폴백하지 않는다 —
     // dev에서 버킷만 바꾸면 dev DB에 운영 CDN 절대 URL이 저장돼 깨진 이미지가 남기 때문이다.
     @param:Value("\${manyak.asset.character-image.base-url:}") private val baseUrl: String,
-) : CharacterImageStorage {
+) : GeneratedImageStorage {
 
     // 버킷과 전용 base URL이 **둘 다** 있어야 활성화한다. 하나라도 비면 클라이언트를 만들지 않고 no-op으로
     // 떨어진다 — 반쪽 설정으로 잘못된 URL이 DB에 굳는 것을 원천 차단한다(이미지 없이 저장되는 편이 안전하다).

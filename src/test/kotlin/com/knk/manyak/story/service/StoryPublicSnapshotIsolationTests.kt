@@ -65,6 +65,12 @@ class StoryPublicSnapshotIsolationTests {
     private fun snapshotLoadCount(): Long =
         statistics().getEntityStatistics(snapshotEntityName).loadCount
 
+    /**
+     * 측정 직전에 통계를 0으로 되돌린다. 측정 전후 값을 빼는 방식은 시드가 남긴 로드·컨텍스트 재생성 같은
+     * 잡음에 흔들려 간헐 실패를 만든다 — 측정 구간만 남기면 그 흔들림이 사라진다.
+     */
+    private fun startMeasuring() = statistics().clear()
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
@@ -85,8 +91,7 @@ class StoryPublicSnapshotIsolationTests {
     @Test
     fun `스토리 배치 조회는 마지막 공개 버전 스냅샷을 읽지 않는다`() {
         val stories = seedPublicStoriesWithSnapshots(3)
-        // 시드가 만든 로드는 세지 않는다 — 측정 구간은 아래 요청뿐이다.
-        val before = snapshotLoadCount()
+        startMeasuring()
 
         restTestClient.post()
             .uri("/api/v1/stories/batch")
@@ -97,11 +102,11 @@ class StoryPublicSnapshotIsolationTests {
             .expectBody()
             .jsonPath("$.length()").isEqualTo(3)
 
-        assertThat(snapshotLoadCount() - before)
+        assertThat(snapshotLoadCount())
             .withFailMessage(
                 "스토리 배치 조회가 스냅샷을 읽었습니다(%d건). 목록 경로는 이 값을 쓰지 않으므로, " +
                     "다시 stories에 붙었거나 목록에서 조회하고 있습니다.",
-                snapshotLoadCount() - before,
+                snapshotLoadCount(),
             )
             .isZero()
     }
@@ -110,7 +115,7 @@ class StoryPublicSnapshotIsolationTests {
     fun `회원 서재의 스토리 목록도 마지막 공개 버전 스냅샷을 읽지 않는다`() {
         val owner = userRepository.save(User(nickname = "제작자", status = UserStatus.ACTIVE))
         seedPublicStoriesWithSnapshots(3, ownerId = owner.id)
-        val before = snapshotLoadCount()
+        startMeasuring()
 
         restTestClient.get()
             .uri("/api/v1/users/me/stories")
@@ -120,7 +125,7 @@ class StoryPublicSnapshotIsolationTests {
             .expectBody()
             .jsonPath("$.length()").isEqualTo(3)
 
-        assertThat(snapshotLoadCount() - before)
+        assertThat(snapshotLoadCount())
             .withFailMessage("서재의 스토리 목록이 스냅샷을 읽었습니다. 이 경로는 이 값을 쓰지 않습니다.")
             .isZero()
     }
@@ -130,9 +135,9 @@ class StoryPublicSnapshotIsolationTests {
         // 위 두 테스트가 "안 읽는다"만 고정하면, 조회를 통째로 지워도 통과한다.
         // 실제로 읽어야 하는 경로가 읽는지도 함께 못박는다.
         val story = seedPublicStoriesWithSnapshots(1).single()
-        val before = snapshotLoadCount()
+        startMeasuring()
 
         assertThat(snapshotService.findByStoryId(story.id)).isNotNull
-        assertThat(snapshotLoadCount() - before).isEqualTo(1)
+        assertThat(snapshotLoadCount()).isEqualTo(1)
     }
 }

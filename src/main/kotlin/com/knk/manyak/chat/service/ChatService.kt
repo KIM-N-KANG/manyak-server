@@ -261,9 +261,14 @@ class ChatService(
                 storyId = story?.publicId?.toString().orEmpty(),
                 storyTitle = (if (showsCurrent) story.title else snapshot?.title).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
-                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(
-                    if (showsCurrent) story.thumbnailImageKey else snapshot?.thumbnailImageKey,
-                ),
+                // 생성 표지(KNK-1069)와 프리셋 키의 2단 폴백은 ImageUrlResolver가 소유한다.
+                // 읽을 수 없으면 **둘 다** 마지막 공개 버전 스냅샷에서 읽는다 — 스냅샷이 URL까지 담으므로
+                // 비공개로 되돌린 스토리의 카드가 프리셋 표지로 내려앉지 않는다(KNK-1069가 수용했던 화면 열화).
+                thumbnailUrlSm = if (showsCurrent) {
+                    imageUrlResolver.thumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey)
+                } else {
+                    imageUrlResolver.thumbnailSmUrlFor(snapshot?.thumbnailImageUrl, snapshot?.thumbnailImageKey)
+                },
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
@@ -1266,7 +1271,7 @@ class ChatService(
         val material = if (showsCurrentStory) {
             story?.let(storyPublicSnapshotService::capture)
         } else {
-            // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V68 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
+            // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V69 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
             // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이
             // 함께 가므로 재료가 비는 손해가 비공개 개작을 흘리는 손해보다 작다.
             story?.let { storyPublicSnapshotService.findByStoryId(it.id) }

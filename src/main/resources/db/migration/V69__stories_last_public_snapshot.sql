@@ -43,6 +43,7 @@ SELECT
     jsonb_build_object(
         'title', s.title,
         'thumbnailImageKey', s.thumbnail_image_key,
+        'thumbnailImageUrl', s.thumbnail_image_url,
         'genre', s.genre,
         'storySettings', COALESCE(
             (
