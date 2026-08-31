@@ -9,8 +9,6 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
-import org.hibernate.annotations.JdbcTypeCode
-import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.util.UUID
 
@@ -67,20 +65,6 @@ class Story(
 
     @Column(name = "deleted_at")
     var deletedAt: Instant? = null,
-
-    /**
-     * 마지막으로 공개(PUBLISHED∧PUBLIC)였던 시점의 표시·생성 재료(KNK-1065).
-     *
-     * 공개 상태로 저장될 때마다 [com.knk.manyak.story.service.StoryPublicSnapshotService]가 통째로 덮어쓴다.
-     * 읽을 수 없는 스토리를 참조하는 채팅 경로는 현재 값 대신 이 값을 쓴다.
-     *
-     * NULL일 수 있다: 한 번도 공개된 적 없는 스토리, 그리고 V68 백필 시점에 이미 비공개·초안·삭제였던
-     * 스토리다(그때의 현재 값은 곧 개작본이라 채워 넣으면 막으려던 유출을 그대로 되살린다).
-     * 운영 PostgreSQL은 V68이 jsonb로, 테스트 H2는 ddl-auto가 dialect별 JSON 타입으로 만든다(ai_call_logs 선례).
-     */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "last_public_snapshot")
-    var lastPublicSnapshot: StoryPublicSnapshot? = null,
 ) {
     @PreUpdate
     fun updateTimestamp() {

@@ -24,6 +24,7 @@ import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -118,6 +119,9 @@ class ChatStreamHistoryIntegrationTests {
 
     @Autowired
     private lateinit var snapshotService: StoryPublicSnapshotService
+
+    @Autowired
+    private lateinit var snapshotRowRepository: StoryPublicSnapshotRepository
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
@@ -377,7 +381,8 @@ class ChatStreamHistoryIntegrationTests {
     fun `스냅샷이 없는 비공개 스토리는 턴 요청 재료가 비어 있고 터지지 않는다`() {
         // 백필 대상 밖(백필 시점에 이미 비공개)인 스토리를 재현한다 — last_public_snapshot이 NULL이다.
         val (story, chat) = seedChatOnPublicStory()
-        storyRepository.save(storyRepository.findById(story.id).orElseThrow().also { it.lastPublicSnapshot = null })
+        // 백필 대상 밖(백필 시점에 이미 비공개)인 스토리를 재현한다 — story_public_snapshots에 행이 없다.
+        snapshotRowRepository.deleteById(story.id)
         hideStory(story)
         changePrologue(story, "비공개 개작 프롤로그")
 

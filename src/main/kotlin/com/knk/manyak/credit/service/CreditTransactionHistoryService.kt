@@ -10,6 +10,7 @@ import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -31,6 +32,7 @@ class CreditTransactionHistoryService(
     private val transactionRepository: CreditTransactionRepository,
     private val lotRepository: CreditLotRepository,
     private val storyRepository: StoryRepository,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
     private val storyChatRepository: StoryChatRepository,
     private val sessionRepository: StoryCreationSessionRepository,
     private val cursorCodec: CreditCursorCodec,
@@ -100,6 +102,10 @@ class CreditTransactionHistoryService(
         val storyIdBySession = sessionRepository.findAllById(sessionIds).associate { it.id to it.storyId }
         val storyIds = (chatById.values.map { it.storyId } + storyIdBySession.values.filterNotNull()).toSet()
         val storyById = storyRepository.findAllById(storyIds).associateBy { it.id }
+        // 스냅샷은 읽을 수 없는 스토리에만 필요하다(별도 테이블 — PR #224 Codex P2). 그 스토리들만 한 번에 조회한다.
+        val snapshotByStoryId = storyPublicSnapshotService.findAllByStoryIds(
+            storyById.values.filterNot { it.isCurrentMetadataVisibleTo(userId) }.map { it.id },
+        )
 
         return rows.mapNotNull { row ->
             val title = when (row.refType) {
@@ -107,7 +113,11 @@ class CreditTransactionHistoryService(
                     val chat = chatById[row.refId] ?: return@mapNotNull null
                     val story = storyById[chat.storyId]
                     // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 제목에서 멈춘다(KNK-1065).
-                    if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else story?.lastPublicSnapshot?.title
+                    if (story?.isCurrentMetadataVisibleTo(userId) == true) {
+                        story.title
+                    } else {
+                        story?.let { snapshotByStoryId[it.id] }?.title
+                    }
                 }
                 // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
                 REF_STORY -> storyIdBySession[row.refId]

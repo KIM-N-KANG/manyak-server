@@ -396,6 +396,65 @@ class ChatTurnEndingMainEventIntegrationTests {
         assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
     }
 
+    @Test
+    fun `완결 사건 기록은 이름 스냅샷으로도 남는다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(
+            aiOutput = "응답 본문",
+            choices = listOf("선택 1"),
+            occurredMainEventName = "발단",
+        )
+
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 조인 행(정본)과 이름 스냅샷(복구용)을 둘 다 남긴다(PR #224 Codex P2).
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId })
+            .containsExactly(eventBaldan.id)
+        assertThat(updated.occurredMainEventNamesSnapshot).containsExactly("발단")
+    }
+
+    @Test
+    fun `주요 사건이 교체돼 완결 기록이 cascade 삭제돼도 다음 턴 요청에 완결 사건이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        // 1턴: '발단'을 완결한다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단")
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 소유자가 감춘 채 주요 사건을 통째로 간다. story_chat_main_events.main_event_id는 CASCADE FK라
+        // 조인 행이 함께 사라진다 — 완결 기록의 정본이 통째로 날아간다.
+        hideStoryFromReaders()
+        jdbcTemplate.update("DELETE FROM story_chat_main_events")
+        jdbcTemplate.update("DELETE FROM story_main_events WHERE story_id = ?", story.id)
+        assertThat(storyChatMainEventRepository.findByChatId(chat.id)).isEmpty()
+
+        // 2턴: AI에게는 스냅샷의 옛 사건이 후보로 나가야 하고, '발단'은 **이미 완결했다**고 함께 나가야 한다.
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.mainEvents.map { it.name }).containsExactly("발단", "절정")
+        // 이 값이 비면 독자가 이미 지난 사건을 다시 겪는다.
+        assertThat(captured.occurredMainEventNames).containsExactly("발단")
+    }
+
+    @Test
+    fun `공개 상태에서 사건 이름을 바꾸면 완결 표기도 현재 이름을 따라간다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"), occurredMainEventName = "발단")
+        streamGuest(chat.publicId.toString(), "길을 나선다.")
+
+        // 공개 상태라 조인 행이 살아 있고, 이름만 바뀌었다. 이름 스냅샷("발단")이 아니라 현재 이름이 나가야 한다.
+        jdbcTemplate.update("UPDATE story_main_events SET name = ? WHERE id = ?", "새 발단", eventBaldan.id)
+
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "응답", choices = listOf("선택 1"))
+        streamGuest(chat.publicId.toString(), "다음 행동.")
+
+        val captured = judgingAiClient.lastRequest.get() ?: error("AI 요청이 캡처되지 않았습니다.")
+        assertThat(captured.occurredMainEventNames).containsExactly("새 발단")
+    }
+
     private fun streamGuest(chatId: String, userInput: String): String =
         stream(chatId, userInput, authorization = null)
 

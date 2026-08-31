@@ -18,6 +18,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -48,6 +49,7 @@ class StoryEditIntegrationTests {
     @Autowired private lateinit var storyEndingRepository: StoryEndingRepository
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach fun setUp() = databaseCleaner.cleanAll()
@@ -349,7 +351,7 @@ class StoryEditIntegrationTests {
 
         patchAll(story, startSetting.publicId.toString(), "v2 제목", "v2 프롤로그", "v2 엔딩")
 
-        val snapshot = storyRepository.findById(story.id).get().lastPublicSnapshot!!
+        val snapshot = snapshotService.findByStoryId(story.id)!!
         assertEquals("v2 제목", snapshot.title)
         assertEquals("v2 제목 장르", snapshot.genre)
         assertEquals("v2 제목 세계관", snapshot.storySettings.worldSetting)
@@ -382,7 +384,7 @@ class StoryEditIntegrationTests {
 
         val reloaded = storyRepository.findById(story.id).get()
         assertEquals("비공개 개작 제목", reloaded.title)
-        assertEquals("공개 제목", reloaded.lastPublicSnapshot!!.title)
+        assertEquals("공개 제목", snapshotService.findByStoryId(story.id)!!.title)
     }
 
     @Test
@@ -405,7 +407,7 @@ class StoryEditIntegrationTests {
             .expectStatus().isOk
 
         // 다시 공개하면 개작본이 곧 현재 공개본이다.
-        assertEquals("개작 제목", storyRepository.findById(story.id).get().lastPublicSnapshot!!.title)
+        assertEquals("개작 제목", snapshotService.findByStoryId(story.id)!!.title)
     }
 
     @Test

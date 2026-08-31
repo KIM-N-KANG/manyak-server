@@ -243,6 +243,11 @@ class ChatService(
         val endingNameById = storyEndingRepository
             .findAllById(chats.mapNotNull { it.reachedEndingId })
             .associate { it.id to it.name }
+        // 스냅샷은 **읽을 수 없는 스토리에만** 필요하다. 별도 테이블이라 그 스토리들만 한 번에 조회한다
+        // (스토리 엔티티에 붙어 있었다면 목록 전체가 이 JSON을 함께 읽었다 — PR #224 Codex P2).
+        val snapshotByStoryId = storyPublicSnapshotService.findAllByStoryIds(
+            storiesByStoryId.values.filterNot { it.isCurrentMetadataVisibleTo(userId) }.map { it.id },
+        )
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
             // 제목·썸네일은 요청자가 지금 그 스토리를 읽을 수 있을 때만 현재 값을 쓴다(KNK-1059).
@@ -250,7 +255,7 @@ class ChatService(
             // 요청자가 원래 알던 값이라 그대로 둔다 — 새로 새는 정보가 없다.
             val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
             // 읽을 수 없으면 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷에서 멈춘다(KNK-1065).
-            val snapshot = if (showsCurrent) null else story?.lastPublicSnapshot
+            val snapshot = if (showsCurrent) null else story?.let { snapshotByStoryId[it.id] }
             ChatSummaryResponse(
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
@@ -342,7 +347,7 @@ class ChatService(
         // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목·프롤로그가 보여선 안 된다.
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
         // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 스냅샷에서 멈춘다(KNK-1065).
-        val snapshot = if (showsCurrentStory) null else story?.lastPublicSnapshot
+        val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
         val storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
@@ -457,7 +462,7 @@ class ChatService(
         val story = storyRepository.findById(chat.storyId).orElse(null)
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
-        val snapshot = if (showsCurrentStory) null else story?.lastPublicSnapshot
+        val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
@@ -1264,7 +1269,7 @@ class ChatService(
             // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V68 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
             // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이
             // 함께 가므로 재료가 비는 손해가 비공개 개작을 흘리는 손해보다 작다.
-            story?.lastPublicSnapshot
+            story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
         }
         val startSetting = material?.startSettingOf(chat.startSettingId)
         val mainEvents = material?.mainEvents.orEmpty()
@@ -1305,7 +1310,7 @@ class ChatService(
                 userSource = userSource,
                 mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
                 targetMainEvent = targetMainEvent,
-                occurredMainEventNames = resolveOccurredMainEventNames(chat.id, mainEvents),
+                occurredMainEventNames = resolveOccurredMainEventNames(chat, mainEvents),
                 endings = endings.map { ChatTurnEnding(it.name, it.achievementCondition, it.epilogue) },
             ),
             traceLink = AiTraceLink(
@@ -1350,13 +1355,29 @@ class ChatService(
                 character.imageUrl?.let { ChatCharacterImage(name = character.name, imageUrl = it) }
             }
 
-    /** 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료). */
-    private fun resolveOccurredMainEventNames(chatId: Long, mainEvents: List<MainEventSnapshot>): List<String> {
+    /**
+     * 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료).
+     *
+     * 정본은 조인 테이블(`story_chat_main_events`)이지만, 그 `main_event_id`가 `story_main_events` FK
+     * **ON DELETE CASCADE**라 소유자가 주요 사건을 교체하면 행이 통째로 사라진다. 그러면 AI에게 옛 사건을
+     * 후보로 보내면서 "이미 완결했다"는 사실은 못 보내, 독자가 **이미 지난 사건을 다시 겪는다**(PR #224 Codex P2).
+     * 그래서 채팅에 박아둔 이름 스냅샷과 **합집합**으로 채운다.
+     *
+     * 합집합인 이유: 조인 행만 보면 CASCADE 삭제를 못 살리고, 이름 스냅샷만 보면 소유자가 공개 상태에서
+     * 사건 이름을 바꾼 경우(조인 행은 살아 있고 새 이름이 정답)를 놓친다.
+     *
+     * 결과는 항상 [mainEvents](이번 요청에 실은 목록)로 걸러 그 표시 순서로 낸다 — AI가 모르는 이름을
+     * "이미 완결했다"고 보내면 판정이 엉킨다.
+     */
+    private fun resolveOccurredMainEventNames(chat: StoryChat, mainEvents: List<MainEventSnapshot>): List<String> {
         if (mainEvents.isEmpty()) {
             return emptyList()
         }
-        val occurredIds = storyChatMainEventRepository.findByChatId(chatId).map { it.mainEventId }.toSet()
-        return mainEvents.filter { it.id in occurredIds }.map { it.name }
+        val occurredIds = storyChatMainEventRepository.findByChatId(chat.id).map { it.mainEventId }.toSet()
+        val occurredNames = mainEvents.filter { it.id in occurredIds }.map { it.name }
+            .plus(chat.occurredMainEventNamesSnapshot.orEmpty())
+            .toSet()
+        return mainEvents.filter { it.name in occurredNames }.map { it.name }
     }
 
     /**

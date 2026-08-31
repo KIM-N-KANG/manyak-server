@@ -238,6 +238,14 @@ class ChatTurnPersister(
      * 현재 행이 없으면(소유자가 이름을 바꿨거나 지웠다) 완결 기록은 **건너뛴다**.
      * `story_chat_main_events.main_event_id`가 NOT NULL FK라 엔딩처럼 이름만 남길 자리가 없다.
      * 목표 사건도 같은 이유로 해제된다(진행 0) — 다음 턴에 AI가 다시 지목하면 그때 다시 잡힌다.
+     *
+     * 기록에 성공한 완결 사건은 이름도 [StoryChat.occurredMainEventNamesSnapshot]에 남긴다. 조인 행 자체가
+     * CASCADE로 사라지는 경우를 대비한 복구 수단이다(PR #224 Codex P2).
+     *
+     * **목표 사건은 이름을 남기지 않는다**(의도된 선택). 완결 기록은 누적 이력이라 한 번 잃으면 되살아나지
+     * 않지만, 목표 사건은 **매 턴 AI 판정으로 다시 정해진다** — 행이 사라져 해제돼도 다음 턴에 AI가 다시
+     * 지목하면 그대로 복원된다. 진행 턴 수도 AI가 판정에 실어 보내는 값을 백엔드가 되돌려 싣는 것이라
+     * 서버가 보존해야 할 권위값이 아니다. 잃는 것은 한 턴의 연속성뿐이라 컬럼·읽기 경로를 늘릴 값이 없다.
      */
     private fun applyMainEventState(chat: StoryChat, judgment: TurnJudgment, judgmentSource: TurnJudgmentSource) {
         // 완결 사건 기록(최초 1회 upsert). 같은 채팅에서 같은 사건은 유니크로 한 번만 남는다.
@@ -247,6 +255,13 @@ class ChatTurnPersister(
                     storyChatMainEventRepository.save(
                         StoryChatMainEvent(chatId = chat.id, mainEventId = eventId),
                     )
+                }
+                // 이름도 채팅에 남긴다. story_chat_main_events는 main_event_id가 CASCADE FK라 소유자가
+                // 주요 사건을 교체하면 행이 통째로 사라지고, 그러면 "이미 완결했다"는 기록이 없어져
+                // 독자가 이미 지난 사건을 다시 겪는다(PR #224 Codex P2).
+                val kept = chat.occurredMainEventNamesSnapshot.orEmpty()
+                if (name !in kept) {
+                    chat.occurredMainEventNamesSnapshot = kept + name
                 }
             }
         }

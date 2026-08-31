@@ -5,9 +5,11 @@ import com.knk.manyak.story.entity.MainEventSnapshot
 import com.knk.manyak.story.entity.StartSettingSnapshot
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.entity.StorySettingsSnapshot
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -28,6 +30,7 @@ class StoryPublicSnapshotService(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
+    private val storyPublicSnapshotRepository: StoryPublicSnapshotRepository,
 ) {
 
     /**
@@ -43,7 +46,27 @@ class StoryPublicSnapshotService(
         if (story.deletedAt != null || !story.isPubliclyVisible()) {
             return
         }
-        story.lastPublicSnapshot = capture(story)
+        val captured = capture(story)
+        // 스토리당 한 행(story_id가 PK)이라 있으면 덮고 없으면 만든다.
+        val existing = storyPublicSnapshotRepository.findById(story.id).orElse(null)
+        if (existing == null) {
+            storyPublicSnapshotRepository.save(StoryPublicSnapshotRow(storyId = story.id, snapshot = captured))
+        } else {
+            existing.snapshot = captured
+            storyPublicSnapshotRepository.save(existing)
+        }
+    }
+
+    /** 스토리 하나의 마지막 공개 버전 스냅샷. 없으면 null(한 번도 공개된 적 없거나 백필 대상 밖). */
+    fun findByStoryId(storyId: Long): StoryPublicSnapshot? =
+        storyPublicSnapshotRepository.findById(storyId).orElse(null)?.snapshot
+
+    /** 여러 스토리의 스냅샷을 한 번에 조회한다(서재·이용내역의 N+1 방지). 없는 스토리는 결과에 없다. */
+    fun findAllByStoryIds(storyIds: Collection<Long>): Map<Long, StoryPublicSnapshot> {
+        if (storyIds.isEmpty()) {
+            return emptyMap()
+        }
+        return storyPublicSnapshotRepository.findAllById(storyIds).associate { it.storyId to it.snapshot }
     }
 
     /** 스토리의 현재 표시·생성 재료를 스냅샷 모양으로 모은다. */

@@ -9,6 +9,8 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.util.UUID
 
@@ -90,6 +92,23 @@ class StoryChat(
 
     @Column(name = "target_progress_turns", nullable = false)
     var targetProgressTurns: Int = 0,
+
+    /**
+     * 이 채팅이 완결한 주요 사건의 **이름** 스냅샷(PR #224 Codex P2). [reachedEndingNameSnapshot]과 같은
+     * 이유로 남기며 DROP 대상이 아니다.
+     *
+     * 완결 기록의 정본은 `story_chat_main_events`인데, 그 테이블의 `main_event_id`가 `story_main_events`
+     * FK **ON DELETE CASCADE**라 수정 API의 `mainEvents[]` 전체 교체가 행을 지우는 순간 남의 채팅 완결
+     * 기록이 통째로 사라진다. 그러면 AI 턴 요청은 스냅샷의 옛 사건을 후보로 보내면서 "이미 완결했다"는
+     * 사실은 못 보내, 독자가 **이미 지난 사건을 다시 겪는다**.
+     *
+     * 목록이라 jsonb 배열이다. `story_chats`는 서재에서 100건까지 eager로 뜨지만 짧은 이름 몇 개라,
+     * 같은 행에 이미 있는 [storyPrologueSnapshot](TEXT 본문) 옆에서 무시할 만한 크기다
+     * (수십 KB까지 커질 수 있는 스토리 스냅샷을 별도 테이블로 뺀 것과는 사정이 다르다).
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "occurred_main_event_names_snapshot")
+    var occurredMainEventNamesSnapshot: List<String>? = null,
 
     // 최초 도달 엔딩(story_endings.id). 값이 있으면 이후 턴 요청에 엔딩 후보를 싣지 않아 채팅당 최초 1회를 보장한다.
     @Column(name = "reached_ending_id")

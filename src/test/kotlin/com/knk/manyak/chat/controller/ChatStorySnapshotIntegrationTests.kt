@@ -24,6 +24,7 @@ import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -71,6 +72,7 @@ class ChatStorySnapshotIntegrationTests {
     @Autowired private lateinit var endingRepository: StoryEndingRepository
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var snapshotRowRepository: StoryPublicSnapshotRepository
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
@@ -415,7 +417,7 @@ class ChatStorySnapshotIntegrationTests {
         val owner = saveUser("소유자")
         val story = publicStory(owner)
 
-        val snapshot = storyRepository.findById(story.id).orElseThrow().lastPublicSnapshot!!
+        val snapshot = snapshotService.findByStoryId(story.id)!!
 
         assertThat(snapshot.title).isEqualTo("원래 제목")
         assertThat(snapshot.thumbnailImageKey).isEqualTo("thumb_0001")
@@ -445,7 +447,8 @@ class ChatStorySnapshotIntegrationTests {
         val story = publicStoryWithPrologue(owner)
         val chat = createChat(story, reader)
         chargeFor(chat, reader.id)
-        storyRepository.save(storyRepository.findById(story.id).orElseThrow().also { it.lastPublicSnapshot = null })
+        // 백필 대상 밖(백필 시점에 이미 비공개)인 스토리를 재현한다 — story_public_snapshots에 행이 없다.
+        snapshotRowRepository.deleteById(story.id)
         hideAndRename(story, "비공개 개작 제목")
 
         val shareId = createShare(chat, reader)
@@ -665,7 +668,7 @@ class ChatStorySnapshotIntegrationTests {
         val story = publicStoryWithPrologue(owner)
         val startSettingId = startSettingRepository.findAll().first { it.story.id == story.id }.id
 
-        val snapshot = storyRepository.findById(story.id).orElseThrow().lastPublicSnapshot!!
+        val snapshot = snapshotService.findByStoryId(story.id)!!
 
         assertThat(snapshot.startSettingOf(startSettingId)?.prologue).isEqualTo("원래 프롤로그")
     }
