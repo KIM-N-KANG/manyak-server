@@ -63,10 +63,23 @@ class CreditReconciliationService(
                 // 있어야 할 총 환불 수 = charge − 완료. 음수(완료 과다)면 발행하지 않는다(fail-safe).
                 val targetRefundCount = group.chargeCount - completed
                 if (targetRefundCount <= 0) continue
+                val emitted = creditWalletService.reconcileRefunds(
+                    userId = group.userId,
+                    refType = group.refType,
+                    refId = group.refId,
+                    unitAmount = group.unitAmount,
+                    targetRefundCount = targetRefundCount,
+                )
+                refundsEmitted += emitted
                 // 혼합 단가 탐지(KNK-1056): 정책 오버라이드가 채팅/세션 수명 도중 바뀌면 그룹 안에 서로 다른
                 // 차감액이 섞인다. 환불은 계속 최소액으로(초과 환불 금지) 내되, 그때 회원이 단가 차액만큼
                 // 덜 받는다는 사실이 조용히 지나가지 않도록 남긴다. 계산은 바꾸지 않는다 — 관측만 추가한다.
-                if (group.unitAmount != group.maxUnitAmount) {
+                //
+                // **실제로 환불을 발행했을 때만** 경고한다(Codex 리뷰 P2). targetRefundCount는 in-flight 경로가
+                // 이미 각 차감액대로 정확히 환불했어도 양수로 남고, 발행 여부는 reconcileRefunds 안에서야
+                // 판정된다. 그 앞에서 경고하면 미보상이 없는 그룹까지 매 배치마다 같은 오경보를 반복해
+                // "조용한 미보상을 드러낸다"는 목적 자체가 신호에 묻힌다.
+                if (emitted > 0 && group.unitAmount != group.maxUnitAmount) {
                     structuredLogger.warn(
                         "credit_reconciliation_mixed_unit_amount",
                         "user_id" to group.userId,
@@ -74,16 +87,9 @@ class CreditReconciliationService(
                         "ref_id" to group.refId,
                         "min_unit_amount" to group.unitAmount,
                         "max_unit_amount" to group.maxUnitAmount,
-                        "target_refund_count" to targetRefundCount,
+                        "refunds_emitted" to emitted,
                     )
                 }
-                refundsEmitted += creditWalletService.reconcileRefunds(
-                    userId = group.userId,
-                    refType = group.refType,
-                    refId = group.refId,
-                    unitAmount = group.unitAmount,
-                    targetRefundCount = targetRefundCount,
-                )
             } catch (exception: Exception) {
                 structuredLogger.event(
                     "credit_reconciliation_group_failed",

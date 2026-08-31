@@ -209,6 +209,62 @@ class CreditPolicyServiceTest {
         assertThat(warning.formattedMessage).contains("credit_policy_override_rejected").contains("chat_turn_cost")
     }
 
+    @Test
+    fun `오버라이드가 만료되면 다음 갱신에서 변경 로그가 남는다`() {
+        // 자동 만료가 이 기능의 존재 이유인데, 그 종료를 확인할 신호가 없으면 한시 이벤트가 실제로 끝났는지
+        // 로그로 알 수 없다(Codex 리뷰 P2). 스냅샷 원본을 같은 now 로 재평가해 비교하면 만료는 영영 안 찍힌다.
+        `when`(repository.findAll()).thenReturn(
+            listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700, effectiveUntil = now.plusSeconds(30))),
+        )
+        val service = service()
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(700)
+        appender.list.clear()
+
+        // 만료 시각과 캐시 TTL 을 모두 지나 다음 갱신이 돌게 한다(행은 DB 에 그대로 남아 있다).
+        now = now.plus(CACHE_TTL).plusSeconds(1)
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+
+        val changed = appender.list.single { "credit_policy_changed" in it.formattedMessage }
+        assertThat(changed.level).isEqualTo(Level.INFO)
+        assertThat(changed.formattedMessage)
+            .contains("key=attendance_reward")
+            .contains("from=700")
+            .contains("to=350")
+    }
+
+    @Test
+    fun `첫 갱신은 변경 로그를 남기지 않는다`() {
+        // 비교 대상이 없다. 그 시점 전체 유효값은 부팅 로그(credit_policy_effective)가 담당한다.
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700)))
+
+        service().amountOf(CreditPolicyKey.ATTENDANCE_REWARD)
+
+        assertThat(appender.list.none { "credit_policy_changed" in it.formattedMessage }).isTrue()
+    }
+
+    @Test
+    fun `캐시 TTL 이 음수면 부팅에 실패한다`() {
+        // 만료 시각이 항상 과거라 모든 조회가 findAll 을 돌고 refreshLock 에서 직렬화된다 — env 오타 하나가
+        // 크레딧 경로 전체를 DB 병목으로 만든다.
+        assertThatThrownBy {
+            CreditPolicyService(repository, 1000, 2000, 10, 350, 200, 20, Duration.ofSeconds(-1), clock)
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("TTL")
+    }
+
+    @Test
+    fun `캐시 TTL 0 은 허용하고 매 조회마다 재적재한다`() {
+        // 테스트 프로파일이 쓰는 값이다. 0 은 "캐시 없음"이지 잘못된 설정이 아니다.
+        `when`(repository.findAll()).thenReturn(emptyList())
+        val service = CreditPolicyService(repository, 1000, 2000, 10, 350, 200, 20, Duration.ZERO, clock)
+
+        service.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+        service.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+
+        verify(repository, times(2)).findAll()
+    }
+
     private companion object {
         val CACHE_TTL: Duration = Duration.ofSeconds(60)
     }

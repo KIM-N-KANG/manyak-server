@@ -56,6 +56,10 @@ enum class CreditPolicyKey(val storageKey: String, val minimumAmount: Long) {
  *
  * 장애 내성: 조회가 실패해도 요청을 막지 않는다(크레딧 경로가 정책 조회 때문에 죽으면 안 된다). warn 로그를
  * 남기고 직전 스냅샷을 유지한 채 TTL만 미룬다 — 스냅샷이 아직 없으면 자연히 yml 기본값이 된다.
+ * 이 폴백이 실제로 성립하려면 예외를 잡는 것만으로는 부족하다: 정책 읽기는 호출자의 `@Transactional` 안에서
+ * 일어나므로, 조회가 그 트랜잭션에 참여하면 실패가 바깥을 rollback-only로 찍어 **커밋이 대신 실패**한다.
+ * 그래서 적재 조회는 [CreditPolicyRepository.findAll]에서 독립 트랜잭션(REQUIRES_NEW)으로 격리한다
+ * (회귀 가드: `CreditPolicyTransactionIsolationIntegrationTest`).
  * 실패마다 기본값으로 떨어뜨리지 않는 이유: 진행 중인 이벤트 수치가 DB 순단마다 조용히 되돌아가면 안 된다.
  * **한계**: 그래서 DB가 끊긴 동안에는 `effective_until`이 NULL인 영구 오버라이드를 철회할 수 없다(행을 지워도
  * 스냅샷이 남는다). 유한 `effective_until`은 판정이 읽는 시점이라 장애 중에도 정상 만료된다. 영구 오버라이드
@@ -95,6 +99,10 @@ class CreditPolicyService(
                 "크레딧 정책 기본값이 최소값 미만입니다: ${key.storageKey}=$amount (최소 ${key.minimumAmount})"
             }
         }
+        // 음수 TTL은 만료 시각을 항상 과거로 만들어 **모든** amountOf가 findAll을 돌고 refreshLock에서 직렬화된다.
+        // 환경변수 오타 하나가 채팅·출석·초대 경로를 DB 병목으로 바꾸므로 부팅에서 거부한다.
+        // 0은 허용한다 — 매 조회 재적재라는 뜻이고 테스트 프로파일이 그걸 쓴다.
+        require(!cacheTtl.isNegative) { "크레딧 정책 캐시 TTL은 음수일 수 없습니다: $cacheTtl" }
     }
 
     private val knownKeys = CreditPolicyKey.entries.joinToString(", ") { it.storageKey }
@@ -103,6 +111,12 @@ class CreditPolicyService(
 
     @Volatile
     private var snapshot: Snapshot = Snapshot(overrides = emptyList(), expiresAt = Instant.MIN)
+
+    // 직전 갱신에서 **관측한** 유효값. 변경 로그의 비교 기준이며 refreshLock이 지킨다(락 안에서만 읽고 쓴다).
+    // 스냅샷의 원본 행을 다시 평가해 비교하면 안 된다: effective_until 만료는 캐시 도중 일어나고,
+    // 다음 갱신에서 before·after를 같은 now로 재평가하면 둘 다 기본값이라 차이가 사라져
+    // 만료가 영영 로그에 남지 않는다(= 한시 이벤트가 끝났는지 확인할 신호가 없다).
+    private var lastEffective: Map<CreditPolicyKey, Long>? = null
 
     /**
      * [key]의 현재 유효값. 오버라이드가 없거나 만료됐거나 최소값 미만이면 yml 기본값이다.
@@ -132,7 +146,7 @@ class CreditPolicyService(
             return try {
                 val loaded = validOverrides(creditPolicyRepository.findAll())
                 snapshot = Snapshot(loaded, now.plus(cacheTtl))
-                logChanges(before = current.overrides, after = loaded, now = now)
+                logChanges(after = loaded, now = now)
                 loaded
             } catch (exception: Exception) {
                 // 정책 조회 실패로 크레딧 지급·차감을 막지 않는다. 직전 스냅샷을 유지하고 TTL만 미뤄 재조회를 늦춘다.
@@ -181,10 +195,19 @@ class CreditPolicyService(
         }
     }
 
-    /** 오버라이드가 적용·만료돼 유효값이 바뀐 키만 남긴다(재조회 시점 기준이라 만료 로그는 최대 [cacheTtl] 늦다). */
-    private fun logChanges(before: List<CreditPolicy>, after: List<CreditPolicy>, now: Instant) {
-        val previous = effectiveOf(before, now)
+    /**
+     * 직전에 관측한 유효값과 견줘 바뀐 키만 남긴다. 오버라이드 적용·철회뿐 아니라 **`effective_until` 자동 만료**도
+     * 여기서 드러난다(만료는 갱신마다 최대 [cacheTtl] 늦게 로그에 남지만, 실제 값은 읽는 즉시 되돌아간다).
+     *
+     * 첫 갱신은 비교 대상이 없어 아무것도 남기지 않는다 — 그 시점의 전체 유효값은 부팅 로그
+     * [logEffectivePoliciesOnStartup]가 한 줄로 찍는다.
+     */
+    private fun logChanges(after: List<CreditPolicy>, now: Instant) {
         val current = effectiveOf(after, now)
+        val previous = lastEffective
+        // 적재 실패 회차는 갱신하지 않는다(직전 스냅샷을 그대로 쓰므로 관측값도 그대로다).
+        lastEffective = current
+        if (previous == null) return
         CreditPolicyKey.entries
             .filter { previous[it] != current[it] }
             .forEach { logger.info("credit_policy_changed key={} from={} to={}", it.storageKey, previous[it], current[it]) }
