@@ -143,6 +143,9 @@ class ChatStorySnapshotIntegrationTests {
         val loaded = storyChatRepository.findById(chat.id).orElseThrow()
         loaded.currentTurn = 1
         loaded.reachedEndingId = ending.id
+        // 실 경로(ChatTurnPersister.applyEndingReach)가 id와 함께 박는 이름. 엔딩 행이 지워졌을 때의
+        // 유일한 복구 수단이라 여기서도 같이 심는다.
+        loaded.reachedEndingNameSnapshot = ending.name
         storyChatRepository.save(loaded)
         // 엔딩은 스토리가 아직 공개일 때 추가됐으므로 스냅샷에도 담긴다.
         publish(story)
@@ -376,6 +379,21 @@ class ChatStorySnapshotIntegrationTests {
             .returnResult().responseBody!!.items.first().title
 
     // ---- 스냅샷 기록 ----
+
+    @Test
+    fun `채팅을 만들면 구버전용 채팅 스냅샷 컬럼도 계속 채운다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+
+        val chat = createChat(story, reader)
+
+        // 이 셋은 아무도 읽지 않는다(읽기 정본은 stories.last_public_snapshot). 그래도 채워야 한다 —
+        // 롤링 배포 창의 구버전 태스크와 배포 되돌림이 이 값을 읽는다. 다음 릴리스의 DROP 대상이다.
+        assertThat(chat.storyTitleSnapshot).isEqualTo("원래 제목")
+        assertThat(chat.storyThumbnailKeySnapshot).isEqualTo("thumb_0001")
+        assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
+    }
 
     @Test
     fun `공개 상태로 저장하면 스토리에 마지막 공개 버전 스냅샷이 박힌다`() {
@@ -844,7 +862,38 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 엔딩 행이 사라져 FK가 끊긴 경우 ----
 
     @Test
-    fun `엔딩 행이 삭제돼 참조가 끊기면 도달 기록을 복구하지 않는다`() {
+    fun `공개 스토리의 엔딩을 수정해 참조가 끊겨도 서재는 도달 기록을 남긴다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        // 스토리는 **공개 그대로**다. 제작자가 엔딩을 손보기만 해도 참조가 끊긴다 — 비공개 전환과 무관하게
+        // 그 스토리로 놀던 모든 독자에게 일어나는 일이라 여기가 이 폴백의 주 무대다.
+        breakEndingReference(chat, ending)
+
+        // 스토리 스냅샷은 "엔딩 id → 이름" 사전인데 FK(ON DELETE SET NULL)가 조회 키를 비웠다.
+        // 채팅에 박아둔 이름(story_chats.reached_ending_name_snapshot)이 유일한 복구 수단이다.
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `비공개로 되돌린 뒤 엔딩이 삭제돼도 서재는 도달 기록을 남긴다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStoryWithPrologue(owner)
+        val chat = createChat(story, reader)
+        val ending = reachEnding(story, chat, "원래 엔딩")
+
+        hideAndRename(story, "바뀐 제목")
+        breakEndingReference(chat, ending)
+
+        assertThat(libraryCard(reader).reachedEndings).containsExactly("원래 엔딩")
+    }
+
+    @Test
+    fun `엔딩 행이 삭제되면 상세의 턴 단위 도달 표식은 복구하지 않는다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
@@ -853,10 +902,10 @@ class ChatStorySnapshotIntegrationTests {
 
         breakEndingReference(chat, ending)
 
-        // 스토리 스냅샷은 **엔딩 id로 이름을 찾는** 구조인데, FK(ON DELETE SET NULL)가 채팅·메시지의
-        // reached_ending_id를 함께 비우므로 연결 고리가 남지 않는다. KNK-1059가 채팅에 이름 컬럼을 두어
-        // 서재만 살렸던 복구는 그 컬럼과 함께 사라졌다(KNK-1065 결정 3).
-        assertThat(libraryCard(reader).reachedEndings).isEmpty()
+        // 메시지의 reached_ending_id도 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다.
+        // "마지막 턴"으로 추정할 수도 없다: ENDED 채팅의 이어쓰기를 막는 가드가 없어(ChatService의 ENDED
+        // 검사는 재생성 경로에만 있다) 도달 뒤에도 턴이 붙을 수 있고, 공유는 커트라인이 도달 턴을 잘라낼 수
+        // 있다. 채팅당 하나인 이름을 엉뚱한 턴에 붙이느니 비워 두고, 서재만 살아나는 비대칭을 고정한다.
         assertThat(detailReachedEndings(chat, reader)).containsExactly(null as String?)
     }
 

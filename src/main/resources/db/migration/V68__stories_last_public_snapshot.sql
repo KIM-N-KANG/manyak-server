@@ -98,17 +98,19 @@ WHERE s.status = 'PUBLISHED'
   AND s.visibility = 'PUBLIC'
   AND s.deleted_at IS NULL;
 
--- 채팅별 스냅샷(V67)을 걷어낸다. 프로덕션은 중간 상태를 보지 않는다 — V67이 아직 릴리스되지 않았고 이 작업도
--- 같은 릴리스에 나가므로 운영 입장에선 이 컬럼들이 존재한 적이 없다. 남기면 같은 값의 출처가 둘이 되어 어느 쪽이
--- 정본인지 코드마다 헷갈린다.
+-- **채팅별 스냅샷 컬럼(V67)은 이번 릴리스에서 지우지 않는다.** 읽기 정본만 이 스토리 스냅샷으로 옮기고,
+-- DROP은 릴리스가 끝난 뒤 별도 티켓에서 한다(expand/contract).
 --
--- **폴백으로도 못 쓴다.** V67의 백필은 기존 채팅 전부에 *현재* 값을 박았으므로, 이미 비공개인 스토리에서는 그 값이
--- 곧 개작본이다. 감추려던 것을 들고 있어서 스토리 스냅샷이 NULL인 경우와 똑같이 틀리다.
+-- 이유 1 — **롤링 배포 중 구버전이 이 컬럼을 읽는다.** ECS 롤링 배포는 새 태스크가 Flyway를 돌리는 동안
+-- 구버전 태스크가 계속 요청을 받는다. 구버전 엔티티에 네 컬럼이 매핑돼 있어 여기서 DROP하면 그 창 동안
+-- 서재·채팅 상세·공유 열람·이프 이용내역의 SELECT가 통째로 실패해 500이 된다. 컬럼 추가와 달리 DROP은
+-- 하위 호환이 아니다. 같은 이유로 배포를 되돌릴 때도 구버전이 그대로 뜬다.
 --
--- 함께 잃는 것(수용): reached_ending_name_snapshot이 살리던 "엔딩 행이 삭제돼 reached_ending_id가 NULL이 된
--- 채팅의 서재 도달 기록"은 복구할 수 없게 된다. 스토리 스냅샷은 엔딩 id로 이름을 찾는데, 그 id를 들고 있던
--- 채팅·메시지 쪽이 FK(ON DELETE SET NULL)로 함께 비기 때문이다.
-ALTER TABLE story_chats DROP COLUMN story_title_snapshot;
-ALTER TABLE story_chats DROP COLUMN story_thumbnail_key_snapshot;
-ALTER TABLE story_chats DROP COLUMN story_prologue_snapshot;
-ALTER TABLE story_chats DROP COLUMN reached_ending_name_snapshot;
+-- 이유 2 — **reached_ending_name_snapshot은 아직 실제로 쓰인다.** 스토리 스냅샷은 "엔딩 id → 이름" 사전인데,
+-- 수정 API의 endings[] 전체 교체가 행을 삭제·재생성하면 FK(ON DELETE SET NULL, V41)가 story_chats·
+-- story_messages의 reached_ending_id를 **동시에** 비운다. 사전을 조회할 키가 사라지므로 사전으로는 덮을 수
+-- 없다. 이건 비공개 스토리만의 문제가 아니다 — 공개 스토리에서 제작자가 엔딩을 손보기만 해도 그 스토리로
+-- 놀던 **모든 독자의 도달 기록**이 날아간다. 그래서 이 컬럼은 서재 폴백으로 계속 읽는다.
+--
+-- 나머지 셋(story_title_snapshot·story_thumbnail_key_snapshot·story_prologue_snapshot)은 읽지 않지만
+-- 채팅 생성 시 계속 채운다. 배포를 되돌리면 구버전이 그 값을 읽기 때문이다. 다음 릴리스의 DROP 대상이다.

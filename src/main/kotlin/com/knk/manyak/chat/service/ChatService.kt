@@ -162,6 +162,12 @@ class ChatService(
                 creationId = storyCreationSessionRepository
                     .findFirstByStoryIdOrderByIdAsc(story.id)
                     ?.storylineRequestId,
+                // 아래 셋은 **아무도 읽지 않는다** — 읽기 정본은 stories.last_public_snapshot이다(KNK-1065).
+                // 그래도 계속 채운다: 롤링 배포 창의 구버전 태스크와 배포 되돌림이 이 값을 읽는다.
+                // 다음 릴리스에서 컬럼과 함께 지운다([StoryChat] KDoc).
+                storyTitleSnapshot = story.title,
+                storyThumbnailKeySnapshot = story.thumbnailImageKey,
+                storyPrologueSnapshot = startSetting?.prologue,
             ),
         )
         structuredLogger.event(
@@ -255,7 +261,7 @@ class ChatService(
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
-                reachedEndings = reachedEndingNameFor(chat.reachedEndingId, showsCurrent, endingNameById, snapshot)
+                reachedEndings = libraryReachedEndingName(chat, showsCurrent, endingNameById, snapshot)
                     ?.let(::listOf)
                     .orEmpty(),
                 updatedAt = chat.updatedAt,
@@ -267,10 +273,9 @@ class ChatService(
      * 도달 엔딩 이름(KNK-1065). 제목·프롤로그와 같은 규칙이다 — 읽을 수 있으면 현재 이름, 아니면 그 스토리가
      * 마지막으로 공개였던 시점의 스냅샷에서 이름을 찾는다. 서재(채팅 단위)와 상세·공유(턴 단위)가 이 하나를 공유한다.
      *
-     * **엔딩 행이 삭제되면 이름을 되찾을 수 없다.** 스토리 수정의 `endings[]`는 전체 교체라 행을 삭제·재생성하고,
-     * FK가 `ON DELETE SET NULL`이라 `story_chats.reached_ending_id`·`story_messages.reached_ending_id`가 함께
-     * NULL이 된다. 스냅샷은 엔딩 id로 이름을 찾는 구조인데 그 id를 들고 있던 쪽이 비므로 연결 고리가 남지 않는다
-     * (KNK-1059가 채팅에 이름 컬럼을 두어 서재만 살렸던 복구는 그 컬럼과 함께 사라졌다 — KNK-1065 결정 3).
+     * **엔딩 행이 삭제되면 여기서는 이름을 되찾을 수 없다.** 스냅샷은 엔딩 id로 이름을 찾는 사전인데,
+     * FK(`ON DELETE SET NULL`)가 그 id를 비우기 때문이다. 채팅 단위인 서재만 [libraryReachedEndingName]으로
+     * 복구한다 — 턴 단위인 상세·공유는 어느 턴이 도달 턴이었는지 알 수 없다.
      */
     private fun reachedEndingNameFor(
         endingId: Long?,
@@ -280,6 +285,29 @@ class ChatService(
     ): String? {
         val id = endingId ?: return null
         return if (showsCurrent) endingNameById[id] else snapshot?.endingNameById()?.get(id)
+    }
+
+    /**
+     * 서재 카드의 도달 엔딩 이름. [reachedEndingNameFor]와 같되, **참조가 끊긴 경우만** 채팅에 박아둔
+     * 이름([StoryChat.reachedEndingNameSnapshot])으로 복구한다.
+     *
+     * 스토리 수정의 `endings[]`는 전체 교체라 행을 삭제·재생성하고, FK가 `ON DELETE SET NULL`이라
+     * [StoryChat.reachedEndingId]가 비워진다. 스토리 스냅샷은 엔딩 id로 이름을 찾는 사전이라 조회 키가
+     * 사라지면 덮을 수 없다. **비공개 스토리만의 문제가 아니다** — 공개 스토리에서 제작자가 엔딩을 손보기만
+     * 해도 그 스토리로 놀던 모든 독자의 도달 기록이 사라진다.
+     *
+     * **여기만 살아나는 비대칭이 있다**: 턴 단위로 보여주는 상세·공유는 `story_messages.reached_ending_id`도
+     * 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다. 채팅당 하나인 이 이름을 아무 턴에나 붙일 수
+     * 없으므로 그쪽은 복구하지 않는다(KNK-1059의 결론 그대로다).
+     */
+    private fun libraryReachedEndingName(
+        chat: StoryChat,
+        showsCurrent: Boolean,
+        endingNameById: Map<Long, String>,
+        snapshot: StoryPublicSnapshot?,
+    ): String? {
+        val endingId = chat.reachedEndingId ?: return chat.reachedEndingNameSnapshot
+        return reachedEndingNameFor(endingId, showsCurrent, endingNameById, snapshot)
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

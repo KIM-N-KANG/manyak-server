@@ -44,6 +44,22 @@ class StoryChat(
     @Column(name = "creation_id", updatable = false)
     val creationId: UUID? = null,
 
+    /**
+     * **다음 릴리스의 DROP 대상**(KNK-1065). 읽기 정본은 `stories.last_public_snapshot`으로 옮겼고 이 셋은
+     * 아무도 읽지 않는다. 그런데도 채팅 생성 시 계속 채우고 컬럼을 남겨 둔다 — ECS 롤링 배포는 새 태스크가
+     * Flyway를 돌리는 동안 구버전 태스크가 계속 요청을 받고, 배포를 되돌리면 구버전이 그대로 뜬다.
+     * 구버전 엔티티에 이 컬럼들이 매핑돼 있어서 지금 지우면 그 창 동안 서재·상세·공유·이용내역의 SELECT가
+     * 통째로 실패한다(컬럼 추가와 달리 DROP은 하위 호환이 아니다). 릴리스가 끝난 뒤 별도 티켓에서 지운다.
+     */
+    @Column(name = "story_title_snapshot", length = 100)
+    val storyTitleSnapshot: String? = null,
+
+    @Column(name = "story_thumbnail_key_snapshot", length = 64)
+    val storyThumbnailKeySnapshot: String? = null,
+
+    @Column(name = "story_prologue_snapshot", columnDefinition = "TEXT")
+    val storyPrologueSnapshot: String? = null,
+
     @Column(length = 100)
     var title: String? = null,
 
@@ -70,6 +86,20 @@ class StoryChat(
     // 최초 도달 엔딩(story_endings.id). 값이 있으면 이후 턴 요청에 엔딩 후보를 싣지 않아 채팅당 최초 1회를 보장한다.
     @Column(name = "reached_ending_id")
     var reachedEndingId: Long? = null,
+
+    /**
+     * 도달 시점의 엔딩 이름(KNK-1059). 위 세 컬럼과 달리 **DROP 대상이 아니고 지금도 읽는다**.
+     *
+     * 스토리 스냅샷은 "엔딩 id → 이름" 사전인데, 수정 API의 `endings[]` 전체 교체가 행을 삭제·재생성하면
+     * FK(`ON DELETE SET NULL`, V41)가 [reachedEndingId]와 `story_messages.reached_ending_id`를 **동시에**
+     * 비운다. 사전을 조회할 키가 사라지므로 사전으로는 덮을 수 없다. 비공개 스토리만의 문제가 아니다 —
+     * 공개 스토리에서 제작자가 엔딩을 손보기만 해도 그 스토리로 놀던 모든 독자의 도달 기록이 날아간다.
+     *
+     * [reachedEndingId]를 박는 그 자리에서 함께 기록한다([ChatTurnPersister]). 도달은 채팅당 최초 1회뿐이라
+     * 컬럼 하나면 된다. 원본과 타입을 맞춘다(story_endings.name varchar(100)).
+     */
+    @Column(name = "reached_ending_name_snapshot", length = 100)
+    var reachedEndingNameSnapshot: String? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

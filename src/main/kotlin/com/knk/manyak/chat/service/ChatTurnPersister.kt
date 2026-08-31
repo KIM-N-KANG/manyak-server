@@ -239,6 +239,9 @@ class ChatTurnPersister(
             return
         }
         chat.reachedEndingId = reachedEnding.id
+        // 도달 시점의 이름을 함께 박는다(KNK-1059). 엔딩 행이 지워지면 [StoryChat.reachedEndingId]가 FK로
+        // 비워져 스토리 스냅샷의 "엔딩 id → 이름" 사전을 조회할 키가 사라지므로, 서재는 이 값으로 복구한다.
+        chat.reachedEndingNameSnapshot = reachedEnding.name
         chat.status = ChatStatus.ENDED
         val userId = chat.userId ?: return
         // 회원 도달 집계는 독립 트랜잭션에서 기록한다. 동시 도달로 유니크 위반이 나도 그 트랜잭션만 롤백되고
