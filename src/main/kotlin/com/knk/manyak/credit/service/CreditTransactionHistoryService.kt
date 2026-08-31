@@ -106,7 +106,8 @@ class CreditTransactionHistoryService(
                 REF_CHAT -> {
                     val chat = chatById[row.refId] ?: return@mapNotNull null
                     val story = storyById[chat.storyId]
-                    if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
+                    // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 제목에서 멈춘다(KNK-1065).
+                    if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else story?.lastPublicSnapshot?.title
                 }
                 // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
                 REF_STORY -> storyIdBySession[row.refId]

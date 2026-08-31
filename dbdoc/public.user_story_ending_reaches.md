@@ -77,6 +77,7 @@ erDiagram
   varchar_20_ status
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
+  jsonb last_public_snapshot
 }
 "public.story_endings" {
   bigint id

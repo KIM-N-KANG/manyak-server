@@ -134,6 +134,7 @@ class SimpleStoryCreationService(
     private val deviceIdHasher: DeviceIdHasher,
     // 간편 제작 1회 소모 크레딧. 운영 중 조정 가능한 정책값이라 요청마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -1152,6 +1153,10 @@ class SimpleStoryCreationService(
                 }
 
                 persistStoryCharacters(story, appearancesByName, imagesByName.keys, uploadedImages)
+
+                // 스토리 저장 경로는 모두 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 간편 제작은 항상
+                // PRIVATE로 등록하므로 지금은 no-op이지만, 기본 공개 범위가 바뀌면 이 한 줄이 없는 쪽이 유출이다.
+                storyPublicSnapshotService.refresh(story)
 
                 // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
                 // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).

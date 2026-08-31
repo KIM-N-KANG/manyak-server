@@ -239,9 +239,6 @@ class ChatTurnPersister(
             return
         }
         chat.reachedEndingId = reachedEnding.id
-        // 도달 시점의 이름을 함께 박는다(KNK-1059). 나중에 소유자가 스토리를 비공개로 되돌리고 엔딩 이름을
-        // 바꿔도, 이미 그 결말에 도달한 사용자에게는 도달 당시 이름이 남아야 한다.
-        chat.reachedEndingNameSnapshot = reachedEnding.name
         chat.status = ChatStatus.ENDED
         val userId = chat.userId ?: return
         // 회원 도달 집계는 독립 트랜잭션에서 기록한다. 동시 도달로 유니크 위반이 나도 그 트랜잭션만 롤백되고

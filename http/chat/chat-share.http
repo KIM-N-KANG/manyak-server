@@ -356,14 +356,15 @@ GET {{baseUrl}}/api/v1/shares/ae578609-2e90-4923-af0e-64ba6a0a6f56
 Accept: application/json
 
 ### ==================================================================
-### [KNK-1059] 스토리 스냅샷 시나리오 — 공유 열람 (S1~S7)
+### [KNK-1059·1065] 스토리 스냅샷 시나리오 — 공유 열람 (S1~S7)
 ###
 ### 공유 열람은 **인증이 필요 없는 경로**라 이 유출이 가장 큽니다: 소유자가 비공개로 되돌린 스토리의
 ### 제목과 프롤로그(도입부 본문)가 링크만 가진 누구에게나 보였습니다.
 ###
 ### 규칙은 상세·서재와 같습니다.
 ###   story.isCurrentMetadataVisibleTo(열람자) 가 참이면 → 현재 제목·프롤로그
-###   거짓이면(비공개·삭제)                              → 채팅 시작 시점의 스냅샷
+###   거짓이면(비공개·삭제)                              → 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷
+###                                                        (stories.last_public_snapshot, KNK-1065)
 ###
 ### 열람자 판정은 토큰이 실려 있으면 그 요청자로, 없으면 익명(null)으로 합니다. 그래서 같은 링크라도
 ### 스토리 소유자가 열면 현재 값을, 익명이 열면 스냅샷을 봅니다(S7에서 둘을 나란히 확인).
@@ -425,7 +426,7 @@ Accept: application/json
     client.global.set("snapStartSettingId", response.body.startSettings[0].id);
 %}
 
-### S3. (준비 3/4) 게스트로 채팅 생성 — 이 시점 값이 스냅샷으로 박힌다
+### S3. (준비 3/4) 게스트로 채팅 생성 — 스냅샷은 채팅이 아니라 스토리 행에 있다(KNK-1065)
 POST {{baseUrl}}/api/v1/chats
 Content-Type: application/json
 Accept: application/json
@@ -510,11 +511,11 @@ Accept: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     const b = response.body;
-    client.test("익명 열람자에게는 스냅샷(변경 전) 제목이 나간다", () => {
+    client.test("익명 열람자에게는 마지막 공개 버전(변경 전) 제목이 나간다", () => {
         client.assert(b.storyTitle === "원래 제목",
             `비공개 전환 후 제목이 새고 있습니다. expected=원래 제목 actual=${b.storyTitle}`);
     });
-    client.test("익명 열람자에게는 스냅샷(변경 전) 프롤로그가 나간다", () => {
+    client.test("익명 열람자에게는 마지막 공개 버전(변경 전) 프롤로그가 나간다", () => {
         client.assert(b.prologue === "원래 프롤로그",
             `비공개 전환 후 프롤로그가 새고 있습니다. expected=원래 프롤로그 actual=${b.prologue}`);
     });

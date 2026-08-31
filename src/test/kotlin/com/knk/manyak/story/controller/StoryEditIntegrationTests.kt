@@ -311,6 +311,103 @@ class StoryEditIntegrationTests {
             .jsonPath("$.visibility").isEqualTo("PRIVATE")
     }
 
+    // ---- [KNK-1065] 마지막 공개 버전 스냅샷 갱신 ----
+
+    /** 스토리 애그리거트 전체를 한 번에 덮는 PATCH 본문. */
+    private fun patchAll(story: Story, startSettingPublicId: String, title: String, prologue: String, endingName: String) {
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "title": "$title",
+                  "genres": ["$title 장르"],
+                  "storySettings": {"worldSetting":"$title 세계관","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+                  "mainEvents": [{"name":"$title 사건","description":"설명","keySentence":"문장"}],
+                  "startSettings": [
+                    {
+                      "id": "$startSettingPublicId",
+                      "name": "장례식 날",
+                      "prologue": "$prologue",
+                      "startSituation": "늦은 밤",
+                      "suggestedInputs": ["하나", "둘", "셋"],
+                      "endings": [ {"name":"$endingName","requirement":{"minTurns":3,"achievementCondition":"조건"},"epilogue":"에필로그"} ]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isOk
+    }
+
+    @Test
+    fun `공개 스토리를 수정하면 마지막 공개 버전 스냅샷이 함께 갱신된다`() {
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+
+        patchAll(story, startSetting.publicId.toString(), "v2 제목", "v2 프롤로그", "v2 엔딩")
+
+        val snapshot = storyRepository.findById(story.id).get().lastPublicSnapshot!!
+        assertEquals("v2 제목", snapshot.title)
+        assertEquals("v2 제목 장르", snapshot.genre)
+        assertEquals("v2 제목 세계관", snapshot.storySettings.worldSetting)
+        assertEquals(listOf("v2 제목 사건"), snapshot.mainEvents.map { it.name })
+        // 시작 설정은 in-place 갱신이라 내부 id가 보존된다 — 진행 중 채팅이 이 id로 스냅샷을 찾는다.
+        assertEquals(startSetting.id, snapshot.startSettings.single().id)
+        assertEquals("v2 프롤로그", snapshot.startSettings.single().prologue)
+        assertEquals(listOf("하나", "둘", "셋"), snapshot.startSettings.single().suggestedInputs)
+        assertEquals(listOf("v2 엔딩"), snapshot.startSettings.single().endings.map { it.name })
+        // 엔딩은 전체 교체로 행이 새로 생기므로, 스냅샷의 엔딩 id도 새 행을 가리켜야 한다.
+        assertEquals(
+            storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single().id,
+            snapshot.startSettings.single().endings.single().id,
+        )
+    }
+
+    @Test
+    fun `비공개로 전환하며 고친 값은 스냅샷에 들어가지 않는다`() {
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        patchAll(story, startSetting.publicId.toString(), "공개 제목", "공개 프롤로그", "공개 엔딩")
+
+        // 같은 요청에서 비공개로 내리고 값을 고친다 — 갱신은 저장 시점의 공개 상태로 판정하므로 no-op이어야 한다.
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PRIVATE","title":"비공개 개작 제목"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        val reloaded = storyRepository.findById(story.id).get()
+        assertEquals("비공개 개작 제목", reloaded.title)
+        assertEquals("공개 제목", reloaded.lastPublicSnapshot!!.title)
+    }
+
+    @Test
+    fun `다시 공개로 되돌리면 그 시점 값이 새 스냅샷이 된다`() {
+        val story = seedStory(userId = null)
+        val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
+        patchAll(story, startSetting.publicId.toString(), "공개 제목", "공개 프롤로그", "공개 엔딩")
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PRIVATE","title":"개작 제목"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        // 다시 공개하면 개작본이 곧 현재 공개본이다.
+        assertEquals("개작 제목", storyRepository.findById(story.id).get().lastPublicSnapshot!!.title)
+    }
+
     @Test
     fun `없는 스토리의 수정 폼은 404다`() {
         restTestClient.get().uri("/api/v1/stories/00000000-0000-0000-0000-000000000000/edit")
