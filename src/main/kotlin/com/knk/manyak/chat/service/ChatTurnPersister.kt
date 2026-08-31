@@ -102,6 +102,9 @@ class ChatTurnPersister(
                 content = aiOutput,
                 messageOrder = user.messageOrder + 1,
                 reachedEndingId = reachedEnding?.id,
+                // 이름도 함께 박는다. FK가 없어 엔딩 행이 교체돼도 남고, **이 값이 곧 도달 턴 표식**이라
+                // 상세·공유가 id 없이도 그 턴에 엔딩을 표시할 수 있다(PR #224 Codex P2 재리뷰).
+                reachedEndingNameSnapshot = reachedEnding?.name,
             ),
         )
 

@@ -14,7 +14,7 @@
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 22 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 7 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 8 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -210,6 +210,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
 }
 "public.story_choices" {
   bigint id

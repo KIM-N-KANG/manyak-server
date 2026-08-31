@@ -10,6 +10,9 @@ import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.client.ChatTurnTargetMainEventResult
+import com.knk.manyak.chat.dto.ChatDetailResponse
+import com.knk.manyak.chat.dto.ChatShareResponse
+import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
@@ -500,6 +503,88 @@ class ChatTurnEndingMainEventIntegrationTests {
         // 조인 행이 없어 유니크 제약이 막아주지 못하므로 이름 기준 중복 방지가 유일한 가드다.
         assertThat(storyChatRepository.findById(chat.id).orElseThrow().occurredMainEventNamesSnapshot)
             .containsExactly("발단")
+    }
+
+    @Test
+    fun `엔딩이 교체된 뒤 도달하면 상세와 공유의 그 턴에도 엔딩 이름이 실린다`() {
+        publish()
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        hideStoryFromReaders()
+        // 소유자가 감춘 채 엔딩을 갈았다. AI에게는 스냅샷의 옛 이름("해피")이 나가고, 라이브 행에는 없다.
+        // 도달은 id 없이 이름만으로 기록되는데, 턴 표식이 없으면 상세·공유에서 그 턴이 비어 보인다.
+        replaceEndings("개작 엔딩")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화가 찾아왔다.", choices = emptyList(), endingName = "해피")
+
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        // 값을 갈라놓는다: FK용 id는 없고(라이브 행에 "해피"가 없다) 이름만 남는다.
+        assertThat(assistant.reachedEndingId).isNull()
+        assertThat(assistant.reachedEndingNameSnapshot).isEqualTo("해피")
+
+        // 상세: 그 턴에 엔딩 이름이 실려야 한다. 라이브 엔딩은 "개작 엔딩"뿐이라 값이 갈라져 있다.
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("해피")
+
+        // 공유: 같은 규칙.
+        val shareId = restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/shares")
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody(CreateChatShareResponse::class.java)
+            .returnResult().responseBody!!.shareId
+        val share = restTestClient.get()
+            .uri("/api/v1/shares/$shareId")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatShareResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(share.turns.map { it.reachedEnding }).containsExactly("해피")
+    }
+
+    @Test
+    fun `도달하지 않은 턴에는 엔딩 이름이 실리지 않는다`() {
+        // 이름 폴백이 "id가 NULL이면 무조건"으로 넓어지면 모든 평범한 턴에 엔딩이 붙는다.
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "계속된다.", choices = listOf("선택 1"))
+
+        streamGuest(chat.publicId.toString(), "걷는다.")
+
+        val assistant = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .last { it.role == MessageRole.ASSISTANT }
+        assertThat(assistant.reachedEndingNameSnapshot).isNull()
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly(null as String?)
+    }
+
+    @Test
+    fun `공개 상태에서 엔딩 이름을 바꾸면 상세의 그 턴도 현재 이름을 따라간다`() {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "평화.", choices = emptyList(), endingName = "해피")
+        streamGuest(chat.publicId.toString(), "최후의 일격.")
+
+        // 참조가 살아 있다 — 이름 폴백이 끼어들면 도달 당시 이름("해피")으로 되돌아간다.
+        jdbcTemplate.update("UPDATE story_endings SET name = ? WHERE id = ?", "새 해피", happyEnding.id)
+
+        val detail = restTestClient.get()
+            .uri("/api/v1/chats/${chat.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody(ChatDetailResponse::class.java)
+            .returnResult().responseBody!!
+        assertThat(detail.turns.map { it.reachedEnding }).containsExactly("새 해피")
     }
 
     private fun streamGuest(chatId: String, userInput: String): String =

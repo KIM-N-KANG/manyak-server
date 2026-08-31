@@ -140,6 +140,26 @@ FROM (
 ) names
 WHERE sc.id = names.chat_id;
 
+-- 턴 단위 도달 엔딩 이름 스냅샷(PR #224 Codex P2 재리뷰).
+--
+-- story_messages.reached_ending_id는 story_endings FK ON DELETE SET NULL이라, 수정 API의 endings[] 전체
+-- 교체가 그 표식을 비운다. 지금까지는 "어느 턴이 도달 턴이었는지 알 수 없다"는 이유로 상세·공유의 턴 단위
+-- 복구를 포기하고 서재만 살렸는데, 그건 **참조가 끊긴 뒤** 얘기였다. 쓰기 시점에는 어느 턴인지 알고 있으면서
+-- id가 없다는 이유로 이름을 버리고 있었다(도달 판정이 라이브 엔딩 행을 못 찾으면 id 없이 기록된다).
+--
+-- **이 컬럼이 곧 도달 턴 표식**이다. FK가 없어 엔딩이 교체돼도 남으므로, id가 비어도 그 턴에 엔딩을 표시할 수 있다.
+-- 원본과 타입을 맞춘다: story_endings.name varchar(100).
+ALTER TABLE story_messages ADD COLUMN reached_ending_name_snapshot VARCHAR(100);
+
+-- 아직 참조가 살아 있는 도달 턴만 이름을 옮겨 담는다.
+UPDATE story_messages sm
+SET reached_ending_name_snapshot = se.name
+FROM story_endings se
+WHERE sm.reached_ending_id = se.id;
+
+-- **한계(수용): 이미 참조가 끊긴 과거 도달은 살릴 수 없다.** reached_ending_id가 이미 NULL이면 어느 턴이
+-- 도달 턴이었는지도, 어떤 엔딩이었는지도 남아 있지 않다. 이 배포 이후 새로 도달하는 건만 복구된다.
+
 -- **채팅별 스냅샷 컬럼(V67)은 이번 릴리스에서 지우지 않는다.** 읽기 정본만 이 스토리 스냅샷으로 옮기고,
 -- DROP은 릴리스가 끝난 뒤 별도 티켓에서 한다(expand/contract).
 --
@@ -152,7 +172,8 @@ WHERE sc.id = names.chat_id;
 -- 행을 삭제·재생성하면 FK(ON DELETE SET NULL, V41·KNK-515)가 그 조회 키를 비운다. 사전으로는 덮을 수 없다.
 --   - reached_ending_name_snapshot: endings[] 교체가 story_chats·story_messages의 reached_ending_id를
 --     **동시에** 비운다. 비공개 스토리만의 문제가 아니다 — 공개 스토리에서 제작자가 엔딩을 손보기만 해도
---     그 스토리로 놀던 **모든 독자의 도달 기록**이 날아간다. 서재 폴백으로 계속 읽는다.
+--     그 스토리로 놀던 **모든 독자의 도달 기록**이 날아간다. 서재(채팅 단위) 폴백으로 계속 읽는다.
+--     턴 단위(상세·공유)는 위에서 추가한 story_messages 쪽 같은 이름 컬럼이 덮는다.
 --   - story_prologue_snapshot: 편집 폼에서 시작 설정 항목을 빼면 story_chats.start_setting_id가 비어
 --     스냅샷의 시작 설정을 찾을 수 없다. 상세·공유·AI 조립의 프롤로그 폴백으로 계속 읽는다.
 --

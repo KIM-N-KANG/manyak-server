@@ -96,6 +96,7 @@ erDiagram
   integer message_order
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
 }
 "public.story_choices" {
   bigint id

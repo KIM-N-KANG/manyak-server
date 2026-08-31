@@ -124,6 +124,9 @@ class StoryChat(
      *
      * [reachedEndingId]를 박는 그 자리에서 함께 기록한다([ChatTurnPersister]). 도달은 채팅당 최초 1회뿐이라
      * 컬럼 하나면 된다. 원본과 타입을 맞춘다(story_endings.name varchar(100)).
+     *
+     * 이건 **채팅 단위**(서재)용이다. 턴 단위(상세·공유)는 `story_messages`의 같은 이름 컬럼이 덮는다 —
+     * 채팅당 하나뿐인 이 값을 특정 턴에 붙일 수는 없기 때문이다.
      */
     @Column(name = "reached_ending_name_snapshot", length = 100)
     var reachedEndingNameSnapshot: String? = null,

@@ -284,17 +284,18 @@ class ChatService(
      * 도달 엔딩 이름(KNK-1065). 제목·프롤로그와 같은 규칙이다 — 읽을 수 있으면 현재 이름, 아니면 그 스토리가
      * 마지막으로 공개였던 시점의 스냅샷에서 이름을 찾는다. 서재(채팅 단위)와 상세·공유(턴 단위)가 이 하나를 공유한다.
      *
-     * **엔딩 행이 삭제되면 여기서는 이름을 되찾을 수 없다.** 스냅샷은 엔딩 id로 이름을 찾는 사전인데,
-     * FK(`ON DELETE SET NULL`)가 그 id를 비우기 때문이다. 채팅 단위인 서재만 [libraryReachedEndingName]으로
-     * 복구한다 — 턴 단위인 상세·공유는 어느 턴이 도달 턴이었는지 알 수 없다.
+     * [fallbackName]은 **참조가 끊겼을 때만**(=[endingId]가 NULL) 쓰는 이름 스냅샷이다. 조건을 좁게 잡는다 —
+     * id가 살아 있으면 기존대로 사전을 본다. 넓히면 소유자가 공개 상태에서 엔딩 이름을 바꾼 정상 케이스까지
+     * 도달 당시 이름으로 되돌린다.
      */
     private fun reachedEndingNameFor(
         endingId: Long?,
         showsCurrent: Boolean,
         endingNameById: Map<Long, String>,
         snapshot: StoryPublicSnapshot?,
+        fallbackName: String?,
     ): String? {
-        val id = endingId ?: return null
+        val id = endingId ?: return fallbackName
         return if (showsCurrent) endingNameById[id] else snapshot?.endingNameById()?.get(id)
     }
 
@@ -307,9 +308,10 @@ class ChatService(
      * 사라지면 덮을 수 없다. **비공개 스토리만의 문제가 아니다** — 공개 스토리에서 제작자가 엔딩을 손보기만
      * 해도 그 스토리로 놀던 모든 독자의 도달 기록이 사라진다.
      *
-     * **여기만 살아나는 비대칭이 있다**: 턴 단위로 보여주는 상세·공유는 `story_messages.reached_ending_id`도
-     * 함께 NULL이 되어 **어느 턴이 도달 턴이었는지** 알 수 없다. 채팅당 하나인 이 이름을 아무 턴에나 붙일 수
-     * 없으므로 그쪽은 복구하지 않는다(KNK-1059의 결론 그대로다).
+     * 턴 단위(상세·공유)도 이제 같은 방식으로 복구한다 — `story_messages`에 도달 시점 이름을 함께 박아
+     * **그 컬럼이 도달 턴 표식 역할**을 하기 때문이다(PR #224 Codex P2 재리뷰). 단, **이 배포 이후 새로
+     * 도달하는 건만** 그렇다. 배포 전에 이미 참조가 끊긴 과거 도달은 어느 턴이었는지조차 남아 있지 않아
+     * 서재만 살아나는 비대칭이 그대로다.
      */
     private fun libraryReachedEndingName(
         chat: StoryChat,
@@ -317,8 +319,13 @@ class ChatService(
         endingNameById: Map<Long, String>,
         snapshot: StoryPublicSnapshot?,
     ): String? {
-        val endingId = chat.reachedEndingId ?: return chat.reachedEndingNameSnapshot
-        return reachedEndingNameFor(endingId, showsCurrent, endingNameById, snapshot)
+        return reachedEndingNameFor(
+            chat.reachedEndingId,
+            showsCurrent,
+            endingNameById,
+            snapshot,
+            fallbackName = chat.reachedEndingNameSnapshot,
+        )
     }
 
     /**
@@ -403,7 +410,13 @@ class ChatService(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
                     choices = choicesByMessageId[assistant.id].orEmpty(),
-                    reachedEnding = reachedEndingNameFor(assistant.reachedEndingId, showsCurrentStory, endingNameById, snapshot),
+                    reachedEnding = reachedEndingNameFor(
+                        assistant.reachedEndingId,
+                        showsCurrentStory,
+                        endingNameById,
+                        snapshot,
+                        fallbackName = assistant.reachedEndingNameSnapshot,
+                    ),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -492,7 +505,13 @@ class ChatService(
                 ChatShareTurnResponse(
                     userInput = assistant.userInput,
                     aiOutput = assistant.content,
-                    reachedEnding = reachedEndingNameFor(assistant.reachedEndingId, showsCurrentStory, endingNameById, snapshot),
+                    reachedEnding = reachedEndingNameFor(
+                        assistant.reachedEndingId,
+                        showsCurrentStory,
+                        endingNameById,
+                        snapshot,
+                        fallbackName = assistant.reachedEndingNameSnapshot,
+                    ),
                     createdAt = assistant.createdAt,
                 )
             },
@@ -557,8 +576,9 @@ class ChatService(
                             id = message.id,
                             userInput = user.content,
                             content = message.content,
-                            // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id). 상세에서 이름으로 해소한다.
+                            // 도달 엔딩은 ASSISTANT 메시지에 표식된다(reached_ending_id + 이름 스냅샷). 상세에서 이름으로 해소한다.
                             reachedEndingId = message.reachedEndingId,
+                            reachedEndingNameSnapshot = message.reachedEndingNameSnapshot,
                             createdAt = message.createdAt,
                         )
                     }
@@ -575,6 +595,8 @@ class ChatService(
         val userInput: String,
         val content: String,
         val reachedEndingId: Long?,
+        // 도달 시점 이름. reachedEndingId가 FK로 비워져도 남는 **도달 턴 표식**이다.
+        val reachedEndingNameSnapshot: String?,
         val createdAt: Instant,
     )
 
