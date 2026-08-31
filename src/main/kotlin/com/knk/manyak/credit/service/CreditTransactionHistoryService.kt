@@ -51,7 +51,7 @@ class CreditTransactionHistoryService(
         }
         val hasMore = fetched.size > pageSize
         val rows = if (hasMore) fetched.subList(0, pageSize) else fetched
-        val titles = resolveTitles(rows)
+        val titles = resolveTitles(rows, userId)
         val expiries = resolveExpiries(rows)
         return CreditTransactionPageResponse(
             items = rows.map { row ->
@@ -86,27 +86,36 @@ class CreditTransactionHistoryService(
      * 함정: `ref_type`이 `"STORY"`인 행의 `ref_id`는 스토리 PK가 아니라 **제작 세션 PK**다
      * ([com.knk.manyak.story.service.SimpleStoryCreationService]가 세션 id로 차감한다). 세션을 한 단계 거치지
      * 않고 `stories.id`로 곧장 조인하면 엉뚱한 스토리 제목이 붙는다. 실패한 세션은 `story_id`가 NULL이라 제목도 없다.
+     *
+     * 채팅 참조 행은 서재와 같은 스냅샷 규칙을 탄다(KNK-1059): 요청자가 지금 그 스토리를 읽을 수 있으면 현재
+     * 제목, 아니면 채팅에 박아둔 스냅샷. 제작 참조 행은 요청자가 곧 소유자라 읽기가 언제나 허용되므로 새는
+     * 정보가 없고, 삭제 시 `null`인 현행 동작을 그대로 둔다.
      */
-    private fun resolveTitles(rows: List<CreditTransaction>): Map<Long, String?> {
+    private fun resolveTitles(rows: List<CreditTransaction>, userId: Long): Map<Long, String?> {
         val chatIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_CHAT) it.refId else null }
         val sessionIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_STORY) it.refId else null }
         if (chatIds.isEmpty() && sessionIds.isEmpty()) return emptyMap()
 
-        val storyIdByChat = storyChatRepository.findAllById(chatIds).associate { it.id to it.storyId }
+        val chatById = storyChatRepository.findAllById(chatIds).associateBy { it.id }
         val storyIdBySession = sessionRepository.findAllById(sessionIds).associate { it.id to it.storyId }
-        val storyIds = (storyIdByChat.values + storyIdBySession.values.filterNotNull()).toSet()
-        // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
-        val titleByStory = storyRepository.findAllById(storyIds)
-            .filter { it.deletedAt == null }
-            .associate { it.id to it.title }
+        val storyIds = (chatById.values.map { it.storyId } + storyIdBySession.values.filterNotNull()).toSet()
+        val storyById = storyRepository.findAllById(storyIds).associateBy { it.id }
 
         return rows.mapNotNull { row ->
-            val storyId = when (row.refType) {
-                REF_CHAT -> storyIdByChat[row.refId]
+            val title = when (row.refType) {
+                REF_CHAT -> {
+                    val chat = chatById[row.refId] ?: return@mapNotNull null
+                    val story = storyById[chat.storyId]
+                    if (story?.isCurrentMetadataVisibleTo(userId) == true) story.title else chat.storyTitleSnapshot
+                }
+                // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
                 REF_STORY -> storyIdBySession[row.refId]
+                    ?.let { storyById[it] }
+                    ?.takeIf { it.deletedAt == null }
+                    ?.title
                 else -> null
             } ?: return@mapNotNull null
-            titleByStory[storyId]?.let { row.id to it }
+            row.id to title
         }.toMap()
     }
 

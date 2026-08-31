@@ -44,6 +44,15 @@ class StoryChat(
     @Column(name = "creation_id", updatable = false)
     val creationId: UUID? = null,
 
+    // 채팅 시작 시점의 스토리 제목·썸네일 키(KNK-1059). creationId와 같은 성격의 1회 해석 값이다 —
+    // 소유자가 스토리를 비공개로 되돌리거나 지운 뒤에도 서재·이용내역이 보여줄 값이 있어야 하기 때문에 박아둔다.
+    // 원본 컬럼과 타입을 맞춘다(stories.title varchar(100), stories.thumbnail_image_key varchar(64)).
+    @Column(name = "story_title_snapshot", length = 100)
+    val storyTitleSnapshot: String? = null,
+
+    @Column(name = "story_thumbnail_key_snapshot", length = 64)
+    val storyThumbnailKeySnapshot: String? = null,
+
     @Column(length = 100)
     var title: String? = null,
 

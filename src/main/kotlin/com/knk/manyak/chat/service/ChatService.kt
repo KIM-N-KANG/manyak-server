@@ -146,6 +146,10 @@ class ChatService(
                 creationId = storyCreationSessionRepository
                     .findFirstByStoryIdOrderByIdAsc(story.id)
                     ?.storylineRequestId,
+                // 시작 시점의 제목·썸네일도 여기서 **한 번만** 박는다(KNK-1059). 소유자가 나중에 스토리를
+                // 비공개로 되돌리거나 지우면 서재·이용내역이 이 값에서 멈춘다.
+                storyTitleSnapshot = story.title,
+                storyThumbnailKeySnapshot = story.thumbnailImageKey,
             ),
         )
         structuredLogger.event(
@@ -182,7 +186,7 @@ class ChatService(
         val chats = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(requestedPublicIds)
             .filter { isOwnerAccessAllowed(it.userId, userId) }
             .sortedWith(compareByDescending<StoryChat> { it.updatedAt }.thenByDescending { it.id })
-        return toSummaryResponses(chats)
+        return toSummaryResponses(chats, userId)
     }
 
     /**
@@ -193,13 +197,14 @@ class ChatService(
     fun getMyChats(userId: Long, limit: Int): List<ChatSummaryResponse> =
         toSummaryResponses(
             storyChatRepository.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId, PageRequest.of(0, limit)),
+            userId,
         )
 
     /**
      * 채팅 목록을 카드 응답으로 매핑한다. 스토리 제목·마지막 프리뷰를 각각 한 번의 배치 조회로 채운다(N+1 방지).
      * 입력 순서를 그대로 보존하므로, 정렬은 호출부(요청 순서·최근 활동순)에서 결정한다.
      */
-    private fun toSummaryResponses(chats: List<StoryChat>): List<ChatSummaryResponse> {
+    private fun toSummaryResponses(chats: List<StoryChat>, userId: Long?): List<ChatSummaryResponse> {
         if (chats.isEmpty()) {
             return emptyList()
         }
@@ -216,12 +221,18 @@ class ChatService(
             .associate { it.id to it.name }
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
+            // 제목·썸네일은 요청자가 지금 그 스토리를 읽을 수 있을 때만 현재 값을 쓴다(KNK-1059).
+            // 비공개로 되돌렸거나 삭제됐으면 채팅에 박아둔 스냅샷에서 멈춘다. storyId(public_id)는
+            // 요청자가 원래 알던 값이라 그대로 둔다 — 새로 새는 정보가 없다.
+            val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
             ChatSummaryResponse(
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
-                storyTitle = story?.title.orEmpty(),
+                storyTitle = (if (showsCurrent) story.title else chat.storyTitleSnapshot).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
-                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(story?.thumbnailImageKey),
+                thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(
+                    if (showsCurrent) story.thumbnailImageKey else chat.storyThumbnailKeySnapshot,
+                ),
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,

@@ -86,6 +86,8 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
+  varchar_100_ story_title_snapshot
+  varchar_64_ story_thumbnail_key_snapshot
 }
 "public.story_endings" {
   bigint id
