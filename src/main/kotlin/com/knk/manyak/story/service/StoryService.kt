@@ -23,7 +23,6 @@ import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
-import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryReportRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
@@ -54,7 +53,6 @@ class StoryService(
     private val storyReportRepository: StoryReportRepository,
     private val eventPublisher: ApplicationEventPublisher,
     private val suspensionGuard: SuspensionGuard,
-    private val storyEndingRepository: StoryEndingRepository,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
@@ -174,7 +172,7 @@ class StoryService(
     /**
      * 회원이 한 스토리에서 도달한 엔딩 이름을 표시 순서로 반환한다. 게스트는 빈 목록.
      *
-     * 집계의 정본 식별자가 이름이므로(V70) 이름을 그대로 읽는다. 표시 순서는 [startSettings]에 실린 **현재**
+     * 집계의 정본 식별자가 이름이므로(V70·V71) 이름을 그대로 읽는다. 표시 순서는 [startSettings]에 실린 **현재**
      * 엔딩 순서를 따른다 — 제작자가 지웠던 엔딩을 **같은 이름으로 다시 만들면 여기서 자연히 다시 이어진다.**
      * 지금 스토리에 없는 이름(교체돼 사라진 엔딩)은 순서를 알 수 없어 뒤에 이름순으로 붙인다. 도달 기록은
      * 사라지지 않으므로 화면에서 빠지지 않는다.
@@ -187,18 +185,10 @@ class StoryService(
         if (userId == null) {
             return emptyList()
         }
-        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
-        // 이름이 비어 있는 행은 롤링 배포 창에 구버전 태스크가 쓴 것이다(이름 컬럼을 모른다 — V70 확장 단계).
-        // 그 행은 ending_id로 라이브 엔딩에서 이름을 해소한다. 둘 다 없으면 남길 근거가 없어 빠진다.
-        val legacyIds = reaches.filter { it.endingNameSnapshot == null }.mapNotNull { it.endingId }
-        val legacyNames = if (legacyIds.isEmpty()) {
-            emptyList()
-        } else {
-            storyEndingRepository.findAllById(legacyIds).map { it.name }
-        }
-        // 중복 제거가 방어가 아니라 실제로 필요하다: 창 동안 구버전 행과 신버전 행이 같은 도달을 두 번 남길 수
-        // 있고(V70 주석의 마지막 조합), 어떤 DB 제약으로도 막히지 않는다. 화면에는 한 번만 실려야 한다.
-        val reachedNames = (reaches.mapNotNull { it.endingNameSnapshot } + legacyNames).distinct()
+        // 이름은 NOT NULL이고 (회원, 스토리, 이름) 유니크라(V71) 그대로 읽으면 된다. 이름이 비어 있는 행을
+        // ending_id로 해소하던 폴백과 중복 제거는 그 두 제약이 대신하므로 함께 걷었다.
+        val reachedNames = userStoryEndingReachRepository.findByUserIdAndStoryId(userId, storyId)
+            .map { it.endingNameSnapshot }
         if (reachedNames.isEmpty()) {
             return emptyList()
         }

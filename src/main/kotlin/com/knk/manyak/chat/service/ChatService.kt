@@ -167,9 +167,7 @@ class ChatService(
                     .findFirstByStoryIdOrderByIdAsc(story.id)
                     ?.storylineRequestId,
                 // 프롤로그는 시작 설정이 삭제되면 조회 키(start_setting_id)가 NULL이 돼 되찾을 수 없어 박아 둔다.
-                // 제목·썸네일 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 더 이상 쓰지 않는다.
-                // 컬럼 DROP은 이 릴리스가 완전히 배포된 뒤 후속 릴리스에서 한다 — 지금 지우면 롤링 창의
-                // 구버전 태스크가 매핑된 컬럼을 조회·INSERT에 실어 즉시 SQL 오류를 낸다.
+                // 제목·썸네일 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 V71에서 지웠다.
                 storyPrologueSnapshot = startSetting?.prologue,
             ),
         )

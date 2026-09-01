@@ -14,7 +14,7 @@ import java.time.Instant
  *
  * `GET /stories/{storyId}`의 reachedEndings 집계 소스이며, 게스트→회원 이관(/auth/migrate) 시 도달분을 백필한다.
  *
- * **정본 식별자는 [endingNameSnapshot]이고 [endingId]는 보조 참조다**(V70, PR #224 Codex P2). 원래 ending_id가
+ * **정본 식별자는 [endingNameSnapshot]이고 [endingId]는 보조 참조다**(V70·V71, PR #224 Codex P2). 원래 ending_id가
  * NOT NULL이고 FK가 ON DELETE CASCADE였는데, 스토리 수정의 `endings[]` 전체 교체가 엔딩 행을
  * delete + re-insert하므로 **제작자가 엔딩을 한 번 손보기만 해도 그 스토리 회원들의 도달 집계가 통째로
  * 삭제됐다**(이름을 그대로 둬도 행이 새로 생기니 마찬가지). 이름을 키로 올리고 FK를 SET NULL로 낮춰 행이 살아남는다.
@@ -24,10 +24,10 @@ import java.time.Instant
     name = "user_story_ending_reaches",
     uniqueConstraints = [
         UniqueConstraint(
-            // 확장 단계에서는 **옛 유니크를 유지한다**(V70). 이름 유니크는 중복 정리가 선행돼야 만들 수 있어
-            // 후속 티켓 몫이다 — 근거는 V70 주석에 있다.
-            name = "uq_user_story_ending_reaches",
-            columnNames = ["user_id", "story_id", "ending_id"],
+            // 이름이 유니크 키다(V71 contract). 옛 (user_id, story_id, ending_id) 유니크는 엔딩 교체로 id가
+            // 갈리면 같은 도달을 못 알아보고 id가 NULL인 행은 아예 못 막아 함께 제거했다.
+            name = "uq_user_story_ending_reaches_name",
+            columnNames = ["user_id", "story_id", "ending_name_snapshot"],
         ),
     ],
 )
@@ -43,18 +43,13 @@ class UserStoryEndingReach(
     val storyId: Long,
 
     /**
-     * 도달 시점의 엔딩 이름. **읽기·중복 판정의 정본 식별자**다.
-     *
-     * **아직 nullable이다**(V70 확장 단계). 롤링 배포 창의 구버전 태스크는 이 컬럼을 모르고 INSERT하므로
-     * NOT NULL로 만들면 그 창 동안 도달 저장이 통째로 실패한다. 그래서 읽는 쪽은 NULL을 만나도 터지지 않고
-     * [endingId]로 라이브 엔딩에서 이름을 해소한다([com.knk.manyak.story.service.StoryService]).
-     * 후속 티켓에서 재백필 → 중복 정리 → NOT NULL → 이름 유니크 순으로 조인다(V70 주석).
+     * 도달 시점의 엔딩 이름. **읽기·중복 판정의 정본 식별자이자 유니크 키**다(V71 contract).
      *
      * 이름을 키로 올리면 같은 스토리 안에서 시작 설정이 다른 동명 엔딩은 하나로 합쳐지는데, 스토리 상세의
      * reachedEndings가 이름만 담은 평면 목록이라 응답에서 애초에 구분되지 않으므로 잃는 정보가 없다(KNK-462).
      */
-    @Column(name = "ending_name_snapshot", length = 100)
-    val endingNameSnapshot: String? = null,
+    @Column(name = "ending_name_snapshot", nullable = false, length = 100)
+    val endingNameSnapshot: String,
 
     /** 보조 참조. 도달 시점에 라이브 엔딩 행을 찾았으면 그 id, 못 찾았거나 나중에 교체되면 NULL이다. */
     @Column(name = "ending_id")
