@@ -153,6 +153,11 @@ class UserWithdrawalIntegrationTests {
         restTestClient.get().uri("/api/v1/stories/00000000-0000-0000-0000-000000000000")
             .header("Authorization", "Bearer $token")
             .exchange().expectStatus().isUnauthorized
+
+        // 이프 수치 조회도 마찬가지다(KNK-1090). BEARER_SKIP에 두면 토큰을 resolve하지 않아 이 경로만 새어나간다.
+        restTestClient.get().uri("/api/v1/credits/policies")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
