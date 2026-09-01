@@ -21,8 +21,6 @@
 | target_progress_turns | integer | 0 | false |  |  |  |
 | reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 | creation_id | uuid |  | true |  |  | KNK-751: 이 채팅이 시작한 스토리의 간편 제작 creation_id(story_creation_sessions.storyline_request_id). 일반 제작 스토리는 NULL. |
-| story_title_snapshot | varchar(100) |  | true |  |  |  |
-| story_thumbnail_key_snapshot | varchar(64) |  | true |  |  |  |
 | story_prologue_snapshot | text |  | true |  |  |  |
 | reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
 | occurred_main_event_names_snapshot | jsonb |  | true |  |  |  |
@@ -82,8 +80,6 @@ erDiagram
   integer target_progress_turns
   bigint reached_ending_id FK
   uuid creation_id
-  varchar_100_ story_title_snapshot
-  varchar_64_ story_thumbnail_key_snapshot
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
   jsonb occurred_main_event_names_snapshot

@@ -406,7 +406,7 @@ class ChatStorySnapshotIntegrationTests {
         val chat = createChat(story, reader)
 
         // 시작 설정이 삭제되면 start_setting_id가 NULL이 돼 프롤로그를 되찾을 키가 사라진다. 제목·썸네일
-        // 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 더 이상 쓰지 않는다(컬럼은 후속 릴리스에서 DROP).
+        // 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 V71에서 컬럼째 지웠다.
         assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
     }
 
