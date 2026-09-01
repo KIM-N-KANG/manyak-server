@@ -177,6 +177,10 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/handoffs"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs/status"),
+            // 이프 수치 조회(KNK-1056 후속)는 인증 경로가 아니지만 성질이 같아 여기 둔다: permitAll이면서
+            // 토큰 resolve를 건너뛴다. 로그인 전 안내 화면도 읽는데, 클라이언트가 모든 요청에 자동 첨부한
+            // 만료·위조 access 헤더가 RS 필터에 걸리면 공개 화면이 통째로 401로 깨진다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies"),
         )
 
         // optional 인증 도메인 경로. authorizeHttpRequests의 permitAll 매처와 동일한 method·path로 맞춘다.

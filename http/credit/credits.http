@@ -14,6 +14,8 @@
 ###   - [KNK-1056] 기본값(2026-08-31 재확정): 가입 1000 · 초대 양쪽 각 2000(계정별 KST 월 10회) · 출석 350,
 ###     스토리 생성 200 · 채팅 턴 20(재생성 포함) · 스토리라인 생성은 무료(application.yml manyak.credit.*).
 ###   - [KNK-1056] 이 수치는 릴리스 없이 `credit_policies` 오버라이드로 바꿉니다. 아래 "정책 오버라이드 확인 절차" 참고.
+###   - 이프 수치 조회(GET /api/v1/credits/policies, 아래 11번)는 **인증이 필요 없습니다**. 화면이 수치를
+###     하드코딩하지 않고 지금 유효한 값을 읽게 하는 용도입니다.
 
 @baseUrl = http://localhost:8080
 
@@ -204,6 +206,34 @@ Accept: application/json
     });
 %}
 
+### 11. (해피 패스) 이프 수치 조회 → 200, 인증 불필요
+### 화면이 "출석하면 얼마 받는지"를 누르기 전에 보여주기 위한 값입니다. 토큰 없이 호출됩니다.
+GET {{baseUrl}}/api/v1/credits/policies
+Accept: application/json
+
+> {%
+    client.test("인증 없이도 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("수치 6종이 모두 숫자다", () => {
+        const keys = ["signupReward", "inviteReward", "inviteMonthlyCap", "attendanceReward", "storyCreationCost", "chatTurnCost"];
+        keys.forEach((k) => client.assert(typeof response.body[k] === "number", `${k} 가 숫자가 아닙니다. actual=${response.body[k]}`));
+    });
+    client.log("현재 출석 보상: " + response.body.attendanceReward);
+%}
+
+### 12. 만료·위조 access 토큰이 붙어도 200이다
+### 클라이언트가 모든 요청에 토큰을 자동 첨부해도 공개 경로가 401로 깨지지 않아야 합니다.
+GET {{baseUrl}}/api/v1/credits/policies
+Authorization: Bearer not-a-real-token
+Accept: application/json
+
+> {%
+    client.test("stale 토큰이 붙어도 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
 ### ---------------------------------------------------------------------------
 ### [KNK-1056] 정책 오버라이드 확인 절차 (수동)
 ###
@@ -220,7 +250,8 @@ Accept: application/json
 ###    ON CONFLICT (policy_key) DO UPDATE SET amount = EXCLUDED.amount,
 ###      effective_until = EXCLUDED.effective_until, updated_at = now();
 ###
-### 3) 60초 뒤 위 4번(출석체크)을 **다음 날 KST** 또는 새 계정으로 호출 → amount 가 700 인지 확인.
+### 3) 60초 뒤 위 11번(이프 수치 조회)을 호출 → attendanceReward 가 700 인지 확인합니다(가장 빠른 확인 경로).
+###    실제 지급까지 보려면 위 4번(출석체크)을 **다음 날 KST** 또는 새 계정으로 호출 → amount 가 700 인지 확인.
 ###    (같은 날 재호출은 멱등으로 rewarded=false, amount=0 이라 수치가 보이지 않습니다.)
 ###    서버 로그에 `credit_policy_changed key=attendance_reward from=350 to=700` 이 남습니다.
 ###

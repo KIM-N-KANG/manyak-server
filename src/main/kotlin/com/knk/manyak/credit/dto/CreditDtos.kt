@@ -83,3 +83,19 @@ data class CreditTransactionPageResponse(
     @Schema(description = "다음 페이지 커서. 더 없으면 null")
     val nextCursor: String?,
 )
+
+@Schema(description = "현재 유효한 이프 적립·소모 수치")
+data class CreditPolicyResponse(
+    @Schema(description = "가입 보상 이프")
+    val signupReward: Long,
+    @Schema(description = "초대 보상 이프. 초대자·제출자가 각각 받는다")
+    val inviteReward: Long,
+    @Schema(description = "초대 보상의 계정별 KST 월 한도. 이프가 아니라 **횟수**다")
+    val inviteMonthlyCap: Long,
+    @Schema(description = "출석체크 보상 이프. KST 자정 기준 1일 1회")
+    val attendanceReward: Long,
+    @Schema(description = "스토리 생성 소모 이프")
+    val storyCreationCost: Long,
+    @Schema(description = "채팅 턴 소모 이프. 재생성도 같은 값")
+    val chatTurnCost: Long,
+)
