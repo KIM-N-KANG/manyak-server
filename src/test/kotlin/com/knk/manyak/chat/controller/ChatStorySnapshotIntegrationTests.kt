@@ -398,17 +398,15 @@ class ChatStorySnapshotIntegrationTests {
     // ---- 스냅샷 기록 ----
 
     @Test
-    fun `채팅을 만들면 구버전용 채팅 스냅샷 컬럼도 계속 채운다`() {
+    fun `채팅을 만들면 프롤로그 스냅샷을 박는다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
         val story = publicStoryWithPrologue(owner)
 
         val chat = createChat(story, reader)
 
-        // 이 셋은 아무도 읽지 않는다(읽기 정본은 stories.last_public_snapshot). 그래도 채워야 한다 —
-        // 롤링 배포 창의 구버전 태스크와 배포 되돌림이 이 값을 읽는다. 다음 릴리스의 DROP 대상이다.
-        assertThat(chat.storyTitleSnapshot).isEqualTo("원래 제목")
-        assertThat(chat.storyThumbnailKeySnapshot).isEqualTo("thumb_0001")
+        // 시작 설정이 삭제되면 start_setting_id가 NULL이 돼 프롤로그를 되찾을 키가 사라진다. 제목·썸네일
+        // 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 더 이상 쓰지 않는다(컬럼은 후속 릴리스에서 DROP).
         assertThat(chat.storyPrologueSnapshot).isEqualTo("원래 프롤로그")
     }
 
