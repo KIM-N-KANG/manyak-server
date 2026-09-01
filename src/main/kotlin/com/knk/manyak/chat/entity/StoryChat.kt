@@ -47,19 +47,6 @@ class StoryChat(
     val creationId: UUID? = null,
 
     /**
-     * **다음 릴리스의 DROP 대상**(KNK-1065). 읽기 정본은 `stories.last_public_snapshot`으로 옮겼고 이 **둘은**
-     * 아무도 읽지 않는다. 그런데도 채팅 생성 시 계속 채우고 컬럼을 남겨 둔다 — ECS 롤링 배포는 새 태스크가
-     * Flyway를 돌리는 동안 구버전 태스크가 계속 요청을 받고, 배포를 되돌리면 구버전이 그대로 뜬다.
-     * 구버전 엔티티에 이 컬럼들이 매핑돼 있어서 지금 지우면 그 창 동안 서재·상세·공유·이용내역의 SELECT가
-     * 통째로 실패한다(컬럼 추가와 달리 DROP은 하위 호환이 아니다). 릴리스가 끝난 뒤 별도 티켓에서 지운다.
-     */
-    @Column(name = "story_title_snapshot", length = 100)
-    val storyTitleSnapshot: String? = null,
-
-    @Column(name = "story_thumbnail_key_snapshot", length = 64)
-    val storyThumbnailKeySnapshot: String? = null,
-
-    /**
      * 채팅 시작 시점의 프롤로그. 위 둘과 달리 **DROP 대상이 아니고 지금도 읽는다**(PR #224 Codex P2).
      *
      * 스토리 스냅샷은 시작 설정을 id로 찾는데, 소유자가 편집 폼에서 시작 설정 항목을 빼면 행이 삭제되고
