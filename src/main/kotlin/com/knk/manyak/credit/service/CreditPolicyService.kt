@@ -126,6 +126,13 @@ class CreditPolicyService(
     }
 
     /**
+     * 전체 키의 현재 유효값을 **한 번의 스냅샷·한 번의 now**로 계산한다. 6종을 [amountOf]로 따로 읽으면 그 사이에
+     * [refresh]가 끼어들어 한 응답 안에 옛 값과 새 값이 섞인다(만료 경계도 키마다 다르게 판정된다).
+     * 여러 수치를 함께 내보내는 조회(`GET /api/v1/credits/policies`)는 이걸 쓴다. DB를 조회하지 않는다.
+     */
+    fun effectiveAmounts(): Map<CreditPolicyKey, Long> = effectiveOf(overrides, clock.instant())
+
+    /**
      * 오버라이드 스냅샷을 다시 적재한다. 부팅 선적재와 주기 스케줄러가 호출하며, **예외를 밖으로 내보내지 않는다**
      * (스케줄러가 한 번의 예외로 영구 중단되지 않도록, 그리고 부팅이 DB 사정으로 실패하지 않도록).
      */
