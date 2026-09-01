@@ -79,4 +79,13 @@ class CreditPolicyControllerIntegrationTests {
             .exchange()
             .expectStatus().isOk
     }
+
+    @Test
+    fun `POST로 같은 경로를 부르면 401이다`() {
+        // 무인증 허용은 GET 이 경로 하나뿐이다. 나중에 matcher가 넓어지면 여기서 red가 난다.
+        restTestClient.post()
+            .uri("/api/v1/credits/policies")
+            .exchange()
+            .expectStatus().isUnauthorized
+    }
 }
