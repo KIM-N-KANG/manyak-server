@@ -99,6 +99,9 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/batch")).permitAll()
                     // 피드백은 익명 제출을 허용한다. 로그인 상태면 인증 도입 후 서버가 user_id 를 채운다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/feedbacks")).permitAll()
+                    // 이프 수치 조회(KNK-1090)는 로그인 전 안내 화면도 읽는 공개 조회다. OPTIONAL_AUTH_MATCHERS에 있으므로
+                    // permitAll을 여기 명시해야 한다(BEARER_SKIP_MATCHERS와 달리 그 배열은 permitAll에 자동 반영되지 않는다).
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies")).permitAll()
                     // 인증 없이 호출하는 공개 인증 엔드포인트(Google·Kakao 로그인, refresh 회전).
                     // - 로그인: 아직 우리 토큰이 없는 상태에서 호출한다.
                     // - refresh: access 없이 회전한다(토큰 유효성은 서비스가 검증한다).
@@ -208,6 +211,12 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/creation-requests/{requestId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/batch"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/feedbacks"),
+            // 이프 수치 조회(KNK-1090)는 요청자 신원을 쓰지 않지만 BEARER_SKIP이 아니라 여기 둔다.
+            // BEARER_SKIP은 토큰을 아예 resolve하지 않아 principal이 비고, 그러면 DeletedAccountRejectionFilter가
+            // 탈퇴 계정의 잔여 유효 토큰을 못 보고 통과시킨다 — 이 경로만 "전면 401" 계약(KNK-1019)에서 새는 것이다.
+            // 여기 두면 유효 토큰은 principal이 채워져 탈퇴 게이트에 걸리고, 만료·위조 토큰은 optional 필터가
+            // 삼켜 로그인 전 안내 화면이 401로 깨지지도 않는다(위 GET /api/v1/shares/{shareId}와 같은 이유).
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies"),
         )
     }
 
