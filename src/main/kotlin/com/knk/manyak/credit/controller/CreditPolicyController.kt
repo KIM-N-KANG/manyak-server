@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController
  * 무인증이다 — 로그인 전 서비스 안내 화면도 같은 값을 쓰고, 비밀도 아니다(지급 응답에 그대로 실린다).
  * 잔액·이용내역과 달리 요청자별 데이터가 없어 `/api/v1/users/me` 아래가 아니라 별도 경로에 둔다.
  *
- * DB를 만지지 않는다 — [CreditPolicyService.amountOf]는 메모리 스냅샷 읽기다.
+ * DB를 만지지 않는다 — [CreditPolicyService.effectiveAmounts]는 메모리 스냅샷 읽기다.
  */
 @Tag(name = "Credits", description = "이프 API")
 @RestController
@@ -36,7 +36,8 @@ class CreditPolicyController(
             현재 유효한 이프 수치를 반환합니다. 인증이 필요 없습니다.
 
             - 운영 중 이벤트로 바뀔 수 있으니 화면에 하드코딩하지 말고 이 값을 표시하세요.
-            - `inviteMonthlyCap`만 이프가 아니라 월 적립 **횟수**입니다.
+            - `inviteMonthlyCap`만 이프가 아니라 월 적립 **횟수**이며, **초대자 몫에만** 걸립니다(제출자 몫은 상한 없음).
+            - `storyCreationCost`는 **간편 제작**에만 듭니다(일반 제작은 무료).
             - 변경 반영은 최대 1분 지연될 수 있습니다(서버가 정책 스냅샷을 주기 갱신합니다).
         """,
     )
@@ -50,13 +51,16 @@ class CreditPolicyController(
         ],
     )
     @GetMapping("/api/v1/credits/policies")
-    fun getCreditPolicies(): CreditPolicyResponse =
-        CreditPolicyResponse(
-            signupReward = creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD),
-            inviteReward = creditPolicyService.amountOf(CreditPolicyKey.INVITE_REWARD),
-            inviteMonthlyCap = creditPolicyService.amountOf(CreditPolicyKey.INVITE_MONTHLY_CAP),
-            attendanceReward = creditPolicyService.amountOf(CreditPolicyKey.ATTENDANCE_REWARD),
-            storyCreationCost = creditPolicyService.amountOf(CreditPolicyKey.STORY_CREATION_COST),
-            chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST),
+    fun getCreditPolicies(): CreditPolicyResponse {
+        // 6종을 하나씩 읽으면 그 사이 갱신에 옛 값과 새 값이 섞이므로 한 스냅샷에서 모두 꺼낸다.
+        val amounts = creditPolicyService.effectiveAmounts()
+        return CreditPolicyResponse(
+            signupReward = amounts.getValue(CreditPolicyKey.SIGNUP_REWARD),
+            inviteReward = amounts.getValue(CreditPolicyKey.INVITE_REWARD),
+            inviteMonthlyCap = amounts.getValue(CreditPolicyKey.INVITE_MONTHLY_CAP),
+            attendanceReward = amounts.getValue(CreditPolicyKey.ATTENDANCE_REWARD),
+            storyCreationCost = amounts.getValue(CreditPolicyKey.STORY_CREATION_COST),
+            chatTurnCost = amounts.getValue(CreditPolicyKey.CHAT_TURN_COST),
         )
+    }
 }

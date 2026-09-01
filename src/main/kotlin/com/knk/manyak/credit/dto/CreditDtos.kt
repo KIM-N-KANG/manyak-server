@@ -90,11 +90,11 @@ data class CreditPolicyResponse(
     val signupReward: Long,
     @Schema(description = "초대 보상 이프. 초대자·제출자가 각각 받는다")
     val inviteReward: Long,
-    @Schema(description = "초대 보상의 계정별 KST 월 한도. 이프가 아니라 **횟수**다")
+    @Schema(description = "**초대자** 역할로 받는 보상의 계정별 KST 월 한도. 이프가 아니라 **횟수**다. 제출자 몫은 이 상한을 받지 않는다(평생 1회 자격이 유일한 제한)")
     val inviteMonthlyCap: Long,
     @Schema(description = "출석체크 보상 이프. KST 자정 기준 1일 1회")
     val attendanceReward: Long,
-    @Schema(description = "스토리 생성 소모 이프")
+    @Schema(description = "**간편 제작** 스토리 생성 소모 이프. 일반 제작(POST /api/v1/stories/general)은 무료다")
     val storyCreationCost: Long,
     @Schema(description = "채팅 턴 소모 이프. 재생성도 같은 값")
     val chatTurnCost: Long,
