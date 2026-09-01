@@ -81,34 +81,23 @@ class EndingRuntimeStateRepositoryTests {
     }
 
     @Test
-    fun `동일 회원-스토리-엔딩id 도달을 중복 기록하면 UNIQUE 제약으로 거부된다`() {
+    fun `동일 회원-스토리-엔딩 이름 도달을 중복 기록하면 UNIQUE 제약으로 거부된다`() {
         endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = 1000))
 
-        // 확장 단계(V70)에서는 **옛 유니크(user, story, ending_id)** 가 그대로 남아 id가 있는 행을 막는다.
         assertThrows(DataIntegrityViolationException::class.java) {
             endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = 1000))
         }
     }
 
     @Test
-    fun `확장 단계에서는 이름이 같아도 id가 다르면 DB가 막지 않는다`() {
-        // 이름 유니크는 중복 정리가 선행돼야 만들 수 있어 후속 티켓 몫이다(V70 주석). 그때까지 이름 기준
-        // 중복 방지는 앱(EndingReachRecorder)이 맡고, DB는 옛 유니크만 든다. **이 전이 상태를 고정해 둔다** —
-        // 후속 티켓이 이름 유니크를 넣으면 이 테스트가 빨개져서 함께 고쳐야 할 자리를 가리킨다.
+    fun `이름이 같으면 엔딩 id가 달라도 UNIQUE 제약으로 거부된다`() {
+        // contract 단계(V71)에서 유니크 키가 (user, story, ending_name_snapshot)으로 바뀌었다. 엔딩 교체로
+        // id가 갈리거나 아예 없어도 같은 도달이면 DB가 막는다 — 이름이 정본 식별자라는 계약의 본체다.
         endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = 1000))
-        endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = null))
 
-        assertEquals(2, endingReachRepository.findByUserIdAndStoryId(1, 100).size)
-    }
-
-    @Test
-    fun `이름이 비어 있는 구버전 스타일 행도 저장된다`() {
-        // 롤링 배포 창의 구버전 태스크는 이름 컬럼을 모르고 INSERT한다. NOT NULL이었다면 여기서 터졌다.
-        endingReachRepository.saveAndFlush(
-            UserStoryEndingReach(userId = 1, storyId = 100, endingNameSnapshot = null, endingId = 1000),
-        )
-
-        assertEquals(1, endingReachRepository.findByUserIdAndStoryId(1, 100).size)
+        assertThrows(DataIntegrityViolationException::class.java) {
+            endingReachRepository.saveAndFlush(reach(userId = 1, storyId = 100, name = "해피", endingId = null))
+        }
     }
 
     private fun reach(userId: Long, storyId: Long, name: String, endingId: Long?) =

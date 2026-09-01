@@ -175,22 +175,14 @@ class GuestDataMigrationService(
     private fun backfillEndingReach(userId: Long, chat: StoryChat) {
         // 이름이 정본이다(V70). 엔딩이 교체돼 chat.reachedEndingId가 비어도 이름 스냅샷으로 백필한다.
         //
-        // 이름 스냅샷이 비어 있으면 라이브 엔딩에서 해소한다. **롤링 배포 창에서 실제로 생기는 상태다** —
-        // 이름 컬럼(V67)이 아직 릴리스되지 않아 구버전 태스크는 도달을 id로만 기록하고, 그 채팅이 이관되면
-        // 이름을 알 수 없어 집계가 조용히 빠진다. 둘 다 없으면 남길 근거가 없어 건너뛴다.
+        // 이름 스냅샷이 비어 있으면 라이브 엔딩에서 해소한다. 집계 쪽 이름과 달리 **채팅의 이름 스냅샷은
+        // 여전히 nullable이다** — V67 이전에 만들어진 채팅과 그 배포 창의 채팅은 값이 없다. 그 채팅이 이관되면
+        // 이름을 알 수 없어 집계가 조용히 빠지므로 여기서 해소한다. 둘 다 없으면 남길 근거가 없어 건너뛴다.
         val endingName = chat.reachedEndingNameSnapshot
             ?: chat.reachedEndingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
             ?: return
-        // **이름과 id 양쪽으로** 확인한다. 롤링 배포 창에 구버전 태스크가 쓴 집계 행은 ending_name_snapshot이
-        // NULL이라 이름으로는 못 찾는데, 같은 ending_id로 다시 넣으면 아직 살아 있는 옛 유니크를 위반한다.
-        // 이 경로에는 위반을 흡수하는 장치가 없어 **이관 요청 자체가 실패**한다(단순 중복이 아니라 오류 경로다).
-        // KNK-1084(후속 contract)의 재백필이 끝나면 id 쪽 확인은 불필요해진다.
-        val alreadyRecorded = userStoryEndingReachRepository
-            .existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName) ||
-            chat.reachedEndingId?.let {
-                userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, chat.storyId, it)
-            } == true
-        if (!alreadyRecorded) {
+        // 집계 행의 이름은 NOT NULL이고 유니크 키다(V71). 이름 하나로 확인하면 충분하다.
+        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName)) {
             userStoryEndingReachRepository.save(
                 UserStoryEndingReach(
                     userId = userId,

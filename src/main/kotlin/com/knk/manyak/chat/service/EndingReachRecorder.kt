@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional
  * 회원 엔딩 도달 집계를 **독립 트랜잭션(REQUIRES_NEW)** 으로 기록한다.
  *
  * `existsBy`→`save`는 원자적이지 않아, 같은 회원이 두 채팅에서 동시에 같은 엔딩에 도달하면 둘 다 exists 검사를
- * 통과한 뒤 한쪽 insert가 `uq_user_story_ending_reaches`를 위반한다. 이 기록을 턴 저장과 같은 트랜잭션에서 하면
+ * 통과한 뒤 한쪽 insert가 `uq_user_story_ending_reaches_name`을 위반한다. 이 기록을 턴 저장과 같은 트랜잭션에서 하면
  * 그 위반이 턴 전체(메시지·선택지·상태)를 롤백시킨다 — AI 응답을 이미 생성한 뒤라 손해가 크다.
  *
  * 그래서 도달 기록만 새 트랜잭션으로 떼어, 유니크 위반이 나면 이 트랜잭션만 롤백되고 호출부(턴 저장)는 유지되게 한다.
@@ -28,7 +28,7 @@ class EndingReachRecorder(
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun record(userId: Long, storyId: Long, endingId: Long?, endingName: String) {
-        if (alreadyRecorded(userId, storyId, endingId, endingName)) {
+        if (userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName)) {
             return
         }
         // saveAndFlush로 위반을 이 메서드 경계 안에서 즉시 드러낸다. 예외는 이 REQUIRES_NEW 트랜잭션만 롤백시키고
@@ -42,19 +42,4 @@ class EndingReachRecorder(
             ),
         )
     }
-
-    /**
-     * 이미 기록된 도달인지 **이름과 id 양쪽**으로 확인한다.
-     *
-     * 이름이 정본이지만, 롤링 배포 창에 구버전 태스크가 쓴 행은 `ending_name_snapshot`이 NULL이라 이름으로는
-     * 찾지 못한다. 그 상태에서 같은 `ending_id`로 다시 넣으면 아직 살아 있는 옛 유니크를 위반한다.
-     * 이 경로는 호출부가 위반을 흡수하므로 터지지는 않지만(불필요한 예외와 롤백을 태울 뿐이고),
-     * 흡수 장치가 없는 이관 백필에서는 요청 자체가 실패한다 —
-     * [com.knk.manyak.migration.service.GuestDataMigrationService]가 같은 판정을 쓴다.
-     *
-     * KNK-1084(후속 contract)의 재백필이 끝나면 이름 NULL 행이 사라져 id 쪽 확인은 불필요해진다.
-     */
-    private fun alreadyRecorded(userId: Long, storyId: Long, endingId: Long?, endingName: String): Boolean =
-        userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName) ||
-            (endingId != null && userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingId(userId, storyId, endingId))
 }
