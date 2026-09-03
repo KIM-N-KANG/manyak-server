@@ -48,6 +48,8 @@ class GeneralStoryCreationService(
     @Transactional
     fun createGeneralStory(request: CreateGeneralStoryRequest, userId: Long?): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
+        // 게스트는 공개(PUBLIC)를 지정할 수 없다(KNK-149). 조용히 PRIVATE으로 낮추지 않고 400으로 거부한다.
+        requireOwnerCanPublish(ownerUserId = userId, requested = request.visibility)
         // 장르는 현행 방식대로 stories.genre에 쉼표 결합 저장한다(§4-3-8).
         val genre = request.genres.joinToString(separator = ", ").ifBlank { null }
 

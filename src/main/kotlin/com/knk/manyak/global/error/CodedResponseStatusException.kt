@@ -40,6 +40,12 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 스토리 공개 지정(400): 게스트(소유자 없음)는 스토리를 PUBLIC으로 만들 수 없다(KNK-149).
+     * 조용히 PRIVATE으로 낮추지 않고 거부한다 — 고른 값을 서버가 뒤집으면 "공개했는데 왜 안 보이냐"가 된다.
+     */
+    const val GUEST_CANNOT_PUBLISH = "GUEST_CANNOT_PUBLISH"
+
+    /**
      * 계정 연동(403): 이미 연동된 provider로의 재인증에 실패했다(KNK-739).
      * 토큰 무효·sub 불일치·미연동 provider·오래된 토큰을 사유 구분 없이 이 코드로 묶는다(계정 존재 여부 비노출).
      * 세션은 유효하므로 401이 아니다 — 401로 내면 클라이언트가 세션 만료로 오인해 로그아웃한다.

@@ -61,6 +61,10 @@ class StoryEditService(
         val story = resolveStoryForUpdate(storyId)
         requireOwnerAccess(story, userId)
         requirePublishedForVisibilityChange(story, request.visibility)
+        // 게스트(소유자 없음) 스토리의 공개 전환은 막는다(KNK-149). 값이 그대로 실려 오는 폼 왕복은 전환이
+        // 아니므로 통과시킨다(위 requirePublishedForVisibilityChange와 같은 이유 — 레거시 PUBLIC 게스트
+        // 스토리가 폼 저장 자체를 못 하게 되면 안 된다).
+        requireOwnerCanPublish(story.userId, request.visibility?.takeIf { it != story.visibility })
 
         // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
         request.title?.let {

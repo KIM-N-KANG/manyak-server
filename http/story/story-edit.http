@@ -5,6 +5,7 @@
 ###   - GET /edit : 수정 폼 조회(통글 4필드 포함). 인증 선택 — 회원 소유는 소유자만(타인·미인증 403), 게스트 스토리는 게스트(토큰 없음)만(회원 403, KNK-480 이관 후 접근).
 ###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
 ###   - [KNK-1021] 공개 전환: 별도 엔드포인트 없이 PATCH의 visibility 부분 갱신으로 PRIVATE↔PUBLIC을 오간다(§4-3-8·B26). 소유자만 가능하고 전환은 읽기 가시성에 즉시 반영된다. GET /edit 응답에도 visibility가 실린다(폼 왕복).
+###   - [KNK-149] 게스트(소유자 없는) 스토리는 PUBLIC으로 전환할 수 없다 → 400 `GUEST_CANNOT_PUBLISH`(E7). 공개는 로그인해 이관한 뒤에 가능하다(E12~E15가 소유자 경로).
 ###   - [KNK-515] 시작 설정 복수화: startSettings[]로 전체 교체(동기화). 각 원소 id(공개 식별자)가 기존과 일치하면 in-place 갱신(행 identity 보존), 없으면 추가, 빠진 기존은 삭제. 추천 입력·엔딩은 각 시작 설정에 중첩.
 ###
 ### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
@@ -134,45 +135,51 @@ Accept: application/json
     });
 %}
 
-### E7. (해피 패스) 공개 전환 PRIVATE → PUBLIC
+### E7. (에러, KNK-149) 게스트 스토리의 공개 전환 → 400. 소유자 없는 스토리는 공개할 수 없습니다.
+# 작성자 신원이 없어 카드에 작성자를 표기할 수 없고 좋아요·신고의 책임 주체가 없기 때문입니다.
+# 소유자가 있는 스토리의 공개 전환 해피 패스는 아래 E12~E15입니다.
 PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
 Content-Type: application/json
 
 { "visibility": "PUBLIC" }
 
 > {%
-    client.test("공개 전환 200이고 응답이 PUBLIC이다", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
+    client.test("게스트 스토리의 공개 전환은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
     });
-    client.test("visibility만 보내도 다른 필드는 유지된다(부분 갱신)", () => {
-        client.assert(response.body.title === "새 제목", `title이 바뀜. actual=${response.body.title}`);
-        client.assert(response.body.startSettings.length === 1, "startSettings가 유실됨");
+    client.test("code 가 GUEST_CANNOT_PUBLISH 다", () => {
+        client.assert(response.body.code === "GUEST_CANNOT_PUBLISH", `code 가 다릅니다. actual=${response.body.code}`);
     });
 %}
 
-### E8. 전환이 읽기 가시성에 즉시 반영된다 — 미인증(타인 시점) 상세 조회가 이제 200이다.
+### E8. 거부돼도 게스트 스토리는 UUID 보유자가 계속 읽습니다(게스트 스토리 규칙 — 공개 여부와 무관).
+# 즉 "공개 전환 거부"가 게스트의 자기 스토리 접근을 막지는 않습니다. 목록 노출만 빠집니다.
 GET {{baseUrl}}/api/v1/stories/{{editStoryId}}
 Accept: application/json
 
 > {%
-    client.test("공개 후에는 미인증 상세 조회가 200이다", () => {
+    client.test("게스트 스토리는 미인증 상세 조회가 200이다", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
+    });
+    client.test("공개 범위는 PRIVATE 그대로다(거부된 전환이 반영되지 않았다)", () => {
+        client.assert(response.body.visibility === "PRIVATE", `actual=${response.body.visibility}`);
     });
 %}
 
-### E9. (되돌림) PUBLIC → PRIVATE. 익명 스토리라 UUID 보유자는 계속 읽을 수 있으나(게스트 스토리 규칙),
-# 저장값이 PRIVATE로 되돌아오는지 확인합니다. 회원 소유 스토리라면 이 시점부터 타인 조회가 404가 됩니다.
+### E9. (해피 패스) 게스트도 PRIVATE 지정은 통과합니다 — 막히는 것은 PUBLIC 하나뿐입니다.
 PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
 Content-Type: application/json
 
 { "visibility": "PRIVATE" }
 
 > {%
-    client.test("되돌림 200이고 응답이 PRIVATE이다", () => {
+    client.test("PRIVATE 지정은 200이고 응답이 PRIVATE이다", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
         client.assert(response.body.visibility === "PRIVATE", `actual=${response.body.visibility}`);
+    });
+    client.test("visibility만 보내도 다른 필드는 유지된다(부분 갱신)", () => {
+        client.assert(response.body.title === "새 제목", `title이 바뀜. actual=${response.body.title}`);
+        client.assert(response.body.startSettings.length === 1, "startSettings가 유실됨");
     });
 %}
 
