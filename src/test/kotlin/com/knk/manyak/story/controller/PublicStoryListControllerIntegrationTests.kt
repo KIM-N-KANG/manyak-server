@@ -24,6 +24,7 @@ import java.time.Instant
  * - 게스트 소유(user_id NULL)는 공개 범위를 고를 수 없어 기본값 PUBLIC으로 생긴 체험 스토리라 제외한다.
  * - latest는 createdAt 내림차순, popular는 좋아요 수 내림차순이고 동률은 publicId 내림차순으로 결정적이다.
  * - 커서는 keyset이라 페이지 사이에 중복·누락이 없고, 정렬이 다른 커서는 400이다.
+ * - 만료·위조 access 헤더가 자동 첨부돼도 401이 아니다(로그아웃 상태 화면이 부르는 경로).
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -83,6 +84,23 @@ class PublicStoryListControllerIntegrationTests {
             .jsonPath("$.items[0].id").isEqualTo(newer.publicId.toString())
             .jsonPath("$.items[1].id").isEqualTo(older.publicId.toString())
             .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `만료·위조 access 토큰이 붙어도 401이 아니라 목록이 나온다`() {
+        // 클라이언트가 모든 요청에 토큰을 자동 첨부하는 구성에서, 공개 피드가 stale 헤더로 막히면
+        // 로그아웃 상태 화면이 통째로 깨진다(OPTIONAL_AUTH_MATCHERS의 토큰 resolve 스킵이 이걸 막는다).
+        val author = saveUser()
+        val story = saveStory(author, "공개")
+
+        restTestClient.get()
+            .uri(PATH)
+            .header("Authorization", "Bearer not-a-real-token")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(story.publicId.toString())
     }
 
     @Test
