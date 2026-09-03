@@ -32,6 +32,15 @@ interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
     @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId AND t.token = :token")
     fun deleteByUserIdAndToken(@Param("userId") userId: Long, @Param("token") token: String): Int
 
+    /**
+     * 기기 상한 축출(DevicePushTokenService). `deleteAll(entities)`는 id만으로 지워, 후보를 뽑은 뒤 다른 회원이
+     * 그 행의 소유권을 가져가 커밋하면 남의 토큰을 지운다(Codex 4차 리뷰 P2). 삭제 시점에 소유자를 다시
+     * 평가하도록 조건을 DELETE 문 안에 둔다. 지운 행 수를 돌려준다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId AND t.id IN :ids")
+    fun deleteByUserIdAndIdIn(@Param("userId") userId: Long, @Param("ids") ids: Collection<Long>): Int
+
     /** 탈퇴 정리(UserWithdrawalService). 같은 이유로 조건부 DELETE다. 지운 행 수를 돌려준다. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId")

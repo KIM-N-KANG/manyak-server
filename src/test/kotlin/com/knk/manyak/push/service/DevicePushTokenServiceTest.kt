@@ -3,6 +3,7 @@ package com.knk.manyak.push.service
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -78,6 +79,23 @@ class DevicePushTokenServiceTest {
             .hasToString("403 FORBIDDEN")
 
         verify(devicePushTokenRepository, never()).deleteByUserIdAndToken(anyLong(), anyString())
+    }
+
+    @Test
+    fun `축출은 소유자 조건부 삭제를 부른다`() {
+        // id만으로 지우면 후보를 뽑은 뒤 다른 회원이 소유권을 가져간 행까지 지운다.
+        lockedUser(6L, UserStatus.ACTIVE)
+        `when`(devicePushTokenRepository.findByTokenForUpdate(TOKEN)).thenReturn(null)
+        val owned = (1L..DevicePushTokenService.MAX_DEVICES_PER_USER).map {
+            DevicePushToken(id = it, userId = 6L, token = "tok-$it", platform = PushPlatform.ANDROID)
+        }
+        `when`(devicePushTokenRepository.findAllByUserIdOrderByUpdatedAtAsc(6L)).thenReturn(owned)
+
+        service.register(6L, TOKEN, PushPlatform.ANDROID)
+
+        // 가장 오래된 하나만, 소유자 조건과 함께 지운다.
+        verify(devicePushTokenRepository).deleteByUserIdAndIdIn(6L, listOf(1L))
+        verify(devicePushTokenRepository, never()).deleteAll(org.mockito.ArgumentMatchers.anyList())
     }
 
     @Test

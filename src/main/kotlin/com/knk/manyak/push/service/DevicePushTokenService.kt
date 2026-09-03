@@ -43,11 +43,18 @@ class DevicePushTokenService(
             devicePushTokenRepository.save(DevicePushToken(userId = userId, token = token, platform = platform))
             return
         }
+        val ownerChanged = existing.userId != userId
         existing.userId = userId
         existing.platform = platform
         // 값이 그대로면 dirty checking이 UPDATE를 내지 않아 @PreUpdate도 돌지 않는다. "마지막 등록 시각"은
         // 재등록마다 갱신돼야 하므로(오래된 토큰 정리 근거) 직접 찍는다.
         existing.updatedAt = Instant.now()
+        // 소유자가 바뀌면 요청자에게는 기기가 하나 늘어난 것이라 삽입과 같은 규칙으로 축출한다(Codex 4차 리뷰 P2).
+        // 같은 소유자의 재등록은 개수가 그대로라 대상이 아니다. 축출은 위 UPDATE가 먼저 flush된 뒤에 돌아야
+        // 옮겨온 행이 요청자 소유로 집계된다.
+        if (ownerChanged) {
+            evictOldestOverCap(userId, keepId = existing.id)
+        }
     }
 
     /** 요청자 소유 토큰만 지운다. 없거나 남의 토큰이면 조용히 0건이다(멱등). */
@@ -58,14 +65,23 @@ class DevicePushTokenService(
     }
 
     /**
-     * 새 기기를 넣기 전에 상한을 맞춘다(Codex 3차 리뷰 P1). 회원당 토큰이 무한히 쌓이면 발송이 그 수만큼 동기
-     * FCM 호출을 낸다. 가장 오래 갱신되지 않은 것부터 지워 [MAX_DEVICES_PER_USER] - 1개로 줄인 뒤 삽입하므로,
-     * 상한을 넘겨 등록하면 가장 안 쓰던 기기가 빠진다. 재등록(기존 행 갱신)은 개수가 늘지 않아 대상이 아니다.
+     * 기기 하나가 늘어나기 전에 상한을 맞춘다(Codex 3차 리뷰 P1). 회원당 토큰이 무한히 쌓이면 발송이 그 수만큼
+     * 동기 FCM 호출을 낸다. 가장 오래 갱신되지 않은 것부터 지워 남은 자리를 [MAX_DEVICES_PER_USER] - 1개로
+     * 줄이므로, 상한을 넘겨 등록하면 가장 안 쓰던 기기가 빠진다. 같은 소유자의 재등록은 개수가 늘지 않아
+     * 호출하지 않는다.
+     *
+     * [keepId]는 이번 등록으로 요청자 것이 되는 행이다(소유권 이전). 가장 최근 갱신이라 정렬상 마지막이지만,
+     * 방금 등록한 기기를 스스로 지우지 않는다는 의도를 명시적으로 남긴다.
+     *
+     * 삭제는 소유자 조건을 DELETE 문 안에 둔 벌크 쿼리다 — id만으로 지우면 후보를 뽑은 뒤 다른 회원이
+     * 소유권을 가져간 행까지 지운다(Codex 4차 리뷰 P2).
      */
-    private fun evictOldestOverCap(userId: Long) {
-        val existing = devicePushTokenRepository.findAllByUserIdOrderByUpdatedAtAsc(userId)
-        if (existing.size < MAX_DEVICES_PER_USER) return
-        devicePushTokenRepository.deleteAll(existing.take(existing.size - MAX_DEVICES_PER_USER + 1))
+    private fun evictOldestOverCap(userId: Long, keepId: Long? = null) {
+        val candidates = devicePushTokenRepository.findAllByUserIdOrderByUpdatedAtAsc(userId)
+            .filter { it.id != keepId }
+        val excess = candidates.size - (MAX_DEVICES_PER_USER - 1)
+        if (excess <= 0) return
+        devicePushTokenRepository.deleteByUserIdAndIdIn(userId, candidates.take(excess).map { it.id })
     }
 
     /**

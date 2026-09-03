@@ -137,6 +137,27 @@ class DevicePushTokenControllerIntegrationTests {
     }
 
     @Test
+    fun `상한을 채운 회원이 남의 토큰을 가져와도 상한이 유지된다`() {
+        val giver = saveUser("양도자")
+        val taker = saveUser("수령자")
+        val cap = DevicePushTokenService.MAX_DEVICES_PER_USER
+        val moved = "dEv1cE_moved:APA91bMovedToken-0123456789_abcdefghijklmnopqrstuvwxyz"
+        register(giver, moved).expectStatus().isNoContent
+        val takerTokens = (1..cap).map { "dEv1cE_t$it:APA91bTakerToken$it-0123456789_abcdefghijklmnopqrstuvwxyz" }
+        takerTokens.forEach { register(taker, it).expectStatus().isNoContent }
+
+        // 한 기기에서 계정을 바꾼 상황. 수령자에게는 기기가 하나 늘어나므로 삽입과 같은 규칙으로 축출돼야 한다.
+        register(taker, moved).expectStatus().isNoContent
+
+        val rows = devicePushTokenRepository.findAll()
+        assertThat(rows).hasSize(cap)
+        assertThat(rows).allMatch { it.userId == taker.id }
+        assertThat(rows.map { it.token })
+            .contains(moved)
+            .doesNotContain(takerTokens.first())
+    }
+
+    @Test
     fun `빈 토큰은 400이다`() {
         register(saveUser(), "   ").expectStatus().isBadRequest
     }
