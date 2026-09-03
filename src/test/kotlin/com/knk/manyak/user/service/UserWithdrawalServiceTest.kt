@@ -5,6 +5,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -26,7 +27,8 @@ class UserWithdrawalServiceTest {
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
     private val refreshTokenStore: RefreshTokenStore = mock(RefreshTokenStore::class.java)
-    private val service = UserWithdrawalService(userRepository, socialAccountRepository, refreshTokenStore)
+    private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
+    private val service = UserWithdrawalService(userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository)
 
     @Test
     fun `탈퇴는 사용자 행을 잠그고 읽는다`() {

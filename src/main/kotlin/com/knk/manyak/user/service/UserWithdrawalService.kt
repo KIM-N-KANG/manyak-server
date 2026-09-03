@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -23,12 +24,15 @@ import java.time.Instant
  * - 탈퇴 직전 상태를 `withdrawn_from_status`에 남긴다(KNK-1053) — 재가입 계정의 정지 제재 승계 근거.
  * - 소유 스토리는 공개 상태를 유지한다(팀 결정). 작성자 표기는 익명화된 닉네임이 자연 반영된다.
  * - refresh는 전 family 폐기, 잔여 access 토큰은 해석 계층(CurrentUserIdArgumentResolver)이 전면 401로 무효화한다.
+ * - 디바이스 푸시 토큰은 하드 삭제한다(KNK-1131). 탈퇴한 회원의 기기로 알림이 가면 안 되고, 토큰은 재가입 매칭에
+ *   쓰이지 않아 남길 이유가 없다(재가입 기기는 앱이 새로 등록한다).
  */
 @Service
 class UserWithdrawalService(
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
     private val refreshTokenStore: RefreshTokenStore,
+    private val devicePushTokenRepository: DevicePushTokenRepository,
 ) {
 
     @Transactional
@@ -69,6 +73,7 @@ class UserWithdrawalService(
             social.deletedAt = now
             social.email = null
         }
+        devicePushTokenRepository.deleteByUserId(id)
         refreshTokenStore.revokeAllForUser(id)
     }
 
