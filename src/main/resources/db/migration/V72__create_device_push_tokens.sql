@@ -18,7 +18,8 @@ CREATE TABLE device_push_tokens (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_device_push_tokens_token UNIQUE (token),
-    CONSTRAINT ck_device_push_tokens_platform CHECK (platform IN ('ANDROID', 'IOS'))
+    -- iOS 앱이 생기면 이 CHECK와 발송 메시지의 ApnsConfig를 함께 넓힌다.
+    CONSTRAINT ck_device_push_tokens_platform CHECK (platform IN ('ANDROID'))
 );
 
 -- 발송이 회원의 기기 전부를 찾는 경로(user_id → tokens). 탈퇴 정리도 같은 경로를 쓴다.

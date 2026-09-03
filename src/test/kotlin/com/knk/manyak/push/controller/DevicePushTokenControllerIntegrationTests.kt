@@ -128,6 +128,11 @@ class DevicePushTokenControllerIntegrationTests {
     }
 
     @Test
+    fun `아직 지원하지 않는 IOS도 400이다`() {
+        register(saveUser(), TOKEN_A, platform = "IOS").expectStatus().isBadRequest
+    }
+
+    @Test
     fun `삭제하면 204이고 행이 사라지며 다시 삭제해도 204다`() {
         val user = saveUser()
         register(user, TOKEN_A).expectStatus().isNoContent

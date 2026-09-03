@@ -15,7 +15,7 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| ck_device_push_tokens_platform | CHECK | CHECK (((platform)::text = ANY ((ARRAY['ANDROID'::character varying, 'IOS'::character varying])::text[]))) |
+| ck_device_push_tokens_platform | CHECK | CHECK (((platform)::text = 'ANDROID'::text)) |
 | device_push_tokens_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | device_push_tokens_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_device_push_tokens_token | UNIQUE | UNIQUE (token) |
