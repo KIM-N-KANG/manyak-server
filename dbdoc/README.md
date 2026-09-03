@@ -41,6 +41,7 @@
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
 | [public.story_public_snapshots](public.story_public_snapshots.md) | 4 | KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다. | BASE TABLE |
+| [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -91,6 +92,7 @@ erDiagram
 "public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -465,6 +467,14 @@ erDiagram
 "public.story_public_snapshots" {
   bigint story_id FK
   jsonb snapshot
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.device_push_tokens" {
+  bigint id
+  bigint user_id FK
+  varchar_512_ token
+  varchar_16_ platform
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }

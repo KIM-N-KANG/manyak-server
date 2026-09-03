@@ -1,0 +1,133 @@
+### 디바이스 푸시 토큰 API 수동 검증 — 등록(PUT) / 삭제(DELETE)
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### [KNK-1131] 디바이스 푸시 토큰 등록·삭제:
+###   - PUT    /api/v1/users/me/push-tokens          {token, platform} → 204. 같은 토큰 재등록은 갱신(멱등).
+###   - DELETE /api/v1/users/me/push-tokens/{token}                     → 204. 없거나 남의 토큰이면 아무 일 없이 204(멱등).
+###   - 인증 필수(/users/me/** 는 anyRequest().authenticated()) → 토큰 없으면 401. 게스트는 대상이 아니다.
+###   - 다른 회원이 같은 토큰을 등록하면 소유자가 옮겨간다(한 기기에서 계정 전환). 계정이 둘 필요해 여기서는 안 다루고
+###     통합 테스트(DevicePushTokenControllerIntegrationTests)로 고정한다. 탈퇴 시 전부 삭제도 같은 테스트에 있다.
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
+###   - Postgres 기동: docker compose up -d
+###   - access 토큰: auth/auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져 아래 {{accessToken}} 에 재사용됩니다.
+###     같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+###   - 응답 본문이 없는(204) API라 어서션은 상태 코드만 봅니다. 행 상태는 아래 SQL로 확인합니다.
+###       SELECT user_id, left(token, 24) AS token, platform, updated_at FROM device_push_tokens ORDER BY updated_at DESC;
+###
+### 실행 순서: 0 → 1 → 2 → 3(재등록 후 updated_at 갱신 확인) → 4 → 5 → 6 → 7 → 8. 9는 자유 요청.
+
+@baseUrl = http://localhost:8080
+
+# auth/auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+# FCM 토큰 모양을 흉내 낸 값. 실제 기기 토큰이 있으면 바꿔 넣어도 됩니다(콜론·하이픈·언더스코어는 경로 변수로 그대로 전달됩니다).
+@pushToken = dEv1cE_manual:APA91bManualToken-0123456789_abcdefghijklmnopqrstuvwxyz
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 1. (에러) 토큰 없이 등록 → 401
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Content-Type: application/json
+
+{ "token": "{{pushToken}}", "platform": "ANDROID" }
+
+> {%
+    client.test("토큰 없는 등록은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (해피 패스) 등록 → 204
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "{{pushToken}}", "platform": "ANDROID" }
+
+> {%
+    client.test("등록은 204이다", () => {
+        client.assert(response.status === 204, `204가 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+%}
+
+### 3. (멱등) 같은 토큰 재등록 → 204, 행은 그대로 1개·updated_at만 갱신
+# 헤더 주석의 SQL로 행 수가 늘지 않았는지 확인하세요.
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "{{pushToken}}", "platform": "ANDROID" }
+
+> {%
+    client.test("재등록도 204이다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 4. (에러) 빈 token → 400
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "   ", "platform": "ANDROID" }
+
+> {%
+    client.test("빈 token 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (에러) 미지원 platform → 400
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "{{pushToken}}", "platform": "WINDOWS_PHONE" }
+
+> {%
+    client.test("미지원 platform 은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6. (에러) 토큰 없이 삭제 → 401
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens/{{pushToken}}
+
+> {%
+    client.test("토큰 없는 삭제는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 7. (해피 패스) 삭제 → 204
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens/{{pushToken}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("삭제는 204이다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (멱등) 이미 지운 토큰 다시 삭제 → 204
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens/{{pushToken}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("없는 토큰 삭제도 204이다", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. (자유 요청) 두 번째 기기 등록 — 한 회원이 기기 여러 대를 가질 수 있는지 눈으로 확인
+# 2번 뒤에 실행하면 행이 2개가 됩니다. 어서션 없음.
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "dEv1cE_second:APA91bSecondDevice-0123456789_abcdefghijklmnopqrstuvwxyz", "platform": "ANDROID" }
