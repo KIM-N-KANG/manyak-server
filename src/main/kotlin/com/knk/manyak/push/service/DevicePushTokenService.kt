@@ -2,6 +2,7 @@ package com.knk.manyak.push.service
 
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -13,6 +14,7 @@ import java.time.Instant
 @Service
 class DevicePushTokenService(
     private val devicePushTokenRepository: DevicePushTokenRepository,
+    private val suspensionGuard: SuspensionGuard,
 ) {
 
     /**
@@ -25,6 +27,8 @@ class DevicePushTokenService(
      */
     @Transactional
     fun register(userId: Long, token: String, platform: PushPlatform) {
+        // 정지·탈퇴 계정의 쓰기 차단(스펙 §4-5 B20). 정지 회원의 기기가 알림을 계속 받게 두면 안 된다.
+        suspensionGuard.requireActive(userId)
         val existing = devicePushTokenRepository.findByToken(token)
         if (existing == null) {
             devicePushTokenRepository.save(DevicePushToken(userId = userId, token = token, platform = platform))
@@ -40,6 +44,7 @@ class DevicePushTokenService(
     /** 요청자 소유 토큰만 지운다. 없거나 남의 토큰이면 조용히 0건이다(멱등). */
     @Transactional
     fun unregister(userId: Long, token: String) {
+        suspensionGuard.requireActive(userId)
         devicePushTokenRepository.deleteByUserIdAndToken(userId, token)
     }
 }

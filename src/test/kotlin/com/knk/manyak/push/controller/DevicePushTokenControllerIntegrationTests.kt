@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - 인증 필수: 토큰 없음 → 401. 게스트는 대상이 아니다(회원 기기만 등록).
  * - 같은 토큰 재등록은 갱신(멱등)이라 중복 행이 생기지 않고, 다른 회원이 등록하면 소유자가 옮겨간다.
  * - 삭제는 소유자만 지우며 멱등(없어도 204)이다. 탈퇴는 그 회원의 토큰을 전부 지운다.
+ * - 정지(SUSPENDED) 계정은 등록·삭제 모두 403이다(스펙 §4-5 B20, Codex P2).
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -144,6 +145,27 @@ class DevicePushTokenControllerIntegrationTests {
         register(owner, TOKEN_A).expectStatus().isNoContent
 
         unregister(other, TOKEN_A).expectStatus().isNoContent
+
+        assertThat(devicePushTokenRepository.findAll()).hasSize(1)
+    }
+
+    @Test
+    fun `정지된 계정은 등록하지 못한다`() {
+        val suspended = userRepository.save(User(nickname = "정지회원", status = UserStatus.SUSPENDED))
+
+        register(suspended, TOKEN_A).expectStatus().isForbidden
+
+        assertThat(devicePushTokenRepository.findAll()).isEmpty()
+    }
+
+    @Test
+    fun `정지된 계정은 삭제하지 못한다`() {
+        val user = saveUser()
+        register(user, TOKEN_A).expectStatus().isNoContent
+        user.status = UserStatus.SUSPENDED
+        userRepository.save(user)
+
+        unregister(user, TOKEN_A).expectStatus().isForbidden
 
         assertThat(devicePushTokenRepository.findAll()).hasSize(1)
     }
