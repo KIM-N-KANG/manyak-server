@@ -1,13 +1,26 @@
 package com.knk.manyak.push.repository
 
 import com.knk.manyak.push.entity.DevicePushToken
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
-    fun findByToken(token: String): DevicePushToken?
+    /**
+     * 등록(upsert)이 잡을 토큰 행. **삭제 중인 행을 읽지 않도록 토큰 행도 잠근다**(Codex 3차 리뷰 P2) —
+     * 잠금 없이 읽으면 다른 회원의 커밋 전 `unregister`가 지운 행을 그대로 읽고, 그 DELETE가 커밋된 뒤
+     * dirty checking UPDATE가 0건이 되어 stale-state 500으로 토큰이 사라진다.
+     * 잠금 순서는 users(요청자 행) → device_push_tokens 한 방향 그대로다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM DevicePushToken t WHERE t.token = :token")
+    fun findByTokenForUpdate(@Param("token") token: String): DevicePushToken?
+
+    /** 회원당 기기 상한(DevicePushTokenService.MAX_DEVICES_PER_USER) 집행용. 가장 안 쓴 기기가 앞에 온다. */
+    fun findAllByUserIdOrderByUpdatedAtAsc(userId: Long): List<DevicePushToken>
 
     /**
      * 소유자 조건을 함께 건 **단일 조건부 DELETE**다. 파생 삭제(`deleteByUserIdAndToken`)는 조회 후 id로 지워,

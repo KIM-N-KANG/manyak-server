@@ -35,7 +35,8 @@ class DevicePushTokenServiceTest {
     @Test
     fun `등록은 사용자 행을 잠그고 읽는다`() {
         lockedUser(1L, UserStatus.ACTIVE)
-        `when`(devicePushTokenRepository.findByToken(TOKEN)).thenReturn(null)
+        `when`(devicePushTokenRepository.findByTokenForUpdate(TOKEN)).thenReturn(null)
+        `when`(devicePushTokenRepository.findAllByUserIdOrderByUpdatedAtAsc(1L)).thenReturn(emptyList())
 
         service.register(1L, TOKEN, PushPlatform.ANDROID)
 

@@ -36,8 +36,10 @@ class DevicePushTokenService(
     @Transactional
     fun register(userId: Long, token: String, platform: PushPlatform) {
         requireActiveUser(userId)
-        val existing = devicePushTokenRepository.findByToken(token)
+        // 토큰 행도 잠그고 읽는다 — 커밋 전 unregister가 지운 행을 읽으면 UPDATE가 0건이 되어 500이 난다.
+        val existing = devicePushTokenRepository.findByTokenForUpdate(token)
         if (existing == null) {
+            evictOldestOverCap(userId)
             devicePushTokenRepository.save(DevicePushToken(userId = userId, token = token, platform = platform))
             return
         }
@@ -56,6 +58,17 @@ class DevicePushTokenService(
     }
 
     /**
+     * 새 기기를 넣기 전에 상한을 맞춘다(Codex 3차 리뷰 P1). 회원당 토큰이 무한히 쌓이면 발송이 그 수만큼 동기
+     * FCM 호출을 낸다. 가장 오래 갱신되지 않은 것부터 지워 [MAX_DEVICES_PER_USER] - 1개로 줄인 뒤 삽입하므로,
+     * 상한을 넘겨 등록하면 가장 안 쓰던 기기가 빠진다. 재등록(기존 행 갱신)은 개수가 늘지 않아 대상이 아니다.
+     */
+    private fun evictOldestOverCap(userId: Long) {
+        val existing = devicePushTokenRepository.findAllByUserIdOrderByUpdatedAtAsc(userId)
+        if (existing.size < MAX_DEVICES_PER_USER) return
+        devicePushTokenRepository.deleteAll(existing.take(existing.size - MAX_DEVICES_PER_USER + 1))
+    }
+
+    /**
      * 사용자 행을 비관적 쓰기 락으로 잡고 상태를 재검사한다(스펙 §4-5 B20, KNK-499·1019 선례).
      * 정지 회원의 기기가 알림을 계속 받아서도, 탈퇴와의 경합이 DELETED 회원에게 토큰을 남겨서도 안 된다.
      */
@@ -63,5 +76,14 @@ class DevicePushTokenService(
         val user = userRepository.findByIdForUpdate(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         requireActiveStatus(user.status)
+    }
+
+    companion object {
+        /**
+         * 회원당 등록 기기 상한. 발송 경로도 같은 수만큼만 읽으므로
+         * (`DevicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc`, KNK-1130) **리포지토리 메서드명과
+         * 함께 바꿔야 한다** — 파생 메서드명에는 상수를 쓸 수 없다.
+         */
+        const val MAX_DEVICES_PER_USER = 10
     }
 }

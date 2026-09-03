@@ -6,6 +6,7 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
+import com.knk.manyak.push.service.DevicePushTokenService
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.user.service.UserWithdrawalService
 import org.assertj.core.api.Assertions.assertThat
@@ -23,6 +24,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 디바이스 푸시 토큰 등록·삭제 통합 검증(KNK-1131).
  * - 인증 필수: 토큰 없음 → 401. 게스트는 대상이 아니다(회원 기기만 등록).
  * - 같은 토큰 재등록은 갱신(멱등)이라 중복 행이 생기지 않고, 다른 회원이 등록하면 소유자가 옮겨간다.
+ * - 회원당 기기는 상한(MAX_DEVICES_PER_USER)까지만 남고, 넘기면 가장 오래 갱신되지 않은 기기가 빠진다.
  * - 삭제는 토큰을 **본문**으로 받고, 소유자만 지우며 멱등(없어도 204)이다. 탈퇴는 그 회원의 토큰을 전부 지운다.
  * - 정지(SUSPENDED) 계정은 등록·삭제 모두 403이다(스펙 §4-5 B20, Codex P2).
  */
@@ -119,6 +121,19 @@ class DevicePushTokenControllerIntegrationTests {
         register(user, TOKEN_B).expectStatus().isNoContent
 
         assertThat(devicePushTokenRepository.findAll()).hasSize(2)
+    }
+
+    @Test
+    fun `상한을 넘겨 등록하면 가장 안 쓰던 기기가 빠진다`() {
+        val user = saveUser()
+        val cap = DevicePushTokenService.MAX_DEVICES_PER_USER
+        val tokens = (1..cap + 1).map { "dEv1cE_$it:APA91bCapToken$it-0123456789_abcdefghijklmnopqrstuvwxyz" }
+
+        tokens.forEach { register(user, it).expectStatus().isNoContent }
+
+        val rows = devicePushTokenRepository.findAll()
+        assertThat(rows).hasSize(cap)
+        assertThat(rows.map { it.token }).doesNotContain(tokens.first()).contains(tokens.last())
     }
 
     @Test
