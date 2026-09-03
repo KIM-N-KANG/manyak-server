@@ -22,8 +22,13 @@ interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
     /** 회원당 기기 상한(DevicePushTokenService.MAX_DEVICES_PER_USER) 집행용. 가장 안 쓴 기기가 앞에 온다. */
     fun findAllByUserIdOrderByUpdatedAtAsc(userId: Long): List<DevicePushToken>
 
-    /** 발송 경로(FcmPushSender): 회원의 등록 기기 전부. */
-    fun findAllByUserId(userId: Long): List<DevicePushToken>
+    /**
+     * 발송 경로(FcmPushSender): 회원의 최근 등록 기기. **Top10의 10은
+     * [com.knk.manyak.push.service.DevicePushTokenService.MAX_DEVICES_PER_USER]와 같은 값이어야 한다** —
+     * 파생 메서드명에는 상수를 쓸 수 없으니 그 상수를 바꿀 때 이 이름도 함께 바꾼다. 등록 상한이 어떤 이유로
+     * 깨져도 발송이 동기 FCM 호출을 무한정 내지 않게 막는 두 번째 방어선이다(Codex 3차 리뷰 P1).
+     */
+    fun findTop10ByUserIdOrderByUpdatedAtDesc(userId: Long): List<DevicePushToken>
 
     /**
      * 소유자 조건을 함께 건 **단일 조건부 DELETE**다. 파생 삭제(`deleteByUserIdAndToken`)는 조회 후 id로 지워,
