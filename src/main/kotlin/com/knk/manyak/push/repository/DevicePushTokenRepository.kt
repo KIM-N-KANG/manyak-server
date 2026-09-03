@@ -22,6 +22,9 @@ interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
     /** 회원당 기기 상한(DevicePushTokenService.MAX_DEVICES_PER_USER) 집행용. 가장 안 쓴 기기가 앞에 온다. */
     fun findAllByUserIdOrderByUpdatedAtAsc(userId: Long): List<DevicePushToken>
 
+    /** 발송 경로(FcmPushSender): 회원의 등록 기기 전부. */
+    fun findAllByUserId(userId: Long): List<DevicePushToken>
+
     /**
      * 소유자 조건을 함께 건 **단일 조건부 DELETE**다. 파생 삭제(`deleteByUserIdAndToken`)는 조회 후 id로 지워,
      * 조회와 삭제 사이에 소유자가 바뀐 행(한 기기에서 계정 전환)까지 지운다 — 남의 토큰을 지우는 경로가 되면
