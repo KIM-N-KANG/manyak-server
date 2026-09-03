@@ -27,7 +27,9 @@ enum class StoryListSort(val parameter: String, val prefix: String) {
  * 2차 키가 내부 PK가 아니라 `public_id`인 이유는 외부 노출 식별자 규칙 때문이다(순차 PK를 API에 실으면 IDOR).
  * UUID는 랜덤이지만 안정적이라 동률 구간의 순서를 결정적으로 만든다.
  *
- * 1차 키 값([sortValue])은 정렬별로 뜻이 다르다 — 최신순은 `createdAt`의 epoch millis, 인기순은 좋아요 수.
+ * 1차 키 값([sortValue])은 정렬별로 뜻이 다르다 — 최신순은 `createdAt`의 **epoch nanos**, 인기순은 좋아요 수.
+ * millis가 아니라 nanos인 이유는 PostgreSQL `timestamptz`가 마이크로초까지 담기 때문이다. 밀리초로 자르면
+ * 같은 밀리초 안의 뒤쪽 행이 `createdAt < 커서`에도 `= 커서`에도 걸리지 않아 페이지 경계에서 통째로 사라진다.
  * offset이 아니라 keyset이라 페이지 사이에 행이 끼어들어도 중복·누락이 없다.
  */
 data class StoryListCursor(
