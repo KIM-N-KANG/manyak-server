@@ -5,6 +5,8 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingException
 import com.google.firebase.messaging.Message
 import com.google.firebase.messaging.MessagingErrorCode
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import io.micrometer.core.instrument.Counter
@@ -19,6 +21,8 @@ import org.springframework.stereotype.Component
  *   딥링크·문구를 앱이 제어할 수 없다. 알림 UI는 앱이 조립한다(KNK-1134).
  * - 우선순위 HIGH: data 전용 메시지는 기본(normal)이면 Doze에서 미뤄져 "완료됐다"는 알림이 늦게 뜬다.
  * - 커밋 뒤에 불러야 한다. 외부 IO라 도메인 트랜잭션 안에서 부르면 롤백돼도 푸시는 이미 나간다.
+ * - 정지·탈퇴 계정에는 보내지 않는다. 등록 시점에는 ACTIVE였어도 그 뒤 상태가 바뀌면 남아 있던 토큰으로
+ *   알림이 계속 나간다(스펙 §4-5 B20).
  * - 실패는 전부 삼키고 로그·메트릭만 남긴다. 푸시는 부가 기능이고, 진실의 원천은 복귀 조회(KNK-631)다.
  * - [messaging]이 null이면(서비스 계정 미설정, [com.knk.manyak.push.config.FcmConfig]) no-op이다.
  *
@@ -31,6 +35,7 @@ class FcmPushSender(
     // Kotlin nullable 생성자 인자 = 선택 주입. FcmConfig가 null을 돌려주면 여기도 null이다.
     private val messaging: FirebaseMessaging?,
     private val devicePushTokenRepository: DevicePushTokenRepository,
+    private val userRepository: UserRepository,
     private val meterRegistry: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -42,7 +47,14 @@ class FcmPushSender(
             log.debug("FCM 발송기가 비활성이라 푸시를 건너뜁니다. (userId={})", userId)
             return
         }
-        devicePushTokenRepository.findAllByUserId(userId).forEach { deviceToken ->
+        // 정지·탈퇴 회원의 남은 토큰으로는 보내지 않는다(Codex 3차 리뷰 P2). isActiveAccessAllowed는 DELETED를
+        // 통과시키므로 여기서는 쓰지 않는다 — 탈퇴 정리와 발송이 엇갈리는 창에서도 막아야 한다.
+        val status = userRepository.findById(userId).orElse(null)?.status
+        if (status != UserStatus.ACTIVE) {
+            log.debug("활성 회원이 아니라 푸시를 건너뜁니다. (userId={}, status={})", userId, status)
+            return
+        }
+        devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId).forEach { deviceToken ->
             sendTo(messaging, deviceToken, data)
         }
     }
@@ -61,9 +73,19 @@ class FcmPushSender(
             // 그걸 삭제 신호로 쓰면 서버 버그 하나가 회원 전체의 토큰을 지운다. 형식이 깨진 토큰은 앱이 FCM SDK에서
             // 받은 값을 그대로 올리는 경로라 실제로 드물고, 남더라도 발송 실패 메트릭으로 드러난다.
             if (ex.messagingErrorCode == MessagingErrorCode.UNREGISTERED) {
-                devicePushTokenRepository.deleteById(deviceToken.id)
-                count(OUTCOME_UNREGISTERED)
-                log.info("무효 FCM 토큰을 정리했습니다. (userId={}, token={})", deviceToken.userId, mask(deviceToken.token))
+                // 정리 실패를 따로 가둔다. DataAccessException은 형제 catch(RuntimeException)에 잡히지 않고
+                // sendToUser 밖으로 새어나가 뒤 기기 발송을 통째로 끊는다(Codex 3차 리뷰 P2).
+                try {
+                    devicePushTokenRepository.deleteById(deviceToken.id)
+                    count(OUTCOME_UNREGISTERED)
+                    log.info("무효 FCM 토큰을 정리했습니다. (userId={}, token={})", deviceToken.userId, mask(deviceToken.token))
+                } catch (cleanupEx: RuntimeException) {
+                    count(OUTCOME_FAILURE)
+                    log.warn(
+                        "무효 FCM 토큰 정리에 실패했습니다. (userId={}, token={}, error={})",
+                        deviceToken.userId, mask(deviceToken.token), cleanupEx.javaClass.simpleName,
+                    )
+                }
             } else {
                 count(OUTCOME_FAILURE)
                 log.warn(
