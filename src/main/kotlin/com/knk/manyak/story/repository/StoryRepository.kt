@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.time.Instant
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
@@ -44,6 +45,80 @@ interface StoryRepository : JpaRepository<Story, Long> {
         userId: Long,
         status: StoryStatus,
         visibility: StoryVisibility,
+    ): List<Story>
+
+    /**
+     * 공개 스토리 목록(KNK-149) 최신순 첫 페이지. 노출 조건은 네 가지를 모두 만족해야 한다 —
+     * 발행·공개·미삭제·**회원 소유**. 게스트 스토리(user_id NULL)는 제작자가 공개 범위를 고를 수 없어
+     * 기본값 PUBLIC으로 쌓인 체험물이라 피드에서 뺀다(스펙 §4-5가 Phase 2 피드로 미뤄둔 결정).
+     *
+     * 2차 정렬 키는 내부 PK가 아니라 `public_id`다(순차 PK를 커서에 실으면 IDOR).
+     */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+        ORDER BY s.createdAt DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicLatest(pageable: Pageable): List<Story>
+
+    /** 최신순 다음 페이지. keyset 조건이라 페이지 사이에 행이 끼어들어도 중복·누락이 없다. */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+          AND (s.createdAt < :createdAt OR (s.createdAt = :createdAt AND s.publicId < :publicId))
+        ORDER BY s.createdAt DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicLatestAfter(
+        @Param("createdAt") createdAt: Instant,
+        @Param("publicId") publicId: UUID,
+        pageable: Pageable,
+    ): List<Story>
+
+    /**
+     * 공개 스토리 목록 인기순 첫 페이지. `likeCount`는 컬럼이 아니라 `story_likes` 집계라 상관 서브쿼리로 센다.
+     * JPQL은 SELECT 별칭을 WHERE·ORDER BY에서 쓸 수 없어 같은 서브쿼리를 반복한다. 비정규화 컬럼은 두지
+     * 않는다 — 마이그레이션과 좋아요 등록·취소 양쪽의 동기화 비용이 목록 하나보다 크다.
+     */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicPopular(pageable: Pageable): List<Story>
+
+    /** 인기순 다음 페이지. 1차 키가 좋아요 수라 동률 구간은 `public_id`로 갈라 결정적으로 이어진다. */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+          AND ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) < :likeCount
+               OR ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) = :likeCount
+                   AND s.publicId < :publicId))
+        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicPopularAfter(
+        @Param("likeCount") likeCount: Long,
+        @Param("publicId") publicId: UUID,
+        pageable: Pageable,
     ): List<Story>
 
     /**
