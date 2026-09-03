@@ -1,20 +1,28 @@
 package com.knk.manyak.push.service
 
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushPlatform
-import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.push.repository.DevicePushTokenRepository
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 /**
  * 디바이스 푸시 토큰 등록·삭제(KNK-1131). 발송은 여기 없다(KNK-1130).
+ *
+ * 두 경로 모두 사용자 행을 **잠그고** 상태를 재검사한다(Codex 2차 리뷰 P1). 잠금 없이 읽으면 탈퇴가 사용자 행을
+ * 잠그고 토큰을 지운 뒤 커밋해도, 대기하던 등록이 DELETED 회원에게 새 토큰을 남긴다 — 탈퇴한 회원의 기기로
+ * 알림이 간다. 잠금 순서는 users → device_push_tokens 한 방향이라 탈퇴(users → social_accounts·
+ * device_push_tokens)와 교차 대기 고리가 생기지 않는다.
  */
 @Service
 class DevicePushTokenService(
     private val devicePushTokenRepository: DevicePushTokenRepository,
-    private val suspensionGuard: SuspensionGuard,
+    private val userRepository: UserRepository,
 ) {
 
     /**
@@ -27,8 +35,7 @@ class DevicePushTokenService(
      */
     @Transactional
     fun register(userId: Long, token: String, platform: PushPlatform) {
-        // 정지·탈퇴 계정의 쓰기 차단(스펙 §4-5 B20). 정지 회원의 기기가 알림을 계속 받게 두면 안 된다.
-        suspensionGuard.requireActive(userId)
+        requireActiveUser(userId)
         val existing = devicePushTokenRepository.findByToken(token)
         if (existing == null) {
             devicePushTokenRepository.save(DevicePushToken(userId = userId, token = token, platform = platform))
@@ -44,7 +51,17 @@ class DevicePushTokenService(
     /** 요청자 소유 토큰만 지운다. 없거나 남의 토큰이면 조용히 0건이다(멱등). */
     @Transactional
     fun unregister(userId: Long, token: String) {
-        suspensionGuard.requireActive(userId)
+        requireActiveUser(userId)
         devicePushTokenRepository.deleteByUserIdAndToken(userId, token)
+    }
+
+    /**
+     * 사용자 행을 비관적 쓰기 락으로 잡고 상태를 재검사한다(스펙 §4-5 B20, KNK-499·1019 선례).
+     * 정지 회원의 기기가 알림을 계속 받아서도, 탈퇴와의 경합이 DELETED 회원에게 토큰을 남겨서도 안 된다.
+     */
+    private fun requireActiveUser(userId: Long) {
+        val user = userRepository.findByIdForUpdate(userId)
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        requireActiveStatus(user.status)
     }
 }

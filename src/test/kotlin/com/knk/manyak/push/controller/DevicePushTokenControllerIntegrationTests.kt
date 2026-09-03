@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -22,7 +23,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 디바이스 푸시 토큰 등록·삭제 통합 검증(KNK-1131).
  * - 인증 필수: 토큰 없음 → 401. 게스트는 대상이 아니다(회원 기기만 등록).
  * - 같은 토큰 재등록은 갱신(멱등)이라 중복 행이 생기지 않고, 다른 회원이 등록하면 소유자가 옮겨간다.
- * - 삭제는 소유자만 지우며 멱등(없어도 204)이다. 탈퇴는 그 회원의 토큰을 전부 지운다.
+ * - 삭제는 토큰을 **본문**으로 받고, 소유자만 지우며 멱등(없어도 204)이다. 탈퇴는 그 회원의 토큰을 전부 지운다.
  * - 정지(SUSPENDED) 계정은 등록·삭제 모두 403이다(스펙 §4-5 B20, Codex P2).
  */
 @ActiveProfiles("test")
@@ -55,10 +56,13 @@ class DevicePushTokenControllerIntegrationTests {
             .body("""{"token":"$token","platform":"$platform"}""")
             .exchange()
 
+    // 삭제는 토큰을 본문으로 받는다(경로에 실으면 원문이 요청 로그에 남는다). delete()는 본문을 못 실어 method()로 보낸다.
     private fun unregister(user: User, token: String) =
-        restTestClient.delete()
-            .uri("$PATH/{token}", token)
+        restTestClient.method(HttpMethod.DELETE)
+            .uri(PATH)
             .header("Authorization", bearer(user))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"token":"$token"}""")
             .exchange()
 
     @Test
@@ -177,7 +181,17 @@ class DevicePushTokenControllerIntegrationTests {
 
     @Test
     fun `토큰 없이 삭제하면 401이다`() {
-        restTestClient.delete().uri("$PATH/{token}", TOKEN_A).exchange().expectStatus().isUnauthorized
+        restTestClient.method(HttpMethod.DELETE)
+            .uri(PATH)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"token":"$TOKEN_A"}""")
+            .exchange()
+            .expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `삭제 본문의 token이 비면 400이다`() {
+        unregister(saveUser(), "   ").expectStatus().isBadRequest
     }
 
     @Test
@@ -197,7 +211,7 @@ class DevicePushTokenControllerIntegrationTests {
 
     companion object {
         private const val PATH = "/api/v1/users/me/push-tokens"
-        // FCM 토큰 형태를 흉내 낸다(콜론·하이픈·언더스코어 포함, 경로 변수로 전달 가능해야 한다).
+        // FCM 토큰 형태를 흉내 낸다(콜론·하이픈·언더스코어 포함).
         private const val TOKEN_A = "dEv1cE_a:APA91bFakeTokenA-0123456789_abcdefghijklmnopqrstuvwxyz"
         private const val TOKEN_B = "dEv1cE_b:APA91bFakeTokenB-0123456789_abcdefghijklmnopqrstuvwxyz"
         private const val TOKEN_C = "dEv1cE_c:APA91bFakeTokenC-0123456789_abcdefghijklmnopqrstuvwxyz"
