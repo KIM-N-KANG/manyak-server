@@ -45,6 +45,15 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     // 컴파일이 생성한 인물 이미지를 S3에 올린다(KNK-966). 스프링 BOM이 관리하지 않아 버전을 명시한다.
     implementation("software.amazon.awssdk:s3:2.46.7")
+    // FCM 푸시 발송(KNK-1130). HTTP v1 인증(서비스 계정 OAuth 토큰 발급·갱신)을 SDK에 맡긴다.
+    implementation("com.google.firebase:firebase-admin:9.10.0") {
+        // FCM만 쓴다. Firestore·Storage 클라이언트는 gRPC·netty·gax를 통째로 끌고 와 jar를 수십 MB 불리므로 뺀다.
+        // FirebaseApp 초기화는 이 둘을 참조하지 않는다(FcmConfigTest가 초기화 경로를 고정한다).
+        exclude(group = "com.google.cloud", module = "google-cloud-firestore")
+        exclude(group = "com.google.cloud", module = "google-cloud-storage")
+    }
+    // firebase-admin 초기화가 JacksonFactory를 참조하는데, 그 아티팩트는 위에서 뺀 Storage를 통해서만 들어왔다. 직접 든다.
+    implementation("com.google.http-client:google-http-client-jackson2:2.1.0")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
     testRuntimeOnly("com.h2database:h2")
