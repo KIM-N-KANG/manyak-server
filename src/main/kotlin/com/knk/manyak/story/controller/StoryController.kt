@@ -6,9 +6,11 @@ import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.GeneralStoryCreationService
+import com.knk.manyak.story.service.StoryListSort
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -139,6 +141,42 @@ class StoryController(
     )
     @GetMapping("/originals")
     fun getOriginalStories(): List<StorySummaryResponse> = storyService.getOriginalStories()
+
+    @Operation(
+        summary = "공개 스토리 목록 조회",
+        description = "발행·공개 상태의 회원 스토리 카드를 커서 페이지네이션으로 반환합니다(KNK-149). 인증은 필요 " +
+            "없고 요청자 신원도 쓰지 않습니다. 정렬은 latest(기본, 등록 최신순)와 popular(좋아요 많은 순)이며, " +
+            "다음 페이지는 응답의 nextCursor를 **같은 sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·초안과 " +
+            "게스트 제작 스토리(소유자 없음)는 제외합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공",
+                content = [Content(schema = Schema(implementation = StoryPageResponse::class))],
+            ),
+            ApiResponse(
+                responseCode = "400",
+                description = "알 수 없는 sort, 숫자가 아닌 limit, 형식이 깨졌거나 정렬이 다른 cursor",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @GetMapping
+    fun getPublicStories(
+        @Parameter(description = "정렬. latest(기본) 또는 popular", example = "latest")
+        @RequestParam(defaultValue = "latest") sort: String,
+        @Parameter(description = "한 페이지 개수(기본 20, 1~50으로 보정)")
+        @RequestParam(defaultValue = "$DEFAULT_LIMIT") limit: Int,
+        @Parameter(description = "이전 응답의 nextCursor. 첫 페이지는 생략합니다.")
+        @RequestParam(required = false) cursor: String?,
+    ): StoryPageResponse =
+        storyService.getPublicStories(
+            sort = StoryListSort.from(sort),
+            limit = limit.coerceIn(MIN_LIMIT, MAX_LIMIT),
+            rawCursor = cursor,
+        )
 
     @Operation(
         summary = "스토리 상세 조회",
@@ -286,4 +324,10 @@ class StoryController(
     // 좋아요 경로는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
     private fun requireUser(userId: Long?): Long =
         userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+
+    private companion object {
+        const val DEFAULT_LIMIT = 20
+        const val MIN_LIMIT = 1
+        const val MAX_LIMIT = 50
+    }
 }

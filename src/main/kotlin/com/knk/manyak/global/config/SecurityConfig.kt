@@ -80,6 +80,9 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks")).permitAll()
                     // 오리지널 스토리 목록도 인증 없는 공개 목록이다(KNK-975). {storyId} 매처에 기대지 않고 명시적으로 허용한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/originals")).permitAll()
+                    // 공개 스토리 목록(KNK-149)도 인증 없는 공개 목록이다. 요청자 신원을 쓰지 않으며,
+                    // 정확 경로라 하위 {storyId} 매처와 겹치지 않는다.
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories")).permitAll()
                     // 스토리 ID도 추측 불가능한 공개 식별자(UUID)다(KNK-256). 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
@@ -198,6 +201,11 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/{turnId:\\d+}/choices"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks"),
+            // 공개 스토리 목록(KNK-149)도 요청자 신원을 쓰지 않지만(무인증), 클라이언트가 자동 첨부한
+            // 만료·위조 access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 여기 함께 둬 토큰 resolve를
+            // 건너뛴다. 로그아웃 상태 화면이 부르는 경로라 stale 헤더 하나로 피드가 통째로 깨지면 안 된다.
+            // 정확 경로라 아래 {storyId} 매처와 겹치지 않는다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general"),

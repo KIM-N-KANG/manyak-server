@@ -30,6 +30,19 @@ data class BatchStoryRequest(
     val storyIds: List<String>,
 )
 
+@Schema(description = "커서 페이지네이션 스토리 목록 응답(KNK-149)")
+data class StoryPageResponse(
+    @field:ArraySchema(schema = Schema(implementation = StorySummaryResponse::class))
+    val items: List<StorySummaryResponse>,
+
+    @field:Schema(
+        description = "다음 페이지 커서. 다음 페이지가 없으면 null이다. 다음 요청에 sort를 그대로 두고 이 값을 cursor로 넘긴다.",
+        example = "bDoxNzgxNjUxMjAwMDAwOjNmMjUwNGUwLTRmODktNDFkMy05YTBjLTAzMDVlODJjMzMwMQ",
+        nullable = true,
+    )
+    val nextCursor: String?,
+)
+
 @Schema(description = "스토리 목록 항목")
 data class StorySummaryResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")

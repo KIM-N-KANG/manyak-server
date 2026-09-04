@@ -4,6 +4,8 @@
 ### [KNK-464] POST /api/v1/stories/general — 폼 입력을 한 번에 검증·저장(AI 비호출, 임시저장 없음, §4-3-8).
 ###   - 인증 선택: 유효 access 토큰이면 생성자 소유, 없으면 소유자 없는(게스트) 스토리.
 ###   - 기본 공개 범위 PRIVATE(요청 visibility로 선택). 크레딧 소모·게스트 한도 카운트 없음.
+###   - [KNK-149] 게스트(익명)는 PUBLIC을 지정할 수 없습니다 → 400 `GUEST_CANNOT_PUBLISH`(아래 7번).
+###     조용히 PRIVATE으로 낮추지 않습니다. 공개는 로그인해 이관한 뒤에 가능합니다.
 ###   - 응답은 간편 제작과 동일: {id, title, oneLineIntro, description, genres, startSettings[]}.
 ###   - [KNK-515] 시작 설정 복수화: startSettings[](최소 1개). 추천 입력(정확히 3)·엔딩(최대 10)은 각 시작 설정에 중첩. 주요 사건은 스토리 스코프.
 ###
@@ -137,6 +139,48 @@ Authorization: Bearer {{accessToken}}
 
 > {%
     client.test("회원 등록은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6-1. (에러, KNK-149) 익명으로 PUBLIC을 지정하면 400이고 code가 GUEST_CANNOT_PUBLISH다
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "게스트 공개 시도",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("게스트의 PUBLIC 지정은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+    client.test("code 가 GUEST_CANNOT_PUBLISH 다", () => {
+        client.assert(response.body.code === "GUEST_CANNOT_PUBLISH",
+            `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}
+
+### 6-2. (해피 패스) 같은 요청을 PRIVATE 으로 보내면 201이다 — 게스트도 비공개 등록은 된다
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "게스트 비공개 등록",
+  "oneLineIntro": "허용되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "visibility": "PRIVATE"
+}
+
+> {%
+    client.test("게스트의 PRIVATE 등록은 201이다", () => {
         client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
     });
 %}
