@@ -155,6 +155,21 @@ manyak:
       # 미설정(빈 값)이면 FCM 빈을 만들지 않아 발송이 no-op이다(Slack 웹훅과 같은 관례). 운영은 manyak/prod/app
       # 시크릿 JSON에 키를 추가하고, 태스크 정의 secrets 목록에 그 키를 노출하는 terraform apply가 함께 필요하다.
       service-account-json: ${MANYAK_FCM_SERVICE_ACCOUNT_JSON:}
+    attendance-reminder:
+      # 출석 리마인드 푸시(KNK-1116, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
+      enabled: ${MANYAK_PUSH_ATTENDANCE_REMINDER_ENABLED:true}
+      # 09:00 KST. zone은 코드에 Asia/Seoul로 박혀 있어 서버 타임존과 무관하게 같은 시각에 돈다.
+      cron: ${MANYAK_PUSH_ATTENDANCE_REMINDER_CRON:0 0 9 * * *}
+    template-refresh:
+      # 푸시 문구 오버라이드(push_message_templates) 스냅샷 갱신 주기.
+      enabled: ${MANYAK_PUSH_TEMPLATE_REFRESH_ENABLED:true}
+      interval-ms: ${MANYAK_PUSH_TEMPLATE_REFRESH_INTERVAL_MS:300000}
+    templates:
+      # 알림 문구의 기본값(정본). DB(push_message_templates)에 유효한 행이 있으면 그 값이 이긴다.
+      # (광고) 표기는 여기 넣지 않는다 — 서버가 발송 시점에 붙인다(빠뜨리면 되돌릴 수 없는 발송이 된다).
+      attendance-reminder:
+        title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:오늘의 출석 이프를 아직 안 받았어요}
+        body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}

@@ -42,6 +42,7 @@
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
 | [public.story_public_snapshots](public.story_public_snapshots.md) | 4 | KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다. | BASE TABLE |
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
+| [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 
 ## Relations
 
@@ -480,6 +481,15 @@ erDiagram
   varchar_16_ platform
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.push_message_templates" {
+  bigint id
+  varchar_64_ template_key
+  varchar_100_ title
+  varchar_300_ body
+  timestamp_with_time_zone effective_from
+  timestamp_with_time_zone effective_until
+  timestamp_with_time_zone created_at
 }
 ```
 
