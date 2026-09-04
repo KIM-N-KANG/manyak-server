@@ -58,6 +58,7 @@ import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.entity.hasSameChainOwnerAs
@@ -88,6 +89,7 @@ import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -136,6 +138,8 @@ class SimpleStoryCreationService(
     // 간편 제작 1회 소모 크레딧. 운영 중 조정 가능한 정책값이라 요청마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
+    // 완성 푸시 발행(KNK-1115). 수신은 커밋 뒤(StoryCompletionPushListener)라 발송 실패가 생성을 되돌리지 않는다.
+    private val eventPublisher: ApplicationEventPublisher,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -301,6 +305,8 @@ class SimpleStoryCreationService(
             isIncompatibleReplayFallback: Boolean,
             recordedParentLink: ParentCreationLink?,
         ) -> T,
+        // COMPLETED 마킹 트랜잭션 안에서 실행할 부수 효과(KNK-1115 완성 푸시 발행). 기록하지 않는 경로는 부르지 않는다.
+        onCompleted: ((T) -> Unit)? = null,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
@@ -316,6 +322,7 @@ class SimpleStoryCreationService(
             responseType,
             parentLink,
             block,
+            onCompleted,
         )
     }
 
@@ -610,13 +617,24 @@ class SimpleStoryCreationService(
         }
         // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
         // 소유자는 세션 소유권으로 정한다(요청 인증 신원이 만료·갱신으로 흔들려도 회원 소유 세션의 재시도가 막히지 않도록 — Codex P2).
+        val completionOwnerUserId = resolveCompletionOwnerUserId(request.simpleCreationId, userId)
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORY_COMPLETION,
-            resolveCompletionOwnerUserId(request.simpleCreationId, userId),
+            completionOwnerUserId,
             deviceId,
             SimpleStoryCreateResponse::class.java,
             block = create,
+            // 완성 푸시(KNK-1115). 요청 행이 COMPLETED로 **커밋된 뒤** 제작자에게 알린다. 발행은 COMPLETED
+            // 마킹과 같은 트랜잭션이라 마킹이 롤백되면 발송도 없고, 멱등 replay는 이 지점에 오지 않아
+            // 재요청으로 중복 발송되지 않는다. 값은 저장된 result_json을 다시 읽지 않고 방금 만든 응답에서 꺼낸다.
+            onCompleted = completionOwnerUserId?.let { ownerId ->
+                { response: SimpleStoryCreateResponse ->
+                    eventPublisher.publishEvent(
+                        StoryCompletedEvent(userId = ownerId, storyPublicId = response.id, title = response.title),
+                    )
+                }
+            },
         )
     }
 
