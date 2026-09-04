@@ -43,10 +43,13 @@ interface UserRepository : JpaRepository<User, Long> {
      *
      * [attendanceDate]는 `AttendanceRewardService`와 같은 KST 날짜 문자열(`YYYY-MM-DD`)이다.
      * 네이티브 쿼리인 이유: JPQL은 숫자를 문자열에 이어 붙이는 표현이 방언마다 갈려 키 조립이 불안정하다.
+     *
+     * **엔티티가 아니라 id만 돌려준다**(Codex 리뷰 P1). 회차가 도는 동안 동의가 바뀔 수 있어 호출부가 발송
+     * 직전에 회원을 다시 읽어야 하므로, 여기서 스냅샷을 만들어 들고 있을 이유가 없다(메모리도 준다).
      */
     @Query(
         value = """
-        SELECT u.* FROM users u
+        SELECT u.id FROM users u
         WHERE u.status = 'ACTIVE'
           AND u.marketing_push_agreed_at IS NOT NULL
           AND EXISTS (SELECT 1 FROM device_push_tokens t WHERE t.user_id = u.id)
@@ -58,7 +61,7 @@ interface UserRepository : JpaRepository<User, Long> {
         """,
         nativeQuery = true,
     )
-    fun findAttendanceReminderTargets(@Param("attendanceDate") attendanceDate: String): List<User>
+    fun findAttendanceReminderTargetIds(@Param("attendanceDate") attendanceDate: String): List<Long>
 
     /**
      * [id] 회원의 **보상 신원**(`coalesce(reward_identity_user_id, id)`)을 돌려준다(KNK-1053).

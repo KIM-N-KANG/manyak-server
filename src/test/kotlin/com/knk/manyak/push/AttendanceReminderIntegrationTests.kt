@@ -16,6 +16,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
+import org.mockito.ArgumentMatchers.eq
+import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
 import org.mockito.Mockito.verify
@@ -92,6 +94,13 @@ class AttendanceReminderIntegrationTests {
 
     private fun eligibleMember(): User = saveMember().also { saveToken(it) }
 
+    /** 설정 화면(KNK-1132)에서 광고 수신을 끈 것과 같은 상태를 만든다 — 동의 시각을 지운다. */
+    private fun withdrawMarketingConsent(userId: Long) {
+        val user = userRepository.findById(userId).orElseThrow()
+        user.marketingPushAgreedAt = null
+        userRepository.saveAndFlush(user)
+    }
+
     @Test
     fun `광고 동의와 토큰이 있고 오늘 출석하지 않은 회원에게 보낸다`() {
         val member = eligibleMember()
@@ -154,6 +163,26 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+    }
+
+    @Test
+    fun `회차 도중 광고 수신을 철회한 회원에게는 보내지 않는다`() {
+        // 대상 조회 결과는 스냅샷이라, 조회 시점의 동의를 그대로 믿으면 회차가 도는 동안(대상이 많으면 길다)
+        // 철회한 회원에게 광고가 나간다. 광고성은 철회가 다음 발송부터 즉시 반영돼야 한다(정책 KNK-1129).
+        val first = eligibleMember()
+        val second = eligibleMember()
+
+        // 첫 회원에게 보내는 순간 둘째 회원이 설정 화면에서 광고 수신을 끈 상황.
+        doAnswer {
+            withdrawMarketingConsent(second.id)
+            null
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
+
+        val result = attendanceReminderService.sendReminders()
+
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap())
+        assertThat(result.sent).isEqualTo(1)
     }
 
     @Test

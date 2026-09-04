@@ -56,6 +56,9 @@ class AttendanceReminderScheduler(
                 "attendance_reminder_sent",
                 "targets" to result.targets,
                 "sent" to result.sent,
+                // 조회 이후 자격을 잃어 건너뛴 수(동의 철회·정지·탈퇴·야간). 0이 아닌 값이 계속 보이면
+                // 회차가 길어져 재확인에 걸리는 회원이 많다는 신호다.
+                "skipped" to result.skipped,
             )
         } catch (exception: Exception) {
             structuredLogger.event(
