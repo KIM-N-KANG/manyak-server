@@ -24,7 +24,9 @@ class PushSettingsService(
     private val userRepository: UserRepository,
 ) {
 
-    @Transactional(readOnly = true)
+    // 조회지만 readOnly를 쓰지 않는다 — PostgreSQL은 read-only 트랜잭션의 SELECT ... FOR UPDATE를 거부하고
+    // (pgjdbc 기본 readOnlyMode=transaction), 아래 잠금 후 재검사 관례는 조회에도 그대로 적용한다.
+    @Transactional
     fun getSettings(userId: Long): PushSettingsResponse = lockActiveUser(userId).toSettingsResponse()
 
     /**
