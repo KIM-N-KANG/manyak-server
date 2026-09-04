@@ -19,7 +19,7 @@
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
-| [public.users](public.users.md) | 17 |  | BASE TABLE |
+| [public.users](public.users.md) | 20 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 10 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
@@ -282,6 +282,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 "public.social_accounts" {
   bigint id
