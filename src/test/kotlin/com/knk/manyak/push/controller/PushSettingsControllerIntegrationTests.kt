@@ -175,6 +175,36 @@ class PushSettingsControllerIntegrationTests {
     }
 
     @Test
+    fun `명시한 null도 필드 누락과 같이 400이다`() {
+        // 명시한 null도 누락과 같이 거부해야 한다 — `"servicePush": null` 한 줄이 400이 아니라
+        // "서비스 알림 끄기"로 조용히 반영되면 전체 교체 PUT의 silent wipe 방지 계약이 깨진다.
+        // Jackson 3은 `FAIL_ON_NULL_FOR_PRIMITIVES`가 기본 on이라 primitive Boolean에 null을 넣으면
+        // 역직렬화에서 거부되지만(Jackson 2 기본과 반대), 그 기본값이 바뀌면 조용히 깨지므로 여기서 고정한다.
+        val user = saveUser()
+        put(user, body(service = true, marketing = true, night = true)).expectStatus().isOk
+
+        put(user, """{"servicePush":null,"marketingPush":true,"marketingNightPush":true}""")
+            .expectStatus().isBadRequest
+
+        val reloaded = reload(user)
+        assertThat(reloaded.servicePushEnabled).isTrue()
+        assertThat(reloaded.marketingPushNightAgreedAt).isNotNull()
+    }
+
+    @Test
+    fun `광고 필드에 명시한 null도 400이고 동의가 철회되지 않는다`() {
+        val user = saveUser()
+        put(user, body(service = true, marketing = true, night = true)).expectStatus().isOk
+
+        put(user, """{"servicePush":true,"marketingPush":null,"marketingNightPush":null}""")
+            .expectStatus().isBadRequest
+
+        val reloaded = reload(user)
+        assertThat(reloaded.marketingPushAgreedAt).isNotNull()
+        assertThat(reloaded.marketingPushNightAgreedAt).isNotNull()
+    }
+
+    @Test
     fun `정지된 계정은 조회도 변경도 403이다`() {
         val suspended = saveUser(status = UserStatus.SUSPENDED)
 
