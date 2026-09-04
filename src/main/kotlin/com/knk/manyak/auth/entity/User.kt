@@ -10,6 +10,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 enum class UserStatus {
@@ -108,9 +109,51 @@ class User(
     @Enumerated(EnumType.STRING)
     @Column(name = "withdrawn_from_status", length = 20)
     var withdrawnFromStatus: UserStatus? = null,
+
+    /** 서비스 알림(스토리 완성·검수 완료) 수신 여부(KNK-1132, V73). 사전 동의가 필요 없어 기본 켜짐 옵트아웃이다. */
+    @Column(name = "service_push_enabled", nullable = false)
+    var servicePushEnabled: Boolean = true,
+
+    /**
+     * 광고 알림 동의 시각(KNK-1132, V73). NULL이면 미동의·철회다.
+     *
+     * boolean이 아니라 시각인 이유는 **값 자체가 동의 증빙**이기 때문이다(정보통신망법 제50조).
+     * 재동의는 이 값을 덮지 않는다 — 증빙은 최초 동의 시점이다.
+     */
+    @Column(name = "marketing_push_agreed_at")
+    var marketingPushAgreedAt: Instant? = null,
+
+    /** 야간(21~08시 KST) 광고 알림 동의 시각(KNK-1132, V73). 광고 동의와 별개이며 단독으로 켤 수 없다. */
+    @Column(name = "marketing_push_night_agreed_at")
+    var marketingPushNightAgreedAt: Instant? = null,
 ) {
     @PreUpdate
     fun updateTimestamp() {
         updatedAt = Instant.now()
+    }
+
+    /**
+     * [at] 시점에 광고 푸시를 보낼 수 있는지(KNK-1132, 정책 KNK-1129). 발송기(KNK-1116·1117)가 쓴다.
+     *
+     * 광고 동의가 있어야 하고, 야간(21~08시 KST)이면 야간 동의까지 있어야 한다. 서비스 알림은 야간 제한이
+     * 없고 필드를 그대로 보면 되므로 헬퍼를 두지 않는다.
+     */
+    fun canReceiveMarketingPush(at: Instant): Boolean {
+        if (marketingPushAgreedAt == null) {
+            return false
+        }
+        return !isMarketingNightHour(at) || marketingPushNightAgreedAt != null
+    }
+
+    private companion object {
+        val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
+        const val NIGHT_START_HOUR = 21
+        const val NIGHT_END_HOUR = 8
+
+        /** 야간 광고 제한 구간 [21:00, 08:00) KST. 자정을 넘기므로 OR로 판정한다. */
+        fun isMarketingNightHour(at: Instant): Boolean {
+            val hour = at.atZone(SEOUL_ZONE).hour
+            return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR
+        }
     }
 }

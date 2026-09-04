@@ -1,0 +1,196 @@
+### 알림 수신 동의 설정 API 수동 검증 — GET·PUT /api/v1/users/me/push-settings (KNK-1132)
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+###
+### 정책(KNK-1129 확정, 정보통신망법 제50조):
+###   - 서비스 알림(스토리 완성·검수 완료) — 기본 켜짐, 사용자가 끌 수 있음(옵트아웃).
+###   - 광고 알림(프로모션·출석 리마인드) — 기본 꺼짐(옵트인). 사전 동의 필수.
+###   - 야간 광고 허용(21~08시 KST) — 기본 꺼짐. 광고 동의와 **별도 옵트인**이며 단독으로 켤 수 없음.
+###
+### 계약:
+###   - GET  /users/me/push-settings → 200 { servicePush, marketingPush, marketingNightPush } (전부 boolean)
+###   - PUT  /users/me/push-settings   같은 세 필드 **전부 필수**(누락 400) → 200으로 갱신 후 상태 반환.
+###   - 저장 정본은 광고성 두 값의 **동의 시각**입니다(users.marketing_push_agreed_at ·
+###     marketing_push_night_agreed_at). 값 자체가 동의 증빙이라 응답에는 boolean만 싣습니다.
+###   - 재동의는 **최초 동의 시각을 유지**합니다(같은 값을 다시 보내도 갱신하지 않음).
+###   - 광고를 끄면 광고·야간 시각을 **함께** NULL로 지웁니다(철회).
+###   - 광고 동의 없이 야간만 켜면 400 `NIGHT_PUSH_REQUIRES_MARKETING`.
+###   - 인증 필수(토큰 없으면 401). 정지 계정은 **조회도 변경도 403**입니다(설정 화면 자체를 못 씀).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080), Postgres 기동: docker compose up -d
+###   - access 토큰: auth/auth-login-google.http 의 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져
+###     아래 {{accessToken}} 에 재사용됩니다. 같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+###   - 동의 시각은 응답에 나오지 않으므로 아래 SQL로 확인합니다.
+###       SELECT service_push_enabled, marketing_push_agreed_at, marketing_push_night_agreed_at
+###       FROM users WHERE public_id = '...';
+###
+### 실행 순서: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9. 10은 자유 요청.
+
+@baseUrl = http://localhost:8080
+
+# auth/auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.test("서버가 떠 있다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 1. (에러) 토큰 없이 조회 → 401
+GET {{baseUrl}}/api/v1/users/me/push-settings
+Accept: application/json
+
+> {%
+    client.test("토큰 없는 조회는 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 2. (해피 패스) 조회 → 200. 처음이면 서비스 알림만 켜져 있습니다.
+GET {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("조회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.test("세 필드가 모두 boolean이다", () => {
+        const b = response.body;
+        client.assert(typeof b.servicePush === "boolean", `servicePush 형식이 다릅니다. actual=${b.servicePush}`);
+        client.assert(typeof b.marketingPush === "boolean", `marketingPush 형식이 다릅니다. actual=${b.marketingPush}`);
+        client.assert(typeof b.marketingNightPush === "boolean", `marketingNightPush 형식이 다릅니다. actual=${b.marketingNightPush}`);
+    });
+    // 이전 실행에서 켜 뒀을 수 있으므로 기본값 단정은 하지 않습니다. 새 계정이면 true/false/false 입니다.
+%}
+
+### 3. (해피 패스) 광고 알림 켜기 → 200, marketingPush=true
+# 헤더 주석의 SQL로 marketing_push_agreed_at 이 채워졌는지 확인하세요(야간은 NULL 유지).
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": true, "marketingNightPush": false }
+
+> {%
+    client.test("광고 켜기는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("응답이 갱신 후 상태를 돌려준다", () => {
+        client.assert(response.body.marketingPush === true, `marketingPush=${response.body.marketingPush}`);
+        client.assert(response.body.marketingNightPush === false, `marketingNightPush=${response.body.marketingNightPush}`);
+    });
+%}
+
+### 4. (증빙 유지) 같은 값으로 재동의 → 200. marketing_push_agreed_at 이 **바뀌지 않아야** 합니다.
+# 3번 실행 직후 SQL로 시각을 적어 두고, 이 요청 뒤 같은 값인지 비교하세요(증빙은 최초 동의 시점).
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": true, "marketingNightPush": false }
+
+> {%
+    client.test("재동의도 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 5. (해피 패스) 야간 광고까지 켜기 → 200, marketingNightPush=true
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": true, "marketingNightPush": true }
+
+> {%
+    client.test("야간 켜기는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("야간 동의가 반영된다", () => {
+        client.assert(response.body.marketingNightPush === true, `marketingNightPush=${response.body.marketingNightPush}`);
+    });
+%}
+
+### 6. (에러) 광고 동의 없이 야간만 켜기 → 400 NIGHT_PUSH_REQUIRES_MARKETING
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": false, "marketingNightPush": true }
+
+> {%
+    client.test("야간 단독 지정은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+    client.test("code 가 NIGHT_PUSH_REQUIRES_MARKETING 이다", () => {
+        client.assert(response.body.code === "NIGHT_PUSH_REQUIRES_MARKETING",
+            `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}
+
+### 7. (에러) 필드가 빠진 본문 → 400. 전체 교체 PUT이라 누락을 기본값으로 채우지 않습니다.
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": true }
+
+> {%
+    client.test("필드 누락은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (철회) 광고 끄기 → 200. 광고·야간 시각이 **둘 다** NULL이 됩니다.
+# 5번에서 야간까지 켜 둔 상태에서 실행해 야간도 함께 지워지는지 SQL로 확인하세요.
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": true, "marketingPush": false, "marketingNightPush": false }
+
+> {%
+    client.test("철회는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("광고와 야간이 함께 꺼진다", () => {
+        client.assert(response.body.marketingPush === false, `marketingPush=${response.body.marketingPush}`);
+        client.assert(response.body.marketingNightPush === false, `marketingNightPush=${response.body.marketingNightPush}`);
+    });
+%}
+
+### 9. (해피 패스) 서비스 알림 끄기 → 200, servicePush=false
+PUT {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "servicePush": false, "marketingPush": false, "marketingNightPush": false }
+
+> {%
+    client.test("서비스 알림 끄기는 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("서비스 알림이 꺼진다", () => {
+        client.assert(response.body.servicePush === false, `servicePush=${response.body.servicePush}`);
+    });
+%}
+
+### 10. (자유 요청, 정지 계정) 정지된 회원은 조회도 403입니다.
+# 관리자 API가 없어(Phase 1 범위 밖) 대상 계정을 DB에서 직접 users.status='SUSPENDED'로 바꾼 뒤,
+# 그 계정의 토큰을 @suspendedAccessToken 에 채워 실행하세요(로그인 후 DB만 바꿔도 기존 토큰은 그대로 유효).
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
+GET {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{suspendedAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("정지 계정의 조회는 403이다", () => {
+        client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}

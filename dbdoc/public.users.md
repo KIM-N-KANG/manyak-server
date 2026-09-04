@@ -21,6 +21,9 @@
 | rejoined_at | timestamp with time zone |  | true |  |  |  |
 | reward_identity_user_id | bigint |  | true |  |  |  |
 | withdrawn_from_status | varchar(20) |  | true |  |  |  |
+| service_push_enabled | boolean | true | false |  |  |  |
+| marketing_push_agreed_at | timestamp with time zone |  | true |  |  |  |
+| marketing_push_night_agreed_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -73,6 +76,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 "public.social_accounts" {
   bigint id

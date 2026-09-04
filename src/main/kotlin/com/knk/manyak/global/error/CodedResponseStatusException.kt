@@ -40,6 +40,12 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 알림 수신 동의(400): 야간 광고 수신은 광고 수신 동의 없이 단독으로 켤 수 없다(KNK-1132, 정책 KNK-1129).
+     * 야간 동의는 광고 동의의 확장이라, 광고를 끈 채 야간만 켠 상태는 발송 판정에서 의미가 없다.
+     */
+    const val NIGHT_PUSH_REQUIRES_MARKETING = "NIGHT_PUSH_REQUIRES_MARKETING"
+
+    /**
      * 스토리 공개 지정(400): 게스트(소유자 없음)는 스토리를 PUBLIC으로 만들 수 없다(KNK-149).
      * 조용히 PRIVATE으로 낮추지 않고 거부한다 — 고른 값을 서버가 뒤집으면 "공개했는데 왜 안 보이냐"가 된다.
      */
