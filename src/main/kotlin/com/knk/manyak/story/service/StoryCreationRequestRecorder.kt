@@ -122,7 +122,11 @@ class StoryCreationRequestRecorder(
             throw throwable
         }
         updateStatus(run.id, StoryCreationRequestStatus.COMPLETED, objectMapper.writeValueAsString(result)) {
-            onCompleted?.invoke(result)
+            // 호환 불가 replay의 fallback은 **이미 COMPLETED였던** 요청을 형식만 맞춰 다시 만든 것이라
+            // 완료 부수 효과를 다시 내지 않는다 — 최초 완성 때 이미 보냈다(Codex 리뷰 P2).
+            if (!run.isIncompatibleReplayFallback) {
+                onCompleted?.invoke(result)
+            }
         }
         return result
     }

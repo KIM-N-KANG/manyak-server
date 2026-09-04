@@ -22,9 +22,12 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
+import org.mockito.Mockito.after
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
+import org.mockito.Mockito.times
+import org.mockito.Mockito.timeout
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
@@ -119,7 +122,7 @@ class StoryCompletionPushIntegrationTests {
         val storyId = STORY_ID_PATTERN.find(String(body.responseBody!!))!!.groupValues[1]
 
         // 값 그대로 검증한다 — Kotlin의 non-null 파라미터에 ArgumentCaptor.capture()가 null을 넘겨 NPE가 난다.
-        verify(fcmPushSender).sendToUser(
+        verify(fcmPushSender, timeout(SEND_TIMEOUT_MS)).sendToUser(
             member.id,
             mapOf("type" to "STORY_COMPLETED", "storyId" to storyId, "title" to STORY_TITLE),
         )
@@ -132,7 +135,7 @@ class StoryCompletionPushIntegrationTests {
 
         completeStory(UUID.randomUUID(), storyline, member).expectStatus().isCreated
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
     }
 
     @Test
@@ -141,7 +144,7 @@ class StoryCompletionPushIntegrationTests {
 
         completeStory(UUID.randomUUID(), storyline, user = null).expectStatus().isCreated
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
     }
 
     @Test
@@ -165,7 +168,7 @@ class StoryCompletionPushIntegrationTests {
             .exchange()
             .expectStatus().isCreated
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
     }
 
     @Test
@@ -178,7 +181,28 @@ class StoryCompletionPushIntegrationTests {
         completeStory(requestId, storyline, member).expectStatus().isCreated
 
         // replay는 COMPLETED 마킹에 도달하지 않으므로 발송도 한 번뿐이다.
-        verify(fcmPushSender).sendToUser(anyLong(), anyMap())
+        // timeout()은 첫 호출이 오면 바로 통과해 "두 번째가 안 온다"를 못 본다 — 창을 다 기다린 뒤 횟수를 센다.
+        verify(fcmPushSender, after(SEND_TIMEOUT_MS).times(1)).sendToUser(anyLong(), anyMap())
+    }
+
+    @Test
+    fun `호환되지 않는 결과로 다시 생성하는 폴백은 추가로 발송하지 않는다`() {
+        // 저장된 result_json이 현재 DTO와 호환되지 않으면 레코더가 block을 다시 돌려 COMPLETED를 다시 마킹한다.
+        // 그때도 발송하면 같은 회원에게 완성 알림이 두 번 간다 — 최초 완성 때 이미 보냈다.
+        val member = saveMember()
+        val storyline = seedStoryline(member)
+        val requestId = UUID.randomUUID()
+        completeStory(requestId, storyline, member).expectStatus().isCreated
+        verify(fcmPushSender, timeout(SEND_TIMEOUT_MS)).sendToUser(anyLong(), anyMap())
+
+        val completed = requestRepository.findByRequestId(requestId)!!
+        completed.resultJson = """{"legacy":true}"""
+        requestRepository.saveAndFlush(completed)
+        reset(fcmPushSender)
+
+        completeStory(requestId, storyline, member).expectStatus().isCreated
+
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
     }
 
     @Test
@@ -200,5 +224,9 @@ class StoryCompletionPushIntegrationTests {
         // 테스트 프로파일은 AI 스텁을 켜 둔다(manyak.ai.story.stub). 스텁의 제목 규칙이 곧 기대값이다.
         private const val STORY_TITLE = "[스텁] $STORYLINE_TEXT"
         private val STORY_ID_PATTERN = """"id":"([^"]+)"""".toRegex()
+
+        // 발송은 @Async라 응답 이후에 돈다. 도착을 기다리는 상한과, "보내지 않는다"를 확인할 조용한 창.
+        private const val SEND_TIMEOUT_MS = 3_000L
+        private const val QUIET_WINDOW_MS = 500L
     }
 }

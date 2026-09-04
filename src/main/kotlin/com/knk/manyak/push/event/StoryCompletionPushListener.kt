@@ -4,9 +4,8 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.LoggerFactory
+import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Propagation
-import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
 
@@ -18,10 +17,11 @@ import org.springframework.transaction.event.TransactionalEventListener
  * - 스토리 완성은 **서비스 알림**이다(사용자가 유발한 작업의 결과 통지). 광고 판정([canReceiveMarketingPush])이
  *   아니라 `servicePushEnabled`만 본다(KNK-1132, 정책 KNK-1129).
  * - 토큰이 없거나 정지·탈퇴 회원인 경우는 [FcmPushSender]가 조용히 건너뛴다(KNK-1130).
- *
- * ponytail: @Async를 붙이지 않았다. 완성 경로는 이미 AI 호출로 수 초~수십 초가 걸리는 동기 흐름이라 발송
- * 한 번이 체감에 묻히고, 동기로 두면 발송 여부를 테스트가 결정적으로 확인할 수 있다. 응답 지연이 문제가 되면
- * 그때 @Async(피드백 알림 선례)로 바꾼다.
+ * - **@Async로 요청 스레드와 분리한다**(피드백 알림 선례, Codex 리뷰 P1). AFTER_COMMIT 콜백은 원 트랜잭션의
+ *   커넥션이 반납되기 전에 돌아, 여기서 DB를 읽으면 요청 하나가 커넥션 두 개를 동시에 쥔다. 풀이 포화되면
+ *   커넥션 획득이 `connectionTimeout`으로 실패하고, 그 실패는 아래 try 바깥(트랜잭션 시작 시점)이라 잡히지도
+ *   않아 이미 커밋된 생성의 응답이 500으로 뒤집힌다. 조회(회원)와 발송(토큰) 둘 다 DB를 타므로 접근을 없앨
+ *   수는 없고, 스레드를 분리해 원 커넥션이 반납된 뒤에 읽는다.
  */
 @Component
 class StoryCompletionPushListener(
@@ -30,8 +30,8 @@ class StoryCompletionPushListener(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    // 커밋 뒤라 진행 중인 트랜잭션이 없다. 사용자 조회를 위해 새 트랜잭션을 연다.
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    // 트랜잭션을 열지 않는다 — 조회 한 번과 발송뿐이라 Spring Data가 여는 트랜잭션으로 충분하다.
+    @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onStoryCompleted(event: StoryCompletedEvent) {
         try {
@@ -52,8 +52,8 @@ class StoryCompletionPushListener(
                 ),
             )
         } catch (ex: RuntimeException) {
-            // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. 여기서 던지면 이미 커밋된 생성의
-            // 응답이 500으로 뒤집힌다.
+            // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. @Async 스레드라 요청에 전파되지는
+            // 않지만, 삼키지 않으면 스택트레이스만 남고 어느 회원의 발송이 깨졌는지 알 수 없다.
             log.warn(
                 "스토리 완성 푸시 발송에 실패했습니다. (userId={}, storyId={}, error={})",
                 event.userId, event.storyPublicId, ex.javaClass.simpleName,
