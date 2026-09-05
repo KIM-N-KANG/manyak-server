@@ -9,6 +9,7 @@ import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.link.AccountLinkService
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.MeResponseAssembler
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.service.AttendanceRewardService
@@ -43,8 +44,7 @@ class AuthController(
     private val userRepository: UserRepository,
     private val socialLoginService: SocialLoginService,
     private val accountLinkService: AccountLinkService,
-    private val creditWalletService: CreditWalletService,
-    private val attendanceRewardService: AttendanceRewardService,
+    private val meResponseAssembler: MeResponseAssembler,
 ) {
 
     @Operation(
@@ -140,19 +140,8 @@ class AuthController(
         val user = userRepository.findByPublicId(publicId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
-        return MeResponse(
-            id = user.publicId.toString(),
-            nickname = user.nickname,
-            profileImageUrl = user.profileImageUrl,
-            // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17). 값은 프리셋 배정(KNK-388) 시 생성되며, 미배정·미생성이면 null.
-            profileThumbnailBase64 = user.profileThumbnailBase64,
-            status = user.status,
-            // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
-            creditBalance = creditWalletService.balanceOf(user.id),
-            attendedToday = attendanceRewardService.hasAttendedToday(user.id),
-            // 계정 연동 상태(KNK-739). 전용 조회 엔드포인트를 두지 않고 이 응답 하나로 노출한다(왕복을 늘리지 않는다).
-            linkedProviders = accountLinkService.linkedProviders(user.id),
-        )
+        // 조립은 PATCH /users/me(KNK-1147)와 공유한다 — 필드가 늘 때 두 응답이 갈리지 않도록.
+        return meResponseAssembler.assemble(user)
     }
 
     @Operation(
