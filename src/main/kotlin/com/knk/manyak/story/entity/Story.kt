@@ -1,5 +1,6 @@
 package com.knk.manyak.story.entity
 
+import com.knk.manyak.image.service.ImageModerationStatus
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -46,12 +47,19 @@ class Story(
     @Column(name = "thumbnail_image_key", length = 64)
     val thumbnailImageKey: String? = null,
 
-    // 컴파일이 생성한 표지의 절대 URL(KNK-1069). 등록 시 1회 확정이라 val이다.
-    // 프리셋 키(thumbnailImageKey)와 **공존한다** — 생성 성공이어도 프리셋 연결은 지우지 않아, 이 값이
-    // 비면(구버전 AI·생성 실패·일반 제작·기존 스토리) 노출이 자동으로 프리셋으로 떨어진다.
+    // 생성 표지(KNK-1069) 또는 소유자가 올린 표지(KNK-1126)의 절대 URL.
+    // 프리셋 키(thumbnailImageKey)와 **공존한다** — 생성·업로드 성공이어도 프리셋 연결은 지우지 않아, 이 값이
+    // 비면(구버전 AI·생성 실패·일반 제작·기존 스토리·표지 삭제) 노출이 자동으로 프리셋으로 떨어진다.
     // 2단 폴백 판정은 ImageUrlResolver 한 곳이 소유한다(호출부에 분기를 흩뿌리지 않는다).
+    // 업로드 교체·삭제가 생기면서 var다(KNK-1126) — 등록 시 1회 확정이던 시절의 val이 아니다.
     @Column(name = "thumbnail_image_url", columnDefinition = "TEXT")
-    val thumbnailImageUrl: String? = null,
+    var thumbnailImageUrl: String? = null,
+
+    // 표지 검수 상태(KNK-1126, V76). APPROVED가 아니면 노출이 프리셋으로 떨어진다(ImageUrlResolver의 게이트).
+    // 프리셋 표지는 팀 자산이라 검수 대상이 아니다 — 이 상태는 thumbnailImageUrl에만 걸린다.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "thumbnail_moderation_status", nullable = false, length = 20)
+    var thumbnailModerationStatus: ImageModerationStatus = ImageModerationStatus.APPROVED,
 
     // 등록 상태(초안/발행). 일반 모드 초안 저장은 DRAFT로 시작하고, 발행 시 PUBLISHED가 된다(KNK-401).
     // 기존 행·간편 제작 스토리는 기본값 PUBLISHED다.

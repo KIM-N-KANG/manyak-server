@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_characters_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('story_characters_id_seq'::regclass) | false | [public.story_character_images](public.story_character_images.md) |  |  |
 | public_id | uuid |  | false |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | name | varchar(100) |  | false |  |  |  |
@@ -40,6 +40,7 @@
 ```mermaid
 erDiagram
 
+"public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
 "public.story_characters" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 
 "public.story_characters" {
@@ -57,6 +58,16 @@ erDiagram
   text visual_identity
   timestamp_with_time_zone created_at
 }
+"public.story_character_images" {
+  bigint id
+  uuid public_id
+  bigint character_id FK
+  varchar_120_ image_name
+  text image_url
+  integer sort_order
+  varchar_20_ moderation_status
+  timestamp_with_time_zone created_at
+}
 "public.stories" {
   bigint id
   bigint user_id
@@ -72,6 +83,7 @@ erDiagram
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
+  varchar_20_ thumbnail_moderation_status
 }
 ```
 

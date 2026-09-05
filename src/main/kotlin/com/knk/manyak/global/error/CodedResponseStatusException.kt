@@ -40,6 +40,12 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 이미지 연결(400): presign으로 받은 객체 키에 아직 파일이 올라오지 않았다(KNK-1126).
+     * 클라이언트가 PUT을 마친 뒤 다시 부르면 되는 상태라, 형식 오류(같은 400)와 구분해 코드로 알린다.
+     */
+    const val UPLOAD_NOT_FOUND = "UPLOAD_NOT_FOUND"
+
+    /**
      * 닉네임 변경(409): 정규화 기준(소문자·공백 제거)으로 이미 쓰는 닉네임이다(KNK-1147, 정책 KNK-1146).
      * 대소문자·공백만 다른 값도 같은 것으로 본다 — 사칭·혼동을 막는 게 유일성의 목적이다.
      */
