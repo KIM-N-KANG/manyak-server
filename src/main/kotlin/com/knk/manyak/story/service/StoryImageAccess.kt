@@ -70,6 +70,7 @@ class StoryImageAccess(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지는 5MB를 넘을 수 없습니다.")
         }
         requireSupportedContentType(uploaded.contentType)
+        // 자동 검수 훅 자리(KNK-1160~ 도입 시) — 표지·인물 연결이 모두 여기를 지나므로 한 곳이면 된다.
         return uploadedImageStorage.serveUrlOf(objectKey) ?: throw uploadDisabled()
     }
 

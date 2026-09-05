@@ -15,6 +15,7 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.story.dto.CharacterImageResponse
@@ -103,6 +104,9 @@ class StoryEditService(
                 )
             }
             story.thumbnailImageUrl = storyImageAccess.resolveUploadedUrl(story, UploadedImageKind.COVER, objectKey)
+            // 새 객체는 새 판정이다 — 이전 표지가 PENDING·REJECTED였다고 물려받으면 이미지를 바꿔도
+            // 계속 가려진다. 자동 검수 도입 시 이 자리에서 판정 결과로 설정한다.
+            story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
         }
 
         // 스토리 설정 통글 4필드 — 없으면 생성, 있으면 교체(제작 시 생성되므로 보통 존재).

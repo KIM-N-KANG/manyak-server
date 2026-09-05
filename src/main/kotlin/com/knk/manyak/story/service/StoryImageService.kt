@@ -11,6 +11,7 @@ import com.knk.manyak.story.dto.ImagePresignRequest
 import com.knk.manyak.story.dto.ImagePresignResponse
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -109,6 +110,7 @@ class StoryImageService(
 @Component
 class CharacterImageAdder(
     private val storyImageAccess: StoryImageAccess,
+    private val storyCharacterRepository: StoryCharacterRepository,
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val suspensionGuard: SuspensionGuard,
 ) {
@@ -125,6 +127,9 @@ class CharacterImageAdder(
         val character = storyImageAccess.resolveCharacter(story, characterId)
         val imageName = requireValidImageName(character.name, requireNotNull(request.imageName))
 
+        // 상한 판정 전에 인물 행을 잠근다. 잠그지 않으면 상한 직전의 동시 추가 둘이 모두 개수를 읽고 통과해
+        // 11장이 되고 sort_order도 겹친다(검수 지적). 같은 트랜잭션 안에서 count → insert가 직렬화된다.
+        storyCharacterRepository.findByIdForUpdate(character.id)
         val existing = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
         if (existing.size >= StoryCharacterImage.MAX_IMAGES_PER_CHARACTER) {
             throw ResponseStatusException(
@@ -140,7 +145,6 @@ class CharacterImageAdder(
             UploadedImageKind.CHARACTER,
             requireNotNull(request.objectKey),
         )
-        // 자동 검수 훅 자리(KNK-1160~ 도입 시)
         val saved = storyCharacterImageRepository.save(
             StoryCharacterImage(
                 character = character,

@@ -372,6 +372,36 @@ class StoryImageUploadControllerIntegrationTests {
     }
 
     @Test
+    fun `표지를 교체하면 검수 상태가 새로 판정된다`() {
+        // 이전 표지가 PENDING·REJECTED였다고 새 표지가 그 판정을 물려받으면, 소유자가 이미지를 바꿔도
+        // 계속 가려진다. 새 객체는 새 판정이다(검수 지적).
+        val owner = saveUser()
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "검수 대기 표지",
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                thumbnailImageKey = "thumb_0001",
+                thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/old.webp",
+                thumbnailModerationStatus = ImageModerationStatus.PENDING,
+            ),
+        )
+
+        patchStory(story, owner, """{"thumbnailObjectKey":"${coverKey(story)}"}""")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.thumbnailModerationStatus").isEqualTo("APPROVED")
+
+        // 상세에서도 프리셋이 아니라 새로 올린 표지가 보인다.
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo("$BASE_URL/${coverKey(story)}")
+    }
+
+    @Test
     fun `검수를 통과하지 못한 표지는 상세에서 프리셋으로 떨어진다`() {
         val owner = saveUser()
         val story = storyRepository.save(
