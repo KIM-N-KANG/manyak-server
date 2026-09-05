@@ -15,6 +15,12 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.image.service.ImageUrlResolver
+import com.knk.manyak.image.service.UploadedImageKind
+import com.knk.manyak.story.dto.CharacterImageResponse
+import com.knk.manyak.story.dto.StoryEditCharacterResponse
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -39,6 +45,11 @@ class StoryEditService(
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    // 이미지 업로드(KNK-1126): 편집 폼이 현재 표지·인물 이미지를 싣고, PATCH가 표지 교체를 받는다.
+    private val storyCharacterRepository: StoryCharacterRepository,
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
+    private val storyImageAccess: StoryImageAccess,
+    private val imageUrlResolver: ImageUrlResolver,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
@@ -79,6 +90,20 @@ class StoryEditService(
         request.genres?.let { story.genre = it.joinToString(separator = ", ").ifBlank { null } }
         // 공개 전환(KNK-1021). 전환 가능 여부는 위 requirePublishedForVisibilityChange가 이미 확정했다.
         request.visibility?.let { story.visibility = it }
+
+        // 표지 교체(KNK-1126). 회원 소유 스토리만이고 객체 키는 이 스토리의 업로드 prefix 아래여야 한다.
+        // 지우기는 DELETE /stories/{storyId}/thumbnail이 담당한다(여기서 null은 미전송·유지).
+        request.thumbnailObjectKey?.let { objectKey ->
+            // 게스트 스토리는 익명으로도 수정할 수 있어(소유권 게이트 통과) 여기서 따로 막는다 — 소유자가
+            // 없으면 올린 이미지의 책임 주체가 없다(스펙 §4-3-8 "회원 소유 스토리만").
+            if (story.userId == null) {
+                throw ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "로그인 후 내 스토리로 가져와야 이미지를 올릴 수 있습니다.",
+                )
+            }
+            story.thumbnailImageUrl = storyImageAccess.resolveUploadedUrl(story, UploadedImageKind.COVER, objectKey)
+        }
 
         // 스토리 설정 통글 4필드 — 없으면 생성, 있으면 교체(제작 시 생성되므로 보통 존재).
         request.storySettings?.let { input ->
@@ -224,7 +249,37 @@ class StoryEditService(
             startSettings = startSettings,
             mainEvents = mainEvents,
             visibility = story.visibility,
+            // 이미지 업로드(KNK-1126). 표지는 2단 폴백(업로드·생성 URL → 프리셋 키)을 쓰되 **검수 게이트는
+            // 적용하지 않는다** — 소유자 화면이라 상태와 함께 원본을 보여야 한다.
+            thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
+            thumbnailModerationStatus = story.thumbnailModerationStatus,
+            characters = buildEditCharacters(story.id),
         )
+    }
+
+    /** 편집 화면의 인물·이미지 목록(KNK-1126). 이미지를 한 번에 읽어 인물 수만큼 쿼리가 늘지 않게 한다. */
+    private fun buildEditCharacters(storyId: Long): List<StoryEditCharacterResponse> {
+        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(storyId)
+        if (characters.isEmpty()) {
+            return emptyList()
+        }
+        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryId(storyId)
+            .groupBy { it.character.id }
+        return characters.map { character ->
+            StoryEditCharacterResponse(
+                id = character.publicId.toString(),
+                name = character.name,
+                // 소유자 화면이라 검수 상태와 무관하게 전부 싣고 상태를 함께 준다.
+                images = imagesByCharacterId[character.id].orEmpty().map { image ->
+                    CharacterImageResponse(
+                        id = image.publicId.toString(),
+                        imageName = image.imageName,
+                        imageUrl = image.imageUrl,
+                        moderationStatus = image.moderationStatus,
+                    )
+                },
+            )
+        }
     }
 
     /**

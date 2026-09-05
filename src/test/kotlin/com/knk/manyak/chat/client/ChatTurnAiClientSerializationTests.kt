@@ -36,13 +36,15 @@ class ChatTurnAiClientSerializationTests {
         val json = objectMapper.writeValueAsString(
             sampleRequest().copy(
                 characterImages = listOf(
-                    ChatCharacterImage(name = "강진우", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
+                    ChatCharacterImage(name = "강진우", imageName = "강진우_기본", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
                 ),
             ),
         )
 
         assertTrue(json.contains(""""character_images":[{"""))
         assertTrue(json.contains(""""name":"강진우""""))
+        // 인물별 여러 장(KNK-1126)이라 이름으로 골라야 한다 — 키는 계약대로 snake_case다.
+        assertTrue(json.contains(""""image_name":"강진우_기본""""))
         assertTrue(json.contains(""""image_url":"https://cdn.test/characters/generated/s/a.webp""""))
         assertFalse(json.contains("imageUrl"))
         assertFalse(json.contains("characterImages"))

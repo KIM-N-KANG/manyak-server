@@ -18,12 +18,14 @@
 | visibility | varchar(20) | 'PUBLIC'::character varying | false |  |  |  |
 | thumbnail_image_key | varchar(64) |  | true |  | [public.image_presets](public.image_presets.md) |  |
 | thumbnail_image_url | text |  | true |  |  |  |
+| thumbnail_moderation_status | varchar(20) | 'APPROVED'::character varying | false |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_stories_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying])::text[]))) |
+| ck_stories_thumbnail_moderation | CHECK | CHECK (((thumbnail_moderation_status)::text = ANY ((ARRAY['APPROVED'::character varying, 'PENDING'::character varying, 'REJECTED'::character varying])::text[]))) |
 | ck_stories_visibility | CHECK | CHECK (((visibility)::text = ANY ((ARRAY['PUBLIC'::character varying, 'PRIVATE'::character varying])::text[]))) |
 | stories_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_stories_public_id | UNIQUE | UNIQUE (public_id) |
@@ -69,6 +71,7 @@ erDiagram
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
+  varchar_20_ thumbnail_moderation_status
 }
 "public.story_settings" {
   bigint id

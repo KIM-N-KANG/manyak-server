@@ -54,6 +54,7 @@ import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.EndingSnapshot
@@ -62,7 +63,7 @@ import com.knk.manyak.story.entity.StartSettingSnapshot
 import com.knk.manyak.story.entity.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
-import com.knk.manyak.story.repository.StoryCharacterRepository
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -105,7 +106,8 @@ class ChatService(
     // 목표 사건의 라이브 이름 해소용(스냅샷 분기에서 id가 빗나갈 때만 탄다).
     private val storyMainEventRepository: StoryMainEventRepository,
     // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
-    private val storyCharacterRepository: StoryCharacterRepository,
+    // 인물 이미지 정본은 story_character_images다(KNK-1126) — 인물별 여러 장을 요청에 싣는다.
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
     // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
@@ -265,9 +267,18 @@ class ChatService(
                 // 읽을 수 없으면 **둘 다** 마지막 공개 버전 스냅샷에서 읽는다 — 스냅샷이 URL까지 담으므로
                 // 비공개로 되돌린 스토리의 카드가 프리셋 표지로 내려앉지 않는다(KNK-1069가 수용했던 화면 열화).
                 thumbnailUrlSm = if (showsCurrent) {
-                    imageUrlResolver.thumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey)
+                    imageUrlResolver.visibleThumbnailSmUrlFor(
+                        story.thumbnailImageUrl,
+                        story.thumbnailImageKey,
+                        story.thumbnailModerationStatus,
+                    )
                 } else {
-                    imageUrlResolver.thumbnailSmUrlFor(snapshot?.thumbnailImageUrl, snapshot?.thumbnailImageKey)
+                    // 공개 스냅샷에는 검수 상태가 없다 — 공개였던 시점의 표시값이라 그대로 쓴다(ImageModeration).
+                    imageUrlResolver.visibleThumbnailSmUrlFor(
+                        snapshot?.thumbnailImageUrl,
+                        snapshot?.thumbnailImageKey,
+                        null,
+                    )
                 },
                 lastStoryPreview = lastPreviewByChatId[chat.id].orEmpty(),
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
@@ -1395,14 +1406,23 @@ class ChatService(
     /**
      * 채팅 요청에 실을 인물-이미지 매핑을 조회한다(스펙 §4-3-3 "채팅 인물 이미지 전달", KNK-943).
      *
-     * 이미지가 없는 인물(생성·업로드 실패로 `image_url`이 NULL)은 조회에서 제외한다 — AI는 이 매핑에 있는 인물만
-     * 태그로 만들 수 있으므로, 매핑에 없으면 태그가 삭제되고 이미지 없이 본문만 나간다.
-     * 인물이 없거나 전부 이미지가 없으면 빈 배열이며, 그때 AI는 인물 태그 규칙을 쓰지 않는다.
+     * `Phase 3 · 구현`(KNK-1126) — 정본이 `story_character_images`로 옮겨가 **인물별 전부**를 싣는다.
+     * 같은 `name`의 항목이 여러 개이고 `image_name`이 그것을 가른다. 옛 컬럼(`story_characters.image_url`)은
+     * 읽지 않는다(V76이 `{이름}_기본` 행으로 옮겼다). 컬럼 DROP은 다음 릴리스다(두 릴리스 규칙).
+     *
+     * 이미지가 없는 인물은 자연히 빠진다 — AI는 이 매핑에 있는 인물만 태그로 만들 수 있으므로, 매핑에 없으면
+     * 태그가 삭제되고 이미지 없이 본문만 나간다. 전부 없으면 빈 배열이며 AI는 인물 태그 규칙을 쓰지 않는다.
      */
     private fun loadCharacterImages(storyId: Long): List<ChatCharacterImage> =
-        storyCharacterRepository.findByStoryIdAndImageUrlIsNotNullOrderByIdAsc(storyId)
-            .mapNotNull { character ->
-                character.imageUrl?.let { ChatCharacterImage(name = character.name, imageUrl = it) }
+        storyCharacterImageRepository.findAllByStoryId(storyId)
+            // 검수 게이트(KNK-1126): AI에게도 APPROVED만 보낸다.
+            .filter { ImageModeration.isVisible(it.moderationStatus) }
+            .map { image ->
+                ChatCharacterImage(
+                    name = image.character.name,
+                    imageName = image.imageName,
+                    imageUrl = image.imageUrl,
+                )
             }
 
     /**

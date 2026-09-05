@@ -5,6 +5,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
@@ -18,11 +19,13 @@ import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.entity.StoryReport
 import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryReportRepository
@@ -56,6 +59,8 @@ class StoryService(
     private val suspensionGuard: SuspensionGuard,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
+    // 인물 대표 이미지의 정본(KNK-1126, V76). 옛 story_characters.image_url은 읽지 않는다.
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyChatRepository: StoryChatRepository,
     private val imageUrlResolver: ImageUrlResolver,
@@ -190,10 +195,9 @@ class StoryService(
             .map { it.toLorebookResponse() }
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
-        // 인물은 저장 순서(= 컴파일 응답 순서)로 싣는다(KNK-1058). 이미지 생성에 실패한 인물도 imageUrl null로 포함해
+        // 인물은 저장 순서(= 컴파일 응답 순서)로 싣는다(KNK-1058). 이미지가 없는 인물도 imageUrl null로 포함해
         // 프론트가 인물 구성을 그대로 보여줄 수 있게 한다(채팅 요청 매핑과 달리 URL 없는 인물을 거르지 않는다).
-        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
-            .map { StoryCharacterResponse(name = it.name, imageUrl = it.imageUrl) }
+        val characters = buildCharacterResponses(story.id)
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
         // 저장도 노출도 이름 기준이다(V70) — 프론트는 엔딩 목록과 이름으로 상관한다(KNK-462).
         val reachedEndings = resolveReachedEndingNames(userId, story.id, startSettings)
@@ -201,7 +205,12 @@ class StoryService(
         return StoryDetailResponse(
             id = story.publicId.toString(),
             // 생성 표지가 있으면 그것을, 없으면 프리셋 키로 조합한다(2단 폴백은 리졸버 소유, KNK-1069).
-            thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
+            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 프리셋으로 떨어진다.
+            thumbnailUrl = imageUrlResolver.visibleThumbnailUrlFor(
+                story.thumbnailImageUrl,
+                story.thumbnailImageKey,
+                story.thumbnailModerationStatus,
+            ),
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
@@ -390,6 +399,31 @@ class StoryService(
             ?.let { StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
 
     /** 스토리 목록을 카드 응답으로 매핑한다. turnCount·author는 한 번의 배치 조회로 채운다(N+1 방지). */
+    /**
+     * 상세의 인물 목록(KNK-1058, 대표 이미지 KNK-1126).
+     *
+     * 대표 이미지는 `{인물이름}_기본`이고, 없으면 표시 순서 첫 장이다 — 인물당 여러 장이 되면서(V76) 어느
+     * 것을 카드에 쓸지 정해야 했고, 컴파일이 만든 첫 장이 `_기본`이라 그것을 우선한다. 이미지를 한 번에 읽어
+     * 인물 수만큼 쿼리가 늘지 않게 한다.
+     */
+    private fun buildCharacterResponses(storyId: Long): List<StoryCharacterResponse> {
+        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(storyId)
+        if (characters.isEmpty()) {
+            return emptyList()
+        }
+        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryId(storyId)
+            .groupBy { it.character.id }
+        return characters.map { character ->
+            // 검수 게이트(KNK-1126): 공개 노출은 APPROVED만이다.
+            val images = imagesByCharacterId[character.id].orEmpty()
+                .filter { ImageModeration.isVisible(it.moderationStatus) }
+            val representative = images.firstOrNull {
+                it.imageName == StoryCharacterImage.defaultImageNameOf(character.name)
+            } ?: images.firstOrNull()
+            StoryCharacterResponse(name = character.name, imageUrl = representative?.imageUrl)
+        }
+    }
+
     private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()
@@ -418,7 +452,11 @@ class StoryService(
             id = publicId.toString(),
             // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형). 단 생성 표지는 축소본이
             // 없어 원본 URL이 그대로 실린다(KNK-1069, 무게는 후속 과제).
-            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageUrl, thumbnailImageKey),
+            thumbnailUrlSm = imageUrlResolver.visibleThumbnailSmUrlFor(
+                thumbnailImageUrl,
+                thumbnailImageKey,
+                thumbnailModerationStatus,
+            ),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),

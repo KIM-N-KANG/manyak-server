@@ -49,6 +49,7 @@ import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacter
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryCreationCharacter
 import com.knk.manyak.story.entity.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
@@ -70,6 +71,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
@@ -121,6 +123,8 @@ class SimpleStoryCreationService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
+    // 인물 이미지 정본(KNK-1126, V76). 옛 컬럼과 함께 채운다(두 릴리스 규칙).
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val generatedImageStorage: GeneratedImageStorage,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
@@ -1472,12 +1476,14 @@ class SimpleStoryCreationService(
         if (names.isEmpty()) {
             return
         }
-        storyCharacterRepository.saveAll(
+        val characters = storyCharacterRepository.saveAll(
             names.map { name ->
                 val appearance = appearancesByName[name]
                 StoryCharacter(
                     story = story,
                     name = name,
+                    // 옛 컬럼에도 계속 쓴다(KNK-1126) — 읽는 코드는 새 테이블로 옮겼지만, 롤백하면 이 컬럼을
+                    // 다시 읽으므로 컬럼 DROP 전까지 둘 다 채운다(계약 마이그레이션 두 릴리스 규칙).
                     imageUrl = uploadedImages[name]?.url,
                     gender = appearance?.gender,
                     age = appearance?.age,
@@ -1489,6 +1495,21 @@ class SimpleStoryCreationService(
                 )
             },
         )
+        // 새 정본에도 함께 넣는다(KNK-1126, V76). 컴파일이 만든 첫 장의 이름은 `{인물이름}_기본`이다 —
+        // 상세의 대표 이미지 판정과 소유자가 나중에 올리는 `{이름}_웃음` 같은 이름이 같은 규칙을 쓴다.
+        val firstImages = characters.mapNotNull { character ->
+            uploadedImages[character.name]?.url?.let { url ->
+                StoryCharacterImage(
+                    character = character,
+                    imageName = StoryCharacterImage.defaultImageNameOf(character.name),
+                    imageUrl = url,
+                    sortOrder = 0,
+                )
+            }
+        }
+        if (firstImages.isNotEmpty()) {
+            storyCharacterImageRepository.saveAll(firstImages)
+        }
     }
 
     private fun findSelectedPredefinedTags(
