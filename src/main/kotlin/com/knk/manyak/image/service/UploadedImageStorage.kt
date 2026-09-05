@@ -7,8 +7,8 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.S3Configuration
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest
-import software.amazon.awssdk.services.s3.model.NoSuchKeyException
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.S3Exception
 import software.amazon.awssdk.services.s3.presigner.S3Presigner
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest
 import java.net.URI
@@ -74,7 +74,8 @@ class S3UploadedImageStorage(
         }
     }
 
-    private val client: S3Client? by lazy {
+    // protected는 테스트가 가짜 S3 클라이언트로 갈아끼우기 위한 최소 이음매다.
+    protected open val client: S3Client? by lazy {
         if (!configured) {
             null
         } else {
@@ -118,12 +119,19 @@ class S3UploadedImageStorage(
         return try {
             s3.headObject(HeadObjectRequest.builder().bucket(bucket).key(objectKey).build())
                 .let { UploadedObject(contentType = it.contentType(), contentLength = it.contentLength() ?: 0L) }
-        } catch (ignored: NoSuchKeyException) {
-            // 아직 PUT하지 않았거나 다른 키다. 호출부가 400 UPLOAD_NOT_FOUND로 바꾼다.
-            null
+        } catch (e: S3Exception) {
+            // HEAD 응답에는 본문이 없어 SDK가 오류 코드를 읽지 못한다. 그래서 없는 객체가 NoSuchKeyException이
+            // 아니라 404를 담은 S3Exception으로 온다(NoSuchKeyException도 그 하위라 이 분기가 함께 덮는다).
+            // 아직 PUT하지 않았거나 다른 키인 정상 흐름이므로 호출부가 400 UPLOAD_NOT_FOUND로 바꾼다.
+            // 403 같은 다른 상태는 권한·설정 문제다. "없음"으로 뭉개면 원인이 가려지므로 그대로 던진다.
+            if (e.statusCode() == HTTP_NOT_FOUND) null else throw e
         }
     }
 
     override fun serveUrlOf(objectKey: String): String? =
         if (configured) "${baseUrl.trimEnd('/')}/$objectKey" else null
+
+    private companion object {
+        const val HTTP_NOT_FOUND = 404
+    }
 }
