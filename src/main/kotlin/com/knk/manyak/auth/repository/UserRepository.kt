@@ -30,6 +30,32 @@ interface UserRepository : JpaRepository<User, Long> {
     fun findByIdForUpdate(@Param("id") id: Long): User?
 
     /**
+     * 정규화 키(KNK-1147)로 닉네임이 이미 쓰이는지 본다. **V75 유니크 인덱스와 같은 식**을 써야 사전 조회와
+     * 저장 결과가 어긋나지 않는다(`replace(lower(nickname), ' ', '')` — [com.knk.manyak.user.service.nicknameKeyOf]).
+     * 가입 발급이 쓰는 형태로, 제외할 자기 자신이 없다.
+     */
+    @Query(
+        value = "SELECT EXISTS (SELECT 1 FROM users u WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey)",
+        nativeQuery = true,
+    )
+    fun existsByNicknameKey(@Param("nicknameKey") nicknameKey: String): Boolean
+
+    /** 위와 같되 **자기 자신은 제외**한다(대소문자·공백만 바꾸는 변경을 막지 않기 위해). */
+    @Query(
+        value = """
+        SELECT EXISTS (
+            SELECT 1 FROM users u
+            WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey AND u.id <> :selfId
+        )
+        """,
+        nativeQuery = true,
+    )
+    fun existsByNicknameKeyExcludingSelf(
+        @Param("nicknameKey") nicknameKey: String,
+        @Param("selfId") selfId: Long,
+    ): Boolean
+
+    /**
      * 출석 리마인드 푸시 대상(KNK-1116, 광고성 알림). 다음을 모두 만족하는 회원이다.
      * - `ACTIVE`(정지·탈퇴 제외)
      * - 광고 수신에 동의함(`marketing_push_agreed_at IS NOT NULL` — V73, 정책 KNK-1129)

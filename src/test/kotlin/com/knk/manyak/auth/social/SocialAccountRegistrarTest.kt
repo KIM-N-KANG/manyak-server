@@ -27,18 +27,21 @@ import java.util.Optional
  * provider는 인자로 받으므로 Google·Kakao 양쪽에 같은 계약이 적용되는지 함께 본다(스펙 §4-5 — 흐름은 provider 무관).
  *
  * - findExistingUser: 연동이 있으면 lastLoginAt 갱신 + User 반환, 없으면 null, User 부재면 401.
- * - createUserAndAccount: 닉네임을 [NicknameGenerator]로 발급해(소셜 클레임과 무관) User+SocialAccount를 생성한다.
+ * - createUserAndAccount: 닉네임을 [UniqueNicknameIssuer]로 발급해(소셜 클레임과 무관) User+SocialAccount를 생성한다.
  */
 class SocialAccountRegistrarTest {
 
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
 
-    // 닉네임 발급은 결정적 고정값으로 스텁해, 레지스트라가 생성기 결과를 그대로 쓰는지만 검증한다.
-    private val nicknameGenerator = NicknameGenerator { GeneratedNickname(GENERATED_NICKNAME, GENERATED_NOUN) }
+    // 닉네임 발급은 결정적 고정값으로 스텁해, 레지스트라가 발급기 결과를 그대로 쓰는지만 검증한다.
+    // 유일성 재시도는 UniqueNicknameIssuerTest가 따로 본다(여기서는 발급 결과 사용만 관심사).
+    private val uniqueNicknameIssuer: UniqueNicknameIssuer = mock(UniqueNicknameIssuer::class.java).also {
+        `when`(it.issue()).thenReturn(GeneratedNickname(GENERATED_NICKNAME, GENERATED_NOUN))
+    }
     private val profileImagePresetService: ProfileImagePresetService = mock(ProfileImagePresetService::class.java)
     private val registrar = SocialAccountRegistrar(
-        userRepository, socialAccountRepository, nicknameGenerator, profileImagePresetService,
+        userRepository, socialAccountRepository, uniqueNicknameIssuer, profileImagePresetService,
     )
 
     @Test

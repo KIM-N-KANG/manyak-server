@@ -40,6 +40,12 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 닉네임 변경(409): 정규화 기준(소문자·공백 제거)으로 이미 쓰는 닉네임이다(KNK-1147, 정책 KNK-1146).
+     * 대소문자·공백만 다른 값도 같은 것으로 본다 — 사칭·혼동을 막는 게 유일성의 목적이다.
+     */
+    const val NICKNAME_TAKEN = "NICKNAME_TAKEN"
+
+    /**
      * 알림 수신 동의(400): 야간 광고 수신은 광고 수신 동의 없이 단독으로 켤 수 없다(KNK-1132, 정책 KNK-1129).
      * 야간 동의는 광고 동의의 확장이라, 광고를 끈 채 야간만 켠 상태는 발송 판정에서 의미가 없다.
      */

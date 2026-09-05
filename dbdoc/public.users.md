@@ -42,6 +42,7 @@
 | users_pkey | CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id) |
 | uq_users_public_id | CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id) |
 | uq_users_invite_code | CREATE UNIQUE INDEX uq_users_invite_code ON public.users USING btree (invite_code) |
+| uq_users_nickname_key | CREATE UNIQUE INDEX uq_users_nickname_key ON public.users USING btree (replace(lower((nickname)::text), ' '::text, ''::text)) |
 
 ## Relations
 
