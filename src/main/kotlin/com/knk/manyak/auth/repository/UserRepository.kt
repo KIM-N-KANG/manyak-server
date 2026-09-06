@@ -90,6 +90,35 @@ interface UserRepository : JpaRepository<User, Long> {
     fun findAttendanceReminderTargetIds(@Param("attendanceDate") attendanceDate: String): List<Long>
 
     /**
+     * 프로모션 푸시 대상 id(KNK-1117, 스펙 §4-3-5). 조건은 셋뿐이다.
+     *
+     * - `ACTIVE`(정지·탈퇴 제외)
+     * - 광고 수신에 동의함(`marketing_push_agreed_at IS NOT NULL` — V73, 정책 KNK-1129)
+     * - 등록된 기기 토큰이 하나라도 있음(없으면 보낼 곳이 없다)
+     *
+     * 출석 리마인드([findAttendanceReminderTargetIds])에서 "오늘 출석 미수령" 조건만 뺀 모양이다. 공통
+     * 조각으로 묶지 않은 이유: 두 쿼리의 수명이 다르다(출석 조건은 원장 스키마를 따라가고 이쪽은 따라가지
+     * 않는다). 한쪽 조건이 바뀔 때 다른 쪽 발송이 조용히 달라지는 결합이 중복보다 비싸다.
+     *
+     * **야간 판정은 여기서 하지 않는다.** 야간 동의 여부는 회원마다 발송 직전에
+     * [com.knk.manyak.auth.entity.User.canReceiveMarketingPush]로 본다 — 야간에 예약된 캠페인은 거부·연기가
+     * 아니라 **야간 동의자에게만** 나가고, 나머지는 `skipped_count`로 남아야 하기 때문이다.
+     *
+     * 엔티티가 아니라 id만 돌려주는 이유도 출석과 같다: 호출부가 발송 직전에 다시 읽으므로 스냅샷이 쓸모없다.
+     */
+    @Query(
+        value = """
+        SELECT u.id FROM users u
+        WHERE u.status = 'ACTIVE'
+          AND u.marketing_push_agreed_at IS NOT NULL
+          AND EXISTS (SELECT 1 FROM device_push_tokens t WHERE t.user_id = u.id)
+        ORDER BY u.id
+        """,
+        nativeQuery = true,
+    )
+    fun findMarketingPushTargetIds(): List<Long>
+
+    /**
      * [id] 회원의 **보상 신원**(`coalesce(reward_identity_user_id, id)`)을 돌려준다(KNK-1053).
      * 1회성 보상의 멱등 키를 user_id가 아니라 이 값으로 만들어야, 재가입이 user_id를 갈아치워도 키가 리셋되지 않는다.
      * 회원이 없으면 null(호출부가 원래 id로 폴백한다).
