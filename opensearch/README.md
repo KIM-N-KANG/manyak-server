@@ -166,3 +166,42 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 
 - `number_of_replicas: 0`은 단일 노드 기준입니다. 노드가 둘 이상이면 KNK-854에서 올립니다.
 - 보관 정책(ISM)은 여기 없습니다. 도메인을 만드는 KNK-854에서 함께 적용합니다.
+
+## 스토리 검색 인덱스
+
+[KNK-1141](https://kimandkang.atlassian.net/browse/KNK-1141)의 검색은 로그 도메인에 `stories-dev`·`stories-prod`를 추가합니다. PostgreSQL이 정본이며 검색 문서는 재생성할 수 있는 파생 사본입니다. Flyway·dbdoc 변경은 없습니다.
+
+### 환경별 최초 설정
+
+관리자 셸에서 기존 `setup.sh`와 같은 `OS_URL` basic auth 패턴을 사용합니다. 자격증명이 들어간 URL은 문서·로그에 출력하지 않습니다. `setup-search.sh`는 `curl`·`jq`가 필요합니다.
+
+1. 관리자 인증을 포함한 `OS_URL`, 환경 `ENV=dev` 또는 `prod`, 그 환경 ECS 태스크 역할 `TASK_ROLE_ARN`을 설정합니다.
+2. `curl --fail --silent --show-error "${OS_URL%/}/_cat/plugins?v"`로 **analysis-nori** 설치를 확인합니다. 없으면 해당 Amazon OpenSearch 버전의 지원 패키지 설치 절차로 먼저 활성화합니다. 운영 매핑에는 standard 폴백이 없습니다.
+3. `./opensearch/setup-search.sh`로 `manyak-search-${ENV}` 역할을 생성합니다. 인덱스 권한은 `stories-${ENV}*`의 `crud`·`create_index`, 클러스터 권한은 `cluster_composite_ops`입니다. 역할 매핑의 `backend_roles`를 `TASK_ROLE_ARN` 하나로 설정합니다.
+4. 태스크 IAM 정책의 `es:ESHttp*`와 도메인 접근 정책을 확인합니다. dev는 FireLens 권한을 재사용합니다. prod는 [KNK-857](https://kimandkang.atlassian.net/browse/KNK-857) 연동 전이면 `manyak-terraform`에서 해당 권한을 먼저 반영해야 합니다.
+5. 아래 설정으로 서버를 기동합니다. 태스크 정의의 환경변수 추가는 Terraform 반영이 필요하며 앱 이미지 배포만으로 추가되지 않습니다.
+
+| 환경변수 | 기본값 | 의미 |
+| --- | --- | --- |
+| `MANYAK_OPENSEARCH_ENDPOINT` | 빈 값 | `https://`·경로 없는 호스트. 빈 값이면 검색 503, 색인 no-op |
+| `AWS_REGION` | `ap-northeast-2` | SigV4 서명 리전 |
+| `MANYAK_OPENSEARCH_STORY_INDEX` | `stories-dev` | prod는 반드시 `stories-prod` |
+| `MANYAK_OPENSEARCH_REINDEX_ON_STARTUP` | `false` | `true`로 기동하면 전체 스토리를 500개씩 bulk 재색인 |
+
+서버 클라이언트는 `opensearch-java 3.10.0` + `AwsSdk2Transport`이며 자격증명은 AWS 기본 체인(운영 태스크 역할)으로 구합니다. JSON은 JSON-B(`JsonbJsonpMapper`, Yasson 3.0.5)로 처리하므로 Spring Jackson 3 매퍼에 영향을 주지 않습니다.
+
+### 색인과 복구
+
+매핑은 `src/main/resources/opensearch/stories-index.json`입니다. 제목·한 줄 소개·인물명은 nori mixed 분해와 품사 필터·lowercase를 쓰고 장르는 keyword입니다. `author`는 `enabled:false`로 원문만 저장하며, 내부 PK인 `author.id`는 기존 카드와 같이 null입니다. 검색 문서에 없는 `profileImageUrl`도 검색 카드에서는 null입니다.
+
+스토리 제작·수정·공개 전환·삭제·표지 삭제·좋아요/취소·작성자 닉네임 변경이 커밋되면 비동기로 다시 색인합니다. 발행·공개·미삭제·회원 소유 조건을 모두 만족할 때만 `visible=true`입니다. 삭제와 비공개 전환도 문서를 없애지 않고 false로 다시 씁니다. 쓰기 실패는 warn 로그만 남깁니다. 저장 응답이 성공해도 검색 반영은 비동기 실행과 OpenSearch refresh 이후입니다.
+
+검색 응답은 인덱스의 `visible`만 신뢰하지 않습니다. 후보 publicId를 DB에서 한 번 배치 조회해 같은 네 조건을 다시 확인하고, 공개가 철회된 문서는 카드에서 제외한 뒤 동기 재색인합니다. 재색인이 실패해도 문서는 응답에서 제외됩니다. 페이지 커서는 필터 전 마지막 hit를 기준으로 하므로 빈 items와 다음 커서가 함께 올 수 있습니다. 클라이언트는 nextCursor가 null일 때 마지막 페이지로 판단합니다.
+
+초기 적재나 색인 실패 복구 시 `MANYAK_OPENSEARCH_REINDEX_ON_STARTUP=true`로 기동하고 `스토리 재색인 완료 (indexed=…, failed=…)` 로그를 확인합니다. **작업 후 false로 되돌립니다.** 매핑을 바꿀 때는 대상 환경의 검색 인덱스만 삭제한 뒤 재색인합니다. 로그 인덱스는 대상이 아닙니다. 재색인 중에는 일부 결과만 보일 수 있고, 페이지 사이 점수가 변하면 중복·누락이 가능합니다.
+
+### 검증
+
+`http/story/story-search.http`를 위에서부터 실행합니다. 검색은 `multi_match(title^3, oneLineIntro, genres, characterNames)` + `visible=true`, 정렬은 점수 내림차순·생성 밀리초 내림차순·UUID 오름차순입니다. 커서는 같은 trim 검색어에서만 사용할 수 있습니다. 빈 결과는 200이고, 검색어/커서 오류는 400, 미설정·검색 연결 장애는 503입니다.
+
+`StorySearchOpenSearchTests`는 일회용 OpenSearch 2.19.4에서 비공개 제외·제목 관련도·search_after를 검증합니다. Docker가 없으면 스킵하고, 이미지에 nori가 없으면 **테스트 매핑만** standard로 바꾸며 결과 로그에 표시합니다. dev에서는 `_cat/plugins`와 `_analyze`로 `이야기꾼의` 같은 조사 포함 입력을 직접 확인하고, 태스크 역할로 색인 생성·읽기·쓰기·bulk 권한까지 검수해야 합니다.

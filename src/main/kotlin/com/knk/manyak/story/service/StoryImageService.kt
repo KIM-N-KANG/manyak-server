@@ -1,5 +1,7 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.UploadedImageKind
@@ -33,6 +35,7 @@ import java.time.Duration
  */
 @Service
 class StoryImageService(
+    private val eventPublisher: ApplicationEventPublisher,
     private val storyImageAccess: StoryImageAccess,
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val uploadedImageStorage: UploadedImageStorage,
@@ -71,6 +74,7 @@ class StoryImageService(
         story.thumbnailImageUrl = null
         // 상태도 되돌린다. 남겨 두면 다음에 올린 표지가 옛 판정(PENDING·REJECTED)을 물려받아 안 보인다.
         story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }
 
     fun addCharacterImage(

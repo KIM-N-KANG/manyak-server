@@ -14,6 +14,8 @@ import java.time.Instant
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
+    @Query("SELECT s.id FROM Story s WHERE s.userId = :userId")
+    fun findIdsByUserId(@Param("userId") userId: Long): List<Long>
 
     // KNK-447: 회원 서재(내 스토리 목록). 요청자 소유·미삭제만 생성 최신순으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId: Long, pageable: Pageable): List<Story>
@@ -37,6 +39,9 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM Story s WHERE s.publicId = :publicId AND s.deletedAt IS NULL")
     fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): Story?
+
+    // 검색 게이트와 오래된 색인 복구에 사용한다. 삭제된 행도 읽어 내부 id로 visible=false 재색인한다.
+    fun findAllByPublicIdIn(publicIds: Collection<UUID>): List<Story>
 
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<Story>
 

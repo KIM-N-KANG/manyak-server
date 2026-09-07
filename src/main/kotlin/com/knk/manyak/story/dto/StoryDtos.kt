@@ -36,7 +36,7 @@ data class StoryPageResponse(
     val items: List<StorySummaryResponse>,
 
     @field:Schema(
-        description = "다음 페이지 커서. 다음 페이지가 없으면 null이다. 다음 요청에 sort를 그대로 두고 이 값을 cursor로 넘긴다.",
+        description = "다음 페이지 커서. 다음 페이지가 없으면 null이다. 다음 요청에 목록의 sort 또는 검색의 q를 그대로 두고 이 값을 cursor로 넘긴다.",
         example = "bDoxNzgxNjUxMjAwMDAwOjNmMjUwNGUwLTRmODktNDFkMy05YTBjLTAzMDVlODJjMzMwMQ",
         nullable = true,
     )

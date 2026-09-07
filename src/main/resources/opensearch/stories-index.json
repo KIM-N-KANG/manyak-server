@@ -1,0 +1,90 @@
+{
+  "settings": {
+    "analysis": {
+      "tokenizer": {
+        "korean_tokenizer": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed"
+        }
+      },
+      "filter": {
+        "korean_pos": {
+          "type": "nori_part_of_speech",
+          "stoptags": [
+            "E",
+            "J",
+            "SC",
+            "SE",
+            "SF",
+            "SP",
+            "SSC",
+            "SSO",
+            "SY"
+          ]
+        }
+      },
+      "analyzer": {
+        "korean": {
+          "type": "custom",
+          "tokenizer": "korean_tokenizer",
+          "filter": [
+            "korean_pos",
+            "lowercase"
+          ]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "publicId": {
+        "type": "keyword"
+      },
+      "genres": {
+        "type": "keyword"
+      },
+      "thumbnailUrlSm": {
+        "type": "keyword",
+        "index": false
+      },
+      "author": {
+        "type": "object",
+        "enabled": false,
+        "properties": {
+          "id": {
+            "type": "long"
+          },
+          "nickname": {
+            "type": "keyword"
+          }
+        }
+      },
+      "turnCount": {
+        "type": "long"
+      },
+      "likeCount": {
+        "type": "long"
+      },
+      "createdAt": {
+        "type": "date",
+        "format": "epoch_millis"
+      },
+      "visible": {
+        "type": "boolean"
+      },
+      "title": {
+        "type": "text",
+        "analyzer": "korean"
+      },
+      "oneLineIntro": {
+        "type": "text",
+        "analyzer": "korean"
+      },
+      "characterNames": {
+        "type": "text",
+        "analyzer": "korean"
+      }
+    }
+  }
+}

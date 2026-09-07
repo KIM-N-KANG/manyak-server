@@ -1,5 +1,8 @@
 package com.knk.manyak.user.service
 
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.repository.StoryRepository
+import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.service.MeResponseAssembler
@@ -66,6 +69,8 @@ class UserProfileService(
  */
 @Component
 class ProfileUpdater(
+    private val stories: StoryRepository,
+    private val events: ApplicationEventPublisher,
     private val userRepository: UserRepository,
     private val profileImagePresetService: ProfileImagePresetService,
     private val meResponseAssembler: MeResponseAssembler,
@@ -99,6 +104,11 @@ class ProfileUpdater(
         // 위반을 커밋까지 미루지 않고 여기서 드러낸다(어디서 깨졌는지가 분명해진다). 잡지는 않는다 —
         // 변환은 트랜잭션 밖의 [UserProfileService.updateProfile] 몫이다.
         userRepository.flush()
+        if (request.nickname != null) {
+            stories.findIdsByUserId(userId).forEach {
+                events.publishEvent(StoryIndexRequestedEvent(it))
+            }
+        }
         return meResponseAssembler.assemble(user)
     }
 }

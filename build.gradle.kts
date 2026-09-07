@@ -45,6 +45,13 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     // 컴파일이 생성한 인물 이미지를 S3에 올린다(KNK-966). 스프링 BOM이 관리하지 않아 버전을 명시한다.
     implementation("software.amazon.awssdk:s3:2.46.7")
+    implementation("org.opensearch.client:opensearch-java:3.10.0")
+    implementation("software.amazon.awssdk:auth:2.46.7")
+    implementation("software.amazon.awssdk:apache-client:2.46.7")
+    // OpenSearch 전용 JSON-B. Spring의 Jackson 3 ObjectMapper 구성과 분리한다.
+    implementation("org.eclipse:yasson:3.0.5")
+    testImplementation("org.opensearch:opensearch-testcontainers:4.1.0")
+    testImplementation("org.testcontainers:testcontainers:2.0.3")
     // FCM 푸시 발송(KNK-1130). HTTP v1 인증(서비스 계정 OAuth 토큰 발급·갱신)을 SDK에 맡긴다.
     implementation("com.google.firebase:firebase-admin:9.10.0") {
         // FCM만 쓴다. Firestore·Storage 클라이언트는 gRPC·netty·gax를 통째로 끌고 와 jar를 수십 MB 불리므로 뺀다.
