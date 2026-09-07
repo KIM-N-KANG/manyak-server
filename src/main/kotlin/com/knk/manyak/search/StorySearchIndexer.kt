@@ -4,8 +4,6 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -41,8 +39,7 @@ class StorySearchDocumentReader(
         author = story.userId?.let { users.findById(it).orElse(null) }?.let { StorySearchAuthor(nickname = it.nickname) },
         turnCount = chats.sumCurrentTurnByStoryId(story.id), likeCount = likes.countByStoryId(story.id),
         createdAt = story.createdAt.toEpochMilli(),
-        visible = story.status == StoryStatus.PUBLISHED && story.visibility == StoryVisibility.PUBLIC &&
-            story.deletedAt == null && story.userId != null,
+        visible = story.isPubliclyListed(),
     )
 }
 

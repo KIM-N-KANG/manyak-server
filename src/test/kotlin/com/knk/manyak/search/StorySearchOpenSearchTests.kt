@@ -1,5 +1,9 @@
 package com.knk.manyak.search
 
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryRepository
+import org.mockito.Mockito.*
 import org.apache.hc.core5.http.HttpHost
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -36,7 +40,13 @@ class StorySearchOpenSearchTests {
                     documents.forEach { document -> bulk.operations { op -> op.index { it.index(index).id(document.publicId).document(document) } } }
                     assertFalse(client.bulk(bulk.build()).errors())
                     client.indices().refresh { it.index(index) }
-                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index))
+                    // 검색 엔진 검증은 실제 컨테이너로, DB 게이트는 위 문서에 대응하는 정본 픽스처로 분리한다.
+                    val repository = mock(StoryRepository::class.java)
+                    `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
+                        Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
+                            visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
+                    })
+                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java))
                     val first = service.search("왕국", 1, null)
                     assertEquals(documents[0].publicId, first.items.single().id)
                     assertNotNull(first.nextCursor)

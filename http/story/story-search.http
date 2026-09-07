@@ -91,5 +91,27 @@ GET {{baseUrl}}/api/v1/stories/search?q=왕국
   });
 %}
 
+### 공개 철회 직후 검색 게이트(2번 준비 스토리, 색인 반영을 기다리지 않고 다음 요청 실행)
+PATCH {{baseUrl}}/api/v1/stories/{{searchStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"visibility":"PRIVATE"}
+
+> {%
+  client.test("비공개 전환", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 비공개 문서는 색인 지연·실패와 관계없이 제외
+GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=50
+
+> {%
+  client.test("철회된 스토리 비노출", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(!response.body.items.some(x => x.id === client.global.get("searchStoryId")),
+      `비공개 스토리가 노출됐습니다. actual=${JSON.stringify(response.body)}`);
+  });
+%}
+
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/search?q=판타지&limit=20

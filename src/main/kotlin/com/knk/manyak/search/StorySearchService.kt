@@ -1,6 +1,8 @@
 package com.knk.manyak.search
 
 import com.knk.manyak.story.dto.StoryPageResponse
+import com.knk.manyak.story.repository.StoryRepository
+import java.util.UUID
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch._types.SortOrder
 import org.opensearch.client.opensearch._types.query_dsl.TextQueryType
@@ -11,7 +13,12 @@ import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
 
 @Service
-class StorySearchService(private val client: OpenSearchClient?, private val properties: StorySearchProperties) {
+class StorySearchService(
+    private val client: OpenSearchClient?,
+    private val properties: StorySearchProperties,
+    private val stories: StoryRepository,
+    private val indexer: StorySearchIndexer,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun search(q: String, limit: Int, cursor: String?): StoryPageResponse {
@@ -41,8 +48,22 @@ class StorySearchService(private val client: OpenSearchClient?, private val prop
         }
         val hits = response.hits().hits()
         val page = hits.take(pageSize)
+        val documents = page.mapNotNull { it.source() }
+        val publicIds = documents.mapNotNull { runCatching { UUID.fromString(it.publicId) }.getOrNull() }.distinct()
+        // 파생 visible은 지연·실패로 낡을 수 있다. 정본을 한 번 조회해 공개 철회를 응답 전에 차단한다.
+        val currentStories = if (publicIds.isEmpty()) emptyList() else stories.findAllByPublicIdIn(publicIds)
+        val visibleIds = currentStories.filter { it.isPubliclyListed() }.map { it.publicId.toString() }.toSet()
+        currentStories.filterNot { it.isPubliclyListed() }.forEach { story ->
+            try {
+                // 검색에는 원 트랜잭션이 없으므로 AFTER_COMMIT 이벤트가 아닌 동기 호출로 복구한다.
+                indexer.index(story.id)
+            } catch (ex: Exception) {
+                log.warn("검색 비공개 문서 재색인 실패 (storyId={}, error={})", story.id, ex.javaClass.simpleName)
+            }
+        }
         return StoryPageResponse(
-            items = page.map { requireNotNull(it.source()).toSummary() },
+            items = documents.filter { it.publicId in visibleIds }.map { it.toSummary() },
+            // 필터 전 마지막 hit로 진행한다. 전부 제외돼 빈 페이지여도 다음 후보를 계속 탐색할 수 있다.
             nextCursor = if (hits.size > pageSize) StorySearchCursor.fromSort(page.last().sort()).encode(query) else null,
         )
     }

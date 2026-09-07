@@ -40,6 +40,9 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query("SELECT s FROM Story s WHERE s.publicId = :publicId AND s.deletedAt IS NULL")
     fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): Story?
 
+    // 검색 게이트와 오래된 색인 복구에 사용한다. 삭제된 행도 읽어 내부 id로 visible=false 재색인한다.
+    fun findAllByPublicIdIn(publicIds: Collection<UUID>): List<Story>
+
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<Story>
 
     // KNK-975: 마냑 오리지널 스토리 목록. 공식 계정 소유의 공개(PUBLISHED∧PUBLIC)·미삭제 스토리를 등록순으로 조회한다.

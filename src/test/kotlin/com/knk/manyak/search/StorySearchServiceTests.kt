@@ -12,7 +12,11 @@ import java.util.UUID
 class StorySearchServiceTests {
     @Test
     fun `미설정 검색은 503이고 유효하지 않은 입력은 먼저 400이다`() {
-        val service = StorySearchService(null, StorySearchProperties())
+        val service = StorySearchService(
+            null, StorySearchProperties(),
+            org.mockito.Mockito.mock(com.knk.manyak.story.repository.StoryRepository::class.java),
+            org.mockito.Mockito.mock(StorySearchIndexer::class.java),
+        )
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
             service.search("왕국", 20, null)
         }.statusCode)

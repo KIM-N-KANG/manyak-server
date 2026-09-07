@@ -103,6 +103,8 @@ class StorySearchControllerIntegrationTests {
             thumbnailUrlSm = "https://example.com/small.png", author = StorySearchAuthor(nickname = "작가"),
             turnCount = 12, likeCount = 3, createdAt = 1780000000000, visible = true,
         )
+        val owner = users.save(User(nickname = "카드작가", status = UserStatus.ACTIVE))
+        stories.save(Story(publicId = UUID.fromString(document.publicId), userId = owner.id, title = document.title))
         val values = listOf(FieldValue.of(3.5), FieldValue.of(document.createdAt), FieldValue.of(document.publicId))
         val hit = Hit.Builder<StorySearchDocument>().index("stories-dev").id(document.publicId).source(document).sort(values).build()
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenReturn(response(listOf(hit, hit)))
@@ -120,6 +122,48 @@ class StorySearchControllerIntegrationTests {
             .exchange().expectStatus().isBadRequest
         client.get().uri("/api/v1/stories/search?q=왕국&cursor=broken").exchange().expectStatus().isBadRequest
     }
+
+    @Test
+    fun `색인에 남은 비공개 스토리는 DB 게이트로 제외하고 즉시 재색인한다`() {
+        val user = users.save(User(nickname = "철회작가", status = UserStatus.ACTIVE))
+        val visible = stories.save(Story(userId = user.id, title = "공개 왕국"))
+        val withdrawn = stories.save(Story(userId = user.id, title = "비공개 왕국", visibility = StoryVisibility.PRIVATE))
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(visible), staleHit(withdrawn))))
+        val body = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+        assertEquals(listOf(visible.publicId.toString()), body.items.map { it.id })
+        verify(indexer).index(withdrawn.id)
+        verify(indexer, never()).index(visible.id)
+    }
+
+    @Test
+    fun `삭제 초안 게스트 부재 문서는 숨기고 빈 페이지 커서는 필터 전 hit를 따른다`() {
+        val user = users.save(User(nickname = "게이트작가", status = UserStatus.ACTIVE))
+        val hidden = listOf(
+            Story(userId = user.id, title = "삭제 왕국", deletedAt = Instant.now()),
+            Story(userId = user.id, title = "초안 왕국", status = StoryStatus.DRAFT),
+            Story(title = "게스트 왕국"),
+        ).map(stories::save)
+        val missing = Story(title = "없는 왕국")
+        val last = staleHit(missing)
+        val extra = staleHit(hidden.first())
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(hidden.map(::staleHit) + last + extra))
+        doThrow(IllegalStateException("unavailable")).`when`(indexer).index(hidden.first().id)
+        val body = client.get().uri("/api/v1/stories/search?q=왕국&limit=4").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+        assertTrue(body.items.isEmpty())
+        assertEquals(StorySearchCursor.fromSort(last.sort()).encode("왕국"), body.nextCursor)
+        hidden.forEach { verify(indexer).index(it.id) }
+        verifyNoMoreInteractions(indexer)
+    }
+
+    private fun staleHit(story: Story): Hit<StorySearchDocument> = Hit.Builder<StorySearchDocument>()
+        .index("stories-dev").id(story.publicId.toString())
+        .source(StorySearchDocument(publicId = story.publicId.toString(), title = story.title, visible = true))
+        .sort(listOf(FieldValue.of(2.0), FieldValue.of(story.createdAt.toEpochMilli()), FieldValue.of(story.publicId.toString())))
+        .build()
 
     @Test
     fun `색인 실패는 검색 503으로 응답한다`() {
