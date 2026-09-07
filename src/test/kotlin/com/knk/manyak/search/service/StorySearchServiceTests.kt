@@ -6,7 +6,7 @@ import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import org.opensearch.client.json.jsonb.JsonbJsonpMapper
+import com.knk.manyak.search.config.StorySearchConfig
 import org.opensearch.client.opensearch._types.FieldValue
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
@@ -79,8 +79,8 @@ class StorySearchServiceTests {
     }
 
     @Test
-    fun `JSON B 매퍼는 카드 문서를 왕복하고 Spring Jackson 빈을 필요로 하지 않는다`() {
-        val mapper = JsonbJsonpMapper()
+    fun `OpenSearch 전용 Jackson 매퍼는 카드 문서를 왕복하고 Spring 빈을 필요로 하지 않는다`() {
+        val mapper = StorySearchConfig.searchJsonMapper()
         val document = StorySearchDocument(publicId = UUID.randomUUID().toString(), title = "왕국", author = StorySearchAuthor(nickname = "작가"), visible = true)
         val writer = StringWriter()
         mapper.jsonProvider().createGenerator(writer).use { mapper.serialize(document, it) }

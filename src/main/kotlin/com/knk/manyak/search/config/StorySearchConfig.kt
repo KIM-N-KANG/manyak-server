@@ -1,6 +1,6 @@
 package com.knk.manyak.search.config
 
-import org.opensearch.client.json.jsonb.JsonbJsonpMapper
+import org.opensearch.client.json.jackson.JacksonJsonpMapper
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.transport.aws.AwsSdk2Transport
 import org.opensearch.client.transport.aws.AwsSdk2TransportOptions
@@ -41,8 +41,15 @@ class StorySearchConfig {
         return OpenSearchClient(
             AwsSdk2Transport(
                 requireNotNull(storySearchHttpClient), properties.endpoint.trim(), Region.of(properties.region),
-                AwsSdk2TransportOptions.builder().setMapper(JsonbJsonpMapper()).build(),
+                AwsSdk2TransportOptions.builder().setMapper(searchJsonMapper()).build(),
             ),
         )
+    }
+
+    companion object {
+        // AWS transport의 NDJSON bulk는 여러 루트 JSON을 쓴다. JSON-B generator는 이를 거부한다.
+        // 이 Jackson 2 매퍼는 OpenSearch 전용이며 Spring Jackson 3 빈으로 등록하지 않는다.
+        fun searchJsonMapper(): JacksonJsonpMapper =
+            JacksonJsonpMapper(com.fasterxml.jackson.databind.ObjectMapper())
     }
 }
