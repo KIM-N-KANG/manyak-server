@@ -42,7 +42,6 @@ class AttendanceReminderService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun sendReminders(): AttendanceReminderResult {
-        val now = clock.instant()
         val today = LocalDate.now(clock.withZone(SEOUL_ZONE))
         val targetIds = userRepository.findAttendanceReminderTargetIds(today.toString())
         if (targetIds.isEmpty()) {
@@ -63,8 +62,11 @@ class AttendanceReminderService(
         var skipped = 0
         targetIds.forEach { userId ->
             // 발송 직전 재조회. 조회 시점의 스냅샷을 믿으면 회차 도중의 철회·정지·탈퇴가 반영되지 않는다.
+            // 야간 판정은 회차 시작이 아니라 **그 회원을 보내는 시점**의 시각으로 한다(KNK-1117 Codex 리뷰 P1).
+            // 09:00 발송이라 21:00 경계를 넘길 일은 거의 없지만, 발송 시각을 옮기거나 회차가 길어지면 그때
+            // 야간 동의 없는 회원에게 광고가 나간다. 프로모션 푸시와 같은 한 줄이라 함께 맞춘다.
             val user = userRepository.findById(userId).orElse(null)
-            if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(now)) {
+            if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(clock.instant())) {
                 skipped++
                 return@forEach
             }

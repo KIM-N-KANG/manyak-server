@@ -7,6 +7,7 @@ import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
@@ -47,6 +48,7 @@ class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -74,8 +76,12 @@ class PromotionPushService(
             )
             targetIds.forEach { userId ->
                 // 발송 직전 재조회. 스냅샷을 믿으면 회차 도중의 철회·정지·탈퇴가 반영되지 않는다.
+                // 야간 판정도 회차 시작 시각이 아니라 **그 회원을 보내는 시점**의 시각으로 한다(Codex 리뷰 P1):
+                // 20:59에 시작한 회차가 대상이 많거나 FCM이 느려 21:00을 넘기면, 그 뒤 회원은 야간 동의 없이
+                // 광고를 받는다(정보통신망법 제50조). 회차 시작 now는 도래 판정과 started_at에만 쓴다.
+                val at = clock.instant()
                 val user = userRepository.findById(userId).orElse(null)
-                if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(now)) {
+                if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(at)) {
                     skipped++
                     return@forEach
                 }

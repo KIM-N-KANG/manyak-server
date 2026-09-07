@@ -29,12 +29,15 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 프로모션 푸시(KNK-1117, 광고성 알림, 스펙 §4-3-5).
@@ -53,7 +56,6 @@ class PromotionPushIntegrationTests {
 
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var pushCampaignRepository: PushCampaignRepository
-    @Autowired private lateinit var promotionPushService: PromotionPushService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -80,6 +82,13 @@ class PromotionPushIntegrationTests {
             DevicePushToken(userId = user.id, token = "tok-${user.id}", platform = PushPlatform.ANDROID),
         )
     }
+
+    /**
+     * 회차마다 시각을 고정한 서비스를 만든다. 야간 판정은 회원을 보내는 **그 시점**의 시각으로 하므로,
+     * 주입된 시스템 시계를 그대로 두면 테스트를 21시 이후에 돌릴 때 결과가 달라진다.
+     */
+    private fun service(clock: Clock = Clock.fixed(NOW, ZoneOffset.UTC)) =
+        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, clock)
 
     private fun eligibleMember(nightAgreed: Boolean = false): User =
         saveMember(nightAgreed = nightAgreed).also { saveToken(it) }
@@ -112,7 +121,7 @@ class PromotionPushIntegrationTests {
         val second = eligibleMember()
         val campaign = saveCampaign()
 
-        val results = promotionPushService.sendDue(NOW)
+        val results = service().sendDue(NOW)
 
         val expected = mapOf(
             "type" to "PROMOTION",
@@ -142,7 +151,7 @@ class PromotionPushIntegrationTests {
         eligibleMember()
         val campaign = saveCampaign(scheduledAt = NOW.plusSeconds(600))
 
-        assertThat(promotionPushService.sendDue(NOW)).isEmpty()
+        assertThat(service().sendDue(NOW)).isEmpty()
 
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SCHEDULED)
@@ -153,7 +162,7 @@ class PromotionPushIntegrationTests {
         eligibleMember()
         val campaign = saveCampaign(status = PushCampaignStatus.CANCELED)
 
-        assertThat(promotionPushService.sendDue(NOW)).isEmpty()
+        assertThat(service().sendDue(NOW)).isEmpty()
 
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.CANCELED)
@@ -166,7 +175,7 @@ class PromotionPushIntegrationTests {
         saveMember(status = UserStatus.SUSPENDED).also { saveToken(it) }
         val campaign = saveCampaign()
 
-        val result = promotionPushService.sendDue(NOW).single()
+        val result = service().sendDue(NOW).single()
 
         assertThat(result.targets).isZero()
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
@@ -181,7 +190,7 @@ class PromotionPushIntegrationTests {
         val nightAgreed = eligibleMember(nightAgreed = true)
         val campaign = saveCampaign(scheduledAt = NIGHT)
 
-        val result = promotionPushService.sendDue(NIGHT).single()
+        val result = service(Clock.fixed(NIGHT, ZoneOffset.UTC)).sendDue(NIGHT).single()
 
         verify(fcmPushSender).sendToUser(eq(nightAgreed.id), anyMap())
         verify(fcmPushSender, never()).sendToUser(eq(dayOnly.id), anyMap())
@@ -201,7 +210,7 @@ class PromotionPushIntegrationTests {
             null
         }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
 
-        val result = promotionPushService.sendDue(NOW).single()
+        val result = service().sendDue(NOW).single()
 
         verify(fcmPushSender).sendToUser(eq(first.id), anyMap())
         verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap())
@@ -222,7 +231,7 @@ class PromotionPushIntegrationTests {
                 pool.submit {
                     ready.countDown()
                     ready.await(5, TimeUnit.SECONDS)
-                    promotionPushService.sendDue(NOW)
+                    service().sendDue(NOW)
                 }
             }
             futures.forEach { it.get(20, TimeUnit.SECONDS) }
@@ -240,7 +249,7 @@ class PromotionPushIntegrationTests {
         val campaign = saveCampaign()
         doThrow(IllegalStateException("FCM down")).`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
 
-        promotionPushService.sendDue(NOW)
+        service().sendDue(NOW)
 
         verify(fcmPushSender).sendToUser(eq(second.id), anyMap())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
@@ -251,12 +260,41 @@ class PromotionPushIntegrationTests {
         val campaign = saveCampaign()
         doThrow(IllegalStateException("db down")).`when`(userRepository).findMarketingPushTargetIds()
 
-        val result = promotionPushService.sendDue(NOW).single()
+        val result = service().sendDue(NOW).single()
 
         assertThat(result.failed).isTrue()
         val saved = reload(campaign)
         assertThat(saved.status).isEqualTo(PushCampaignStatus.FAILED)
         assertThat(saved.finishedAt).isNotNull()
+    }
+
+    @Test
+    fun `회차가 야간 경계를 넘으면 그 뒤 회원은 야간 판정을 받는다`() {
+        // 회차 시작 시각 하나로 전원을 판정하면, 20:59에 시작한 캠페인이 대상이 많거나 FCM이 느려 21:00을
+        // 넘길 때 야간 동의 없는 회원에게 그대로 나간다(정보통신망법 위반). 판정은 회원마다 그 시점 시각으로 한다.
+        val beforeNight = eligibleMember()
+        val afterNight = eligibleMember()
+        saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
+        val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
+        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, crossing)
+
+        val result = service.sendDue(JUST_BEFORE_NIGHT).single()
+
+        verify(fcmPushSender).sendToUser(eq(beforeNight.id), anyMap())
+        verify(fcmPushSender, never()).sendToUser(eq(afterNight.id), anyMap())
+        assertThat(result.sent).isEqualTo(1)
+        assertThat(result.skipped).isEqualTo(1)
+    }
+
+    /** 부를 때마다 다음 시각을 돌려주고, 목록이 끝나면 마지막 값을 유지한다(회차가 경계를 넘는 상황 재현). */
+    private class SteppingClock(private val instants: List<Instant>) : Clock() {
+        private val index = AtomicInteger(0)
+
+        override fun instant(): Instant = instants[minOf(index.getAndIncrement(), instants.size - 1)]
+
+        override fun getZone(): ZoneId = ZoneId.of("UTC")
+
+        override fun withZone(zone: ZoneId): Clock = this
     }
 
     private companion object {
@@ -268,5 +306,11 @@ class PromotionPushIntegrationTests {
 
         /** 야간 구간(21~08시 KST) 안의 시각. */
         val NIGHT: Instant = ZonedDateTime.of(2026, 9, 10, 22, 0, 0, 0, SEOUL_ZONE).toInstant()
+
+        /** 야간 시작 직전(20:59:50 KST) — 회차가 이 시각에 시작한다. */
+        val JUST_BEFORE_NIGHT: Instant = ZonedDateTime.of(2026, 9, 10, 20, 59, 50, 0, SEOUL_ZONE).toInstant()
+
+        /** 회차가 도는 사이 넘어간 야간 시작 직후(21:00:10 KST). */
+        val JUST_AFTER_NIGHT: Instant = ZonedDateTime.of(2026, 9, 10, 21, 0, 10, 0, SEOUL_ZONE).toInstant()
     }
 }
