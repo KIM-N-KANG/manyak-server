@@ -188,7 +188,7 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 | `MANYAK_OPENSEARCH_STORY_INDEX` | `stories-dev` | prod는 반드시 `stories-prod` |
 | `MANYAK_OPENSEARCH_REINDEX_ON_STARTUP` | `false` | `true`로 기동하면 전체 스토리를 500개씩 bulk 재색인 |
 
-서버 클라이언트는 `opensearch-java 3.10.0` + `AwsSdk2Transport`이며 자격증명은 AWS 기본 체인(운영 태스크 역할)으로 구합니다. JSON은 JSON-B(`JsonbJsonpMapper`, Yasson 3.0.5)로 처리하므로 Spring Jackson 3 매퍼에 영향을 주지 않습니다.
+서버 클라이언트는 `opensearch-java 3.10.0` + `AwsSdk2Transport`이며 자격증명은 AWS 기본 체인(운영 태스크 역할)으로 구합니다. 요청·응답은 `JacksonJsonpMapper`와 설정 클래스 내부에서 생성한 Jackson 2 `ObjectMapper`로 처리합니다. Spring 빈으로 등록하지 않아 Spring Jackson 3 매퍼와 분리됩니다. JSON-B는 로컬 인덱스 매핑 파일 파싱에만 사용합니다. AWS transport의 NDJSON bulk는 여러 루트 JSON을 쓰는데 JSON-B generator는 이를 거부하므로 전송용으로 사용하지 않습니다.
 
 ### 색인과 복구
 
@@ -206,4 +206,4 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 
 `http/story/story-search.http`를 위에서부터 실행합니다. 검색은 `multi_match(title^3, oneLineIntro, genres, characterNames)` + `visible=true`, 정렬은 점수 내림차순·생성 밀리초 내림차순·UUID 오름차순입니다. 커서는 같은 trim 검색어에서만 사용할 수 있습니다. `index_not_found_exception`은 `items=[]`, `nextCursor=null`의 200이며, 다른 저장소 오류는 503입니다. 빈 결과는 200이고, 검색어/커서 오류는 400, 미설정·검색 연결 장애는 503입니다.
 
-`StorySearchOpenSearchTests`는 일회용 OpenSearch 2.19.4에서 비공개 제외·제목 관련도·search_after를 검증합니다. Docker가 없으면 스킵하고, 이미지에 nori가 없으면 **테스트 매핑만** standard로 바꾸며 결과 로그에 표시합니다. dev에서는 `_cat/plugins`와 `_analyze`로 `이야기꾼의` 같은 조사 포함 입력을 직접 확인하고, 태스크 역할로 색인 생성·읽기·쓰기·bulk 권한까지 검수해야 합니다.
+`StorySearchOpenSearchTests`는 일회용 OpenSearch 2.19.4와 운영과 같은 `AwsSdk2Transport`·매퍼로 단건 색인·실제 `indexer.reindex()` bulk·검색 역직렬화·비공개 제외·제목 관련도·search_after를 검증합니다. HTTP 소켓 주소만 컨테이너로 바꾸고 테스트용 고정 자격증명을 사용합니다. Docker가 없으면 스킵하고, 이미지에 nori가 없으면 **테스트 매핑만** standard로 바꾸며 결과 로그에 표시합니다. dev에서는 `_cat/plugins`와 `_analyze`로 `이야기꾼의` 같은 조사 포함 입력을 직접 확인하고, 태스크 역할로 색인 생성·읽기·쓰기·bulk 권한까지 검수해야 합니다.

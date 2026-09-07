@@ -48,7 +48,7 @@ dependencies {
     implementation("org.opensearch.client:opensearch-java:3.10.0")
     implementation("software.amazon.awssdk:auth:2.46.7")
     implementation("software.amazon.awssdk:apache-client:2.46.7")
-    // OpenSearch 전용 JSON-B. Spring의 Jackson 3 ObjectMapper 구성과 분리한다.
+    // 로컬 인덱스 매핑 JSON 파싱용 JSON-B. 전송은 OpenSearch 전용 Jackson 2 매퍼를 사용한다.
     implementation("org.eclipse:yasson:3.0.5")
     testImplementation("org.opensearch:opensearch-testcontainers:4.1.0")
     testImplementation("org.testcontainers:testcontainers:2.0.3")

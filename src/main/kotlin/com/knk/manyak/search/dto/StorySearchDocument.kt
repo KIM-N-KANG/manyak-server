@@ -5,7 +5,7 @@ import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.entity.StoryStatus
 import java.time.Instant
 
-// JSON-B가 무인자 생성자와 setter로 읽는다. 영속 엔티티·Spring의 JSON 설정과 분리된 파생 사본이다.
+// OpenSearch 전용 Jackson 2 매퍼가 무인자 생성자와 setter로 읽는다. 영속 엔티티·Spring의 JSON 설정과 분리된 파생 사본이다.
 data class StorySearchAuthor(
     var id: Long? = null,
     var nickname: String = "",
