@@ -1,5 +1,7 @@
 package com.knk.manyak.story.service
 
+import org.springframework.context.ApplicationEventPublisher
+import com.knk.manyak.search.StoryIndexRequestedEvent
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.GeneralStartSettingInput
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional
  */
 @Service
 class GeneralStoryCreationService(
+    private val eventPublisher: ApplicationEventPublisher,
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
@@ -97,6 +100,7 @@ class GeneralStoryCreationService(
 
         // 공개(PUBLIC)로 등록하면 지금이 곧 마지막 공개 시점이다(KNK-1065). 비공개 등록이면 no-op이다.
         storyPublicSnapshotService.refresh(story)
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 
         return SimpleStoryCreateResponse(
             id = story.publicId.toString(),

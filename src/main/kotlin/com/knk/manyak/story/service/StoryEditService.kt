@@ -1,5 +1,7 @@
 package com.knk.manyak.story.service
 
+import org.springframework.context.ApplicationEventPublisher
+import com.knk.manyak.search.StoryIndexRequestedEvent
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.GeneralStartSettingInput
@@ -42,6 +44,7 @@ import java.util.UUID
  */
 @Service
 class StoryEditService(
+    private val eventPublisher: ApplicationEventPublisher,
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
@@ -144,6 +147,7 @@ class StoryEditService(
         // 자식 교체까지 모두 끝난 뒤에 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 공개 상태가 아니면 no-op이라
         // 비공개 개작은 스냅샷에 들어가지 않는다. 여기가 스토리 애그리거트를 바꾸는 유일한 수정 경로다.
         storyPublicSnapshotService.refresh(story)
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 
         return buildEditForm(story)
     }

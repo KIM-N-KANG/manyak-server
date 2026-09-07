@@ -23,6 +23,10 @@ management:
       enabled: false
 
 manyak:
+  search:
+    opensearch:
+      endpoint: ""
+      reindex-on-startup: false
   push:
     attendance-reminder:
       # 출석 리마인드 스케줄러를 끈다. 테스트는 스케줄러·서비스를 직접 호출해 실행 시점을 스스로 정한다.

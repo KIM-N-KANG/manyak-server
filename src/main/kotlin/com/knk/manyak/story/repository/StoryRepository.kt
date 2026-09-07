@@ -14,6 +14,8 @@ import java.time.Instant
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
+    @Query("SELECT s.id FROM Story s WHERE s.userId = :userId")
+    fun findIdsByUserId(@Param("userId") userId: Long): List<Long>
 
     // KNK-447: 회원 서재(내 스토리 목록). 요청자 소유·미삭제만 생성 최신순으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId: Long, pageable: Pageable): List<Story>

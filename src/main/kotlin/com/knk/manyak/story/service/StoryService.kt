@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.search.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.SuspensionGuard
@@ -20,7 +21,6 @@ import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacterImage
-import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.entity.StoryReport
 import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
@@ -49,6 +49,7 @@ import java.util.UUID
 
 @Service
 class StoryService(
+    private val storyLikeWriter: StoryLikeWriter,
     private val storyRepository: StoryRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
     private val lorebookRepository: LorebookRepository,
@@ -278,7 +279,7 @@ class StoryService(
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
         try {
-            storyLikeRepository.saveAndFlush(StoryLike(userId = userId, storyId = story.id))
+            storyLikeWriter.like(story.id, userId)
         } catch (ignored: DataIntegrityViolationException) {
             // 이미 좋아요한 스토리(또는 동시 등록 경합). 계약대로 멱등하게 통과한다.
         }
@@ -316,7 +317,7 @@ class StoryService(
     fun unlike(storyId: String, userId: Long) {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
-        storyLikeRepository.deleteByUserIdAndStoryId(userId, story.id)
+        storyLikeWriter.unlike(story.id, userId)
     }
 
     /**
@@ -334,6 +335,7 @@ class StoryService(
         }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }
 
     /**
