@@ -1,7 +1,9 @@
 package com.knk.manyak.search.event
 
 import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.service.StorySearchIndexAdmin
 import com.knk.manyak.search.service.StorySearchIndexer
+import org.opensearch.client.opensearch.OpenSearchClient
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
@@ -37,6 +39,25 @@ class StorySearchReindexRunner(private val properties: StorySearchProperties, pr
             indexer.reindex()
         } catch (ex: Exception) {
             log.warn("스토리 재색인 실패 (error={})", ex.javaClass.simpleName)
+        }
+    }
+}
+
+@Component
+class StorySearchIndexBootstrap(
+    private val client: OpenSearchClient?,
+    private val admin: StorySearchIndexAdmin,
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @Async
+    @EventListener(ApplicationReadyEvent::class)
+    fun onReady() {
+        if (client == null) return
+        try {
+            admin.ensureIndex()
+        } catch (ex: Exception) {
+            log.warn("스토리 검색 인덱스 초기화 실패 (error={})", ex.javaClass.simpleName)
         }
     }
 }

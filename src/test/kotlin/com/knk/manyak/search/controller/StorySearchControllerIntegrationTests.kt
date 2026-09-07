@@ -172,6 +172,17 @@ class StorySearchControllerIntegrationTests {
         .build()
 
     @Test
+    fun `인덱스가 아직 없으면 인증 없이 빈 검색 페이지를 반환한다`() {
+        val error = org.opensearch.client.opensearch._types.OpenSearchException(
+            org.opensearch.client.opensearch._types.ErrorResponse.Builder().status(404)
+                .error { it.type("index_not_found_exception").reason("test") }.build(),
+        )
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(error)
+        client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.items").isEmpty.jsonPath("$.nextCursor").isEmpty
+    }
+
+    @Test
     fun `색인 실패는 검색 503으로 응답한다`() {
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(java.io.IOException("unavailable"))
         client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isEqualTo(503)

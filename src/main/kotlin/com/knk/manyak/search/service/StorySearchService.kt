@@ -7,6 +7,7 @@ import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.repository.StoryRepository
 import java.util.UUID
 import org.opensearch.client.opensearch.OpenSearchClient
+import org.opensearch.client.opensearch._types.OpenSearchException
 import org.opensearch.client.opensearch._types.SortOrder
 import org.opensearch.client.opensearch._types.query_dsl.TextQueryType
 import org.opensearch.client.opensearch.core.SearchRequest
@@ -45,6 +46,9 @@ class StorySearchService(
         val response = try {
             searchClient.search(request.build(), StorySearchDocument::class.java)
         } catch (ex: Exception) {
+            if (ex is OpenSearchException && ex.error().type() == "index_not_found_exception") {
+                return StoryPageResponse(items = emptyList(), nextCursor = null)
+            }
             // 질의 원문이나 자격증명이 포함될 수 있는 외부 오류 본문은 기록하지 않는다.
             log.warn("스토리 검색 실패 (error={})", ex.javaClass.simpleName)
             throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "검색을 일시적으로 사용할 수 없습니다.")

@@ -113,5 +113,17 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=50
   });
 %}
 
+### 인덱스 미존재(격리된 검증 환경에서 아직 생성되지 않은 인덱스를 조회할 때만 실행)
+# 기동 시 인덱스 보장이 먼저 완료되면 일반 빈 결과와 같은 응답이다. 공유 인덱스를 삭제하지 않는다.
+GET {{baseUrl}}/api/v1/stories/search?q=knk1216nomatch
+
+> {%
+  client.test("미존재 인덱스는 빈 페이지", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(response.body.items.length === 0 && response.body.nextCursor === null,
+      `actual=${JSON.stringify(response.body)}`);
+  });
+%}
+
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/search?q=판타지&limit=20
