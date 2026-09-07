@@ -1,5 +1,8 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.service
 
+import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.dto.StorySearchCursor
+import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.repository.StoryRepository
 import java.util.UUID

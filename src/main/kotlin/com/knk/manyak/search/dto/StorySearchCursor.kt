@@ -1,4 +1,4 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.dto
 
 import org.opensearch.client.opensearch._types.FieldValue
 import org.springframework.http.HttpStatus

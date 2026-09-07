@@ -1,5 +1,9 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.service
 
+import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.dto.StorySearchAuthor
+import com.knk.manyak.search.dto.StorySearchCursor
+import com.knk.manyak.search.dto.StorySearchDocument
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.opensearch.client.json.jsonb.JsonbJsonpMapper

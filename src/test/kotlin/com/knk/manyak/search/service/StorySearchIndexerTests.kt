@@ -1,5 +1,9 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.service
 
+import com.knk.manyak.search.config.StorySearchConfig
+import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.dto.StorySearchDocument
+import com.knk.manyak.search.event.StorySearchReindexRunner
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor

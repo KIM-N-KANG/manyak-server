@@ -1,6 +1,6 @@
 package com.knk.manyak.story.controller
 
-import com.knk.manyak.search.StorySearchService
+import com.knk.manyak.search.service.StorySearchService
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest

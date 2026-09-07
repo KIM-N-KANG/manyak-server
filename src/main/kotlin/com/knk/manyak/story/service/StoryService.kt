@@ -1,6 +1,6 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.StoryIndexRequestedEvent
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.SuspensionGuard

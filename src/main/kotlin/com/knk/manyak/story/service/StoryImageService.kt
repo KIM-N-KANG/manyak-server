@@ -1,6 +1,6 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.StoryIndexRequestedEvent
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.image.service.ImageModerationStatus

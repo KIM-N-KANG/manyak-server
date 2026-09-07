@@ -1,5 +1,8 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.service
 
+import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.dto.StorySearchAuthor
+import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.image.service.ImageUrlResolver

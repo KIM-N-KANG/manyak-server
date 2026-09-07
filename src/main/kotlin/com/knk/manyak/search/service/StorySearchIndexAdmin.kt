@@ -1,5 +1,6 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.service
 
+import com.knk.manyak.search.config.StorySearchProperties
 import org.opensearch.client.json.jsonb.JsonbJsonpMapper
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch._types.OpenSearchException

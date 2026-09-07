@@ -1,4 +1,4 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.config
 
 import org.opensearch.client.json.jsonb.JsonbJsonpMapper
 import org.opensearch.client.opensearch.OpenSearchClient

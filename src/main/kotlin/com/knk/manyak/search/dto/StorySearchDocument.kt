@@ -1,4 +1,4 @@
-package com.knk.manyak.search
+package com.knk.manyak.search.dto
 
 import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StorySummaryResponse

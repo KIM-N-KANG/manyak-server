@@ -1,6 +1,6 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.StoryIndexRequestedEvent
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditPolicyKey

@@ -1,6 +1,6 @@
 package com.knk.manyak.user.service
 
-import com.knk.manyak.search.StoryIndexRequestedEvent
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse

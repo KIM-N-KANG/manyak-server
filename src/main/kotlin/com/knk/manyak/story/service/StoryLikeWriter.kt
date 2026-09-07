@@ -1,6 +1,6 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.StoryIndexRequestedEvent
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.repository.StoryLikeRepository
 import org.springframework.context.ApplicationEventPublisher
