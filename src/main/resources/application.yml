@@ -160,6 +160,11 @@ manyak:
       enabled: ${MANYAK_PUSH_ATTENDANCE_REMINDER_ENABLED:true}
       # 09:00 KST. zone은 코드에 Asia/Seoul로 박혀 있어 서버 타임존과 무관하게 같은 시각에 돈다.
       cron: ${MANYAK_PUSH_ATTENDANCE_REMINDER_CRON:0 0 9 * * *}
+    promotion:
+      # 프로모션 푸시(KNK-1117, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
+      enabled: ${MANYAK_PUSH_PROMOTION_ENABLED:true}
+      # 도래한 예약을 훑는 주기. 예약은 사람이 SQL로 넣으므로 분 단위 정밀도면 충분하다.
+      interval-ms: ${MANYAK_PUSH_PROMOTION_INTERVAL_MS:60000}
     template-refresh:
       # 푸시 문구 오버라이드(push_message_templates) 스냅샷 갱신 주기.
       enabled: ${MANYAK_PUSH_TEMPLATE_REFRESH_ENABLED:true}

@@ -44,6 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
 
 ## Relations
 
@@ -502,6 +503,20 @@ erDiagram
   text image_url
   integer sort_order
   varchar_20_ moderation_status
+  timestamp_with_time_zone created_at
+}
+"public.push_campaigns" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  varchar_300_ body
+  timestamp_with_time_zone scheduled_at
+  varchar_20_ status
+  integer target_count
+  integer sent_count
+  integer skipped_count
+  timestamp_with_time_zone started_at
+  timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
 }
 ```
