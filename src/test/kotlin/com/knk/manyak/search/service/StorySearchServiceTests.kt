@@ -10,16 +10,51 @@ import org.opensearch.client.json.jsonb.JsonbJsonpMapper
 import org.opensearch.client.opensearch._types.FieldValue
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
+import org.mockito.Mockito
+import org.opensearch.client.opensearch.OpenSearchClient
+import org.opensearch.client.opensearch._types.OpenSearchException
+import org.opensearch.client.opensearch._types.ErrorResponse
+import org.opensearch.client.opensearch.core.SearchRequest
+import com.knk.manyak.story.repository.StoryRepository
 import java.io.StringWriter
 import java.util.UUID
 
 class StorySearchServiceTests {
     @Test
+    fun `없는 인덱스는 빈 페이지를 반환하고 다른 저장소 오류는 503이다`() {
+        val client = Mockito.mock(OpenSearchClient::class.java)
+        val stories = Mockito.mock(StoryRepository::class.java)
+        val indexer = Mockito.mock(StorySearchIndexer::class.java)
+        val service = StorySearchService(client, StorySearchProperties(), stories, indexer)
+        fun failure(type: String, status: Int) = OpenSearchException(
+            ErrorResponse.Builder()
+                .status(status).error { it.type(type).reason("test") }.build(),
+        )
+        Mockito.`when`(client.search(
+            Mockito.any(SearchRequest::class.java),
+            Mockito.eq(StorySearchDocument::class.java),
+        )).thenThrow(failure("index_not_found_exception", 404))
+        val page = service.search("왕국", 20, null)
+        assertTrue(page.items.isEmpty())
+        assertNull(page.nextCursor)
+        Mockito.verifyNoInteractions(stories, indexer)
+        for (error in listOf(failure("security_exception", 403), failure("search_phase_execution_exception", 500), java.io.IOException("unavailable"))) {
+            Mockito.doThrow(error).`when`(client).search(
+                Mockito.any(SearchRequest::class.java),
+                Mockito.eq(StorySearchDocument::class.java),
+            )
+            assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
+                service.search("왕국", 20, null)
+            }.statusCode)
+        }
+    }
+
+    @Test
     fun `미설정 검색은 503이고 유효하지 않은 입력은 먼저 400이다`() {
         val service = StorySearchService(
             null, StorySearchProperties(),
-            org.mockito.Mockito.mock(com.knk.manyak.story.repository.StoryRepository::class.java),
-            org.mockito.Mockito.mock(StorySearchIndexer::class.java),
+            Mockito.mock(StoryRepository::class.java),
+            Mockito.mock(StorySearchIndexer::class.java),
         )
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
             service.search("왕국", 20, null)

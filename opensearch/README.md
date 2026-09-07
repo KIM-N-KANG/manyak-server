@@ -177,7 +177,7 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 
 1. 관리자 인증을 포함한 `OS_URL`, 환경 `ENV=dev` 또는 `prod`, 그 환경 ECS 태스크 역할 `TASK_ROLE_ARN`을 설정합니다.
 2. `curl --fail --silent --show-error "${OS_URL%/}/_cat/plugins?v"`로 **analysis-nori** 설치를 확인합니다. 없으면 해당 Amazon OpenSearch 버전의 지원 패키지 설치 절차로 먼저 활성화합니다. 운영 매핑에는 standard 폴백이 없습니다.
-3. `./opensearch/setup-search.sh`로 `manyak-search-${ENV}` 역할을 생성합니다. 인덱스 권한은 `stories-${ENV}*`의 `crud`·`create_index`, 클러스터 권한은 `cluster_composite_ops`입니다. 역할 매핑의 `backend_roles`를 `TASK_ROLE_ARN` 하나로 설정합니다.
+3. `./opensearch/setup-search.sh`로 `manyak-search-${ENV}` 역할을 생성합니다. 인덱스 권한은 `stories-${ENV}*` 한정 `indices_all`, 클러스터 권한은 `cluster_composite_ops`입니다. `crud`에는 인덱스 존재 확인(`indices:admin/exists`)·매핑 조회가 없어 이 권한이 필요합니다. 역할 매핑의 `backend_roles`를 `TASK_ROLE_ARN` 하나로 설정합니다.
 4. 태스크 IAM 정책의 `es:ESHttp*`와 도메인 접근 정책을 확인합니다. dev는 FireLens 권한을 재사용합니다. prod는 [KNK-857](https://kimandkang.atlassian.net/browse/KNK-857) 연동 전이면 `manyak-terraform`에서 해당 권한을 먼저 반영해야 합니다.
 5. 아래 설정으로 서버를 기동합니다. 태스크 정의의 환경변수 추가는 Terraform 반영이 필요하며 앱 이미지 배포만으로 추가되지 않습니다.
 
@@ -198,10 +198,12 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 
 검색 응답은 인덱스의 `visible`만 신뢰하지 않습니다. 후보 publicId를 DB에서 한 번 배치 조회해 같은 네 조건을 다시 확인하고, 공개가 철회된 문서는 카드에서 제외한 뒤 동기 재색인합니다. 재색인이 실패해도 문서는 응답에서 제외됩니다. 페이지 커서는 필터 전 마지막 hit를 기준으로 하므로 빈 items와 다음 커서가 함께 올 수 있습니다. 클라이언트는 nextCursor가 null일 때 마지막 페이지로 판단합니다.
 
+클라이언트가 설정되면 `ApplicationReadyEvent`에서 재색인 토글과 무관하게 인덱스 존재를 한 번 보장합니다. 실패는 warn만 남기고 기동을 막지 않습니다.
+
 초기 적재나 색인 실패 복구 시 `MANYAK_OPENSEARCH_REINDEX_ON_STARTUP=true`로 기동하고 `스토리 재색인 완료 (indexed=…, failed=…)` 로그를 확인합니다. **작업 후 false로 되돌립니다.** 매핑을 바꿀 때는 대상 환경의 검색 인덱스만 삭제한 뒤 재색인합니다. 로그 인덱스는 대상이 아닙니다. 재색인 중에는 일부 결과만 보일 수 있고, 페이지 사이 점수가 변하면 중복·누락이 가능합니다.
 
 ### 검증
 
-`http/story/story-search.http`를 위에서부터 실행합니다. 검색은 `multi_match(title^3, oneLineIntro, genres, characterNames)` + `visible=true`, 정렬은 점수 내림차순·생성 밀리초 내림차순·UUID 오름차순입니다. 커서는 같은 trim 검색어에서만 사용할 수 있습니다. 빈 결과는 200이고, 검색어/커서 오류는 400, 미설정·검색 연결 장애는 503입니다.
+`http/story/story-search.http`를 위에서부터 실행합니다. 검색은 `multi_match(title^3, oneLineIntro, genres, characterNames)` + `visible=true`, 정렬은 점수 내림차순·생성 밀리초 내림차순·UUID 오름차순입니다. 커서는 같은 trim 검색어에서만 사용할 수 있습니다. `index_not_found_exception`은 `items=[]`, `nextCursor=null`의 200이며, 다른 저장소 오류는 503입니다. 빈 결과는 200이고, 검색어/커서 오류는 400, 미설정·검색 연결 장애는 503입니다.
 
 `StorySearchOpenSearchTests`는 일회용 OpenSearch 2.19.4에서 비공개 제외·제목 관련도·search_after를 검증합니다. Docker가 없으면 스킵하고, 이미지에 nori가 없으면 **테스트 매핑만** standard로 바꾸며 결과 로그에 표시합니다. dev에서는 `_cat/plugins`와 `_analyze`로 `이야기꾼의` 같은 조사 포함 입력을 직접 확인하고, 태스크 역할로 색인 생성·읽기·쓰기·bulk 권한까지 검수해야 합니다.
