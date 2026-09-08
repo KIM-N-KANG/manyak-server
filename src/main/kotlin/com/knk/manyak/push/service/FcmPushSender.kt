@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component
  * - **data 전용** 메시지다. `notification` 필드를 실으면 백그라운드에서 OS가 알아서 띄우고 앱 코드가 돌지 않아
  *   딥링크·문구를 앱이 제어할 수 없다. 알림 UI는 앱이 조립한다(KNK-1134).
  * - 우선순위 HIGH: data 전용 메시지는 기본(normal)이면 Doze에서 미뤄져 "완료됐다"는 알림이 늦게 뜬다.
+ * - 모든 데이터에 `recipientId`(수신 회원 public_id)를 덧붙인다(KNK-1220) — 앱이 기기 공유 시 남의 알림을 거른다.
  * - 커밋 뒤에 불러야 한다. 외부 IO라 도메인 트랜잭션 안에서 부르면 롤백돼도 푸시는 이미 나간다.
  * - 정지·탈퇴 계정에는 보내지 않는다. 등록 시점에는 ACTIVE였어도 그 뒤 상태가 바뀌면 남아 있던 토큰으로
  *   알림이 계속 나간다(스펙 §4-5 B20).
@@ -49,13 +50,16 @@ class FcmPushSender(
         }
         // 정지·탈퇴 회원의 남은 토큰으로는 보내지 않는다(Codex 3차 리뷰 P2). isActiveAccessAllowed는 DELETED를
         // 통과시키므로 여기서는 쓰지 않는다 — 탈퇴 정리와 발송이 엇갈리는 창에서도 막아야 한다.
-        val status = userRepository.findById(userId).orElse(null)?.status
-        if (status != UserStatus.ACTIVE) {
-            log.debug("활성 회원이 아니라 푸시를 건너뜁니다. (userId={}, status={})", userId, status)
+        val user = userRepository.findById(userId).orElse(null)
+        if (user?.status != UserStatus.ACTIVE) {
+            log.debug("활성 회원이 아니라 푸시를 건너뜁니다. (userId={}, status={})", userId, user?.status)
             return
         }
+        // 수신자 식별(KNK-1220). 푸시는 회원이 아니라 기기로 도착하므로, 앱이 이 값을 현재 로그인 회원과 비교해
+        // 남의 알림(로그아웃 뒤 남은 토큰·늦게 도착한 메시지)을 거른다. 호출자가 같은 키를 넘겨도 여기 값이 이긴다.
+        val payload = data + (KEY_RECIPIENT_ID to user.publicId.toString())
         devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId).forEach { deviceToken ->
-            sendTo(messaging, deviceToken, data)
+            sendTo(messaging, deviceToken, payload)
         }
     }
 
@@ -111,6 +115,8 @@ class FcmPushSender(
     private fun mask(token: String): String = token.take(TOKEN_LOG_PREFIX) + "…"
 
     companion object {
+        /** 모든 시나리오 데이터에 모듈이 덧붙이는 수신 회원 `public_id` 키(스펙 §4-3-5 푸시 발송 모듈). */
+        const val KEY_RECIPIENT_ID = "recipientId"
         const val METRIC_PUSH_SEND_RESULT = "manyak.push.send.result"
         const val OUTCOME_SUCCESS = "success"
         const val OUTCOME_UNREGISTERED = "unregistered"
