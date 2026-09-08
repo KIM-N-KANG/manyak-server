@@ -127,6 +127,42 @@ manyak:
       endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
+  payment:
+    groble:
+      # 미설정 기동은 허용하되 주문 생성은 링크·시크릿 중 하나라도 비어 있으면 503이다.
+      webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
+      # 그로블 결제창 생성 후 값 채움(단일 판매자 계정이라 환경 공통), 빈 값이면 주문 생성 503
+      products:
+        - id: if_2000
+          base: 2000
+          bonus: 0
+          web-price-krw: 2000
+          app-price-krw: 2800
+          payment-url: ""
+        - id: if_5000
+          base: 5000
+          bonus: 200
+          web-price-krw: 5000
+          app-price-krw: 7000
+          payment-url: ""
+        - id: if_10000
+          base: 10000
+          bonus: 700
+          web-price-krw: 10000
+          app-price-krw: 14000
+          payment-url: ""
+        - id: if_30000
+          base: 30000
+          bonus: 3000
+          web-price-krw: 30000
+          app-price-krw: 42000
+          payment-url: ""
+        - id: if_50000
+          base: 50000
+          bonus: 6000
+          web-price-krw: 50000
+          app-price-krw: 70000
+          payment-url: ""
   credit:
     # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-08-31 재확정 · KNK-1056). 여기 값은 CreditPolicyService가
     # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).

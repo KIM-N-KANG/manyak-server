@@ -45,6 +45,7 @@
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
 | [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
+| [public.credit_orders](public.credit_orders.md) | 13 |  | BASE TABLE |
 
 ## Relations
 
@@ -97,6 +98,8 @@ erDiagram
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
+"public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -518,6 +521,21 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+}
+"public.credit_orders" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_32_ product_id
+  varchar_20_ provider
+  varchar_20_ status
+  bigint price_krw
+  bigint credit_amount
+  varchar_255_ provider_ref
+  bigint credit_transaction_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  timestamp_with_time_zone refunded_at
 }
 ```
 
