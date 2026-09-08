@@ -106,6 +106,7 @@ class SecurityConfig {
                     // 이프 수치 조회(KNK-1090)는 로그인 전 안내 화면도 읽는 공개 조회다. OPTIONAL_AUTH_MATCHERS에 있으므로
                     // permitAll을 여기 명시해야 한다(BEARER_SKIP_MATCHERS와 달리 그 배열은 permitAll에 자동 반영되지 않는다).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/products")).permitAll()
                     // 인증 없이 호출하는 공개 인증 엔드포인트(Google·Kakao 로그인, refresh 회전).
                     // - 로그인: 아직 우리 토큰이 없는 상태에서 호출한다.
                     // - refresh: access 없이 회전한다(토큰 유효성은 서비스가 검증한다).
@@ -227,6 +228,7 @@ class SecurityConfig {
             // 여기 두면 유효 토큰은 principal이 채워져 탈퇴 게이트에 걸리고, 만료·위조 토큰은 optional 필터가
             // 삼켜 로그인 전 안내 화면이 401로 깨지지도 않는다(위 GET /api/v1/shares/{shareId}와 같은 이유).
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/products"),
         )
     }
 

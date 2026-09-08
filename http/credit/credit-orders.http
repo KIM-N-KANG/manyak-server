@@ -1,0 +1,129 @@
+# KNK-1156 이프 상품 목록·웹 충전 주문 검증
+# 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun.
+# MANYAK_GROBLE_WEBHOOK_SECRET 및 상품별 MANYAK_GROBLE_PAYMENT_URL_IF_2000 등 링크 env를 설정한다.
+# 링크 기본값은 비어 있으므로 미설정 서버에서는 주문 생성이 503이다.
+# accessToken은 로그인 응답, otherAccessToken은 다른 회원의 로그인 응답에서 직접 입력한다.
+# 위에서부터 실행한다. 주문 생성 응답에서 creditOrderId를 저장하므로 조회 전에 생성 요청이 필요하다.
+# 이 파일은 결제창을 열거나 결제·적립하지 않는다. 주문은 PENDING으로 남는다.
+@baseUrl = http://localhost:8080
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+@otherAccessToken = REPLACE_WITH_OTHER_ACCESS_TOKEN
+@suspendedAccessToken = REPLACE_WITH_SUSPENDED_ACCESS_TOKEN
+
+### 1. 서버 헬스
+GET {{baseUrl}}/actuator/health
+
+### 2. 공개 상품 목록
+GET {{baseUrl}}/api/v1/credits/products
+
+> {%
+    client.test("상품 5종과 보너스 총량", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.length === 5, `expected=5 actual=${response.body.items.length}`);
+        client.assert(response.body.items[1].totalCredits === 5200, `expected=5200 actual=${response.body.items[1].totalCredits}`);
+    });
+%}
+
+### 3. 웹 주문 생성 (해당 상품 링크와 시크릿 설정 필요)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_2000"}
+
+> {%
+    client.test("주문 생성과 결제 ref", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        client.assert(response.body.paymentUrl.includes(`ref=${response.body.orderId}`), `ref missing actual=${response.body.paymentUrl}`);
+    });
+    if (response.status === 201) client.global.set("creditOrderId", response.body.orderId);
+%}
+
+### 4. 본인 주문 조회 (3번 선행)
+GET {{baseUrl}}/api/v1/users/me/credits/orders/{{creditOrderId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("본인 PENDING 주문", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.status === "PENDING", `expected=PENDING actual=${response.body.status}`);
+        client.assert(response.body.totalCredits === 2000, `expected=2000 actual=${response.body.totalCredits}`);
+        client.assert(response.body.completedAt === null, `expected=null actual=${response.body.completedAt}`);
+    });
+%}
+
+### 5. 타인 주문 조회 (3번 선행, 다른 회원 토큰 필요)
+GET {{baseUrl}}/api/v1/users/me/credits/orders/{{creditOrderId}}
+Authorization: Bearer {{otherAccessToken}}
+
+> {%
+    client.test("타인 주문 비노출", () => {
+        client.assert(response.status === 404, `expected=404 actual=${response.status}`);
+    });
+%}
+
+### 6. 없는 주문
+GET {{baseUrl}}/api/v1/users/me/credits/orders/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("없는 주문", () => {
+        client.assert(response.status === 404, `expected=404 actual=${response.status}`);
+    });
+%}
+
+### 7. 미지원 상품
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "unsupported"}
+
+> {%
+    client.test("미지원 상품", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+    });
+%}
+
+### 8. 게스트 주문 생성
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Content-Type: application/json
+
+{"productId": "if_2000"}
+
+> {%
+    client.test("인증 필수", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
+    });
+%}
+
+### 9. 결제 미설정 (별도 검증: 시크릿 또는 IF_2000 링크를 비우고 서버 재기동 후 실행)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_2000"}
+
+> {%
+    client.test("결제 미설정", () => {
+        client.assert(response.status === 503, `expected=503 actual=${response.status}`);
+    });
+%}
+
+### 10. 자유 조회 (실제 주문 UUID로 교체)
+GET {{baseUrl}}/api/v1/users/me/credits/orders/REPLACE_WITH_ORDER_UUID
+Authorization: Bearer {{accessToken}}
+
+### 11. 정지 계정 주문 생성 (정지된 회원의 토큰 필요)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{suspendedAccessToken}}
+Content-Type: application/json
+
+{"productId": "if_2000"}
+
+> {%
+    client.test("정지 계정 차단", () => {
+        client.assert(response.status === 403, `expected=403 actual=${response.status}`);
+    });
+%}
