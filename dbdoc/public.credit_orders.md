@@ -17,6 +17,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | completed_at | timestamp with time zone |  | true |  |  |  |
 | refunded_at | timestamp with time zone |  | true |  |  |  |
+| reversal_shortfall | bigint |  | true |  |  |  |
 
 ## Constraints
 
@@ -61,6 +62,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone completed_at
   timestamp_with_time_zone refunded_at
+  bigint reversal_shortfall
 }
 "public.users" {
   bigint id

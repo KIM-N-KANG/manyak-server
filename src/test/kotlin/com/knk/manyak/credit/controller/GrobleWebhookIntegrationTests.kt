@@ -18,6 +18,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
+import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.HexFormat
@@ -44,6 +45,7 @@ class GrobleWebhookIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var meters: MeterRegistry
+    @Autowired private lateinit var jdbc: JdbcTemplate
 
     @BeforeEach fun clean() = cleaner.cleanAll()
 
@@ -246,6 +248,43 @@ class GrobleWebhookIntegrationTests {
         for (status in listOf("400", "401", "503")) {
             assertThat(operation.path("responses").path(status).path("content").path("application/json")
                 .path("schema").path("\$ref").stringValue()).isEqualTo("#/components/schemas/ApiErrorResponse")
+        }
+    }
+
+    @Test fun `환불이 먼저 도착하면 중복 표식을 하나만 보관하고 완료 때 적립하지 않는다`() {
+        val order = order()
+        val before = count("marked")
+        send(refunded(order))
+        send(refunded(order))
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM groble_refund_marks", Long::class.java)).isEqualTo(1)
+        assertThat(count("marked") - before).isEqualTo(2.0)
+        send(completed(order))
+        val saved = orders.findById(order.id).orElseThrow()
+        assertThat(saved.status).isEqualTo(CreditOrderStatus.REFUNDED)
+        assertThat(saved.completedAt).isNotNull().isEqualTo(saved.refundedAt)
+        assertThat(saved.creditTransactionId).isNull()
+        assertThat(saved.providerRef).isEqualTo("merchant-${order.id}")
+        assertThat(transactions.count()).isZero()
+        assertThat(lots.count()).isZero()
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM groble_refund_marks", Long::class.java)).isZero()
+    }
+
+    @Test fun `전액 표시여도 환불 금액이 다르면 회수하지 않는다`() {
+        val order = order()
+        send(completed(order))
+        send(refunded(order).replace("5000", "1000"))
+        assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
+        assertThat(transactions.count()).isEqualTo(1)
+    }
+
+    @Test fun `회수 부족분은 미사용이면 0 일부 소진이면 소진량이다`() {
+        for (spent in listOf(0L, 200L, 5200L)) {
+            val order = order()
+            send(completed(order))
+            if (spent > 0) walletService.deduct(order.userId, spent, CreditReason.CHAT_TURN)
+            send(refunded(order))
+            assertThat(jdbc.queryForObject("SELECT reversal_shortfall FROM credit_orders WHERE id = ?", Long::class.java, order.id))
+                .isEqualTo(spent)
         }
     }
 

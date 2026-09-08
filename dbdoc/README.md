@@ -45,7 +45,8 @@
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
 | [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
-| [public.credit_orders](public.credit_orders.md) | 13 |  | BASE TABLE |
+| [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
+| [public.groble_refund_marks](public.groble_refund_marks.md) | 2 |  | BASE TABLE |
 
 ## Relations
 
@@ -536,6 +537,11 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone completed_at
   timestamp_with_time_zone refunded_at
+  bigint reversal_shortfall
+}
+"public.groble_refund_marks" {
+  varchar_255_ merchant_uid
+  timestamp_with_time_zone created_at
 }
 ```
 

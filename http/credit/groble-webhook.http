@@ -287,7 +287,7 @@ X-Groble-Idempotency-Key: manual-delivery
     client.test("15. sellerReference 없는 완료는 무시", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
 %}
 
-### 16. 미매칭 환불은 무시
+### 16. 미매칭 전체 환불은 표식으로 저장
 < {%
     const ts = String(Math.floor(Date.now() / 1000));
     request.variables.set("grobleTimestamp", ts);
@@ -306,8 +306,28 @@ X-Groble-Idempotency-Key: manual-delivery
 {"id":"manual-refund-{{grobleOrderId}}","type":"payment.refunded","data":{"object":{"merchantUid":"unmatched","refund":{"partialRefund":false,"amount":5000}}}}
 
 > {%
-    client.test("16. 미매칭 환불은 무시", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    client.test("16. 미매칭 전체 환불은 표식으로 저장", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
 %}
+
+### 16-1. 역순 검증용 새 주문 (표식 → 완료, 적립 없음)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId":"if_5000"}
+
+> {%
+    client.test("역순 주문", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
+    if (response.status === 201) {
+        client.global.set("grobleOrderId", response.body.orderId);
+        client.global.set("grobleEventId", "manual-reverse-" + response.body.orderId);
+        client.global.set("grobleMerchantUid", "manual-reverse-merchant-" + response.body.orderId);
+    }
+%}
+
+# 새 주문 생성 후 7번(환불) → 7번 재전송 → 3번(완료) → 9번(REFUNDED 조회) 순으로 실행한다.
+# DB에서 credit_transaction_id=NULL, completed_at=refunded_at, 해당 merchant_uid 표식 삭제를 확인한다.
+# 정상 회수 주문은 reversal_shortfall=0, 일부 소진 후 회수는 소진량이 기록되는지 확인한다.
 
 ### 17. 자유 조회 — DB의 주문 UUID를 넣어 확인
 GET {{baseUrl}}/api/v1/users/me/credits/orders/00000000-0000-0000-0000-000000000000

@@ -3,6 +3,7 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.credit.entity.CreditOrderProvider
 import com.knk.manyak.credit.entity.CreditOrderStatus
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.GrobleRefundMarkRepository
 import com.knk.manyak.credit.repository.CreditOrderRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import org.slf4j.LoggerFactory
@@ -17,6 +18,7 @@ class GroblePaymentEventService(
     private val orders: CreditOrderRepository,
     private val transactions: CreditTransactionRepository,
     private val wallets: CreditWalletService,
+    private val refundMarks: GrobleRefundMarkRepository,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     /** 모든 결제 경로에서 주문 → 지갑 → 로트 순으로 잠근다. 주문 전이와 원장·잔액 갱신은 함께 커밋한다. */
@@ -50,6 +52,15 @@ class GroblePaymentEventService(
             ?: return ignored("merchantUid 오류")
         val eventId = event.path("id").stringValue(null)?.takeIf { it.isNotBlank() && it.length <= 248 }
             ?: return ignored("이벤트 id 오류")
+        if (refundMarks.existsById(merchantUid)) {
+            val now = clock.instant()
+            order.status = CreditOrderStatus.REFUNDED
+            order.completedAt = now
+            order.refundedAt = now
+            order.providerRef = merchantUid
+            refundMarks.deleteById(merchantUid)
+            return "refunded"
+        }
         val key = "groble:$eventId"
         wallets.reward(order.userId, order.creditAmount, CreditReason.PURCHASE, key, "CREDIT_ORDER", order.id)
         val transaction = transactions.findByIdempotencyKey(key) ?: error("구매 적립 원장이 없습니다: orderId=${order.id}")
@@ -67,12 +78,21 @@ class GroblePaymentEventService(
 
     private fun refund(obj: JsonNode): String {
         val merchantUid = obj.path("merchantUid").stringValue(null) ?: return ignored("환불 merchantUid 없음")
-        val order = orders.findByProviderRefForUpdate(merchantUid) ?: return ignored("환불 주문 미매칭")
         val partial = obj.path("refund").path("partialRefund")
         if (!partial.isBoolean) return ignored("환불 partialRefund 오류")
         if (partial.booleanValue()) return ignored("부분 환불 미지원")
+        if (merchantUid.isBlank() || merchantUid.length > 255) return ignored("환불 merchantUid 오류")
+        val amount = obj.path("refund").path("amount")
+        if (!amount.isIntegralNumber || !amount.canConvertToLong()) return ignored("환불 금액 오류")
+        val order = orders.findByProviderRefForUpdate(merchantUid)
+        if (order == null) {
+            refundMarks.insertIfAbsent(merchantUid)
+            return "marked"
+        }
+        if (amount.longValue() != order.priceKrw) return ignored("환불 금액 불일치")
         if (order.provider != CreditOrderProvider.GROBLE || order.status != CreditOrderStatus.COMPLETED) return "ignored"
-        wallets.reverseLot(order.userId, checkNotNull(order.creditTransactionId), "CREDIT_ORDER", order.id)
+        val reversed = wallets.reverseLot(order.userId, checkNotNull(order.creditTransactionId), "CREDIT_ORDER", order.id)
+        order.reversalShortfall = order.creditAmount - reversed
         order.status = CreditOrderStatus.REFUNDED
         order.refundedAt = clock.instant()
         return "refunded"
