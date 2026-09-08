@@ -58,6 +58,9 @@ class CreditOrder(
     @Column(name = "completed_at")
     var completedAt: Instant? = null,
 
+    @Column(name = "reversal_shortfall")
+    var reversalShortfall: Long? = null,
+
     @Column(name = "refunded_at")
     var refundedAt: Instant? = null,
 )

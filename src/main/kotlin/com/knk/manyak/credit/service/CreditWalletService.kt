@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
+import org.slf4j.LoggerFactory
 import kotlin.math.min
 
 /** 보상 적립 결과. [rewarded]가 false면 멱등 키 중복 또는 월 상한 초과로 이번 요청은 적립하지 않았다(잔액 불변). */
@@ -163,7 +165,7 @@ class CreditWalletService(
                 idempotencyKey = idempotencyKey,
             ),
         )
-        // 적립·환불 1건당 로트 1개. 무기한(PURCHASE)만 만료가 없고, 보상·환불은 적립 시점 + 30일에 만료된다(스펙 §4-3-7).
+        // 적립·환불 1건당 로트 1개. 구매는 5년 뒤, 보상·환불은 적립 시점 + 30일에 만료된다(스펙 §4-3-7).
         lotRepository.save(
             CreditLot(
                 userId = userId,
@@ -316,11 +318,34 @@ class CreditWalletService(
         }
     }
 
-    /** 로트 만료 시각. 무기한(PURCHASE)은 NULL, 그 외 보상·환불은 적립 시점 + [REWARD_VALIDITY]. */
+    /** 로트 만료 시각. 구매는 5년, 그 외 보상·환불은 적립 시점 + [REWARD_VALIDITY]. */
     private fun expiryFor(reason: CreditReason, now: Instant): Instant? =
-        if (reason == CreditReason.PURCHASE) null else now.plus(REWARD_VALIDITY)
+        if (reason == CreditReason.PURCHASE) now.atZone(ZoneOffset.UTC).plusYears(5).toInstant() else now.plus(REWARD_VALIDITY)
+
+    /** 구매 환불: 지갑 → 해당 로트 순서로 잠그고 남은 수량만 회수한다. 소진분은 로그로 남긴다. */
+    @Transactional
+    fun reverseLot(userId: Long, transactionId: Long, refType: String, refId: Long): Long {
+        val wallet = walletRepository.findByUserIdForUpdate(userId)
+            ?: error("구매 환불 지갑이 없습니다: userId=$userId")
+        val lot = lotRepository.findByUserIdAndTransactionIdForUpdate(userId, transactionId)
+            ?: error("구매 환불 로트가 없습니다: transactionId=$transactionId")
+        val amount = lot.remaining
+        if (amount < lot.originalAmount) {
+            logger.warn("구매 환불 소진분: transactionId={}, shortfall={}", transactionId, lot.originalAmount - amount)
+        }
+        if (amount == 0L) return 0
+        check(wallet.balance >= amount) { "구매 환불 지갑·로트 불일치: userId=$userId" }
+        transactionRepository.save(CreditTransaction(
+            userId = userId, amount = -amount, reason = CreditReason.PURCHASE_REVERSAL,
+            refType = refType, refId = refId,
+        ))
+        lot.remaining = 0
+        wallet.balance -= amount
+        return amount
+    }
 
     private companion object {
+        val logger = LoggerFactory.getLogger(CreditWalletService::class.java)
         // 보상·환불 크레딧 유효기간(스펙 §4-3-7 B12, 2026-07-07 결정): 적립 30일.
         val REWARD_VALIDITY: Duration = Duration.ofDays(30)
     }

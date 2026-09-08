@@ -189,15 +189,15 @@ class CreditTransactionHistoryIntegrationTests {
     }
 
     @Test
-    fun `PURCHASE는 ALL에도 나오지 않는다`() {
+    fun `PURCHASE는 ALL과 EARN에 노출한다`() {
         val user = saveUser()
         tx(user.id, 1000, CreditReason.PURCHASE)
         tx(user.id, 250, CreditReason.ATTENDANCE_REWARD, createdAt = base.plusSeconds(10))
 
         assertThat(get(user, "?type=ALL").items.map { it.reason })
-            .containsExactly(CreditReason.ATTENDANCE_REWARD)
+            .containsExactly(CreditReason.ATTENDANCE_REWARD, CreditReason.PURCHASE)
         assertThat(get(user, "?type=EARN").items.map { it.reason })
-            .containsExactly(CreditReason.ATTENDANCE_REWARD)
+            .containsExactly(CreditReason.ATTENDANCE_REWARD, CreditReason.PURCHASE)
     }
 
     @Test
