@@ -6,6 +6,7 @@
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | merchant_uid | varchar(255) |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| refund_amount | bigint |  | true |  |  |  |
 
 ## Constraints
 
@@ -28,6 +29,7 @@ erDiagram
 "public.groble_refund_marks" {
   varchar_255_ merchant_uid
   timestamp_with_time_zone created_at
+  bigint refund_amount
 }
 ```
 

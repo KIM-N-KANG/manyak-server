@@ -288,6 +288,32 @@ class GrobleWebhookIntegrationTests {
         }
     }
 
+    @Test fun `역순 환불 금액이 다르면 정상 적립하고 표식을 삭제한다`() {
+        val order = order()
+        send(refunded(order).replace("5000", "1000"))
+        send(completed(order))
+        assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
+        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5200)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM groble_refund_marks", Long::class.java)).isZero()
+    }
+
+    @Test fun `완료와 환불 동시 수신은 직렬화되어 최종 환불 잔액 0이다`() {
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            repeat(12) {
+                val order = order()
+                val start = java.util.concurrent.CyclicBarrier(2)
+                val futures = listOf(completed(order), refunded(order)).map { body ->
+                    pool.submit { start.await(5, TimeUnit.SECONDS); send(body) }
+                }
+                futures.forEach { it.get(20, TimeUnit.SECONDS) }
+                assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.REFUNDED)
+                assertThat(walletService.balanceOf(order.userId)).isZero()
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM groble_refund_marks", Long::class.java)).isZero()
+            }
+        } finally { pool.shutdownNow() }
+    }
+
     private fun count(result: String) = meters.find("manyak.payment.groble.webhook").tag("result", result).counter()?.count() ?: 0.0
     private fun order(): CreditOrder {
         val user = users.save(User(nickname = "웹훅 회원"))

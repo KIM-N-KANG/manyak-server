@@ -15,4 +15,6 @@ class GrobleRefundMark(
     val merchantUid: String,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
+    @Column(name = "refund_amount")
+    var refundAmount: Long? = null,
 )

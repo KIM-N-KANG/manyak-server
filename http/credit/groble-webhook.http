@@ -328,6 +328,9 @@ Content-Type: application/json
 # 새 주문 생성 후 7번(환불) → 7번 재전송 → 3번(완료) → 9번(REFUNDED 조회) 순으로 실행한다.
 # DB에서 credit_transaction_id=NULL, completed_at=refunded_at, 해당 merchant_uid 표식 삭제를 확인한다.
 # 정상 회수 주문은 reversal_shortfall=0, 일부 소진 후 회수는 소진량이 기록되는지 확인한다.
+# 금액 불일치 검증: 새 주문에서 7번 refund.amount를 1000으로 바꾸어 선발송 후 3번 완료를 실행한다.
+# 5번 조회가 COMPLETED이고 정상 5200 적립, warn 로그 및 표식 삭제를 확인한다.
+# 두 이벤트는 merchantUid 표식 행 → 주문 → 지갑 → 로트 순으로 잠근다.
 
 ### 17. 자유 조회 — DB의 주문 UUID를 넣어 확인
 GET {{baseUrl}}/api/v1/users/me/credits/orders/00000000-0000-0000-0000-000000000000
