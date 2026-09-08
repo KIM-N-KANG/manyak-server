@@ -9,6 +9,8 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
+    fun findByIdempotencyKey(idempotencyKey: String): CreditTransaction?
+
 
     // 보상 멱등: 같은 키의 원장 행이 이미 있으면 중복 적립하지 않는다(유니크 제약과 함께 이중 방어).
     fun existsByIdempotencyKey(idempotencyKey: String): Boolean
@@ -86,7 +88,7 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
 
     /**
      * 이용내역 첫 페이지(KNK-1044). 최신순 `created_at DESC, id DESC`로 [pageable] 크기만큼 가져온다.
-     * [reasons]가 노출 대상 사유를 통제한다(PURCHASE는 호출부가 애초에 넣지 않는다).
+     * [reasons]가 화면 분류별 조회 사유를 통제한다.
      */
     @Query(
         """

@@ -39,25 +39,24 @@ enum class CreditTransactionType {
 
     companion object {
         /**
-         * 원장 사유 → 화면 분류. **null이면 이용내역에서 제외**한다.
+         * 원장 사유 → 화면 분류. 구매는 획득, 구매 환불 회수는 소멸로 표시한다.
          *
          * REFUND는 획득이다 — 생성·턴 실패 시 자동 환불이라 사용자 눈엔 크레딧이 되돌아온 사건이다(2026-08-30 결정).
          */
-        fun of(reason: CreditReason): CreditTransactionType? = when (reason) {
+        fun of(reason: CreditReason): CreditTransactionType = when (reason) {
             CreditReason.STORY_CREATION, CreditReason.CHAT_TURN -> SPEND
             CreditReason.SIGNUP_REWARD,
             CreditReason.ATTENDANCE_REWARD,
             CreditReason.INVITE_REWARD,
             CreditReason.REFUND,
+            CreditReason.PURCHASE,
             -> EARN
-            CreditReason.EXPIRE -> EXPIRE
-            // 결제 도입 시 구매내역 탭이 따로 가져간다. 지금 EARN에 섞어두면 나중에 중복 노출된다.
-            CreditReason.PURCHASE -> null
+            CreditReason.EXPIRE, CreditReason.PURCHASE_REVERSAL -> EXPIRE
         }
 
-        /** 이용내역에 노출하는 사유 전체(= `type=ALL`). PURCHASE는 빠져 있다. */
+        /** 이용내역에 노출하는 사유 전체(= `type=ALL`). */
         val historyReasons: Set<CreditReason> =
-            CreditReason.entries.filterTo(mutableSetOf()) { of(it) != null }
+            CreditReason.entries.toSet()
     }
 }
 
@@ -71,7 +70,7 @@ data class CreditTransactionResponse(
     val amount: Long,
     @Schema(description = "관련 스토리 제목. 보상·소멸 행이거나 스토리가 삭제됐으면 null")
     val title: String?,
-    @Schema(description = "획득 행은 그 적립분의 만료 예정일, 소멸 행은 실제 만료일. 소모 행은 null")
+    @Schema(description = "획득 행은 그 적립분의 만료 예정일, EXPIRE 행은 실제 만료일. 소모·구매 환불 회수는 null")
     val expiresAt: Instant?,
     @Schema(description = "원장 기록 시각. 소멸 행은 만료일이 아니라 회수가 기록된 시각이다")
     val createdAt: Instant,

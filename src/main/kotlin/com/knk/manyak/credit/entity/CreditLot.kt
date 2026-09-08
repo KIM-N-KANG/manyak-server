@@ -14,7 +14,7 @@ import java.time.Instant
  * [remaining]은 FIFO 차감·만료로 감소하는 가변 잔여다(원장 [CreditTransaction]과 달리 상태를 갱신한다).
  * 지갑 [CreditWallet.balance]는 활성(잔여>0) 로트 잔여의 합과 일치하며, 만료는 EXPIRE 원장 행으로 실현한다.
  *
- * [expiresAt]이 NULL이면 무기한(PURCHASE — Phase 3)이고, 보상·환불 로트는 적립 시점 + 30일이다.
+ * [expiresAt]이 NULL이면 기존 무기한 로트이고, 신규 구매 로트는 5년, 보상·환불 로트는 적립 시점 + 30일이다.
  */
 @Entity
 @Table(name = "credit_lots")
@@ -37,7 +37,7 @@ class CreditLot(
     @Column(nullable = false)
     var remaining: Long,
 
-    // NULL = 무기한(PURCHASE). 보상·환불은 적립 시점 + 30일.
+    // NULL = 기존 무기한 로트. 신규 구매는 5년. 보상·환불은 적립 시점 + 30일.
     @Column(name = "expires_at")
     val expiresAt: Instant? = null,
 

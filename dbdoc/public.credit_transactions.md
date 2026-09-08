@@ -18,7 +18,7 @@
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_credit_transactions_amount | CHECK | CHECK ((amount <> 0)) |
-| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying])::text[]))) |
+| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying, 'PURCHASE_REVERSAL'::character varying])::text[]))) |
 | credit_transactions_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | credit_transactions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_credit_transactions_idempotency | UNIQUE | UNIQUE (idempotency_key) |

@@ -1,0 +1,324 @@
+# KNK-1157 그로블 웹훅 적립·환불 검증 (로컬 전용 합성 이벤트)
+# 준비: PostgreSQL·Redis 기동 → MANYAK_GROBLE_WEBHOOK_SECRET 설정 → ./gradlew bootRun.
+# application.yml if_5000 상품 payment-url도 채운다. 기존 credit-orders.http 준비 방법 참고.
+# IntelliJ HTTP Client 환경 private 파일에 grobleWebhookSecret을 서버와 같은 값으로 설정한다.
+# accessToken은 로그인 응답에서 입력한다. 시크릿은 이 파일에 입력하지 않는다.
+# 위에서부터 실행. 합성 웹훅은 실제 돈의 이동 없이 로컬 이프를 변경하므로 전용 테스트 회원을 사용한다.
+# 503 요청은 마지막에 서버 시크릿을 비우고 재기동한 뒤 따로 실행한다.
+@baseUrl = http://localhost:8080
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+
+### 1. 헬스 확인
+GET {{baseUrl}}/actuator/health
+
+### 2. 주문 생성 (5000원 → 보너스 포함 5200 이프)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId":"if_5000"}
+
+> {%
+    client.test("주문 생성", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
+    if (response.status === 201) {
+        client.global.set("grobleOrderId", response.body.orderId);
+        client.global.set("grobleEventId", "manual-complete-" + response.body.orderId);
+        client.global.set("grobleMerchantUid", "manual-merchant-" + response.body.orderId);
+    }
+%}
+
+
+### 3. 완료 이벤트 — Previous 서명으로 검증
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: 00
+X-Groble-Signature-Previous: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"{{grobleEventId}}","type":"payment.completed","data":{"object":{"sellerReference":"{{grobleOrderId}}","merchantUid":"{{grobleMerchantUid}}","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("3. 완료 이벤트 — Previous 서명으로 검증", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 4. 같은 완료 재전송 — 중복 적립 없음
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"{{grobleEventId}}","type":"payment.completed","data":{"object":{"sellerReference":"{{grobleOrderId}}","merchantUid":"{{grobleMerchantUid}}","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("4. 같은 완료 재전송 — 중복 적립 없음", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 5. 완료 주문 확인 (3~4번 선행)
+GET {{baseUrl}}/api/v1/users/me/credits/orders/{{grobleOrderId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("완료 상태", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.status === "COMPLETED", `expected=COMPLETED actual=${response.body.status}`);
+        client.assert(response.body.completedAt !== null, "completedAt expected");
+    });
+%}
+
+### 6. 부분 환불은 무시
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"manual-refund-{{grobleOrderId}}","type":"payment.refunded","data":{"object":{"merchantUid":"{{grobleMerchantUid}}","refund":{"partialRefund":true,"amount":5000}}}}
+
+> {%
+    client.test("6. 부분 환불은 무시", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 7. 전체 환불 회수
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"manual-refund-{{grobleOrderId}}","type":"payment.refunded","data":{"object":{"merchantUid":"{{grobleMerchantUid}}","refund":{"partialRefund":false,"amount":5000}}}}
+
+> {%
+    client.test("7. 전체 환불 회수", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 8. 환불 재전송 — 중복 회수 없음
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"manual-refund-{{grobleOrderId}}","type":"payment.refunded","data":{"object":{"merchantUid":"{{grobleMerchantUid}}","refund":{"partialRefund":false,"amount":5000}}}}
+
+> {%
+    client.test("8. 환불 재전송 — 중복 회수 없음", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 9. 환불 주문 확인
+GET {{baseUrl}}/api/v1/users/me/credits/orders/{{grobleOrderId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("환불 상태", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.status === "REFUNDED", `expected=REFUNDED actual=${response.body.status}`);
+    });
+%}
+
+### 10. 이용내역 — 전용 회원에서 PURCHASE +5200, PURCHASE_REVERSAL -5200 각 1건
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=ALL&limit=100
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("구매·회수 각 1회", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        for (const [reason, type, amount] of [["PURCHASE", "EARN", 5200], ["PURCHASE_REVERSAL", "EXPIRE", -5200]]) {
+            const rows = response.body.items.filter(it => it.reason === reason);
+            client.assert(rows.length === 1, `expected=1 ${reason} actual=${rows.length}`);
+            client.assert(rows[0].type === type && rows[0].amount === amount && rows[0].title === null, JSON.stringify(rows[0]));
+        }
+    });
+%}
+
+### 11. 서명 불일치
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: 00
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"{{grobleEventId}}","type":"payment.completed","data":{"object":{"sellerReference":"{{grobleOrderId}}","merchantUid":"{{grobleMerchantUid}}","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("11. 서명 불일치", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 12. 5분 초과 과거 타임스탬프
+< {%
+    const ts = String(Math.floor(Date.now() / 1000) - 600);
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"{{grobleEventId}}","type":"payment.completed","data":{"object":{"sellerReference":"{{grobleOrderId}}","merchantUid":"{{grobleMerchantUid}}","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("12. 5분 초과 과거 타임스탬프", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 13. 5분 초과 미래 타임스탬프
+< {%
+    const ts = String(Math.floor(Date.now() / 1000) + 600);
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"{{grobleEventId}}","type":"payment.completed","data":{"object":{"sellerReference":"{{grobleOrderId}}","merchantUid":"{{grobleMerchantUid}}","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("13. 5분 초과 미래 타임스탬프", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 14. 유효 서명이지만 JSON 오류
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{broken
+
+> {%
+    client.test("14. 유효 서명이지만 JSON 오류", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 15. sellerReference 없는 완료는 무시
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"missing-reference","type":"payment.completed","data":{"object":{"merchantUid":"unmatched","pricing":{"finalAmount":5000}}}}
+
+> {%
+    client.test("15. sellerReference 없는 완료는 무시", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 16. 미매칭 환불은 무시
+< {%
+    const ts = String(Math.floor(Date.now() / 1000));
+    request.variables.set("grobleTimestamp", ts);
+    const signature = crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("grobleWebhookSecret"))
+        .updateWithText(ts + "." + request.body.tryGetSubstituted())
+        .digest().toHex();
+    request.variables.set("grobleSignature", signature);
+%}
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+X-Groble-Timestamp: {{grobleTimestamp}}
+X-Groble-Signature: {{grobleSignature}}
+X-Groble-Idempotency-Key: manual-delivery
+
+{"id":"manual-refund-{{grobleOrderId}}","type":"payment.refunded","data":{"object":{"merchantUid":"unmatched","refund":{"partialRefund":false,"amount":5000}}}}
+
+> {%
+    client.test("16. 미매칭 환불은 무시", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 17. 자유 조회 — DB의 주문 UUID를 넣어 확인
+GET {{baseUrl}}/api/v1/users/me/credits/orders/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+
+### 18. 시크릿 미설정 — 서버 시크릿을 비우고 재기동한 후 별도 실행
+POST {{baseUrl}}/api/v1/webhooks/groble
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("미설정 503", () => client.assert(response.status === 503, `expected=503 actual=${response.status}`));
+%}

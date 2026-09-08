@@ -71,9 +71,8 @@ class CreditTransactionHistoryService(
         )
     }
 
-    /** 조회는 노출 대상 사유로만 좁혀 오므로 분류가 없는 사유(PURCHASE)는 여기까지 오지 않는다. */
     private fun typeOf(reason: CreditReason): CreditTransactionType =
-        CreditTransactionType.of(reason) ?: error("이용내역에서 제외된 사유가 조회됐습니다: $reason")
+        CreditTransactionType.of(reason)
 
     /** 필터 칩 값 → 분류. `ALL`은 필터 없음(null)이고, 그 외 미지원 값은 400이다. */
     private fun filterOf(type: String): CreditTransactionType? {
