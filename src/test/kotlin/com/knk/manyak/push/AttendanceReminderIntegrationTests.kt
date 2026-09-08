@@ -10,10 +10,14 @@ import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.scheduler.AttendanceReminderScheduler
 import com.knk.manyak.push.service.AttendanceReminderService
+import com.knk.manyak.push.service.PushMessageTemplateService
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
 import org.mockito.ArgumentMatchers.eq
@@ -26,6 +30,9 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -38,10 +45,7 @@ import java.time.ZoneId
  * 같은 날 두 번 도는 것은 Redis `SET NX`가 막는다(배포 교체로 태스크가 cron에 걸치는 창).
  */
 @ActiveProfiles("test")
-@SpringBootTest(
-    // 스케줄러는 테스트 프로파일에서 꺼져 있다. NX 계약을 검증하려면 빈이 필요해 이 클래스에서만 켠다.
-    properties = ["manyak.push.attendance-reminder.enabled=true"],
-)
+@SpringBootTest
 class AttendanceReminderIntegrationTests {
 
     @MockitoBean private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
@@ -49,29 +53,40 @@ class AttendanceReminderIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
-    @Autowired private lateinit var attendanceReminderService: AttendanceReminderService
-    @Autowired private lateinit var attendanceReminderScheduler: AttendanceReminderScheduler
+    @Autowired private lateinit var pushMessageTemplateService: PushMessageTemplateService
+    @Autowired private lateinit var structuredLogger: StructuredLogger
     @Autowired private lateinit var redisTemplate: StringRedisTemplate
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
+    // PromotionPushIntegrationTests와 같이 실제 저장소·템플릿·발송기 빈에 고정 Clock만 전달한다.
+    // 서비스, 스케줄러, 출석 키의 날짜를 같은 시계로 맞추고 실제 cron은 켜지 않는다.
+    private var clock: Clock = atHour(15)
+    private val attendanceReminderService: AttendanceReminderService
+        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock)
+    private val attendanceReminderScheduler: AttendanceReminderScheduler
+        get() = AttendanceReminderScheduler(attendanceReminderService, redisTemplate, structuredLogger, clock)
+
     @BeforeEach
     fun setUp() {
+        clock = atHour(15)
         databaseCleaner.cleanAll()
         redisTemplate.keys("push:attendance-reminder:*").orEmpty().let { if (it.isNotEmpty()) redisTemplate.delete(it) }
         reset(fcmPushSender)
     }
 
-    private fun today(): LocalDate = LocalDate.now(SEOUL_ZONE)
+    private fun today(): LocalDate = LocalDate.now(clock.withZone(SEOUL_ZONE))
 
     private fun saveMember(
         status: UserStatus = UserStatus.ACTIVE,
         marketingAgreed: Boolean = true,
         rewardIdentityUserId: Long? = null,
+        nightAgreed: Boolean = true,
     ): User = userRepository.save(
         User(
             nickname = "수신자",
             status = status,
             marketingPushAgreedAt = if (marketingAgreed) java.time.Instant.parse("2026-09-01T00:00:00Z") else null,
+            marketingPushNightAgreedAt = if (marketingAgreed && nightAgreed) Instant.parse("2026-09-01T00:00:00Z") else null,
             rewardIdentityUserId = rewardIdentityUserId,
         ),
     )
@@ -101,8 +116,10 @@ class AttendanceReminderIntegrationTests {
         userRepository.saveAndFlush(user)
     }
 
-    @Test
-    fun `광고 동의와 토큰이 있고 오늘 출석하지 않은 회원에게 보낸다`() {
+    @ParameterizedTest
+    @ValueSource(ints = [15, 23])
+    fun `광고 동의와 토큰이 있고 오늘 출석하지 않은 회원에게 보낸다`(hour: Int) {
+        clock = atHour(hour)
         val member = eligibleMember()
 
         val result = attendanceReminderService.sendReminders()
@@ -165,8 +182,10 @@ class AttendanceReminderIntegrationTests {
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
     }
 
-    @Test
-    fun `회차 도중 광고 수신을 철회한 회원에게는 보내지 않는다`() {
+    @ParameterizedTest
+    @ValueSource(ints = [15, 23])
+    fun `회차 도중 광고 수신을 철회한 회원에게는 보내지 않는다`(hour: Int) {
+        clock = atHour(hour)
         // 대상 조회 결과는 스냅샷이라, 조회 시점의 동의를 그대로 믿으면 회차가 도는 동안(대상이 많으면 길다)
         // 철회한 회원에게 광고가 나간다. 광고성은 철회가 다음 발송부터 즉시 반영돼야 한다(정책 KNK-1129).
         val first = eligibleMember()
@@ -185,8 +204,10 @@ class AttendanceReminderIntegrationTests {
         assertThat(result.sent).isEqualTo(1)
     }
 
-    @Test
-    fun `스케줄러를 같은 날 두 번 돌려도 발송은 한 번뿐이다`() {
+    @ParameterizedTest
+    @ValueSource(ints = [15, 23])
+    fun `스케줄러를 같은 날 두 번 돌려도 발송은 한 번뿐이다`(hour: Int) {
+        clock = atHour(hour)
         eligibleMember()
 
         attendanceReminderScheduler.run()
@@ -195,6 +216,26 @@ class AttendanceReminderIntegrationTests {
         // 두 번째 실행은 Redis SET NX 실패로 서비스에 진입하지 않는다.
         verify(fcmPushSender).sendToUser(anyLong(), anyMap())
     }
+
+    @ParameterizedTest
+    @ValueSource(ints = [15, 23])
+    fun `야간 동의가 없는 회원은 주간에만 발송한다`(hour: Int) {
+        clock = atHour(hour)
+        saveMember(nightAgreed = false).also { saveToken(it) }
+
+        val result = attendanceReminderService.sendReminders()
+
+        assertThat(result.targets).isEqualTo(1)
+        assertThat(result.sent).isEqualTo(if (hour == 15) 1 else 0)
+        assertThat(result.skipped).isEqualTo(if (hour == 15) 0 else 1)
+        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        else verify(fcmPushSender).sendToUser(anyLong(), anyMap())
+    }
+
+    private fun atHour(hour: Int): Clock = Clock.fixed(
+        LocalDate.of(2026, 9, 8).atTime(hour, 0).atZone(SEOUL_ZONE).toInstant(),
+        ZoneOffset.UTC,
+    )
 
     private companion object {
         val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
