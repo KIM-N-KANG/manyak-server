@@ -14,6 +14,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
@@ -23,6 +24,7 @@ import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.dao.DataIntegrityViolationException
 import java.util.Optional
+import java.util.UUID
 
 /**
  * FCM 발송기 단위 검증(KNK-1130). 실제 FCM은 부르지 않고 [FirebaseMessaging]을 목으로 둔다.
@@ -32,6 +34,7 @@ import java.util.Optional
  * - 회원의 등록 기기 전부에 한 건씩 보낸다.
  * - UNREGISTERED 응답은 그 토큰만 지우고 나머지 발송은 계속한다. 다른 오류는 토큰을 남긴다.
  * - 결과는 outcome 태그 카운터에 쌓인다.
+ * - 모든 발송 데이터에 수신 회원의 public_id를 `recipientId`로 덧붙인다(KNK-1220). 앱이 기기 공유 시 남의 알림을 거른다.
  */
 class FcmPushSenderTest {
 
@@ -46,9 +49,11 @@ class FcmPushSenderTest {
         stubUser(UserStatus.ACTIVE)
     }
 
+    private val publicId: UUID = UUID.fromString("3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+
     private fun stubUser(status: UserStatus) {
         `when`(userRepository.findById(7L))
-            .thenReturn(Optional.of(User(id = 7L, nickname = "발송대상", status = status)))
+            .thenReturn(Optional.of(User(id = 7L, publicId = publicId, nickname = "발송대상", status = status)))
     }
 
     private fun token(id: Long, value: String) = DevicePushToken(id = id, userId = 7L, token = value, platform = PushPlatform.ANDROID)
@@ -77,6 +82,26 @@ class FcmPushSenderTest {
         assertThat(count(FcmPushSender.OUTCOME_SUCCESS)).isEqualTo(2.0)
         verify(repository, never()).deleteById(any())
     }
+
+    @Test
+    fun `발송 데이터에 수신 회원의 publicId를 recipientId로 덧붙인다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "tok-a")))
+        `when`(messaging.send(any())).thenReturn("projects/x/messages/1")
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+
+        // 시나리오가 같은 키를 넘겨도 모듈 값이 이긴다 — 수신자 판정 키를 호출자가 덮어쓰지 못한다.
+        sender.sendToUser(7L, mapOf("type" to "STORY_COMPLETED", "storyId" to "abc", "recipientId" to "spoofed"))
+
+        verify(messaging).send(captor.capture())
+        val data = dataOf(captor.value)
+        assertThat(data).containsEntry("recipientId", publicId.toString())
+        assertThat(data).containsEntry("type", "STORY_COMPLETED").containsEntry("storyId", "abc")
+    }
+
+    /** [Message]는 data 접근자가 없어 SDK 내부 필드를 읽는다. 키 이름이 바뀌면 이 헬퍼만 고친다. */
+    @Suppress("UNCHECKED_CAST")
+    private fun dataOf(message: Message): Map<String, String> =
+        Message::class.java.getDeclaredField("data").also { it.isAccessible = true }.get(message) as Map<String, String>
 
     @Test
     fun `토큰이 없으면 발송하지 않는다`() {
