@@ -11,6 +11,13 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.env.YamlPropertySourceLoader
+import org.springframework.context.ApplicationContextInitializer
+import org.springframework.context.ConfigurableApplicationContext
+import org.springframework.core.env.EnumerablePropertySource
+import org.springframework.core.env.MapPropertySource
+import org.springframework.core.io.ClassPathResource
+import org.springframework.test.context.ContextConfiguration
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
@@ -20,13 +27,11 @@ import java.util.UUID
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
+@ContextConfiguration(initializers = [CreditOrderPaymentTestInitializer::class])
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = [
         "manyak.payment.groble.webhook-secret=test-only-webhook-secret",
-        "MANYAK_GROBLE_PAYMENT_URL_IF_2000=https://pay.example.test/2000",
-        "MANYAK_GROBLE_PAYMENT_URL_IF_5000=https://pay.example.test/5000?source=manyak",
-        "MANYAK_GROBLE_PAYMENT_URL_IF_50000=",
     ],
 )
 class CreditOrderIntegrationTests {
@@ -59,6 +64,24 @@ class CreditOrderIntegrationTests {
         client.get().uri("/api/v1/credits/products").header("Authorization", "Bearer invalid-token")
             .exchange().expectStatus().isOk
         client.post().uri("/api/v1/credits/products").exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `유효한 탈퇴 계정 토큰으로 공개 상품을 조회하면 401이다`() {
+        val deleted = users.save(User(nickname = "탈퇴 회원", status = UserStatus.DELETED))
+        client.get().uri("/api/v1/credits/products").header("Authorization", bearer(deleted))
+            .exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `유효한 탈퇴 계정 토큰으로 본인 주문을 조회하면 401이다`() {
+        val owner = user()
+        val id = create(owner, "if_2000", "https://pay.example.test/2000?ref=")
+        val token = bearer(owner)
+        owner.status = UserStatus.DELETED
+        users.saveAndFlush(owner)
+        client.get().uri("/api/v1/users/me/credits/orders/$id").header("Authorization", token)
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
@@ -175,11 +198,11 @@ class CreditOrderIntegrationTests {
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
+@ContextConfiguration(initializers = [CreditOrderPaymentTestInitializer::class])
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = [
         "manyak.payment.groble.webhook-secret=",
-        "MANYAK_GROBLE_PAYMENT_URL_IF_2000=https://pay.example.test/2000",
     ],
 )
 class CreditOrderUnconfiguredIntegrationTests {
@@ -198,5 +221,22 @@ class CreditOrderUnconfiguredIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to "if_2000"))
             .exchange().expectStatus().isEqualTo(503)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isZero()
+    }
+}
+
+/** 리스트 속성은 상위 소스가 전체 교체하므로 실제 yml 상품을 복사하고 링크만 바꾼다. */
+class CreditOrderPaymentTestInitializer : ApplicationContextInitializer<ConfigurableApplicationContext> {
+    override fun initialize(context: ConfigurableApplicationContext) {
+        val products = mutableMapOf<String, Any>()
+        YamlPropertySourceLoader().load("credit-order-products", ClassPathResource("application.yml"))
+            .forEach { source ->
+                (source as EnumerablePropertySource<*>).propertyNames
+                    .filter { it.startsWith("manyak.payment.groble.products[") }
+                    .forEach { name -> source.getProperty(name)?.let { products[name] = it } }
+            }
+        products["manyak.payment.groble.products[0].payment-url"] = "https://pay.example.test/2000"
+        products["manyak.payment.groble.products[1].payment-url"] = "https://pay.example.test/5000?source=manyak"
+        products["manyak.payment.groble.products[4].payment-url"] = ""
+        context.environment.propertySources.addFirst(MapPropertySource("credit-order-products", products))
     }
 }

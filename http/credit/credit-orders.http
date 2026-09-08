@@ -1,6 +1,7 @@
 # KNK-1156 이프 상품 목록·웹 충전 주문 검증
 # 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun.
-# MANYAK_GROBLE_WEBHOOK_SECRET 및 상품별 MANYAK_GROBLE_PAYMENT_URL_IF_2000 등 링크 env를 설정한다.
+# MANYAK_GROBLE_WEBHOOK_SECRET을 설정하고 application.yml의 상품별 payment-url 값을 채운다.
+# 결제창 링크는 단일 판매자 계정의 환경 공통 yml 값이다.
 # 링크 기본값은 비어 있으므로 미설정 서버에서는 주문 생성이 503이다.
 # accessToken은 로그인 응답, otherAccessToken은 다른 회원의 로그인 응답에서 직접 입력한다.
 # 위에서부터 실행한다. 주문 생성 응답에서 creditOrderId를 저장하므로 조회 전에 생성 요청이 필요하다.
@@ -98,7 +99,7 @@ Content-Type: application/json
     });
 %}
 
-### 9. 결제 미설정 (별도 검증: 시크릿 또는 IF_2000 링크를 비우고 서버 재기동 후 실행)
+### 9. 결제 미설정 (별도 검증: 시크릿 또는 yml의 if_2000 상품 payment-url을 비우고 서버 재기동 후 실행)
 POST {{baseUrl}}/api/v1/users/me/credits/orders
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
