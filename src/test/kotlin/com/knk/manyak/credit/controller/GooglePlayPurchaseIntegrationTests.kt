@@ -148,6 +148,34 @@ class GooglePlayPurchaseIntegrationTests {
         assertThat(transactions.count()).isZero()
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = [1, 2, 3, -1])
+    fun `프로모션 리워드 미지원 유형은 적립 없이 거부한다`(type: Int) {
+        val owner = user()
+        receipt(type = type)
+        val rejected = meters.counter("manyak.payment.google.purchase", "result", "rejected")
+        val before = rejected.count()
+        val response = buy(owner, status = 400)
+        assertThat(response["message"].asText()).contains("지원하지 않는 구매 유형")
+        assertThat(rejected.count() - before).isEqualTo(1.0)
+        assertThat(orders.count()).isZero()
+        assertThat(transactions.count()).isZero()
+        assertThat(lots.count()).isZero()
+    }
+
+    @Test fun `dev 테스트 허용도 프로모션과 리워드를 허용하지 않는다`() {
+        val owner = user()
+        val service = GooglePlayPurchaseService(settings(allowTest = true), products, google, orderTransactions, guard, meters)
+        for (type in listOf(1, 2)) {
+            receipt(type = type)
+            org.assertj.core.api.Assertions.assertThatThrownBy { service.purchase(owner.id, "if_5000", "test-purchase") }
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+                .hasMessageContaining("400").hasMessageContaining("지원하지 않는 구매 유형")
+        }
+        assertThat(orders.count()).isZero()
+        assertThat(transactions.count()).isZero()
+    }
+
     @Test fun `테스트 허용 설정이면 테스트 구매도 적립한다`() {
         val user = user()
         receipt(type = 0)

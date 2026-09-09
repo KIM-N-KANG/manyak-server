@@ -131,7 +131,7 @@ manyak:
     google-play:
       service-account-json: ${MANYAK_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:}
       package-name: ${MANYAK_GOOGLE_PLAY_PACKAGE_NAME:}
-      allow-test-purchases: ${MANYAK_GOOGLE_PLAY_ALLOW_TEST_PURCHASES:false}
+      allow-test-purchases: false
       voided-reconcile:
         enabled: true
         fixed-delay: 1h

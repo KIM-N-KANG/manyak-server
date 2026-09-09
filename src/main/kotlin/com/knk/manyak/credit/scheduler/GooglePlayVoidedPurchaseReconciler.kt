@@ -6,12 +6,14 @@ import com.knk.manyak.credit.service.GooglePlayOrderTransactions
 import com.knk.manyak.credit.service.purchaseTokenHash
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Component
+@ConditionalOnProperty(name = ["manyak.payment.google-play.voided-reconcile.enabled"], havingValue = "true", matchIfMissing = true)
 class GooglePlayVoidedPurchaseReconciler(
     private val properties: GooglePlayPaymentProperties,
     private val google: GooglePlayPurchaseClient,

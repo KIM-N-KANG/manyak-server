@@ -39,10 +39,13 @@ class GooglePlayPaymentProperties(
 class GooglePlayPaymentConfig {
     @Bean
     fun googlePlayPurchaseClient(properties: GooglePlayPaymentProperties): GooglePlayPurchaseClient {
-        // 빈 설정으로도 기동한다. 자격증명 파싱·토큰 갱신은 실제 호출 때만 하며 값을 로그에 남기지 않는다.
-        val credentials by lazy {
+        // 빈 값만 미설정으로 허용한다. 비공백 JSON은 기동 시 검증하고 토큰 발급은 실제 호출 때 한다.
+        val credentials = if (properties.serviceAccountJson.isBlank()) null else try {
             GoogleCredentials.fromStream(properties.serviceAccountJson.byteInputStream())
                 .createScoped("https://www.googleapis.com/auth/androidpublisher")
+        } catch (_: Exception) {
+            // JSON·개인 키가 파서 예외에 섞일 수 있어 원인 객체를 기동 로그에 노출하지 않는다.
+            throw IllegalArgumentException("Google Play 서비스 계정 JSON이 올바르지 않습니다.")
         }
         val rest = RestClient.builder().baseUrl("https://androidpublisher.googleapis.com")
             .requestFactory(SimpleClientHttpRequestFactory().apply {
@@ -50,8 +53,9 @@ class GooglePlayPaymentConfig {
                 setReadTimeout(Duration.ofSeconds(15))
             }).build()
         return RestGooglePlayPurchaseClient(rest) {
-            credentials.refreshIfExpired()
-            credentials.accessToken.tokenValue
+            val configuredCredentials = credentials ?: throw com.knk.manyak.credit.google.GooglePlayUnavailableException()
+            configuredCredentials.refreshIfExpired()
+            configuredCredentials.accessToken.tokenValue
         }
     }
 }

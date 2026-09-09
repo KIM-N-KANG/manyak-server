@@ -33,9 +33,17 @@ class GooglePlayPurchaseService(
         val receipt = google.getProductPurchase(properties.packageName, productId, token)
         if (receipt.purchaseState != 0) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "미완료 구매입니다.")
         if (receipt.productId != productId) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "구매 상품이 일치하지 않습니다.")
-        if (receipt.purchaseType == 0 && !properties.allowTestPurchases) {
-            logger.warn("Google Play 테스트 구매 거부")
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "테스트 구매를 허용하지 않습니다.")
+        when (receipt.purchaseType) {
+            null -> Unit // 일반 구매만 허용한다.
+            0 -> if (!properties.allowTestPurchases) {
+                logger.warn("Google Play 테스트 구매 거부")
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "테스트 구매를 허용하지 않습니다.")
+            }
+            else -> {
+                // 프로모션(1)·리워드(2)와 향후 추가될 유형도 정책에 명시되기 전에는 적립하지 않는다.
+                logger.warn("Google Play 지원하지 않는 구매 유형 거부")
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 구매 유형입니다.")
+            }
         }
         try {
             counted("completed", orders.complete(userId, product, reference))
