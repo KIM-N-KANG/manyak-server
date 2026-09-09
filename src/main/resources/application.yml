@@ -128,6 +128,14 @@ manyak:
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   payment:
+    google-play:
+      service-account-json: ${MANYAK_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:}
+      package-name: ${MANYAK_GOOGLE_PLAY_PACKAGE_NAME:}
+      allow-test-purchases: ${MANYAK_GOOGLE_PLAY_ALLOW_TEST_PURCHASES:false}
+      voided-reconcile:
+        enabled: true
+        fixed-delay: 1h
+        lookback: 48h
     groble:
       # 미설정 기동은 허용하되 주문 생성은 링크·시크릿 중 하나라도 비어 있으면 503이다.
       webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
