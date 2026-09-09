@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query
 
 interface CreditOrderRepository : JpaRepository<CreditOrder, Long> {
     fun findByPublicId(publicId: UUID): CreditOrder?
+    fun findByProviderRef(providerRef: String): CreditOrder?
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT o FROM CreditOrder o WHERE o.publicId = :publicId")

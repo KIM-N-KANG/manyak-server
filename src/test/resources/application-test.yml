@@ -23,6 +23,12 @@ management:
       enabled: false
 
 manyak:
+  payment:
+    google-play:
+      service-account-json: ""
+      package-name: ""
+      voided-reconcile:
+        enabled: false
   search:
     opensearch:
       endpoint: ""
