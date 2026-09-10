@@ -4,7 +4,7 @@
 
 - 리뷰 코멘트와 리뷰 요약은 **한국어**로 작성한다. 코드 식별자, 파일 경로, 로그, 오류 메시지는 원문을 유지한다.
 - 단순 스타일이나 포매팅 문제는 리뷰하지 않는다.
-- 작업·리뷰 전에 `CLAUDE.md`와 스펙 정본 `../knk-harness/docs/product-specs/`(특히 `0-glossary.md`, `4-backend.md`, `5-ai-server.md`)를 확인한다. 코드와 스펙이 다르면 **코드를 스펙에 맞춘다**.
+- 작업·리뷰 전에 `CLAUDE.md`와 스펙 정본 `../knk-harness/docs/`의 Spec(특히 `spec/0-glossary.md`, `spec/4-backend-server-spec.md`, `spec/5-ai-server-spec.md`)를 확인한다. 코드와 스펙이 다르면 **코드를 스펙에 맞춘다**.
 - 이 파일과 `CLAUDE.md`가 충돌하면 `CLAUDE.md`를 따른다. 이 파일은 리뷰에 필요한 부분만 추린 요약이다.
 
 ## 이 레포에서 자주 나는 오독
