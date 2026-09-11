@@ -122,7 +122,7 @@ class RestChatTurnAiClientTests {
         client().generateChoices(
             sampleRequest().copy(
                 characterImages = listOf(
-                    ChatCharacterImage(name = "강진우", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
+                    ChatCharacterImage(name = "강진우", imageName = "강진우_기본", imageUrl = "https://cdn.test/characters/generated/s/a.webp"),
                 ),
             ),
             aiOutput = "생성된 본문",

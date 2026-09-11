@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -21,6 +21,9 @@
 | rejoined_at | timestamp with time zone |  | true |  |  |  |
 | reward_identity_user_id | bigint |  | true |  |  |  |
 | withdrawn_from_status | varchar(20) |  | true |  |  |  |
+| service_push_enabled | boolean | true | false |  |  |  |
+| marketing_push_agreed_at | timestamp with time zone |  | true |  |  |  |
+| marketing_push_night_agreed_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -39,6 +42,7 @@
 | users_pkey | CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id) |
 | uq_users_public_id | CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id) |
 | uq_users_invite_code | CREATE UNIQUE INDEX uq_users_invite_code ON public.users USING btree (invite_code) |
+| uq_users_nickname_key | CREATE UNIQUE INDEX uq_users_nickname_key ON public.users USING btree (replace(lower((nickname)::text), ' '::text, ''::text)) |
 
 ## Relations
 
@@ -53,6 +57,8 @@ erDiagram
 "public.user_story_ending_reaches" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_likes" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 
 "public.users" {
   bigint id
@@ -72,6 +78,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 "public.social_accounts" {
   bigint id
@@ -132,6 +141,30 @@ erDiagram
   varchar_20_ reason
   text detail
   timestamp_with_time_zone created_at
+}
+"public.device_push_tokens" {
+  bigint id
+  bigint user_id FK
+  varchar_512_ token
+  varchar_16_ platform
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.credit_orders" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_32_ product_id
+  varchar_20_ provider
+  varchar_20_ status
+  bigint price_krw
+  bigint credit_amount
+  varchar_255_ provider_ref
+  bigint credit_transaction_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  timestamp_with_time_zone refunded_at
+  bigint reversal_shortfall
 }
 ```
 

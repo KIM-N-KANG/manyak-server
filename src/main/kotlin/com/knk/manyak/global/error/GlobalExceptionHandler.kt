@@ -17,6 +17,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 
@@ -115,6 +116,22 @@ class GlobalExceptionHandler {
                 )
             },
         )
+
+    /**
+     * 쿼리·경로 파라미터의 타입 변환 실패(`?limit=abc`처럼 Int 자리에 문자). 클라이언트가 만든 값이라 400이다.
+     * 이 핸들러가 없으면 catch-all(Exception)로 떨어져 500 + Sentry 노이즈가 된다.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleMethodArgumentTypeMismatchException(
+        exception: MethodArgumentTypeMismatchException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("Parameter type mismatch: path={}, name={}, value={}", request.requestURI, exception.name, exception.value)
+        return badRequest(
+            request = request,
+            details = listOf(ApiErrorDetail(field = exception.name, message = "값의 형식이 올바르지 않습니다.")),
+        )
+    }
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleHttpMessageNotReadableException(

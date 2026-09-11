@@ -199,9 +199,13 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
-    fun `visibility PUBLIC로 등록하면 익명 조회가 허용된다`() {
+    fun `회원이 visibility PUBLIC로 등록하면 익명 조회가 허용된다`() {
+        // 공개는 회원만 지정할 수 있다(게스트 PUBLIC은 400 — 아래 케이스).
+        val member = userRepository.save(User(nickname = "공개작가", status = UserStatus.ACTIVE))
+
         restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body(visibility = "PUBLIC"))
             .exchange()
@@ -209,11 +213,42 @@ class GeneralStoryCreationIntegrationTests {
 
         val story = storyRepository.findAll().single()
         assertEquals(StoryVisibility.PUBLIC, story.visibility)
+        assertEquals(member.id, story.userId)
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isOk
+    }
+
+    @Test
+    fun `게스트가 visibility PUBLIC로 등록하면 400이고 저장되지 않는다`() {
+        // 조용히 PRIVATE으로 낮추지 않는다 — 사용자가 고른 값을 서버가 몰래 뒤집으면
+        // "공개했는데 왜 안 보이냐"가 된다. 공개는 로그인해 이관한 뒤에만 가능하다.
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body(visibility = "PUBLIC"))
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("GUEST_CANNOT_PUBLISH")
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
+    fun `게스트가 visibility PRIVATE로 등록하면 201이고 PRIVATE으로 저장된다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body(visibility = "PRIVATE"))
+            .exchange()
+            .expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertNull(story.userId)
+        assertEquals(StoryVisibility.PRIVATE, story.visibility)
     }
 
     @Test

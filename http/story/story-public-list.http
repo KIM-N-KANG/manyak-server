@@ -1,0 +1,228 @@
+### 공개 스토리 목록(Public Story List) API 수동 검증
+### IntelliJ HTTP Client / VS Code REST Client 호환.
+### 위에서부터 순서대로 실행하면 회원 소유 공개 스토리를 둘 만든 뒤 최신순 조회 → 커서로 다음 페이지 →
+### 인기순 조회 → 에러 케이스(sort·limit·cursor)를 확인합니다.
+###
+### [KNK-149] GET /api/v1/stories — 발행(PUBLISHED)·공개(PUBLIC)·미삭제·회원 소유 스토리만.
+###   - 인증 불필요(요청자 신원을 쓰지 않습니다). 게스트 제작 스토리(소유자 없음)는 제외합니다.
+###   - sort=latest(기본, 등록 최신순) | popular(좋아요 많은 순). 그 외 값은 400.
+###   - limit 기본 20, 1~50으로 보정(0·100 같은 값은 400이 아니라 보정). 숫자가 아니면 400.
+###   - 응답은 { items: [스토리 카드], nextCursor: string|null }. 다음 페이지는 nextCursor를 **같은 sort로** 넘깁니다.
+###   - 커서는 keyset(정렬값 + public_id)이라 페이지 사이에 중복·누락이 없습니다. 형식이 깨졌거나
+###     정렬이 다른 커서는 400입니다(최신순 커서를 popular에 넣으면 400).
+###
+### 사전 준비:
+###   - 서버 실행: ./gradlew bootRun (기본 포트 8080), Postgres 기동(docker compose up -d)
+###   - access 토큰: auth/auth-login-google.http 5번(해피 패스)을 먼저 실행하면 전역 accessToken 이 채워져
+###     아래 {{accessToken}} 에 재사용됩니다. 같은 IntelliJ 세션이 아니면 @accessToken 에 직접 붙여넣으세요.
+###     **회원 토큰이 필요합니다** — 익명으로 만든 스토리는 소유자가 없어 이 목록에 나오지 않습니다.
+###   - 목록은 DB 전체를 봅니다. 다른 공개 스토리가 이미 있으면 "정확히 N건" 대신 순서·포함 여부를 확인하세요.
+###
+### 실행 순서: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9. 10은 자유 조회.
+
+@baseUrl = http://localhost:8080
+
+# auth/auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 백엔드 상태 확인
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.test("서버가 떠 있다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 1. (준비 1/2) 회원 소유 공개 스토리 생성 → 201
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "목록 검증 스토리 A",
+  "oneLineIntro": "먼저 만든 스토리",
+  "description": "공개 목록 수동 검증용",
+  "genres": ["판타지"],
+  "storySettings": {
+    "worldSetting": "몰락한 왕국 아르덴",
+    "characterSetting": "기억을 잃은 마법사",
+    "userRoleSetting": "과거를 쫓는 추적자",
+    "ruleSetting": "마법은 대가를 요구한다"
+  },
+  "startSettings": [
+    {
+      "name": "선왕의 장례식 날",
+      "prologue": "잿빛 비가 사흘째 왕성을 적신다",
+      "startSituation": "장례식이 끝난 늦은 밤",
+      "suggestedInputs": ["주변을 둘러본다", "봉인된 편지를 읽는다", "기사에게 말을 건다"]
+    }
+  ],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("스토리 A 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(회원 토큰이 유효한지 확인). actual=${response.status}`);
+    });
+    client.global.set("storyIdA", response.body.id);
+%}
+
+### 2. (준비 2/2) 두 번째 공개 스토리 생성 → 201. 이쪽이 더 최신입니다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "목록 검증 스토리 B",
+  "oneLineIntro": "나중에 만든 스토리",
+  "description": "공개 목록 수동 검증용",
+  "genres": ["미스터리"],
+  "storySettings": {
+    "worldSetting": "안개의 항구도시",
+    "characterSetting": "은퇴한 형사",
+    "userRoleSetting": "사건을 뒤쫓는 기자",
+    "ruleSetting": "밤에는 아무도 믿지 않는다"
+  },
+  "startSettings": [
+    {
+      "name": "부두의 첫 밤",
+      "prologue": "무전기에서 잡음이 흘러나온다",
+      "startSituation": "안개가 짙은 새벽",
+      "suggestedInputs": ["현장을 살핀다", "목격자를 찾는다", "무전을 듣는다"]
+    }
+  ],
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("스토리 B 생성이 성공한다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("storyIdB", response.body.id);
+%}
+
+### 3. (핵심 검증) 인증 없이 최신순 첫 페이지 → 200, B가 A보다 앞
+GET {{baseUrl}}/api/v1/stories
+Accept: application/json
+
+> {%
+    client.test("비로그인 조회가 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    const items = response.body.items;
+    client.test("응답이 items·nextCursor 계약을 지킨다", () => {
+        client.assert(Array.isArray(items), `items가 배열이 아닙니다. actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.nextCursor === null || typeof response.body.nextCursor === "string",
+            `nextCursor 형식이 다릅니다. actual=${JSON.stringify(response.body.nextCursor)}`);
+    });
+    const idxA = items.findIndex(it => it.id === client.global.get("storyIdA"));
+    const idxB = items.findIndex(it => it.id === client.global.get("storyIdB"));
+    client.test("방금 만든 두 스토리가 최신순(B 먼저)으로 들어 있다", () => {
+        client.assert(idxA >= 0 && idxB >= 0, `방금 만든 스토리가 목록에 없습니다. ids=${items.map(it => it.id).join(",")}`);
+        client.assert(idxB < idxA, `B가 A보다 앞이어야 합니다. idxB=${idxB}, idxA=${idxA}`);
+    });
+    client.test("카드에 작성자·좋아요 수·턴 수·장르가 실린다", () => {
+        const card = items[idxB];
+        client.assert(card.author !== null && typeof card.author.nickname === "string",
+            `author가 비었습니다. actual=${JSON.stringify(card.author)}`);
+        client.assert(typeof card.likeCount === "number", `likeCount가 숫자가 아닙니다. actual=${card.likeCount}`);
+        client.assert(typeof card.turnCount === "number", `turnCount가 숫자가 아닙니다. actual=${card.turnCount}`);
+        client.assert(Array.isArray(card.genres), `genres가 배열이 아닙니다. actual=${JSON.stringify(card.genres)}`);
+        client.assert(card.status === "PUBLISHED", `status가 PUBLISHED가 아닙니다. actual=${card.status}`);
+    });
+%}
+
+### 4. (커서) limit=1 로 첫 페이지 → nextCursor 를 전역에 저장
+GET {{baseUrl}}/api/v1/stories?limit=1
+Accept: application/json
+
+> {%
+    client.test("limit=1이면 한 건만 온다", () => {
+        client.assert(response.body.items.length === 1, `1건이 아닙니다. actual=${response.body.items.length}`);
+    });
+    client.test("다음 페이지가 있으면 nextCursor가 실린다", () => {
+        client.assert(typeof response.body.nextCursor === "string" && response.body.nextCursor.length > 0,
+            `nextCursor가 없습니다(공개 스토리가 1건뿐이면 정상). actual=${JSON.stringify(response.body.nextCursor)}`);
+    });
+    client.global.set("latestCursor", response.body.nextCursor);
+    client.global.set("firstPageId", response.body.items[0].id);
+%}
+
+### 5. (커서) 저장한 커서로 다음 페이지 → 첫 페이지 항목이 다시 나오지 않는다
+GET {{baseUrl}}/api/v1/stories?limit=1&cursor={{latestCursor}}
+Accept: application/json
+
+> {%
+    client.test("다음 페이지 조회가 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("첫 페이지와 중복되지 않는다(keyset)", () => {
+        const ids = response.body.items.map(it => it.id);
+        client.assert(ids.indexOf(client.global.get("firstPageId")) < 0,
+            `첫 페이지 항목이 다시 나왔습니다. ids=${ids.join(",")}`);
+    });
+%}
+
+### 6. (정렬) 인기순 조회 → 200, likeCount 내림차순
+# 좋아요를 심으려면 story-like.http 로 몇 건 등록한 뒤 다시 실행하세요.
+GET {{baseUrl}}/api/v1/stories?sort=popular&limit=20
+Accept: application/json
+
+> {%
+    client.test("인기순 조회가 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("likeCount가 내림차순이다", () => {
+        const counts = response.body.items.map(it => it.likeCount);
+        for (let i = 1; i < counts.length; i++) {
+            client.assert(counts[i - 1] >= counts[i], `내림차순이 아닙니다. actual=${counts.join(",")}`);
+        }
+    });
+%}
+
+### 7. (에러) 알 수 없는 sort → 400
+GET {{baseUrl}}/api/v1/stories?sort=trending
+Accept: application/json
+
+> {%
+    client.test("알 수 없는 sort는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 8. (에러) 숫자가 아닌 limit → 400
+GET {{baseUrl}}/api/v1/stories?limit=abc
+Accept: application/json
+
+> {%
+    client.test("숫자가 아닌 limit은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9. (에러) 정렬이 다른 커서 → 400
+# 4번에서 받은 최신순 커서를 인기순에 넣습니다. 정렬 접두가 달라 거부됩니다.
+GET {{baseUrl}}/api/v1/stories?sort=popular&cursor={{latestCursor}}
+Accept: application/json
+
+> {%
+    client.test("다른 정렬의 커서는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9-1. (에러) 망가진 커서 → 400
+GET {{baseUrl}}/api/v1/stories?cursor=not-a-cursor
+Accept: application/json
+
+> {%
+    client.test("망가진 커서는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 10. (자유 조회) limit 보정 눈으로 확인 — 0은 1로, 100은 50으로 보정됩니다. 어서션 없음.
+GET {{baseUrl}}/api/v1/stories?sort=latest&limit=100
+Accept: application/json

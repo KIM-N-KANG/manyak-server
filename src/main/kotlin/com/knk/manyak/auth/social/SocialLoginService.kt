@@ -154,7 +154,11 @@ class SocialLoginService(
         } catch (ex: DataIntegrityViolationException) {
             // 경합으로 상대가 먼저 생성·커밋했을 수 있다. 새 조회 시점(now)으로 재시도한다.
             // 이 경로는 상대가 만든 기존 계정 재사용이므로 신규 아님(is_new_user=false).
-            (registrar.findExistingUser(provider, info, Instant.now()) ?: throw ex) to false
+            registrar.findExistingUser(provider, info, Instant.now())?.let { return it to false }
+            // 상대 계정이 없으면 소셜 충돌이 아니라 **닉네임 유니크 위반**일 수 있다(KNK-1147, V75).
+            // 등록은 독립 트랜잭션이라 실패분이 이미 롤백됐고, 발급기가 새 닉네임을 뽑으므로 재시도가 같은
+            // 값으로 다시 깨지지 않는다. 한 번만 더 시도하고, 그래도 실패하면 원 예외가 그대로 드러난다.
+            registrar.createUserAndAccount(provider, info, Instant.now()) to true
         }
     }
 

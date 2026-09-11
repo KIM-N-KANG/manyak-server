@@ -46,6 +46,15 @@ class ProfileImagePresetService(
     /** 명사의 저해상도 썸네일 base64(목록·미리보기용). 매핑이 없으면 null. */
     fun thumbnailBase64For(noun: String): String? = thumbnailsByNoun[noun]
 
+    /**
+     * 프리셋 이미지가 있는 명사 키 전부(KNK-1147 프로필 수정의 선택지). 명사 풀 순서를 그대로 쓴다 —
+     * 목록 순서가 요청마다 흔들리지 않아야 클라이언트가 안정적으로 그린다.
+     */
+    fun presetKeys(): List<String> = thumbnailsByNoun.keys.toList()
+
+    /** [key]가 배정 가능한 프리셋인지. 없는 키로 프로필을 바꾸면 아바타가 사라지므로 호출부가 400으로 막는다. */
+    fun hasPreset(key: String): Boolean = thumbnailsByNoun.containsKey(key)
+
     /** 명사 풀을 훑어 프리셋 리소스가 있는 명사만 썸네일을 만든다. 누락은 경고 후 건너뛴다(해당 명사는 null 폴백). */
     private fun loadThumbnails(): Map<String, String> {
         val map = LinkedHashMap<String, String>()

@@ -9,7 +9,7 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 14 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 15 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
@@ -19,7 +19,7 @@
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
 | [public.ai_call_logs](public.ai_call_logs.md) | 22 |  | BASE TABLE |
-| [public.users](public.users.md) | 17 |  | BASE TABLE |
+| [public.users](public.users.md) | 20 |  | BASE TABLE |
 | [public.social_accounts](public.social_accounts.md) | 10 |  | BASE TABLE |
 | [public.lorebooks](public.lorebooks.md) | 8 |  | BASE TABLE |
 | [public.story_lorebooks](public.story_lorebooks.md) | 5 |  | BASE TABLE |
@@ -41,6 +41,12 @@
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
 | [public.story_public_snapshots](public.story_public_snapshots.md) | 4 | KNK-1065: 스토리가 마지막으로 공개(PUBLISHED AND PUBLIC)였던 시점의 표시·생성 재료. 읽을 수 없는 스토리를 참조하는 채팅 경로가 현재 값 대신 읽는다. | BASE TABLE |
+| [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
+| [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
+| [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
+| [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
+| [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 
 ## Relations
 
@@ -91,6 +97,10 @@ erDiagram
 "public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
+"public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -150,6 +160,7 @@ erDiagram
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
+  varchar_20_ thumbnail_moderation_status
 }
 "public.story_settings" {
   bigint id
@@ -280,6 +291,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 "public.social_accounts" {
   bigint id
@@ -467,6 +481,68 @@ erDiagram
   jsonb snapshot
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.device_push_tokens" {
+  bigint id
+  bigint user_id FK
+  varchar_512_ token
+  varchar_16_ platform
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.push_message_templates" {
+  bigint id
+  varchar_64_ template_key
+  varchar_100_ title
+  varchar_300_ body
+  timestamp_with_time_zone effective_from
+  timestamp_with_time_zone effective_until
+  timestamp_with_time_zone created_at
+}
+"public.story_character_images" {
+  bigint id
+  uuid public_id
+  bigint character_id FK
+  varchar_120_ image_name
+  text image_url
+  integer sort_order
+  varchar_20_ moderation_status
+  timestamp_with_time_zone created_at
+}
+"public.push_campaigns" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  varchar_300_ body
+  timestamp_with_time_zone scheduled_at
+  varchar_20_ status
+  integer target_count
+  integer sent_count
+  integer skipped_count
+  timestamp_with_time_zone started_at
+  timestamp_with_time_zone finished_at
+  timestamp_with_time_zone created_at
+}
+"public.credit_orders" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_32_ product_id
+  varchar_20_ provider
+  varchar_20_ status
+  bigint price_krw
+  bigint credit_amount
+  varchar_255_ provider_ref
+  bigint credit_transaction_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  timestamp_with_time_zone refunded_at
+  bigint reversal_shortfall
+}
+"public.groble_refund_marks" {
+  varchar_255_ merchant_uid
+  timestamp_with_time_zone created_at
+  bigint refund_amount
 }
 ```
 

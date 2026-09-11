@@ -10,6 +10,10 @@ import java.time.Instant
 
 interface CreditLotRepository : JpaRepository<CreditLot, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM CreditLot l WHERE l.userId = :userId AND l.transactionId = :transactionId")
+    fun findByUserIdAndTransactionIdForUpdate(userId: Long, transactionId: Long): CreditLot?
+
     /**
      * FIFO 차감·만료 정리용: 잔여>0 로트를 비관적 락으로 잠그고 소비 순서로 정렬해 조회한다(스펙 §4-3-7).
      *

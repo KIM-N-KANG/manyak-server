@@ -67,6 +67,12 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  search:
+    opensearch:
+      endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
+      region: ${AWS_REGION:ap-northeast-2}
+      story-index: ${MANYAK_OPENSEARCH_STORY_INDEX:stories-dev}
+      reindex-on-startup: ${MANYAK_OPENSEARCH_REINDEX_ON_STARTUP:false}
   # 마냑 공식 계정(오리지널 스토리 소유자)의 user public_id(UUID). 운영은 env로 주입하며,
   # 미설정(빈 값)이면 GET /stories/originals는 빈 목록을 반환한다(KNK-975).
   official-user-public-id: ${MANYAK_OFFICIAL_USER_PUBLIC_ID:}
@@ -121,14 +127,66 @@ manyak:
       endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
+  payment:
+    google-play:
+      service-account-json: ${MANYAK_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:}
+      package-name: ${MANYAK_GOOGLE_PLAY_PACKAGE_NAME:}
+      allow-test-purchases: false
+      voided-reconcile:
+        enabled: true
+        fixed-delay: 1h
+        lookback: 48h
+    groble:
+      # 미설정 기동은 허용하되 주문 생성은 링크·시크릿 중 하나라도 비어 있으면 503이다.
+      webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
+      # 상품별 그로블 결제창(단일 판매자 계정이라 환경 공통). 주문 생성은 웹훅 시크릿 설정도 필요하다.
+      # 표기는 크랙 방식(기본 수량 = 가격, 보너스는 덤), 앱 가격은 웹 × 1.4를 100원 단위 반올림.
+      # 2026-09-11 최종안(KNK-1270). 결제창은 그로블 MCP로 관리한다(가격은 판매 이력 없을 때만 제자리 수정 가능).
+      products:
+        - id: if_2000
+          base: 2000
+          bonus: 0
+          web-price-krw: 2000
+          app-price-krw: 2800
+          payment-url: "https://www.groble.im/payment/iwhU85"
+        - id: if_5000
+          base: 4800
+          bonus: 200
+          web-price-krw: 4800
+          app-price-krw: 6700
+          payment-url: "https://www.groble.im/payment/nSGNPJ"
+        - id: if_10000
+          base: 9400
+          bonus: 600
+          web-price-krw: 9400
+          app-price-krw: 13200
+          payment-url: "https://www.groble.im/payment/pt2z39"
+        - id: if_30000
+          base: 27500
+          bonus: 2500
+          web-price-krw: 27500
+          app-price-krw: 38500
+          payment-url: "https://www.groble.im/payment/AvtY6y"
+        - id: if_50000
+          base: 45000
+          bonus: 5000
+          web-price-krw: 45000
+          app-price-krw: 63000
+          payment-url: "https://www.groble.im/payment/dRw9sY"
+        - id: if_100000
+          base: 88000
+          bonus: 12000
+          web-price-krw: 88000
+          app-price-krw: 123200
+          payment-url: "https://www.groble.im/payment/mBWhrA"
   credit:
-    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-08-31 재확정 · KNK-1056). 여기 값은 CreditPolicyService가
+    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-09-11 재확정 · KNK-1270). 여기 값은 CreditPolicyService가
     # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).
     signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:1000}
     invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:2000}
     invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
-    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:350}
-    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:200}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:250}
     chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
     policy-refresh:
       # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이
@@ -149,6 +207,34 @@ manyak:
     storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:5}
     story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:1}
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
+  push:
+    web:
+      icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
+    fcm:
+      # Firebase 서비스 계정 JSON 원문(KNK-1130). 앱의 google-services.json과 같은 프로젝트에서 발급한다.
+      # 미설정(빈 값)이면 FCM 빈을 만들지 않아 발송이 no-op이다(Slack 웹훅과 같은 관례). 운영은 manyak/prod/app
+      # 시크릿 JSON에 키를 추가하고, 태스크 정의 secrets 목록에 그 키를 노출하는 terraform apply가 함께 필요하다.
+      service-account-json: ${MANYAK_FCM_SERVICE_ACCOUNT_JSON:}
+    attendance-reminder:
+      # 출석 리마인드 푸시(KNK-1116, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
+      enabled: ${MANYAK_PUSH_ATTENDANCE_REMINDER_ENABLED:true}
+      # 09:00 KST. zone은 코드에 Asia/Seoul로 박혀 있어 서버 타임존과 무관하게 같은 시각에 돈다.
+      cron: ${MANYAK_PUSH_ATTENDANCE_REMINDER_CRON:0 0 9 * * *}
+    promotion:
+      # 프로모션 푸시(KNK-1117, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
+      enabled: ${MANYAK_PUSH_PROMOTION_ENABLED:true}
+      # 도래한 예약을 훑는 주기. 예약은 사람이 SQL로 넣으므로 분 단위 정밀도면 충분하다.
+      interval-ms: ${MANYAK_PUSH_PROMOTION_INTERVAL_MS:60000}
+    template-refresh:
+      # 푸시 문구 오버라이드(push_message_templates) 스냅샷 갱신 주기.
+      enabled: ${MANYAK_PUSH_TEMPLATE_REFRESH_ENABLED:true}
+      interval-ms: ${MANYAK_PUSH_TEMPLATE_REFRESH_INTERVAL_MS:300000}
+    templates:
+      # 알림 문구의 기본값(정본). DB(push_message_templates)에 유효한 행이 있으면 그 값이 이긴다.
+      # (광고) 표기는 여기 넣지 않는다 — 서버가 발송 시점에 붙인다(빠뜨리면 되돌릴 수 없는 발송이 된다).
+      attendance-reminder:
+        title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:오늘의 출석 이프를 아직 안 받았어요}
+        body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.}
   slack:
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}

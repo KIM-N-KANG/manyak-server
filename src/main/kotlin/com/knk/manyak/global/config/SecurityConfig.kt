@@ -80,6 +80,10 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks")).permitAll()
                     // 오리지널 스토리 목록도 인증 없는 공개 목록이다(KNK-975). {storyId} 매처에 기대지 않고 명시적으로 허용한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/originals")).permitAll()
+                    // 공개 스토리 목록(KNK-149)도 인증 없는 공개 목록이다. 요청자 신원을 쓰지 않으며,
+                    // 정확 경로라 하위 {storyId} 매처와 겹치지 않는다.
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/search")).permitAll()
                     // 스토리 ID도 추측 불가능한 공개 식별자(UUID)다(KNK-256). 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
@@ -102,6 +106,7 @@ class SecurityConfig {
                     // 이프 수치 조회(KNK-1090)는 로그인 전 안내 화면도 읽는 공개 조회다. OPTIONAL_AUTH_MATCHERS에 있으므로
                     // permitAll을 여기 명시해야 한다(BEARER_SKIP_MATCHERS와 달리 그 배열은 permitAll에 자동 반영되지 않는다).
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/products")).permitAll()
                     // 인증 없이 호출하는 공개 인증 엔드포인트(Google·Kakao 로그인, refresh 회전).
                     // - 로그인: 아직 우리 토큰이 없는 상태에서 호출한다.
                     // - refresh: access 없이 회전한다(토큰 유효성은 서비스가 검증한다).
@@ -171,6 +176,8 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            // 그로블은 raw body HMAC으로 인증하며 사용자 Bearer 토큰을 사용하지 않는다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/webhooks/groble"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/kakao"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
@@ -198,6 +205,12 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/{turnId:\\d+}/choices"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks"),
+            // 공개 스토리 목록(KNK-149)도 요청자 신원을 쓰지 않지만(무인증), 클라이언트가 자동 첨부한
+            // 만료·위조 access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 여기 함께 둬 토큰 resolve를
+            // 건너뛴다. 로그아웃 상태 화면이 부르는 경로라 stale 헤더 하나로 피드가 통째로 깨지면 안 된다.
+            // 정확 경로라 아래 {storyId} 매처와 겹치지 않는다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/search"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general"),
@@ -217,6 +230,7 @@ class SecurityConfig {
             // 여기 두면 유효 토큰은 principal이 채워져 탈퇴 게이트에 걸리고, 만료·위조 토큰은 optional 필터가
             // 삼켜 로그인 전 안내 화면이 401로 깨지지도 않는다(위 GET /api/v1/shares/{shareId}와 같은 이유).
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/policies"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/credits/products"),
         )
     }
 

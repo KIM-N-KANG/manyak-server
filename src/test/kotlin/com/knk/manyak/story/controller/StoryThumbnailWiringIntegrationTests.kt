@@ -7,6 +7,10 @@ import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationTagRepository
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -39,7 +43,12 @@ class StoryThumbnailWiringIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var imagePresetRepository: ImagePresetRepository
     @Autowired private lateinit var storyCreationTagRepository: StoryCreationTagRepository
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    // 공개(PUBLIC) 스토리는 회원만 만들 수 있다(KNK-149) — 등록을 이 회원 명의로 한다.
+    private lateinit var accessToken: String
 
     @BeforeEach
     fun setUp() {
@@ -55,6 +64,8 @@ class StoryThumbnailWiringIntegrationTests {
         imagePresetRepository.save(
             ImagePreset(imageKey = "thumb_0001", type = ImagePresetType.THUMBNAIL, genres = setOf(fantasy)),
         )
+        val author = userRepository.save(User(nickname = "썸네일작가", status = UserStatus.ACTIVE))
+        accessToken = jwtTokenProvider.issueAccessToken(author.publicId)
     }
 
     @AfterEach
@@ -68,6 +79,8 @@ class StoryThumbnailWiringIntegrationTests {
 
         restTestClient.get()
             .uri("/api/v1/stories/$storyId")
+            // 비공개 스토리는 소유자만 읽는다 — 등록한 회원 명의로 조회한다.
+            .header("Authorization", "Bearer $accessToken")
             .exchange()
             .expectStatus().isOk
             .expectBody()
@@ -128,6 +141,8 @@ class StoryThumbnailWiringIntegrationTests {
 
         restTestClient.get()
             .uri("/api/v1/stories/$storyId")
+            // 비공개 스토리는 소유자만 읽는다 — 등록한 회원 명의로 조회한다.
+            .header("Authorization", "Bearer $accessToken")
             .exchange()
             .expectStatus().isOk
             .expectBody()
@@ -162,6 +177,7 @@ class StoryThumbnailWiringIntegrationTests {
 
         return restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer $accessToken")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
             .exchange()

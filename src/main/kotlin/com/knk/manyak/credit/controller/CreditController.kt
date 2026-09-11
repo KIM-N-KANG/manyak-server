@@ -97,11 +97,11 @@ class CreditController(
             요청자의 크레딧 증감 내역을 최신순으로 반환합니다. 인증 필수입니다.
 
             - `type`: 화면 필터 칩과 같은 값(`ALL`·`SPEND`·`EARN`·`EXPIRE`). 환불(REFUND)은 획득으로 분류하고,
-              구매(PURCHASE)는 구매내역 탭 몫이라 `ALL`에서도 제외합니다.
+              구매(PURCHASE)는 EARN, 구매 환불 회수(PURCHASE_REVERSAL)는 EXPIRE로 표시합니다.
             - `limit`: 1~100으로 보정합니다(기본 50).
             - `cursor`: 이전 응답의 `nextCursor`를 그대로 넘기면 다음 페이지입니다. 다음이 없으면 `nextCursor`는 null입니다.
             - `title`은 관련 스토리 제목이며, 보상·소멸 행이거나 스토리가 삭제됐으면 null입니다.
-            - 소멸 행의 `createdAt`은 회수가 기록된 시각이라 실제 만료일과 다릅니다. 날짜 표시는 `expiresAt`을 쓰세요.
+            - 만료(EXPIRE) 행의 `createdAt`은 회수 기록 시각이고 실제 만료일은 `expiresAt`입니다. 구매 환불 회수의 `expiresAt`은 null입니다.
         """,
     )
     @ApiResponses(

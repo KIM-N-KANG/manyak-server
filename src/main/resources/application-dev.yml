@@ -19,6 +19,9 @@ spring:
     enabled: true
 
 manyak:
+  payment:
+    google-play:
+      allow-test-purchases: true
   google-form:
     feedback:
       # 빈 문자열 **리터럴**이다(placeholder를 쓰지 않는다). 개발은 어떤 구글 폼에도 적재하면 안 되므로 잠근다.

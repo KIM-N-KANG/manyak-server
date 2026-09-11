@@ -1,5 +1,7 @@
 package com.knk.manyak.story.service
 
+import org.springframework.context.ApplicationEventPublisher
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.GeneralStartSettingInput
@@ -15,6 +17,13 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.image.service.ImageModerationStatus
+import com.knk.manyak.image.service.ImageUrlResolver
+import com.knk.manyak.image.service.UploadedImageKind
+import com.knk.manyak.story.dto.CharacterImageResponse
+import com.knk.manyak.story.dto.StoryEditCharacterResponse
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -35,10 +44,16 @@ import java.util.UUID
  */
 @Service
 class StoryEditService(
+    private val eventPublisher: ApplicationEventPublisher,
     private val storyRepository: StoryRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
+    // 이미지 업로드(KNK-1126): 편집 폼이 현재 표지·인물 이미지를 싣고, PATCH가 표지 교체를 받는다.
+    private val storyCharacterRepository: StoryCharacterRepository,
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
+    private val storyImageAccess: StoryImageAccess,
+    private val imageUrlResolver: ImageUrlResolver,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
@@ -61,6 +76,10 @@ class StoryEditService(
         val story = resolveStoryForUpdate(storyId)
         requireOwnerAccess(story, userId)
         requirePublishedForVisibilityChange(story, request.visibility)
+        // 게스트(소유자 없음) 스토리의 공개 전환은 막는다(KNK-149). 값이 그대로 실려 오는 폼 왕복은 전환이
+        // 아니므로 통과시킨다(위 requirePublishedForVisibilityChange와 같은 이유 — 레거시 PUBLIC 게스트
+        // 스토리가 폼 저장 자체를 못 하게 되면 안 된다).
+        requireOwnerCanPublish(story.userId, request.visibility?.takeIf { it != story.visibility })
 
         // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
         request.title?.let {
@@ -75,6 +94,23 @@ class StoryEditService(
         request.genres?.let { story.genre = it.joinToString(separator = ", ").ifBlank { null } }
         // 공개 전환(KNK-1021). 전환 가능 여부는 위 requirePublishedForVisibilityChange가 이미 확정했다.
         request.visibility?.let { story.visibility = it }
+
+        // 표지 교체(KNK-1126). 회원 소유 스토리만이고 객체 키는 이 스토리의 업로드 prefix 아래여야 한다.
+        // 지우기는 DELETE /stories/{storyId}/thumbnail이 담당한다(여기서 null은 미전송·유지).
+        request.thumbnailObjectKey?.let { objectKey ->
+            // 게스트 스토리는 익명으로도 수정할 수 있어(소유권 게이트 통과) 여기서 따로 막는다 — 소유자가
+            // 없으면 올린 이미지의 책임 주체가 없다(스펙 §4-3-8 "회원 소유 스토리만").
+            if (story.userId == null) {
+                throw ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "로그인 후 내 스토리로 가져와야 이미지를 올릴 수 있습니다.",
+                )
+            }
+            story.thumbnailImageUrl = storyImageAccess.resolveUploadedUrl(story, UploadedImageKind.COVER, objectKey)
+            // 새 객체는 새 판정이다 — 이전 표지가 PENDING·REJECTED였다고 물려받으면 이미지를 바꿔도
+            // 계속 가려진다. 자동 검수 도입 시 이 자리에서 판정 결과로 설정한다.
+            story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
+        }
 
         // 스토리 설정 통글 4필드 — 없으면 생성, 있으면 교체(제작 시 생성되므로 보통 존재).
         request.storySettings?.let { input ->
@@ -111,6 +147,7 @@ class StoryEditService(
         // 자식 교체까지 모두 끝난 뒤에 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 공개 상태가 아니면 no-op이라
         // 비공개 개작은 스냅샷에 들어가지 않는다. 여기가 스토리 애그리거트를 바꾸는 유일한 수정 경로다.
         storyPublicSnapshotService.refresh(story)
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 
         return buildEditForm(story)
     }
@@ -220,7 +257,37 @@ class StoryEditService(
             startSettings = startSettings,
             mainEvents = mainEvents,
             visibility = story.visibility,
+            // 이미지 업로드(KNK-1126). 표지는 2단 폴백(업로드·생성 URL → 프리셋 키)을 쓰되 **검수 게이트는
+            // 적용하지 않는다** — 소유자 화면이라 상태와 함께 원본을 보여야 한다.
+            thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
+            thumbnailModerationStatus = story.thumbnailModerationStatus,
+            characters = buildEditCharacters(story.id),
         )
+    }
+
+    /** 편집 화면의 인물·이미지 목록(KNK-1126). 이미지를 한 번에 읽어 인물 수만큼 쿼리가 늘지 않게 한다. */
+    private fun buildEditCharacters(storyId: Long): List<StoryEditCharacterResponse> {
+        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(storyId)
+        if (characters.isEmpty()) {
+            return emptyList()
+        }
+        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryId(storyId)
+            .groupBy { it.character.id }
+        return characters.map { character ->
+            StoryEditCharacterResponse(
+                id = character.publicId.toString(),
+                name = character.name,
+                // 소유자 화면이라 검수 상태와 무관하게 전부 싣고 상태를 함께 준다.
+                images = imagesByCharacterId[character.id].orEmpty().map { image ->
+                    CharacterImageResponse(
+                        id = image.publicId.toString(),
+                        imageName = image.imageName,
+                        imageUrl = image.imageUrl,
+                        moderationStatus = image.moderationStatus,
+                    )
+                },
+            )
+        }
     }
 
     /**

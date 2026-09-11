@@ -54,6 +54,20 @@ class ImageUrlResolver(
     fun thumbnailSmUrlFor(generatedUrl: String?, imageKey: String?): String? =
         generatedUrl?.takeIf { it.isNotBlank() } ?: thumbnailSmUrlFor(imageKey)
 
+    /**
+     * **공개 노출용** 표지 URL(KNK-1126 검수 게이트). 업로드·생성 표지는 [ImageModeration.isVisible]을 통과할
+     * 때만 쓰고, 아니면 프리셋으로 떨어진다 — 검수에 걸린 이미지가 상세·목록·채팅 카드에 나가지 않게 한다.
+     *
+     * 소유자의 편집 폼은 이 게이트를 쓰지 않는다([thumbnailUrlFor]) — 본인이 올린 이미지는 상태와 함께
+     * 그대로 보여야 무엇이 걸렸는지 알 수 있다.
+     */
+    fun visibleThumbnailUrlFor(uploadedUrl: String?, imageKey: String?, status: ImageModerationStatus?): String? =
+        thumbnailUrlFor(uploadedUrl.takeIf { ImageModeration.isVisible(status) }, imageKey)
+
+    /** 목록·카드용. [visibleThumbnailUrlFor]와 같은 게이트를 지난다. */
+    fun visibleThumbnailSmUrlFor(uploadedUrl: String?, imageKey: String?, status: ImageModerationStatus?): String? =
+        thumbnailSmUrlFor(uploadedUrl.takeIf { ImageModeration.isVisible(status) }, imageKey)
+
     private companion object {
         const val SM_SUFFIX = "_sm"
     }

@@ -50,6 +50,9 @@ class StoryDetailControllerIntegrationTests {
     private lateinit var storyCharacterRepository: StoryCharacterRepository
 
     @Autowired
+    private lateinit var storyCharacterImageRepository: com.knk.manyak.story.repository.StoryCharacterImageRepository
+
+    @Autowired
     private lateinit var storyChatRepository: StoryChatRepository
 
     @Autowired
@@ -317,6 +320,63 @@ class StoryDetailControllerIntegrationTests {
     }
 
     @Test
+    /** 인물과 그 인물의 `{이름}_기본` 이미지를 함께 심는다(KNK-1126 — 대표 이미지 정본). */
+    private fun seedCharacterWithImage(
+        story: com.knk.manyak.story.entity.Story,
+        name: String,
+        imageUrl: String,
+        gender: String? = null,
+    ) {
+        val character = storyCharacterRepository.save(
+            StoryCharacter(story = story, name = name, imageUrl = imageUrl, gender = gender),
+        )
+        storyCharacterImageRepository.save(
+            com.knk.manyak.story.entity.StoryCharacterImage(
+                character = character,
+                imageName = com.knk.manyak.story.entity.StoryCharacterImage.defaultImageNameOf(name),
+                imageUrl = imageUrl,
+            ),
+        )
+    }
+
+    @Test
+    fun `상세 대표 이미지는 기본 이름을 우선하고 없으면 첫 장이다`() {
+        // KNK-1126: 인물당 여러 장이 되면서 카드에 쓸 한 장을 정해야 한다. 컴파일이 만든 첫 장이 `_기본`이라 그것을 쓴다.
+        val story = storyRepository.save(
+            Story(
+                title = "대표 이미지 스토리",
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+            ),
+        )
+        val character = storyCharacterRepository.save(StoryCharacter(story = story, name = "레이"))
+        // 표시 순서로는 웃음이 먼저지만 대표는 `_기본`이어야 한다.
+        storyCharacterImageRepository.save(
+            com.knk.manyak.story.entity.StoryCharacterImage(
+                character = character,
+                imageName = "레이_웃음",
+                imageUrl = "https://cdn.manyak.app/characters/uploaded/smile.webp",
+                sortOrder = 0,
+            ),
+        )
+        storyCharacterImageRepository.save(
+            com.knk.manyak.story.entity.StoryCharacterImage(
+                character = character,
+                imageName = "레이_기본",
+                imageUrl = "https://cdn.manyak.app/characters/ray.png",
+                sortOrder = 1,
+            ),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.characters[0].imageUrl").isEqualTo("https://cdn.manyak.app/characters/ray.png")
+    }
+
+    @Test
     fun `상세 characters는 저장 순서로 실리고 이미지 없는 인물도 imageUrl null로 포함한다`() {
         val story = storyRepository.save(
             Story(
@@ -326,13 +386,10 @@ class StoryDetailControllerIntegrationTests {
             ),
         )
         // 저장 순서(= 컴파일 응답 순서)를 보존하는지 보려고 이미지 있는 인물과 없는 인물을 섞어 넣는다.
-        storyCharacterRepository.save(
-            StoryCharacter(story = story, name = "레이", imageUrl = "https://cdn.manyak.app/characters/ray.png", gender = "남성"),
-        )
+        // 대표 이미지의 정본은 story_character_images다(KNK-1126, V76) — 컴파일이 만든 첫 장은 `{이름}_기본`이다.
+        seedCharacterWithImage(story, "레이", "https://cdn.manyak.app/characters/ray.png", gender = "남성")
         storyCharacterRepository.save(StoryCharacter(story = story, name = "카일", imageUrl = null))
-        storyCharacterRepository.save(
-            StoryCharacter(story = story, name = "미라", imageUrl = "https://cdn.manyak.app/characters/mira.png"),
-        )
+        seedCharacterWithImage(story, "미라", "https://cdn.manyak.app/characters/mira.png")
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}")

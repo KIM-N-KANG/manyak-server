@@ -208,6 +208,39 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `게스트는 소유자 없는 스토리를 공개로 바꿀 수 없고 400이다`() {
+        // 게스트 스토리는 게스트가 수정할 수 있지만(소유권 게이트 통과) 공개 전환만은 막는다.
+        // 작성자 신원이 없어 카드에 작성자를 표기할 수 없고 소셜 기능의 책임 주체가 없기 때문이다.
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PUBLIC"}""")
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("GUEST_CANNOT_PUBLISH")
+
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+    }
+
+    @Test
+    fun `게스트도 소유자 없는 스토리의 다른 필드는 수정할 수 있다`() {
+        // 공개 전환만 막고 나머지 수정 경로는 그대로다(회귀 가드).
+        val story = seedStory(userId = null)
+        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
+
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"title":"게스트가 고친 제목"}""")
+            .exchange()
+            .expectStatus().isOk
+
+        assertEquals("게스트가 고친 제목", storyRepository.findById(story.id).get().title)
+    }
+
+    @Test
     fun `타인은 공개 전환할 수 없고 403이며 공개 범위가 그대로다`() {
         val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
         val other = userRepository.save(User(nickname = "타인", status = UserStatus.ACTIVE))
@@ -316,9 +349,17 @@ class StoryEditIntegrationTests {
     // ---- [KNK-1065] 마지막 공개 버전 스냅샷 갱신 ----
 
     /** 스토리 애그리거트 전체를 한 번에 덮는 PATCH 본문. */
-    private fun patchAll(story: Story, startSettingPublicId: String, title: String, prologue: String, endingName: String) {
+    private fun patchAll(
+        story: Story,
+        startSettingPublicId: String,
+        title: String,
+        prologue: String,
+        endingName: String,
+        accessToken: String? = null,
+    ) {
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .apply { accessToken?.let { header("Authorization", "Bearer $it") } }
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -389,11 +430,15 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `다시 공개로 되돌리면 그 시점 값이 새 스냅샷이 된다`() {
-        val story = seedStory(userId = null)
+        // 공개 전환이 있는 시나리오라 회원 소유 스토리로 심는다(게스트는 PUBLIC 지정 불가, KNK-149).
+        val owner = userRepository.save(User(nickname = "소유자", status = UserStatus.ACTIVE))
+        val token = tokenFor(owner)
+        val story = seedStory(userId = owner.id)
         val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
-        patchAll(story, startSetting.publicId.toString(), "공개 제목", "공개 프롤로그", "공개 엔딩")
+        patchAll(story, startSetting.publicId.toString(), "공개 제목", "공개 프롤로그", "공개 엔딩", accessToken = token)
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer $token")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PRIVATE","title":"개작 제목"}""")
             .exchange()
@@ -401,6 +446,7 @@ class StoryEditIntegrationTests {
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer $token")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
             .exchange()

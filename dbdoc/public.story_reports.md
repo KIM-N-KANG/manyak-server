@@ -62,6 +62,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 "public.stories" {
   bigint id
@@ -78,6 +81,7 @@ erDiagram
   varchar_20_ visibility
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
+  varchar_20_ thumbnail_moderation_status
 }
 ```
 

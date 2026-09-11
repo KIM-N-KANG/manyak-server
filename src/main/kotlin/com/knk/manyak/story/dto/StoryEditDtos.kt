@@ -1,5 +1,6 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
@@ -43,6 +44,24 @@ data class StoryEditFormResponse(
     // 공개 전환(KNK-1021)이 수정 API의 부분 갱신이므로, 폼 왕복을 위해 현재 공개 범위도 함께 싣는다(스펙 §4-3-8).
     @field:Schema(description = "공개 범위(PUBLIC · PRIVATE)", example = "PRIVATE")
     val visibility: StoryVisibility,
+
+    // 이미지 업로드(KNK-1126). 편집 화면이 현재 표지와 인물별 이미지를 보여주고 교체·삭제를 걸 수 있어야 한다.
+    // 소유자 화면이라 검수 게이트를 적용하지 않은 원본을 싣는다 — 본인이 올린 이미지가 왜 안 보이는지
+    // 알려면 이미지와 상태를 함께 봐야 한다(공개 노출은 APPROVED만 — ImageUrlResolver).
+    @field:Schema(
+        description = "현재 표지 URL(업로드·생성 표지 우선, 없으면 프리셋 조합). 표지가 없으면 null",
+        nullable = true,
+    )
+    val thumbnailUrl: String? = null,
+
+    @field:Schema(description = "표지 검수 상태(APPROVED · PENDING · REJECTED)", example = "APPROVED")
+    val thumbnailModerationStatus: ImageModerationStatus = ImageModerationStatus.APPROVED,
+
+    @field:ArraySchema(
+        schema = Schema(implementation = StoryEditCharacterResponse::class),
+        arraySchema = Schema(description = "인물과 인물별 이미지 목록(KNK-1126). 인물이 없으면 빈 배열"),
+    )
+    val characters: List<StoryEditCharacterResponse> = emptyList(),
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -90,4 +109,13 @@ data class UpdateStoryRequest(
     // 소유권 게이트는 수정 API의 것을 그대로 쓰고, 전환은 읽기 가시성(§4-3-1)에 즉시 반영된다.
     @field:Schema(description = "공개 범위(PUBLIC · PRIVATE). 생략하면 현재 값을 유지한다.", example = "PUBLIC")
     val visibility: StoryVisibility? = null,
+
+    // 표지 교체(KNK-1126, 스펙 §4-3-8). presign으로 받은 객체 키를 그대로 넣는다. 서버가 이 스토리의
+    // 업로드 prefix 아래인지 확인하고 HEAD로 존재·크기·형식을 재검증한 뒤 절대 URL을 굳힌다.
+    // 지우기는 이 필드가 아니라 DELETE /stories/{storyId}/thumbnail이다(null = 미전송·유지).
+    @field:Schema(
+        description = "업로드한 표지의 객체 키(presign 응답의 objectKey). 생략하면 표지를 바꾸지 않는다.",
+        nullable = true,
+    )
+    val thumbnailObjectKey: String? = null,
 )

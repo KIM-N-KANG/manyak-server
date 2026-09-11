@@ -1,0 +1,129 @@
+# 공개 스토리 검색(KNK-1141). IntelliJ HTTP Client에서 위부터 순서대로 실행한다.
+# 사전 준비: Postgres·Redis 기동, 검색 FGAC/nori 설정(opensearch/README.md), ./gradlew bootRun.
+# accessToken은 로그인 검증 파일에서 발급해 client.global.set으로 저장한다.
+# 검색 미설정 503 케이스만 OpenSearch endpoint를 비우고 재기동한 뒤 따로 실행한다.
+@baseUrl = http://localhost:8080
+
+### 1. 헬스 체크
+GET {{baseUrl}}/actuator/health
+
+### 2. 공개 스토리 준비(회원 토큰 필요)
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "검색검증 마법 왕국",
+  "oneLineIntro": "마법사가 왕국의 비밀을 찾는다",
+  "genres": ["판타지"],
+  "visibility": "PUBLIC",
+  "storySettings": {"worldSetting":"왕국", "characterSetting":"마법사", "userRoleSetting":"여행자", "ruleSetting":"비밀을 찾는다"},
+  "startSettings": [{"name":"성문", "prologue":"성문 앞에 섰다", "startSituation":"왕국에 입장한다", "suggestedInputs":["문을 연다","주변을 살핀다","인사한다"]}]
+}
+
+> {%
+  client.test("준비 스토리 등록", () => client.assert(response.status === 201, `actual=${response.status}`));
+  client.global.set("searchStoryId", response.body.id);
+%}
+
+### 3. 색인·refresh 후 검색(잠시 뒤 실행, 미반영이면 재실행)
+GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=20
+
+> {%
+  client.test("검색 카드", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const card = response.body.items.find(x => x.id === client.global.get("searchStoryId"));
+    client.assert(!!card, `준비 스토리가 없습니다. actual=${JSON.stringify(response.body)}`);
+    client.assert(card.title === "검색검증 마법 왕국" && card.author.id === null, `actual=${JSON.stringify(card)}`);
+  });
+%}
+
+### 4. 페이지네이션(왕국 검색 결과가 2건 이상일 때 다음 요청까지 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=왕국&limit=1
+
+> {%
+  client.test("첫 페이지", () => client.assert(response.status === 200, `actual=${response.status}`));
+  client.global.set("storySearchCursor", response.body.nextCursor || "");
+%}
+
+### 5. 다음 페이지(nextCursor가 있을 때만)
+GET {{baseUrl}}/api/v1/stories/search?q=왕국&limit=1&cursor={{storySearchCursor}}
+
+> {%
+  client.test("다음 페이지", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 6. 다른 질의의 커서는 400(4번에서 커서가 발급된 뒤 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=로맨스&cursor={{storySearchCursor}}
+
+> {%
+  client.test("질의가 다른 커서", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 7. 검색어 누락
+GET {{baseUrl}}/api/v1/stories/search
+
+> {%
+  client.test("필수 검색어", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 8. 검색어 길이 미달
+GET {{baseUrl}}/api/v1/stories/search?q=왕
+
+> {%
+  client.test("한 글자 검색어", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 9. 형식이 잘못된 커서
+GET {{baseUrl}}/api/v1/stories/search?q=왕국&cursor=broken
+
+> {%
+  client.test("커서 오류", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 10. 검색 미설정(환경변수를 비우고 서버 재기동 후 따로 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=왕국
+
+> {%
+  client.test("미설정 503", () => {
+    client.assert(response.status === 503, `actual=${response.status}`);
+    client.assert(response.body.message === "검색이 설정되지 않았습니다.", `actual=${response.body.message}`);
+  });
+%}
+
+### 공개 철회 직후 검색 게이트(2번 준비 스토리, 색인 반영을 기다리지 않고 다음 요청 실행)
+PATCH {{baseUrl}}/api/v1/stories/{{searchStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"visibility":"PRIVATE"}
+
+> {%
+  client.test("비공개 전환", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 비공개 문서는 색인 지연·실패와 관계없이 제외
+GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=50
+
+> {%
+  client.test("철회된 스토리 비노출", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(!response.body.items.some(x => x.id === client.global.get("searchStoryId")),
+      `비공개 스토리가 노출됐습니다. actual=${JSON.stringify(response.body)}`);
+  });
+%}
+
+### 인덱스 미존재(격리된 검증 환경에서 아직 생성되지 않은 인덱스를 조회할 때만 실행)
+# 기동 시 인덱스 보장이 먼저 완료되면 일반 빈 결과와 같은 응답이다. 공유 인덱스를 삭제하지 않는다.
+GET {{baseUrl}}/api/v1/stories/search?q=knk1216nomatch
+
+> {%
+  client.test("미존재 인덱스는 빈 페이지", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(response.body.items.length === 0 && response.body.nextCursor === null,
+      `actual=${JSON.stringify(response.body)}`);
+  });
+%}
+
+### 자유 조회
+GET {{baseUrl}}/api/v1/stories/search?q=판타지&limit=20

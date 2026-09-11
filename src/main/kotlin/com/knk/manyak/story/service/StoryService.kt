@@ -1,10 +1,12 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.LorebookListItemResponse
@@ -12,16 +14,18 @@ import com.knk.manyak.story.dto.LorebookResponse
 import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StoryCharacterResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
+import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.dto.StoryStartSettingResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryLike
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryReport
 import com.knk.manyak.story.entity.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryReportRepository
@@ -45,6 +49,7 @@ import java.util.UUID
 
 @Service
 class StoryService(
+    private val storyLikeWriter: StoryLikeWriter,
     private val storyRepository: StoryRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
     private val lorebookRepository: LorebookRepository,
@@ -55,6 +60,8 @@ class StoryService(
     private val suspensionGuard: SuspensionGuard,
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
+    // 인물 대표 이미지의 정본(KNK-1126, V76). 옛 story_characters.image_url은 읽지 않는다.
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyChatRepository: StoryChatRepository,
     private val imageUrlResolver: ImageUrlResolver,
@@ -104,6 +111,62 @@ class StoryService(
             .toSummaryResponses()
 
     /**
+     * 공개 스토리 목록(KNK-149). 노출 조건은 발행(PUBLISHED)·공개(PUBLIC)·미삭제·**회원 소유** 넷을 모두
+     * 만족하는 스토리다. 게스트(소유자 없음) 스토리는 작성자 신원이 없어 카드에 작성자를 표기할 수 없고
+     * 좋아요·신고 같은 소셜 기능의 책임 주체가 없어 싣지 않는다. 간편 제작은 게스트도 PRIVATE으로
+     * 저장되므로([SimpleStoryCreationService], KNK-464) 실제로 걸러지는 것은 일반 제작에서 PUBLIC을 지정한
+     * 게스트 스토리와 향후 경로다. 게스트가 로그인해 이관하면 회원 소유가 되어 자연히 노출된다.
+     * 요청자 신원을 쓰지 않는 공개 목록이라 비로그인도 같은 결과를 본다.
+     *
+     * 페이지네이션은 offset이 아니라 keyset이다 — 새 스토리가 앞에 끼어들어도 다음 페이지에 중복·누락이 없다.
+     * [limit] + 1건을 읽어 다음 페이지 유무를 판정하고, 마지막 페이지면 `nextCursor`는 null이다.
+     */
+    @Transactional(readOnly = true)
+    fun getPublicStories(sort: StoryListSort, limit: Int, rawCursor: String?): StoryPageResponse {
+        val cursor = rawCursor?.let { StoryListCursor.decode(it, sort) }
+        // 다음 페이지 유무 판정용으로 한 건 더 읽는다. 응답에는 limit개까지만 싣는다.
+        val pageable = PageRequest.of(0, limit + 1)
+        val fetched = when (sort) {
+            StoryListSort.LATEST ->
+                if (cursor == null) {
+                    storyRepository.findPublicLatest(pageable)
+                } else {
+                    storyRepository.findPublicLatestAfter(instantOfEpochNanos(cursor.sortValue), cursor.publicId, pageable)
+                }
+            StoryListSort.POPULAR ->
+                if (cursor == null) {
+                    storyRepository.findPublicPopular(pageable)
+                } else {
+                    storyRepository.findPublicPopularAfter(cursor.sortValue, cursor.publicId, pageable)
+                }
+        }
+        val page = fetched.take(limit)
+        val items = page.toSummaryResponses()
+        val nextCursor = if (fetched.size > limit) {
+            val last = page.last()
+            val sortValue = when (sort) {
+                StoryListSort.LATEST -> epochNanosOf(last.createdAt)
+                // 커서 값은 방금 매핑한 카드의 좋아요 수를 재사용한다(배치 집계라 추가 조회가 없다).
+                StoryListSort.POPULAR -> items.last().likeCount
+            }
+            StoryListCursor(sortValue, last.publicId).encode(sort)
+        } else {
+            null
+        }
+        return StoryPageResponse(items = items, nextCursor = nextCursor)
+    }
+
+    /**
+     * 최신순 커서의 1차 키. **millis가 아니라 nanos**다 — PostgreSQL `timestamptz`는 마이크로초까지 담아서,
+     * 밀리초로 자르면 같은 밀리초 안의 뒤쪽 행이 `createdAt < 커서`에도 `= 커서`에도 걸리지 않고 통째로 사라진다.
+     * 값은 방금 DB에서 읽은 엔티티에서 뽑으므로 왕복이 정확하고, 2262년까지 Long 범위 안이다.
+     */
+    private fun epochNanosOf(instant: Instant): Long = instant.epochSecond * 1_000_000_000L + instant.nano
+
+    private fun instantOfEpochNanos(nanos: Long): Instant =
+        Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L).toLong())
+
+    /**
      * 마냑 오리지널 스토리 목록(KNK-975). 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환한다.
      * 피드·검색이 나오기 전까지 홈의 오리지널 섹션이 소비하며, 공식 계정 미설정 환경은 빈 목록이다.
      */
@@ -133,10 +196,9 @@ class StoryService(
             .map { it.toLorebookResponse() }
         val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
             .map { it.toMainEventResponse() }
-        // 인물은 저장 순서(= 컴파일 응답 순서)로 싣는다(KNK-1058). 이미지 생성에 실패한 인물도 imageUrl null로 포함해
+        // 인물은 저장 순서(= 컴파일 응답 순서)로 싣는다(KNK-1058). 이미지가 없는 인물도 imageUrl null로 포함해
         // 프론트가 인물 구성을 그대로 보여줄 수 있게 한다(채팅 요청 매핑과 달리 URL 없는 인물을 거르지 않는다).
-        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
-            .map { StoryCharacterResponse(name = it.name, imageUrl = it.imageUrl) }
+        val characters = buildCharacterResponses(story.id)
         // 요청 회원이 이 스토리에서 도달한 엔딩 이름 집계(스펙 §4-3-10). 게스트(userId null)는 빈 배열.
         // 저장도 노출도 이름 기준이다(V70) — 프론트는 엔딩 목록과 이름으로 상관한다(KNK-462).
         val reachedEndings = resolveReachedEndingNames(userId, story.id, startSettings)
@@ -144,7 +206,12 @@ class StoryService(
         return StoryDetailResponse(
             id = story.publicId.toString(),
             // 생성 표지가 있으면 그것을, 없으면 프리셋 키로 조합한다(2단 폴백은 리졸버 소유, KNK-1069).
-            thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
+            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 프리셋으로 떨어진다.
+            thumbnailUrl = imageUrlResolver.visibleThumbnailUrlFor(
+                story.thumbnailImageUrl,
+                story.thumbnailImageKey,
+                story.thumbnailModerationStatus,
+            ),
             title = story.title,
             oneLineIntro = story.oneLineIntro.orEmpty(),
             description = story.description,
@@ -212,7 +279,7 @@ class StoryService(
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
         try {
-            storyLikeRepository.saveAndFlush(StoryLike(userId = userId, storyId = story.id))
+            storyLikeWriter.like(story.id, userId)
         } catch (ignored: DataIntegrityViolationException) {
             // 이미 좋아요한 스토리(또는 동시 등록 경합). 계약대로 멱등하게 통과한다.
         }
@@ -250,7 +317,7 @@ class StoryService(
     fun unlike(storyId: String, userId: Long) {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val story = resolveReadableStory(storyId, userId)
-        storyLikeRepository.deleteByUserIdAndStoryId(userId, story.id)
+        storyLikeWriter.unlike(story.id, userId)
     }
 
     /**
@@ -268,6 +335,7 @@ class StoryService(
         }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
         story.deletedAt = Instant.now()
+        eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }
 
     /**
@@ -333,6 +401,31 @@ class StoryService(
             ?.let { StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
 
     /** 스토리 목록을 카드 응답으로 매핑한다. turnCount·author는 한 번의 배치 조회로 채운다(N+1 방지). */
+    /**
+     * 상세의 인물 목록(KNK-1058, 대표 이미지 KNK-1126).
+     *
+     * 대표 이미지는 `{인물이름}_기본`이고, 없으면 표시 순서 첫 장이다 — 인물당 여러 장이 되면서(V76) 어느
+     * 것을 카드에 쓸지 정해야 했고, 컴파일이 만든 첫 장이 `_기본`이라 그것을 우선한다. 이미지를 한 번에 읽어
+     * 인물 수만큼 쿼리가 늘지 않게 한다.
+     */
+    private fun buildCharacterResponses(storyId: Long): List<StoryCharacterResponse> {
+        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(storyId)
+        if (characters.isEmpty()) {
+            return emptyList()
+        }
+        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryId(storyId)
+            .groupBy { it.character.id }
+        return characters.map { character ->
+            // 검수 게이트(KNK-1126): 공개 노출은 APPROVED만이다.
+            val images = imagesByCharacterId[character.id].orEmpty()
+                .filter { ImageModeration.isVisible(it.moderationStatus) }
+            val representative = images.firstOrNull {
+                it.imageName == StoryCharacterImage.defaultImageNameOf(character.name)
+            } ?: images.firstOrNull()
+            StoryCharacterResponse(name = character.name, imageUrl = representative?.imageUrl)
+        }
+    }
+
     private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()
@@ -361,7 +454,11 @@ class StoryService(
             id = publicId.toString(),
             // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형). 단 생성 표지는 축소본이
             // 없어 원본 URL이 그대로 실린다(KNK-1069, 무게는 후속 과제).
-            thumbnailUrlSm = imageUrlResolver.thumbnailSmUrlFor(thumbnailImageUrl, thumbnailImageKey),
+            thumbnailUrlSm = imageUrlResolver.visibleThumbnailSmUrlFor(
+                thumbnailImageUrl,
+                thumbnailImageKey,
+                thumbnailModerationStatus,
+            ),
             title = title,
             oneLineIntro = oneLineIntro.orEmpty(),
             genres = toGenreNames(),

@@ -57,8 +57,8 @@ class CreditPolicyServiceTest {
         signupReward = 1000,
         inviteReward = 2000,
         inviteMonthlyCap = 10,
-        attendanceReward = 350,
-        storyCreationCost = 200,
+        attendanceReward = 250,
+        storyCreationCost = 250,
         chatTurnCost = 20,
         clock = clock,
     )
@@ -78,8 +78,8 @@ class CreditPolicyServiceTest {
                     CreditPolicyKey.SIGNUP_REWARD to 1000L,
                     CreditPolicyKey.INVITE_REWARD to 2000L,
                     CreditPolicyKey.INVITE_MONTHLY_CAP to 10L,
-                    CreditPolicyKey.ATTENDANCE_REWARD to 350L,
-                    CreditPolicyKey.STORY_CREATION_COST to 200L,
+                    CreditPolicyKey.ATTENDANCE_REWARD to 250L,
+                    CreditPolicyKey.STORY_CREATION_COST to 250L,
                     CreditPolicyKey.CHAT_TURN_COST to 20L,
                 ),
             )
@@ -120,7 +120,7 @@ class CreditPolicyServiceTest {
         // 만료 판정은 갱신이 아니라 **읽는 시점**이라, 다음 갱신 주기를 기다리지 않고 즉시 되돌아간다.
         now = now.plusSeconds(31)
 
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
     }
 
     @Test
@@ -151,7 +151,7 @@ class CreditPolicyServiceTest {
             .thenThrow(IllegalStateException("db down"))
             .thenReturn(listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700)))
         val service = loadedService()
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
         appender.list.clear()
 
         service.refresh()
@@ -159,7 +159,7 @@ class CreditPolicyServiceTest {
         assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(700)
         assertThat(changedLogs().single().formattedMessage)
             .contains("key=attendance_reward")
-            .contains("from=350")
+            .contains("from=250")
             .contains("to=700")
     }
 
@@ -183,7 +183,7 @@ class CreditPolicyServiceTest {
     @Test
     fun `기본값이 최소값 미만이면 부팅에 실패한다`() {
         // 오버라이드와 달리 기본값에는 물러설 곳이 없다. env 로 0 을 넣는 사고는 배포 시점에 드러나야 한다.
-        assertThatThrownBy { CreditPolicyService(repository, 0, 2000, 10, 350, 200, 20, clock) }
+        assertThatThrownBy { CreditPolicyService(repository, 0, 2000, 10, 250, 250, 20, clock) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("signup_reward")
     }
@@ -199,7 +199,7 @@ class CreditPolicyServiceTest {
         )
         val service = loadedService()
 
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
         // 모르는 키 하나가 전체 적재를 망치지 않는다.
         assertThat(service.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(33)
     }
@@ -248,7 +248,7 @@ class CreditPolicyServiceTest {
         assertThat(changed.formattedMessage)
             .contains("key=attendance_reward")
             .contains("from=700")
-            .contains("to=350")
+            .contains("to=250")
     }
 
     @Test

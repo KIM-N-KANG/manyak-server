@@ -91,6 +91,10 @@ data class ChatTurnAiRequest(
 /** 채팅 요청에 싣는 인물-이미지 매핑 한 건(스펙 §5-3-4). 와이어 키는 snake_case다. */
 data class ChatCharacterImage(
     val name: String,
+    // 인물 이미지 여러 장(KNK-1126) — 같은 name의 항목이 여러 개 실리므로 AI가 이름으로 골라야 한다.
+    // `{인물이름}_{접미}` 형식이며 접미가 표정·상황이다. 고르는 판정은 AI 서버 몫(KNK-1199)이다.
+    @JsonProperty("image_name")
+    val imageName: String,
     @JsonProperty("image_url")
     val imageUrl: String,
 )

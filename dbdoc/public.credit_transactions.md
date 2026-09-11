@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) |  |  |
+| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) [public.credit_orders](public.credit_orders.md) |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | amount | bigint |  | false |  |  |  |
 | reason | varchar(30) |  | false |  |  |  |
@@ -18,7 +18,7 @@
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_credit_transactions_amount | CHECK | CHECK ((amount <> 0)) |
-| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying])::text[]))) |
+| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying, 'PURCHASE_REVERSAL'::character varying])::text[]))) |
 | credit_transactions_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | credit_transactions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_credit_transactions_idempotency | UNIQUE | UNIQUE (idempotency_key) |
@@ -39,6 +39,7 @@
 erDiagram
 
 "public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
+"public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.credit_transactions" {
@@ -60,6 +61,22 @@ erDiagram
   timestamp_with_time_zone expires_at
   timestamp_with_time_zone created_at
 }
+"public.credit_orders" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_32_ product_id
+  varchar_20_ provider
+  varchar_20_ status
+  bigint price_krw
+  bigint credit_amount
+  varchar_255_ provider_ref
+  bigint credit_transaction_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  timestamp_with_time_zone refunded_at
+  bigint reversal_shortfall
+}
 "public.users" {
   bigint id
   uuid public_id
@@ -78,6 +95,9 @@ erDiagram
   timestamp_with_time_zone rejoined_at
   bigint reward_identity_user_id
   varchar_20_ withdrawn_from_status
+  boolean service_push_enabled
+  timestamp_with_time_zone marketing_push_agreed_at
+  timestamp_with_time_zone marketing_push_night_agreed_at
 }
 ```
 

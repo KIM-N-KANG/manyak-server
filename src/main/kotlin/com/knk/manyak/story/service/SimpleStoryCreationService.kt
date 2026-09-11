@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditPolicyKey
@@ -49,6 +50,7 @@ import com.knk.manyak.story.entity.ParentCreationLink
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacter
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryCreationCharacter
 import com.knk.manyak.story.entity.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
@@ -58,6 +60,7 @@ import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.entity.hasSameChainOwnerAs
@@ -69,6 +72,7 @@ import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
@@ -88,6 +92,7 @@ import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -119,6 +124,8 @@ class SimpleStoryCreationService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
+    // 인물 이미지 정본(KNK-1126, V76). 옛 컬럼과 함께 채운다(두 릴리스 규칙).
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val generatedImageStorage: GeneratedImageStorage,
     private val storyAiClient: StoryAiClient,
     private val structuredLogger: StructuredLogger,
@@ -136,6 +143,8 @@ class SimpleStoryCreationService(
     // 간편 제작 1회 소모 크레딧. 운영 중 조정 가능한 정책값이라 요청마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
+    // 완성 푸시 발행(KNK-1115). 수신은 커밋 뒤(StoryCompletionPushListener)라 발송 실패가 생성을 되돌리지 않는다.
+    private val eventPublisher: ApplicationEventPublisher,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -301,6 +310,8 @@ class SimpleStoryCreationService(
             isIncompatibleReplayFallback: Boolean,
             recordedParentLink: ParentCreationLink?,
         ) -> T,
+        // COMPLETED 마킹 트랜잭션 안에서 실행할 부수 효과(KNK-1115 완성 푸시 발행). 기록하지 않는 경로는 부르지 않는다.
+        onCompleted: ((T) -> Unit)? = null,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
@@ -316,6 +327,7 @@ class SimpleStoryCreationService(
             responseType,
             parentLink,
             block,
+            onCompleted,
         )
     }
 
@@ -610,13 +622,24 @@ class SimpleStoryCreationService(
         }
         // 백그라운드 복구·멱등(스펙 §4-3-8): requestId로 요청을 추적하고, 재요청은 COMPLETED replay·PENDING 409·FAILED 재실행한다.
         // 소유자는 세션 소유권으로 정한다(요청 인증 신원이 만료·갱신으로 흔들려도 회원 소유 세션의 재시도가 막히지 않도록 — Codex P2).
+        val completionOwnerUserId = resolveCompletionOwnerUserId(request.simpleCreationId, userId)
         return recordOrRun(
             request.requestId,
             StoryCreationStage.STORY_COMPLETION,
-            resolveCompletionOwnerUserId(request.simpleCreationId, userId),
+            completionOwnerUserId,
             deviceId,
             SimpleStoryCreateResponse::class.java,
             block = create,
+            // 완성 푸시(KNK-1115). 요청 행이 COMPLETED로 **커밋된 뒤** 제작자에게 알린다. 발행은 COMPLETED
+            // 마킹과 같은 트랜잭션이라 마킹이 롤백되면 발송도 없고, 멱등 replay는 이 지점에 오지 않아
+            // 재요청으로 중복 발송되지 않는다. 값은 저장된 result_json을 다시 읽지 않고 방금 만든 응답에서 꺼낸다.
+            onCompleted = completionOwnerUserId?.let { ownerId ->
+                { response: SimpleStoryCreateResponse ->
+                    eventPublisher.publishEvent(
+                        StoryCompletedEvent(userId = ownerId, storyPublicId = response.id, title = response.title),
+                    )
+                }
+            },
         )
     }
 
@@ -1165,6 +1188,7 @@ class SimpleStoryCreationService(
                 // 스토리 저장 경로는 모두 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 간편 제작은 항상
                 // PRIVATE로 등록하므로 지금은 no-op이지만, 기본 공개 범위가 바뀌면 이 한 줄이 없는 쪽이 유출이다.
                 storyPublicSnapshotService.refresh(story)
+                eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 
                 // 익명 세션을 로그인 사용자가 완료(claim)하면 세션 소유자도 그 사용자로 박는다 — 안 그러면 그 스토리의
                 // 스토리라인 평가 소유권 검사(session.userId 기반)가 세션을 익명으로 보아 아무나 평가/취소할 수 있다(Codex PR #76 P2).
@@ -1454,12 +1478,14 @@ class SimpleStoryCreationService(
         if (names.isEmpty()) {
             return
         }
-        storyCharacterRepository.saveAll(
+        val characters = storyCharacterRepository.saveAll(
             names.map { name ->
                 val appearance = appearancesByName[name]
                 StoryCharacter(
                     story = story,
                     name = name,
+                    // 옛 컬럼에도 계속 쓴다(KNK-1126) — 읽는 코드는 새 테이블로 옮겼지만, 롤백하면 이 컬럼을
+                    // 다시 읽으므로 컬럼 DROP 전까지 둘 다 채운다(계약 마이그레이션 두 릴리스 규칙).
                     imageUrl = uploadedImages[name]?.url,
                     gender = appearance?.gender,
                     age = appearance?.age,
@@ -1471,6 +1497,21 @@ class SimpleStoryCreationService(
                 )
             },
         )
+        // 새 정본에도 함께 넣는다(KNK-1126, V76). 컴파일이 만든 첫 장의 이름은 `{인물이름}_기본`이다 —
+        // 상세의 대표 이미지 판정과 소유자가 나중에 올리는 `{이름}_웃음` 같은 이름이 같은 규칙을 쓴다.
+        val firstImages = characters.mapNotNull { character ->
+            uploadedImages[character.name]?.url?.let { url ->
+                StoryCharacterImage(
+                    character = character,
+                    imageName = StoryCharacterImage.defaultImageNameOf(character.name),
+                    imageUrl = url,
+                    sortOrder = 0,
+                )
+            }
+        }
+        if (firstImages.isNotEmpty()) {
+            storyCharacterImageRepository.saveAll(firstImages)
+        }
     }
 
     private fun findSelectedPredefinedTags(

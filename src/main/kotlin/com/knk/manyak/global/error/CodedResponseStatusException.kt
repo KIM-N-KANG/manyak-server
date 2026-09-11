@@ -40,6 +40,30 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 이미지 연결(400): presign으로 받은 객체 키에 아직 파일이 올라오지 않았다(KNK-1126).
+     * 클라이언트가 PUT을 마친 뒤 다시 부르면 되는 상태라, 형식 오류(같은 400)와 구분해 코드로 알린다.
+     */
+    const val UPLOAD_NOT_FOUND = "UPLOAD_NOT_FOUND"
+
+    /**
+     * 닉네임 변경(409): 정규화 기준(소문자·공백 제거)으로 이미 쓰는 닉네임이다(KNK-1147, 정책 KNK-1146).
+     * 대소문자·공백만 다른 값도 같은 것으로 본다 — 사칭·혼동을 막는 게 유일성의 목적이다.
+     */
+    const val NICKNAME_TAKEN = "NICKNAME_TAKEN"
+
+    /**
+     * 알림 수신 동의(400): 야간 광고 수신은 광고 수신 동의 없이 단독으로 켤 수 없다(KNK-1132, 정책 KNK-1129).
+     * 야간 동의는 광고 동의의 확장이라, 광고를 끈 채 야간만 켠 상태는 발송 판정에서 의미가 없다.
+     */
+    const val NIGHT_PUSH_REQUIRES_MARKETING = "NIGHT_PUSH_REQUIRES_MARKETING"
+
+    /**
+     * 스토리 공개 지정(400): 게스트(소유자 없음)는 스토리를 PUBLIC으로 만들 수 없다(KNK-149).
+     * 조용히 PRIVATE으로 낮추지 않고 거부한다 — 고른 값을 서버가 뒤집으면 "공개했는데 왜 안 보이냐"가 된다.
+     */
+    const val GUEST_CANNOT_PUBLISH = "GUEST_CANNOT_PUBLISH"
+
+    /**
      * 계정 연동(403): 이미 연동된 provider로의 재인증에 실패했다(KNK-739).
      * 토큰 무효·sub 불일치·미연동 provider·오래된 토큰을 사유 구분 없이 이 코드로 묶는다(계정 존재 여부 비노출).
      * 세션은 유효하므로 401이 아니다 — 401로 내면 클라이언트가 세션 만료로 오인해 로그아웃한다.

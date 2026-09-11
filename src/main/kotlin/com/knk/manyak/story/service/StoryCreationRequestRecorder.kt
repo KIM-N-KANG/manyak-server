@@ -78,6 +78,12 @@ class StoryCreationRequestRecorder(
             isIncompatibleReplayFallback: Boolean,
             recordedParentLink: ParentCreationLink?,
         ) -> T,
+        /**
+         * COMPLETED 마킹 **트랜잭션 안에서** 결과와 함께 한 번 호출된다(KNK-1115). 완성 알림처럼 "이 요청이
+         * 실제로 완료됐다"에 매달리는 부수 효과를 커밋 뒤로 미루는 자리다(`@TransactionalEventListener`).
+         * 멱등 replay는 이 지점에 도달하지 않아 재요청으로 다시 불리지 않는다.
+         */
+        onCompleted: ((T) -> Unit)? = null,
     ): T {
         var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         while (claim is Claim.Replay) {
@@ -115,7 +121,13 @@ class StoryCreationRequestRecorder(
             updateStatus(run.id, failureStatus, resultJson = null)
             throw throwable
         }
-        updateStatus(run.id, StoryCreationRequestStatus.COMPLETED, objectMapper.writeValueAsString(result))
+        updateStatus(run.id, StoryCreationRequestStatus.COMPLETED, objectMapper.writeValueAsString(result)) {
+            // 호환 불가 replay의 fallback은 **이미 COMPLETED였던** 요청을 형식만 맞춰 다시 만든 것이라
+            // 완료 부수 효과를 다시 내지 않는다 — 최초 완성 때 이미 보냈다(Codex 리뷰 P2).
+            if (!run.isIncompatibleReplayFallback) {
+                onCompleted?.invoke(result)
+            }
+        }
         return result
     }
 
@@ -270,7 +282,14 @@ class StoryCreationRequestRecorder(
      * 프로세스가 죽으면 행이 result 없이 PENDING으로 남는 좁은 창이 있다. 이 창의 회수 재실행은 스토리 완성 경로에서
      * session.storyId로 응답을 재구성해 COMPLETED로 되돌린다(P2-10 해소, KNK-635 — SimpleStoryCreationService.reconcileCreatedSession).
      */
-    private fun updateStatus(id: Long, status: StoryCreationRequestStatus, resultJson: String?) {
+    private fun updateStatus(
+        id: Long,
+        status: StoryCreationRequestStatus,
+        resultJson: String?,
+        // 상태 갱신과 **같은 트랜잭션**에서 실행할 부수 효과(KNK-1115). 여기서 발행한 이벤트라야
+        // AFTER_COMMIT 리스너가 "COMPLETED가 실제로 커밋된 뒤"에 돈다.
+        inTransaction: (() -> Unit)? = null,
+    ) {
         txTemplate.execute {
             val row = repository.findById(id)
                 .orElseThrow { IllegalStateException("Story creation request row $id disappeared") }
@@ -279,6 +298,7 @@ class StoryCreationRequestRecorder(
                 row.resultJson = resultJson
             }
             repository.save(row)
+            inTransaction?.invoke()
         }
     }
 

@@ -9,8 +9,10 @@ import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -26,6 +28,17 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
+/**
+ * 채팅 생성 통합 검증.
+ *
+ * 아래 "읽기 게이트" 섹션이 `ChatService.createChat`의 `Story.isReadableBy` 게이트를 고정한다(KNK-1145).
+ * 이 게이트가 느슨해지면 타인의 비공개 초안이 채팅 생성 경로로 유출되므로, 티켓의 다섯 경우를 각각 붙잡는다.
+ * (1) 타인의 공개 스토리 201 = `회원이 공개 발행된 타인 스토리로 채팅을 생성하면 201이다`,
+ * (2) 타인의 비공개·초안 404 = 아래 PRIVATE·DRAFT 두 건,
+ * (3) 삭제된 스토리 404 = `소프트 삭제된 스토리로 채팅을 생성하면 404로 응답한다 (KNK-257)`,
+ * (4) 게스트 소유(NULL)에 회원이 붙으면 403 = `회원이 게스트(NULL) 소유 스토리로 채팅을 생성하면 403이다`,
+ * (5) 비로그인 사용자의 공개 스토리 채팅 생성 = 아래 비로그인 201 한 건.
+ */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -324,6 +337,73 @@ class ChatCreateControllerIntegrationTests {
             .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
             .expectStatus().isCreated
+    }
+
+    // ---- 읽기 게이트(KNK-401, KNK-1145): 타인 스토리의 공개 여부 ----
+
+    @Test
+    fun `회원이 타인의 비공개(PRIVATE) 스토리로 채팅을 생성하면 404다`() {
+        // 존재를 드러내지 않는다 — 403(권한 없음)이면 "그 UUID의 스토리는 있다"가 새어나간다.
+        val author = saveUser("작가")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(
+            Story(title = "비공개작", userId = author.id, visibility = StoryVisibility.PRIVATE),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(reader.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(404)
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
+    fun `회원이 타인의 초안(DRAFT) 스토리로 채팅을 생성하면 404다`() {
+        // 공개 범위가 PUBLIC이어도 발행 전이면 읽을 수 없다(PUBLISHED ∧ PUBLIC 둘 다 필요).
+        val author = saveUser("작가")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(
+            Story(title = "초안", userId = author.id, status = StoryStatus.DRAFT),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(reader.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(404)
+            .jsonPath("$.message").isEqualTo("스토리를 찾을 수 없습니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
+    fun `비로그인 사용자가 타인 회원의 공개 스토리로 채팅을 생성하면 201이다`() {
+        // 게스트도 공개 스토리는 플레이할 수 있다. 교차 접근 차단(KNK-480)은 게스트 소유(NULL) 스토리에
+        // 회원이 붙는 반대 방향만 막으므로, 소유자 있는 공개 스토리에는 걸리지 않아야 한다.
+        val author = saveUser("작가")
+        val story = storyRepository.save(Story(title = "공개작", userId = author.id)) // 기본 PUBLISHED·PUBLIC
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isCreated
+
+        val chat = storyChatRepository.findAll().single()
+        assertThat(chat.userId).isNull()
+        assertThat(chat.storyId).isEqualTo(story.id)
     }
 
     private fun saveUser(nickname: String): User =

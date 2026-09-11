@@ -26,7 +26,7 @@ import java.time.Instant
 class SocialAccountRegistrar(
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
-    private val nicknameGenerator: NicknameGenerator,
+    private val uniqueNicknameIssuer: UniqueNicknameIssuer,
     private val profileImagePresetService: ProfileImagePresetService,
 ) {
 
@@ -127,7 +127,8 @@ class SocialAccountRegistrar(
                 ?: throw DataIntegrityViolationException("이미 사용 중인 소셜 연동입니다: provider=$provider")
         }
         // 실명·외부 사진 노출을 피하기 위해 소셜 `name`·`picture` 대신 랜덤 닉네임과 프리셋 이미지를 발급한다(스펙 §4-5, B7).
-        val nickname = nicknameGenerator.generate()
+        // 정규화 기준 유일해야 한다(V75). 충돌하면 다시 뽑고, 계속 부딪히면 접미를 붙인다(KNK-1147).
+        val nickname = uniqueNicknameIssuer.issue()
         val user = userRepository.save(
             User(
                 nickname = nickname.text,

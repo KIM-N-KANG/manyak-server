@@ -1,0 +1,187 @@
+# KNK-1158 Google Play 구매 검증·이프 적립
+# 준비: PostgreSQL·Redis 기동 후 ./gradlew bootRun. 로그인은 http/auth/의 기존 흐름 사용.
+# MANYAK_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON·MANYAK_GOOGLE_PLAY_PACKAGE_NAME 설정 필요.
+# 테스트 구매 허용은 프로파일 리터럴로 고정한다(dev true, 그 외 false).
+# 비공백 서비스 계정 JSON이 잘못되면 기동 실패. 빈 JSON 또는 패키지명 미설정은 API 503.
+# 앱은 서버 적립 확인 뒤 consume한다. 미확인 구매 환불 기한: 일반 3일, 라이선스 테스터 3분.
+# 서비스 계정은 Play Console 구매 조회 권한 필요. 실제 키·토큰은 커밋하지 않는다.
+# 정상 구매 → 재전송 → 주문 조회 순서. 서버 200 확인 후에만 앱에서 consume한다.
+# 실제 토큰·실기기 준비 전에는 실행하지 않는다. 502·503 시나리오는 별도 환경 설정 후 실행.
+@baseUrl = http://localhost:8080
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+@otherAccessToken = REPLACE_WITH_OTHER_ACCESS_TOKEN
+@suspendedAccessToken = REPLACE_WITH_SUSPENDED_ACCESS_TOKEN
+@purchaseToken = REPLACE_WITH_PURCHASE_TOKEN
+@productId = if_5000
+@unsupportedTypePurchaseToken = REPLACE_WITH_PROMO_OR_REWARDED_PURCHASE_TOKEN
+
+### 1. 서버 헬스
+GET {{baseUrl}}/actuator/health
+
+### 2. 상품 목록
+GET {{baseUrl}}/api/v1/credits/products
+
+### 3. 정상 구매 — 상품 5천 이프, 보너스 포함 5,000 적립
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    });
+    if (response.status === 200) {
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), "주문 공개 UUID가 필요합니다.");
+        client.global.set("googleOrderId", response.body.orderId);
+        client.global.set("googlePurchaseBalance", response.body.balance);
+    }
+%}
+
+### 4. 동일 토큰 재전송 — 중간에 잔액 변동이 없어야 함
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    });
+    if (response.status === 200) {
+        client.assert(response.body.orderId === client.global.get("googleOrderId"), "같은 주문이어야 합니다.");
+        client.assert(response.body.balance === client.global.get("googlePurchaseBalance"), "중복 적립되면 안 됩니다.");
+    }
+%}
+
+### 5. 본인 주문 조회 — 3번 선행
+GET {{baseUrl}}/api/v1/users/me/credits/orders/{{googleOrderId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("완료 주문", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.status === "COMPLETED", "COMPLETED가 필요합니다.");
+    });
+%}
+
+### 6. 타인 토큰 재사용 — 3번 선행
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{otherAccessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 7. 미지원 상품
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "unsupported", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 8. 빈 토큰
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": ""}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 9. 인증 없음
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 10. 정지 계정
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{suspendedAccessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 403, `expected=403 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 11. 미설정 — JSON 또는 패키지명을 비우고 서버 재기동 후 별도 실행
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 503, `expected=503 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 12. Google 5xx·네트워크 실패 — 테스트용 장애 환경에서만 별도 실행
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{purchaseToken}}"}
+
+> {%
+    client.test("응답 상태", () => {
+        client.assert(response.status === 502, `expected=502 actual=${response.status}`);
+        client.assert(typeof response.body.message === "string" && response.body.message.length > 0, "오류 메시지가 필요합니다.");
+    });
+%}
+
+### 13. 자유 주문 조회 — 실제 본인 주문 UUID로 교체
+GET {{baseUrl}}/api/v1/users/me/credits/orders/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+
+# 환불 대사: Play 환불 후 기본 1시간 주기·48시간 lookback 내 회수 여부를 주문 조회와 원장에서 확인한다.
+# 이미 사용한 구매는 남은 로트만 회수하며 부족분은 credit_orders.reversal_shortfall에 기록한다.
+# 구매 취소·대기·상품 불일치·테스트 구매 거부·Google 404는 목 클라이언트 통합 테스트로 검증한다.
+
+### 14. 프로모션·리워드 구매 거부 — 해당 유형의 테스트 토큰 준비 후 별도 실행
+POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "{{productId}}", "purchaseToken": "{{unsupportedTypePurchaseToken}}"}
+
+> {%
+    client.test("유료 이프 상품의 미지원 구매 유형", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(response.body.message.includes("지원하지 않는 구매 유형"), "구매 유형 거부 메시지가 필요합니다.");
+    });
+%}
