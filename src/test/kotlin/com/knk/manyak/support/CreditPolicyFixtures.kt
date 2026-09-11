@@ -15,8 +15,8 @@ fun fixedCreditPolicyService(
     signupReward: Long = 1000,
     inviteReward: Long = 2000,
     inviteMonthlyCap: Long = 10,
-    attendanceReward: Long = 350,
-    storyCreationCost: Long = 200,
+    attendanceReward: Long = 250,
+    storyCreationCost: Long = 250,
     chatTurnCost: Long = 20,
 ): CreditPolicyService = CreditPolicyService(
     creditPolicyRepository = mock(CreditPolicyRepository::class.java),

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 
 class GroblePaymentPropertiesTests {
-    private val values = listOf(2000, 5000, 10000, 30000, 50000).flatMapIndexed { i, value ->
+    private val values = listOf(2000, 5000, 10000, 30000, 50000, 100000).flatMapIndexed { i, value ->
         listOf(
             "manyak.payment.groble.products[$i].id=if_$value",
             "manyak.payment.groble.products[$i].base=$value",
@@ -19,11 +19,11 @@ class GroblePaymentPropertiesTests {
         .withPropertyValues(*properties.toTypedArray())
 
     @Test
-    fun `유효한 5종은 바인딩하고 미설정 링크와 시크릿으로도 기동한다`() {
+    fun `유효한 6종은 바인딩하고 미설정 링크와 시크릿으로도 기동한다`() {
         runner().run { context ->
             assertThat(context).hasNotFailed()
             val properties = context.getBean(GroblePaymentProperties::class.java)
-            assertThat(properties.products).hasSize(5)
+            assertThat(properties.products).hasSize(6)
             assertThat(properties.products.first().id).isEqualTo("if_2000")
             assertThat(properties.products.first().paymentUrl).isEmpty()
             assertThat(properties.webhookSecret).isEmpty()
@@ -31,10 +31,10 @@ class GroblePaymentPropertiesTests {
     }
 
     @Test
-    fun `상품이 5종이 아니면 바인딩 중 기동에 실패한다`() {
-        runner(values.filterNot { "products[4]" in it }).run { context ->
+    fun `상품이 6종이 아니면 바인딩 중 기동에 실패한다`() {
+        runner(values.filterNot { "products[5]" in it }).run { context ->
             assertThat(context).hasFailed()
-            assertThat(context.startupFailure).hasStackTraceContaining("이프 충전 상품은 5종이어야 합니다.")
+            assertThat(context.startupFailure).hasStackTraceContaining("이프 충전 상품은 6종이어야 합니다.")
         }
     }
 

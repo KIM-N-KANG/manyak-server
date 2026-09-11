@@ -61,12 +61,12 @@ class GrobleWebhookIntegrationTests {
         assertThat(saved.completedAt).isNotNull()
         val tx = transactions.findAll().single()
         assertThat(saved.creditTransactionId).isEqualTo(tx.id)
-        assertThat(tx.amount).isEqualTo(5200)
+        assertThat(tx.amount).isEqualTo(5000)
         assertThat(tx.reason).isEqualTo(CreditReason.PURCHASE)
         assertThat(tx.idempotencyKey).isEqualTo("groble:event-${order.id}")
         assertThat(tx.refType).isEqualTo("CREDIT_ORDER")
         assertThat(tx.refId).isEqualTo(order.id)
-        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5200)
+        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5000)
         val lot = lots.findAll().single()
         assertThat(lot.expiresAt).isEqualTo(lot.createdAt.atZone(ZoneOffset.UTC).plusYears(5).toInstant())
         assertThat(count("completed") - before).isEqualTo(1.0)
@@ -114,8 +114,8 @@ class GrobleWebhookIntegrationTests {
             completed(order).replace("\"sellerReference\":\"${order.publicId}\",", ""),
             completed(order).replace(order.publicId.toString(), "invalid"),
             completed(order).replace(order.publicId.toString(), UUID.randomUUID().toString()),
-            completed(order).replace("5000", "4999"),
-            completed(order).replace("5000", "5000.5"),
+            completed(order).replace("4800", "4999"),
+            completed(order).replace("4800", "4800.5"),
             completed(order).replace("payment.completed", "subscription.created"),
         )) send(body)
         assertThat(transactions.count()).isZero()
@@ -145,7 +145,7 @@ class GrobleWebhookIntegrationTests {
         assertThat(lots.findAll().single().remaining).isZero()
         assertThat(wallets.findByUserId(order.userId)!!.balance).isZero()
         val reversal = transactions.findAll().single { it.reason.name == "PURCHASE_REVERSAL" }
-        assertThat(reversal.amount).isEqualTo(-5200)
+        assertThat(reversal.amount).isEqualTo(-5000)
         assertThat(reversal.refType).isEqualTo("CREDIT_ORDER")
         assertThat(reversal.refId).isEqualTo(order.id)
         assertThat(count("refunded") - before).isEqualTo(1.0)
@@ -154,7 +154,7 @@ class GrobleWebhookIntegrationTests {
     @Test fun `일부 소진한 구매는 잔여만 회수하고 다른 로트는 보존한다`() {
         val order = order()
         send(completed(order))
-        walletService.deduct(order.userId, 5000, CreditReason.CHAT_TURN)
+        walletService.deduct(order.userId, 4800, CreditReason.CHAT_TURN)
         walletService.reward(order.userId, 250, CreditReason.ATTENDANCE_REWARD, "attendance-test")
         send(refunded(order))
         assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(250)
@@ -165,7 +165,7 @@ class GrobleWebhookIntegrationTests {
     @Test fun `전부 소진한 구매도 환불 상태를 기록하고 0원 원장은 만들지 않는다`() {
         val order = order()
         send(completed(order))
-        walletService.deduct(order.userId, 5200, CreditReason.CHAT_TURN)
+        walletService.deduct(order.userId, 5000, CreditReason.CHAT_TURN)
         send(refunded(order))
         assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.REFUNDED)
         assertThat(transactions.count()).isEqualTo(2)
@@ -178,7 +178,7 @@ class GrobleWebhookIntegrationTests {
         send(refunded(order, true))
         send(refunded(order).replace("merchant-${order.id}", "unmatched"))
         assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
-        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5200)
+        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5000)
         assertThat(transactions.count()).isEqualTo(1)
     }
 
@@ -272,13 +272,13 @@ class GrobleWebhookIntegrationTests {
     @Test fun `전액 표시여도 환불 금액이 다르면 회수하지 않는다`() {
         val order = order()
         send(completed(order))
-        send(refunded(order).replace("5000", "1000"))
+        send(refunded(order).replace("4800", "1000"))
         assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
         assertThat(transactions.count()).isEqualTo(1)
     }
 
     @Test fun `회수 부족분은 미사용이면 0 일부 소진이면 소진량이다`() {
-        for (spent in listOf(0L, 200L, 5200L)) {
+        for (spent in listOf(0L, 200L, 5000L)) {
             val order = order()
             send(completed(order))
             if (spent > 0) walletService.deduct(order.userId, spent, CreditReason.CHAT_TURN)
@@ -290,10 +290,10 @@ class GrobleWebhookIntegrationTests {
 
     @Test fun `역순 환불 금액이 다르면 정상 적립하고 표식을 삭제한다`() {
         val order = order()
-        send(refunded(order).replace("5000", "1000"))
+        send(refunded(order).replace("4800", "1000"))
         send(completed(order))
         assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
-        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5200)
+        assertThat(wallets.findByUserId(order.userId)!!.balance).isEqualTo(5000)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM groble_refund_marks", Long::class.java)).isZero()
     }
 
@@ -318,10 +318,10 @@ class GrobleWebhookIntegrationTests {
     private fun order(): CreditOrder {
         val user = users.save(User(nickname = "웹훅 회원"))
         return orders.save(CreditOrder(userId = user.id, productId = "if_5000", provider = CreditOrderProvider.GROBLE,
-            priceKrw = 5000, creditAmount = 5200))
+            priceKrw = 4800, creditAmount = 5000))
     }
-    private fun completed(order: CreditOrder, extra: String = "") = """{"id":"event-${order.id}","type":"payment.completed","data":{"object":{"sellerReference":"${order.publicId}","merchantUid":"merchant-${order.id}","pricing":{"finalAmount":5000}$extra}}}"""
-    private fun refunded(order: CreditOrder, partial: Boolean = false) = """{"id":"refund-${order.id}","type":"payment.refunded","data":{"object":{"merchantUid":"merchant-${order.id}","refund":{"partialRefund":$partial,"amount":5000}}}}"""
+    private fun completed(order: CreditOrder, extra: String = "") = """{"id":"event-${order.id}","type":"payment.completed","data":{"object":{"sellerReference":"${order.publicId}","merchantUid":"merchant-${order.id}","pricing":{"finalAmount":4800}$extra}}}"""
+    private fun refunded(order: CreditOrder, partial: Boolean = false) = """{"id":"refund-${order.id}","type":"payment.refunded","data":{"object":{"merchantUid":"merchant-${order.id}","refund":{"partialRefund":$partial,"amount":4800}}}}"""
     private fun send(body: String, ts: String = Instant.now().epochSecond.toString(), signature: String = sign(body, ts), previous: String? = null, status: Int = 200) {
         val request = client.post().uri("/api/v1/webhooks/groble")
             .header("Authorization", "Bearer ignored-webhook-token")

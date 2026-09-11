@@ -46,16 +46,16 @@ class CreditOrderIntegrationTests {
     fun setUp() = cleaner.cleanAll()
 
     @Test
-    fun `공개 상품 목록은 설정 순서대로 5종의 가격과 총량을 반환한다`() {
+    fun `공개 상품 목록은 설정 순서대로 6종의 가격과 총량을 반환한다`() {
         client.get().uri("/api/v1/credits/products").exchange()
             .expectStatus().isOk.expectBody()
-            .jsonPath("$.items.length()").isEqualTo(5)
-            .jsonPath("$.items[*].productId").isEqualTo(listOf("if_2000", "if_5000", "if_10000", "if_30000", "if_50000"))
-            .jsonPath("$.items[*].baseCredits").isEqualTo(listOf(2000, 5000, 10000, 30000, 50000))
-            .jsonPath("$.items[*].bonusCredits").isEqualTo(listOf(0, 200, 700, 3000, 6000))
-            .jsonPath("$.items[*].totalCredits").isEqualTo(listOf(2000, 5200, 10700, 33000, 56000))
-            .jsonPath("$.items[*].webPriceKrw").isEqualTo(listOf(2000, 5000, 10000, 30000, 50000))
-            .jsonPath("$.items[*].appPriceKrw").isEqualTo(listOf(2800, 7000, 14000, 42000, 70000))
+            .jsonPath("$.items.length()").isEqualTo(6)
+            .jsonPath("$.items[*].productId").isEqualTo(listOf("if_2000", "if_5000", "if_10000", "if_30000", "if_50000", "if_100000"))
+            .jsonPath("$.items[*].baseCredits").isEqualTo(listOf(2000, 4800, 9400, 27500, 45000, 88000))
+            .jsonPath("$.items[*].bonusCredits").isEqualTo(listOf(0, 200, 600, 2500, 5000, 12000))
+            .jsonPath("$.items[*].totalCredits").isEqualTo(listOf(2000, 5000, 10000, 30000, 50000, 100000))
+            .jsonPath("$.items[*].webPriceKrw").isEqualTo(listOf(2000, 4800, 9400, 27500, 45000, 88000))
+            .jsonPath("$.items[*].appPriceKrw").isEqualTo(listOf(2800, 6700, 13200, 38500, 63000, 123200))
             .jsonPath("$.items[0].paymentUrl").doesNotExist()
     }
 
@@ -106,7 +106,7 @@ class CreditOrderIntegrationTests {
     fun `기존 쿼리 문자열을 보존하고 보너스 포함 총량으로 주문한다`() {
         val orderId = create(user(), "if_5000", "https://pay.example.test/5000?source=manyak&ref=")
         assertThat(jdbc.queryForObject("SELECT credit_amount FROM credit_orders WHERE public_id = ?", Long::class.java, UUID.fromString(orderId)))
-            .isEqualTo(5200)
+            .isEqualTo(5000)
     }
 
     @Test
@@ -238,5 +238,47 @@ class CreditOrderPaymentTestInitializer : ApplicationContextInitializer<Configur
         products["manyak.payment.groble.products[1].payment-url"] = "https://pay.example.test/5000?source=manyak"
         products["manyak.payment.groble.products[4].payment-url"] = ""
         context.environment.propertySources.addFirst(MapPropertySource("credit-order-products", products))
+    }
+}
+
+/** 실제 yml의 링크를 오버라이드하지 않고 6종 주문 생성을 검증한다. */
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["manyak.payment.groble.webhook-secret=test-only-webhook-secret"],
+)
+class CreditOrderConfiguredLinksIntegrationTests {
+    @Autowired private lateinit var client: RestTestClient
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var jwt: JwtTokenProvider
+    @Autowired private lateinit var cleaner: DatabaseCleaner
+    @Autowired private lateinit var mapper: ObjectMapper
+    @Autowired private lateinit var jdbc: JdbcTemplate
+
+    @Test
+    fun `실제 설정의 6종 모두 주문을 생성하고 상품별 결제창 URL과 주문 참조를 반환한다`() {
+        cleaner.cleanAll()
+        val user = users.save(User(nickname = "결제 링크 회원"))
+        val links = linkedMapOf(
+            "if_2000" to "iwhU85",
+            "if_5000" to "nSGNPJ",
+            "if_10000" to "pt2z39",
+            "if_30000" to "AvtY6y",
+            "if_50000" to "dRw9sY",
+            "if_100000" to "mBWhrA",
+        )
+        for ((productId, linkId) in links) {
+            val body = client.post().uri("/api/v1/users/me/credits/orders")
+                .header("Authorization", "Bearer ${jwt.issueAccessToken(user.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to productId))
+                .exchange().expectStatus().isCreated.expectBody(String::class.java).returnResult().responseBody!!
+            val json = mapper.readTree(body)
+            val orderId = json["orderId"].asText()
+            assertThat(UUID.fromString(orderId).toString()).isEqualTo(orderId)
+            assertThat(json["paymentUrl"].asText())
+                .isEqualTo("https://www.groble.im/payment/$linkId?ref=$orderId")
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isEqualTo(6)
     }
 }

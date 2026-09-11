@@ -78,7 +78,7 @@ class GooglePlayPurchaseIntegrationTests {
             .body(mapOf("productId" to "if_5000", "purchaseToken" to "test-purchase"))
             .exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.orderId").isNotEmpty
-            .jsonPath("$.balance").isEqualTo(5200)
+            .jsonPath("$.balance").isEqualTo(5000)
     }
     @Test fun `재전송은 동일 주문이고 적립 및 5년 로트는 한 번이다`() {
         val user = user()
@@ -86,12 +86,12 @@ class GooglePlayPurchaseIntegrationTests {
         val first = buy(user)
         val second = buy(user)
         assertThat(first["orderId"].asText()).isEqualTo(second["orderId"].asText())
-        assertThat(second["balance"].asLong()).isEqualTo(5200)
+        assertThat(second["balance"].asLong()).isEqualTo(5000)
         val order = orders.findAll().single()
         assertThat(order.provider).isEqualTo(CreditOrderProvider.GOOGLE_PLAY)
         assertThat(order.providerRef).isEqualTo(purchaseTokenHash("test-purchase"))
-        assertThat(order.priceKrw).isEqualTo(7000)
-        assertThat(order.creditAmount).isEqualTo(5200)
+        assertThat(order.priceKrw).isEqualTo(6700)
+        assertThat(order.creditAmount).isEqualTo(5000)
         assertThat(order.status).isEqualTo(CreditOrderStatus.COMPLETED)
         assertThat(order.completedAt).isNotNull()
         val tx = transactions.findAll().single()
@@ -100,7 +100,7 @@ class GooglePlayPurchaseIntegrationTests {
         assertThat(tx.refId).isEqualTo(order.id)
         assertThat(tx.reason).isEqualTo(CreditReason.PURCHASE)
         val lot = lots.findAll().single()
-        assertThat(lot.originalAmount).isEqualTo(5200)
+        assertThat(lot.originalAmount).isEqualTo(5000)
         assertThat(lot.expiresAt).isEqualTo(lot.createdAt.atZone(ZoneOffset.UTC).plusYears(5).toInstant())
         verify(google, times(1)).getProductPurchase("app.manyak.test", "if_5000", "test-purchase")
     }
@@ -180,7 +180,7 @@ class GooglePlayPurchaseIntegrationTests {
         val user = user()
         receipt(type = 0)
         val service = GooglePlayPurchaseService(settings(allowTest = true), products, google, orderTransactions, guard, meters)
-        assertThat(service.purchase(user.id, "if_5000", "test-purchase").balance).isEqualTo(5200)
+        assertThat(service.purchase(user.id, "if_5000", "test-purchase").balance).isEqualTo(5000)
     }
 
     @Test fun `Google 검증 실패는 400 일시 장애는 502이다`() {
@@ -221,7 +221,7 @@ class GooglePlayPurchaseIntegrationTests {
         reconciler.run()
         val saved = orders.findById(order.id).orElseThrow()
         assertThat(saved.status).isEqualTo(CreditOrderStatus.REFUNDED)
-        assertThat(saved.reversalShortfall).isEqualTo(4000)
+        assertThat(saved.reversalShortfall).isEqualTo(3800)
         assertThat(saved.refundedAt).isNotNull()
         assertThat(wallets.findByUserId(user.id)!!.balance).isZero()
         assertThat(lots.findAll().single().remaining).isZero()
@@ -242,7 +242,7 @@ class GooglePlayPurchaseIntegrationTests {
             }) }
             assertThat(jobs.map { it.get(20, TimeUnit.SECONDS) }).containsExactlyInAnyOrder("reversed", "ignored")
             assertThat(orders.findAll().single().reversalShortfall).isZero()
-            assertThat(transactions.findAll().single { it.reason == CreditReason.PURCHASE_REVERSAL }.amount).isEqualTo(-5200)
+            assertThat(transactions.findAll().single { it.reason == CreditReason.PURCHASE_REVERSAL }.amount).isEqualTo(-5000)
         } finally { pool.shutdownNow() }
     }
 
@@ -275,7 +275,7 @@ class GooglePlayPurchaseIntegrationTests {
         val owner = user()
         receipt()
         doThrow(IllegalStateException("test-only-wallet-failure")).`when`(walletService)
-            .reward(org.mockito.ArgumentMatchers.eq(owner.id), org.mockito.ArgumentMatchers.eq(5200L),
+            .reward(org.mockito.ArgumentMatchers.eq(owner.id), org.mockito.ArgumentMatchers.eq(5000L),
                 org.mockito.ArgumentMatchers.eq(CreditReason.PURCHASE) ?: CreditReason.PURCHASE, org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq("CREDIT_ORDER"), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.isNull())
         buy(owner, status = 500)

@@ -21,7 +21,7 @@ GET {{baseUrl}}/actuator/health
 ### 2. 상품 목록
 GET {{baseUrl}}/api/v1/credits/products
 
-### 3. 정상 구매 — 상품 5천 이프, 보너스 포함 5,200 적립
+### 3. 정상 구매 — 상품 5천 이프, 보너스 포함 5,000 적립
 POST {{baseUrl}}/api/v1/users/me/credits/purchases/google
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

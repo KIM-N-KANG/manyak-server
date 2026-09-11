@@ -140,6 +140,8 @@ manyak:
       # 미설정 기동은 허용하되 주문 생성은 링크·시크릿 중 하나라도 비어 있으면 503이다.
       webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
       # 상품별 그로블 결제창(단일 판매자 계정이라 환경 공통). 주문 생성은 웹훅 시크릿 설정도 필요하다.
+      # 표기는 크랙 방식(기본 수량 = 가격, 보너스는 덤), 앱 가격은 웹 × 1.4를 100원 단위 반올림.
+      # 2026-09-11 최종안(KNK-1270). 결제창은 그로블 MCP로 관리한다(가격은 판매 이력 없을 때만 제자리 수정 가능).
       products:
         - id: if_2000
           base: 2000
@@ -148,37 +150,43 @@ manyak:
           app-price-krw: 2800
           payment-url: "https://www.groble.im/payment/iwhU85"
         - id: if_5000
-          base: 5000
+          base: 4800
           bonus: 200
-          web-price-krw: 5000
-          app-price-krw: 7000
+          web-price-krw: 4800
+          app-price-krw: 6700
           payment-url: "https://www.groble.im/payment/nSGNPJ"
         - id: if_10000
-          base: 10000
-          bonus: 700
-          web-price-krw: 10000
-          app-price-krw: 14000
+          base: 9400
+          bonus: 600
+          web-price-krw: 9400
+          app-price-krw: 13200
           payment-url: "https://www.groble.im/payment/pt2z39"
         - id: if_30000
-          base: 30000
-          bonus: 3000
-          web-price-krw: 30000
-          app-price-krw: 42000
+          base: 27500
+          bonus: 2500
+          web-price-krw: 27500
+          app-price-krw: 38500
           payment-url: "https://www.groble.im/payment/AvtY6y"
         - id: if_50000
-          base: 50000
-          bonus: 6000
-          web-price-krw: 50000
-          app-price-krw: 70000
+          base: 45000
+          bonus: 5000
+          web-price-krw: 45000
+          app-price-krw: 63000
           payment-url: "https://www.groble.im/payment/dRw9sY"
+        - id: if_100000
+          base: 88000
+          bonus: 12000
+          web-price-krw: 88000
+          app-price-krw: 123200
+          payment-url: "https://www.groble.im/payment/mBWhrA"
   credit:
-    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-08-31 재확정 · KNK-1056). 여기 값은 CreditPolicyService가
+    # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-09-11 재확정 · KNK-1270). 여기 값은 CreditPolicyService가
     # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).
     signup-reward: ${MANYAK_CREDIT_SIGNUP_REWARD:1000}
     invite-reward: ${MANYAK_CREDIT_INVITE_REWARD:2000}
     invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
-    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:350}
-    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:200}
+    attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
+    story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:250}
     chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
     policy-refresh:
       # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이

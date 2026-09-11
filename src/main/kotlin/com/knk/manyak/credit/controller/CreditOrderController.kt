@@ -28,7 +28,7 @@ import java.util.UUID
 @Tag(name = "Credits", description = "이프 API")
 @RestController
 class CreditOrderController(private val service: CreditOrderService) {
-    @Operation(summary = "이프 충전 상품 목록", description = "인증 없이 설정 순서대로 상품 5종의 총량과 웹·앱 가격을 조회합니다.")
+    @Operation(summary = "이프 충전 상품 목록", description = "인증 없이 설정 순서대로 상품 6종의 총량과 웹·앱 가격을 조회합니다.")
     @GetMapping("/api/v1/credits/products")
     fun products(): CreditProductsResponse = service.products()
 

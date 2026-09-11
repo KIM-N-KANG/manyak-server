@@ -49,8 +49,8 @@ class CreditPolicyControllerIntegrationTests {
             .jsonPath("$.signupReward").isEqualTo(1000)
             .jsonPath("$.inviteReward").isEqualTo(2000)
             .jsonPath("$.inviteMonthlyCap").isEqualTo(10)
-            .jsonPath("$.attendanceReward").isEqualTo(350)
-            .jsonPath("$.storyCreationCost").isEqualTo(200)
+            .jsonPath("$.attendanceReward").isEqualTo(250)
+            .jsonPath("$.storyCreationCost").isEqualTo(250)
             .jsonPath("$.chatTurnCost").isEqualTo(20)
     }
 
