@@ -84,7 +84,7 @@ class CreditPolicyTransactionIsolationIntegrationTest {
         try {
             creditPolicyService.refresh()
 
-            assertThat(creditPolicyService.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(350)
+            assertThat(creditPolicyService.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
         } finally {
             jdbcTemplate.execute("ALTER TABLE credit_policies_hidden RENAME TO credit_policies")
         }

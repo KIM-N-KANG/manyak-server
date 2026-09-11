@@ -44,8 +44,8 @@ class CreditPolicyServiceIntegrationTest {
                     CreditPolicyKey.SIGNUP_REWARD to 1000L,
                     CreditPolicyKey.INVITE_REWARD to 2000L,
                     CreditPolicyKey.INVITE_MONTHLY_CAP to 10L,
-                    CreditPolicyKey.ATTENDANCE_REWARD to 350L,
-                    CreditPolicyKey.STORY_CREATION_COST to 200L,
+                    CreditPolicyKey.ATTENDANCE_REWARD to 250L,
+                    CreditPolicyKey.STORY_CREATION_COST to 250L,
                     CreditPolicyKey.CHAT_TURN_COST to 20L,
                 ),
             )

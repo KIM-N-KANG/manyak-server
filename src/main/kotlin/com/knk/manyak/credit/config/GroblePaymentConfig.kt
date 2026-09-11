@@ -10,7 +10,7 @@ class GroblePaymentProperties(
     val webhookSecret: String = "",
 ) {
     init {
-        require(products.size == 5) { "이프 충전 상품은 5종이어야 합니다." }
+        require(products.size == 6) { "이프 충전 상품은 6종이어야 합니다." }
         require(products.map { it.id }.distinct().size == products.size) { "이프 상품 ID는 중복될 수 없습니다." }
     }
 }

@@ -1,8 +1,8 @@
 # KNK-1156 이프 상품 목록·웹 충전 주문 검증
 # 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun.
-# MANYAK_GROBLE_WEBHOOK_SECRET을 설정하고 application.yml의 상품별 payment-url 값을 채운다.
+# MANYAK_GROBLE_WEBHOOK_SECRET을 설정한다. if_2000의 기존 payment-url로 주문을 생성한다.
 # 결제창 링크는 단일 판매자 계정의 환경 공통 yml 값이다.
-# 링크 기본값은 비어 있으므로 미설정 서버에서는 주문 생성이 503이다.
+# if_2000은 기존 링크를 유지한다. 나머지 5개 상품은 새 가격의 링크가 나올 때까지 비어 있어 주문 생성이 503이다.
 # accessToken은 로그인 응답, otherAccessToken은 다른 회원의 로그인 응답에서 직접 입력한다.
 # 위에서부터 실행한다. 주문 생성 응답에서 creditOrderId를 저장하므로 조회 전에 생성 요청이 필요하다.
 # 이 파일은 결제창을 열거나 결제·적립하지 않는다. 주문은 PENDING으로 남는다.
@@ -18,10 +18,13 @@ GET {{baseUrl}}/actuator/health
 GET {{baseUrl}}/api/v1/credits/products
 
 > {%
-    client.test("상품 5종과 보너스 총량", () => {
+    client.test("상품 6종과 보너스 총량", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
-        client.assert(response.body.items.length === 5, `expected=5 actual=${response.body.items.length}`);
-        client.assert(response.body.items[1].totalCredits === 5200, `expected=5200 actual=${response.body.items[1].totalCredits}`);
+        client.assert(response.body.items.length === 6, `expected=6 actual=${response.body.items.length}`);
+        client.assert(response.body.items[1].totalCredits === 5000, `expected=5000 actual=${response.body.items[1].totalCredits}`);
+        const expectedIds = ["if_2000", "if_5000", "if_10000", "if_30000", "if_50000", "if_100000"];
+        client.assert(JSON.stringify(response.body.items.map(item => item.productId)) === JSON.stringify(expectedIds), `expected=${expectedIds} actual=${response.body.items.map(item => item.productId)}`);
+        client.assert(response.body.items[5].totalCredits === 100000, `expected=100000 actual=${response.body.items[5].totalCredits}`);
     });
 %}
 
@@ -99,12 +102,12 @@ Content-Type: application/json
     });
 %}
 
-### 9. 결제 미설정 (별도 검증: 시크릿 또는 yml의 if_2000 상품 payment-url을 비우고 서버 재기동 후 실행)
+### 9. 결제 링크 미설정 (if_100000의 빈 payment-url 기본값 유지)
 POST {{baseUrl}}/api/v1/users/me/credits/orders
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{"productId": "if_2000"}
+{"productId": "if_100000"}
 
 > {%
     client.test("결제 미설정", () => {
