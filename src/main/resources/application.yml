@@ -208,6 +208,8 @@ manyak:
     story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:1}
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
   push:
+    web:
+      icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
     fcm:
       # Firebase 서비스 계정 JSON 원문(KNK-1130). 앱의 google-services.json과 같은 프로젝트에서 발급한다.
       # 미설정(빈 값)이면 FCM 빈을 만들지 않아 발송이 no-op이다(Slack 웹훅과 같은 관례). 운영은 manyak/prod/app

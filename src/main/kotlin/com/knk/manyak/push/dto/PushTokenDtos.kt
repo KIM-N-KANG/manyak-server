@@ -10,13 +10,13 @@ data class PushTokenRegisterRequest(
     @field:NotBlank
     @field:Size(max = 512)
     @field:Schema(
-        description = "앱이 FCM에서 발급받은 등록 토큰. 같은 값을 다시 보내면 갱신(멱등)이고, " +
+        description = "안드로이드 앱 또는 웹 PWA가 FCM에서 발급받은 등록 토큰. 같은 값을 다시 보내면 갱신(멱등)이고, " +
             "토큰이 바뀌면(onNewToken) 새 값으로 다시 등록한다.",
         example = "dEv1cE:APA91bExampleToken-0123456789",
     )
     val token: String,
 
-    @field:Schema(description = "기기 플랫폼", example = "ANDROID")
+    @field:Schema(description = "기기 플랫폼: ANDROID(안드로이드 앱), WEB(웹 PWA)", example = "WEB")
     val platform: PushPlatform,
 )
 
@@ -29,7 +29,7 @@ data class PushTokenDeleteRequest(
     @field:NotBlank
     @field:Size(max = 512)
     @field:Schema(
-        description = "지울 등록 토큰. 요청자 소유가 아니면 아무 일도 하지 않는다(멱등).",
+        description = "지울 안드로이드 또는 웹 등록 토큰. platform은 필요하지 않다. 요청자 소유가 아니면 아무 일도 하지 않는다(멱등).",
         example = "dEv1cE:APA91bExampleToken-0123456789",
     )
     val token: String,

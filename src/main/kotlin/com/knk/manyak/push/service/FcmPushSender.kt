@@ -4,22 +4,26 @@ import com.google.firebase.messaging.AndroidConfig
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingException
 import com.google.firebase.messaging.Message
+import com.google.firebase.messaging.WebpushConfig
+import com.google.firebase.messaging.WebpushNotification
+import com.google.firebase.messaging.WebpushFcmOptions
 import com.google.firebase.messaging.MessagingErrorCode
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 
 /**
  * FCM 발송기(KNK-1130). 시나리오별 발송(스토리 완성 등)은 전부 이 클래스를 부른다.
  *
- * - **data 전용** 메시지다. `notification` 필드를 실으면 백그라운드에서 OS가 알아서 띄우고 앱 코드가 돌지 않아
- *   딥링크·문구를 앱이 제어할 수 없다. 알림 UI는 앱이 조립한다(KNK-1134).
- * - 우선순위 HIGH: data 전용 메시지는 기본(normal)이면 Doze에서 미뤄져 "완료됐다"는 알림이 늦게 뜬다.
+ * - ANDROID는 data 전용 + HIGH로 보내 앱이 알림을 조립한다(KNK-1134).
+ * - WEB은 data와 webpush notification을 함께 보내 브라우저가 표시한다(KNK-1271).
  * - 모든 데이터에 `recipientId`(수신 회원 public_id)를 덧붙인다(KNK-1220) — 앱이 기기 공유 시 남의 알림을 거른다.
  * - 커밋 뒤에 불러야 한다. 외부 IO라 도메인 트랜잭션 안에서 부르면 롤백돼도 푸시는 이미 나간다.
  * - 정지·탈퇴 계정에는 보내지 않는다. 등록 시점에는 ACTIVE였어도 그 뒤 상태가 바뀌면 남아 있던 토큰으로
@@ -38,6 +42,8 @@ class FcmPushSender(
     private val devicePushTokenRepository: DevicePushTokenRepository,
     private val userRepository: UserRepository,
     private val meterRegistry: MeterRegistry,
+    @Value("\${manyak.push.web.icon-url:https://manyak.app/icons/icon-192.png}")
+    private val webIconUrl: String = "https://manyak.app/icons/icon-192.png",
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -64,12 +70,26 @@ class FcmPushSender(
     }
 
     private fun sendTo(messaging: FirebaseMessaging, deviceToken: DevicePushToken, data: Map<String, String>) {
-        val message = Message.builder()
-            .setToken(deviceToken.token)
-            .putAllData(data)
-            .setAndroidConfig(AndroidConfig.builder().setPriority(AndroidConfig.Priority.HIGH).build())
-            .build()
         try {
+            val builder = Message.builder().setToken(deviceToken.token).putAllData(data)
+            when (deviceToken.platform) {
+                PushPlatform.ANDROID -> builder.setAndroidConfig(
+                    AndroidConfig.builder().setPriority(AndroidConfig.Priority.HIGH).build(),
+                )
+                PushPlatform.WEB -> builder.setWebpushConfig(
+                    WebpushConfig.builder()
+                        .setNotification(
+                            WebpushNotification.builder()
+                                .setTitle(data["title"])
+                                .setBody(data["body"])
+                                .setIcon(webIconUrl)
+                                .build(),
+                        )
+                        .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: "https://manyak.app"))
+                        .build(),
+                )
+            }
+            val message = builder.build()
             messaging.send(message)
             count(OUTCOME_SUCCESS)
         } catch (ex: FirebaseMessagingException) {
