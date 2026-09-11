@@ -20,8 +20,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
  * 프로필 수정 API 통합 검증(KNK-1147, 정책 KNK-1146).
- * - 닉네임은 trim 후 2~20자, 한글 완성형·영문·숫자·공백만 허용하고 연속 공백은 막는다.
- * - 유일성은 정규화 키(소문자 + 공백 제거) 기준이라, 대소문자·공백만 다른 닉네임은 409다.
+ * - 닉네임은 2~20자, 한글 완성형·영문·숫자만 허용하고 공백은 거부한다.
+ * - 유일성은 정규화 키(소문자 + 공백 제거) 기준이라, 기존 공백 포함 값도 유일 판정에 반영한다.
  * - 프로필 이미지는 프리셋 선택만 지원한다(업로드 없음). 닉네임 변경과 독립이다.
  * - 인증 필수이며 정지 계정은 403이다.
  */
@@ -81,14 +81,14 @@ class UserProfileControllerIntegrationTests {
     fun `닉네임만 바꾸면 프로필 이미지는 그대로다`() {
         val user = saveUser()
 
-        patch(user, """{"nickname":"새로운 작가"}""")
+        patch(user, """{"nickname":"새로운작가"}""")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.nickname").isEqualTo("새로운 작가")
+            .jsonPath("$.nickname").isEqualTo("새로운작가")
             .jsonPath("$.profileImageUrl").isNotEmpty
 
         val reloaded = reload(user)
-        assertThat(reloaded.nickname).isEqualTo("새로운 작가")
+        assertThat(reloaded.nickname).isEqualTo("새로운작가")
         assertThat(reloaded.profileThumbnailBase64).isEqualTo("seed-thumb")
     }
 
@@ -111,10 +111,10 @@ class UserProfileControllerIntegrationTests {
     fun `닉네임과 프리셋을 함께 바꾸면 둘 다 반영된다`() {
         val user = saveUser()
 
-        patch(user, """{"nickname":"이야기 수집가","profileImagePreset":"수집가"}""").expectStatus().isOk
+        patch(user, """{"nickname":"이야기수집가","profileImagePreset":"수집가"}""").expectStatus().isOk
 
         val reloaded = reload(user)
-        assertThat(reloaded.nickname).isEqualTo("이야기 수집가")
+        assertThat(reloaded.nickname).isEqualTo("이야기수집가")
         assertThat(reloaded.profileImageUrl).isEqualTo(profileImagePresetService.imageUrlFor("수집가"))
     }
 
@@ -149,16 +149,12 @@ class UserProfileControllerIntegrationTests {
         assertThat(reload(user).nickname).isEqualTo("몽환적인 이야기꾼")
     }
 
-    @Test
-    fun `앞뒤 공백은 지우고 저장한다`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["닉 네임", " 닉네임", "닉네임 "])
+    fun `공백 닉네임은 다듬지 않고 400으로 거부한다`(nickname: String) {
         val user = saveUser()
-
-        patch(user, """{"nickname":"  다듬은 닉네임  "}""")
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.nickname").isEqualTo("다듬은 닉네임")
-
-        assertThat(reload(user).nickname).isEqualTo("다듬은 닉네임")
+        patch(user, """{"nickname":"$nickname"}""").expectStatus().isBadRequest
+        assertThat(reload(user).nickname).isEqualTo(user.nickname)
     }
 
     @Test
@@ -176,12 +172,12 @@ class UserProfileControllerIntegrationTests {
 
     @Test
     fun `자기 닉네임의 대소문자만 바꾸는 것은 허용한다`() {
-        val user = saveUser(nickname = "Story Teller")
+        val user = saveUser(nickname = "StoryTeller")
 
-        patch(user, """{"nickname":"STORY TELLER"}""")
+        patch(user, """{"nickname":"STORYTELLER"}""")
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.nickname").isEqualTo("STORY TELLER")
+            .jsonPath("$.nickname").isEqualTo("STORYTELLER")
     }
 
     @Test

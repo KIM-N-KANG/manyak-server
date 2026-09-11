@@ -1,11 +1,11 @@
 ### 프로필 수정 API 수동 검증 — PATCH /api/v1/users/me · GET /api/v1/profile-presets (KNK-1147)
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ###
-### 정책(KNK-1146 확정):
-###   - 닉네임: 앞뒤 공백 trim 후 2~20자. 한글 완성형(가-힣)·영문·숫자·공백만 허용.
-###     연속 공백·자모 단독(ㄱ, ㅏ)·특수문자·이모지는 400.
-###   - 유일성은 **정규화 키**(소문자 + 공백 제거) 기준입니다. "Story Teller"와 "storyteller"는 같은 닉네임으로
-###     보고 409 `NICKNAME_TAKEN`. 단 **자기 닉네임의 대소문자·공백만 바꾸는 것은 허용**합니다.
+### 정책(KNK-1146, KNK-1274 갱신):
+###   - 닉네임: 입력값 그대로 2~20자. 한글 완성형(가-힣)·영문·숫자만 허용.
+###     모든 공백·자모 단독(ㄱ, ㅏ)·특수문자·이모지는 400.
+###   - 유일성은 **정규화 키**(소문자 + 공백 제거) 기준입니다. "StoryTeller"와 "storyteller"는 같은 닉네임으로
+###     보고 409 `NICKNAME_TAKEN`. 단 **자기 닉네임의 대소문자만 바꾸는 것은 허용**합니다.
 ###   - 변경 주기 제한·금칙어 필터는 없습니다.
 ###   - 프로필 이미지는 **프리셋 선택만**(업로드 없음). 닉네임을 바꿔도 이미지는 따라 바뀌지 않습니다.
 ###
@@ -78,14 +78,14 @@ PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "nickname": "수동 검증 작가" }
+{ "nickname": "수동검증작가" }
 
 > {%
     client.test("닉네임 변경은 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     client.test("응답이 바뀐 닉네임을 돌려준다", () => {
-        client.assert(response.body.nickname === "수동 검증 작가", `actual=${response.body.nickname}`);
+        client.assert(response.body.nickname === "수동검증작가", `actual=${response.body.nickname}`);
     });
     // 프리셋 변경(4번) 뒤 이미지가 실제로 바뀌었는지 비교하려고 지금 값을 저장해 둡니다.
     client.global.set("imageUrlBeforePreset", response.body.profileImageUrl);
@@ -103,7 +103,7 @@ Content-Type: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     client.test("닉네임은 유지된다", () => {
-        client.assert(response.body.nickname === "수동 검증 작가", `닉네임이 바뀌었습니다. actual=${response.body.nickname}`);
+        client.assert(response.body.nickname === "수동검증작가", `닉네임이 바뀌었습니다. actual=${response.body.nickname}`);
     });
     client.test("프로필 이미지가 고른 프리셋 URL 이다", () => {
         client.assert(response.body.profileImageUrl === client.global.get("presetImageUrl"),
@@ -111,17 +111,16 @@ Content-Type: application/json
     });
 %}
 
-### 5. (해피 패스) 앞뒤 공백은 trim 되어 저장 → 200
+### 5. (에러) 앞뒤 공백은 trim하지 않고 거부 → 400
 PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "nickname": "  공백 다듬기  " }
+{ "nickname": "  공백닉네임  " }
 
 > {%
-    client.test("trim 후 저장된다", () => {
-        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
-        client.assert(response.body.nickname === "공백 다듬기", `trim 되지 않았습니다. actual='${response.body.nickname}'`);
+    client.test("앞뒤 공백은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
     });
 %}
 
@@ -130,7 +129,7 @@ PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "nickname": "manyak writer" }
+{ "nickname": "manyakwriter" }
 
 > {%
     client.test("영문 닉네임으로 먼저 바꾼다", () => {
@@ -143,17 +142,17 @@ PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "nickname": "MANYAK WRITER" }
+{ "nickname": "MANYAKWRITER" }
 
 > {%
     client.test("자기 닉네임의 대소문자 변경은 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
-        client.assert(response.body.nickname === "MANYAK WRITER", `actual=${response.body.nickname}`);
+        client.assert(response.body.nickname === "MANYAKWRITER", `actual=${response.body.nickname}`);
     });
 %}
 
 ### 7. (에러) 다른 회원이 쓰는 닉네임 → 409 NICKNAME_TAKEN
-# @otherNickname 에 다른 회원의 닉네임을 넣고 실행하세요. 대소문자·공백을 바꿔 넣어도 같은 409여야 합니다.
+# @otherNickname 에 다른 회원의 닉네임을 넣고 실행하세요. 대소문자를 바꿔 넣어도 같은 409여야 합니다.
 PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -192,7 +191,7 @@ PATCH {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "nickname": "닉  네임" }
+{ "nickname": "닉 네임" }
 
 > {%
     client.test("규칙 위반 닉네임은 400이다", () => {

@@ -87,7 +87,7 @@ class ProfileUpdater(
 
         request.nickname?.let { raw ->
             val nickname = requireValidNickname(raw)
-            // 자기 자신은 제외한다 — 대소문자·공백만 바꾸는 변경(같은 정규화 키)을 막지 않기 위해서다.
+            // 자기 자신은 제외한다. 대소문자만 바꾸는 변경(같은 정규화 키)을 막지 않기 위해서다.
             if (userRepository.existsByNicknameKeyExcludingSelf(nicknameKeyOf(nickname), userId)) {
                 throw nicknameTaken()
             }

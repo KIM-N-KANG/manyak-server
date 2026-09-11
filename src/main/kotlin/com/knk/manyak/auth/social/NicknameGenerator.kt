@@ -18,11 +18,11 @@ fun interface NicknameGenerator {
 }
 
 /**
- * 한국어 형용사 + 명사 조합으로 닉네임을 랜덤 생성한다(예: "몽환적인 이야기꾼").
+ * 한국어 형용사 + 명사 조합으로 닉네임을 랜덤 생성한다(예: "몽환적인이야기꾼").
  *
- * 백엔드 스펙 §4-5 "가입 프로필 발급": 실명(Google `name`) 노출을 피하기 위한 랜덤 발급. 50자 이내, 중복 허용(식별은 `public_id`).
+ * 백엔드 스펙 §4-5 "가입 프로필 발급": 실명(Google `name`) 노출을 피하기 위한 랜덤 발급. 50자 이내이며 유일성은 UniqueNicknameIssuer와 DB 인덱스가 보장한다.
  * 단어 풀은 마냑("내가 쓰고 AI가 이어가는 나만의 이야기")의 세계관에 맞춰 이야기 속 인물·창작자 정체성과
- * 서사적 무드로 구성한다. 각 토큰은 공백이 없어 "형용사 공백 명사" 형식이 항상 성립한다.
+ * 서사적 무드로 구성한다. 각 토큰은 공백이 없고 형용사와 명사를 바로 붙인다(KNK-1274).
  */
 @Component
 class RandomNicknameGenerator : NicknameGenerator {
@@ -30,7 +30,7 @@ class RandomNicknameGenerator : NicknameGenerator {
     override fun generate(): GeneratedNickname {
         val noun = NOUNS.random()
         // 명사는 프리셋 이미지 매핑 키다. text는 컬럼 길이 방어로 절단하되(실제 조합은 훨씬 짧음), noun은 매핑용 원본을 그대로 반환한다.
-        return GeneratedNickname(text = "${ADJECTIVES.random()} $noun".take(MAX_NICKNAME_LENGTH), noun = noun)
+        return GeneratedNickname(text = "${ADJECTIVES.random()}$noun".take(MAX_NICKNAME_LENGTH), noun = noun)
     }
 
     companion object {

@@ -11,9 +11,9 @@ import io.swagger.v3.oas.annotations.media.Schema
 @Schema(description = "프로필 수정 요청(KNK-1147). 둘 중 최소 하나는 있어야 한다")
 data class UpdateProfileRequest(
     @field:Schema(
-        description = "새 닉네임. 앞뒤 공백을 지운 뒤 2~20자이며 한글·영문·숫자·공백만 쓸 수 있다. " +
-            "대소문자·공백만 다른 닉네임은 이미 쓰는 것으로 본다(409).",
-        example = "몽환적인 이야기꾼",
+        description = "새 닉네임. 입력값 그대로 2~20자이며 한글·영문·숫자만 쓸 수 있다. 공백은 거부한다. " +
+            "대소문자만 다른 닉네임은 이미 쓰는 것으로 본다(409).",
+        example = "몽환적인이야기꾼",
         nullable = true,
     )
     val nickname: String? = null,
