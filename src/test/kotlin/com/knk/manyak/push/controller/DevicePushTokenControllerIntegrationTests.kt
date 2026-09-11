@@ -101,6 +101,25 @@ class DevicePushTokenControllerIntegrationTests {
     }
 
     @Test
+    fun `WEB 토큰을 등록하고 멱등 재등록한 뒤 삭제한다`() {
+        val user = saveUser()
+        register(user, TOKEN_A, "WEB").expectStatus().isNoContent
+        val original = devicePushTokenRepository.findAll().single()
+        assertThat(original.platform.name).isEqualTo("WEB")
+        assertThat(original.userId).isEqualTo(user.id)
+
+        register(user, TOKEN_A, "WEB").expectStatus().isNoContent
+        val rows = devicePushTokenRepository.findAll()
+        assertThat(rows).hasSize(1)
+        assertThat(rows.single().id).isEqualTo(original.id)
+        assertThat(rows.single().platform.name).isEqualTo("WEB")
+
+        unregister(user, TOKEN_A).expectStatus().isNoContent
+        assertThat(devicePushTokenRepository.findAll()).isEmpty()
+        unregister(user, TOKEN_A).expectStatus().isNoContent
+    }
+
+    @Test
     fun `다른 회원이 같은 토큰을 등록하면 소유자가 옮겨간다`() {
         val first = saveUser("첫째")
         val second = saveUser("둘째")

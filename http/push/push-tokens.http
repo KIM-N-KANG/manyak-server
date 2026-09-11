@@ -154,3 +154,57 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "token": "dEv1cE_second:APA91bSecondDevice-0123456789_abcdefghijklmnopqrstuvwxyz", "platform": "ANDROID" }
+
+# WEB 검증은 아래 등록, 재등록, 삭제 순서로 실행합니다. 행 수는 헤더의 SQL로 확인합니다.
+
+### WEB 등록
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "web_manual:APA91bWebToken", "platform": "WEB" }
+
+> {%
+    client.test("WEB 등록 상태 코드", () => {
+        client.assert(response.status === 204, `204이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### WEB 멱등 재등록
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "web_manual:APA91bWebToken", "platform": "WEB" }
+
+> {%
+    client.test("WEB 멱등 재등록 상태 코드", () => {
+        client.assert(response.status === 204, `204이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### WEB 삭제
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "web_manual:APA91bWebToken" }
+
+> {%
+    client.test("WEB 삭제 상태 코드", () => {
+        client.assert(response.status === 204, `204이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 미지원 IOS 등록
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "web_manual:APA91bWebToken", "platform": "IOS" }
+
+> {%
+    client.test("미지원 IOS 등록 상태 코드", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}

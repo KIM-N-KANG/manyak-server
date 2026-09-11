@@ -103,6 +103,52 @@ class FcmPushSenderTest {
     private fun dataOf(message: Message): Map<String, String> =
         Message::class.java.getDeclaredField("data").also { it.isAccessible = true }.get(message) as Map<String, String>
 
+    // SDK가 공개 접근자를 제공하지 않아 기존 data 검증과 같은 방식으로 전송 객체를 확인한다.
+    private fun fieldOf(value: Any, name: String): Any? =
+        value.javaClass.getDeclaredField(name).also { it.isAccessible = true }.get(value)
+
+    @Test
+    fun `ANDROID는 HIGH data 전용이고 webpush가 없다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "androidConfig")))
+        sender.sendToUser(7L, mapOf("title" to "제목"))
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        assertThat(fieldOf(captor.value, "webpushConfig")).isNull()
+        assertThat(fieldOf(captor.value, "notification")).isNull()
+        assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "priority")).isEqualTo("high")
+    }
+
+    @Test
+    fun `WEB은 광고 문구와 수신자 및 딥링크를 그대로 보낸다`() {
+        val web = token(1, "web").apply { platform = PushPlatform.valueOf("WEB") }
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
+        val data = mapOf("title" to "(광고) 선물", "body" to "출석하세요", "deepLink" to "https://manyak.app/shop")
+        sender.sendToUser(7L, data)
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        val message = captor.value
+        assertThat(dataOf(message)).containsAllEntriesOf(data).containsEntry("recipientId", publicId.toString())
+        assertThat(fieldOf(message, "androidConfig")).isNull()
+        val webpush = fieldOf(message, "webpushConfig")!!
+        val notification = fieldOf(webpush, "notification") as Map<*, *>
+        assertThat(notification["title"]).isEqualTo("(광고) 선물")
+        assertThat(notification["body"]).isEqualTo("출석하세요")
+        assertThat(notification["icon"]).isEqualTo("https://manyak.app/icons/icon-192.png")
+        assertThat(fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")).isEqualTo(data["deepLink"])
+    }
+
+    @Test
+    fun `WEB 스토리 완성은 본문과 딥링크 없이도 홈 링크로 보낸다`() {
+        val web = token(1, "web").apply { platform = PushPlatform.valueOf("WEB") }
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
+        sender.sendToUser(7L, mapOf("type" to "STORY_COMPLETED", "title" to "스토리"))
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        val webpush = fieldOf(captor.value, "webpushConfig")!!
+        assertThat(fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")).isEqualTo("https://manyak.app")
+        assertThat((fieldOf(webpush, "notification") as Map<*, *>)["title"]).isEqualTo("스토리")
+    }
+
     @Test
     fun `토큰이 없으면 발송하지 않는다`() {
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(emptyList())
