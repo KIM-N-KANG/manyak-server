@@ -122,12 +122,9 @@ class CreditOrderIntegrationTests {
 
     @Test
     fun `상품 결제 링크가 없으면 503이며 주문을 만들지 않는다`() {
-        val owner = user()
-        for (productId in listOf("if_10000", "if_30000", "if_50000", "if_100000")) {
-            client.post().uri("/api/v1/users/me/credits/orders").header("Authorization", bearer(owner))
-                .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to productId))
-                .exchange().expectStatus().isEqualTo(503)
-        }
+        client.post().uri("/api/v1/users/me/credits/orders").header("Authorization", bearer(user()))
+            .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to "if_50000"))
+            .exchange().expectStatus().isEqualTo(503)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isZero()
     }
 
@@ -239,6 +236,49 @@ class CreditOrderPaymentTestInitializer : ApplicationContextInitializer<Configur
             }
         products["manyak.payment.groble.products[0].payment-url"] = "https://pay.example.test/2000"
         products["manyak.payment.groble.products[1].payment-url"] = "https://pay.example.test/5000?source=manyak"
+        products["manyak.payment.groble.products[4].payment-url"] = ""
         context.environment.propertySources.addFirst(MapPropertySource("credit-order-products", products))
+    }
+}
+
+/** 실제 yml의 링크를 오버라이드하지 않고 6종 주문 생성을 검증한다. */
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["manyak.payment.groble.webhook-secret=test-only-webhook-secret"],
+)
+class CreditOrderConfiguredLinksIntegrationTests {
+    @Autowired private lateinit var client: RestTestClient
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var jwt: JwtTokenProvider
+    @Autowired private lateinit var cleaner: DatabaseCleaner
+    @Autowired private lateinit var mapper: ObjectMapper
+    @Autowired private lateinit var jdbc: JdbcTemplate
+
+    @Test
+    fun `실제 설정의 6종 모두 주문을 생성하고 상품별 결제창 URL과 주문 참조를 반환한다`() {
+        cleaner.cleanAll()
+        val user = users.save(User(nickname = "결제 링크 회원"))
+        val links = linkedMapOf(
+            "if_2000" to "iwhU85",
+            "if_5000" to "nSGNPJ",
+            "if_10000" to "pt2z39",
+            "if_30000" to "AvtY6y",
+            "if_50000" to "dRw9sY",
+            "if_100000" to "mBWhrA",
+        )
+        for ((productId, linkId) in links) {
+            val body = client.post().uri("/api/v1/users/me/credits/orders")
+                .header("Authorization", "Bearer ${jwt.issueAccessToken(user.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to productId))
+                .exchange().expectStatus().isCreated.expectBody(String::class.java).returnResult().responseBody!!
+            val json = mapper.readTree(body)
+            val orderId = json["orderId"].asText()
+            assertThat(UUID.fromString(orderId).toString()).isEqualTo(orderId)
+            assertThat(json["paymentUrl"].asText())
+                .isEqualTo("https://www.groble.im/payment/$linkId?ref=$orderId")
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isEqualTo(6)
     }
 }

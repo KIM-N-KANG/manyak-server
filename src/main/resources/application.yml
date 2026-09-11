@@ -141,7 +141,7 @@ manyak:
       webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
       # 상품별 그로블 결제창(단일 판매자 계정이라 환경 공통). 주문 생성은 웹훅 시크릿 설정도 필요하다.
       # 표기는 크랙 방식(기본 수량 = 가격, 보너스는 덤), 앱 가격은 웹 × 1.4를 100원 단위 반올림.
-      # 2026-09-11 최종안(KNK-1270). 가격이 바뀐 상품은 새 결제 링크가 나올 때까지 비워 둔다.
+      # 2026-09-11 최종안(KNK-1270). 결제창은 그로블 MCP로 관리한다(가격은 판매 이력 없을 때만 제자리 수정 가능).
       products:
         - id: if_2000
           base: 2000
@@ -154,31 +154,31 @@ manyak:
           bonus: 200
           web-price-krw: 4800
           app-price-krw: 6700
-          payment-url: ""
+          payment-url: "https://www.groble.im/payment/nSGNPJ"
         - id: if_10000
           base: 9400
           bonus: 600
           web-price-krw: 9400
           app-price-krw: 13200
-          payment-url: ""
+          payment-url: "https://www.groble.im/payment/pt2z39"
         - id: if_30000
           base: 27500
           bonus: 2500
           web-price-krw: 27500
           app-price-krw: 38500
-          payment-url: ""
+          payment-url: "https://www.groble.im/payment/AvtY6y"
         - id: if_50000
           base: 45000
           bonus: 5000
           web-price-krw: 45000
           app-price-krw: 63000
-          payment-url: ""
+          payment-url: "https://www.groble.im/payment/dRw9sY"
         - id: if_100000
           base: 88000
           bonus: 12000
           web-price-krw: 88000
           app-price-krw: 123200
-          payment-url: ""
+          payment-url: "https://www.groble.im/payment/mBWhrA"
   credit:
     # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-09-11 재확정 · KNK-1270). 여기 값은 CreditPolicyService가
     # 한 곳에서 받고, 운영 중 조정은 credit_policies 테이블 오버라이드로 한다(릴리스·terraform apply 불필요).

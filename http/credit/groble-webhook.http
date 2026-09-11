@@ -1,6 +1,6 @@
 # KNK-1157 그로블 웹훅 적립·환불 검증 (로컬 전용 합성 이벤트)
 # 준비: PostgreSQL·Redis 기동 → MANYAK_GROBLE_WEBHOOK_SECRET 설정 → ./gradlew bootRun.
-# application.yml if_5000 상품 payment-url도 새 가격 4800원에 맞는 테스트 링크로 채운다. 기존 credit-orders.http 준비 방법 참고.
+# application.yml if_5000 상품에는 새 가격 4800원의 결제창 링크가 설정돼 있다. 결제창을 열지 않고 로컬 합성 이벤트만 사용한다.
 # IntelliJ HTTP Client 환경 private 파일에 grobleWebhookSecret을 서버와 같은 값으로 설정한다.
 # accessToken은 로그인 응답에서 입력한다. 시크릿은 이 파일에 입력하지 않는다.
 # 위에서부터 실행. 합성 웹훅은 실제 돈의 이동 없이 로컬 이프를 변경하므로 전용 테스트 회원을 사용한다.

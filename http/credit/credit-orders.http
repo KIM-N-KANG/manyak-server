@@ -2,7 +2,7 @@
 # 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun.
 # MANYAK_GROBLE_WEBHOOK_SECRET을 설정한다. if_2000의 기존 payment-url로 주문을 생성한다.
 # 결제창 링크는 단일 판매자 계정의 환경 공통 yml 값이다.
-# if_2000은 기존 링크를 유지한다. 나머지 5개 상품은 새 가격의 링크가 나올 때까지 비어 있어 주문 생성이 503이다.
+# 6종 모두 최종 가격의 결제창 링크가 설정돼 있다. 시크릿 설정 후 주문 생성이 가능하다.
 # accessToken은 로그인 응답, otherAccessToken은 다른 회원의 로그인 응답에서 직접 입력한다.
 # 위에서부터 실행한다. 주문 생성 응답에서 creditOrderId를 저장하므로 조회 전에 생성 요청이 필요하다.
 # 이 파일은 결제창을 열거나 결제·적립하지 않는다. 주문은 PENDING으로 남는다.
@@ -39,7 +39,8 @@ Content-Type: application/json
     client.test("주문 생성과 결제 ref", () => {
         client.assert(response.status === 201, `expected=201 actual=${response.status}`);
         client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
-        client.assert(response.body.paymentUrl.includes(`ref=${response.body.orderId}`), `ref missing actual=${response.body.paymentUrl}`);
+        const expectedUrl = `https://www.groble.im/payment/iwhU85?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
     });
     if (response.status === 201) client.global.set("creditOrderId", response.body.orderId);
 %}
@@ -102,7 +103,71 @@ Content-Type: application/json
     });
 %}
 
-### 9. 결제 링크 미설정 (if_100000의 빈 payment-url 기본값 유지)
+### 9-1. if_5000 주문 생성 (3번 if_2000과 함께 6종 검증)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_5000"}
+
+> {%
+    client.test("if_5000 주문 생성과 결제창 URL", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        const expectedUrl = `https://www.groble.im/payment/nSGNPJ?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
+    });
+%}
+
+### 9-2. if_10000 주문 생성 (3번 if_2000과 함께 6종 검증)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_10000"}
+
+> {%
+    client.test("if_10000 주문 생성과 결제창 URL", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        const expectedUrl = `https://www.groble.im/payment/pt2z39?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
+    });
+%}
+
+### 9-3. if_30000 주문 생성 (3번 if_2000과 함께 6종 검증)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_30000"}
+
+> {%
+    client.test("if_30000 주문 생성과 결제창 URL", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        const expectedUrl = `https://www.groble.im/payment/AvtY6y?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
+    });
+%}
+
+### 9-4. if_50000 주문 생성 (3번 if_2000과 함께 6종 검증)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"productId": "if_50000"}
+
+> {%
+    client.test("if_50000 주문 생성과 결제창 URL", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        const expectedUrl = `https://www.groble.im/payment/dRw9sY?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
+    });
+%}
+
+### 9-5. if_100000 주문 생성 (3번 if_2000과 함께 6종 검증)
 POST {{baseUrl}}/api/v1/users/me/credits/orders
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -110,8 +175,11 @@ Content-Type: application/json
 {"productId": "if_100000"}
 
 > {%
-    client.test("결제 미설정", () => {
-        client.assert(response.status === 503, `expected=503 actual=${response.status}`);
+    client.test("if_100000 주문 생성과 결제창 URL", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(/^[0-9a-f-]{36}$/.test(response.body.orderId), `UUID expected actual=${response.body.orderId}`);
+        const expectedUrl = `https://www.groble.im/payment/mBWhrA?ref=${response.body.orderId}`;
+        client.assert(response.body.paymentUrl === expectedUrl, `expected=${expectedUrl} actual=${response.body.paymentUrl}`);
     });
 %}
 
