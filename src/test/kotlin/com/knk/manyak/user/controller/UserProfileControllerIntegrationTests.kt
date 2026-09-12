@@ -224,12 +224,12 @@ class UserProfileControllerIntegrationTests {
     }
 
     @Test
-    fun `닉네임 변경은 소유한 공개 스토리 두 건만 커밋 후 색인한다`() {
+    fun `닉네임 변경은 삭제되지 않은 소유 스토리 네 건을 커밋 후 색인한다`() {
         val user = saveUser(nickname = "기존작가")
         val first = storyRepository.save(Story(userId = user.id, title = "공개 하나"))
         val second = storyRepository.save(Story(userId = user.id, title = "공개 둘"))
-        storyRepository.save(Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
-        storyRepository.save(Story(userId = user.id, title = "초안", status = StoryStatus.DRAFT))
+        val privateStory = storyRepository.save(Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
+        val draft = storyRepository.save(Story(userId = user.id, title = "초안", status = StoryStatus.DRAFT))
         storyRepository.save(Story(userId = user.id, title = "삭제", deletedAt = Instant.now()))
         storyRepository.save(Story(userId = saveUser(nickname = "다른작가").id, title = "다른 회원"))
         storyRepository.save(Story(title = "게스트"))
@@ -238,7 +238,9 @@ class UserProfileControllerIntegrationTests {
 
         verify(indexer, timeout(3000)).index(first.id)
         verify(indexer, timeout(3000)).index(second.id)
-        verify(indexer, after(200).times(2)).index(anyLong())
+        verify(indexer, timeout(3000)).index(privateStory.id)
+        verify(indexer, timeout(3000)).index(draft.id)
+        verify(indexer, after(200).times(4)).index(anyLong())
         verifyNoMoreInteractions(indexer)
         assertThat(reload(user).nickname).isEqualTo("새로운작가")
     }

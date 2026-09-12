@@ -108,7 +108,8 @@ class ProfileUpdater(
         // 변환은 트랜잭션 밖의 [UserProfileService.updateProfile] 몫이다.
         userRepository.flush()
         if (user.nickname != previousNickname) {
-            val storyIds = stories.findPubliclyListedIdsByUserId(userId)
+            // 공개 전환과 경합하면 재색인이 누락될 수 있어 공개 여부로 거르지 않는다(Codex P2).
+            val storyIds = stories.findActiveIdsByUserId(userId)
             storyIds.forEach { events.publishEvent(StoryIndexRequestedEvent(it)) }
             log.info("nickname_reindex_requested userId={} stories={}", userId, storyIds.size)
         }
