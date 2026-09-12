@@ -5,10 +5,18 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.ProfileImagePresetService
+import com.knk.manyak.search.service.StorySearchIndexer
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.*
+import org.springframework.test.context.bean.override.mockito.MockitoBean
+import java.time.Instant
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,6 +43,8 @@ class UserProfileControllerIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var profileImagePresetService: ProfileImagePresetService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @MockitoBean private lateinit var indexer: StorySearchIndexer
 
     @BeforeEach
     fun setUp() {
@@ -211,6 +221,63 @@ class UserProfileControllerIntegrationTests {
             .jsonPath("$.length()").isEqualTo(profileImagePresetService.presetKeys().size)
             .jsonPath("$[0].key").isNotEmpty
             .jsonPath("$[0].imageUrl").isNotEmpty
+    }
+
+    @Test
+    fun `닉네임 변경은 소유한 공개 스토리 두 건만 커밋 후 색인한다`() {
+        val user = saveUser(nickname = "기존작가")
+        val first = storyRepository.save(Story(userId = user.id, title = "공개 하나"))
+        val second = storyRepository.save(Story(userId = user.id, title = "공개 둘"))
+        storyRepository.save(Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
+        storyRepository.save(Story(userId = user.id, title = "초안", status = StoryStatus.DRAFT))
+        storyRepository.save(Story(userId = user.id, title = "삭제", deletedAt = Instant.now()))
+        storyRepository.save(Story(userId = saveUser(nickname = "다른작가").id, title = "다른 회원"))
+        storyRepository.save(Story(title = "게스트"))
+
+        patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
+
+        verify(indexer, timeout(3000)).index(first.id)
+        verify(indexer, timeout(3000)).index(second.id)
+        verify(indexer, after(200).times(2)).index(anyLong())
+        verifyNoMoreInteractions(indexer)
+        assertThat(reload(user).nickname).isEqualTo("새로운작가")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = [
+        "{\"nickname\":\"기존작가\"}",
+        "{\"profileImagePreset\":\"마법사\"}",
+        "{\"nickname\":\"기존작가\",\"profileImagePreset\":\"마법사\"}",
+    ])
+    fun `닉네임이 그대로면 색인을 요청하지 않는다`(body: String) {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, body).expectStatus().isOk
+
+        verify(indexer, after(200).never()).index(anyLong())
+    }
+
+    @Test
+    fun `대소문자만 바꿔도 표시 닉네임이 달라지므로 재색인한다`() {
+        val user = saveUser(nickname = "StoryTeller")
+        val story = storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, """{"nickname":"STORYTELLER"}""").expectStatus().isOk
+
+        verify(indexer, timeout(3000)).index(story.id)
+    }
+
+    @Test
+    fun `프로필 수정이 실패하면 닉네임과 색인을 반영하지 않는다`() {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, """{"nickname":"새로운작가","profileImagePreset":"없는프리셋"}""")
+            .expectStatus().isBadRequest
+
+        assertThat(reload(user).nickname).isEqualTo("기존작가")
+        verify(indexer, after(200).never()).index(anyLong())
     }
 
     private companion object {

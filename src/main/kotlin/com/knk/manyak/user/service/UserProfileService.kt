@@ -14,6 +14,7 @@ import com.knk.manyak.user.dto.ProfilePresetResponse
 import com.knk.manyak.user.dto.UpdateProfileRequest
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -75,6 +76,7 @@ class ProfileUpdater(
     private val profileImagePresetService: ProfileImagePresetService,
     private val meResponseAssembler: MeResponseAssembler,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     @Transactional
     fun update(userId: Long, request: UpdateProfileRequest): MeResponse {
@@ -85,6 +87,7 @@ class ProfileUpdater(
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         requireActiveStatus(user.status)
 
+        val previousNickname = user.nickname
         request.nickname?.let { raw ->
             val nickname = requireValidNickname(raw)
             // 자기 자신은 제외한다. 대소문자만 바꾸는 변경(같은 정규화 키)을 막지 않기 위해서다.
@@ -104,10 +107,10 @@ class ProfileUpdater(
         // 위반을 커밋까지 미루지 않고 여기서 드러낸다(어디서 깨졌는지가 분명해진다). 잡지는 않는다 —
         // 변환은 트랜잭션 밖의 [UserProfileService.updateProfile] 몫이다.
         userRepository.flush()
-        if (request.nickname != null) {
-            stories.findIdsByUserId(userId).forEach {
-                events.publishEvent(StoryIndexRequestedEvent(it))
-            }
+        if (user.nickname != previousNickname) {
+            val storyIds = stories.findPubliclyListedIdsByUserId(userId)
+            storyIds.forEach { events.publishEvent(StoryIndexRequestedEvent(it)) }
+            log.info("nickname_reindex_requested userId={} stories={}", userId, storyIds.size)
         }
         return meResponseAssembler.assemble(user)
     }
