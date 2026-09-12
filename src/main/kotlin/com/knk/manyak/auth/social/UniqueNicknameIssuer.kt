@@ -34,7 +34,7 @@ class UniqueNicknameIssuer(
             candidate = nicknameGenerator.generate()
         }
         // 마지막 후보에 짧은 난수를 붙여 확률적으로 유일하게 만든다. 컬럼 길이(50)를 넘지 않도록 앞을 자른다.
-        val suffix = "#%04d".format(Random.nextInt(SUFFIX_BOUND))
+        val suffix = "%04d".format(Random.nextInt(SUFFIX_BOUND))
         val text = candidate.text.take(RandomNicknameGenerator.MAX_NICKNAME_LENGTH - suffix.length) + suffix
         logger.info("랜덤 닉네임이 계속 충돌해 접미를 붙여 발급합니다. (attempts={})", MAX_ATTEMPTS)
         return candidate.copy(text = text)

@@ -32,6 +32,7 @@ interface UserRepository : JpaRepository<User, Long> {
     /**
      * 정규화 키(KNK-1147)로 닉네임이 이미 쓰이는지 본다. **V75 유니크 인덱스와 같은 식**을 써야 사전 조회와
      * 저장 결과가 어긋나지 않는다(`replace(lower(nickname), ' ', '')` — [com.knk.manyak.user.service.nicknameKeyOf]).
+     * 공백은 KNK-1274부터 입력 단계에서 거부, 식은 호환 유지.
      * 가입 발급이 쓰는 형태로, 제외할 자기 자신이 없다.
      */
     @Query(
@@ -40,7 +41,7 @@ interface UserRepository : JpaRepository<User, Long> {
     )
     fun existsByNicknameKey(@Param("nicknameKey") nicknameKey: String): Boolean
 
-    /** 위와 같되 **자기 자신은 제외**한다(대소문자·공백만 바꾸는 변경을 막지 않기 위해). */
+    /** 위와 같되 **자기 자신은 제외**한다(대소문자만 바꾸는 변경을 막지 않기 위해). */
     @Query(
         value = """
         SELECT EXISTS (

@@ -53,7 +53,7 @@ class NicknameRaceConflictIntegrationTests {
             .uri("/api/v1/users/me")
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"nickname":"먼저 차지당한 닉네임"}""")
+            .body("""{"nickname":"먼저차지당한닉네임"}""")
             .exchange()
             .expectStatus().isEqualTo(HttpStatus.CONFLICT)
             .expectBody()
