@@ -30,13 +30,13 @@ interface UserRepository : JpaRepository<User, Long> {
     fun findByIdForUpdate(@Param("id") id: Long): User?
 
     /**
-     * 정규화 키(KNK-1147)로 닉네임이 이미 쓰이는지 본다. **V75 유니크 인덱스와 같은 식**을 써야 사전 조회와
+     * 정규화 키(KNK-1147)로 닉네임이 이미 쓰이는지 본다. **V82 부분 유니크 인덱스와 같은 식과 미삭제 조건**을 써야 사전 조회와
      * 저장 결과가 어긋나지 않는다(`replace(lower(nickname), ' ', '')` — [com.knk.manyak.user.service.nicknameKeyOf]).
      * 공백은 KNK-1274부터 입력 단계에서 거부, 식은 호환 유지.
      * 가입 발급이 쓰는 형태로, 제외할 자기 자신이 없다.
      */
     @Query(
-        value = "SELECT EXISTS (SELECT 1 FROM users u WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey)",
+        value = "SELECT EXISTS (SELECT 1 FROM users u WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey AND u.deleted_at IS NULL)",
         nativeQuery = true,
     )
     fun existsByNicknameKey(@Param("nicknameKey") nicknameKey: String): Boolean
@@ -46,7 +46,7 @@ interface UserRepository : JpaRepository<User, Long> {
         value = """
         SELECT EXISTS (
             SELECT 1 FROM users u
-            WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey AND u.id <> :selfId
+            WHERE replace(lower(u.nickname), ' ', '') = :nicknameKey AND u.id <> :selfId AND u.deleted_at IS NULL
         )
         """,
         nativeQuery = true,
