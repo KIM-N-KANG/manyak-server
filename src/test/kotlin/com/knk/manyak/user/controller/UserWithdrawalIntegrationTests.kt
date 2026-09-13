@@ -54,6 +54,21 @@ class UserWithdrawalIntegrationTests {
     private fun tokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
 
     @Test
+    fun `두 회원이 연속 탈퇴하면 모두 204이고 같은 익명화 닉네임을 갖는다`() {
+        val users = listOf(saveMember("첫번째회원"), saveMember("두번째회원"))
+        users.forEach { user ->
+            restTestClient.delete().uri("/api/v1/users/me")
+                .header("Authorization", "Bearer ${tokenFor(user)}")
+                .exchange().expectStatus().isNoContent
+        }
+        users.forEach { user ->
+            val withdrawn = userRepository.findById(user.id).orElseThrow()
+            assertEquals(UserStatus.DELETED, withdrawn.status)
+            assertEquals(com.knk.manyak.user.service.UserWithdrawalService.ANONYMIZED_NICKNAME, withdrawn.nickname)
+        }
+    }
+
+    @Test
     fun `탈퇴하면 DELETED 전환과 함께 개인정보가 익명화되고 소셜 연동·refresh가 폐기된다`() {
         val user = saveMember()
         socialAccountRepository.save(

@@ -236,3 +236,16 @@ Content-Type: application/json
 GET {{baseUrl}}/api/v1/auth/me
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+### 예약어 검증(KNK-1281): 탈퇴 익명화 이름 → 400 (공백 포함 버전도 400)
+PATCH {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "nickname": "탈퇴한사용자" }
+
+> {%
+    client.test("탈퇴 익명화 이름은 예약어다", () => {
+        client.assert(response.status === 400, `actual=${response.status}`);
+    });
+%}

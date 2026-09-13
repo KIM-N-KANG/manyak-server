@@ -282,6 +282,25 @@ class UserProfileControllerIntegrationTests {
         verify(indexer, after(200).never()).index(anyLong())
     }
 
+    @Test
+    fun `탈퇴 행이 가진 닉네임은 프로필과 가입 발급에서 재사용할 수 있다`() {
+        userRepository.save(User(nickname = "재사용작가", status = UserStatus.DELETED, deletedAt = Instant.now()))
+        val user = saveUser(nickname = "현재작가")
+        assertThat(userRepository.existsByNicknameKey("재사용작가")).isFalse()
+        val generator = mock(com.knk.manyak.auth.social.NicknameGenerator::class.java)
+        `when`(generator.generate()).thenReturn(com.knk.manyak.auth.social.GeneratedNickname("재사용작가", "작가"))
+        val issuer = com.knk.manyak.auth.social.UniqueNicknameIssuer(generator, userRepository)
+        assertThat(issuer.issue().text).isEqualTo("재사용작가")
+        verify(generator, times(1)).generate()
+        patch(user, """{"nickname":"재사용작가"}""").expectStatus().isOk
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["탈퇴한사용자", "탈퇴한 사용자"])
+    fun `탈퇴 익명화 닉네임은 사용할 수 없다`(nickname: String) {
+        patch(saveUser(), """{"nickname":"$nickname"}""").expectStatus().isBadRequest
+    }
+
     private companion object {
         const val PATH = "/api/v1/users/me"
         const val PRESETS_PATH = "/api/v1/profile-presets"
