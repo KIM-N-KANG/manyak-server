@@ -86,9 +86,18 @@ data class ChatTurnAiRequest(
     @JsonProperty("occurred_main_event_names")
     val occurredMainEventNames: List<String> = emptyList(),
     val endings: List<ChatTurnEnding> = emptyList(),
+    @JsonProperty("image_slots")
+    val imageSlots: List<ChatImageSlot> = emptyList(),
 )
 
-/** 채팅 요청에 싣는 인물-이미지 매핑 한 건(스펙 §5-3-4). 와이어 키는 snake_case다. */
+/** 실시간 이미지 업로드 슬롯. 와이어 키는 snake_case다. */
+data class ChatImageSlot(
+    val key: String,
+    @JsonProperty("upload_url") val uploadUrl: String,
+    @JsonProperty("public_url") val publicUrl: String,
+)
+
+/** 채팅 요청에 싣는 인물-이미지 매핑 한 건(스펙 §5-3-4). */
 data class ChatCharacterImage(
     val name: String,
     // 인물 이미지 여러 장(KNK-1126) — 같은 name의 항목이 여러 개 실리므로 AI가 이름으로 골라야 한다.
@@ -174,6 +183,8 @@ data class ChatTurnAiResult(
     val targetMainEvent: ChatTurnTargetMainEventResult? = null,
     val occurredMainEventName: String? = null,
     val endingName: String? = null,
+    @com.fasterxml.jackson.annotation.JsonSetter(nulls = com.fasterxml.jackson.annotation.Nulls.AS_EMPTY)
+    val characterImages: List<ChatCharacterImageEvent> = emptyList(),
 )
 
 data class ChatTurnTargetMainEventResult(

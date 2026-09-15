@@ -117,6 +117,7 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
+    private val chatRealtimeImageService: ChatRealtimeImageService,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
@@ -138,6 +139,7 @@ class ChatService(
      * **조립이 끝나면 즉시 커밋되고 그 뒤에 AI를 부른다** — 트랜잭션이 AI 호출·스트리밍으로 넘어가지 않는다.
      */
     private val assemblyTransactionTemplate = assemblyTransactionTemplate(transactionManager)
+    private val turnSaveTransactionTemplate = TransactionTemplate(transactionManager)
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
@@ -674,6 +676,7 @@ class ChatService(
             userId = userId,
             deviceId = deviceId,
             isRegenerated = false,
+            realtimeImage = request.realtimeImage,
             persist = { result ->
                 chatTurnPersister.persistTurn(
                     chatId = chat.id,
@@ -756,6 +759,7 @@ class ChatService(
             userId = userId,
             deviceId = deviceId,
             isRegenerated = true,
+            realtimeImage = request.realtimeImage,
             persist = { result ->
                 chatTurnPersister.regenerateLastTurn(
                     chatId = chat.id,
@@ -906,6 +910,7 @@ class ChatService(
         userId: Long?,
         deviceId: String?,
         isRegenerated: Boolean,
+        realtimeImage: Boolean,
         persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
@@ -940,6 +945,15 @@ class ChatService(
         // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
         val refundKey = "refund:chatturn:${UUID.randomUUID()}"
         val refundGate = AtomicBoolean(false)
+        val imageReservation = try {
+            chatRealtimeImageService.reserve(
+                realtimeImage, userId, guestDeviceId, chat.publicId,
+                if (isRegenerated) chat.currentTurn else chat.currentTurn + 1,
+            )
+        } catch (ex: Throwable) {
+            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+            throw ex
+        }
         val persisted = AtomicBoolean(false)
         // supplier(워커 본문)가 실제로 실행됐는지 표식. supplier 첫 줄에서 세운다. CompletableFuture.runAsync는
         // 큐 대기 중 cancel되면(result 선점) AsyncRun이 supplier를 통째로 스킵하므로, 이 값이 false면 워커 finally가
@@ -999,10 +1013,10 @@ class ChatService(
                     meta = { it.meta },
                 ) {
                     chatTurnAiClient.streamTurn(
-                        aiCall.request,
+                        aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
                         aiCall.traceLink,
                         // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
-                        // 검증·변환은 하지 않는다 — 매핑 자체를 백엔드가 보냈으므로 돌아온 URL은 이미 검증된 값이다.
+                        // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                         onCharacterImage = { characterImage ->
                             if (!Thread.currentThread().isInterrupted) {
                                 emitter.send(
@@ -1033,11 +1047,17 @@ class ChatService(
                 // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
                 // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
                 // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
-                val result = recorded.result.copy(choices = emptyList())
-                val persistedTurn = persist(result)
+                // HEAD 검증 결과와 본문 저장은 같은 트랜잭션에서 확정한다.
+                // Redis 복원은 DB 커밋 뒤 수행하며 롤백이면 아래 실패 종료 경로가 복원한다.
+                val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
+                    val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
+                    checked to persist(checked.result)
+                })
+                val result = validated.result
                 // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                 // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                 persisted.set(true)
+                if (!validated.success) chatRealtimeImageService.restore(imageReservation)
                 Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                 // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                 aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
@@ -1105,6 +1125,7 @@ class ChatService(
                 // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
                 recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
+                    chatRealtimeImageService.restore(imageReservation)
                     refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
                 }
             }
@@ -1115,6 +1136,7 @@ class ChatService(
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
             recordChatTurnResult(OUTCOME_FAILURE)
+            chatRealtimeImageService.restore(imageReservation)
             refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
@@ -1141,6 +1163,7 @@ class ChatService(
                 // 워커의 `success` 1건이 함께 남아 합계만 하나 늘 뿐, **저장·과금된 턴이 실패로 굳지 않는다**.
                 // 잠정 판정을 failure로 세고 게이트로 잠그면 그 오분류가 영구히 남는다(그쪽이 더 나쁘다).
                 recordChatTurnResult(OUTCOME_CANCELLED)
+                chatRealtimeImageService.restore(imageReservation)
                 refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
             }
         }

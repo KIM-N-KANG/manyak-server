@@ -97,4 +97,6 @@ data class CreditPolicyResponse(
     val storyCreationCost: Long,
     @Schema(description = "채팅 턴 소모 이프. 재생성도 같은 값. 회원의 무료 체험 잔여를 먼저 소진한 뒤 적용되는 단가이며, 게스트는 이프 대신 디바이스 한도를 쓴다")
     val chatTurnCost: Long,
+    @Schema(description = "실시간 이미지 비용. 무료 체험 소진 후 적용하며 0이면 무료")
+    val chatImageCost: Long,
 )

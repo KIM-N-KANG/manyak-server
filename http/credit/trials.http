@@ -1,0 +1,51 @@
+### 체험 사용량·한도 검증. ./gradlew bootRun과 로컬 Redis가 필요합니다.
+### 위에서부터 실행. 회원은 auth 로그인 검증 파일로 accessToken을 먼저 설정합니다.
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+
+### 0. 헬스 체크·게스트 디바이스 준비
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.global.set("trialDeviceId", "trial-verify-" + Date.now());
+%}
+
+### 1. 게스트 체험은 채팅·이미지 각각 5회
+GET {{baseUrl}}/api/v1/users/me/trials
+X-Manyak-Device-Id: {{trialDeviceId}}
+
+> {%
+    client.test("게스트 체험 네 종류", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const b = response.body;
+        ["chatTurn", "chatImage", "storyCreation", "storylineGeneration"].forEach(key => {
+            client.assert(b[key].used === 0, `${key}: actual=${JSON.stringify(b[key])}`);
+            client.assert(!("remaining" in b[key]), `${key}에 remaining이 있음`);
+        });
+        client.assert(b.chatTurn.limit === 5 && b.chatImage.limit === 5, JSON.stringify(b));
+        client.assert(b.storyCreation.limit === 1 && b.storylineGeneration.limit === 5, JSON.stringify(b));
+    });
+%}
+
+### 2. 게스트 헤더 누락 → 400
+GET {{baseUrl}}/api/v1/users/me/trials
+
+> {%
+    client.test("게스트 헤더 필수", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 3. 회원은 디바이스 헤더 없이 조회하며 스토리라인은 무제한
+GET {{baseUrl}}/api/v1/users/me/trials
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("회원 스토리라인 무제한", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const trial = response.body.storylineGeneration;
+        client.assert(trial.used === 0 && trial.limit === null, JSON.stringify(trial));
+    });
+%}
+
+### 4. 자유 조회: 기존 디바이스 ID로 바꿔 사용량 확인
+GET {{baseUrl}}/api/v1/users/me/trials
+X-Manyak-Device-Id: {{trialDeviceId}}

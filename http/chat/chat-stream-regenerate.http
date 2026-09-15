@@ -1,3 +1,6 @@
+### [KNK-1291] realtimeImage는 생략 시 true. false면 이미지 체험을 예약하지 않습니다.
+### 실시간 이미지 검증에는 KNK-1293 S3 권한·KNK-1294 AI 허용 호스트가 필요합니다.
+### 이미지 무료 체험은 채팅과 별개 5회. 소진 후 회원 0원 정책만 슬롯 발급하며 유료는 KNK-1292까지 생략합니다.
 ### AI 응답 재생성 스트리밍(Regenerate, SSE) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ### 위에서부터 순서대로 실행하면 스토리·채팅·첫 턴을 만든 뒤, 그 마지막 턴을 재생성해 본문이 교체되는지 확인합니다.
@@ -139,7 +142,8 @@ Content-Type: application/json
 Accept: text/event-stream, application/json
 
 {
-  "turnId": {{lastTurnId}}
+  "turnId": {{lastTurnId}},
+  "realtimeImage": true
 }
 
 > {%
@@ -263,3 +267,16 @@ Accept: text/event-stream, application/json
 {
   "turnId": 1
 }
+
+### 실시간 이미지 끄고 재생성 (위 준비 흐름의 chatId·lastTurnId 사용)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"turnId": {{lastTurnId}}, "realtimeImage": false}
+
+### 이미지 체험 사용량 자유 조회 (턴 전후 chatImage.used 비교)
+GET {{baseUrl}}/api/v1/users/me/trials
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json

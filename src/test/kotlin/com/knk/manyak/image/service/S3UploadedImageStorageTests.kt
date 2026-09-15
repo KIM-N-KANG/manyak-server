@@ -18,6 +18,25 @@ import software.amazon.awssdk.services.s3.model.S3Exception
 class S3UploadedImageStorageTests {
 
     @Test
+    fun `실시간 슬롯은 WebP와 10분을 서명하고 길이는 고정하지 않는다`() {
+        val signer = software.amazon.awssdk.services.s3.presigner.S3Presigner.builder()
+            .region(software.amazon.awssdk.regions.Region.US_EAST_1)
+            .credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.create(
+                software.amazon.awssdk.auth.credentials.AwsBasicCredentials.create("test-access", "test-secret"),
+            )).build()
+        signer.use {
+            val storage = object : S3UploadedImageStorage("assets", "us-east-1", "", "https://cdn.test/") {
+                override val presigner = signer
+            }
+            val url = storage.presignRealtimeImage("chat-images/chat/1-test.webp", java.time.Duration.ofMinutes(10))!!
+            val decoded = java.net.URLDecoder.decode(url, java.nio.charset.StandardCharsets.UTF_8)
+            assertThat(decoded).contains("X-Amz-Expires=600").contains("content-type").doesNotContain("content-length")
+            assertThat(storage.serveUrlOf("chat-images/chat/1-test.webp"))
+                .isEqualTo("https://cdn.test/chat-images/chat/1-test.webp")
+        }
+    }
+
+    @Test
     fun `없는 객체의 404는 없음으로 본다`() {
         val storage = storage(s3Error(404))
 

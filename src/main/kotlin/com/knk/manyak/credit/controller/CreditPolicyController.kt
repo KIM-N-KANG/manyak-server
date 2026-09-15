@@ -53,7 +53,7 @@ class CreditPolicyController(
     )
     @GetMapping("/api/v1/credits/policies")
     fun getCreditPolicies(): CreditPolicyResponse {
-        // 6종을 하나씩 읽으면 그 사이 갱신에 옛 값과 새 값이 섞이므로 한 스냅샷에서 모두 꺼낸다.
+        // 7종을 하나씩 읽으면 그 사이 갱신에 옛 값과 새 값이 섞이므로 한 스냅샷에서 모두 꺼낸다.
         val amounts = creditPolicyService.effectiveAmounts()
         return CreditPolicyResponse(
             signupReward = amounts.getValue(CreditPolicyKey.SIGNUP_REWARD),
@@ -62,6 +62,7 @@ class CreditPolicyController(
             attendanceReward = amounts.getValue(CreditPolicyKey.ATTENDANCE_REWARD),
             storyCreationCost = amounts.getValue(CreditPolicyKey.STORY_CREATION_COST),
             chatTurnCost = amounts.getValue(CreditPolicyKey.CHAT_TURN_COST),
+            chatImageCost = amounts.getValue(CreditPolicyKey.CHAT_IMAGE_COST),
         )
     }
 }

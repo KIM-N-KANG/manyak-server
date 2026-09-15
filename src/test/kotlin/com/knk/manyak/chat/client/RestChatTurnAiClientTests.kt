@@ -40,6 +40,13 @@ class RestChatTurnAiClientTests {
     }
 
     @Test
+    fun `ping은 무시하고 completed 이미지 목록을 읽는다`() {
+        server.enqueue(sseResponse("event: ping\ndata: {}\n\nevent: completed\ndata: {\"aiOutput\":\"본문\",\"characterImages\":[{\"name\":\"인물\",\"imageUrl\":\"https://cdn.test/chat-images/a.webp\"}]}\n\n"))
+        val result = client().streamTurn(sampleRequest(), onToken = {})
+        assertEquals(1, result.characterImages.size)
+    }
+
+    @Test
     fun `token을 1대1로 중계하고 completed를 결과로 매핑한다`() {
         server.enqueue(sseResponse(
             """

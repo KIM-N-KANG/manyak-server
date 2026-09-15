@@ -30,6 +30,9 @@ interface UploadedImageStorage {
     /** 서명된 PUT URL. `Content-Type`·`Content-Length`를 서명에 고정하므로 클라이언트는 요청한 값 그대로 보내야 한다. */
     fun presignPut(objectKey: String, contentType: String, contentLength: Long, expiresIn: Duration): String?
 
+    /** AI 생성물은 발급 시 크기를 알 수 없어 Content-Type만 서명한다. */
+    fun presignRealtimeImage(objectKey: String, expiresIn: Duration): String? = null
+
     /** 객체 메타데이터. 객체가 없으면 null이다. 저장소 미구성이면 null이라 호출부가 [isEnabled]로 먼저 가른다. */
     fun head(objectKey: String): UploadedObject?
 
@@ -57,7 +60,7 @@ class S3UploadedImageStorage(
 
     private val configured: Boolean get() = bucket.isNotBlank() && baseUrl.isNotBlank()
 
-    private val presigner: S3Presigner? by lazy {
+    protected open val presigner: S3Presigner? by lazy {
         if (!configured) {
             null
         } else {
@@ -101,13 +104,20 @@ class S3UploadedImageStorage(
     override fun isEnabled(): Boolean = configured
 
     override fun presignPut(objectKey: String, contentType: String, contentLength: Long, expiresIn: Duration): String? {
+        return presign(objectKey, contentType, contentLength, expiresIn)
+    }
+
+    override fun presignRealtimeImage(objectKey: String, expiresIn: Duration): String? =
+        presign(objectKey, "image/webp", null, expiresIn)
+
+    private fun presign(objectKey: String, contentType: String, contentLength: Long?, expiresIn: Duration): String? {
         val signer = presigner ?: return null
         val put = PutObjectRequest.builder()
             .bucket(bucket)
             .key(objectKey)
             // 서명에 고정한다 — 클라이언트가 다른 형식·크기로 바꿔 올릴 수 없다.
             .contentType(contentType)
-            .contentLength(contentLength)
+            .apply { if (contentLength != null) contentLength(contentLength) }
             .build()
         return signer.presignPutObject(
             PutObjectPresignRequest.builder().signatureDuration(expiresIn).putObjectRequest(put).build(),

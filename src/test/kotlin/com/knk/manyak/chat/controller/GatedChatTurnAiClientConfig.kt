@@ -22,6 +22,16 @@ import java.util.concurrent.TimeUnit
  */
 @TestConfiguration
 class GatedChatTurnAiClientConfig {
+    @Bean
+    @Primary
+    fun realtimeImageStorage(): com.knk.manyak.image.service.UploadedImageStorage = object : com.knk.manyak.image.service.UploadedImageStorage {
+        override fun isEnabled() = realtimeEnabled
+        override fun serveUrlOf(objectKey: String) = "https://cdn.test/$objectKey"
+        override fun presignPut(objectKey: String, contentType: String, contentLength: Long, expiresIn: java.time.Duration): String? = null
+        override fun presignRealtimeImage(objectKey: String, expiresIn: java.time.Duration) = "https://s3.test/$objectKey"
+        override fun head(objectKey: String) = if (realtimeExists) com.knk.manyak.image.service.UploadedObject("image/webp", 10) else null
+    }
+
 
     @Bean
     @Primary
@@ -50,6 +60,10 @@ class GatedChatTurnAiClientConfig {
                 nextCharacterImage?.let(onCharacterImage)
             }
             onToken("된 본문입니다.")
+            if (realtimeEnabled) {
+                val url = request.imageSlots.firstOrNull()?.publicUrl ?: "https://cdn.test/characters/parent.webp"
+                return ChatTurnAiResult("[[$url]]\n본문", emptyList(), characterImages = listOf(ChatCharacterImageEvent("인물", url)))
+            }
             return ChatTurnAiResult(aiOutput = "생성된 본문입니다. ${request.userInput.take(8)}", choices = emptyList())
         }
 
@@ -64,6 +78,9 @@ class GatedChatTurnAiClientConfig {
     }
 
     companion object {
+        @Volatile var realtimeEnabled = false
+        @Volatile var realtimeExists = false
+
         const val AWAIT_SECONDS = 20L
 
         /** 이 입력의 턴 호출만 [gate]에서 붙잡는다. null이면 아무것도 붙잡지 않는다. */
@@ -107,6 +124,8 @@ class GatedChatTurnAiClientConfig {
             nextChoices = emptyList()
             lastRequest = null
             nextCharacterImage = null
+            realtimeEnabled = false
+            realtimeExists = false
             interruptBeforeCharacterImage = false
             gate = CountDownLatch(1)
             entered = CountDownLatch(1)

@@ -188,6 +188,8 @@ manyak:
     attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
     story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:250}
     chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
+    # dev 실측은 0. 운영 유료 차감은 KNK-1292에서 연결한다.
+    chat-image-cost: ${MANYAK_CREDIT_CHAT_IMAGE_COST:0}
     policy-refresh:
       # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이
       # 반영되기까지의 최대 지연"이다. effective_until 만료는 읽는 시점 판정이라 이 주기와 무관하게 즉시 반영된다.
@@ -203,10 +205,11 @@ manyak:
       # 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제).
       charge-age-threshold: ${MANYAK_CREDIT_RECONCILIATION_CHARGE_AGE_THRESHOLD:PT15M}
   guest-trial:
-    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정 → KNK-480 축소). 디바이스 ID별 Redis 카운터 3종, TTL 없음(Phase 1).
+    # 게스트 체험 한도(스펙 §4-3-7, KNK-477 확정 → KNK-480 축소). 디바이스 ID별 Redis 카운터 4종, TTL 없음(Phase 1).
     storyline-generation-limit: ${MANYAK_GUEST_TRIAL_STORYLINE_LIMIT:5}
     story-creation-limit: ${MANYAK_GUEST_TRIAL_STORY_CREATION_LIMIT:1}
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
+    chat-image-limit: 5
   push:
     web:
       icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
