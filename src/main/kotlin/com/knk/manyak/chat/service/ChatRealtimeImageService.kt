@@ -59,8 +59,8 @@ class ChatRealtimeImageService(
 
     /** DB 저장 트랜잭션 안에서 호출한다. 발급한 정확한 URL만 HEAD하며 임의 URL은 요청하지 않는다. */
     fun validate(reservation: Reservation, result: ChatTurnAiResult): Validated {
-        val urls = markers.findAll(result.aiOutput).map { it.groupValues[1] }.toList() +
-            result.characterImages.map { it.imageUrl }
+        // 저장 정본은 본문 마커다. 목록에만 있는 이미지는 기록에 남지 않으므로 성공이 아니다.
+        val urls = markers.findAll(result.aiOutput).map { it.groupValues[1] }.toList()
         val slot = reservation.slot
         val accepted = slot != null && slot.publicUrl in urls && try {
             storage.head(slot.key) != null

@@ -72,6 +72,25 @@ class ChatRealtimeImageServiceTest {
         assertTrue(success.result.aiOutput.contains("[[$url]]"))
         assertFalse(success.result.aiOutput.contains(wrong))
     }
+    @Test fun `목록에만 있는 발급 URL은 실패이고 목록에서 제거한다`() {
+        configureStorage()
+        val reservation = service.reserve(true, 1L, null, chat, 1)
+        `when`(storage.head(anyString())).thenReturn(UploadedObject("image/webp", 10))
+        val checked = service.validate(reservation, ChatTurnAiResult("본문", emptyList(),
+            characterImages = listOf(ChatCharacterImageEvent("인물", reservation.slot!!.publicUrl))))
+        assertFalse(checked.success)
+        assertTrue(checked.result.characterImages.isEmpty())
+        verify(storage, never()).head(anyString())
+    }
+    @Test fun `마커에만 있는 발급 URL은 HEAD 성공이면 성공이다`() {
+        configureStorage()
+        val reservation = service.reserve(true, 1L, null, chat, 1)
+        `when`(storage.head(anyString())).thenReturn(UploadedObject("image/webp", 10))
+        val output = "[[${reservation.slot!!.publicUrl}]]본문"
+        val checked = service.validate(reservation, ChatTurnAiResult(output, emptyList()))
+        assertTrue(checked.success)
+        assertEquals(output, checked.result.aiOutput)
+    }
     @Test fun `저장소 오류는 이미지를 탈락시킨다`() {
         configureStorage()
         val reservation = service.reserve(true, 1L, null, chat, 1)

@@ -29,7 +29,10 @@ class GatedChatTurnAiClientConfig {
         override fun serveUrlOf(objectKey: String) = "https://cdn.test/$objectKey"
         override fun presignPut(objectKey: String, contentType: String, contentLength: Long, expiresIn: java.time.Duration): String? = null
         override fun presignRealtimeImage(objectKey: String, expiresIn: java.time.Duration) = "https://s3.test/$objectKey"
-        override fun head(objectKey: String) = if (realtimeExists) com.knk.manyak.image.service.UploadedObject("image/webp", 10) else null
+        override fun head(objectKey: String): com.knk.manyak.image.service.UploadedObject? {
+            onRealtimeHead()
+            return if (realtimeExists) com.knk.manyak.image.service.UploadedObject("image/webp", 10) else null
+        }
     }
 
 
@@ -48,6 +51,7 @@ class GatedChatTurnAiClientConfig {
                 // 무한 대기 금지 — 검증 대상이 깨져도 테스트가 매달리지 않고 실패로 끝나야 한다.
                 gate.await(AWAIT_SECONDS, TimeUnit.SECONDS)
             }
+            turnFailure?.let { throw it }
             onToken("생성 ")
             // 인물 이미지 이벤트는 본문 토큰 사이에 끼어든다(스펙 §4-3-3의 이벤트 순서).
             if (interruptBeforeCharacterImage) {
@@ -78,6 +82,8 @@ class GatedChatTurnAiClientConfig {
     }
 
     companion object {
+        @Volatile var onRealtimeHead: () -> Unit = {}
+        @Volatile var turnFailure: RuntimeException? = null
         @Volatile var realtimeEnabled = false
         @Volatile var realtimeExists = false
 
@@ -124,6 +130,8 @@ class GatedChatTurnAiClientConfig {
             nextChoices = emptyList()
             lastRequest = null
             nextCharacterImage = null
+            onRealtimeHead = {}
+            turnFailure = null
             realtimeEnabled = false
             realtimeExists = false
             interruptBeforeCharacterImage = false

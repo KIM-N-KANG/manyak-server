@@ -1,3 +1,4 @@
+### 이미지 한도는 MANYAK_GUEST_TRIAL_CHAT_IMAGE_LIMIT로 조정 가능(아래 검증은 기본값 5 기준).
 ### 체험 사용량·한도 검증. ./gradlew bootRun과 로컬 Redis가 필요합니다.
 ### 위에서부터 실행. 회원은 auth 로그인 검증 파일로 accessToken을 먼저 설정합니다.
 @baseUrl = http://localhost:8080
