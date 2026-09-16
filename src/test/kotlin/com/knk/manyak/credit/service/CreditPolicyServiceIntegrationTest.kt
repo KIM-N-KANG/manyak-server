@@ -47,6 +47,7 @@ class CreditPolicyServiceIntegrationTest {
                     CreditPolicyKey.ATTENDANCE_REWARD to 250L,
                     CreditPolicyKey.STORY_CREATION_COST to 250L,
                     CreditPolicyKey.CHAT_TURN_COST to 20L,
+                    CreditPolicyKey.CHAT_IMAGE_COST to 0L,
                 ),
             )
     }

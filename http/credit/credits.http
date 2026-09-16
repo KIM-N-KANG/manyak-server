@@ -90,6 +90,7 @@ Accept: application/json
 ### ------------------------------------------------------------------
 ### [KNK-1044] 크레딧 이용내역 조회 — GET /api/v1/users/me/credits/transactions
 ###   - 최신순(created_at DESC, id DESC) 커서 페이지: 응답은 {items, nextCursor} 객체다(평평한 배열이 아니다).
+###   - CHAT_IMAGE는 SPEND, 이미지 REFUND는 EARN이며 둘 다 채팅의 스토리 제목을 표시합니다.
 ###   - type: ALL(기본)·SPEND·EARN·EXPIRE. REFUND·PURCHASE 는 EARN, PURCHASE_REVERSAL 은 EXPIRE.
 ###   - limit: 1~100 으로 보정(기본 50). cursor: 이전 응답의 nextCursor 를 그대로 전달.
 ###   - nextCursor 는 실제로 다음 페이지가 있을 때만 채워진다(limit+1 판정). 총 건수가 limit 의 배수여도 빈 페이지를 더 부르지 않는다.
@@ -214,8 +215,8 @@ Accept: application/json
     client.test("인증 없이도 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
-    client.test("수치 6종이 모두 숫자다", () => {
-        const keys = ["signupReward", "inviteReward", "inviteMonthlyCap", "attendanceReward", "storyCreationCost", "chatTurnCost"];
+    client.test("수치 7종이 모두 숫자다", () => {
+        const keys = ["signupReward", "inviteReward", "inviteMonthlyCap", "attendanceReward", "storyCreationCost", "chatTurnCost", "chatImageCost"];
         keys.forEach((k) => client.assert(typeof response.body[k] === "number", `${k} 가 숫자가 아닙니다. actual=${response.body[k]}`));
     });
     client.log("현재 출석 보상: " + response.body.attendanceReward);
@@ -273,3 +274,20 @@ Accept: application/json
 ### 쓰이지만, **조용히 넘어가지 않고 서버 warn 로그로 드러납니다** — 오버라이드를 넣은 뒤 값이 안 바뀌면
 ### `credit_policy_override_unknown_key`(유효한 키 목록이 함께 찍힙니다) · `credit_policy_override_rejected` 를 찾아보세요.
 ### ---------------------------------------------------------------------------
+
+### [KNK-1292] 유료 이미지 소모·환불 검증
+# 준비: 회원의 chat_turn·chat_image 체험을 소진하고 chat_image_cost를 양수로 설정합니다.
+# chat-stream.http에서 realtimeImage=true로 턴 진행 후 아래 조회를 실행합니다.
+# 성공: 같은 스토리 제목의 SPEND가 턴 비용·이미지 비용 두 행. 이미지 실패: 이미지 금액의 EARN(REFUND) 한 행 추가.
+# 본문 실패: 두 금액의 EARN이 각각 한 행. 비용 0인 이미지에는 소모·환불 행이 없어야 합니다.
+# 합계 잔액 부족: 턴 스트림 시작 전 402, 소모 행 없음. /users/me/trials로 예약 복원도 확인합니다.
+GET {{baseUrl}}/api/v1/users/me/credits/transactions?type=ALL
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("이미지 이용내역도 기존 형식으로 조회된다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        response.body.items.forEach(it => client.assert(["SPEND", "EARN", "EXPIRE"].includes(it.type), JSON.stringify(it)));
+    });
+%}

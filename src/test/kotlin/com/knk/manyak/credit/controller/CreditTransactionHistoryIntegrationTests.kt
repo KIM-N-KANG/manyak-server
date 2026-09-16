@@ -126,6 +126,19 @@ class CreditTransactionHistoryIntegrationTests {
             .returnResult().responseBody!!
 
     @Test
+    fun `이미지 소모와 환불은 채팅 제목을 조회하며 소모는 SPEND다`() {
+        val user = saveUser()
+        val story = story(user.id, "이미지 스토리")
+        val chat = chat(user.id, story.id)
+        tx(user.id, -30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chat.id)
+        tx(user.id, 30, CreditReason.REFUND, "CHAT_IMAGE", chat.id)
+        val rows = get(user).items
+        assertThat(rows.map { it.title }).containsOnly("이미지 스토리")
+        assertThat(rows.map { it.type.name }).containsExactlyInAnyOrder("SPEND", "EARN")
+        assertThat(get(user, "?type=SPEND").items).hasSize(1)
+    }
+
+    @Test
     fun `토큰 없이 이용내역을 조회하면 401이다`() {
         restTestClient.get().uri("/api/v1/users/me/credits/transactions")
             .exchange().expectStatus().isUnauthorized

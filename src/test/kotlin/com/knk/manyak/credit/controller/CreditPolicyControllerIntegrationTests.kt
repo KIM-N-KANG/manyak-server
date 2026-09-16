@@ -52,6 +52,7 @@ class CreditPolicyControllerIntegrationTests {
             .jsonPath("$.attendanceReward").isEqualTo(250)
             .jsonPath("$.storyCreationCost").isEqualTo(250)
             .jsonPath("$.chatTurnCost").isEqualTo(20)
+            .jsonPath("$.chatImageCost").isEqualTo(0)
     }
 
     @Test
@@ -59,6 +60,7 @@ class CreditPolicyControllerIntegrationTests {
         creditPolicyRepository.save(
             CreditPolicy(policyKey = CreditPolicyKey.ATTENDANCE_REWARD.storageKey, amount = 700),
         )
+        creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_IMAGE_COST.storageKey, amount = 30))
         creditPolicyService.refresh()
 
         restTestClient.get()
@@ -67,6 +69,7 @@ class CreditPolicyControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.attendanceReward").isEqualTo(700)
+            .jsonPath("$.chatImageCost").isEqualTo(30)
     }
 
     @Test

@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
 
 /**
- * 게스트 체험 한도(스펙 §4-3-7, KNK-477): 회원 크레딧과 별개로 디바이스 ID별 Redis 카운터 3종을 관리한다.
+ * 게스트 체험 한도(스펙 §4-3-7, KNK-477): 회원 크레딧과 별개로 디바이스 ID별 Redis 카운터 4종을 관리한다.
  *
  * AI 호출·스트림 시작 **전에** [reserve]로 1회 예약하고(한도 소진이면 예약 없이 false → 호출부가 402로 변환),
  * 실패·미완료 트리거를 만나면 [restore]로 되돌린다(크레딧 환불과 대응되는 카운터 복원).
@@ -32,6 +32,8 @@ class GuestTrialLimitService(
     private val storyCreationLimit: Long,
     @param:Value("\${manyak.guest-trial.chat-turn-limit:5}")
     private val chatTurnLimit: Long,
+    @param:Value("\${manyak.guest-trial.chat-image-limit:5}")
+    private val chatImageLimit: Long = 5,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -40,6 +42,7 @@ class GuestTrialLimitService(
         STORYLINE_GENERATION("storyline_generation"),
         STORY_CREATION("story_creation"),
         CHAT_TURN("chat_turn"),
+        CHAT_IMAGE("chat_image"),
     }
 
     /**
@@ -151,10 +154,22 @@ class GuestTrialLimitService(
         return validDeviceId
     }
 
+    fun usage(userId: Long?, deviceId: String?, counter: Counter): com.knk.manyak.credit.dto.TrialUsage {
+        if (userId != null && counter == Counter.STORYLINE_GENERATION) {
+            return com.knk.manyak.credit.dto.TrialUsage(0, null)
+        }
+        val key = if (userId != null) memberKeyFor(userId, counter)
+            else keyFor(requireDeviceId(deviceId), counter)
+        // 조회 실패를 0으로 위장하면 이미 소진한 체험을 화면에 다시 제공하므로 오류를 전파한다.
+        val used = redisTemplate.opsForValue().get(key)?.toLong() ?: 0L
+        return com.knk.manyak.credit.dto.TrialUsage(used, limitFor(counter))
+    }
+
     private fun limitFor(counter: Counter): Long = when (counter) {
         Counter.STORYLINE_GENERATION -> storylineGenerationLimit
         Counter.STORY_CREATION -> storyCreationLimit
         Counter.CHAT_TURN -> chatTurnLimit
+        Counter.CHAT_IMAGE -> chatImageLimit
     }
 
     private fun keyFor(deviceId: String, counter: Counter): String =
@@ -166,7 +181,7 @@ class GuestTrialLimitService(
 
     private companion object {
         // 회원이 크레딧 대신 소비하는 체험 카운터. 스토리라인 생성은 회원 무료라 제외한다.
-        val MEMBER_SHARED_COUNTERS = listOf(Counter.STORY_CREATION, Counter.CHAT_TURN)
+        val MEMBER_SHARED_COUNTERS = listOf(Counter.STORY_CREATION, Counter.CHAT_TURN, Counter.CHAT_IMAGE)
 
         // 한도 미만이면 INCR 후 1(예약 성공), 이상이면 그대로 0(예약 거절). ARGV[1]=한도.
         val RESERVE_SCRIPT = DefaultRedisScript<Long>().apply {

@@ -41,6 +41,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatCharacterImageIntegrationTests {
 
+    @Autowired private lateinit var trials: com.knk.manyak.credit.service.GuestTrialLimitService
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
@@ -212,6 +213,36 @@ class ChatCharacterImageIntegrationTests {
 
         assertThat(body).doesNotContain("character_image")
         assertThat(body).contains("event:completed")
+    }
+
+    @Test
+    fun `실시간 이미지 검증 탈락은 저장 마커를 제거하고 이미지 체험만 복원한다`() {
+        GatedChatTurnAiClientConfig.realtimeEnabled = true
+        val chat = storyChatRepository.save(StoryChat(storyId = seedStory().id))
+        val body = stream(chat, "살펴본다")
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.imageSlots).hasSize(1)
+        assertThat(body).contains("event:completed").doesNotContain("[[https://cdn.test/chat-images/")
+        val saved = storyMessageRepository.findAll().filter { it.chatId == chat.id && it.role == MessageRole.ASSISTANT }.single()
+        assertThat(saved.content).isEqualTo("\n본문")
+        assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_IMAGE).used).isZero()
+        assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
+    }
+
+    @Test
+    fun `실시간 이미지 성공은 마커를 저장하고 재생성은 새 슬롯을 쓴다`() {
+        GatedChatTurnAiClientConfig.realtimeEnabled = true
+        GatedChatTurnAiClientConfig.realtimeExists = true
+        val chat = storyChatRepository.save(StoryChat(storyId = seedStory().id))
+        assertThat(stream(chat, "살펴본다")).contains("[[https://cdn.test/chat-images/")
+        val first = GatedChatTurnAiClientConfig.lastRequest!!.imageSlots.single()
+        val turn = storyMessageRepository.findAll().single { it.chatId == chat.id && it.role == MessageRole.ASSISTANT }
+        restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/regenerate/stream")
+            .header("X-Manyak-Device-Id", "test-device").contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.TEXT_EVENT_STREAM).body("""{"turnId":${turn.id}}""")
+            .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult()
+        val second = GatedChatTurnAiClientConfig.lastRequest!!.imageSlots.single()
+        assertThat(second.key).isNotEqualTo(first.key).startsWith("chat-images/${chat.publicId}/1-")
+        assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_IMAGE).used).isEqualTo(2)
     }
 
     private fun seedStory(): Story = storyRepository.save(Story(title = "인물 이미지 스토리", genre = "판타지"))

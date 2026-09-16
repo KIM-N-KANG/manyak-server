@@ -60,6 +60,8 @@ class RequestCorrelationFilter(
         // 헤더가 없는 게 정상이고, 경고를 찍으면 로그의 대부분을 노이즈로 채운다(실측 92%).
         // MDC unknown 적재와 request_id 발급은 경로와 무관하게 그대로 동작한다.
         if (!request.requestURI.startsWith("/api/")) return
+        // 향후 Google Play RTDN 등 외부 콜백도 같은 웹훅 prefix를 사용한다.
+        if (request.requestURI.startsWith("/api/v1/webhooks/")) return
 
         val missing = buildList {
             if (rawDeviceId == null) add(HEADER_DEVICE_ID)

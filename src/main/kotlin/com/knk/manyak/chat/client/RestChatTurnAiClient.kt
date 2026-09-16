@@ -88,8 +88,10 @@ class RestChatTurnAiClient(
                                     ?.let { ChatTurnTargetMainEventResult(it.name, it.progressTurns) },
                                 occurredMainEventName = data.occurredMainEventName,
                                 endingName = data.endingName,
+                                characterImages = data.characterImages.orEmpty().map { ChatCharacterImageEvent(it.name, it.imageUrl) },
                             )
                         }
+                        "ping" -> Unit // AI 이미지·판정 대기 heartbeat. 본문/저장에는 포함하지 않는다.
                         EVENT_ERROR -> {
                             val data = read(event.data(), ErrorData::class.java)
                             throw ChatTurnAiException(code = data.code, message = data.message)
@@ -156,6 +158,7 @@ class RestChatTurnAiClient(
     @JsonIgnoreProperties(ignoreUnknown = true)
     private data class CompletedData(
         val aiOutput: String,
+        val characterImages: List<CharacterImageData>? = null,
         val choices: List<String>? = null,
         val meta: ChatCompletedMeta? = null,
         // AI 판정 결과. 와이어 키는 camelCase(targetMainEvent{name, progressTurns}·occurredMainEventName·endingName)다.

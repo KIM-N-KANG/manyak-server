@@ -114,6 +114,32 @@ class CreditReconciliationIntegrationTests {
         transactionRepository.countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND)
 
     @Test
+    fun `이미지 차감과 환불은 턴 대사 건수에 섞이지 않는다`() {
+        val user = saveUser()
+        giveBalance(user, 100)
+        val chat = seedChat(user, currentTurn = 0)
+        chargeChat(user, chat)
+        creditWalletService.deduct(user, 30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chat)
+        creditWalletService.reward(user, 30, CreditReason.REFUND, "image-refund", "CHAT_IMAGE", chat)
+        serviceAsOf(future).reconcile()
+        serviceAsOf(future).reconcile()
+        assertThat(refundCount(user, "CHAT", chat)).isEqualTo(1)
+        assertThat(refundCount(user, "CHAT_IMAGE", chat)).isEqualTo(1)
+        assertThat(creditWalletService.balanceOf(user)).isEqualTo(100)
+    }
+
+    @Test
+    fun `이미지 차감만 있으면 대사 배치가 자동 환불하지 않는다`() {
+        val user = saveUser()
+        giveBalance(user, 100)
+        val chat = seedChat(user, currentTurn = 0)
+        creditWalletService.deduct(user, 30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chat)
+        serviceAsOf(future).reconcile()
+        assertThat(refundCount(user, "CHAT_IMAGE", chat)).isZero()
+        assertThat(creditWalletService.balanceOf(user)).isEqualTo(70)
+    }
+
+    @Test
     fun `혼합 단가 그룹에 환불을 발행하면 경고를 남긴다`() {
         // KNK-1056: 정책 오버라이드가 채팅 수명 도중 바뀌면 그룹 안에 서로 다른 차감액이 섞인다.
         // 환불은 최소액으로 나가 회원이 차액만큼 미보상되므로, 그 사실이 조용히 지나가면 안 된다.

@@ -44,7 +44,7 @@ enum class CreditTransactionType {
          * REFUND는 획득이다 — 생성·턴 실패 시 자동 환불이라 사용자 눈엔 크레딧이 되돌아온 사건이다(2026-08-30 결정).
          */
         fun of(reason: CreditReason): CreditTransactionType = when (reason) {
-            CreditReason.STORY_CREATION, CreditReason.CHAT_TURN -> SPEND
+            CreditReason.STORY_CREATION, CreditReason.CHAT_TURN, CreditReason.CHAT_IMAGE -> SPEND
             CreditReason.SIGNUP_REWARD,
             CreditReason.ATTENDANCE_REWARD,
             CreditReason.INVITE_REWARD,
@@ -97,4 +97,6 @@ data class CreditPolicyResponse(
     val storyCreationCost: Long,
     @Schema(description = "채팅 턴 소모 이프. 재생성도 같은 값. 회원의 무료 체험 잔여를 먼저 소진한 뒤 적용되는 단가이며, 게스트는 이프 대신 디바이스 한도를 쓴다")
     val chatTurnCost: Long,
+    @Schema(description = "실시간 이미지 비용. 무료 체험 소진 후 적용하며 0이면 무료")
+    val chatImageCost: Long,
 )

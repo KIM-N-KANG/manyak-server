@@ -11,6 +11,16 @@ class ChatTurnAiClientSerializationTests {
     private val objectMapper = JsonMapper.builder().build()
 
     @Test
+    fun `슬롯은 snake case로 보내고 호환 플래그는 보내지 않는다`() {
+        val json = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest().copy(
+            imageSlots = listOf(ChatImageSlot("chat-images/id/1-test.webp", "https://s3.test/signed", "https://cdn.test/chat-images/id/1-test.webp")),
+        )))
+        assertEquals("https://s3.test/signed", json["image_slots"][0]["upload_url"].asText())
+        assertTrue(json["image_slots"][0].has("public_url"))
+        assertFalse(json.has("generate_child_image"))
+    }
+
+    @Test
     fun `채팅 턴 요청은 snake case 필드명으로 직렬화한다`() {
         val json = objectMapper.writeValueAsString(sampleRequest())
 
