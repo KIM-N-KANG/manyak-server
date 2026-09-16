@@ -52,6 +52,7 @@ class CreditPolicyControllerIntegrationTests {
             .jsonPath("$.attendanceReward").isEqualTo(250)
             .jsonPath("$.storyCreationCost").isEqualTo(250)
             .jsonPath("$.chatTurnCost").isEqualTo(20)
+            .jsonPath("$.chatImageCost").isEqualTo(0)
     }
 
     @Test

@@ -68,6 +68,19 @@ class CreditPolicyServiceTest {
     private fun changedLogs() = appender.list.filter { "credit_policy_changed" in it.formattedMessage }
 
     @Test
+    fun `이미지 정책은 0 오버라이드를 허용하고 음수는 거부한다`() {
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_image_cost", amount = 0)))
+        val service = loadedService()
+        assertThat(service.amountOf(CreditPolicyKey.CHAT_IMAGE_COST)).isZero()
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_image_cost", amount = 50)))
+        service.refresh()
+        assertThat(service.amountOf(CreditPolicyKey.CHAT_IMAGE_COST)).isEqualTo(50)
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_image_cost", amount = -1)))
+        service.refresh()
+        assertThat(service.amountOf(CreditPolicyKey.CHAT_IMAGE_COST)).isZero()
+    }
+
+    @Test
     fun `오버라이드가 없으면 주입된 기본값을 쓴다`() {
         `when`(repository.findAll()).thenReturn(emptyList())
         val service = loadedService()
@@ -81,6 +94,7 @@ class CreditPolicyServiceTest {
                     CreditPolicyKey.ATTENDANCE_REWARD to 250L,
                     CreditPolicyKey.STORY_CREATION_COST to 250L,
                     CreditPolicyKey.CHAT_TURN_COST to 20L,
+                    CreditPolicyKey.CHAT_IMAGE_COST to 0L,
                 ),
             )
     }

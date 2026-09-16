@@ -1,3 +1,6 @@
+### [KNK-1291] realtimeImage는 생략 시 true. false면 이미지 체험을 예약하지 않습니다.
+### 실시간 이미지 검증에는 KNK-1293 S3 권한·KNK-1294 AI 허용 호스트가 필요합니다.
+### 이미지 무료 체험은 채팅과 별개 5회. 소진 후 회원 0원 정책만 슬롯 발급하며 유료는 KNK-1292까지 생략합니다.
 ### 채팅 이어쓰기 스트리밍(Continue Chat, SSE) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ### 위에서부터 순서대로 실행하면 스토리·채팅을 하나씩 만든 뒤 그 chatId로 이어쓰기 스트리밍을 확인합니다.
@@ -135,6 +138,7 @@ Content-Type: application/json
 Accept: text/event-stream, application/json
 
 {
+  "realtimeImage": true,
   "userInput": "다들 평범하게 속성을 발현한다. 나는 마법수정에 손을 올렸지만 아무 빛도 나오지 않았다."
 }
 
@@ -592,3 +596,16 @@ Accept: application/json
         });
     });
 %}
+
+### 실시간 이미지 끄기 (위 준비 흐름의 chatId 사용)
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"userInput": "주변을 살핀다.", "realtimeImage": false}
+
+### 이미지 체험 사용량 자유 조회 (턴 전후 chatImage.used 비교)
+GET {{baseUrl}}/api/v1/users/me/trials
+X-Manyak-Device-Id: {{deviceId}}
+Accept: application/json

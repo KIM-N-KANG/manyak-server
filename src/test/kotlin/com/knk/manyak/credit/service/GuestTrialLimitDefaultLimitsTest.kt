@@ -53,6 +53,18 @@ class GuestTrialLimitDefaultLimitsTest {
         assertReservableExactly(GuestTrialLimitService.Counter.CHAT_TURN, limit = 5)
     }
 
+    @Test
+    fun `이미지 체험 5회와 가입 시 사용량 승계를 보장한다`() {
+        val counter = GuestTrialLimitService.Counter.CHAT_IMAGE
+        repeat(2) { assertThat(service.reserve("image-device", counter)).isTrue() }
+        assertThat(service.snapshotTrialAtSignup(1291L, "image-device")).isTrue()
+        repeat(3) { assertThat(service.reserveMember(1291L, counter)).isTrue() }
+        assertThat(service.reserveMember(1291L, counter)).isFalse()
+        service.restoreMember(1291L, counter)
+        assertThat(service.reserveMember(1291L, counter)).isTrue()
+        assertThat(service.reserve("image-device", GuestTrialLimitService.Counter.CHAT_TURN)).isTrue()
+    }
+
     /** [limit]번은 예약에 성공하고 그다음 한 번은 거절돼야 한다(경계값). 카운터별로 독립 디바이스를 쓴다. */
     private fun assertReservableExactly(counter: GuestTrialLimitService.Counter, limit: Int) {
         val deviceId = "device-${counter.key}"

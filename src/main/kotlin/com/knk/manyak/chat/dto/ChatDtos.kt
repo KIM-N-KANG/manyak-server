@@ -285,6 +285,8 @@ data class ContinueChatRequest(
         nullable = true,
     )
     val choiceOrder: Int? = null,
+    @field:Schema(description = "실시간 이미지 생성 여부. 기본 true")
+    val realtimeImage: Boolean = true,
 )
 
 @Schema(description = "AI 응답 재생성 요청")
@@ -296,6 +298,8 @@ data class RegenerateChatRequest(
         example = "3",
     )
     val turnId: Long,
+    @field:Schema(description = "실시간 이미지 생성 여부. 기본 true")
+    val realtimeImage: Boolean = true,
 )
 
 @Schema(description = "SSE 스트리밍 시작 이벤트 예시")

@@ -117,6 +117,7 @@ class ChatService(
     private val storyChoiceRepository: StoryChoiceRepository,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
+    private val chatRealtimeImageService: ChatRealtimeImageService,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
     private val creditWalletService: CreditWalletService,
@@ -138,6 +139,9 @@ class ChatService(
      * **조립이 끝나면 즉시 커밋되고 그 뒤에 AI를 부른다** — 트랜잭션이 AI 호출·스트리밍으로 넘어가지 않는다.
      */
     private val assemblyTransactionTemplate = assemblyTransactionTemplate(transactionManager)
+    private enum class TurnWorkerState { PENDING, RUNNING, CANCELLED }
+
+    private val turnSaveTransactionTemplate = TransactionTemplate(transactionManager)
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
@@ -674,6 +678,7 @@ class ChatService(
             userId = userId,
             deviceId = deviceId,
             isRegenerated = false,
+            realtimeImage = request.realtimeImage,
             persist = { result ->
                 chatTurnPersister.persistTurn(
                     chatId = chat.id,
@@ -756,6 +761,7 @@ class ChatService(
             userId = userId,
             deviceId = deviceId,
             isRegenerated = true,
+            realtimeImage = request.realtimeImage,
             persist = { result ->
                 chatTurnPersister.regenerateLastTurn(
                     chatId = chat.id,
@@ -906,6 +912,7 @@ class ChatService(
         userId: Long?,
         deviceId: String?,
         isRegenerated: Boolean,
+        realtimeImage: Boolean,
         persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
@@ -940,38 +947,44 @@ class ChatService(
         // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
         val refundKey = "refund:chatturn:${UUID.randomUUID()}"
         val refundGate = AtomicBoolean(false)
+        val imageReservation = try {
+            chatRealtimeImageService.reserve(
+                realtimeImage, userId, guestDeviceId, chat.publicId,
+                if (isRegenerated) chat.currentTurn else chat.currentTurn + 1,
+            )
+        } catch (ex: Throwable) {
+            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+            throw ex
+        }
         val persisted = AtomicBoolean(false)
-        // supplier(워커 본문)가 실제로 실행됐는지 표식. supplier 첫 줄에서 세운다. CompletableFuture.runAsync는
-        // 큐 대기 중 cancel되면(result 선점) AsyncRun이 supplier를 통째로 스킵하므로, 이 값이 false면 워커 finally가
-        // 영영 돌지 않는다(그 경우 아래 whenComplete가 복원을 맡는다). true면 워커가 실행돼 자기 finally가 복원을 소유한다.
-        val workerStarted = AtomicBoolean(false)
-
+        // PENDING 소유권은 워커 진입과 취소 중 한쪽만 CAS로 선점한다.
+        // RUNNING 이후에는 저장 결과를 아는 워커 finally만 환불을 결정한다.
+        val workerState = AtomicReference(TurnWorkerState.PENDING)
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
 
-        emitter.onTimeout {
+        fun cancelPendingWorker() {
+            if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
+                recordChatTurnResult(OUTCOME_CANCELLED)
+                chatRealtimeImageService.restore(imageReservation)
+                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+            }
+        }
+        fun cancelWorker() {
+            cancelPendingWorker()
             futureRef.get()?.cancel(true)
+        }
+        emitter.onTimeout {
+            cancelWorker()
             emitter.complete()
         }
-        emitter.onCompletion {
-            // 정리만 한다(cancel). 환불은 여기서 판정하지 않는다(Codex P1): 타임아웃 시 onCompletion은 persisted==false로 보지만,
-            // cancel(true)가 이미 실행 중인 워커를 중단시키지 못해 워커가 곧이어 persist를 성공시킬 수 있다
-            // (AI가 60s 직후 응답). 그러면 환불+저장이 겹쳐 무료 턴이 된다. 그래서 in-flight 환불 판정은 자기 결과를
-            // 아는 워커의 finally에 일원화한다(저장 실패 exit ⇒ 환불, 저장 성공 ⇒ 과금). 워커의 AI 호출도 자체 타임아웃이
-            // 있어 워커는 반드시 종료하므로, 타임아웃된 턴은 워커가 저장 없이 빠져나갈 때 그 finally에서 환불된다.
-            //
-            // 큐드-취소(executor 포화로 큐에서 대기하던 태스크가 cancel로 supplier째 스킵되는 경우)는 워커 finally가
-            // 아예 돌지 않으므로, 아래 future.whenComplete가 workerStarted==false를 근거로 복원을 맡는다(Codex P1 재리뷰).
-            futureRef.get()?.cancel(true)
-        }
-        emitter.onError {
-            futureRef.get()?.cancel(true)
-        }
+        emitter.onCompletion { cancelWorker() }
+        emitter.onError { cancelWorker() }
 
         val future = try {
             CompletableFuture.runAsync({
-            // 워커가 실제로 실행됐음을 표식(스킵된 큐드-취소와 구분). 이 뒤로는 finally가 반드시 돌아 복원을 소유한다.
-            workerStarted.set(true)
+            // CompletableFuture가 실행권을 얻은 뒤 취소가 끼어도 CANCELLED면 AI 호출·저장 없이 끝낸다.
+            if (!workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.RUNNING)) return@runAsync
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
             var succeededAiCallLogId: Long? = null
             try {
@@ -999,10 +1012,10 @@ class ChatService(
                     meta = { it.meta },
                 ) {
                     chatTurnAiClient.streamTurn(
-                        aiCall.request,
+                        aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
                         aiCall.traceLink,
                         // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
-                        // 검증·변환은 하지 않는다 — 매핑 자체를 백엔드가 보냈으므로 돌아온 URL은 이미 검증된 값이다.
+                        // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                         onCharacterImage = { characterImage ->
                             if (!Thread.currentThread().isInterrupted) {
                                 emitter.send(
@@ -1033,8 +1046,14 @@ class ChatService(
                 // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
                 // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
                 // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
-                val result = recorded.result.copy(choices = emptyList())
-                val persistedTurn = persist(result)
+                // HEAD 검증 결과와 본문 저장은 같은 트랜잭션에서 확정한다.
+                // 검증 실패 예약은 즉시 복원한다. 이후 롤백 시 finally와 겹쳐도 Reservation CAS가 중복을 막는다.
+                val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
+                    val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
+                    if (!checked.success) chatRealtimeImageService.restore(imageReservation)
+                    checked to persist(checked.result)
+                })
+                val result = validated.result
                 // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                 // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                 persisted.set(true)
@@ -1101,10 +1120,11 @@ class ChatService(
                 // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 val persistedOk = persisted.get()
-                // 결과 판정은 이 finally·아래 whenComplete·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
-                // 워커가 실행된 경우는 여기가 소유하므로 아래 whenComplete는 workerStarted로 걸러진다.
+                // 결과 판정은 이 finally·cancelPendingWorker·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
+                // 워커가 실행된 경우는 여기가 소유하므로 취소 콜백은 RUNNING 상태로 걸러진다.
                 recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
+                    chatRealtimeImageService.restore(imageReservation)
                     refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
                 }
             }
@@ -1114,8 +1134,11 @@ class ChatService(
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
-            recordChatTurnResult(OUTCOME_FAILURE)
-            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+            if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
+                recordChatTurnResult(OUTCOME_FAILURE)
+                chatRealtimeImageService.restore(imageReservation)
+                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+            }
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
                 "chat_turn_schedule_rejected",
@@ -1127,23 +1150,8 @@ class ChatService(
         }
         futureRef.set(future)
 
-        // 큐드-취소 안전망(Codex P1 재리뷰): 워커가 실행되지 않은 채(future가 큐 대기 중 cancel돼 supplier가 스킵됨)
-        // 종료되면 workerStarted==false다. 이때만 여기서 선차감분을 환불·게스트 카운터를 복원한다. workerStarted==true면
-        // 워커가 실행돼 자기 finally가 persisted 여부로 복원을 판정하므로 여기서는 손대지 않는다(환불+저장 겹침 방지).
-        // refundGate로 최종 1회만 실행돼, 워커 finally와 겹쳐도 원장·카운터가 이중 복원되지 않는다.
-        future.whenComplete { _, _ ->
-            if (!workerStarted.get()) {
-                // 큐드-취소는 별도 outcome으로 센다(KNK-811, Codex P2 재리뷰). `!workerStarted`는 확정이 아니라
-                // 잠정 판정이다 — AsyncRun이 취소 검사를 통과한 뒤 람다가 workerStarted를 세우기 전 취소가
-                // 끼어들면, 여기서 false를 보고도 워커가 곧이어 저장에 성공할 수 있다.
-                //
-                // 그래서 success/failure와 **같은 값을 쓰지 않는다**. 경합이 나면 이 턴은 `cancelled` 1건과
-                // 워커의 `success` 1건이 함께 남아 합계만 하나 늘 뿐, **저장·과금된 턴이 실패로 굳지 않는다**.
-                // 잠정 판정을 failure로 세고 게이트로 잠그면 그 오분류가 영구히 남는다(그쪽이 더 나쁘다).
-                recordChatTurnResult(OUTCOME_CANCELLED)
-                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
-            }
-        }
+        // future 자체의 취소·실패도 같은 CAS를 사용한다. 정상 완료는 RUNNING이므로 복원하지 않는다.
+        future.whenComplete { _, _ -> cancelPendingWorker() }
 
         return emitter
     }
@@ -1215,7 +1223,8 @@ class ChatService(
      *
      * outcome은 스토리 완성·스토리라인과 같은 3값이다:
      *   - `success`  : 턴이 저장까지 확정된 호출(`persisted`)
-     *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·큐드 취소·스케줄 거부
+     *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·스케줄 거부
+     *   - `cancelled`: 시작 전 취소가 PENDING 소유권을 선점한 호출
      *   - `rejected` : 스트림 개시 **이전** 4xx — 크레딧 부족(402)·게스트 한도 소진(402)·device 헤더 누락(400)
      *
      * **Timer가 아니라 Counter인 이유**: 채팅 턴은 스트리밍이라 `manyak.ai.call.duration{feature="chat_response"}`이
@@ -1225,13 +1234,10 @@ class ChatService(
      * **호출 지점은 셋이다**:
      *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 `persisted`로 success/failure를 가른다
      *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우(failure)
-     *   3. `future.whenComplete`의 `!workerStarted` — 큐드-취소(`cancelled`)
+     *   3. cancelPendingWorker — PENDING → CANCELLED CAS 성공 시 시작 전 취소 확정(cancelled)
      *
-     * 3번만 **잠정 판정**이다. AsyncRun이 취소 검사를 통과한 뒤 람다가 `workerStarted`를 세우기 전 취소가
-     * 끼어들면, 그 시점의 `false`를 보고도 워커가 곧이어 저장에 성공할 수 있다. 그래서 3번은 1·2와
-     * **다른 outcome 값**을 쓴다 — 경합이 나면 `cancelled` 1건과 `success` 1건이 함께 남아 합계만 하나 늘 뿐,
-     * 저장·과금된 턴이 실패로 굳지 않는다. 잠정 판정을 `failure`로 세고 1회 게이트로 잠그면 그 오분류가
-     * 영구히 남는데, 그쪽이 더 나쁘다(Codex P2 재리뷰에서 확인).
+     * 워커 진입도 PENDING → RUNNING CAS를 사용하므로 취소와 실행은 배타적이다.
+     * 취소가 선점하면 워커는 AI 호출·저장 없이 종료하며, RUNNING이면 finally가 결과를 소유한다.
      */
     private fun recordChatTurnResult(outcome: String) {
         // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
