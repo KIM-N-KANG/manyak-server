@@ -130,6 +130,27 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
+    fun `웹훅은 헤더 누락 경고 없이 상관관계 ID와 MDC를 유지한다`() {
+        val logger = LoggerFactory.getLogger(RequestCorrelationFilter::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            for (path in listOf("/api/v1/webhooks/groble", "/api/v1/webhooks/google-play/rtdn")) {
+                val (mdc, response) = runFilter(MockHttpServletRequest("POST", path))
+                assertThat(mdc["request_id"]).startsWith("req_")
+                assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo(mdc["request_id"])
+                assertThat(mdc["session_id"]).isEqualTo("unknown")
+                assertThat(mdc["device_id_hash"]).isEqualTo("unknown")
+                assertThat(MDC.getCopyOfContextMap().orEmpty()).isEmpty()
+            }
+            assertThat(appender.list).noneMatch { it.level == Level.WARN }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    @Test
     fun `필수 헤더가 없어도 4xx로 막지 않고 체인을 진행한다`() {
         var chainInvoked = false
         val response = MockHttpServletResponse()
