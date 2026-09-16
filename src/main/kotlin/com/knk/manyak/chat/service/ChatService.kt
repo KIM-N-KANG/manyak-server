@@ -40,6 +40,8 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.InsufficientCreditException
+import com.knk.manyak.credit.entity.CreditTransaction
+import com.knk.manyak.credit.service.CreditDeduction
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
@@ -917,44 +919,53 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
-        // 소모 정책값은 이 턴 안에서 한 번만 읽어 차감·환불에 같은 값을 쓴다(KNK-1056). 차감과 환불 사이에
-        // 정책이 바뀌면 금액이 어긋나 사용자가 손해를 보거나 이득을 본다(환불은 원장 행이 아니라 이 값을 쓴다).
         val chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
-        // 선차감·한도 예약은 SseEmitter를 만들기 전 동기 구간이다. 여기서 나는 402/400은 AI를 부르기 전 거부라
-        // AI 타이머(manyak.ai.call.duration)에도 Langfuse에도 남지 않으므로 rejected로 세어 둔다(KNK-811).
-        val (memberTrialCovered, guestDeviceId) = try {
-            // 회원이면 SseEmitter를 만들기 전에 동기로 선차감한다. 잔액 부족 시 여기서 InsufficientCreditException이
-            // 던져져(스트림 미개시) 컨트롤러가 402로 변환한다.
-            // 위 소유권 가드 뒤이므로, owned 채팅이면 요청자 == 소유자 ⇒ 소유자가 차감되고,
-            // 게스트 채팅을 회원이 이어쓰면 그 회원이 차감된다(게스트는 userId == null이라 무차감).
-            // 회원 소모 2단(스펙 §4-3-7 B13): 계정 귀속 체험 잔여가 있으면 먼저 무료로 소진하고, 없으면 크레딧을 선차감한다.
-            val covered =
-                userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
-            if (userId != null && !covered) {
-                creditWalletService.deduct(userId, chatTurnCost, CreditReason.CHAT_TURN, refType = "CHAT", refId = chatPk)
+        var memberTrialCovered = false
+        var guestDeviceId: String? = null
+        var imageReservation = ChatRealtimeImageService.Reservation(null)
+        var charges = emptyList<CreditTransaction>()
+        val refundGate = AtomicBoolean(false) // 턴 체험/턴 비용만 소유한다. 이미지 환불과 공유하지 않는다.
+        val trialRefundKey = "refund:chatturn:${UUID.randomUUID()}"
+        fun turnCharge() = charges.firstOrNull { it.reason == CreditReason.CHAT_TURN }
+        fun refundTurn() = refundChatTurn(
+            userId, guestDeviceId, memberTrialCovered, chatPk,
+            turnCharge()?.let { "refund:charge:${it.id}" } ?: trialRefundKey,
+            refundGate, turnCharge()?.amount?.unaryMinus() ?: 0,
+        )
+        fun refundImage() {
+            chatRealtimeImageService.restore(imageReservation)
+            val charge = charges.firstOrNull { it.reason == CreditReason.CHAT_IMAGE } ?: return
+            // DB 멱등 키가 행별 소유권이다. 저장 트랜잭션이 롤백되면 키도 롤백돼 finally에서 재시도할 수 있다.
+            creditWalletService.reward(
+                charge.userId, -charge.amount, CreditReason.REFUND, "refund:charge:${charge.id}",
+                refType = "CHAT_IMAGE", refId = chatPk,
+            )
+        }
+        fun refundImageQuietly() {
+            try {
+                refundImage()
+            } catch (ex: Exception) {
+                // 이미지 환불은 대사 배치 미대상(수용한 한계)이므로 실패를 별도로 기록한다.
+                structuredLogger.event("chat_image_refund_failed", "chat_pk" to chatPk, "error" to ex.javaClass.simpleName)
             }
-            // 게스트(userId == null)는 크레딧 대신 디바이스 ID별 chat_turn 체험 한도를 예약한다(스펙 §4-3-7, KNK-477).
-            // 한도 소진·device 헤더 누락은 여기서 동기 402/400으로 던져져(스트림 미개시) 그대로 컨트롤러에 전파된다.
-            covered to guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+        }
+        try {
+            memberTrialCovered = userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
+            guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+            imageReservation = chatRealtimeImageService.prepare(realtimeImage, userId, guestDeviceId)
+            if (userId != null) {
+                val items = buildList {
+                    if (!memberTrialCovered) add(CreditDeduction(chatTurnCost, CreditReason.CHAT_TURN, "CHAT", chatPk))
+                    if (imageReservation.cost > 0) add(CreditDeduction(imageReservation.cost, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chatPk))
+                }
+                if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
+            }
+            chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
         } catch (throwable: Throwable) {
-            // 4xx 거부만 rejected다. Redis·DB 장애로 예약·차감이 깨진 경우는 5xx로 나가므로 failure로 세야
-            // 실패 알림에 잡힌다 — rejected는 알림에서 제외되는 축이라 여기 섞으면 운영 장애가 조용히 사라진다(Codex P2).
+            refundImageQuietly()
+            refundTurn()
             recordChatTurnResult(if (isChatTurnClientRejection(throwable)) OUTCOME_REJECTED else OUTCOME_FAILURE)
             throw throwable
-        }
-        // 환불 상태: 이 턴 시도의 결정적 멱등 키(재시도·이중 콜백에도 환불 1회 보장)와, 실행은 최초 1회만 하는 게이트.
-        // persisted는 "턴이 저장돼 차감이 확정됨"을 뜻한다. persist 성공 직후 세워, 이후 completed 전송 실패·연결
-        // 끊김이 있어도 환불하지 않는다(저장된 턴은 이력에 남아 무료로 재조회되면 안 됨, Codex P1). 저장 전 실패만 환불한다.
-        val refundKey = "refund:chatturn:${UUID.randomUUID()}"
-        val refundGate = AtomicBoolean(false)
-        val imageReservation = try {
-            chatRealtimeImageService.reserve(
-                realtimeImage, userId, guestDeviceId, chat.publicId,
-                if (isRegenerated) chat.currentTurn else chat.currentTurn + 1,
-            )
-        } catch (ex: Throwable) {
-            refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
-            throw ex
         }
         val persisted = AtomicBoolean(false)
         // PENDING 소유권은 워커 진입과 취소 중 한쪽만 CAS로 선점한다.
@@ -966,8 +977,8 @@ class ChatService(
         fun cancelPendingWorker() {
             if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
                 recordChatTurnResult(OUTCOME_CANCELLED)
-                chatRealtimeImageService.restore(imageReservation)
-                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+                refundImageQuietly()
+                refundTurn()
             }
         }
         fun cancelWorker() {
@@ -1050,7 +1061,7 @@ class ChatService(
                 // 검증 실패 예약은 즉시 복원한다. 이후 롤백 시 finally와 겹쳐도 Reservation CAS가 중복을 막는다.
                 val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
                     val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
-                    if (!checked.success) chatRealtimeImageService.restore(imageReservation)
+                    if (!checked.success) refundImage()
                     checked to persist(checked.result)
                 })
                 val result = validated.result
@@ -1124,8 +1135,8 @@ class ChatService(
                 // 워커가 실행된 경우는 여기가 소유하므로 취소 콜백은 RUNNING 상태로 걸러진다.
                 recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
-                    chatRealtimeImageService.restore(imageReservation)
-                    refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+                    refundImageQuietly()
+                    refundTurn()
                 }
             }
         }, chatSseExecutor)
@@ -1136,8 +1147,8 @@ class ChatService(
             // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
             if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
                 recordChatTurnResult(OUTCOME_FAILURE)
-                chatRealtimeImageService.restore(imageReservation)
-                refundChatTurn(userId, guestDeviceId, memberTrialCovered, chatPk, refundKey, refundGate, chatTurnCost)
+                refundImageQuietly()
+                refundTurn()
             }
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(
@@ -1175,13 +1186,14 @@ class ChatService(
         amount: Long,
     ) {
         if (userId == null && guestDeviceId == null) return
+        if (userId != null && !memberTrialCovered && amount == 0L) return
         if (!gate.compareAndSet(false, true)) return
         try {
             val restored = if (memberTrialCovered && userId != null) {
                 // 이 턴이 체험 잔여로 무료 처리됐으면 크레딧이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
                 // restoreMember는 Redis 장애를 삼키고 정상 반환하므로, 성공 여부는 반환값으로만 알 수 있다(Codex P2).
                 guestTrialLimitService.restoreMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
-            } else if (userId != null) {
+            } else if (userId != null && amount > 0) {
                 creditWalletService.reward(
                     userId = userId,
                     amount = amount,

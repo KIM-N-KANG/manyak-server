@@ -55,6 +55,37 @@ class CreditWalletServiceIntegrationTest {
     }
 
     @Test
+    fun `batch는 합계로 차감하고 항목별 원장을 남긴다`() {
+        service.reward(userId, 100, CreditReason.SIGNUP_REWARD, "seed")
+        val result = service.deductBatch(userId, listOf(
+            CreditDeduction(20, CreditReason.CHAT_TURN, "CHAT", 1),
+            CreditDeduction(30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", 1),
+        ))
+        assertThat(result.balance).isEqualTo(50)
+        assertThat(result.transactions.map { it.amount }).containsExactly(-20L, -30L)
+        assertThat(result.transactions.map { it.refType }).containsExactly("CHAT", "CHAT_IMAGE")
+        assertThat(service.balanceOf(userId)).isEqualTo(50)
+    }
+
+    @Test
+    fun `batch 합계 부족이면 부분 차감도 하지 않는다`() {
+        service.reward(userId, 40, CreditReason.SIGNUP_REWARD, "seed")
+        assertThatThrownBy { service.deductBatch(userId, listOf(
+            CreditDeduction(20, CreditReason.CHAT_TURN, "CHAT", 1),
+            CreditDeduction(30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", 1),
+        )) }.isInstanceOf(InsufficientCreditException::class.java)
+        assertThat(service.balanceOf(userId)).isEqualTo(40)
+        assertThat(transactionRepository.findAll()).hasSize(1)
+    }
+
+    @Test
+    fun `빈 batch는 지갑이나 원장을 만들지 않는다`() {
+        assertThat(service.deductBatch(userId, emptyList()).transactions).isEmpty()
+        assertThat(walletRepository.findByUserId(userId)).isNull()
+        assertThat(transactionRepository.count()).isZero()
+    }
+
+    @Test
     fun `hasTransaction은 멱등 키로 적립 여부를 확인하고 부수효과가 없다`() {
         assertThat(service.hasTransaction("attendance:$userId:2026-07-08")).isFalse()
 

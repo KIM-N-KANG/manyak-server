@@ -188,7 +188,7 @@ manyak:
     attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
     story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:250}
     chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
-    # dev 실측은 0. 운영 유료 차감은 KNK-1292에서 연결한다.
+    # dev 실측 기본값은 0. 양수이면 체험 소진 후 이미지 비용을 별도로 차감한다.
     chat-image-cost: ${MANYAK_CREDIT_CHAT_IMAGE_COST:0}
     policy-refresh:
       # 정책 오버라이드(credit_policies) 스냅샷 주기 갱신. 읽기는 메모리라 이 주기가 곧 "운영 SQL 변경이
