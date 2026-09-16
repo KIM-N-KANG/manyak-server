@@ -14,7 +14,7 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** 턴·재생성에서 같은 슬롯/체험/검증 규칙을 사용한다. 원장은 KNK-1292에서 연결한다. */
+/** 턴·재생성에서 같은 슬롯/체험/검증 규칙을 사용한다. 유료 항목은 호출부가 합산 차감한 뒤 슬롯을 발급한다. */
 @Service
 class ChatRealtimeImageService(
     private val trials: GuestTrialLimitService,
@@ -24,37 +24,42 @@ class ChatRealtimeImageService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     class Reservation(
-        val slot: ChatImageSlot?,
+        var slot: ChatImageSlot?,
         val userId: Long? = null,
         val deviceId: String? = null,
         val trialReserved: Boolean = false,
+        val cost: Long = 0,
+        val eligible: Boolean = false,
     ) {
         internal val restored = AtomicBoolean(false)
     }
     data class Validated(val result: ChatTurnAiResult, val success: Boolean)
 
-    fun reserve(enabled: Boolean, userId: Long?, deviceId: String?, chatId: UUID, turnNumber: Int): Reservation {
+    /** 체험·비용 판정만 한다. 비용을 실제 차감하기 전에는 presign하지 않는다. */
+    fun prepare(enabled: Boolean, userId: Long?, deviceId: String?): Reservation {
         if (!enabled || !storage.isEnabled()) return Reservation(null)
         val reserved = if (userId != null) trials.reserveMember(userId, Counter.CHAT_IMAGE)
             else trials.reserve(trials.requireDeviceId(deviceId), Counter.CHAT_IMAGE)
-        // KNK-1292: 양수 유료 이미지의 CHAT_IMAGE 차감·환불을 붙이기 전에는 슬롯을 발급하지 않는다.
-        if (!reserved && (userId == null || policy.amountOf(CreditPolicyKey.CHAT_IMAGE_COST) > 0)) {
-            return Reservation(null)
-        }
-        val reservation = Reservation(null, userId, deviceId, reserved)
+        if (!reserved && userId == null) return Reservation(null)
+        val cost = if (reserved) 0 else policy.amountOf(CreditPolicyKey.CHAT_IMAGE_COST)
+        return Reservation(null, userId, deviceId, reserved, cost, eligible = true)
+    }
+
+    /** 합산 선차감 성공 뒤 호출한다. 발급 실패는 슬롯 없이 진행하며 완료 판정에서 이미지 비용만 환불한다. */
+    fun issue(reservation: Reservation, chatId: UUID, turnNumber: Int) {
+        if (!reservation.eligible) return
         try {
             val key = "chat-images/$chatId/$turnNumber-${UUID.randomUUID()}.webp"
             val publicUrl = storage.serveUrlOf(key)
             val uploadUrl = storage.presignRealtimeImage(key, Duration.ofMinutes(10))
             if (publicUrl != null && uploadUrl != null) {
-                return Reservation(ChatImageSlot(key, uploadUrl, publicUrl), userId, deviceId, reserved)
+                reservation.slot = ChatImageSlot(key, uploadUrl, publicUrl)
+                return
             }
         } catch (ex: Exception) {
-            // 서명 URL은 자격 증명이므로 로그에 포함하지 않는다.
             logger.warn("실시간 이미지 슬롯 발급 실패: {}", ex.javaClass.simpleName)
         }
         restore(reservation)
-        return Reservation(null)
     }
 
     /** DB 저장 트랜잭션 안에서 호출한다. 발급한 정확한 URL만 HEAD하며 임의 URL은 요청하지 않는다. */

@@ -18,6 +18,10 @@ import java.time.ZoneOffset
 import org.slf4j.LoggerFactory
 import kotlin.math.min
 
+/** 양수 비용 한 항목. 서로 다른 refType으로 환불·대사 범위를 분리할 수 있다. */
+data class CreditDeduction(val amount: Long, val reason: CreditReason, val refType: String? = null, val refId: Long? = null)
+data class CreditDeductionOutcome(val balance: Long, val transactions: List<CreditTransaction>)
+
 /** 보상 적립 결과. [rewarded]가 false면 멱등 키 중복 또는 월 상한 초과로 이번 요청은 적립하지 않았다(잔액 불변). */
 data class RewardOutcome(val rewarded: Boolean, val balance: Long)
 
@@ -205,7 +209,15 @@ class CreditWalletService(
         refType: String? = null,
         refId: Long? = null,
     ): Long {
-        require(amount > 0) { "차감액은 양수여야 합니다: $amount" }
+        return deductBatch(userId, listOf(CreditDeduction(amount, reason, refType, refId))).balance
+    }
+
+    /** 지갑 한 번 잠금·합계 잔액 판정·FIFO 소진 후 항목별 원장을 같은 트랜잭션에 기록한다. */
+    @Transactional
+    fun deductBatch(userId: Long, items: List<CreditDeduction>): CreditDeductionOutcome {
+        if (items.isEmpty()) return CreditDeductionOutcome(balanceOf(userId), emptyList())
+        items.forEach { require(it.amount > 0) { "차감액은 양수여야 합니다: ${it.amount}" } }
+        val amount = items.fold(0L) { sum, item -> Math.addExact(sum, item.amount) }
         val wallet = walletRepository.findByUserIdForUpdate(userId)
             ?: throw InsufficientCreditException(userId, required = amount, balance = 0)
         val now = clock.instant()
@@ -227,17 +239,14 @@ class CreditWalletService(
             toConsume -= take
         }
         check(toConsume == 0L) { "FIFO 소진 후 남은 차감량이 있습니다: userId=$userId, remaining=$toConsume" }
-        transactionRepository.save(
-            CreditTransaction(
-                userId = userId,
-                amount = -amount,
-                reason = reason,
-                refType = refType,
-                refId = refId,
-            ),
-        )
+        val transactions = items.map { item ->
+            transactionRepository.save(CreditTransaction(
+                userId = userId, amount = -item.amount, reason = item.reason,
+                refType = item.refType, refId = item.refId,
+            ))
+        }
         wallet.balance -= amount
-        return wallet.balance
+        return CreditDeductionOutcome(wallet.balance, transactions)
     }
 
     /**

@@ -93,7 +93,7 @@ class CreditTransactionHistoryService(
      * 정보가 없고, 삭제 시 `null`인 현행 동작을 그대로 둔다.
      */
     private fun resolveTitles(rows: List<CreditTransaction>, userId: Long): Map<Long, String?> {
-        val chatIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_CHAT) it.refId else null }
+        val chatIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_CHAT || it.refType == "CHAT_IMAGE") it.refId else null }
         val sessionIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_STORY) it.refId else null }
         if (chatIds.isEmpty() && sessionIds.isEmpty()) return emptyMap()
 
@@ -108,7 +108,7 @@ class CreditTransactionHistoryService(
 
         return rows.mapNotNull { row ->
             val title = when (row.refType) {
-                REF_CHAT -> {
+                REF_CHAT, "CHAT_IMAGE" -> {
                     val chat = chatById[row.refId] ?: return@mapNotNull null
                     val story = storyById[chat.storyId]
                     // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 제목에서 멈춘다(KNK-1065).

@@ -18,6 +18,7 @@ enum class CreditReason {
     ATTENDANCE_REWARD,
     STORY_CREATION,
     CHAT_TURN,
+    CHAT_IMAGE,
     REFUND,
     PURCHASE,
     PURCHASE_REVERSAL,
@@ -29,7 +30,7 @@ enum class CreditReason {
 /**
  * 크레딧 원장 행(append-only). 생성 후 수정하지 않는다 — 환불도 수정이 아니라 REFUND 행 추가다(스펙 §4-3-7).
  *
- * [idempotencyKey]는 보상 중복을 막는 유니크 제약이다(소모/환불 행은 NULL). NULL은 서로 다른 값으로 취급돼 충돌하지 않는다.
+ * [idempotencyKey]는 적립·요청 내 환불의 중복을 막는 유니크 제약이다. 소모·대사 환불의 NULL은 서로 충돌하지 않는다.
  */
 @Entity
 @Table(
@@ -54,14 +55,14 @@ class CreditTransaction(
     @Column(nullable = false, length = 30)
     val reason: CreditReason,
 
-    // 소모 행은 연관 리소스(STORY·CHAT·AI_CALL_LOG), REFUND 행은 소모 행(CREDIT_TRANSACTION)을 가리킨다.
+    // 소모·환불은 연관 리소스를 참조한다. 채팅 이미지는 CHAT_IMAGE/채팅 PK로 CHAT 대사 그룹과 분리한다.
     @Column(name = "ref_type", length = 30)
     val refType: String? = null,
 
     @Column(name = "ref_id")
     val refId: Long? = null,
 
-    // 보상 멱등 키(signup:{userId} 등). 소모/환불 행은 NULL.
+    // 보상·환불 멱등 키(signup:{userId}, refund:charge:{차감행ID} 등). 소모·대사 환불은 NULL.
     @Column(name = "idempotency_key")
     val idempotencyKey: String? = null,
 

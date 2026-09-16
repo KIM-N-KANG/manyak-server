@@ -50,8 +50,119 @@ class ChatImageFailureIntegrationTests {
     private lateinit var chat: StoryChat
     private val device = "image-failure-device"
 
+    @Autowired private lateinit var users: com.knk.manyak.auth.repository.UserRepository
+    @Autowired private lateinit var policies: com.knk.manyak.credit.repository.CreditPolicyRepository
+    @Autowired private lateinit var policy: com.knk.manyak.credit.service.CreditPolicyService
+    @Autowired private lateinit var wallet: com.knk.manyak.credit.service.CreditWalletService
+    @Autowired private lateinit var ledger: com.knk.manyak.credit.repository.CreditTransactionRepository
+
+    private fun paidMember(cost: Long = 30, balance: Long = 100, drainTurn: Boolean = true, drainImage: Boolean = true): Long {
+        policies.save(com.knk.manyak.credit.entity.CreditPolicy(policyKey = "chat_image_cost", amount = cost))
+        policies.save(com.knk.manyak.credit.entity.CreditPolicy(policyKey = "chat_turn_cost", amount = 20))
+        policy.refresh()
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "유료이미지회원"))
+        if (drainTurn) while (trials.reserveMember(user.id, Counter.CHAT_TURN)) { }
+        if (drainImage) while (trials.reserveMember(user.id, Counter.CHAT_IMAGE)) { }
+        if (balance > 0) wallet.reward(user.id, balance, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "seed")
+        chat = chats.save(StoryChat(storyId = chat.storyId, userId = user.id))
+        return user.id
+    }
+    private fun paidStart(userId: Long) = service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest(userInput = "유료"), userId = userId)
+    private fun spends() = ledger.findAll().filter { it.amount < 0 }
+    private fun refunds() = ledger.findAll().filter { it.reason == com.knk.manyak.credit.entity.CreditReason.REFUND }
+
+    @Test fun `유료 이미지와 턴을 한꺼번에 차감한 뒤 슬롯을 전달한다`() {
+        val user = paidMember()
+        paidStart(user)
+        assertThat(wallet.balanceOf(user)).isEqualTo(50)
+        assertThat(spends().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        queued.get().run()
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.imageSlots).hasSize(1)
+        assertThat(refunds()).isEmpty()
+    }
+    @Test fun `턴 체험이 남아도 유료 이미지는 독립적으로 차감한다`() {
+        val user = paidMember(drainTurn = false)
+        paidStart(user)
+        queued.get().run()
+        assertThat(wallet.balanceOf(user)).isEqualTo(70)
+        assertThat(spends().map { it.refType }).containsExactly("CHAT_IMAGE")
+        assertThat(trials.usage(user, null, Counter.CHAT_TURN).used).isEqualTo(1)
+        assertThat(refunds()).isEmpty()
+    }
+
+    @Test fun `0원 이미지에는 차감과 환불 원장이 없다`() {
+        val user = paidMember(cost = 0)
+        GatedChatTurnAiClientConfig.realtimeExists = false
+        paidStart(user)
+        queued.get().run()
+        assertThat(wallet.balanceOf(user)).isEqualTo(80)
+        assertThat(spends()).hasSize(1)
+        assertThat(refunds()).isEmpty()
+    }
+    @Test fun `이미지 실패는 이미지 비용만 환불하고 턴은 저장한다`() {
+        val user = paidMember()
+        GatedChatTurnAiClientConfig.realtimeExists = false
+        val emitter = paidStart(user)
+        queued.get().run()
+        callback(emitter, "completionCallback")
+        assertThat(wallet.balanceOf(user)).isEqualTo(80)
+        assertThat(refunds().map { it.refType }).containsExactly("CHAT_IMAGE")
+        assertThat(refunds().single().amount).isEqualTo(30)
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+    }
+    @Test fun `본문 실패는 두 차감 행을 각각 한번 환불한다`() {
+        val user = paidMember()
+        GatedChatTurnAiClientConfig.turnFailure = ChatTurnAiException("AI_ERROR", "test")
+        val emitter = paidStart(user)
+        queued.get().run()
+        callback(emitter, "completionCallback")
+        assertThat(wallet.balanceOf(user)).isEqualTo(100)
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(refunds().map { it.idempotencyKey }.distinct()).hasSize(2)
+    }
+    @Test fun `유료 큐 취소는 두 차감 행을 각각 한번 환불한다`() {
+        val user = paidMember()
+        val emitter = paidStart(user)
+        callback(emitter, "timeoutCallback")
+        callback(emitter, "completionCallback")
+        queued.get().run()
+        assertThat(wallet.balanceOf(user)).isEqualTo(100)
+        assertThat(refunds()).hasSize(2)
+        assertThat(GatedChatTurnAiClientConfig.lastRequest).isNull()
+    }
+    @Test fun `이미지 환불 뒤 턴 롤백이면 이미지 환불을 다시 커밋한다`() {
+        val user = paidMember()
+        GatedChatTurnAiClientConfig.realtimeExists = false
+        GatedChatTurnAiClientConfig.onRealtimeHead = {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun beforeCommit(readOnly: Boolean) { error("rollback image refund too") }
+            })
+        }
+        paidStart(user)
+        queued.get().run()
+        assertThat(wallet.balanceOf(user)).isEqualTo(100)
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
+    }
+    @Test fun `이미지 비용 부족이면 예약한 턴 체험을 복원한다`() {
+        val user = paidMember(balance = 10, drainTurn = false)
+        org.assertj.core.api.Assertions.assertThatThrownBy { paidStart(user) }
+            .isInstanceOf(com.knk.manyak.credit.InsufficientCreditException::class.java)
+        assertThat(trials.usage(user, null, Counter.CHAT_TURN).used).isZero()
+        assertThat(spends()).isEmpty()
+        assertThat(refunds()).isEmpty()
+    }
+    @Test fun `턴 비용 부족이면 예약한 이미지 체험을 복원한다`() {
+        val user = paidMember(balance = 10, drainImage = false)
+        org.assertj.core.api.Assertions.assertThatThrownBy { paidStart(user) }
+            .isInstanceOf(com.knk.manyak.credit.InsufficientCreditException::class.java)
+        assertThat(trials.usage(user, null, Counter.CHAT_IMAGE).used).isZero()
+        assertThat(spends()).isEmpty()
+    }
+
     @BeforeEach fun setup() {
         cleaner.cleanAll()
+        policy.refresh()
         GatedChatTurnAiClientConfig.reset()
         GatedChatTurnAiClientConfig.realtimeEnabled = true
         GatedChatTurnAiClientConfig.realtimeExists = true

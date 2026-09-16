@@ -44,7 +44,7 @@ enum class CreditTransactionType {
          * REFUND는 획득이다 — 생성·턴 실패 시 자동 환불이라 사용자 눈엔 크레딧이 되돌아온 사건이다(2026-08-30 결정).
          */
         fun of(reason: CreditReason): CreditTransactionType = when (reason) {
-            CreditReason.STORY_CREATION, CreditReason.CHAT_TURN -> SPEND
+            CreditReason.STORY_CREATION, CreditReason.CHAT_TURN, CreditReason.CHAT_IMAGE -> SPEND
             CreditReason.SIGNUP_REWARD,
             CreditReason.ATTENDANCE_REWARD,
             CreditReason.INVITE_REWARD,
