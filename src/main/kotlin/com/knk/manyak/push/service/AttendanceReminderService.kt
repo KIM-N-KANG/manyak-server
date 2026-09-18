@@ -48,6 +48,7 @@ class AttendanceReminderService(
 
     fun sendReminders(): AttendanceReminderResult {
         val today = LocalDate.now(clock.withZone(SEOUL_ZONE))
+        val expiry = today.plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant()
         val targetIds = userRepository.findAttendanceReminderTargetIds(today.toString())
         if (targetIds.isEmpty()) {
             return AttendanceReminderResult(targets = 0, sent = 0, skipped = 0)
@@ -79,9 +80,8 @@ class AttendanceReminderService(
             // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
             runCatching {
                 val now = clock.instant()
-                val midnight = now.atZone(SEOUL_ZONE).toLocalDate().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant()
                 fcmPushSender.sendToUser(
-                    userId, data, AndroidConfig.Priority.NORMAL, Duration.between(now, midnight).toMillis(),
+                    userId, data, AndroidConfig.Priority.NORMAL, Duration.between(now, expiry).toMillis().coerceAtLeast(0),
                 )
             }
                 .onSuccess { sent++ }

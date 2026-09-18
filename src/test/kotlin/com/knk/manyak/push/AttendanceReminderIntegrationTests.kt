@@ -152,6 +152,29 @@ class AttendanceReminderIntegrationTests {
     }
 
     @Test
+    fun `회차가 자정을 넘겨도 전날 날짜를 유지하고 TTL은 0이다`() {
+        val instants = listOf(Instant.parse("2026-09-08T14:59:59Z"), Instant.parse("2026-09-08T15:00:00Z"))
+        clock = SteppingClock(instants)
+        val member = eligibleMember()
+
+        val result = attendanceReminderService.sendReminders()
+
+        assertThat(result.sent).isEqualTo(1)
+        verify(fcmPushSender).sendToUser(
+            member.id,
+            mapOf(
+                "type" to "ATTENDANCE_REMINDER",
+                "date" to "2026-09-08",
+                "title" to "(광고) 오늘의 출석 이프를 아직 안 받았어요",
+                "body" to "지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.",
+                "deepLink" to "https://manyak.app/my/credits?tab=free",
+            ),
+            NORMAL,
+            0L,
+        )
+    }
+
+    @Test
     fun `오늘 이미 출석한 회원에게는 보내지 않는다`() {
         val member = eligibleMember()
         markAttended(rewardIdentityId = member.id, userId = member.id)
@@ -250,6 +273,17 @@ class AttendanceReminderIntegrationTests {
         LocalDate.of(2026, 9, 8).atTime(hour, 0).atZone(SEOUL_ZONE).toInstant(),
         ZoneOffset.UTC,
     )
+
+    /** 시간대가 바뀌어도 같은 진행 상태를 공유한다(프로모션 테스트의 SteppingClock 관례). */
+    private class SteppingClock(
+        private val instants: List<Instant>,
+        private val zone: ZoneId = ZoneOffset.UTC,
+        private val index: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0),
+    ) : Clock() {
+        override fun instant(): Instant = instants[minOf(index.getAndIncrement(), instants.size - 1)]
+        override fun getZone(): ZoneId = zone
+        override fun withZone(zone: ZoneId): Clock = SteppingClock(instants, zone, index)
+    }
 
     private companion object {
         val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")
