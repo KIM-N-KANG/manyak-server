@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.google.firebase.messaging.AndroidConfig.Priority.NORMAL
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
@@ -131,9 +132,45 @@ class AttendanceReminderIntegrationTests {
             mapOf(
                 "type" to "ATTENDANCE_REMINDER",
                 "date" to today().toString(),
+                "deepLink" to "https://manyak.app/my/credits?tab=free",
                 "title" to "(광고) 오늘의 출석 이프를 아직 안 받았어요",
                 "body" to "지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.",
             ),
+            NORMAL,
+            (24 - hour) * 60 * 60 * 1000L,
+        )
+    }
+
+    @Test
+    fun `출석 TTL은 KST 자정 직전의 남은 밀리초다`() {
+        clock = Clock.fixed(Instant.parse("2026-09-08T14:59:59.500Z"), ZoneOffset.UTC)
+        val member = eligibleMember()
+
+        attendanceReminderService.sendReminders()
+
+        verify(fcmPushSender).sendToUser(eq(member.id), anyMap(), eq(NORMAL) ?: NORMAL, eq(500L))
+    }
+
+    @Test
+    fun `회차가 자정을 넘겨도 전날 날짜를 유지하고 TTL은 0이다`() {
+        val instants = listOf(Instant.parse("2026-09-08T14:59:59Z"), Instant.parse("2026-09-08T15:00:00Z"))
+        clock = SteppingClock(instants)
+        val member = eligibleMember()
+
+        val result = attendanceReminderService.sendReminders()
+
+        assertThat(result.sent).isEqualTo(1)
+        verify(fcmPushSender).sendToUser(
+            member.id,
+            mapOf(
+                "type" to "ATTENDANCE_REMINDER",
+                "date" to "2026-09-08",
+                "title" to "(광고) 오늘의 출석 이프를 아직 안 받았어요",
+                "body" to "지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.",
+                "deepLink" to "https://manyak.app/my/credits?tab=free",
+            ),
+            NORMAL,
+            0L,
         )
     }
 
@@ -143,7 +180,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = member.id, userId = member.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @Test
@@ -151,7 +188,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(marketingAgreed = false).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @Test
@@ -159,7 +196,7 @@ class AttendanceReminderIntegrationTests {
         saveMember()
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @Test
@@ -167,7 +204,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(status = UserStatus.SUSPENDED).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @Test
@@ -179,7 +216,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = original.id, userId = rejoined.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @ParameterizedTest
@@ -195,12 +232,12 @@ class AttendanceReminderIntegrationTests {
         doAnswer {
             withdrawMarketingConsent(second.id)
             null
-        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
 
         val result = attendanceReminderService.sendReminders()
 
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap())
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
         assertThat(result.sent).isEqualTo(1)
     }
 
@@ -214,7 +251,7 @@ class AttendanceReminderIntegrationTests {
         attendanceReminderScheduler.run()
 
         // 두 번째 실행은 Redis SET NX 실패로 서비스에 진입하지 않는다.
-        verify(fcmPushSender).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @ParameterizedTest
@@ -228,14 +265,25 @@ class AttendanceReminderIntegrationTests {
         assertThat(result.targets).isEqualTo(1)
         assertThat(result.sent).isEqualTo(if (hour == 15) 1 else 0)
         assertThat(result.skipped).isEqualTo(if (hour == 15) 0 else 1)
-        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
-        else verify(fcmPushSender).sendToUser(anyLong(), anyMap())
+        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     private fun atHour(hour: Int): Clock = Clock.fixed(
         LocalDate.of(2026, 9, 8).atTime(hour, 0).atZone(SEOUL_ZONE).toInstant(),
         ZoneOffset.UTC,
     )
+
+    /** 시간대가 바뀌어도 같은 진행 상태를 공유한다(프로모션 테스트의 SteppingClock 관례). */
+    private class SteppingClock(
+        private val instants: List<Instant>,
+        private val zone: ZoneId = ZoneOffset.UTC,
+        private val index: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0),
+    ) : Clock() {
+        override fun instant(): Instant = instants[minOf(index.getAndIncrement(), instants.size - 1)]
+        override fun getZone(): ZoneId = zone
+        override fun withZone(zone: ZoneId): Clock = SteppingClock(instants, zone, index)
+    }
 
     private companion object {
         val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")

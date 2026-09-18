@@ -1,5 +1,6 @@
 package com.knk.manyak.push.service
 
+import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
@@ -86,7 +87,7 @@ class PromotionPushService(
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, data) }
+                runCatching { fcmPushSender.sendToUser(userId, data, AndroidConfig.Priority.NORMAL) }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
             }

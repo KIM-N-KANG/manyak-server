@@ -211,6 +211,7 @@ manyak:
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
     chat-image-limit: ${MANYAK_GUEST_TRIAL_CHAT_IMAGE_LIMIT:5}
   push:
+    web-base-url: ${MANYAK_PUSH_WEB_BASE_URL:https://manyak.app}
     web:
       icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
     fcm:
