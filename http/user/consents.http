@@ -1,0 +1,109 @@
+### 약관·개인정보 처리방침 동의(KNK-1334) 수동 검증
+### 준비: docker compose up -d, ./gradlew bootRun. auth/auth-login-google.http에서 로그인해
+### 전역 accessToken을 준비합니다. 아래 요청은 0부터 순서대로 실행합니다.
+### 기록 요청은 실제 동의 이력을 남깁니다. 테스트 계정으로 웹의 해당 버전 문서를 확인한 뒤 실행하세요.
+### 동의 시각은 내부 증빙이며 응답에 없습니다. 재제출 전후 아래 SQL로 최초 시각 보존을 확인합니다.
+### SELECT doc_type, version, agreed_at FROM user_consents
+### WHERE user_id = (SELECT id FROM users WHERE public_id = '테스트 회원 UUID') ORDER BY doc_type, version;
+
+@baseUrl = http://localhost:8080
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 1. 현행 버전 조회·후속 요청 변수 저장(이 요청을 먼저 실행)
+GET {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("동의 조회", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        for (const key of ["terms", "privacy", "age14"]) {
+            client.assert(typeof response.body[key].needsConsent === "boolean", `needsConsent 형식 오류: ${key}`);
+        }
+        client.assert(response.body.age14.requiredVersion === "1", `expected=1 actual=${response.body.age14.requiredVersion}`);
+    });
+    if (response.status === 200) {
+        client.global.set("consentTermsVersion", response.body.terms.requiredVersion);
+        client.global.set("consentPrivacyVersion", response.body.privacy.requiredVersion);
+        client.global.set("consentAge14Version", response.body.age14.requiredVersion);
+    }
+%}
+
+### 2. 한 항목 동의(누락 항목은 기존 상태 유지)
+POST {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"terms":"{{consentTermsVersion}}"}
+
+> {%
+    client.test("약관만 기록", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.terms.needsConsent === false, `expected=false actual=${response.body.terms.needsConsent}`);
+    });
+%}
+
+### 3. 세 항목 동의(다시 실행해도 행·agreed_at 유지)
+POST {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"terms":"{{consentTermsVersion}}","privacy":"{{consentPrivacyVersion}}","age14":"{{consentAge14Version}}"}
+
+> {%
+    client.test("세 항목 기록", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        for (const key of ["terms", "privacy", "age14"]) {
+            client.assert(response.body[key].needsConsent === false, `expected=false actual=${response.body[key].needsConsent} key=${key}`);
+        }
+    });
+%}
+
+### 4. 버전 불일치: 400, 일부 저장도 없음
+POST {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"terms":"{{consentTermsVersion}}","privacy":"invalid-version"}
+
+> {%
+    client.test("버전 불일치", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(response.body.code === "CONSENT_VERSION_MISMATCH", `expected=CONSENT_VERSION_MISMATCH actual=${response.body.code}`);
+    });
+%}
+
+### 5. 전부 미제출: 400
+POST {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"terms":null,"privacy":null,"age14":null}
+
+> {%
+    client.test("미제출 거부", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 6. 미인증: 401
+GET {{baseUrl}}/api/v1/users/me/consents
+
+> {%
+    client.test("미인증 거부", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 7. 정지 테스트 계정 토큰을 별도 suspendedAccessToken 전역 변수에 넣고 실행: 403
+GET {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{suspendedAccessToken}}
+
+> {%
+    client.test("정지 계정 거부", () => client.assert(response.status === 403, `expected=403 actual=${response.status}`));
+%}
+
+### 8. 자유 조회
+GET {{baseUrl}}/api/v1/users/me/consents
+Authorization: Bearer {{accessToken}}

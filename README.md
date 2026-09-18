@@ -71,6 +71,8 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 
 `MANYAK_PUSH_WEB_BASE_URL`은 스토리 완성·출석 리마인드 푸시의 `deepLink`에 쓸 웹 주소입니다(기본 `https://manyak.app`). 개발 웹 주소가 필요한 환경에서는 이 값으로 재정의합니다.
 
+`MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.2`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.4`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
+
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
 ## 엔드포인트
