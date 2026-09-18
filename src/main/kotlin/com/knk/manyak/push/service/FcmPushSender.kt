@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component
 /**
  * FCM 발송기(KNK-1130). 시나리오별 발송(스토리 완성 등)은 전부 이 클래스를 부른다.
  *
- * - ANDROID는 data 전용 + HIGH로 보내 앱이 알림을 조립한다(KNK-1134).
+ * - ANDROID는 data 전용 + 시나리오별 우선순위·TTL로 보내 앱이 알림을 조립한다(KNK-1134).
  * - WEB은 data와 webpush notification을 함께 보내 브라우저가 표시한다(KNK-1271).
  * - 모든 데이터에 `recipientId`(수신 회원 public_id)를 덧붙인다(KNK-1220) — 앱이 기기 공유 시 남의 알림을 거른다.
  * - 커밋 뒤에 불러야 한다. 외부 IO라 도메인 트랜잭션 안에서 부르면 롤백돼도 푸시는 이미 나간다.
@@ -48,7 +48,12 @@ class FcmPushSender(
     private val log = LoggerFactory.getLogger(javaClass)
 
     /** 회원의 등록 기기 전부에 [data]를 보낸다. 발송기가 비활성이거나 토큰이 없으면 아무 일도 하지 않는다. */
-    fun sendToUser(userId: Long, data: Map<String, String>) {
+    fun sendToUser(
+        userId: Long,
+        data: Map<String, String>,
+        priority: AndroidConfig.Priority = AndroidConfig.Priority.HIGH,
+        ttlMillis: Long? = null,
+    ) {
         val messaging = this.messaging
         if (messaging == null) {
             log.debug("FCM 발송기가 비활성이라 푸시를 건너뜁니다. (userId={})", userId)
@@ -65,16 +70,24 @@ class FcmPushSender(
         // 남의 알림(로그아웃 뒤 남은 토큰·늦게 도착한 메시지)을 거른다. 호출자가 같은 키를 넘겨도 여기 값이 이긴다.
         val payload = data + (KEY_RECIPIENT_ID to user.publicId.toString())
         devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId).forEach { deviceToken ->
-            sendTo(messaging, deviceToken, payload)
+            sendTo(messaging, deviceToken, payload, priority, ttlMillis)
         }
     }
 
-    private fun sendTo(messaging: FirebaseMessaging, deviceToken: DevicePushToken, data: Map<String, String>) {
+    private fun sendTo(
+        messaging: FirebaseMessaging,
+        deviceToken: DevicePushToken,
+        data: Map<String, String>,
+        priority: AndroidConfig.Priority,
+        ttlMillis: Long?,
+    ) {
         try {
             val builder = Message.builder().setToken(deviceToken.token).putAllData(data)
             when (deviceToken.platform) {
                 PushPlatform.ANDROID -> builder.setAndroidConfig(
-                    AndroidConfig.builder().setPriority(AndroidConfig.Priority.HIGH).build(),
+                    AndroidConfig.builder().setPriority(priority)
+                        .apply { ttlMillis?.let { setTtl(it) } }
+                        .build(),
                 )
                 PushPlatform.WEB -> builder.setWebpushConfig(
                     WebpushConfig.builder()

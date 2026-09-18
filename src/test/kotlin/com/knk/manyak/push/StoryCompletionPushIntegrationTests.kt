@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -22,6 +23,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
+import org.mockito.ArgumentMatchers.eq
+import org.mockito.ArgumentMatchers.isNull
 import org.mockito.Mockito.after
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.never
@@ -124,7 +127,12 @@ class StoryCompletionPushIntegrationTests {
         // 값 그대로 검증한다 — Kotlin의 non-null 파라미터에 ArgumentCaptor.capture()가 null을 넘겨 NPE가 난다.
         verify(fcmPushSender, timeout(SEND_TIMEOUT_MS)).sendToUser(
             member.id,
-            mapOf("type" to "STORY_COMPLETED", "storyId" to storyId, "title" to STORY_TITLE),
+            mapOf(
+                "type" to "STORY_COMPLETED",
+                "storyId" to storyId,
+                "title" to STORY_TITLE,
+                "deepLink" to "https://manyak.app/stories/$storyId",
+            ),
         )
     }
 
@@ -135,7 +143,7 @@ class StoryCompletionPushIntegrationTests {
 
         completeStory(UUID.randomUUID(), storyline, member).expectStatus().isCreated
 
-        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
     }
 
     @Test
@@ -144,7 +152,7 @@ class StoryCompletionPushIntegrationTests {
 
         completeStory(UUID.randomUUID(), storyline, user = null).expectStatus().isCreated
 
-        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
     }
 
     @Test
@@ -168,7 +176,7 @@ class StoryCompletionPushIntegrationTests {
             .exchange()
             .expectStatus().isCreated
 
-        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
     }
 
     @Test
@@ -182,7 +190,7 @@ class StoryCompletionPushIntegrationTests {
 
         // replay는 COMPLETED 마킹에 도달하지 않으므로 발송도 한 번뿐이다.
         // timeout()은 첫 호출이 오면 바로 통과해 "두 번째가 안 온다"를 못 본다 — 창을 다 기다린 뒤 횟수를 센다.
-        verify(fcmPushSender, after(SEND_TIMEOUT_MS).times(1)).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(SEND_TIMEOUT_MS).times(1)).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
     }
 
     @Test
@@ -193,7 +201,7 @@ class StoryCompletionPushIntegrationTests {
         val storyline = seedStoryline(member)
         val requestId = UUID.randomUUID()
         completeStory(requestId, storyline, member).expectStatus().isCreated
-        verify(fcmPushSender, timeout(SEND_TIMEOUT_MS)).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, timeout(SEND_TIMEOUT_MS)).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
 
         val completed = requestRepository.findByRequestId(requestId)!!
         completed.resultJson = """{"legacy":true}"""
@@ -202,7 +210,7 @@ class StoryCompletionPushIntegrationTests {
 
         completeStory(requestId, storyline, member).expectStatus().isCreated
 
-        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, after(QUIET_WINDOW_MS).never()).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
     }
 
     @Test
@@ -210,7 +218,7 @@ class StoryCompletionPushIntegrationTests {
         val member = saveMember()
         val storyline = seedStoryline(member)
         val requestId = UUID.randomUUID()
-        doThrow(IllegalStateException("FCM 다운")).`when`(fcmPushSender).sendToUser(anyLong(), anyMap())
+        doThrow(IllegalStateException("FCM 다운")).`when`(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(HIGH) ?: HIGH, isNull())
 
         completeStory(requestId, storyline, member).expectStatus().isCreated
 

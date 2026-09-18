@@ -1,5 +1,6 @@
 package com.knk.manyak.push.service
 
+import com.google.firebase.messaging.AndroidConfig
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingException
 import com.google.firebase.messaging.Message
@@ -116,6 +117,33 @@ class FcmPushSenderTest {
         assertThat(fieldOf(captor.value, "webpushConfig")).isNull()
         assertThat(fieldOf(captor.value, "notification")).isNull()
         assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "priority")).isEqualTo("high")
+        assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "ttl")).isNull()
+    }
+
+    @Test
+    fun `ANDROID는 지정한 NORMAL 우선순위와 TTL을 전달한다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
+
+        sender.sendToUser(7L, mapOf("type" to "ATTENDANCE_REMINDER"), AndroidConfig.Priority.NORMAL, 500L)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        val android = fieldOf(captor.value, "androidConfig")!!
+        assertThat(fieldOf(android, "priority")).isEqualTo("normal")
+        assertThat(fieldOf(android, "ttl")).isEqualTo("0.500000000s")
+    }
+
+    @Test
+    fun `프로모션의 NORMAL 우선순위는 TTL을 설정하지 않는다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
+
+        sender.sendToUser(7L, mapOf("type" to "PROMOTION"), AndroidConfig.Priority.NORMAL)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        val android = fieldOf(captor.value, "androidConfig")!!
+        assertThat(fieldOf(android, "priority")).isEqualTo("normal")
+        assertThat(fieldOf(android, "ttl")).isNull()
     }
 
     @Test

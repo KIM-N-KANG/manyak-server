@@ -1,10 +1,13 @@
 package com.knk.manyak.push.service
 
+import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -38,6 +41,8 @@ class AttendanceReminderService(
     private val pushMessageTemplateService: PushMessageTemplateService,
     private val fcmPushSender: FcmPushSender,
     private val clock: Clock = Clock.systemUTC(),
+    @Value("\${manyak.push.web-base-url:https://manyak.app}")
+    private val webBaseUrl: String = "https://manyak.app",
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -56,6 +61,7 @@ class AttendanceReminderService(
             // (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
             "title" to withAdPrefix(text.title),
             "body" to text.body,
+            "deepLink" to "${webBaseUrl.trimEnd('/')}/my/credits?tab=free",
         )
 
         var sent = 0
@@ -71,7 +77,13 @@ class AttendanceReminderService(
                 return@forEach
             }
             // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-            runCatching { fcmPushSender.sendToUser(userId, data) }
+            runCatching {
+                val now = clock.instant()
+                val midnight = now.atZone(SEOUL_ZONE).toLocalDate().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant()
+                fcmPushSender.sendToUser(
+                    userId, data, AndroidConfig.Priority.NORMAL, Duration.between(now, midnight).toMillis(),
+                )
+            }
                 .onSuccess { sent++ }
                 .onFailure { logger.warn("출석 리마인드 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
         }

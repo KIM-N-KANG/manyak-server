@@ -69,6 +69,8 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 `MANYAK_ANALYTICS_AMPLITUDE_ENABLED`·`MANYAK_AMPLITUDE_API_KEY`는 서버 분석 이벤트(`server_*`)의 Amplitude 발행 설정입니다(B1, KNK-514). 기본은 off이며, `ENABLED=true`이고 API 키가 있을 때만 발행합니다. 그 외에는 발행 파사드가 no-op이라 로컬·테스트·키 미주입 운영에서 조용히 꺼집니다. 리전이 EU면 `MANYAK_AMPLITUDE_BASE_URL=https://api.eu.amplitude.com`으로 재정의합니다.
 `MANYAK_REDIS_PORT`은 로컬 Redis 컨테이너가 게시할 포트입니다(기본 `6379`). 앱은 기본적으로 `localhost:6379`에 연결하며, `SPRING_DATA_REDIS_HOST`/`SPRING_DATA_REDIS_PORT`로 재정의합니다. 운영에서는 ElastiCache 엔드포인트를 주입합니다.
 
+`MANYAK_PUSH_WEB_BASE_URL`은 스토리 완성·출석 리마인드 푸시의 `deepLink`에 쓸 웹 주소입니다(기본 `https://manyak.app`). 개발 웹 주소가 필요한 환경에서는 이 값으로 재정의합니다.
+
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
 ## 엔드포인트
