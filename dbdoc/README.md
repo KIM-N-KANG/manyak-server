@@ -47,6 +47,7 @@
 | [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
+| [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -101,6 +102,7 @@ erDiagram
 "public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
+"public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -543,6 +545,12 @@ erDiagram
   varchar_255_ merchant_uid
   timestamp_with_time_zone created_at
   bigint refund_amount
+}
+"public.user_consents" {
+  bigint user_id FK
+  varchar_20_ doc_type
+  varchar_20_ version
+  timestamp_with_time_zone agreed_at
 }
 ```
 

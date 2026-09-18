@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.google.firebase.messaging.AndroidConfig.Priority.NORMAL
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
 import org.mockito.ArgumentMatchers.eq
+import org.mockito.ArgumentMatchers.isNull
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.never
@@ -129,8 +131,8 @@ class PromotionPushIntegrationTests {
             "title" to "(광고) 새 오리지널 스토리가 나왔어요",
             "body" to "이번 주 신작 5편을 지금 만나보세요.",
         )
-        verify(fcmPushSender).sendToUser(first.id, expected)
-        verify(fcmPushSender).sendToUser(second.id, expected)
+        verify(fcmPushSender).sendToUser(first.id, expected, NORMAL)
+        verify(fcmPushSender).sendToUser(second.id, expected, NORMAL)
 
         val result = results.single()
         assertThat(result.campaignId).isEqualTo(campaign.publicId)
@@ -153,7 +155,7 @@ class PromotionPushIntegrationTests {
 
         assertThat(service().sendDue(NOW)).isEmpty()
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SCHEDULED)
     }
 
@@ -164,7 +166,7 @@ class PromotionPushIntegrationTests {
 
         assertThat(service().sendDue(NOW)).isEmpty()
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.CANCELED)
     }
 
@@ -178,7 +180,7 @@ class PromotionPushIntegrationTests {
         val result = service().sendDue(NOW).single()
 
         assertThat(result.targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
     }
 
@@ -192,8 +194,8 @@ class PromotionPushIntegrationTests {
 
         val result = service(Clock.fixed(NIGHT, ZoneOffset.UTC)).sendDue(NIGHT).single()
 
-        verify(fcmPushSender).sendToUser(eq(nightAgreed.id), anyMap())
-        verify(fcmPushSender, never()).sendToUser(eq(dayOnly.id), anyMap())
+        verify(fcmPushSender).sendToUser(eq(nightAgreed.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
+        verify(fcmPushSender, never()).sendToUser(eq(dayOnly.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(result.sent).isEqualTo(1)
         assertThat(result.skipped).isEqualTo(1)
         assertThat(reload(campaign).skippedCount).isEqualTo(1)
@@ -208,12 +210,12 @@ class PromotionPushIntegrationTests {
         doAnswer {
             withdrawMarketingConsent(second.id)
             null
-        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
 
         val result = service().sendDue(NOW).single()
 
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap())
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(result.sent).isEqualTo(1)
         assertThat(result.skipped).isEqualTo(1)
     }
@@ -239,7 +241,7 @@ class PromotionPushIntegrationTests {
             pool.shutdownNow()
         }
 
-        verify(fcmPushSender, times(1)).sendToUser(anyLong(), anyMap())
+        verify(fcmPushSender, times(1)).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
     }
 
     @Test
@@ -247,11 +249,11 @@ class PromotionPushIntegrationTests {
         val first = eligibleMember()
         val second = eligibleMember()
         val campaign = saveCampaign()
-        doThrow(IllegalStateException("FCM down")).`when`(fcmPushSender).sendToUser(eq(first.id), anyMap())
+        doThrow(IllegalStateException("FCM down")).`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
 
         service().sendDue(NOW)
 
-        verify(fcmPushSender).sendToUser(eq(second.id), anyMap())
+        verify(fcmPushSender).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
     }
 
@@ -280,8 +282,8 @@ class PromotionPushIntegrationTests {
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 
-        verify(fcmPushSender).sendToUser(eq(beforeNight.id), anyMap())
-        verify(fcmPushSender, never()).sendToUser(eq(afterNight.id), anyMap())
+        verify(fcmPushSender).sendToUser(eq(beforeNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
+        verify(fcmPushSender, never()).sendToUser(eq(afterNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull())
         assertThat(result.sent).isEqualTo(1)
         assertThat(result.skipped).isEqualTo(1)
     }

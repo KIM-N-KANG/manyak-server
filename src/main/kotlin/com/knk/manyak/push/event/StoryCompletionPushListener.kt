@@ -4,6 +4,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Component
 import org.springframework.transaction.event.TransactionPhase
@@ -27,6 +28,8 @@ import org.springframework.transaction.event.TransactionalEventListener
 class StoryCompletionPushListener(
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
+    @Value("\${manyak.push.web-base-url:https://manyak.app}")
+    private val webBaseUrl: String = "https://manyak.app",
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -49,6 +52,7 @@ class StoryCompletionPushListener(
                     "type" to STORY_COMPLETED_TYPE,
                     "storyId" to event.storyPublicId,
                     "title" to event.title,
+                    "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${event.storyPublicId}",
                 ),
             )
         } catch (ex: RuntimeException) {

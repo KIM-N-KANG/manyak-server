@@ -18,6 +18,9 @@ class CodedResponseStatusException(
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    /** 문서 동의(400): 제출한 버전이 현행 요구 버전과 다르다. */
+    const val CONSENT_VERSION_MISMATCH = "CONSENT_VERSION_MISMATCH"
+
     /** 회원 크레딧 잔액 부족(402). 게스트 체험 한도와 구분한다. */
     const val INSUFFICIENT_CREDIT = "INSUFFICIENT_CREDIT"
 
