@@ -67,6 +67,9 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  legal:
+    terms-version: ${MANYAK_LEGAL_TERMS_VERSION:v1.2}
+    privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.4}
   search:
     opensearch:
       endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
