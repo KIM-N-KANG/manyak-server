@@ -7,6 +7,7 @@
 ### WHERE user_id = (SELECT id FROM users WHERE public_id = '테스트 회원 UUID') ORDER BY doc_type, version;
 
 @baseUrl = http://localhost:8080
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNTS_ACCESS_TOKEN_HERE
 
 ### 0. 서버 상태
 GET {{baseUrl}}/actuator/health
@@ -96,7 +97,8 @@ GET {{baseUrl}}/api/v1/users/me/consents
     client.test("미인증 거부", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
 %}
 
-### 7. 정지 테스트 계정 토큰을 별도 suspendedAccessToken 전역 변수에 넣고 실행: 403
+### 7. 정지 테스트 계정: 403
+### 테스트 계정이 정지되기 전에 발급받은 유효한 access 토큰을 상단 @suspendedAccessToken에 붙여넣고 실행합니다.
 GET {{baseUrl}}/api/v1/users/me/consents
 Authorization: Bearer {{suspendedAccessToken}}
 
