@@ -1,0 +1,127 @@
+### 게스트 개인정보 수집 동의 수동 검증
+### 준비: docker compose up -d postgres redis, ./gradlew bootRun
+### 0부터 순서대로 실행합니다. 테스트 디바이스로 웹의 해당 문서를 확인한 뒤 기록 요청을 실행합니다.
+### 매번 최초 상태를 확인하려면 deviceId와 otherDeviceId를 새 값으로 바꿉니다.
+### 최초 시각 보존은 2와 3 실행 전후 DB에서 확인합니다(시각은 API에 노출하지 않음).
+### SELECT device_id_hash, doc_type, version, agreed_at FROM guest_consents ORDER BY agreed_at;
+
+@baseUrl = http://localhost:8080
+@deviceId = guest-consent-manual-a
+@otherDeviceId = guest-consent-manual-b
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 1. 현행 버전 조회 및 후속 변수 저장
+GET {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}
+
+> {%
+    client.test("동의 조회", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(typeof response.body.guestPrivacy.needsConsent === "boolean", `expected=boolean actual=${response.body.guestPrivacy.needsConsent}`);
+    });
+    if (response.status === 200) client.global.set("guestPrivacyVersion", response.body.guestPrivacy.requiredVersion);
+%}
+
+### 2. 동의 기록
+POST {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"guestPrivacy":"{{guestPrivacyVersion}}"}
+
+> {%
+    client.test("동의 기록", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.guestPrivacy.needsConsent === false, `expected=false actual=${response.body.guestPrivacy.needsConsent}`);
+    });
+%}
+
+### 3. 같은 버전 재제출
+POST {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"guestPrivacy":"{{guestPrivacyVersion}}"}
+
+> {%
+    client.test("같은 버전 재제출", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.guestPrivacy.needsConsent === false, `expected=false actual=${response.body.guestPrivacy.needsConsent}`);
+    });
+%}
+
+### 4. 다른 테스트 디바이스의 독립 상태
+GET {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{otherDeviceId}}
+
+> {%
+    client.test("다른 디바이스 미동의", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.guestPrivacy.needsConsent === true, `expected=true actual=${response.body.guestPrivacy.needsConsent}`);
+    });
+%}
+
+### 5. 버전 불일치
+POST {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"guestPrivacy":"invalid-version"}
+
+> {%
+    client.test("버전 불일치 거부", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+        client.assert(response.body.code === "CONSENT_VERSION_MISMATCH", `expected=CONSENT_VERSION_MISMATCH actual=${response.body.code}`);
+    });
+%}
+
+### 6. 헤더 없는 조회
+GET {{baseUrl}}/api/v1/guests/consents
+
+> {%
+    client.test("헤더 누락 거부", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 7. 헤더 없는 기록
+POST {{baseUrl}}/api/v1/guests/consents
+Content-Type: application/json
+
+{"guestPrivacy":"{{guestPrivacyVersion}}"}
+
+> {%
+    client.test("헤더 누락 거부", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 8. 동의 항목 미제출
+POST {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("미제출 거부", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 9. 로그인 토큰 첨부 시 디바이스 상태 조회(선택 실행)
+### auth/auth-login-google.http에서 전역 accessToken을 먼저 준비합니다.
+GET {{baseUrl}}/api/v1/guests/consents
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
+
+> {%
+    client.test("토큰과 무관한 디바이스 동의", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.guestPrivacy.needsConsent === false, `expected=false actual=${response.body.guestPrivacy.needsConsent}`);
+    });
+%}
+
+### 10. 자유 조회
+GET {{baseUrl}}/api/v1/guests/consents
+X-Manyak-Device-Id: {{deviceId}}

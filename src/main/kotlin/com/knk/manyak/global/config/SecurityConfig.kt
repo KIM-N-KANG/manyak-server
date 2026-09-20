@@ -177,6 +177,9 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            // 게스트 동의는 회원 토큰과 상태를 사용하지 않고 디바이스 헤더로만 식별한다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/guests/consents"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/guests/consents"),
             // 그로블은 raw body HMAC으로 인증하며 사용자 Bearer 토큰을 사용하지 않는다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/webhooks/groble"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/google"),
