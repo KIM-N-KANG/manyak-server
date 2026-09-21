@@ -47,11 +47,33 @@ class StoryImageService(
     fun presign(storyId: String, userId: Long, request: ImagePresignRequest): ImagePresignResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 쓰기 차단(스펙 §4-5 B20).
         val story = storyImageAccess.resolveOwnedStory(storyId, userId)
-        val kind = requireNotNull(request.kind)
+        return issuePresign(request) { kind, contentType ->
+            UploadedImageObjectKeys.newObjectKey(kind, story.publicId, contentType)
+        }
+    }
+
+    /**
+     * 스토리 없이 받는 presign(일반 제작 등록 전, KNK-1390). 소유 스코프가 스토리가 아니라 **사용자**라
+     * 키가 `{prefix}/drafts/{userPublicId}/` 아래로 떨어진다. 등록 요청이 같은 규칙으로 키를 검증한다.
+     */
+    @Transactional(readOnly = true)
+    fun presignDraft(userId: Long, request: ImagePresignRequest): ImagePresignResponse {
+        suspensionGuard.requireActive(userId)
+        val userPublicId = storyImageAccess.resolveUserPublicId(userId)
+        return issuePresign(request) { kind, contentType ->
+            UploadedImageObjectKeys.newDraftObjectKey(kind, userPublicId, contentType)
+        }
+    }
+
+    /** 스토리 스코프와 draft 스코프가 공유하는 발급 절차. 키를 어디에 두느냐만 다르다. */
+    private fun issuePresign(
+        request: ImagePresignRequest,
+        objectKeyOf: (UploadedImageKind, String) -> String,
+    ): ImagePresignResponse {
         val contentType = storyImageAccess.requireSupportedContentType(request.contentType)
         storyImageAccess.requireUploadEnabled()
 
-        val objectKey = UploadedImageObjectKeys.newObjectKey(kind, story.publicId, contentType)
+        val objectKey = objectKeyOf(requireNotNull(request.kind), contentType)
         val uploadUrl = uploadedImageStorage.presignPut(
             objectKey = objectKey,
             contentType = contentType,

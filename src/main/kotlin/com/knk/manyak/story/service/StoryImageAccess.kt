@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.image.service.UploadedImageKind
@@ -24,6 +25,7 @@ import java.util.UUID
 @Component
 class StoryImageAccess(
     private val storyRepository: StoryRepository,
+    private val userRepository: UserRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
     private val uploadedImageStorage: UploadedImageStorage,
 ) {
@@ -54,11 +56,33 @@ class StoryImageAccess(
      * 그다음 객체를 확인한다. presign 서명이 형식·크기를 고정하지만, 서명 없이 올라온 객체나 재사용된 키가
      * 있을 수 있어 신뢰 경계에서 한 번 더 본다.
      */
-    fun resolveUploadedUrl(story: Story, kind: UploadedImageKind, objectKey: String): String {
+    fun resolveUploadedUrl(story: Story, kind: UploadedImageKind, objectKey: String): String =
+        resolveUploadedUrlUnder(
+            expectedPrefix = "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+            objectKey = objectKey,
+            mismatchMessage = "이 스토리의 업로드 이미지가 아닙니다.",
+        )
+
+    /**
+     * 등록 전 업로드(일반 제작, KNK-1390)의 객체 키 검증. 스토리가 아직 없으니 소유는 사용자 공개 식별자로
+     * 가른다. 그 밖의 규칙(HEAD 존재·5MB·형식)은 스토리 스코프와 같다.
+     */
+    fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String): String =
+        resolveUploadedUrlUnder(
+            expectedPrefix = "${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/",
+            objectKey = objectKey,
+            mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
+        )
+
+    /** 업로드 이미지를 쓸 수 있는 회원의 공개 식별자. 토큰은 유효하나 사용자가 사라졌으면 401이다. */
+    fun resolveUserPublicId(userId: Long): UUID =
+        userRepository.findById(userId).orElse(null)?.publicId
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+
+    private fun resolveUploadedUrlUnder(expectedPrefix: String, objectKey: String, mismatchMessage: String): String {
         requireUploadEnabled()
-        val expectedPrefix = "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/"
         if (!objectKey.startsWith(expectedPrefix)) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리의 업로드 이미지가 아닙니다.")
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, mismatchMessage)
         }
         val uploaded = uploadedImageStorage.head(objectKey)
             ?: throw CodedResponseStatusException(
