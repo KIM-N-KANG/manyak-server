@@ -1,0 +1,56 @@
+### 무효 토큰 삭제 내부 API 검증
+### 준비: 로컬 DB와 Redis, MANYAK_INTERNAL_SHARED_SECRET를 설정한 서버.
+### internalSecret은 커밋하지 않는 IntelliJ HTTP 환경 파일에 넣습니다.
+### 테스트 전용 회원 accessToken을 넣고 위에서부터 실행합니다.
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_TEST_ACCESS_TOKEN_HERE
+@manualToken = invalid-token-manual-test
+
+### 서버 상태
+GET {{baseUrl}}/actuator/health
+
+### 테스트 토큰 등록
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"token":"{{manualToken}}","platform":"ANDROID"}
+
+### 삭제 후 같은 요청을 다시 실행해도 204
+DELETE {{baseUrl}}/internal/push-tokens
+X-Manyak-Internal-Secret: {{internalSecret}}
+Content-Type: application/json
+
+{"token":"{{manualToken}}"}
+
+> {%
+    client.test("멱등 삭제", () => client.assert(response.status === 204, `expected=204 actual=${response.status}`));
+%}
+
+### 헤더 누락
+DELETE {{baseUrl}}/internal/push-tokens
+Content-Type: application/json
+
+{"token":"{{manualToken}}"}
+
+> {%
+    client.test("인증 거절", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 빈 토큰
+DELETE {{baseUrl}}/internal/push-tokens
+X-Manyak-Internal-Secret: {{internalSecret}}
+Content-Type: application/json
+
+{"token":""}
+
+> {%
+    client.test("입력 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 시크릿을 비우고 서버를 재시작한 후 별도 실행
+DELETE {{baseUrl}}/internal/push-tokens
+
+> {%
+    client.test("내부 API 비활성", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
