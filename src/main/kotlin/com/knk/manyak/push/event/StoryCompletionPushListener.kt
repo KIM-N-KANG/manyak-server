@@ -92,7 +92,7 @@ class StoryCompletionPushListener(
                 fcmPushSender.sendToUser(event.userId, data)
             }
         } catch (ex: RuntimeException) {
-            // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. @Async 스레드라 요청에 전파되지는
+            // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. 워커 스레드라 요청에 전파되지는
             // 않지만, 삼키지 않으면 스택트레이스만 남고 어느 회원의 발송이 깨졌는지 알 수 없다.
             log.warn(
                 "스토리 완성 푸시 발송에 실패했습니다. (userId={}, storyId={}, error={})",
