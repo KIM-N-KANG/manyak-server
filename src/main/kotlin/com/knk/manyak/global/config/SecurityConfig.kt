@@ -2,6 +2,7 @@ package com.knk.manyak.global.config
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
 import com.knk.manyak.global.security.DeletedAccountRejectionFilter
 import com.knk.manyak.global.security.OptionalJwtAuthenticationFilter
 import jakarta.servlet.http.HttpServletRequest
@@ -36,6 +37,7 @@ class SecurityConfig {
         environment: Environment,
         userRepository: UserRepository,
         objectMapper: ObjectMapper,
+        @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
     ): SecurityFilterChain =
         http
             .cors { }
@@ -114,9 +116,15 @@ class SecurityConfig {
                     // 두 경로 모두 bearerTokenResolver에서도 토큰을 무시하므로(아래 resolver),
                     // 클라이언트가 자동 첨부한 만료/위조 access 헤더로 막히지 않는다.
                     // /api/v1/auth/me 는 anyRequest().authenticated() 로 보호된다.
+                    // 내부 경로는 사용자 인증 대신 InternalSecretAuthenticationFilter가 시크릿을 검증한다.
+                    .requestMatchers(INTERNAL_API_MATCHER).permitAll()
                     .requestMatchers(*BEARER_SKIP_MATCHERS).permitAll()
                     .anyRequest().authenticated()
             }
+            .addFilterBefore(
+                InternalSecretAuthenticationFilter(internalSharedSecret, INTERNAL_API_MATCHER, objectMapper),
+                BearerTokenAuthenticationFilter::class.java,
+            )
             // optional 인증 필터. 익명 허용(permitAll) 도메인 경로(OPTIONAL_AUTH_MATCHERS)에서만 동작하며,
             // 유효 access 토큰이면 principal(Jwt)을 채우고 토큰이 없거나 만료·위조면 익명으로 통과시킨다(401 없음).
             // 이 경로들은 아래 bearerTokenResolver에서 토큰 resolve를 건너뛰므로 RS 필터(BearerTokenAuthenticationFilter)가
@@ -153,6 +161,7 @@ class SecurityConfig {
         val delegate = DefaultBearerTokenResolver()
         return BearerTokenResolver { request: HttpServletRequest ->
             if (
+                INTERNAL_API_MATCHER.matches(request) ||
                 BEARER_SKIP_MATCHERS.any { it.matches(request) } ||
                 OPTIONAL_AUTH_MATCHERS.any { it.matches(request) } ||
                 PUBLIC_STATIC_MATCHERS.any { it.matches(request) }
@@ -168,6 +177,8 @@ class SecurityConfig {
     }
 
     private companion object {
+        val INTERNAL_API_MATCHER = PathPatternRequestMatcher.withDefaults().matcher("/internal/**")
+
         // 공개 정적 자산(프로필 프리셋 이미지, 스펙 §4-5 B7). permitAll이면서, 모바일 등이 자동 첨부한 만료/위조
         // access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 토큰 resolve도 건너뛴다(공개 응답 author.profileImageUrl로 참조).
         val PUBLIC_STATIC_MATCHERS = arrayOf(
