@@ -41,6 +41,20 @@ class StoryImageAccess(
         return story
     }
 
+    /**
+     * 위와 같지만 **스토리 행을 쓰기 락으로 잠근다**(PR #273 Codex P1). 이미지를 바꾸면서 공개 스냅샷을
+     * 갱신하는 경로가 대상이다: 잠그지 않으면 동시에 커밋된 비공개 전환을 못 보고, 낡은 PUBLIC 판정으로
+     * **비공개 개작을 공개 스냅샷에 덮어써** 기존 독자에게 유출된다. 수정 API와 같은 락이라 두 경로가
+     * 스토리 단위로 직렬화된다.
+     */
+    fun resolveOwnedStoryForUpdate(storyId: String, userId: Long): Story {
+        val story = storyRepository
+            .findByPublicIdAndDeletedAtIsNullForUpdate(parsePublicIdOrNull(storyId) ?: notFoundStory())
+            ?: notFoundStory()
+        requireUploadableOwner(story, userId)
+        return story
+    }
+
     /** 이 스토리의 인물. 형식 오류·없음은 404로 통일한다(IDOR 차단). */
     fun resolveCharacter(story: Story, characterId: String): StoryCharacter {
         val publicId = parsePublicIdOrNull(characterId) ?: notFoundCharacter()
@@ -56,11 +70,21 @@ class StoryImageAccess(
      * 그다음 객체를 확인한다. presign 서명이 형식·크기를 고정하지만, 서명 없이 올라온 객체나 재사용된 키가
      * 있을 수 있어 신뢰 경계에서 한 번 더 본다.
      */
-    fun resolveUploadedUrl(story: Story, kind: UploadedImageKind, objectKey: String): String =
+    fun resolveUploadedUrl(
+        story: Story,
+        ownerPublicId: UUID?,
+        kind: UploadedImageKind,
+        objectKey: String,
+    ): String =
         resolveUploadedUrlUnder(
-            expectedPrefix = "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+            // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작·수정 화면에서 같은
+            // 업로드 컴포넌트를 쓰면 수정 중에도 draft 키가 올라오는데, 내가 올린 객체라면 막을 이유가 없다.
+            expectedPrefixes = listOfNotNull(
+                "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+                ownerPublicId?.let { "${UploadedImageObjectKeys.draftPrefixOf(kind, it)}/" },
+            ),
             objectKey = objectKey,
-            mismatchMessage = "이 스토리의 업로드 이미지가 아닙니다.",
+            mismatchMessage = "내가 이 스토리에 올린 업로드 이미지가 아닙니다.",
         )
 
     /**
@@ -69,7 +93,7 @@ class StoryImageAccess(
      */
     fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String): String =
         resolveUploadedUrlUnder(
-            expectedPrefix = "${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/",
+            expectedPrefixes = listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"),
             objectKey = objectKey,
             mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
         )
@@ -79,9 +103,13 @@ class StoryImageAccess(
         userRepository.findById(userId).orElse(null)?.publicId
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
-    private fun resolveUploadedUrlUnder(expectedPrefix: String, objectKey: String, mismatchMessage: String): String {
+    private fun resolveUploadedUrlUnder(
+        expectedPrefixes: List<String>,
+        objectKey: String,
+        mismatchMessage: String,
+    ): String {
         requireUploadEnabled()
-        if (!objectKey.startsWith(expectedPrefix)) {
+        if (expectedPrefixes.none { objectKey.startsWith(it) }) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, mismatchMessage)
         }
         val uploaded = uploadedImageStorage.head(objectKey)

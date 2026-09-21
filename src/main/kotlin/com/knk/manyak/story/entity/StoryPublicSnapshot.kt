@@ -71,6 +71,15 @@ data class StoryPublicSnapshot(
     val storySettings: StorySettingsSnapshot = StorySettingsSnapshot(),
     val startSettings: List<StartSettingSnapshot> = emptyList(),
     val mainEvents: List<MainEventSnapshot> = emptyList(),
+
+    /**
+     * 마지막 공개 시점의 인물 이미지(KNK-1391). AI 턴 요청의 `character_images[]`와 같은 평면 목록이다.
+     *
+     * 담는 이유: 인물·이미지는 수정 API로 바뀌는데(추가·개명·삭제) 턴 조립이 라이브 행을 읽으면 비공개로
+     * 되돌린 뒤의 개작이 타인의 진행 중 채팅에 그대로 실린다(PR #273 Codex P1). 설정·사건·엔딩과 같은 규칙으로
+     * 여기에 굳혀 스냅샷 분기가 이 값을 쓴다. 캡처 시점에 `APPROVED`인 것만 담는다 — 노출 규칙과 같다.
+     */
+    val characterImages: List<CharacterImageSnapshot> = emptyList(),
 ) {
     /**
      * [chatStartSettingId]가 가리키는 시작 설정. 시작 설정이 지워져 참조가 끊긴 채팅은 null이다.
@@ -125,4 +134,12 @@ data class MainEventSnapshot(
     val name: String = "",
     val description: String = "",
     val keySentence: String = "",
+)
+
+/** 인물 이미지 한 장(KNK-1391). id를 담지 않는다 — 라이브 행과 잇지 않고 그대로 AI 요청 재료로 쓴다. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class CharacterImageSnapshot(
+    val name: String = "",
+    val imageName: String = "",
+    val imageUrl: String = "",
 )

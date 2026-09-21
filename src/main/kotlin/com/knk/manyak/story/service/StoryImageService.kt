@@ -40,6 +40,7 @@ class StoryImageService(
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val uploadedImageStorage: UploadedImageStorage,
     private val suspensionGuard: SuspensionGuard,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
     private val characterImageAdder: CharacterImageAdder,
 ) {
 
@@ -91,11 +92,16 @@ class StoryImageService(
     @Transactional
     fun deleteThumbnail(storyId: String, userId: Long) {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        // 스냅샷 갱신이 뒤따르므로 공개 범위 판정 전에 스토리를 잠근다(PR #273 Codex P1).
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         // S3 객체는 지우지 않는다 — 지난 채팅 카드·스냅샷이 그 URL을 가리킬 수 있다(스펙 결정 기록).
         story.thumbnailImageUrl = null
         // 상태도 되돌린다. 남겨 두면 다음에 올린 표지가 옛 판정(PENDING·REJECTED)을 물려받아 안 보인다.
         story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
+        // 공개 스토리면 마지막 공개 재료도 같이 굳힌다(PR #273 Codex P2). 수정 API 밖에서 표지·인물 이미지를
+        // 바꾸는 경로가 스냅샷을 갱신하지 않으면, 나중에 비공개로 내려갔을 때 기존 독자에게 가는 재료가
+        // 공개 당시와 어긋난다(지운 이미지가 되살아나거나 추가한 이미지가 사라진다).
+        storyPublicSnapshotService.refresh(story)
         eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }
 
@@ -116,11 +122,13 @@ class StoryImageService(
     @Transactional
     fun deleteCharacterImage(storyId: String, characterId: String, imageId: String, userId: Long) {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         val character = storyImageAccess.resolveCharacter(story, characterId)
         val imagePublicId = StoryImageAccess.parsePublicIdOrNull(imageId) ?: return
         storyCharacterImageRepository.findByCharacterIdAndPublicId(character.id, imagePublicId)
             ?.let(storyCharacterImageRepository::delete)
+        storyCharacterImageRepository.flush()
+        storyPublicSnapshotService.refresh(story)
     }
 
     companion object {
@@ -139,6 +147,7 @@ class CharacterImageAdder(
     private val storyCharacterRepository: StoryCharacterRepository,
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val suspensionGuard: SuspensionGuard,
+    private val storyPublicSnapshotService: StoryPublicSnapshotService,
 ) {
 
     @Transactional
@@ -149,13 +158,20 @@ class CharacterImageAdder(
         request: AddCharacterImageRequest,
     ): CharacterImageResponse {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        // 스토리 → 인물 순으로 잠근다. 수정 API(PATCH)와 같은 순서라 역순 획득이 없고, 스냅샷 갱신이
+        // 낡은 공개 범위로 실행되지 않는다(PR #273 Codex P1).
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         val character = storyImageAccess.resolveCharacter(story, characterId)
-        val imageName = requireValidImageName(character.name, requireNotNull(request.imageName))
 
         // 상한 판정 전에 인물 행을 잠근다. 잠그지 않으면 상한 직전의 동시 추가 둘이 모두 개수를 읽고 통과해
         // 11장이 되고 sort_order도 겹친다(검수 지적). 같은 트랜잭션 안에서 count → insert가 직렬화된다.
-        storyCharacterRepository.findByIdForUpdate(character.id)
+        //
+        // 잠근 뒤 **현재 이름을 다시 읽어** 이름을 검증한다(PR #273 Codex P2). 락을 기다리는 동안 수정 API가
+        // 이 인물을 지웠거나(→ null, 404) 개명했을 수 있는데, 먼저 검증하면 사라진 인물에 insert해 FK가 깨지고
+        // 개명된 인물에는 옛 접두의 이미지가 붙는다.
+        val currentName = storyCharacterRepository.findNameByIdForUpdate(character.id)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "인물을 찾을 수 없습니다.")
+        val imageName = requireValidImageName(currentName, requireNotNull(request.imageName))
         val existing = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
         if (existing.size >= StoryCharacterImage.MAX_IMAGES_PER_CHARACTER) {
             throw ResponseStatusException(
@@ -168,6 +184,8 @@ class CharacterImageAdder(
         }
         val imageUrl = storyImageAccess.resolveUploadedUrl(
             story,
+            // 소유자 확인은 resolveOwnedStory가 이미 했으므로 user_id는 non-null이다.
+            storyImageAccess.resolveUserPublicId(userId),
             UploadedImageKind.CHARACTER,
             requireNotNull(request.objectKey),
         )
@@ -182,6 +200,8 @@ class CharacterImageAdder(
         )
         // 위반을 커밋까지 미루지 않고 여기서 드러낸다. 잡지는 않는다 — 409 변환은 트랜잭션 밖의 몫이다.
         storyCharacterImageRepository.flush()
+        // 공개 스토리면 마지막 공개 재료도 함께 굳힌다(위 deleteThumbnail과 같은 이유).
+        storyPublicSnapshotService.refresh(story)
         return CharacterImageResponse(
             id = saved.publicId.toString(),
             imageName = saved.imageName,

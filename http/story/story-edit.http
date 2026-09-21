@@ -6,6 +6,9 @@
 ###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
 ###   - [KNK-1021] 공개 전환: 별도 엔드포인트 없이 PATCH의 visibility 부분 갱신으로 PRIVATE↔PUBLIC을 오간다(§4-3-8·B26). 소유자만 가능하고 전환은 읽기 가시성에 즉시 반영된다. GET /edit 응답에도 visibility가 실린다(폼 왕복).
 ###   - [KNK-149] 게스트(소유자 없는) 스토리는 PUBLIC으로 전환할 수 없다 → 400 `GUEST_CANNOT_PUBLISH`(E7). 공개는 로그인해 이관한 뒤에 가능하다(E12~E15가 소유자 경로).
+###   - [KNK-1391] 인물 동기화: characters[]로 전체 교체. id가 기존과 맞으면 개명(in-place), 없으면 추가, 빠진 기존은 이미지까지 삭제.
+###     각 인물의 images[]도 같은 방식이며 항목은 {id}(기존 유지) 또는 {objectKey, imageName}(신규)입니다. images 생략은 유지, 빈 배열은 전부 삭제.
+###     인물을 개명하면 그 인물 이미지 이름의 접두(`{인물이름}_`)도 함께 바뀝니다.
 ###   - [KNK-515] 시작 설정 복수화: startSettings[]로 전체 교체(동기화). 각 원소 id(공개 식별자)가 기존과 일치하면 in-place 갱신(행 identity 보존), 없으면 추가, 빠진 기존은 삭제. 추천 입력·엔딩은 각 시작 설정에 중첩.
 ###
 ### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
@@ -263,4 +266,159 @@ Content-Type: application/json
         client.assert(response.status === 200, `actual=${response.status}`);
         client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
     });
+%}
+
+### ───────────── 인물 편집(KNK-1391) ─────────────
+### C1부터는 **회원 소유 스토리**와 access 토큰이 필요합니다(이미지는 회원만). 이미지 저장소 설정도 필요합니다
+### (없으면 503 — 로컬 MinIO 설정은 story-images.http 헤더 참고).
+### 실행 순서: C0 → C1 → C2 → C3 → C4 → C5 → C6. C7~C9는 에러 케이스입니다.
+
+### C0. (준비) 회원 소유 스토리를 만들고 id를 전역에 저장
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "title": "인물 편집 대상",
+  "oneLineIntro": "인물을 나중에 추가한다",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ]
+}
+
+> {%
+    client.test("준비 등록은 201이다", () => { client.assert(response.status === 201, `actual=${response.status}`); });
+    client.global.set("characterStoryId", response.body.id);
+%}
+
+### C1. (준비) 이 스토리 경로로 인물 이미지 presign 발급
+POST {{baseUrl}}/api/v1/stories/{{characterStoryId}}/images/presign
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "kind": "CHARACTER", "contentType": "image/webp", "contentLength": 1024 }
+
+> {%
+    client.test("presign 은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(503이면 저장소 미설정). actual=${response.status}`);
+    });
+    client.global.set("editCharacterKey", response.body.objectKey);
+%}
+
+### C1-1. (수동) 위 uploadUrl 로 PUT — 터미널에서 실행하세요.
+#   dd if=/dev/urandom of=/tmp/face.webp bs=1024 count=1
+#   curl -X PUT -H 'Content-Type: image/webp' --data-binary @/tmp/face.webp '<C1 응답의 uploadUrl>'
+
+### C2. (해피 패스) 등록 때 없던 인물을 이미지와 함께 추가 → 200
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "name": "세린", "images": [ { "objectKey": "{{editCharacterKey}}", "imageName": "세린_웃음" } ] } ] }
+
+> {%
+    client.test("인물 추가는 200이다", () => {
+        client.assert(response.status === 200,
+            `200이 아닙니다(400 UPLOAD_NOT_FOUND 면 C1-1 PUT 을 건너뛴 것). actual=${response.status} body=${JSON.stringify(response.body)}`);
+    });
+    client.test("인물과 이미지가 응답에 실린다", () => {
+        const c = response.body.characters[0];
+        client.assert(c.name === "세린", `인물 이름 불일치. actual=${JSON.stringify(response.body.characters)}`);
+        client.assert(c.images[0].imageName === "세린_웃음", `이미지 이름 불일치. actual=${JSON.stringify(c.images)}`);
+    });
+    client.global.set("editCharacterId", response.body.characters[0].id);
+    client.global.set("editImageId", response.body.characters[0].images[0].id);
+%}
+
+### C3. (해피 패스) 인물 개명 → 이미지 이름 접두가 함께 바뀐다
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "id": "{{editCharacterId}}", "name": "루아" } ] }
+
+> {%
+    client.test("개명은 200이다", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+    client.test("이미지 이름 접두가 따라 바뀐다", () => {
+        const c = response.body.characters[0];
+        client.assert(c.name === "루아", `actual=${c.name}`);
+        client.assert(c.images[0].imageName === "루아_웃음",
+            `이미지 이름이 안 따라왔습니다. actual=${c.images[0].imageName}`);
+    });
+%}
+
+### C4. (왕복) images 를 생략하면 기존 이미지가 유지된다
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "id": "{{editCharacterId}}", "name": "루아" } ] }
+
+> {%
+    client.test("이미지가 유지된다", () => {
+        client.assert(response.body.characters[0].images.length === 1,
+            `이미지가 유지되지 않았습니다. actual=${JSON.stringify(response.body.characters[0].images)}`);
+    });
+%}
+
+### C5. (해피 패스) 기존 이미지는 id로 유지하고 이름만 바꾼다
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "id": "{{editCharacterId}}", "name": "루아", "images": [ { "id": "{{editImageId}}", "imageName": "루아_분노" } ] } ] }
+
+> {%
+    client.test("이미지 이름 변경은 200이다", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+    client.test("이름이 바뀌고 id는 그대로다", () => {
+        const img = response.body.characters[0].images[0];
+        client.assert(img.imageName === "루아_분노", `actual=${img.imageName}`);
+    });
+%}
+
+### C6. (해피 패스) 빈 배열로 인물을 모두 삭제한다 — 이미지도 함께 사라진다(S3 객체는 남음)
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [] }
+
+> {%
+    client.test("인물 전체 삭제는 200이다", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+    client.test("characters 가 빈 배열이다", () => {
+        client.assert(response.body.characters.length === 0, `actual=${JSON.stringify(response.body.characters)}`);
+    });
+%}
+
+### C7. (에러) 이 스토리에 없는 인물 id → 400
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301", "name": "없는인물" } ] }
+
+> {%
+    client.test("없는 인물 id 는 400이다", () => { client.assert(response.status === 400, `actual=${response.status}`); });
+%}
+
+### C8. (에러) 인물 이름 중복 → 400
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "name": "세린" }, { "name": "세린" } ] }
+
+> {%
+    client.test("이름 중복은 400이다", () => { client.assert(response.status === 400, `actual=${response.status}`); });
+%}
+
+### C9. (에러) 이미지 항목에 id 와 objectKey 를 함께 보내면 400
+PATCH {{baseUrl}}/api/v1/stories/{{characterStoryId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "characters": [ { "name": "세린", "images": [ { "id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301", "objectKey": "{{editCharacterKey}}", "imageName": "세린_웃음" } ] } ] }
+
+> {%
+    client.test("id 와 objectKey 동시 지정은 400이다", () => { client.assert(response.status === 400, `actual=${response.status}`); });
 %}

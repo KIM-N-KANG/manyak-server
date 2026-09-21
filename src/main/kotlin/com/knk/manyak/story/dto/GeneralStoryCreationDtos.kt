@@ -4,6 +4,7 @@ import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
+import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
@@ -79,8 +80,18 @@ data class CreateGeneralStoryRequest(
  * 일반 제작 인물 입력(KNK-1390). 이름과 이미지만 받는다 — 외형 필드(성별·머리·의상)는 컴파일 산출물이라
  * 일반 제작에는 없고, 인물 묘사는 `storySettings.characterSetting` 통글이 담는다.
  */
-@Schema(description = "일반 제작 인물 입력")
+@Schema(description = "인물 입력(제작·수정 공용)")
 data class GeneralCharacterInput(
+    // 수정(PATCH)에서만 쓰는 매칭 키(공개 식별자 UUID). 기존 인물을 지목해 개명하고, 없으면(null) 새 인물로
+    // 추가한다. 제작(POST)에는 매칭할 기존 인물이 없으므로 지정하면 400이다(시작 설정과 달리 조용히 무시하지
+    // 않는다 — 인물 id는 이미지 연결 대상이라 잘못 지목하면 엉뚱한 인물에 붙는다).
+    @field:Schema(
+        description = "인물 ID(공개 식별자). 수정 시 기존 인물 매칭 키로 쓴다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val id: String? = null,
+
     @field:NotBlank(message = "인물 이름은 비어 있을 수 없습니다.")
     @field:Size(max = 100, message = "인물 이름은 100자를 넘을 수 없습니다.")
     @field:Schema(description = "인물 이름(스토리 내 유일)", example = "세린")
@@ -91,25 +102,45 @@ data class GeneralCharacterInput(
         max = StoryCharacterImage.MAX_IMAGES_PER_CHARACTER,
         message = "인물당 이미지는 ${StoryCharacterImage.MAX_IMAGES_PER_CHARACTER}장까지 올릴 수 있습니다.",
     )
-    @field:Schema(description = "이 인물의 이미지 목록(최대 10장, 선택). 배열 순서가 표시 순서가 된다.")
-    val images: List<@NotNull GeneralCharacterImageInput> = emptyList(),
+    @field:Schema(
+        description = "이 인물의 이미지 목록(최대 10장). 배열 순서가 표시 순서가 된다. " +
+            "**수정에서 생략하면 기존 이미지를 유지**하고 빈 배열이면 모두 삭제한다.",
+        nullable = true,
+    )
+    val images: List<@NotNull GeneralCharacterImageInput>? = null,
 )
 
-/** 인물 이미지 한 장의 입력(KNK-1390). 연결 규칙은 등록 후 추가(`POST .../characters/{id}/images`)와 같다. */
-@Schema(description = "일반 제작 인물 이미지 입력")
+/**
+ * 인물 이미지 한 장의 입력(KNK-1390·1391). 연결 규칙은 등록 후 추가(`POST .../characters/{id}/images`)와 같다.
+ *
+ * 항목은 **기존 유지([id])이거나 신규 추가([objectKey])** 둘 중 하나다. 수정 폼이 기존 이미지를 되돌려 보낼 때
+ * `objectKey`를 쓸 수 없어(저장값이 URL이라 키를 모른다) id로 지목한다.
+ */
+@Schema(description = "인물 이미지 입력")
 data class GeneralCharacterImageInput(
-    @field:NotBlank(message = "객체 키는 비어 있을 수 없습니다.")
-    @field:Schema(description = "presign으로 받은 객체 키. 내 인물 업로드 prefix 아래여야 한다")
-    val objectKey: String,
+    @field:Schema(description = "기존 이미지 ID(공개 식별자). 이 이미지를 그대로 유지한다.", nullable = true)
+    val id: String? = null,
 
-    @field:NotBlank(message = "이미지 이름은 비어 있을 수 없습니다.")
+    @field:Schema(description = "presign으로 받은 객체 키(신규 추가). 내 업로드 prefix 아래여야 한다", nullable = true)
+    val objectKey: String? = null,
+
     @field:Size(max = 120, message = "이미지 이름은 120자를 넘을 수 없습니다.")
     @field:Schema(
-        description = "`{인물이름}_{접미}` 형식. 접미는 1~20자 한글·영문·숫자이며 같은 인물 안에서 유일하다",
+        description = "`{인물이름}_{접미}` 형식. 접미는 1~20자 한글·영문·숫자이며 같은 인물 안에서 유일하다. " +
+            "신규 추가에는 필수이고, 기존 유지에서 생략하면 현재 이름을 유지한다(인물 개명 시 접두만 갱신).",
         example = "세린_웃음",
+        nullable = true,
     )
-    val imageName: String,
-)
+    val imageName: String? = null,
+) {
+    @AssertTrue(message = "이미지 항목은 기존 이미지 id 또는 새 objectKey 중 하나만 지정해야 합니다.")
+    @Schema(hidden = true)
+    fun hasExactlyOneSource(): Boolean = id.isNullOrBlank() != objectKey.isNullOrBlank()
+
+    @AssertTrue(message = "새로 추가하는 이미지는 이름이 필요합니다.")
+    @Schema(hidden = true)
+    fun hasImageNameWhenNew(): Boolean = objectKey.isNullOrBlank() || !imageName.isNullOrBlank()
+}
 
 @Schema(description = "스토리 설정 통글 4필드(모두 필수)")
 data class GeneralStorySettingsInput(

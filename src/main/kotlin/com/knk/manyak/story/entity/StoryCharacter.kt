@@ -46,8 +46,9 @@ class StoryCharacter(
     @JoinColumn(name = "story_id", nullable = false)
     val story: Story,
 
+    // 수정에서 개명할 수 있다(KNK-1391). 이름이 바뀌면 이 인물 이미지 이름의 접두도 함께 바뀐다.
     @Column(nullable = false, length = 100)
-    val name: String,
+    var name: String,
 
     @Column(name = "image_url", columnDefinition = "TEXT")
     val imageUrl: String? = null,
