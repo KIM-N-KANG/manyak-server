@@ -4,6 +4,8 @@ import com.knk.manyak.search.service.StorySearchService
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
+import com.knk.manyak.story.dto.ImagePresignRequest
+import com.knk.manyak.story.dto.ImagePresignResponse
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
@@ -11,6 +13,7 @@ import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.GeneralStoryCreationService
+import com.knk.manyak.story.service.StoryImageService
 import com.knk.manyak.story.service.StoryListSort
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -44,6 +47,7 @@ class StoryController(
     private val storySearchService: StorySearchService,
     private val storyService: StoryService,
     private val generalStoryCreationService: GeneralStoryCreationService,
+    private val storyImageService: StoryImageService,
 ) {
 
     @Operation(
@@ -68,6 +72,41 @@ class StoryController(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: CreateGeneralStoryRequest,
     ): SimpleStoryCreateResponse = generalStoryCreationService.createGeneralStory(request, userId)
+
+    @Operation(
+        summary = "등록 전 이미지 업로드용 presigned URL 발급",
+        description = "스토리를 만들기 전에 표지·인물 이미지를 올릴 서명 URL을 발급합니다(KNK-1390). 객체 키는 " +
+            "`{thumbnails|characters}/uploaded/drafts/{내 식별자}/{uuid}.{ext}`이며, PUT을 마친 뒤 그 `objectKey`를 " +
+            "`POST /stories/general`의 `thumbnailObjectKey`·`characters[].images[].objectKey`에 넣습니다. " +
+            "규칙(형식 3종·5MB·만료 10분)은 스토리 스코프 발급과 같고 **인증이 필요**합니다.",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "201",
+                description = "발급 성공",
+                content = [Content(schema = Schema(implementation = ImagePresignResponse::class))],
+            ),
+            ApiResponse(responseCode = "400", description = "지원하지 않는 형식·크기 초과", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "403", description = "정지된 계정", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(
+                responseCode = "503",
+                description = "이미지 저장소가 설정되지 않음(로컬 기본값)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
+        ],
+    )
+    @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/images/presign")
+    fun presignDraftImage(
+        @CurrentUserId userId: Long?,
+        @Valid @RequestBody request: ImagePresignRequest,
+    ): ImagePresignResponse = storyImageService.presignDraft(
+        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다."),
+        request,
+    )
 
     @Operation(
         summary = "스토리 ID 목록으로 스토리 목록 조회",

@@ -126,6 +126,37 @@ class StoryImageUploadControllerIntegrationTests {
     }
 
     @Test
+    fun `스토리 없이 발급한 draft 키는 내 drafts 경로 아래다`() {
+        // 일반 제작(KNK-1390)은 등록 전에 올린다. 스토리가 아직 없어 사용자 공개 식별자로 소유를 가른다.
+        val owner = saveUser()
+
+        restTestClient.post()
+            .uri("/api/v1/stories/images/presign")
+            .header("Authorization", bearer(owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(coverBody())
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.uploadUrl").isNotEmpty
+            .jsonPath("$.objectKey").value<String> {
+                assertThat(it).startsWith("thumbnails/uploaded/drafts/${owner.publicId}/")
+                assertThat(it).endsWith(".webp")
+            }
+            .jsonPath("$.expiresInSeconds").isEqualTo(600)
+    }
+
+    @Test
+    fun `미인증 draft presign은 401이다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/images/presign")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(coverBody())
+            .exchange()
+            .expectStatus().isUnauthorized
+    }
+
+    @Test
     fun `게스트 소유 스토리는 presign이 400이다`() {
         // 소유자가 없으면 올린 이미지의 책임 주체가 없다. 이관 뒤에 올린다.
         presign(saveStory(owner = null), saveUser(), coverBody()).expectStatus().isBadRequest

@@ -1,5 +1,6 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
@@ -11,10 +12,14 @@ import jakarta.validation.constraints.Size
 /** 추천 입력 개수(채팅 시작 화면 계약과 동일, 정확히 3개). */
 const val GENERAL_SUGGESTED_INPUTS_SIZE = 3
 
+/** 인물 수 상한. 간편 제작(주인공 1 + 주변 인물 5)과 같은 실질 상한을 쓴다. */
+const val MAX_GENERAL_CHARACTERS = 6
+
 /**
  * 일반 제작 스토리 등록 요청(단발, 스펙 §4-3-8). 검증 후 그대로 저장하며 AI를 호출하지 않는다
  * (컴파일은 희소 입력 확장인데 일반 제작 입력은 이미 확장된 형태라 크레딧 소모·게스트 한도 카운트가 없다).
- * 이미지·썸네일은 §4-3-9 이미지 인프라 범위라 이 요청에서 제외한다.
+ * 표지·인물 이미지는 등록 전에 presign(`POST /stories/images/presign`)으로 올린 객체 키를 함께 보낸다(KNK-1390).
+ * 이미지 필드는 **회원만** 쓸 수 있다 — 소유자가 없으면 올린 이미지의 책임 주체가 없다.
  */
 @Schema(description = "일반 제작 스토리 등록 요청(단발). 검증 후 그대로 저장하며 AI를 호출하지 않는다.")
 data class CreateGeneralStoryRequest(
@@ -55,6 +60,55 @@ data class CreateGeneralStoryRequest(
 
     @field:Schema(description = "공개 범위. 생략하면 PRIVATE.", example = "PRIVATE", defaultValue = "PRIVATE")
     val visibility: StoryVisibility = StoryVisibility.PRIVATE,
+
+    // 표지 업로드(KNK-1390). presign으로 받은 draft 객체 키를 그대로 넣는다. 서버가 내 draft 경로 아래인지
+    // 확인하고 HEAD로 존재·크기·형식을 재검증한 뒤 절대 URL을 굳힌다. 없으면 프리셋 자동 연결만 남는다.
+    @field:Schema(
+        description = "업로드한 표지의 객체 키(presign 응답의 objectKey). 회원만 쓸 수 있다.",
+        nullable = true,
+    )
+    val thumbnailObjectKey: String? = null,
+
+    @field:Valid
+    @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
+    @field:Schema(description = "인물 목록(최대 6명, 선택). 이름은 스토리 안에서 유일하다.")
+    val characters: List<@NotNull GeneralCharacterInput> = emptyList(),
+)
+
+/**
+ * 일반 제작 인물 입력(KNK-1390). 이름과 이미지만 받는다 — 외형 필드(성별·머리·의상)는 컴파일 산출물이라
+ * 일반 제작에는 없고, 인물 묘사는 `storySettings.characterSetting` 통글이 담는다.
+ */
+@Schema(description = "일반 제작 인물 입력")
+data class GeneralCharacterInput(
+    @field:NotBlank(message = "인물 이름은 비어 있을 수 없습니다.")
+    @field:Size(max = 100, message = "인물 이름은 100자를 넘을 수 없습니다.")
+    @field:Schema(description = "인물 이름(스토리 내 유일)", example = "세린")
+    val name: String,
+
+    @field:Valid
+    @field:Size(
+        max = StoryCharacterImage.MAX_IMAGES_PER_CHARACTER,
+        message = "인물당 이미지는 ${StoryCharacterImage.MAX_IMAGES_PER_CHARACTER}장까지 올릴 수 있습니다.",
+    )
+    @field:Schema(description = "이 인물의 이미지 목록(최대 10장, 선택). 배열 순서가 표시 순서가 된다.")
+    val images: List<@NotNull GeneralCharacterImageInput> = emptyList(),
+)
+
+/** 인물 이미지 한 장의 입력(KNK-1390). 연결 규칙은 등록 후 추가(`POST .../characters/{id}/images`)와 같다. */
+@Schema(description = "일반 제작 인물 이미지 입력")
+data class GeneralCharacterImageInput(
+    @field:NotBlank(message = "객체 키는 비어 있을 수 없습니다.")
+    @field:Schema(description = "presign으로 받은 객체 키. 내 인물 업로드 prefix 아래여야 한다")
+    val objectKey: String,
+
+    @field:NotBlank(message = "이미지 이름은 비어 있을 수 없습니다.")
+    @field:Size(max = 120, message = "이미지 이름은 120자를 넘을 수 없습니다.")
+    @field:Schema(
+        description = "`{인물이름}_{접미}` 형식. 접미는 1~20자 한글·영문·숫자이며 같은 인물 안에서 유일하다",
+        example = "세린_웃음",
+    )
+    val imageName: String,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(모두 필수)")

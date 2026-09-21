@@ -8,6 +8,9 @@
 ###     조용히 PRIVATE으로 낮추지 않습니다. 공개는 로그인해 이관한 뒤에 가능합니다.
 ###   - 응답은 간편 제작과 동일: {id, title, oneLineIntro, description, genres, startSettings[]}.
 ###   - [KNK-515] 시작 설정 복수화: startSettings[](최소 1개). 추천 입력(정확히 3)·엔딩(최대 10)은 각 시작 설정에 중첩. 주요 사건은 스토리 스코프.
+###   - [KNK-1390] 등록 요청에 이미지: thumbnailObjectKey(표지 1장)·characters[](최대 6명, 각 images[] 최대 10장).
+###     등록 **전에** POST /stories/images/presign 으로 키를 받아 S3 에 직접 PUT 한 뒤 그 objectKey 를 넣습니다.
+###     이미지 필드는 **회원만** 쓸 수 있습니다(미인증이 보내면 400). 인물 이름만 보내는 것은 게스트도 됩니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun (기본 포트 8080), Postgres 기동(docker compose up -d)
@@ -205,5 +208,181 @@ Authorization: Bearer {{suspendedAccessToken}}
 > {%
     client.test("정지된 회원의 등록은 403이다", () => {
         client.assert(response.status === 403, `403이 아닙니다(토큰이 정지 계정 것인지 확인). actual=${response.status}`);
+    });
+%}
+
+### ───────────── 등록 요청 이미지(KNK-1390) ─────────────
+### 7번부터는 access 토큰과 이미지 저장소 설정이 필요합니다. 저장소가 비어 있으면 presign 이 503입니다
+### (로컬 MinIO 설정은 story-images.http 헤더 참고). 실행 순서: 7 → 7-1(curl) → 8 → 8-1(curl) → 9 → 10.
+
+### 7. (해피 패스) 스토리 없이 표지 presign 발급 → 201, 키가 내 drafts 경로 아래다
+POST {{baseUrl}}/api/v1/stories/images/presign
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "kind": "COVER", "contentType": "image/webp", "contentLength": 1024 }
+
+> {%
+    client.test("draft presign 은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다(503이면 저장소 미설정). actual=${response.status}`);
+    });
+    client.test("키가 thumbnails/uploaded/drafts/ 아래다", () => {
+        client.assert(response.body.objectKey.indexOf("thumbnails/uploaded/drafts/") === 0,
+            `objectKey 가 기대와 다릅니다. actual=${response.body.objectKey}`);
+        client.assert(response.body.expiresInSeconds === 600, `만료가 600초가 아닙니다. actual=${response.body.expiresInSeconds}`);
+    });
+    client.global.set("draftCoverUploadUrl", response.body.uploadUrl);
+    client.global.set("draftCoverKey", response.body.objectKey);
+%}
+
+### 7-1. (수동) 위 uploadUrl 로 직접 PUT — 터미널에서 실행하세요.
+# .http 파일은 로컬 파일 바이트를 그대로 PUT 하기 번거로워 curl 로 대신합니다.
+# Content-Type·Content-Length 는 **presign 요청에 넣은 값 그대로**여야 서명이 맞습니다(다르면 S3 가 403).
+#
+#   dd if=/dev/urandom of=/tmp/cover.webp bs=1024 count=1
+#   curl -X PUT -H 'Content-Type: image/webp' --data-binary @/tmp/cover.webp '<7번 응답의 uploadUrl>'
+#
+# PUT 을 건너뛰고 9번을 실행하면 400 `UPLOAD_NOT_FOUND` 가 납니다(서버가 HEAD 로 재검증).
+
+### 8. (해피 패스) 인물 이미지 presign 발급 → 201
+POST {{baseUrl}}/api/v1/stories/images/presign
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "kind": "CHARACTER", "contentType": "image/webp", "contentLength": 1024 }
+
+> {%
+    client.test("인물 draft presign 은 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+    });
+    client.test("키가 characters/uploaded/drafts/ 아래다", () => {
+        client.assert(response.body.objectKey.indexOf("characters/uploaded/drafts/") === 0,
+            `objectKey 가 기대와 다릅니다. actual=${response.body.objectKey}`);
+    });
+    client.global.set("draftCharacterUploadUrl", response.body.uploadUrl);
+    client.global.set("draftCharacterKey", response.body.objectKey);
+%}
+
+### 8-1. (수동) 8번 uploadUrl 로 PUT — 7-1과 같은 방식입니다.
+#   curl -X PUT -H 'Content-Type: image/webp' --data-binary @/tmp/cover.webp '<8번 응답의 uploadUrl>'
+
+### 9. (해피 패스) 표지·인물 이미지를 함께 등록 → 201
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "title": "이미지까지 올린 스토리",
+  "oneLineIntro": "표지와 인물 이미지를 등록 요청에 함께 싣는다",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "세린은 은발의 검사다", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "thumbnailObjectKey": "{{draftCoverKey}}",
+  "characters": [
+    { "name": "세린", "images": [ { "objectKey": "{{draftCharacterKey}}", "imageName": "세린_웃음" } ] }
+  ]
+}
+
+> {%
+    client.test("이미지 포함 등록은 201이다", () => {
+        client.assert(response.status === 201,
+            `201이 아닙니다(400 UPLOAD_NOT_FOUND 면 7-1·8-1 PUT 을 건너뛴 것). actual=${response.status} body=${JSON.stringify(response.body)}`);
+    });
+    client.global.set("imagedStoryId", response.body.id);
+%}
+
+### 10. (왕복) 편집 폼에서 표지 URL·인물 이미지가 보인다
+GET {{baseUrl}}/api/v1/stories/{{imagedStoryId}}/edit
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("편집 폼은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("업로드한 표지 URL 이 실린다", () => {
+        client.assert(typeof response.body.thumbnailUrl === "string" && response.body.thumbnailUrl.indexOf("uploaded/drafts/") > 0,
+            `thumbnailUrl 이 업로드본이 아닙니다. actual=${response.body.thumbnailUrl}`);
+        client.assert(response.body.thumbnailModerationStatus === "APPROVED",
+            `검수 상태가 APPROVED 가 아닙니다. actual=${response.body.thumbnailModerationStatus}`);
+    });
+    client.test("인물과 인물 이미지가 실린다", () => {
+        const c = response.body.characters[0];
+        client.assert(c.name === "세린", `인물 이름 불일치. actual=${JSON.stringify(response.body.characters)}`);
+        client.assert(c.images[0].imageName === "세린_웃음", `이미지 이름 불일치. actual=${JSON.stringify(c.images)}`);
+    });
+%}
+
+### 11. (에러) 미인증 draft presign → 401
+POST {{baseUrl}}/api/v1/stories/images/presign
+Content-Type: application/json
+
+{ "kind": "COVER", "contentType": "image/webp", "contentLength": 1024 }
+
+> {%
+    client.test("미인증 presign 은 401이다", () => {
+        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 12. (에러) 게스트가 이미지를 보내면 400 — 소유자가 없으면 이미지의 책임 주체가 없다
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+
+{
+  "title": "게스트 이미지 시도",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "thumbnailObjectKey": "{{draftCoverKey}}"
+}
+
+> {%
+    client.test("게스트의 이미지 등록은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 13. (에러) 올린 적 없는 키는 400 `UPLOAD_NOT_FOUND`
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "title": "업로드 미완료 키",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "thumbnailObjectKey": "{{draftCoverKey}}-없는키.webp"
+}
+
+> {%
+    client.test("업로드 미완료 키는 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+    client.test("code 가 UPLOAD_NOT_FOUND 다", () => {
+        client.assert(response.body.code === "UPLOAD_NOT_FOUND", `code 가 다릅니다. actual=${response.body.code}`);
+    });
+%}
+
+### 14. (에러) 이미지 이름이 `{인물이름}_{접미}` 형식이 아니면 400
+POST {{baseUrl}}/api/v1/stories/general
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "title": "이미지 이름 형식 위반",
+  "oneLineIntro": "차단되어야 함",
+  "genres": ["판타지"],
+  "storySettings": { "worldSetting": "w", "characterSetting": "c", "userRoleSetting": "u", "ruleSetting": "r" },
+  "startSettings": [ { "name": "시작", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] } ],
+  "characters": [ { "name": "세린", "images": [ { "objectKey": "{{draftCharacterKey}}", "imageName": "루아_웃음" } ] } ]
+}
+
+> {%
+    client.test("이름 형식 위반은 400이다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
     });
 %}
