@@ -48,6 +48,7 @@
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
+| [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -548,6 +549,12 @@ erDiagram
 }
 "public.user_consents" {
   bigint user_id FK
+  varchar_20_ doc_type
+  varchar_20_ version
+  timestamp_with_time_zone agreed_at
+}
+"public.guest_consents" {
+  varchar_64_ device_id_hash
   varchar_20_ doc_type
   varchar_20_ version
   timestamp_with_time_zone agreed_at
