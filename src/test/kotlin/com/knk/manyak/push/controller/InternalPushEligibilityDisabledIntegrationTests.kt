@@ -18,6 +18,13 @@ import java.util.UUID
 class InternalPushEligibilityDisabledIntegrationTests {
     @Autowired private lateinit var client: RestTestClient
 
+    @org.junit.jupiter.api.Test
+    fun `시크릿 미설정이면 토큰 삭제도 404다`() {
+        client.delete().uri("/internal/push-tokens").exchange().expectStatus().isNotFound
+        client.delete().uri("/internal/push-tokens").header("X-Manyak-Internal-Secret", "arbitrary-secret")
+            .exchange().expectStatus().isNotFound
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["", "?kind=SERVICE&at=2026-09-21T03:00:00Z"])
     fun `시크릿 미설정이면 인증과 파라미터에 앞서 404다`(query: String) {
