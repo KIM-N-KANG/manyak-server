@@ -92,7 +92,8 @@ class StoryImageService(
     @Transactional
     fun deleteThumbnail(storyId: String, userId: Long) {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        // 스냅샷 갱신이 뒤따르므로 공개 범위 판정 전에 스토리를 잠근다(PR #273 Codex P1).
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         // S3 객체는 지우지 않는다 — 지난 채팅 카드·스냅샷이 그 URL을 가리킬 수 있다(스펙 결정 기록).
         story.thumbnailImageUrl = null
         // 상태도 되돌린다. 남겨 두면 다음에 올린 표지가 옛 판정(PENDING·REJECTED)을 물려받아 안 보인다.
@@ -121,7 +122,7 @@ class StoryImageService(
     @Transactional
     fun deleteCharacterImage(storyId: String, characterId: String, imageId: String, userId: Long) {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         val character = storyImageAccess.resolveCharacter(story, characterId)
         val imagePublicId = StoryImageAccess.parsePublicIdOrNull(imageId) ?: return
         storyCharacterImageRepository.findByCharacterIdAndPublicId(character.id, imagePublicId)
@@ -157,7 +158,9 @@ class CharacterImageAdder(
         request: AddCharacterImageRequest,
     ): CharacterImageResponse {
         suspensionGuard.requireActive(userId)
-        val story = storyImageAccess.resolveOwnedStory(storyId, userId)
+        // 스토리 → 인물 순으로 잠근다. 수정 API(PATCH)와 같은 순서라 역순 획득이 없고, 스냅샷 갱신이
+        // 낡은 공개 범위로 실행되지 않는다(PR #273 Codex P1).
+        val story = storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId)
         val character = storyImageAccess.resolveCharacter(story, characterId)
 
         // 상한 판정 전에 인물 행을 잠근다. 잠그지 않으면 상한 직전의 동시 추가 둘이 모두 개수를 읽고 통과해

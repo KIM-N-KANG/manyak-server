@@ -41,6 +41,20 @@ class StoryImageAccess(
         return story
     }
 
+    /**
+     * 위와 같지만 **스토리 행을 쓰기 락으로 잠근다**(PR #273 Codex P1). 이미지를 바꾸면서 공개 스냅샷을
+     * 갱신하는 경로가 대상이다: 잠그지 않으면 동시에 커밋된 비공개 전환을 못 보고, 낡은 PUBLIC 판정으로
+     * **비공개 개작을 공개 스냅샷에 덮어써** 기존 독자에게 유출된다. 수정 API와 같은 락이라 두 경로가
+     * 스토리 단위로 직렬화된다.
+     */
+    fun resolveOwnedStoryForUpdate(storyId: String, userId: Long): Story {
+        val story = storyRepository
+            .findByPublicIdAndDeletedAtIsNullForUpdate(parsePublicIdOrNull(storyId) ?: notFoundStory())
+            ?: notFoundStory()
+        requireUploadableOwner(story, userId)
+        return story
+    }
+
     /** 이 스토리의 인물. 형식 오류·없음은 404로 통일한다(IDOR 차단). */
     fun resolveCharacter(story: Story, characterId: String): StoryCharacter {
         val publicId = parsePublicIdOrNull(characterId) ?: notFoundCharacter()
