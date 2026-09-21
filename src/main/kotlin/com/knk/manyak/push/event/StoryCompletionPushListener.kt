@@ -2,6 +2,7 @@ package com.knk.manyak.push.event
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.client.NotificationClient
+import com.knk.manyak.push.config.PushAsyncConfig
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
@@ -43,7 +44,9 @@ class StoryCompletionPushListener(
     private val log = LoggerFactory.getLogger(javaClass)
 
     // 트랜잭션을 열지 않는다 — 조회 한 번과 발송뿐이라 Spring Data가 여는 트랜잭션으로 충분하다.
-    @Async
+    // 실행기를 이름으로 지정한다. 기본 @Async 실행기에는 MDC decorator가 없어 워커에서 상관 식별자가
+    // 사라지고, remote 모드의 알림 서비스 호출이 request_id 없이 나간다(PushAsyncConfig).
+    @Async(PushAsyncConfig.PUSH_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onStoryCompleted(event: StoryCompletedEvent) {
         try {
