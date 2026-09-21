@@ -12,6 +12,9 @@ import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -51,6 +54,7 @@ class StoryImageUploadControllerIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
     @Autowired private lateinit var storyCharacterImageRepository: StoryCharacterImageRepository
+    @Autowired private lateinit var snapshotRepository: StoryPublicSnapshotRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -106,6 +110,38 @@ class StoryImageUploadControllerIntegrationTests {
 
     private fun addImageBody(story: Story, imageName: String) =
         """{"objectKey":"${characterKey(story)}","imageName":"$imageName"}"""
+
+    @Test
+    fun `공개 스토리의 인물 이미지를 추가·삭제하면 공개 스냅샷도 따라 갱신된다`() {
+        // 수정 API 밖에서 이미지를 바꾸는 경로가 스냅샷을 갱신하지 않으면, 나중에 비공개로 내려갔을 때
+        // 기존 독자에게 가는 재료가 공개 당시와 어긋난다(PR #273 Codex P2).
+        val owner = saveUser()
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "공개 스토리",
+                thumbnailImageKey = "thumb_0001",
+                status = StoryStatus.PUBLISHED,
+                visibility = StoryVisibility.PUBLIC,
+            ),
+        )
+        val character = saveCharacter(story)
+
+        addImage(story, character, owner, addImageBody(story, "세린_웃음")).expectStatus().isCreated
+
+        val added = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(added.characterImages.map { it.imageName }).containsExactly("세린_웃음")
+
+        val imageId = storyCharacterImageRepository.findAll().single().publicId
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}/characters/${character.publicId}/images/$imageId")
+            .header("Authorization", bearer(owner))
+            .exchange()
+            .expectStatus().isNoContent
+
+        val removed = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(removed.characterImages).isEmpty()
+    }
 
     // ---- presign ----
 

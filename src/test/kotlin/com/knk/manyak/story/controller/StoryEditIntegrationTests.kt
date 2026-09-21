@@ -20,6 +20,9 @@ import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
+import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.entity.StoryPublicSnapshotRow
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
@@ -63,6 +66,7 @@ class StoryEditIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var snapshotRepository: StoryPublicSnapshotRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -800,6 +804,81 @@ class StoryEditIntegrationTests {
         val byPublicId = storyCharacterImageRepository.findAll().associateBy { it.publicId }
         assertEquals("세린_분노", byPublicId.getValue(smile.publicId).imageName)
         assertEquals("세린_웃음", byPublicId.getValue(anger.publicId).imageName)
+    }
+
+    @Test
+    fun `개명으로 이미지 이름이 120자를 넘으면 400이다`() {
+        // 인물 100자 + `_` + 접미 20자 = 121자. 요청 DTO는 보낸 이름만 재므로 자동 생성된 이름은
+        // 여기서 걸러야 insert 500이 안 난다(Codex P2).
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        seedImage(character, "세린_" + "가".repeat(20))
+        val longName = "린".repeat(100)
+
+        patchCharacters(story, user, """{"characters": [{"id": "${character.publicId}", "name": "$longName"}]}""")
+            .expectStatus().isBadRequest
+
+        assertEquals("세린", storyCharacterRepository.findAll().single().name)
+    }
+
+    @Test
+    fun `게스트 스토리도 기존 이미지를 id로 되돌려 보내면 유지된다`() {
+        // 되돌려 보내는 것은 업로드가 아니다. 회원 업로더를 요구하면 게스트 스토리의 폼 왕복이 막힌다(Codex P2).
+        val story = seedStory(userId = null)
+        val character = seedCharacter(story, "세린")
+        val image = seedImage(character, "세린_웃음")
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """{"characters": [{"id": "${character.publicId}", "name": "세린", "images": [{"id": "${image.publicId}"}]}]}""",
+            )
+            .exchange()
+            .expectStatus().isOk
+
+        assertEquals("세린_웃음", storyCharacterImageRepository.findAll().single().imageName)
+    }
+
+    @Test
+    fun `임시 이름과 같은 이름을 쓰는 인물이 있어도 개명이 된다`() {
+        // 임시값이 예측 가능하면(공개 식별자 등) 사용자가 그 이름을 미리 지어 두고 유니크 충돌을 만들 수 있다.
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val serin = seedCharacter(story, "세린")
+        // 이 인물은 요청에 그대로 남아 삭제되지 않는다 — 옛 임시값(`#{개명 대상 publicId}`)과 정면으로 부딪힌다.
+        val decoy = seedCharacter(story, "#${serin.publicId}")
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${serin.publicId}", "name": "루아"}, {"id": "${decoy.publicId}", "name": "#${serin.publicId}"}]}""",
+        ).expectStatus().isOk
+
+        assertEquals(setOf("루아", "#${serin.publicId}"), storyCharacterRepository.findAll().map { it.name }.toSet())
+    }
+
+    @Test
+    fun `인물 이미지가 없는 옛 스냅샷도 비공개 전환 직전에 다시 캡처된다`() {
+        // 이 릴리스 전에 만들어진 스냅샷 JSON에는 characterImages가 없다. 전환 뒤 refresh는 no-op이라
+        // 그대로 굳으면 기존 독자의 인물 재료가 통째로 빈다(Codex P2).
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        story.status = StoryStatus.PUBLISHED
+        story.visibility = StoryVisibility.PUBLIC
+        storyRepository.save(story)
+        val character = seedCharacter(story, "세린")
+        seedImage(character, "세린_웃음")
+        // 옛 스냅샷: 인물 이미지 필드가 비어 있다.
+        snapshotRepository.save(
+            StoryPublicSnapshotRow(storyId = story.id, snapshot = StoryPublicSnapshot(title = story.title)),
+        )
+
+        patchCharacters(story, user, """{"visibility": "PRIVATE"}""").expectStatus().isOk
+
+        val snapshot = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertEquals(listOf("세린_웃음"), snapshot.characterImages.map { it.imageName })
     }
 
     @Test

@@ -85,6 +85,14 @@ class StoryEditService(
         // 스토리가 폼 저장 자체를 못 하게 되면 안 된다).
         requireOwnerCanPublish(story.userId, request.visibility?.takeIf { it != story.visibility })
 
+        // 공개 → 비공개로 내려가는 요청은 **바뀌기 전에** 한 번 캡처한다(PR #273 Codex P2). 아래 끝의
+        // refresh는 이미 비공개라 no-op이라, 이 릴리스 전에 만들어진 스냅샷(인물 이미지가 없는 JSON)이
+        // 그대로 굳어 기존 독자의 인물 재료가 통째로 빈다. 마이그레이션 백필 대신 전환 순간을 잡는다 —
+        // 백필은 그 시점의 공개 스토리만 덮고, 이후 같은 구멍이 다시 생기면 또 놓친다.
+        if (story.isPubliclyVisible() && request.visibility != null && request.visibility != story.visibility) {
+            storyPublicSnapshotService.refresh(story)
+        }
+
         // 기본 정보 — 보낸 필드만 교체. 제목·한 줄 소개는 present-only 비어있음 검증(제작과 동일 계약).
         request.title?.let {
             if (it.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목은 비어 있을 수 없습니다.")
@@ -203,12 +211,17 @@ class StoryEditService(
         // 비켜 두고 한 번 flush하면 중간 충돌이 사라진다. 임시값은 공개 식별자라 다른 이름과 겹치지 않는다.
         val renamed = resolved.mapNotNull { (input, match) -> match?.takeIf { it.name != input.name } }
         if (renamed.isNotEmpty()) {
-            renamed.forEach { it.name = "#${it.publicId}" }
+            // 임시값은 **요청 시점 난수**다. 공개 식별자를 쓰면 사용자가 그 값을 인물 이름으로 미리 지어 둘 수
+            // 있어(이름 검증은 형식을 따지지 않는다) 임시 단계가 유니크 제약에 걸린다(PR #273 Codex P2).
+            renamed.forEach { it.name = temporaryName() }
             storyCharacterRepository.flush()
         }
 
-        // 이미지가 실린 요청은 회원 소유 스토리만이다. 업로드 키 검증에 소유자 식별자가 필요해 한 번만 읽는다.
-        val ownerPublicId = if (resolved.any { !it.first.images.isNullOrEmpty() }) requireImageUploader(story) else null
+        // **새 객체를 올리는 요청만** 회원 소유 스토리로 제한한다(PR #273 Codex P2). 편집 폼이 기존 이미지를
+        // id로 되돌려 보내는 것은 업로드가 아니라 유지이고, 게스트 스토리(간편 제작 산출물에도 이미지가 있다)의
+        // 폼 왕복을 막을 이유가 없다. 업로드 키 검증에 소유자 식별자가 필요해 그때 한 번만 읽는다.
+        val hasNewUpload = resolved.any { (input, _) -> input.images.orEmpty().any { !it.objectKey.isNullOrBlank() } }
+        val ownerPublicId = if (hasNewUpload) requireImageUploader(story) else null
 
         resolved.forEach { (input, match) ->
             val character = match ?: StoryCharacter(story = story, name = input.name)
@@ -237,7 +250,9 @@ class StoryEditService(
         val existing = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
         if (inputs == null) {
             // 생략 = 미전송 = 유지. 개명했다면 `{인물이름}_{접미}` 규칙이 깨지지 않게 접두만 갈아끼운다.
-            existing.forEach { it.imageName = renameImagePrefix(it.imageName, previousName, character.name) }
+            existing.forEach {
+                it.imageName = requireStorableImageName(renameImagePrefix(it.imageName, previousName, character.name))
+            }
             return
         }
 
@@ -258,7 +273,7 @@ class StoryEditService(
         val finalNames = resolved.map { (item, match) ->
             val name = item.imageName?.takeIf { it.isNotBlank() }
                 ?: renameImagePrefix(requireNotNull(match).imageName, previousName, character.name)
-            requireValidImageName(character.name, name)
+            requireStorableImageName(requireValidImageName(character.name, name))
         }
         requireDistinctCharacterImageNames(finalNames)
 
@@ -270,7 +285,7 @@ class StoryEditService(
         val renamed = resolved.mapIndexed { index, (_, match) -> match to finalNames[index] }
             .mapNotNull { (match, finalName) -> match?.takeIf { it.imageName != finalName } }
         if (renamed.isNotEmpty()) {
-            renamed.forEach { it.imageName = "#${it.publicId}" }
+            renamed.forEach { it.imageName = temporaryName() }
             storyCharacterImageRepository.flush()
         }
 
@@ -295,6 +310,24 @@ class StoryEditService(
             }
         }
     }
+
+    /**
+     * 저장 가능한 이미지 이름인지 본다(PR #273 Codex P2). 인물 이름 100자 + `_` + 접미 20자면 121자가 돼
+     * `story_character_images.image_name VARCHAR(120)`을 넘는데, 요청 DTO는 **보낸 이름**만 재므로 개명이
+     * 자동으로 만든 이름은 걸러지지 않는다. insert에서 500이 나기 전에 400으로 돌려준다.
+     */
+    private fun requireStorableImageName(imageName: String): String {
+        if (imageName.length > MAX_IMAGE_NAME_LENGTH) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "인물 이름이 길어 이미지 이름이 ${MAX_IMAGE_NAME_LENGTH}자를 넘습니다. 인물 이름이나 이미지 접미를 줄여 주세요.",
+            )
+        }
+        return imageName
+    }
+
+    /** 이름 교환의 임시값. 사용자가 미리 지어 둘 수 없도록 요청 시점 난수를 쓴다. */
+    private fun temporaryName(): String = "#tmp-${UUID.randomUUID()}"
 
     /** 인물 개명에 이미지 이름 접두를 맞춘다. 규칙을 벗어난 이름(옛 접두가 아님)은 손대지 않는다. */
     private fun renameImagePrefix(imageName: String, previousName: String, newName: String): String =
@@ -390,6 +423,11 @@ class StoryEditService(
                 },
             )
         }
+    }
+
+    private companion object {
+        /** `story_character_images.image_name` 컬럼 길이(V76). DTO의 @Size와 같은 값이다. */
+        const val MAX_IMAGE_NAME_LENGTH = 120
     }
 
     /** 시작 설정 공개 식별자(UUID 문자열)를 파싱한다. 형식 오류는 null로 반환해 호출부에서 400 처리한다. */
