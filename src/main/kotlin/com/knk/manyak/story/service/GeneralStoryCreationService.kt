@@ -183,12 +183,22 @@ class GeneralStoryCreationService(
         )
     }
 
+    /** 제작 요청에는 수정용 매칭 키가 올 수 없다(가리킬 기존 행이 없다). 조용히 무시하면 이미지가 사라진다. */
+    private fun requireNoExistingIds(input: GeneralCharacterInput) {
+        if (input.id != null || input.images.orEmpty().any { it.id != null }) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "제작 요청에는 기존 인물·이미지 ID를 보낼 수 없습니다.",
+            )
+        }
+    }
+
     /**
      * 이미지 필드를 쓸 수 있는 회원의 공개 식별자. 이미지가 없으면 null이고(게스트 등록 그대로 허용),
      * 이미지가 있는데 미인증이면 400이다 — 소유자가 없으면 올린 이미지의 책임 주체가 없다(스펙 §4-3-8).
      */
     private fun resolveUploaderPublicId(request: CreateGeneralStoryRequest, userId: Long?): UUID? {
-        val hasImages = request.thumbnailObjectKey != null || request.characters.any { it.images.isNotEmpty() }
+        val hasImages = request.thumbnailObjectKey != null || request.characters.any { !it.images.isNullOrEmpty() }
         if (!hasImages) return null
         if (userId == null) {
             throw ResponseStatusException(
@@ -207,19 +217,22 @@ class GeneralStoryCreationService(
         if (characters.isEmpty()) return
         requireDistinctCharacterNames(characters.map { it.name })
         characters.forEach { input ->
+            // 제작에는 매칭할 기존 인물·이미지가 없다. id를 보냈다면 수정 요청을 잘못 보낸 것이라 400으로 돌려준다.
+            requireNoExistingIds(input)
             val character = storyCharacterRepository.save(StoryCharacter(story = story, name = input.name))
-            if (input.images.isEmpty()) return@forEach
-            val imageNames = input.images.map { requireValidImageName(character.name, it.imageName) }
+            val images = input.images.orEmpty()
+            if (images.isEmpty()) return@forEach
+            val imageNames = images.map { requireValidImageName(character.name, requireNotNull(it.imageName)) }
             requireDistinctCharacterImageNames(imageNames)
             storyCharacterImageRepository.saveAll(
-                input.images.mapIndexed { index, image ->
+                images.mapIndexed { index, image ->
                     StoryCharacterImage(
                         character = character,
                         imageName = imageNames[index],
                         imageUrl = storyImageAccess.resolveDraftUploadedUrl(
                             requireNotNull(uploaderPublicId),
                             UploadedImageKind.CHARACTER,
-                            image.objectKey,
+                            requireNotNull(image.objectKey),
                         ),
                         // 표시 순서는 요청 배열 순서다(등록 후 추가와 같은 0-based).
                         sortOrder = index,

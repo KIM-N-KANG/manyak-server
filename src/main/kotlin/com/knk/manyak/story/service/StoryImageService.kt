@@ -168,6 +168,8 @@ class CharacterImageAdder(
         }
         val imageUrl = storyImageAccess.resolveUploadedUrl(
             story,
+            // 소유자 확인은 resolveOwnedStory가 이미 했으므로 user_id는 non-null이다.
+            storyImageAccess.resolveUserPublicId(userId),
             UploadedImageKind.CHARACTER,
             requireNotNull(request.objectKey),
         )

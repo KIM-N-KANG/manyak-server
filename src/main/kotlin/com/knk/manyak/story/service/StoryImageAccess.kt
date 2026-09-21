@@ -56,11 +56,21 @@ class StoryImageAccess(
      * 그다음 객체를 확인한다. presign 서명이 형식·크기를 고정하지만, 서명 없이 올라온 객체나 재사용된 키가
      * 있을 수 있어 신뢰 경계에서 한 번 더 본다.
      */
-    fun resolveUploadedUrl(story: Story, kind: UploadedImageKind, objectKey: String): String =
+    fun resolveUploadedUrl(
+        story: Story,
+        ownerPublicId: UUID?,
+        kind: UploadedImageKind,
+        objectKey: String,
+    ): String =
         resolveUploadedUrlUnder(
-            expectedPrefix = "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+            // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작·수정 화면에서 같은
+            // 업로드 컴포넌트를 쓰면 수정 중에도 draft 키가 올라오는데, 내가 올린 객체라면 막을 이유가 없다.
+            expectedPrefixes = listOfNotNull(
+                "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+                ownerPublicId?.let { "${UploadedImageObjectKeys.draftPrefixOf(kind, it)}/" },
+            ),
             objectKey = objectKey,
-            mismatchMessage = "이 스토리의 업로드 이미지가 아닙니다.",
+            mismatchMessage = "내가 이 스토리에 올린 업로드 이미지가 아닙니다.",
         )
 
     /**
@@ -69,7 +79,7 @@ class StoryImageAccess(
      */
     fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String): String =
         resolveUploadedUrlUnder(
-            expectedPrefix = "${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/",
+            expectedPrefixes = listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"),
             objectKey = objectKey,
             mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
         )
@@ -79,9 +89,13 @@ class StoryImageAccess(
         userRepository.findById(userId).orElse(null)?.publicId
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
-    private fun resolveUploadedUrlUnder(expectedPrefix: String, objectKey: String, mismatchMessage: String): String {
+    private fun resolveUploadedUrlUnder(
+        expectedPrefixes: List<String>,
+        objectKey: String,
+        mismatchMessage: String,
+    ): String {
         requireUploadEnabled()
-        if (!objectKey.startsWith(expectedPrefix)) {
+        if (expectedPrefixes.none { objectKey.startsWith(it) }) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, mismatchMessage)
         }
         val uploaded = uploadedImageStorage.head(objectKey)

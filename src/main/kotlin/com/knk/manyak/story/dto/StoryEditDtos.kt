@@ -118,4 +118,12 @@ data class UpdateStoryRequest(
         nullable = true,
     )
     val thumbnailObjectKey: String? = null,
+
+    // 인물 동기화(KNK-1391). 보내면 컬렉션 전체를 교체한다: id가 기존과 맞으면 개명(in-place), 없으면 신규
+    // 추가, 요청에서 빠진 기존 인물은 이미지와 함께 삭제한다. 빈 배열이면 인물을 전부 지운다.
+    // 각 인물의 images를 생략하면 그 인물의 기존 이미지는 유지된다(null = 미전송).
+    @field:Valid
+    @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
+    @field:Schema(description = "인물 목록(최대 6명). 생략하면 인물을 바꾸지 않는다.", nullable = true)
+    val characters: List<@NotNull GeneralCharacterInput>? = null,
 )

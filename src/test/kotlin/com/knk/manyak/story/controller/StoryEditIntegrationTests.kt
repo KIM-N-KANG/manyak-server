@@ -4,7 +4,11 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.image.service.UploadedImageStorage
+import com.knk.manyak.image.service.UploadedObject
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCharacter
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
@@ -12,6 +16,8 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -24,11 +30,14 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.anyString
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -40,6 +49,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class StoryEditIntegrationTests {
 
+    @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
+
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storySettingRepository: StorySettingRepository
@@ -47,12 +58,20 @@ class StoryEditIntegrationTests {
     @Autowired private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
     @Autowired private lateinit var storyMainEventRepository: StoryMainEventRepository
     @Autowired private lateinit var storyEndingRepository: StoryEndingRepository
+    @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
+    @Autowired private lateinit var storyCharacterImageRepository: StoryCharacterImageRepository
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
-    @BeforeEach fun setUp() = databaseCleaner.cleanAll()
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+        `when`(uploadedImageStorage.isEnabled()).thenReturn(true)
+        `when`(uploadedImageStorage.serveUrlOf(anyString())).thenAnswer { "https://cdn.test/${it.arguments[0]}" }
+        `when`(uploadedImageStorage.head(anyString())).thenReturn(UploadedObject("image/webp", 1024))
+    }
     @AfterEach fun tearDown() = databaseCleaner.cleanAll()
 
     private fun seedStory(userId: Long? = null): Story {
@@ -637,6 +656,230 @@ class StoryEditIntegrationTests {
             .uri("/api/v1/stories/${story.publicId}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{ "title": "   " }""")
+            .exchange()
+            .expectStatus().isBadRequest
+    }
+
+    // ---- 인물 편집(KNK-1391, 스펙 §4-3-8 스토리 수정) ----
+
+    private fun owner(nickname: String = "소유자") =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+
+    private fun seedCharacter(story: Story, name: String): StoryCharacter =
+        storyCharacterRepository.save(StoryCharacter(story = story, name = name))
+
+    private fun seedImage(character: StoryCharacter, imageName: String, sortOrder: Int = 0): StoryCharacterImage =
+        storyCharacterImageRepository.save(
+            StoryCharacterImage(
+                character = character,
+                imageName = imageName,
+                imageUrl = "https://cdn.test/characters/uploaded/${character.story.publicId}/$imageName.webp",
+                sortOrder = sortOrder,
+            ),
+        )
+
+    private fun patchCharacters(story: Story, user: User, body: String) =
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(user)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+            .exchange()
+
+    private fun storyCharacterKey(story: Story) = "characters/uploaded/${story.publicId}/new-face.webp"
+
+    private fun draftCharacterKey(user: User) = "characters/uploaded/drafts/${user.publicId}/new-face.webp"
+
+    @Test
+    fun `등록 때 없던 인물을 이미지와 함께 추가한다`() {
+        // 이게 이 티켓의 핵심이다: 인물 행을 만들 길이 없으면 그 스토리는 인물 이미지를 영영 못 붙인다.
+        val user = owner()
+        val story = seedStory(userId = user.id)
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"name": "세린", "images": [{"objectKey": "${storyCharacterKey(story)}", "imageName": "세린_웃음"}]}]}""",
+        )
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(1)
+            .jsonPath("$.characters[0].name").isEqualTo("세린")
+            .jsonPath("$.characters[0].images[0].imageName").isEqualTo("세린_웃음")
+
+        val character = storyCharacterRepository.findAll().single()
+        assertEquals("세린", character.name)
+        assertEquals("세린_웃음", storyCharacterImageRepository.findAll().single().imageName)
+    }
+
+    @Test
+    fun `인물 이름을 바꾸면 이미지 이름 접두도 함께 바뀐다`() {
+        // 이미지 이름이 `{인물이름}_{접미}` 규칙이라 개명만 하면 기존 이미지가 규칙 위반으로 남는다.
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        seedImage(character, "세린_웃음")
+
+        patchCharacters(story, user, """{"characters": [{"id": "${character.publicId}", "name": "루아"}]}""")
+            .expectStatus().isOk
+
+        assertEquals("루아", storyCharacterRepository.findAll().single().name)
+        val image = storyCharacterImageRepository.findAll().single()
+        assertEquals("루아_웃음", image.imageName)
+    }
+
+    @Test
+    fun `images를 생략하면 기존 이미지를 유지한다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        seedImage(character, "세린_웃음")
+        seedImage(character, "세린_분노", sortOrder = 1)
+
+        patchCharacters(story, user, """{"characters": [{"id": "${character.publicId}", "name": "세린"}]}""")
+            .expectStatus().isOk
+
+        assertEquals(2, storyCharacterImageRepository.findAll().size)
+    }
+
+    @Test
+    fun `기존 이미지는 id로 유지하고 새 이미지는 objectKey로 추가하며 빠진 것은 삭제된다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        val kept = seedImage(character, "세린_웃음")
+        seedImage(character, "세린_분노", sortOrder = 1)
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${character.publicId}", "name": "세린", "images": [""" +
+                """{"id": "${kept.publicId}"},""" +
+                """{"objectKey": "${storyCharacterKey(story)}", "imageName": "세린_슬픔"}]}]}""",
+        ).expectStatus().isOk
+
+        val names = storyCharacterImageRepository.findAll().map { it.imageName }.toSet()
+        assertEquals(setOf("세린_웃음", "세린_슬픔"), names)
+    }
+
+    @Test
+    fun `요청에서 빠진 인물은 이미지와 함께 삭제된다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val serin = seedCharacter(story, "세린")
+        seedImage(serin, "세린_웃음")
+        val rua = seedCharacter(story, "루아")
+        seedImage(rua, "루아_기본")
+
+        patchCharacters(story, user, """{"characters": [{"id": "${serin.publicId}", "name": "세린"}]}""")
+            .expectStatus().isOk
+
+        assertEquals(listOf("세린"), storyCharacterRepository.findAll().map { it.name })
+        assertEquals(listOf("세린_웃음"), storyCharacterImageRepository.findAll().map { it.imageName })
+    }
+
+    @Test
+    fun `빈 배열을 보내면 인물이 모두 삭제된다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        seedImage(seedCharacter(story, "세린"), "세린_웃음")
+
+        patchCharacters(story, user, """{"characters": []}""").expectStatus().isOk
+
+        assertEquals(0, storyCharacterRepository.findAll().size)
+        assertEquals(0, storyCharacterImageRepository.findAll().size)
+    }
+
+    @Test
+    fun `등록 전 draft 키로 올린 이미지도 수정에서 연결된다`() {
+        // 웹이 제작·수정 화면에서 같은 업로드 컴포넌트를 쓰면 draft 키가 올 수 있다. 내가 올린 것이면 통과시킨다.
+        val user = owner()
+        val story = seedStory(userId = user.id)
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"name": "세린", "images": [{"objectKey": "${draftCharacterKey(user)}", "imageName": "세린_웃음"}]}]}""",
+        ).expectStatus().isOk
+
+        assertEquals("세린_웃음", storyCharacterImageRepository.findAll().single().imageName)
+    }
+
+    @Test
+    fun `타 스토리의 인물 id를 지목하면 400이다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val otherStory = seedStory(userId = user.id)
+        val foreign = seedCharacter(otherStory, "남의인물")
+
+        patchCharacters(story, user, """{"characters": [{"id": "${foreign.publicId}", "name": "세린"}]}""")
+            .expectStatus().isBadRequest
+
+        assertEquals("남의인물", storyCharacterRepository.findAll().single().name)
+    }
+
+    @Test
+    fun `요청 내 인물 id가 중복되면 400이다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${character.publicId}", "name": "세린"}, {"id": "${character.publicId}", "name": "루아"}]}""",
+        ).expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `인물 이름이 겹치면 400이다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+
+        patchCharacters(story, user, """{"characters": [{"name": "세린"}, {"name": "세린"}]}""")
+            .expectStatus().isBadRequest
+
+        assertEquals(0, storyCharacterRepository.findAll().size)
+    }
+
+    @Test
+    fun `이미지 항목에 id와 objectKey를 함께 보내면 400이다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        val image = seedImage(character, "세린_웃음")
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${character.publicId}", "name": "세린", "images": [""" +
+                """{"id": "${image.publicId}", "objectKey": "${storyCharacterKey(story)}", "imageName": "세린_웃음"}]}]}""",
+        ).expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `인물당 10장을 넘기면 400이다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val images = (1..11).joinToString(",") {
+            """{"objectKey": "${storyCharacterKey(story)}", "imageName": "세린_표정$it"}"""
+        }
+
+        patchCharacters(story, user, """{"characters": [{"name": "세린", "images": [$images]}]}""")
+            .expectStatus().isBadRequest
+
+        assertEquals(0, storyCharacterImageRepository.findAll().size)
+    }
+
+    @Test
+    fun `게스트 스토리에 이미지를 붙이면 400이다`() {
+        // 소유자가 없으면 올린 이미지의 책임 주체가 없다(표지 교체와 같은 규칙).
+        val story = seedStory(userId = null)
+
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"characters": [{"name": "세린", "images": [{"objectKey": "${storyCharacterKey(story)}", "imageName": "세린_웃음"}]}]}""")
             .exchange()
             .expectStatus().isBadRequest
     }

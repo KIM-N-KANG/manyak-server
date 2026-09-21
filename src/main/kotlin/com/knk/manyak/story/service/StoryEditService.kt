@@ -4,12 +4,16 @@ import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.story.dto.GeneralCharacterImageInput
+import com.knk.manyak.story.dto.GeneralCharacterInput
 import com.knk.manyak.story.dto.GeneralStartSettingInput
 import com.knk.manyak.story.dto.StoryEditFormResponse
 import com.knk.manyak.story.dto.StoryEditSettingsResponse
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.dto.toMainEventResponse
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCharacter
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
@@ -98,15 +102,9 @@ class StoryEditService(
         // 표지 교체(KNK-1126). 회원 소유 스토리만이고 객체 키는 이 스토리의 업로드 prefix 아래여야 한다.
         // 지우기는 DELETE /stories/{storyId}/thumbnail이 담당한다(여기서 null은 미전송·유지).
         request.thumbnailObjectKey?.let { objectKey ->
-            // 게스트 스토리는 익명으로도 수정할 수 있어(소유권 게이트 통과) 여기서 따로 막는다 — 소유자가
-            // 없으면 올린 이미지의 책임 주체가 없다(스펙 §4-3-8 "회원 소유 스토리만").
-            if (story.userId == null) {
-                throw ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "로그인 후 내 스토리로 가져와야 이미지를 올릴 수 있습니다.",
-                )
-            }
-            story.thumbnailImageUrl = storyImageAccess.resolveUploadedUrl(story, UploadedImageKind.COVER, objectKey)
+            val ownerPublicId = requireImageUploader(story)
+            story.thumbnailImageUrl =
+                storyImageAccess.resolveUploadedUrl(story, ownerPublicId, UploadedImageKind.COVER, objectKey)
             // 새 객체는 새 판정이다 — 이전 표지가 PENDING·REJECTED였다고 물려받으면 이미지를 바꿔도
             // 계속 가려진다. 자동 검수 도입 시 이 자리에서 판정 결과로 설정한다.
             story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
@@ -141,6 +139,9 @@ class StoryEditService(
             )
         }
 
+        // 인물 전체 교체(KNK-1391). 인물 이미지는 각 인물에 종속되므로 함께 동기화한다.
+        request.characters?.let { inputs -> syncCharacters(story, inputs) }
+
         // 시작 설정 전체 교체(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정에 종속되므로 함께 동기화한다.
         request.startSettings?.let { inputs -> syncStartSettings(story, inputs) }
 
@@ -150,6 +151,142 @@ class StoryEditService(
         eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 
         return buildEditForm(story)
+    }
+
+    /**
+     * 인물 컬렉션을 요청과 동기화한다(전체 교체, KNK-1391). 시작 설정 동기화와 같은 규칙이다: `id`가 기존과
+     * 맞으면 in-place 갱신(개명), 없으면 신규 추가, 요청에서 빠진 기존 인물은 이미지와 함께 삭제한다.
+     * 없는 id·타 스토리 id·요청 내 중복 id는 400이다(조용한 무시 금지).
+     *
+     * 삭제는 DB 행만 지우고 **S3 객체는 남긴다** — 지난 채팅의 `[[URL]]` 마커가 그 객체를 가리킨다(KNK-1126 결정).
+     */
+    private fun syncCharacters(story: Story, inputs: List<GeneralCharacterInput>) {
+        requireDistinctCharacterNames(inputs.map { it.name })
+        val existing = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        val existingByPublicId = existing.associateBy { it.publicId }
+
+        // 같은 인물을 두 번 지목하면 뒤엣것만 남고 앞엣것이 조용히 유실된다(시작 설정과 같은 불변식).
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(StoryImageAccess::parsePublicIdOrNull) }
+        if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "인물 ID는 요청 내에서 중복될 수 없습니다.")
+        }
+
+        val resolved = inputs.map { input ->
+            val match = input.id?.let { raw ->
+                existingByPublicId[StoryImageAccess.parsePublicIdOrNull(raw)]
+                    ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리에 속하지 않는 인물 ID입니다.")
+            }
+            input to match
+        }
+        val keptIds = resolved.mapNotNull { it.second?.id }.toSet()
+
+        // 요청에서 빠진 인물은 이미지까지 지운다. FK는 PostgreSQL에서 ON DELETE CASCADE지만 테스트 스키마가
+        // 다를 수 있어 자식을 명시적으로 지운다(시작 설정 동기화와 같은 방식).
+        existing.filter { it.id !in keptIds }.forEach { removed ->
+            storyCharacterImageRepository.deleteAll(
+                storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(removed.id),
+            )
+            storyCharacterRepository.delete(removed)
+        }
+        storyCharacterRepository.flush()
+
+        // 이미지가 실린 요청은 회원 소유 스토리만이다. 업로드 키 검증에 소유자 식별자가 필요해 한 번만 읽는다.
+        val ownerPublicId = if (resolved.any { !it.first.images.isNullOrEmpty() }) requireImageUploader(story) else null
+
+        resolved.forEach { (input, match) ->
+            val character = match ?: StoryCharacter(story = story, name = input.name)
+            val previousName = character.name
+            character.name = input.name
+            val saved = storyCharacterRepository.save(character)
+            syncCharacterImages(story, saved, previousName, input.images, ownerPublicId)
+        }
+    }
+
+    /**
+     * 인물 하나의 이미지를 동기화한다. [inputs]가 null이면 **유지**이고(인물을 개명했으면 이름 접두만 따라간다),
+     * 리스트면 전체 교체다: `id` 항목은 그 행을 유지하고, `objectKey` 항목은 새로 추가하며, 빠진 기존은 삭제한다.
+     */
+    private fun syncCharacterImages(
+        story: Story,
+        character: StoryCharacter,
+        previousName: String,
+        inputs: List<GeneralCharacterImageInput>?,
+        ownerPublicId: UUID?,
+    ) {
+        val existing = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
+        if (inputs == null) {
+            // 생략 = 미전송 = 유지. 개명했다면 `{인물이름}_{접미}` 규칙이 깨지지 않게 접두만 갈아끼운다.
+            existing.forEach { it.imageName = renameImagePrefix(it.imageName, previousName, character.name) }
+            return
+        }
+
+        val existingByPublicId = existing.associateBy { it.publicId }
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(StoryImageAccess::parsePublicIdOrNull) }
+        if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지 ID는 요청 내에서 중복될 수 없습니다.")
+        }
+        val resolved = inputs.map { item ->
+            val match = item.id?.let { raw ->
+                existingByPublicId[StoryImageAccess.parsePublicIdOrNull(raw)]
+                    ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 인물에 속하지 않는 이미지 ID입니다.")
+            }
+            item to match
+        }
+
+        // 최종 이름을 먼저 확정해 검증한다. 유지 항목이 이름을 생략하면 현재 이름(개명 시 접두 갱신)을 쓴다.
+        val finalNames = resolved.map { (item, match) ->
+            val name = item.imageName?.takeIf { it.isNotBlank() }
+                ?: renameImagePrefix(requireNotNull(match).imageName, previousName, character.name)
+            requireValidImageName(character.name, name)
+        }
+        requireDistinctCharacterImageNames(finalNames)
+
+        val keptIds = resolved.mapNotNull { it.second?.id }.toSet()
+        storyCharacterImageRepository.deleteAll(existing.filter { it.id !in keptIds })
+        storyCharacterImageRepository.flush()
+
+        resolved.forEachIndexed { index, (item, match) ->
+            if (match != null) {
+                // ponytail: 한 요청 안에서 두 이미지의 이름을 맞바꾸면 유니크 제약에 걸린다. 최종 이름 중복은
+                // 위에서 막았고 교환은 실사용에서 드물어 수용한다. 필요해지면 임시 이름 한 단계를 넣는다.
+                match.imageName = finalNames[index]
+                match.sortOrder = index
+            } else {
+                storyCharacterImageRepository.save(
+                    StoryCharacterImage(
+                        character = character,
+                        imageName = finalNames[index],
+                        imageUrl = storyImageAccess.resolveUploadedUrl(
+                            story,
+                            ownerPublicId,
+                            UploadedImageKind.CHARACTER,
+                            requireNotNull(item.objectKey),
+                        ),
+                        sortOrder = index,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 인물 개명에 이미지 이름 접두를 맞춘다. 규칙을 벗어난 이름(옛 접두가 아님)은 손대지 않는다. */
+    private fun renameImagePrefix(imageName: String, previousName: String, newName: String): String =
+        if (previousName == newName || !imageName.startsWith("${previousName}_")) {
+            imageName
+        } else {
+            "${newName}_${imageName.removePrefix("${previousName}_")}"
+        }
+
+    /**
+     * 이미지를 올릴 수 있는 소유자의 공개 식별자. 게스트 스토리는 익명으로도 수정할 수 있어(소유권 게이트 통과)
+     * 여기서 따로 막는다 — 소유자가 없으면 올린 이미지의 책임 주체가 없다(스펙 §4-3-8 "회원 소유 스토리만").
+     */
+    private fun requireImageUploader(story: Story): UUID {
+        val ownerId = story.userId ?: throw ResponseStatusException(
+            HttpStatus.BAD_REQUEST,
+            "로그인 후 내 스토리로 가져와야 이미지를 올릴 수 있습니다.",
+        )
+        return storyImageAccess.resolveUserPublicId(ownerId)
     }
 
     /**
