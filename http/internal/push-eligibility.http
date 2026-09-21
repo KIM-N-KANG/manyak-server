@@ -1,0 +1,163 @@
+### 발송 자격 내부 API 수동 검증
+### 준비: docker compose up -d postgres redis, MANYAK_INTERNAL_SHARED_SECRET를 주입한 뒤 ./gradlew bootRun.
+### 실제 시크릿은 IntelliJ의 커밋하지 않는 HTTP 환경 파일에 internalSecret 변수로 넣습니다.
+### auth/auth-login-google.http로 로컬 테스트 회원의 accessToken을 얻습니다.
+### 0~12는 순서대로 실행합니다. 13은 시크릿을 비우고 서버를 재시작한 뒤 별도로 실행합니다.
+### 이 파일은 발송하지 않습니다. 테스트 회원의 기존 설정을 조회하고 임시 토큰을 등록한 뒤 정리합니다.
+### 토큰이 이미 10개인 회원을 쓰면 등록 시 가장 오래된 기기가 축출되므로 전용 테스트 회원을 사용합니다.
+### 정지, 탈퇴 및 11기기 상한은 InternalPushEligibilityControllerIntegrationTests에서 검증합니다.
+
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_TEST_ACCESS_TOKEN_HERE
+@manualToken = internal-eligibility-manual-token
+@day = 2026-09-21T03:00:00Z
+@night = 2026-09-21T13:00:00Z
+@missingPublicId = 00000000-0000-4000-8000-000000000000
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 1. 테스트 회원 publicId 저장
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("회원 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    if (response.status === 200) client.global.set("eligibilityPublicId", response.body.id);
+%}
+
+### 2. 현재 동의 상태 저장
+GET {{baseUrl}}/api/v1/users/me/push-settings
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("동의 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    if (response.status === 200) {
+        client.global.set("eligibilityServicePush", response.body.servicePush);
+        client.global.set("eligibilityMarketingPush", response.body.marketingPush);
+        client.global.set("eligibilityNightPush", response.body.marketingNightPush);
+    }
+%}
+
+### 3. 임시 WEB 토큰 등록
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"token":"{{manualToken}}","platform":"WEB"}
+
+> {%
+    client.test("임시 토큰 등록", () => client.assert(response.status === 204, `expected=204 actual=${response.status}`));
+%}
+
+### 4. SERVICE 자격과 토큰 (2번에서 읽은 수신 설정 기준)
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("서비스 자격", () => {
+        const allowed = String(client.global.get("eligibilityServicePush")) === "true";
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.allowed === allowed, `expected=${allowed} actual=${response.body.allowed}`);
+        client.assert(response.body.reason === (allowed ? "OK" : "SERVICE_PUSH_DISABLED"), `unexpected reason=${response.body.reason}`);
+        client.assert(allowed ? response.body.tokens.length > 0 && response.body.tokens.length <= 10 : response.body.tokens.length === 0,
+            `unexpected token count=${response.body.tokens.length}`);
+        client.assert(response.body.tokens.every(t => Object.keys(t).sort().join(",") === "platform,token"), "토큰 응답 필드가 다릅니다.");
+    });
+%}
+
+### 5. 주간 MARKETING (KST 12시)
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=MARKETING&at={{day}}
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("주간 광고 자격", () => {
+        const allowed = String(client.global.get("eligibilityMarketingPush")) === "true";
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.allowed === allowed, `expected=${allowed} actual=${response.body.allowed}`);
+        client.assert(response.body.reason === (allowed ? "OK" : "MARKETING_NOT_AGREED"), `unexpected reason=${response.body.reason}`);
+    });
+%}
+
+### 6. 야간 MARKETING (KST 22시)
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=MARKETING&at={{night}}
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("야간 광고 자격", () => {
+        const allowed = String(client.global.get("eligibilityMarketingPush")) === "true" && String(client.global.get("eligibilityNightPush")) === "true";
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.allowed === allowed, `expected=${allowed} actual=${response.body.allowed}`);
+        client.assert(response.body.reason === (allowed ? "OK" : "MARKETING_NOT_AGREED"), `unexpected reason=${response.body.reason}`);
+    });
+%}
+
+### 7. 회원 부재도 200 (missingPublicId가 DB에 없는지 확인)
+GET {{baseUrl}}/internal/users/{{missingPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("없는 회원 거절", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.allowed === false && response.body.reason === "USER_NOT_FOUND" && response.body.tokens.length === 0,
+            `unexpected response=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 8. 사용자 access 토큰만 보내면 401 (시크릿 누락)
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("사용자 인증으로 대체 불가", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 9. 시크릿 불일치
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+X-Manyak-Internal-Secret: intentionally-wrong-secret
+
+> {%
+    client.test("시크릿 불일치", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 10. 잘못된 kind
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=INVALID&at={{day}}
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("종류 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 11. at 누락
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=SERVICE
+X-Manyak-Internal-Secret: {{internalSecret}}
+
+> {%
+    client.test("시각 필수", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 12. 임시 토큰 정리 (기존 공개 삭제 API)
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"token":"{{manualToken}}"}
+
+> {%
+    client.test("임시 토큰 정리", () => client.assert(response.status === 204, `expected=204 actual=${response.status}`));
+%}
+
+### 13. 별도 실행: 시크릿을 빈 값으로 재시작하면 404
+GET {{baseUrl}}/internal/users/{{missingPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+
+> {%
+    client.test("미설정 시 비활성", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 14. 자유 조회: 시크릿을 설정해 재시작하고 실제 publicId와 발송 직전 at으로 변경
+GET {{baseUrl}}/internal/users/{{eligibilityPublicId}}/push-eligibility?kind=SERVICE&at={{day}}
+X-Manyak-Internal-Secret: {{internalSecret}}

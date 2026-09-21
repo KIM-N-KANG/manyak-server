@@ -73,6 +73,8 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 
 `MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.2`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.4`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
 
+`MANYAK_INTERNAL_SHARED_SECRET`은 내부 발송 자격 조회의 공유 시크릿입니다(`manyak.internal.shared-secret`). 기본값은 빈 문자열이며 비어 있으면 `/internal/**` 요청에 404를 반환합니다. 설정된 경우 `X-Manyak-Internal-Secret` 헤더가 일치해야 하고, 사용자 Bearer 토큰은 내부 인증에 사용하지 않습니다. 공개 ALB의 내부 경로 라우팅 제외는 인프라 후속 작업입니다. 수동 검증은 [발송 자격 조회](http/internal/push-eligibility.http)를 따릅니다.
+
 실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
 
 ## 엔드포인트
@@ -83,7 +85,7 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 - OpenAPI JSON: `GET /v3/api-docs`
 - Swagger UI: `GET /swagger-ui.html`
 
-비즈니스 API는 `/api/v1` prefix를 사용합니다.
+공개 비즈니스 API는 `/api/v1` prefix를 사용합니다. 내부 API `GET /internal/users/{publicId}/push-eligibility`는 별도 prefix 없이 `kind`와 `at`을 필수로 받으며 공개 OpenAPI 문서에서 제외합니다.
 
 ## 스키마 문서
 
