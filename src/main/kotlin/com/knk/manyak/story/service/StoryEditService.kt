@@ -183,6 +183,10 @@ class StoryEditService(
         // 요청에서 빠진 인물은 이미지까지 지운다. FK는 PostgreSQL에서 ON DELETE CASCADE지만 테스트 스키마가
         // 다를 수 있어 자식을 명시적으로 지운다(시작 설정 동기화와 같은 방식).
         existing.filter { it.id !in keptIds }.forEach { removed ->
+            // 인물 행을 잠근 뒤 이미지를 읽는다. 잠그지 않으면 동시에 들어온 이미지 추가
+            // (POST .../characters/{id}/images는 인물 행만 잠근다)가 우리 조회 뒤에 커밋돼
+            // 삭제 목록에서 빠지고, 인물만 지워져 FK가 깨진다(PR #273 Codex P2).
+            storyCharacterRepository.findByIdForUpdate(removed.id)
             storyCharacterImageRepository.deleteAll(
                 storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(removed.id),
             )
@@ -190,12 +194,25 @@ class StoryEditService(
         }
         storyCharacterRepository.flush()
 
+        // 개명 전 이름을 먼저 붙잡는다. 아래 임시 이름 단계가 엔티티의 name을 덮어써서, 뒤에서 읽으면
+        // 이미지 이름 접두를 옛 이름으로 맞출 수 없다.
+        val previousNames = resolved.mapNotNull { (_, match) -> match?.let { it.id to it.name } }.toMap()
+
+        // 이름 교환(A↔B)은 최종 이름이 서로 달라 위 검증을 통과하지만, 순차 갱신 중간 상태가
+        // uq_story_characters_name과 충돌해 커밋이 깨진다(PR #273 Codex P2). 바뀌는 이름을 먼저 임시값으로
+        // 비켜 두고 한 번 flush하면 중간 충돌이 사라진다. 임시값은 공개 식별자라 다른 이름과 겹치지 않는다.
+        val renamed = resolved.mapNotNull { (input, match) -> match?.takeIf { it.name != input.name } }
+        if (renamed.isNotEmpty()) {
+            renamed.forEach { it.name = "#${it.publicId}" }
+            storyCharacterRepository.flush()
+        }
+
         // 이미지가 실린 요청은 회원 소유 스토리만이다. 업로드 키 검증에 소유자 식별자가 필요해 한 번만 읽는다.
         val ownerPublicId = if (resolved.any { !it.first.images.isNullOrEmpty() }) requireImageUploader(story) else null
 
         resolved.forEach { (input, match) ->
             val character = match ?: StoryCharacter(story = story, name = input.name)
-            val previousName = character.name
+            val previousName = match?.let { previousNames.getValue(it.id) } ?: input.name
             character.name = input.name
             val saved = storyCharacterRepository.save(character)
             syncCharacterImages(story, saved, previousName, input.images, ownerPublicId)
@@ -213,6 +230,10 @@ class StoryEditService(
         inputs: List<GeneralCharacterImageInput>?,
         ownerPublicId: UUID?,
     ) {
+        // 이미지 목록을 읽기 전에 인물 행을 잠근다. 별도 추가 경로(POST .../characters/{id}/images)가 같은
+        // 락을 쓰므로 두 경로가 직렬화된다 — 잠그지 않으면 우리가 목록을 읽은 뒤 커밋된 새 이미지가
+        // 전체 교체(빈 배열 포함)를 그대로 살아남는다(PR #273 Codex P2).
+        storyCharacterRepository.findByIdForUpdate(character.id)
         val existing = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
         if (inputs == null) {
             // 생략 = 미전송 = 유지. 개명했다면 `{인물이름}_{접미}` 규칙이 깨지지 않게 접두만 갈아끼운다.
@@ -245,10 +266,16 @@ class StoryEditService(
         storyCharacterImageRepository.deleteAll(existing.filter { it.id !in keptIds })
         storyCharacterImageRepository.flush()
 
+        // 인물 이름과 같은 이유로 이미지 이름 교환도 임시값을 한 단계 거친다((character_id, image_name) 유니크).
+        val renamed = resolved.mapIndexed { index, (_, match) -> match to finalNames[index] }
+            .mapNotNull { (match, finalName) -> match?.takeIf { it.imageName != finalName } }
+        if (renamed.isNotEmpty()) {
+            renamed.forEach { it.imageName = "#${it.publicId}" }
+            storyCharacterImageRepository.flush()
+        }
+
         resolved.forEachIndexed { index, (item, match) ->
             if (match != null) {
-                // ponytail: 한 요청 안에서 두 이미지의 이름을 맞바꾸면 유니크 제약에 걸린다. 최종 이름 중복은
-                // 위에서 막았고 교환은 실사용에서 드물어 수용한다. 필요해지면 임시 이름 한 단계를 넣는다.
                 match.imageName = finalNames[index]
                 match.sortOrder = index
             } else {

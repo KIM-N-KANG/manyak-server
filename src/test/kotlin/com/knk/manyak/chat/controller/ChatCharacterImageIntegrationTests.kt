@@ -13,6 +13,12 @@ import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPublicSnapshotService
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -48,6 +54,8 @@ class ChatCharacterImageIntegrationTests {
     @Autowired private lateinit var storyCharacterImageRepository: StoryCharacterImageRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyMessageRepository: StoryMessageRepository
+    @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
+    @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -243,6 +251,80 @@ class ChatCharacterImageIntegrationTests {
         val second = GatedChatTurnAiClientConfig.lastRequest!!.imageSlots.single()
         assertThat(second.key).isNotEqualTo(first.key).startsWith("chat-images/${chat.publicId}/1-")
         assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_IMAGE).used).isEqualTo(2)
+    }
+
+    @Test
+    fun `비공개로 되돌린 뒤 바꾼 인물 이미지는 타인의 채팅 AI 요청에 실리지 않는다`() {
+        // 설정·사건·엔딩과 같은 규칙이다(KNK-1065): 읽기 권한이 없는 독자에게는 마지막 공개 버전만 간다.
+        // 인물 이미지만 라이브 행을 읽으면 비공개 개작이 생성 결과로 새어 나간다(PR #273 Codex P1).
+        val owner = userRepository.save(User(nickname = "제작자", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "공개 스토리",
+                genre = "판타지",
+                status = StoryStatus.PUBLISHED,
+                visibility = StoryVisibility.PUBLIC,
+            ),
+        )
+        seedCharacter(story, "강진우", "https://cdn.test/characters/generated/s/public.webp")
+        snapshotService.refresh(story)
+
+        // 비공개로 되돌린 뒤 인물을 개명하고 이미지를 갈아끼운다(수정 API가 하는 일과 같은 결과).
+        story.visibility = StoryVisibility.PRIVATE
+        storyRepository.save(story)
+        val character = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single()
+        character.name = "비밀인물"
+        storyCharacterRepository.save(character)
+        storyCharacterImageRepository.deleteAll(
+            storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id),
+        )
+        storyCharacterImageRepository.save(
+            StoryCharacterImage(
+                character = character,
+                imageName = "비밀인물_기본",
+                imageUrl = "https://cdn.test/characters/uploaded/s/secret.webp",
+            ),
+        )
+
+        // 타인(게스트)의 진행 중 채팅이 다음 턴을 돌린다.
+        stream(storyChatRepository.save(StoryChat(storyId = story.id)), "문을 연다.")
+
+        val mappings = GatedChatTurnAiClientConfig.lastRequest!!.characterImages
+        assertThat(mappings.map { it.name }).containsExactly("강진우")
+        assertThat(mappings.map { it.imageUrl })
+            .containsExactly("https://cdn.test/characters/generated/s/public.webp")
+    }
+
+    @Test
+    fun `공개 스토리면 인물 이미지는 현재 값을 따라간다`() {
+        // 공개 상태의 밸런스 패치는 진행 중 채팅에도 반영돼야 한다(스냅샷은 비공개 전환 이후만 멈춘다).
+        val owner = userRepository.save(User(nickname = "제작자", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "공개 스토리",
+                genre = "판타지",
+                status = StoryStatus.PUBLISHED,
+                visibility = StoryVisibility.PUBLIC,
+            ),
+        )
+        seedCharacter(story, "강진우", "https://cdn.test/characters/generated/s/old.webp")
+        snapshotService.refresh(story)
+        val character = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single()
+        storyCharacterImageRepository.deleteAll(storyCharacterImageRepository.findAll())
+        storyCharacterImageRepository.save(
+            StoryCharacterImage(
+                character = character,
+                imageName = "강진우_기본",
+                imageUrl = "https://cdn.test/characters/uploaded/s/new.webp",
+            ),
+        )
+
+        stream(storyChatRepository.save(StoryChat(storyId = story.id)), "문을 연다.")
+
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.characterImages.map { it.imageUrl })
+            .containsExactly("https://cdn.test/characters/uploaded/s/new.webp")
     }
 
     private fun seedStory(): Story = storyRepository.save(Story(title = "인물 이미지 스토리", genre = "판타지"))

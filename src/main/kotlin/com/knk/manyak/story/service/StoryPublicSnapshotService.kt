@@ -1,5 +1,7 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.image.service.ImageModeration
+import com.knk.manyak.story.entity.CharacterImageSnapshot
 import com.knk.manyak.story.entity.EndingSnapshot
 import com.knk.manyak.story.entity.MainEventSnapshot
 import com.knk.manyak.story.entity.StartSettingSnapshot
@@ -10,6 +12,7 @@ import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StorySettingsSnapshot
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
@@ -28,6 +31,7 @@ import org.springframework.stereotype.Service
  */
 @Service
 class StoryPublicSnapshotService(
+    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val storySettingRepository: StorySettingRepository,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
@@ -104,6 +108,7 @@ class StoryPublicSnapshotService(
                 },
             ),
             mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map(::toSnapshot),
+            characterImages = captureCharacterImages(story.id),
         )
     }
 
@@ -147,8 +152,15 @@ class StoryPublicSnapshotService(
                 )
             },
             mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).map(::toSnapshot),
+            characterImages = captureCharacterImages(story.id),
         )
     }
+
+    /** 인물 이미지 재료(KNK-1391). 노출·AI 전달과 같은 규칙으로 `APPROVED`만 담는다. */
+    private fun captureCharacterImages(storyId: Long): List<CharacterImageSnapshot> =
+        storyCharacterImageRepository.findAllByStoryId(storyId)
+            .filter { ImageModeration.isVisible(it.moderationStatus) }
+            .map { CharacterImageSnapshot(it.character.name, it.imageName, it.imageUrl) }
 
     private fun StorySetting?.toSnapshot() = StorySettingsSnapshot(
         worldSetting = this?.worldSetting,

@@ -56,7 +56,6 @@ import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
-import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.EndingSnapshot
@@ -65,7 +64,6 @@ import com.knk.manyak.story.entity.StartSettingSnapshot
 import com.knk.manyak.story.entity.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
-import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -109,7 +107,6 @@ class ChatService(
     private val storyMainEventRepository: StoryMainEventRepository,
     // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
     // 인물 이미지 정본은 story_character_images다(KNK-1126) — 인물별 여러 장을 요청에 싣는다.
-    private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
     // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
@@ -1385,7 +1382,11 @@ class ChatService(
                 summary = "",
                 // 인물-이미지 매핑(KNK-943). 이어쓰기·재생성·선택지 생성이 이 조립을 공유하므로 세 경로 모두 같은 매핑을 싣는다.
                 // 스냅샷 대상이 아니다 — story_characters는 전 컬럼이 불변이고 수정 API가 손대지 않아 개작될 수 없다.
-                characterImages = loadCharacterImages(chat.storyId),
+                // 인물 이미지도 나머지 재료와 같은 갈래로 흐른다(PR #273 Codex P1). 라이브 행을 직접 읽으면
+                // 비공개로 되돌린 뒤의 인물 개작이 타인의 진행 중 채팅에 실린다 — 설정·사건·엔딩만 막고
+                // 인물을 놓치는 것이 KNK-1059가 프롤로그만 막았던 실수와 같은 모양이다.
+                characterImages = material?.characterImages.orEmpty()
+                    .map { ChatCharacterImage(name = it.name, imageName = it.imageName, imageUrl = it.imageUrl) },
                 userSource = userSource,
                 mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
                 targetMainEvent = targetMainEvent,
@@ -1431,18 +1432,6 @@ class ChatService(
      * 이미지가 없는 인물은 자연히 빠진다 — AI는 이 매핑에 있는 인물만 태그로 만들 수 있으므로, 매핑에 없으면
      * 태그가 삭제되고 이미지 없이 본문만 나간다. 전부 없으면 빈 배열이며 AI는 인물 태그 규칙을 쓰지 않는다.
      */
-    private fun loadCharacterImages(storyId: Long): List<ChatCharacterImage> =
-        storyCharacterImageRepository.findAllByStoryId(storyId)
-            // 검수 게이트(KNK-1126): AI에게도 APPROVED만 보낸다.
-            .filter { ImageModeration.isVisible(it.moderationStatus) }
-            .map { image ->
-                ChatCharacterImage(
-                    name = image.character.name,
-                    imageName = image.imageName,
-                    imageUrl = image.imageUrl,
-                )
-            }
-
     /**
      * 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료).
      *

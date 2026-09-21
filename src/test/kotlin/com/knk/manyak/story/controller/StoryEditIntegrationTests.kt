@@ -763,6 +763,46 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `인물 이름을 서로 맞바꿔도 저장된다`() {
+        // 최종 이름은 서로 다르지만 순차 갱신 중간 상태가 (story_id, name) 유니크와 충돌한다(Codex P2).
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val serin = seedCharacter(story, "세린")
+        val rua = seedCharacter(story, "루아")
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${serin.publicId}", "name": "루아"}, {"id": "${rua.publicId}", "name": "세린"}]}""",
+        ).expectStatus().isOk
+
+        val byPublicId = storyCharacterRepository.findAll().associateBy { it.publicId }
+        assertEquals("루아", byPublicId.getValue(serin.publicId).name)
+        assertEquals("세린", byPublicId.getValue(rua.publicId).name)
+    }
+
+    @Test
+    fun `같은 인물의 이미지 이름을 서로 맞바꿔도 저장된다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = seedCharacter(story, "세린")
+        val smile = seedImage(character, "세린_웃음")
+        val anger = seedImage(character, "세린_분노", sortOrder = 1)
+
+        patchCharacters(
+            story,
+            user,
+            """{"characters": [{"id": "${character.publicId}", "name": "세린", "images": [""" +
+                """{"id": "${smile.publicId}", "imageName": "세린_분노"},""" +
+                """{"id": "${anger.publicId}", "imageName": "세린_웃음"}]}]}""",
+        ).expectStatus().isOk
+
+        val byPublicId = storyCharacterImageRepository.findAll().associateBy { it.publicId }
+        assertEquals("세린_분노", byPublicId.getValue(smile.publicId).imageName)
+        assertEquals("세린_웃음", byPublicId.getValue(anger.publicId).imageName)
+    }
+
+    @Test
     fun `요청에서 빠진 인물은 이미지와 함께 삭제된다`() {
         val user = owner()
         val story = seedStory(userId = user.id)
