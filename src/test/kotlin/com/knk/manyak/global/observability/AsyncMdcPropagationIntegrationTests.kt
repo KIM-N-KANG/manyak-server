@@ -8,8 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import com.knk.manyak.push.config.PushAsyncConfig
-import org.springframework.core.task.TaskExecutor
 import org.springframework.test.context.ActiveProfiles
+import java.util.concurrent.Executor
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
@@ -29,7 +29,7 @@ class AsyncMdcPropagationIntegrationTests {
 
     @Autowired
     @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)
-    private lateinit var pushExecutor: TaskExecutor
+    private lateinit var pushExecutor: Executor
 
     @AfterEach
     fun clearMdc() = MDC.clear()

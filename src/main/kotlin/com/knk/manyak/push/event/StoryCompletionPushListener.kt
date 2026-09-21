@@ -8,10 +8,12 @@ import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.scheduling.annotation.Async
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.core.task.TaskRejectedException
 import org.springframework.stereotype.Component
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
+import java.util.concurrent.Executor
 
 /**
  * 스토리 완성 푸시(KNK-1115). 완성 마킹 트랜잭션이 커밋된 뒤 제작자에게 서비스 알림을 보낸다.
@@ -25,17 +27,25 @@ import org.springframework.transaction.event.TransactionalEventListener
  *   `remote`는 알림 서비스([NotificationClient])다. 어느 쪽이든 **무엇을 보낼지와 보내도 되는지는 서버가
  *   판단한다** — 아래 수신 동의 확인은 모드와 무관하게 그대로 돈다. 기본값 `local`이라 배포만으로는
  *   경로가 바뀌지 않고, 환경변수 하나로 켜고 같은 값으로 되돌린다.
- * - **@Async로 요청 스레드와 분리한다**(피드백 알림 선례, Codex 리뷰 P1). AFTER_COMMIT 콜백은 원 트랜잭션의
- *   커넥션이 반납되기 전에 돌아, 여기서 DB를 읽으면 요청 하나가 커넥션 두 개를 동시에 쥔다. 풀이 포화되면
- *   커넥션 획득이 `connectionTimeout`으로 실패하고, 그 실패는 아래 try 바깥(트랜잭션 시작 시점)이라 잡히지도
- *   않아 이미 커밋된 생성의 응답이 500으로 뒤집힌다. 조회(회원)와 발송(토큰) 둘 다 DB를 타므로 접근을 없앨
- *   수는 없고, 스레드를 분리해 원 커넥션이 반납된 뒤에 읽는다.
+ * - **워커 스레드로 넘겨 요청 스레드와 분리한다**(피드백 알림 선례, Codex 리뷰 P1). AFTER_COMMIT 콜백은 원
+ *   트랜잭션의 커넥션이 반납되기 전에 돌아, 여기서 DB를 읽으면 요청 하나가 커넥션 두 개를 동시에 쥔다. 풀이
+ *   포화되면 커넥션 획득이 `connectionTimeout`으로 실패하고, 그 실패는 아래 try 바깥(트랜잭션 시작 시점)이라
+ *   잡히지도 않아 이미 커밋된 생성의 응답이 500으로 뒤집힌다. 조회(회원)와 발송(토큰) 둘 다 DB를 타므로 접근을
+ *   없앨 수는 없고, 스레드를 분리해 원 커넥션이 반납된 뒤에 읽는다.
+ * - **`@Async` 대신 실행기에 직접 제출한다**(Codex 리뷰). `@Async`는 제출 자체가 프록시에서 일어나 큐가
+ *   가득 찼을 때의 `TaskRejectedException`이 이 메서드 본문 **밖**에서 난다. 그러면 위와 같은 이유로 이미
+ *   커밋된 생성이 500으로 뒤집힌다. 제출을 본문 안으로 들여 거부를 잡고 로그로 남긴다. 그 푸시는 유실되며,
+ *   유실되지 않는 전달은 아웃박스와 큐를 넣는 3단계의 몫이다(KNK-1364).
+ * - 실행기는 `Executor` 타입으로 받는다. `TaskExecutor`로 노출하면 이 앱에서 유일한 `TaskExecutor` 빈이
+ *   돼서, 실행기를 지정하지 않은 다른 `@Async`들이 전부 푸시 풀로 끌려온다(KNK-1392).
  */
 @Component
 class StoryCompletionPushListener(
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
     private val notificationClient: NotificationClient,
+    @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)
+    private val pushExecutor: Executor,
     @Value("\${manyak.push.mode:local}")
     private val pushMode: String = PUSH_MODE_LOCAL,
     @Value("\${manyak.push.web-base-url:https://manyak.app}")
@@ -43,12 +53,23 @@ class StoryCompletionPushListener(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    // 트랜잭션을 열지 않는다 — 조회 한 번과 발송뿐이라 Spring Data가 여는 트랜잭션으로 충분하다.
-    // 실행기를 이름으로 지정한다. 기본 @Async 실행기에는 MDC decorator가 없어 워커에서 상관 식별자가
-    // 사라지고, remote 모드의 알림 서비스 호출이 request_id 없이 나간다(PushAsyncConfig).
-    @Async(PushAsyncConfig.PUSH_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onStoryCompleted(event: StoryCompletedEvent) {
+        // 제출은 요청 스레드에서 일어난다. MDC가 아직 살아 있어야 PushAsyncConfig의 decorator가 워커로 옮긴다.
+        try {
+            pushExecutor.execute { dispatch(event) }
+        } catch (ex: TaskRejectedException) {
+            // 큐가 가득 찼다. 이 푸시는 유실된다 — AFTER_COMMIT 이벤트는 다시 발행되지 않는다.
+            // 삼키지 않으면 이미 커밋된 스토리 생성의 응답이 500으로 뒤집힌다.
+            log.warn(
+                "푸시 실행기 포화로 스토리 완성 푸시를 버립니다. (userId={}, storyId={})",
+                event.userId, event.storyPublicId,
+            )
+        }
+    }
+
+    // 트랜잭션을 열지 않는다 — 조회 한 번과 발송뿐이라 Spring Data가 여는 트랜잭션으로 충분하다.
+    private fun dispatch(event: StoryCompletedEvent) {
         try {
             // remote 모드는 수신자를 public_id로 넘기므로 회원 엔티티가 필요하다. 동의 확인은 두 모드가 공유한다.
             val user = userRepository.findById(event.userId).orElse(null)

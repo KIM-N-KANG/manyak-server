@@ -15,6 +15,9 @@ import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
+import org.springframework.core.task.SyncTaskExecutor
+import org.springframework.core.task.TaskRejectedException
+import java.util.concurrent.Executor
 import java.util.Optional
 import java.util.UUID
 
@@ -46,10 +49,12 @@ class StoryCompletionPushModeTests {
         "deepLink" to "$WEB_BASE_URL/stories/$storyPublicId",
     )
 
-    private fun listener(mode: String) = StoryCompletionPushListener(
+    // 제출을 즉시 실행해 검증을 결정적으로 만든다. 실행기를 실제 풀로 두면 verify가 경쟁한다.
+    private fun listener(mode: String, executor: Executor = SyncTaskExecutor()) = StoryCompletionPushListener(
         userRepository = userRepository,
         fcmPushSender = fcmPushSender,
         notificationClient = notificationClient,
+        pushExecutor = executor,
         pushMode = mode,
         webBaseUrl = WEB_BASE_URL,
     )
@@ -102,6 +107,17 @@ class StoryCompletionPushModeTests {
 
         // 푸시는 부가 기능이라 발송 실패가 스토리 제작 결과를 되돌리지 않는다.
         assertThatCode { listener("remote").onStoryCompleted(event) }.doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `실행기가 제출을 거부해도 예외가 전파되지 않는다`() {
+        givenUser()
+        val saturated = Executor { throw TaskRejectedException("큐가 가득 찼습니다") }
+
+        // 거부는 @Async 프록시를 쓰면 메서드 본문 밖에서 나고, 그러면 이미 커밋된 스토리 생성이 500이 된다.
+        assertThatCode { listener("remote", saturated).onStoryCompleted(event) }.doesNotThrowAnyException()
+        verifyNoInteractions(notificationClient)
+        verifyNoInteractions(fcmPushSender)
     }
 
     private companion object {
