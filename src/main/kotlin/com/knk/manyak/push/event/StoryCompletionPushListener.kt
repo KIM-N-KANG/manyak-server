@@ -36,8 +36,10 @@ import java.util.concurrent.Executor
  *   가득 찼을 때의 `TaskRejectedException`이 이 메서드 본문 **밖**에서 난다. 그러면 위와 같은 이유로 이미
  *   커밋된 생성이 500으로 뒤집힌다. 제출을 본문 안으로 들여 거부를 잡고 로그로 남긴다. 그 푸시는 유실되며,
  *   유실되지 않는 전달은 아웃박스와 큐를 넣는 3단계의 몫이다(KNK-1364).
- * - 실행기는 `Executor` 타입으로 받는다. `TaskExecutor`로 노출하면 이 앱에서 유일한 `TaskExecutor` 빈이
- *   돼서, 실행기를 지정하지 않은 다른 `@Async`들이 전부 푸시 풀로 끌려온다(KNK-1392).
+ * - 실행기는 `Executor` 타입으로 받는다. 빈 선언 타입이 `Executor`라 `TaskExecutor`로는 주입되지 않는다
+ *   (`chatSseExecutor`와 같은 관례). 주입 타입을 `TaskExecutor`로 쓰면 컨텍스트가 뜨지 않는다. 다만 이건
+ *   주입 문제일 뿐이고, 생성된 인스턴스는 `ThreadPoolTaskExecutor`라 `@Async`의 후보 목록에는 그대로
+ *   올라간다. 그 목록은 이 변경 전부터 이미 모호했다(KNK-1392).
  */
 @Component
 class StoryCompletionPushListener(
