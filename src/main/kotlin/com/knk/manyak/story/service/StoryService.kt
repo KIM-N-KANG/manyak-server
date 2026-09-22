@@ -42,6 +42,7 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -123,8 +124,16 @@ class StoryService(
      *
      * [filter]가 `ORIGINAL`이면 공식 계정 소유로 좁힌다(KNK-1398, 폐기 예정인 [getOriginalStories] 대체).
      * 소유자 조건은 커서에 싣지 않으므로 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
+     *
+     * 격리 수준이 REPEATABLE_READ인 이유는 **정렬 집계와 커서값의 출처를 같은 스냅샷으로 묶기** 위해서다.
+     * `likes`·`chats`는 1차 키가 컬럼이 아니라 집계라 정렬 쿼리가 한 번, 카드 매핑의 배치 집계가 또 한 번
+     * 센다. READ_COMMITTED는 문장마다 스냅샷을 새로 떠서, 그 사이에 좋아요나 턴이 커밋되면 커서에 실리는
+     * 값이 정렬에 쓰인 값과 어긋나고 다음 페이지에 같은 스토리가 다시 나온다. PostgreSQL의 REPEATABLE_READ는
+     * 트랜잭션 첫 문장 시점 스냅샷을 이후 문장이 공유하므로 두 집계가 같은 값을 본다. 읽기 전용이라
+     * 직렬화 실패로 재시도할 일도 없다. 집계를 정렬 쿼리에서 함께 꺼내 오는 프로젝션 방식은 JPQL 6개를
+     * 전부 DTO 프로젝션으로 바꿔야 해서 택하지 않았다.
      */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getPublicStories(
         filter: StoryListFilter,
         sort: StoryListSort,
