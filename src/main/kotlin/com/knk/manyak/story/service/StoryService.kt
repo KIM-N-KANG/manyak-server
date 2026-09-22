@@ -42,6 +42,7 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -120,24 +121,51 @@ class StoryService(
      *
      * 페이지네이션은 offset이 아니라 keyset이다 — 새 스토리가 앞에 끼어들어도 다음 페이지에 중복·누락이 없다.
      * [limit] + 1건을 읽어 다음 페이지 유무를 판정하고, 마지막 페이지면 `nextCursor`는 null이다.
+     *
+     * [filter]가 `ORIGINAL`이면 공식 계정 소유로 좁힌다(KNK-1398, 폐기 예정인 [getOriginalStories] 대체).
+     * 소유자 조건은 커서에 싣지 않으므로 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
+     *
+     * 격리 수준이 REPEATABLE_READ인 이유는 **정렬 집계와 커서값의 출처를 같은 스냅샷으로 묶기** 위해서다.
+     * `likes`·`chats`는 1차 키가 컬럼이 아니라 집계라 정렬 쿼리가 한 번, 카드 매핑의 배치 집계가 또 한 번
+     * 센다. READ_COMMITTED는 문장마다 스냅샷을 새로 떠서, 그 사이에 좋아요나 턴이 커밋되면 커서에 실리는
+     * 값이 정렬에 쓰인 값과 어긋나고 다음 페이지에 같은 스토리가 다시 나온다. PostgreSQL의 REPEATABLE_READ는
+     * 트랜잭션 첫 문장 시점 스냅샷을 이후 문장이 공유하므로 두 집계가 같은 값을 본다. 읽기 전용이라
+     * 직렬화 실패로 재시도할 일도 없다. 집계를 정렬 쿼리에서 함께 꺼내 오는 프로젝션 방식은 JPQL 6개를
+     * 전부 DTO 프로젝션으로 바꿔야 해서 택하지 않았다.
      */
-    @Transactional(readOnly = true)
-    fun getPublicStories(sort: StoryListSort, limit: Int, rawCursor: String?): StoryPageResponse {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    fun getPublicStories(
+        filter: StoryListFilter,
+        sort: StoryListSort,
+        limit: Int,
+        rawCursor: String?,
+    ): StoryPageResponse {
+        // 공식 계정이 설정되지 않았거나 그 publicId의 회원이 없으면 목록 조회 없이 빈 페이지다.
+        val ownerId = when (filter) {
+            StoryListFilter.ALL -> null
+            StoryListFilter.ORIGINAL -> officialUserId() ?: return StoryPageResponse(items = emptyList(), nextCursor = null)
+        }
         val cursor = rawCursor?.let { StoryListCursor.decode(it, sort) }
         // 다음 페이지 유무 판정용으로 한 건 더 읽는다. 응답에는 limit개까지만 싣는다.
         val pageable = PageRequest.of(0, limit + 1)
         val fetched = when (sort) {
             StoryListSort.LATEST ->
                 if (cursor == null) {
-                    storyRepository.findPublicLatest(pageable)
+                    storyRepository.findPublicLatest(ownerId, pageable)
                 } else {
-                    storyRepository.findPublicLatestAfter(instantOfEpochNanos(cursor.sortValue), cursor.publicId, pageable)
+                    storyRepository.findPublicLatestAfter(ownerId, instantOfEpochNanos(cursor.sortValue), cursor.publicId, pageable)
                 }
-            StoryListSort.POPULAR ->
+            StoryListSort.LIKES ->
                 if (cursor == null) {
-                    storyRepository.findPublicPopular(pageable)
+                    storyRepository.findPublicLikes(ownerId, pageable)
                 } else {
-                    storyRepository.findPublicPopularAfter(cursor.sortValue, cursor.publicId, pageable)
+                    storyRepository.findPublicLikesAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
+                }
+            StoryListSort.CHATS ->
+                if (cursor == null) {
+                    storyRepository.findPublicChats(ownerId, pageable)
+                } else {
+                    storyRepository.findPublicChatsAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
                 }
         }
         val page = fetched.take(limit)
@@ -146,8 +174,9 @@ class StoryService(
             val last = page.last()
             val sortValue = when (sort) {
                 StoryListSort.LATEST -> epochNanosOf(last.createdAt)
-                // 커서 값은 방금 매핑한 카드의 좋아요 수를 재사용한다(배치 집계라 추가 조회가 없다).
-                StoryListSort.POPULAR -> items.last().likeCount
+                // 커서 값은 방금 매핑한 카드의 집계를 재사용한다(배치 집계라 추가 조회가 없다).
+                StoryListSort.LIKES -> items.last().likeCount
+                StoryListSort.CHATS -> items.last().turnCount
             }
             StoryListCursor(sortValue, last.publicId).encode(sort)
         } else {
@@ -155,6 +184,10 @@ class StoryService(
         }
         return StoryPageResponse(items = items, nextCursor = nextCursor)
     }
+
+    /** 마냑 공식 계정의 내부 id. 설정이 비었거나 그 publicId의 회원이 없으면 null이다(KNK-975). */
+    private fun officialUserId(): Long? =
+        officialUserPublicId?.let { userRepository.findByPublicId(it) }?.id
 
     /**
      * 최신순 커서의 1차 키. **millis가 아니라 nanos**다 — PostgreSQL `timestamptz`는 마이크로초까지 담아서,
@@ -168,15 +201,18 @@ class StoryService(
 
     /**
      * 마냑 오리지널 스토리 목록(KNK-975). 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환한다.
-     * 피드·검색이 나오기 전까지 홈의 오리지널 섹션이 소비하며, 공식 계정 미설정 환경은 빈 목록이다.
+     * 공식 계정 미설정 환경은 빈 목록이다.
      */
+    @Deprecated(
+        "GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.",
+        ReplaceWith("getPublicStories(StoryListFilter.ORIGINAL, StoryListSort.LATEST, limit, null)"),
+    )
     @Transactional(readOnly = true)
     fun getOriginalStories(): List<StorySummaryResponse> {
-        val publicId = officialUserPublicId ?: return emptyList()
-        val official = userRepository.findByPublicId(publicId) ?: return emptyList()
+        val officialId = officialUserId() ?: return emptyList()
         return storyRepository
             .findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
-                official.id,
+                officialId,
                 StoryStatus.PUBLISHED,
                 StoryVisibility.PUBLIC,
             )

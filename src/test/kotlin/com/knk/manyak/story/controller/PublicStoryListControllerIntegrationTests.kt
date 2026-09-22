@@ -2,6 +2,8 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.entity.StoryStatus
@@ -17,13 +19,15 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
+import java.util.UUID
 
 /**
  * 공개 스토리 목록 조회 통합 검증(KNK-149).
  * - 비로그인으로 200이고 공개(PUBLISHED∧PUBLIC)·미삭제·회원 소유 스토리만 나온다.
  * - 게스트 소유(user_id NULL)는 공개 범위를 고를 수 없어 기본값 PUBLIC으로 생긴 체험 스토리라 제외한다.
- * - latest는 createdAt 내림차순, popular는 좋아요 수 내림차순이고 동률은 publicId 내림차순으로 결정적이다.
+ * - latest는 createdAt 내림차순, likes는 좋아요 수, chats는 누적 턴 수 내림차순이고 동률은 publicId 내림차순으로 결정적이다.
  * - 커서는 keyset이라 페이지 사이에 중복·누락이 없고, 정렬이 다른 커서는 400이다.
+ * - filter=original은 공식 계정 소유만 싣고, 공식 계정 미설정 환경은 빈 페이지다(KNK-1398).
  * - 만료·위조 access 헤더가 자동 첨부돼도 401이 아니다(로그아웃 상태 화면이 부르는 경로).
  */
 @ActiveProfiles("test")
@@ -35,6 +39,7 @@ class PublicStoryListControllerIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyLikeRepository: StoryLikeRepository
     @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -63,6 +68,17 @@ class PublicStoryListControllerIntegrationTests {
             deletedAt = deletedAt,
         ),
     )
+
+    /** 누적 턴 수를 심는다. [deleted]면 소프트 삭제 채팅이라 합계에서 빠져야 한다. */
+    private fun chat(story: Story, turns: Int, deleted: Boolean = false) {
+        storyChatRepository.save(
+            StoryChat(
+                storyId = story.id,
+                currentTurn = turns,
+                deletedAt = if (deleted) Instant.now() else null,
+            ),
+        )
+    }
 
     private fun like(story: Story, times: Int) {
         repeat(times) { storyLikeRepository.save(StoryLike(userId = saveUser("좋아요$it-${story.id}").id, storyId = story.id)) }
@@ -145,7 +161,7 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `popular는 좋아요 수 내림차순이고 동률은 publicId 내림차순이다`() {
+    fun `likes는 좋아요 수 내림차순이고 동률은 publicId 내림차순이다`() {
         val author = saveUser()
         val hot = saveStory(author, "인기")
         val mild = saveStory(author, "보통")
@@ -158,7 +174,7 @@ class PublicStoryListControllerIntegrationTests {
         // 둘의 순서가 갈리므로 기대값도 DB와 같은 정렬(정규 표기 문자열 = 부호 없는 바이트 순)로 만든다.
         val tiedExpected = listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending()
 
-        get("?sort=popular")
+        get("?sort=likes")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(4)
@@ -170,7 +186,7 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `popular도 커서로 이어 읽는다`() {
+    fun `likes도 커서로 이어 읽는다`() {
         val author = saveUser()
         val hot = saveStory(author, "인기")
         val mild = saveStory(author, "보통")
@@ -178,13 +194,13 @@ class PublicStoryListControllerIntegrationTests {
         like(hot, 3)
         like(mild, 1)
 
-        val firstPage = get("?sort=popular&limit=2").expectStatus().isOk
+        val firstPage = get("?sort=likes&limit=2").expectStatus().isOk
             .expectBody()
             .jsonPath("$.items[0].id").isEqualTo(hot.publicId.toString())
             .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
             .returnResult()
 
-        get("?sort=popular&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
+        get("?sort=likes&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(1)
@@ -202,7 +218,93 @@ class PublicStoryListControllerIntegrationTests {
             get("?limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
         )
 
-        get("?sort=popular&limit=1&cursor=$latestCursor").expectStatus().isBadRequest
+        get("?sort=likes&limit=1&cursor=$latestCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `chats는 미삭제 채팅의 누적 턴 수 내림차순이고 동률은 publicId 내림차순이다`() {
+        val author = saveUser()
+        val busy = saveStory(author, "많이 논 스토리")
+        val mild = saveStory(author, "조금 논 스토리")
+        val tiedA = saveStory(author, "동률A")
+        val tiedB = saveStory(author, "동률B")
+        chat(busy, 7)
+        chat(busy, 3)
+        chat(mild, 4)
+        // 소프트 삭제된 채팅의 턴은 카드 turnCount와 마찬가지로 합계에서 빠진다.
+        chat(mild, 99, deleted = true)
+
+        val tiedExpected = listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending()
+
+        get("?sort=chats")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(4)
+            .jsonPath("$.items[0].id").isEqualTo(busy.publicId.toString())
+            .jsonPath("$.items[0].turnCount").isEqualTo(10)
+            .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
+            .jsonPath("$.items[1].turnCount").isEqualTo(4)
+            .jsonPath("$.items[2].id").isEqualTo(tiedExpected[0])
+            .jsonPath("$.items[3].id").isEqualTo(tiedExpected[1])
+    }
+
+    @Test
+    fun `chats도 커서로 이어 읽고 중복도 누락도 없다`() {
+        val author = saveUser()
+        val busy = saveStory(author, "많이")
+        val mild = saveStory(author, "조금")
+        val idle = saveStory(author, "없음")
+        chat(busy, 5)
+        chat(mild, 2)
+
+        val firstPage = get("?sort=chats&limit=2").expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items[0].id").isEqualTo(busy.publicId.toString())
+            .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
+            .returnResult()
+
+        get("?sort=chats&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(idle.publicId.toString())
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `chats 커서를 likes에 넘기면 400이다`() {
+        val author = saveUser()
+        saveStory(author, "하나")
+        saveStory(author, "둘")
+
+        val chatsCursor = cursorOf(
+            get("?sort=chats&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
+        )
+
+        get("?sort=likes&limit=1&cursor=$chatsCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `개명 전 이름 popular는 더 이상 받지 않는다`() {
+        // 별칭을 두지 않는다(KNK-1398). 옛 이름을 조용히 받아 주면 클라이언트 전환이 끝났는지 알 수 없다.
+        get("?sort=popular").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `알 수 없는 filter는 400이다`() {
+        get("?filter=mine").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이면 filter=original은 빈 페이지다`() {
+        val author = saveUser()
+        saveStory(author, "공개")
+
+        get("?filter=original")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+            .jsonPath("$.nextCursor").doesNotExist()
     }
 
     @Test
@@ -255,5 +357,81 @@ class PublicStoryListControllerIntegrationTests {
     companion object {
         private const val PATH = "/api/v1/stories"
         private val CURSOR_PATTERN = """"nextCursor":"([^"]+)"""".toRegex()
+    }
+}
+
+/**
+ * 공식 계정이 설정된 환경의 `filter=original` 검증(KNK-1398).
+ * 폐기 예정인 `GET /stories/originals`를 대체하는 경로라 소유자 필터가 정확해야 한다.
+ */
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["manyak.official-user-public-id=11111111-2222-3333-4444-555555555555"],
+)
+class PublicStoryListOriginalFilterIntegrationTests {
+
+    @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+    }
+
+    private fun saveOfficialUser(): User =
+        userRepository.save(User(publicId = OFFICIAL_PUBLIC_ID, nickname = "마냑"))
+
+    private fun saveStory(owner: User, title: String, createdAt: Instant): Story =
+        storyRepository.save(
+            Story(userId = owner.id, title = title, oneLineIntro = "$title 소개", genre = "판타지", createdAt = createdAt),
+        )
+
+    @Test
+    fun `filter=original은 공식 계정 소유 스토리만 최신순으로 반환한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        val older = saveStory(official, "오리지널 먼저", Instant.parse("2026-08-01T00:00:00Z"))
+        val newer = saveStory(official, "오리지널 나중", Instant.parse("2026-08-02T00:00:00Z"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-03T00:00:00Z"))
+
+        restTestClient.get().uri("/api/v1/stories?filter=original").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+            .jsonPath("$.items[0].id").isEqualTo(newer.publicId.toString())
+            .jsonPath("$.items[1].id").isEqualTo(older.publicId.toString())
+    }
+
+    @Test
+    fun `filter=all은 공식 계정 밖의 스토리도 함께 반환한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        saveStory(official, "오리지널", Instant.parse("2026-08-01T00:00:00Z"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-02T00:00:00Z"))
+
+        restTestClient.get().uri("/api/v1/stories").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+    }
+
+    @Test
+    fun `공식 계정 publicId에 해당하는 회원이 없으면 빈 페이지다`() {
+        val other = userRepository.save(User(nickname = "다른유저"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-01T00:00:00Z"))
+
+        restTestClient.get().uri("/api/v1/stories?filter=original").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    companion object {
+        private val OFFICIAL_PUBLIC_ID: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555")
     }
 }

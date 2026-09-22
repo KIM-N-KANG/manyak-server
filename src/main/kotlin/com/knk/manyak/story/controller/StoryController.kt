@@ -14,6 +14,7 @@ import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryImageService
+import com.knk.manyak.story.service.StoryListFilter
 import com.knk.manyak.story.service.StoryListSort
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -167,9 +168,11 @@ class StoryController(
     ): List<LorebookListItemResponse> = storyService.getLorebooks(genre)
 
     @Operation(
-        summary = "오리지널 스토리 목록 조회",
-        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 피드·검색이 나오기 전까지 " +
-            "홈의 오리지널 섹션이 사용하며, 인증은 필요 없습니다. 공식 계정 미설정 환경은 빈 목록입니다.",
+        summary = "오리지널 스토리 목록 조회(폐기 예정)",
+        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 인증은 필요 없고 공식 계정 " +
+            "미설정 환경은 빈 목록입니다. **폐기 예정**: GET /stories?filter=original이 대체하며, 클라이언트 " +
+            "전환 후 KNK-1400에서 제거합니다.",
+        deprecated = true,
     )
     @ApiResponses(
         value = [
@@ -180,15 +183,18 @@ class StoryController(
             ),
         ],
     )
+    @Deprecated("GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.")
     @GetMapping("/originals")
+    @Suppress("DEPRECATION")
     fun getOriginalStories(): List<StorySummaryResponse> = storyService.getOriginalStories()
 
     @Operation(
         summary = "공개 스토리 목록 조회",
         description = "발행·공개 상태의 회원 스토리 카드를 커서 페이지네이션으로 반환합니다(KNK-149). 인증은 필요 " +
-            "없고 요청자 신원도 쓰지 않습니다. 정렬은 latest(기본, 등록 최신순)와 popular(좋아요 많은 순)이며, " +
-            "다음 페이지는 응답의 nextCursor를 **같은 sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·초안과 " +
-            "게스트 제작 스토리(소유자 없음)는 제외합니다.",
+            "없고 요청자 신원도 쓰지 않습니다. 정렬은 latest(기본, 등록 최신순)·likes(좋아요 많은 순)·" +
+            "chats(누적 턴 수 많은 순)이고, filter는 all(기본)과 original(마냑 공식 계정 소유만)입니다. " +
+            "다음 페이지는 응답의 nextCursor를 **같은 filter·sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·" +
+            "초안과 게스트 제작 스토리(소유자 없음)는 제외합니다.",
     )
     @ApiResponses(
         value = [
@@ -199,14 +205,16 @@ class StoryController(
             ),
             ApiResponse(
                 responseCode = "400",
-                description = "알 수 없는 sort, 숫자가 아닌 limit, 형식이 깨졌거나 정렬이 다른 cursor",
+                description = "알 수 없는 filter·sort, 숫자가 아닌 limit, 형식이 깨졌거나 정렬이 다른 cursor",
                 content = [Content(schema = Schema(hidden = true))],
             ),
         ],
     )
     @GetMapping
     fun getPublicStories(
-        @Parameter(description = "정렬. latest(기본) 또는 popular", example = "latest")
+        @Parameter(description = "필터. all(기본) 또는 original(마냑 공식 계정 소유만)", example = "all")
+        @RequestParam(defaultValue = "all") filter: String,
+        @Parameter(description = "정렬. latest(기본), likes 또는 chats", example = "latest")
         @RequestParam(defaultValue = "latest") sort: String,
         @Parameter(description = "한 페이지 개수(기본 20, 1~50으로 보정)")
         @RequestParam(defaultValue = "$DEFAULT_LIMIT") limit: Int,
@@ -214,6 +222,7 @@ class StoryController(
         @RequestParam(required = false) cursor: String?,
     ): StoryPageResponse =
         storyService.getPublicStories(
+            filter = StoryListFilter.from(filter),
             sort = StoryListSort.from(sort),
             limit = limit.coerceIn(MIN_LIMIT, MAX_LIMIT),
             rawCursor = cursor,
