@@ -36,6 +36,11 @@ import org.springframework.stereotype.Component
  * SDK가 내부에서 재시도하고, 그래도 실패한 한 건은 놓쳐도 복귀 조회가 덮는다.
  */
 @Component
+@Deprecated(
+    // 경고가 붙는 호출부가 곧 KNK-1385에서 옮길 목록이다. 새 호출부를 늘리지 않으려고 지금 표시한다.
+    "발송 실행은 알림 서비스로 옮긴다(KNK-1375). 이 빈은 manyak.push.mode=local 경로와 아직 옮기지 않은 " +
+        "스케줄러(출석·프로모션)를 위해 남아 있고, KNK-1385에서 삭제한다.",
+)
 class FcmPushSender(
     // Kotlin nullable 생성자 인자 = 선택 주입. FcmConfig가 null을 돌려주면 여기도 null이다.
     private val messaging: FirebaseMessaging?,

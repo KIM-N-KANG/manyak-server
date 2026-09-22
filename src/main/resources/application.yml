@@ -218,6 +218,17 @@ manyak:
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
     chat-image-limit: ${MANYAK_GUEST_TRIAL_CHAT_IMAGE_LIMIT:5}
   push:
+    # 발송 실행 위치(KNK-1375). local은 서버 안의 FcmPushSender, remote는 알림 서비스가 FCM을 부른다.
+    # 기본 local이라 배포만으로는 경로가 바뀌지 않는다. 환경변수 하나로 켜고 같은 값으로 되돌린다.
+    # 무엇을 보낼지와 보내도 되는지(수신 동의)는 어느 모드에서도 서버가 판단한다.
+    mode: ${MANYAK_PUSH_MODE:local}
+    notification:
+      # 알림 서비스 주소. 비면(기본) remote 모드에서도 발송을 건너뛴다 — FCM 서비스 계정과 같은 관례로,
+      # 주소 주입이 먼저이고 모드 전환이 나중이다. 로컬 compose는 http://manyak-notification:8080.
+      base-url: ${MANYAK_NOTIFICATION_BASE_URL:}
+      # @Async 스레드가 응답을 무한정 기다리면 묶인다. 발송은 FCM 왕복이 있어 읽기를 넉넉히 둔다.
+      connect-timeout: ${MANYAK_NOTIFICATION_CONNECT_TIMEOUT:5s}
+      read-timeout: ${MANYAK_NOTIFICATION_READ_TIMEOUT:10s}
     web-base-url: ${MANYAK_PUSH_WEB_BASE_URL:https://manyak.app}
     web:
       icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
