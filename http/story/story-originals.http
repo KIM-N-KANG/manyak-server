@@ -1,8 +1,10 @@
 ### 오리지널 스토리 목록(Story Originals) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ###
-### [KNK-975] 마냑 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환합니다.
-###   피드·검색이 나오기 전까지 홈의 오리지널 섹션이 사용하며, 인증이 필요 없습니다.
+### [KNK-975] 마냑 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환합니다. 인증이 필요 없습니다.
+###
+### **폐기 예정**: GET /api/v1/stories?filter=original 이 대체합니다(KNK-1398).
+###   대체 경로 검증은 story-public-list.http 6-2번을 쓰세요. 이 파일은 클라이언트 전환 후 KNK-1400에서 지웁니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
