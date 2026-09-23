@@ -43,6 +43,12 @@ object ApiErrorCodes {
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
 
     /**
+     * 초대 코드 입력(409): 초대자가 제출자보다 나중에 가입한 회원이다(KNK-1404). 가입 순서는 보상 신원 id로 비교해
+     * 상호·순환 등록을 막는다.
+     */
+    const val INVITE_INVITER_NEWER = "INVITE_INVITER_NEWER"
+
+    /**
      * 이미지 연결(400): presign으로 받은 객체 키에 아직 파일이 올라오지 않았다(KNK-1126).
      * 클라이언트가 PUT을 마친 뒤 다시 부르면 되는 상태라, 형식 오류(같은 400)와 구분해 코드로 알린다.
      */

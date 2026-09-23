@@ -81,7 +81,8 @@ class InviteService(
      *
      * 오류 계약(입력값이라 사유를 구분해 응답한다): 형식 위반 400, 매칭 없음 404,
      * 자기 코드 409 [ApiErrorCodes.INVITE_SELF_CODE], 재제출 409 [ApiErrorCodes.INVITE_ALREADY_REDEEMED],
-     * 초대자 탈퇴 409 [ApiErrorCodes.INVITE_INVITER_WITHDRAWN], 초대자 정지 409 [ApiErrorCodes.INVITE_INVITER_UNAVAILABLE].
+     * 초대자 탈퇴 409 [ApiErrorCodes.INVITE_INVITER_WITHDRAWN], 초대자 정지 409 [ApiErrorCodes.INVITE_INVITER_UNAVAILABLE],
+     * 초대자가 나중 가입 409 [ApiErrorCodes.INVITE_INVITER_NEWER](보상 신원 id 비교 — KNK-1404).
      *
      * 월 상한(적립 시점의 KST 월 귀속)은 초대자 몫에만 적용한다(KNK-581) — 초대자가 상한이면 초대자만 건너뛰고
      * 제출자는 적립하며 응답은 성공이다(상한 사실은 응답에 싣지 않음 — 초대자 쪽 진행 표시로 충분). 제출자 몫은
@@ -138,6 +139,17 @@ class InviteService(
             )
             UserStatus.ACTIVE -> Unit
         }
+        // 가입 순서 게이트(KNK-1404). 초대자는 제출자보다 먼저 가입한 회원이어야 한다. 보상 신원 id로 비교하므로
+        // 재가입으로 나중 가입자가 되어 피할 수 없고, 서로의 코드를 등록하는 상호·순환 등록이 성립하지 않는다.
+        val inviterIdentity = inviter.rewardIdentity()
+        val redeemerIdentity = redeemer.rewardIdentity()
+        if (inviterIdentity > redeemerIdentity) {
+            throw CodedResponseStatusException(
+                HttpStatus.CONFLICT,
+                ApiErrorCodes.INVITE_INVITER_NEWER,
+                "나보다 먼저 가입한 회원의 초대 코드만 입력할 수 있습니다.",
+            )
+        }
         // 관계 저장(평생 1회 소진)과 양측 적립을 같은 트랜잭션에서 커밋한다. 적립 실패 시 관계도 함께 롤백된다.
         redeemer.inviterUserId = inviter.id
         // 정책값은 이 요청 안에서 한 번만 읽어 재사용한다(KNK-1056). 초대자·제출자 적립 사이에 값이 바뀌면
@@ -159,8 +171,6 @@ class InviteService(
         // 키는 user_id가 아니라 **보상 신원**으로 만든다(KNK-1053). 재가입은 user_id를 갈아치우므로 user_id 키면
         // 초대자가 상한을 채운 뒤 탈퇴·재가입하는 것만으로 월 상한이 0으로 리셋된다(크레딧을 미리 쓰고 나가면 지갑
         // 소멸도 페널티가 아니다). 기존 회원·신규 가입은 신원 = 자기 자신이라 키 문자열이 종전과 같아 원장과 호환된다.
-        val inviterIdentity = inviter.rewardIdentity()
-        val redeemerIdentity = redeemer.rewardIdentity()
         val rewardInviter = {
             creditWalletService.reward(
                 userId = inviter.id,
