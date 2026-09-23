@@ -45,8 +45,8 @@ class UserConsentControllerIntegrationTests {
     @Test
     fun `최초 조회는 현행 버전 세 항목 모두 미동의다`() {
         get(saveUser()).expectStatus().isOk.expectBody()
-            .jsonPath("$.terms.requiredVersion").isEqualTo("v1.2")
-            .jsonPath("$.privacy.requiredVersion").isEqualTo("v1.4")
+            .jsonPath("$.terms.requiredVersion").isEqualTo("v1.4")
+            .jsonPath("$.privacy.requiredVersion").isEqualTo("v1.7")
             .jsonPath("$.age14.requiredVersion").isEqualTo("1")
             .jsonPath("$.terms.needsConsent").isEqualTo(true)
             .jsonPath("$.privacy.needsConsent").isEqualTo(true)
@@ -56,7 +56,7 @@ class UserConsentControllerIntegrationTests {
     @Test
     fun `한 항목만 제출하면 그 항목만 저장한다`() {
         val user = saveUser()
-        post(user, """{"terms":"v1.2"}""").expectStatus().isOk.expectBody()
+        post(user, """{"terms":"v1.4"}""").expectStatus().isOk.expectBody()
             .jsonPath("$.terms.needsConsent").isEqualTo(false)
             .jsonPath("$.privacy.needsConsent").isEqualTo(true)
             .jsonPath("$.age14.needsConsent").isEqualTo(true)
@@ -80,7 +80,7 @@ class UserConsentControllerIntegrationTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["""{"terms":"old"}""", """{"terms":"v1.2","privacy":"old"}""", """{"terms":"v1.2","privacy":"v1.4","age14":"2"}"""])
+    @ValueSource(strings = ["""{"terms":"old"}""", """{"terms":"v1.4","privacy":"old"}""", """{"terms":"v1.4","privacy":"v1.7","age14":"2"}"""])
     fun `한 항목이라도 현행 버전과 다르면 전부 거부한다`(body: String) {
         val user = saveUser()
         post(user, body).expectStatus().isBadRequest.expectBody()
@@ -104,7 +104,7 @@ class UserConsentControllerIntegrationTests {
         jdbc.update("UPDATE user_consents SET agreed_at = TIMESTAMP WITH TIME ZONE '2020-01-01 00:00:00+00' WHERE user_id = ?", user.id)
         val first = rows(user)
         post(user, ALL).expectStatus().isOk
-        post(user, """{"terms":"v1.2","privacy":null}""").expectStatus().isOk
+        post(user, """{"terms":"v1.4","privacy":null}""").expectStatus().isOk
         assertThat(rows(user)).isEqualTo(first)
     }
 
@@ -113,8 +113,8 @@ class UserConsentControllerIntegrationTests {
         val user = saveUser()
         jdbc.update("INSERT INTO user_consents (user_id, doc_type, version, agreed_at) VALUES (?, 'TERMS', 'v1.1', CURRENT_TIMESTAMP)", user.id)
         get(user).expectStatus().isOk.expectBody().jsonPath("$.terms.needsConsent").isEqualTo(true)
-        post(user, """{"terms":"v1.2"}""").expectStatus().isOk
-        assertThat(rows(user).map { it["version"] }).containsExactlyInAnyOrder("v1.1", "v1.2")
+        post(user, """{"terms":"v1.4"}""").expectStatus().isOk
+        assertThat(rows(user).map { it["version"] }).containsExactlyInAnyOrder("v1.1", "v1.4")
     }
 
     @Test
@@ -158,6 +158,6 @@ class UserConsentControllerIntegrationTests {
 
     companion object {
         private const val PATH = "/api/v1/users/me/consents"
-        private const val ALL = """{"terms":"v1.2","privacy":"v1.4","age14":"1"}"""
+        private const val ALL = """{"terms":"v1.4","privacy":"v1.7","age14":"1"}"""
     }
 }
