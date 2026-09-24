@@ -171,8 +171,9 @@ class InviteServiceTest {
         // Codex P2: reward의 지갑 행 락은 트랜잭션 커밋까지 유지된다. 초대자 우선 고정 순서면 서로의 코드를
         // 동시에 제출하는 두 요청이 지갑을 교차 대기(A: B→A, B: A→B)해 데드락이 난다. 초대자 id가 더 커도
         // 오름차순(제출자 먼저)으로 실행되는지 검증해 락 획득 순서를 전역 결정적으로 고정한다.
+        // 가입 순서 게이트(KNK-1404)는 보상 신원으로 판정하므로, 초대자 id가 더 큰 경우는 재가입 계정(신원이 더 먼저)이다.
         val redeemer = User(id = 5L, nickname = "제출자")
-        val inviter = User(id = 9L, nickname = "초대자", inviteCode = "GOOD9999")
+        val inviter = User(id = 9L, nickname = "초대자", inviteCode = "GOOD9999", rewardIdentityUserId = 2L)
         `when`(userRepository.findByIdForUpdate(5L)).thenReturn(redeemer)
         `when`(userRepository.findByInviteCode("GOOD9999")).thenReturn(inviter)
         stubReward(RewardOutcome(rewarded = true, balance = 500L))
