@@ -48,6 +48,10 @@ data class StorySummaryResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
+    @get:JsonProperty("isOriginal")
+    @field:Schema(description = "공식 계정 소유 스토리인지. 공식 계정 미설정 또는 회원 부재 시 false.", example = "false")
+    val isOriginal: Boolean,
+
     @field:Schema(
         description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null. " +
             "컴파일이 생성한 표지가 있으면 축소본 없이 그 원본 URL(webp)이 실린다(KNK-1069).",

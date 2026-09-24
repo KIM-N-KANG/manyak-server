@@ -83,6 +83,8 @@ class UserContentControllerIntegrationTests {
             .jsonPath("$.length()").isEqualTo(2)
             .jsonPath("$[0].title").isEqualTo("new")
             .jsonPath("$[1].title").isEqualTo("old")
+            .jsonPath("$[0].isOriginal").isEqualTo(false)
+            .jsonPath("$[1].isOriginal").isEqualTo(false)
     }
 
     @Test

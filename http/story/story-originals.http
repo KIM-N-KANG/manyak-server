@@ -37,6 +37,8 @@ Accept: application/json
     });
     client.test("모든 카드가 PUBLISHED이고 author 닉네임이 채워져 있다", () => {
         for (let i = 0; i < b.length; i++) {
+            client.assert(b[i].isOriginal === true,
+                `isOriginal이 true여야 합니다. index=${i}, actual=${b[i].isOriginal}`);
             client.assert(b[i].status === "PUBLISHED",
                 `status가 PUBLISHED가 아닙니다. index=${i}, actual=${b[i].status}`);
             client.assert(b[i].author !== null && typeof b[i].author.nickname === "string",

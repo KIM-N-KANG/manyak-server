@@ -34,7 +34,24 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=20
     client.assert(response.status === 200, `actual=${response.status}`);
     const card = response.body.items.find(x => x.id === client.global.get("searchStoryId"));
     client.assert(!!card, `준비 스토리가 없습니다. actual=${JSON.stringify(response.body)}`);
+    client.assert(typeof card.isOriginal === "boolean" && !("original" in card),
+      `isOriginal boolean이 필요합니다. actual=${JSON.stringify(card)}`);
+    client.global.set("searchStoryIsOriginal", card.isOriginal);
     client.assert(card.title === "검색검증 마법 왕국" && card.author.id === null, `actual=${JSON.stringify(card)}`);
+  });
+%}
+
+### 3-1. 검색 카드와 배치 카드의 오리지널 판정 일치(3번 실행 후)
+POST {{baseUrl}}/api/v1/stories/batch
+Content-Type: application/json
+
+{"storyIds":["{{searchStoryId}}"]}
+
+> {%
+  client.test("검색과 배치의 isOriginal이 같다", () => {
+    client.assert(response.status === 200 && response.body.length === 1, `actual=${JSON.stringify(response.body)}`);
+    client.assert(response.body[0].isOriginal === client.global.get("searchStoryIsOriginal"),
+      `검색과 배치 판정이 다릅니다. actual=${JSON.stringify(response.body[0])}`);
   });
 %}
 

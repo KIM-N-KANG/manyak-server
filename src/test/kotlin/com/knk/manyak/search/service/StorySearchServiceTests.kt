@@ -15,6 +15,7 @@ import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch._types.OpenSearchException
 import org.opensearch.client.opensearch._types.ErrorResponse
 import org.opensearch.client.opensearch.core.SearchRequest
+import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import java.io.StringWriter
 import java.util.UUID
@@ -25,7 +26,8 @@ class StorySearchServiceTests {
         val client = Mockito.mock(OpenSearchClient::class.java)
         val stories = Mockito.mock(StoryRepository::class.java)
         val indexer = Mockito.mock(StorySearchIndexer::class.java)
-        val service = StorySearchService(client, StorySearchProperties(), stories, indexer)
+        val officialAccount = Mockito.mock(OfficialStoryAccount::class.java)
+        val service = StorySearchService(client, StorySearchProperties(), stories, indexer, officialAccount)
         fun failure(type: String, status: Int) = OpenSearchException(
             ErrorResponse.Builder()
                 .status(status).error { it.type(type).reason("test") }.build(),
@@ -37,7 +39,7 @@ class StorySearchServiceTests {
         val page = service.search("왕국", 20, null)
         assertTrue(page.items.isEmpty())
         assertNull(page.nextCursor)
-        Mockito.verifyNoInteractions(stories, indexer)
+        Mockito.verifyNoInteractions(stories, indexer, officialAccount)
         for (error in listOf(failure("security_exception", 403), failure("search_phase_execution_exception", 500), java.io.IOException("unavailable"))) {
             Mockito.doThrow(error).`when`(client).search(
                 Mockito.any(SearchRequest::class.java),
@@ -55,6 +57,7 @@ class StorySearchServiceTests {
             null, StorySearchProperties(),
             Mockito.mock(StoryRepository::class.java),
             Mockito.mock(StorySearchIndexer::class.java),
+            Mockito.mock(OfficialStoryAccount::class.java),
         )
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
             service.search("왕국", 20, null)
@@ -88,6 +91,6 @@ class StorySearchServiceTests {
             mapper.deserialize(it, StorySearchDocument::class.java)
         }
         assertEquals(document, decoded)
-        assertNull(decoded.toSummary().author!!.id)
+        assertNull(decoded.toSummary(isOriginal = false).author!!.id)
     }
 }

@@ -1,6 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -13,6 +14,10 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.verify
+import org.springframework.http.MediaType
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
@@ -347,6 +352,8 @@ class PublicStoryListControllerIntegrationTests {
             .jsonPath("$.items[0].turnCount").isEqualTo(0)
             .jsonPath("$.items[0].genres[0]").isEqualTo("판타지")
             .jsonPath("$.items[0].status").isEqualTo("PUBLISHED")
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[0].original").doesNotExist()
     }
 
     /** 응답 본문에서 nextCursor 값을 뽑는다(테스트 사이 값 전달용). */
@@ -372,9 +379,11 @@ class PublicStoryListControllerIntegrationTests {
 )
 class PublicStoryListOriginalFilterIntegrationTests {
 
+    @Autowired private lateinit var jwt: JwtTokenProvider
+
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
-    @Autowired private lateinit var userRepository: UserRepository
+    @MockitoSpyBean private lateinit var userRepository: UserRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -398,12 +407,16 @@ class PublicStoryListOriginalFilterIntegrationTests {
         val newer = saveStory(official, "오리지널 나중", Instant.parse("2026-08-02T00:00:00Z"))
         saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-03T00:00:00Z"))
 
+        clearInvocations(userRepository)
         restTestClient.get().uri("/api/v1/stories?filter=original").exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(2)
             .jsonPath("$.items[0].id").isEqualTo(newer.publicId.toString())
             .jsonPath("$.items[1].id").isEqualTo(older.publicId.toString())
+            .jsonPath("$.items[0].isOriginal").isEqualTo(true)
+            .jsonPath("$.items[1].isOriginal").isEqualTo(true)
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
     }
 
     @Test
@@ -413,10 +426,16 @@ class PublicStoryListOriginalFilterIntegrationTests {
         saveStory(official, "오리지널", Instant.parse("2026-08-01T00:00:00Z"))
         saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-02T00:00:00Z"))
 
-        restTestClient.get().uri("/api/v1/stories").exchange()
+        clearInvocations(userRepository)
+        restTestClient.get().uri("/api/v1/stories?filter=all").exchange()
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(2)
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[1].isOriginal").isEqualTo(true)
+            .jsonPath("$.items[0].original").doesNotExist()
+            .jsonPath("$.items[1].original").doesNotExist()
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
     }
 
     @Test
@@ -429,6 +448,59 @@ class PublicStoryListOriginalFilterIntegrationTests {
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(0)
             .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `배치 카드도 공식 계정만 오리지널이며 게스트와 비공개 읽기 규칙을 유지한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "일반작가"))
+        val original = saveStory(official, "오리지널", Instant.now())
+        val member = saveStory(other, "회원 스토리", Instant.now())
+        val guest = storyRepository.save(Story(title = "게스트"))
+        val draft = storyRepository.save(Story(userId = official.id, title = "공식 초안", status = StoryStatus.DRAFT))
+        clearInvocations(userRepository)
+
+        restTestClient.post().uri("/api/v1/stories/batch").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(original, member, guest, draft).map { it.publicId.toString() }))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.length()").isEqualTo(3)
+            .jsonPath("$[0].id").isEqualTo(original.publicId.toString())
+            .jsonPath("$[0].isOriginal").isEqualTo(true)
+            .jsonPath("$[1].isOriginal").isEqualTo(false)
+            .jsonPath("$[2].isOriginal").isEqualTo(false)
+            .jsonPath("$[0].author.id").isEmpty
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
+    }
+
+    @Test
+    fun `내 스토리는 공개 여부와 관계없이 공식 계정 소유를 오리지널로 판정한다`() {
+        val official = saveOfficialUser()
+        val member = userRepository.save(User(nickname = "일반작가"))
+        storyRepository.save(Story(userId = official.id, title = "공식 초안", status = StoryStatus.DRAFT, visibility = StoryVisibility.PRIVATE))
+        saveStory(official, "공식 공개", Instant.now())
+        saveStory(member, "일반 공개", Instant.now())
+
+        for ((user, expected) in listOf(official to true, member to false)) {
+            restTestClient.get().uri("/api/v1/users/me/stories")
+                .header("Authorization", "Bearer ${jwt.issueAccessToken(user.publicId)}")
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$[*].isOriginal").isEqualTo(if (expected) listOf(true, true) else listOf(false))
+        }
+    }
+
+    @Test
+    fun `공식 계정이 DB에 없으면 전체 카드의 isOriginal은 false다`() {
+        val other = userRepository.save(User(nickname = "일반작가"))
+        saveStory(other, "일반 공개", Instant.now())
+        restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+    }
+
+    @Test
+    fun `OpenAPI 카드 필드명은 original이 아닌 isOriginal이다`() {
+        restTestClient.get().uri("/v3/api-docs").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.components.schemas.StorySummaryResponse.properties.isOriginal.type").isEqualTo("boolean")
+            .jsonPath("$.components.schemas.StorySummaryResponse.properties.original").doesNotExist()
     }
 
     companion object {

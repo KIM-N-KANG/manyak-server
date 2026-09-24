@@ -24,7 +24,8 @@ data class StorySearchDocument(
     var createdAt: Long = 0,
     var visible: Boolean = false,
 ) {
-    fun toSummary() = StorySummaryResponse(
+    fun toSummary(isOriginal: Boolean) = StorySummaryResponse(
+        isOriginal = isOriginal,
         id = publicId, thumbnailUrlSm = thumbnailUrlSm, title = title, oneLineIntro = oneLineIntro,
         genres = genres,
         // 기존 카드 계약처럼 내부 PK는 항상 가린다. 검색 인덱스에는 프로필 이미지를 싣지 않는다.
