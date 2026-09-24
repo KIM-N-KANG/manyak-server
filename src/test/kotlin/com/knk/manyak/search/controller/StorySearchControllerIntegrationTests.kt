@@ -34,6 +34,7 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTe
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.PlatformTransactionManager
@@ -43,11 +44,11 @@ import java.util.UUID
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.ai.story.stub=true"])
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.ai.story.stub=true", "manyak.official-user-public-id=11111111-2222-3333-4444-555555555555"])
 class StorySearchControllerIntegrationTests {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var stories: StoryRepository
-    @Autowired private lateinit var users: UserRepository
+    @MockitoSpyBean private lateinit var users: UserRepository
     @Autowired private lateinit var sessions: com.knk.manyak.story.repository.StoryCreationSessionRepository
     @Autowired private lateinit var storylines: com.knk.manyak.story.repository.StoryCreationStorylineRepository
     @Autowired private lateinit var jwt: com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -116,7 +117,7 @@ class StorySearchControllerIntegrationTests {
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenReturn(response(listOf(hit, hit)))
         val body = client.get().uri("/api/v1/stories/search?q=왕국&limit=1").exchange().expectStatus().isOk
             .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
-        assertEquals(document.toSummary(), body.items.single())
+        assertEquals(document.toSummary(isOriginal = false), body.items.single())
         assertNotNull(body.nextCursor)
         assertNull(body.items.single().author!!.id)
         assertEquals(Instant.ofEpochMilli(document.createdAt), body.items.single().createdAt)
@@ -127,6 +128,45 @@ class StorySearchControllerIntegrationTests {
         client.get().uri { it.path("/api/v1/stories/search").queryParam("q", "마법").queryParam("cursor", body.nextCursor!!).build() }
             .exchange().expectStatus().isBadRequest
         client.get().uri("/api/v1/stories/search?q=왕국&cursor=broken").exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `검색 카드의 오리지널 판정은 색인 작성자 ID 없이도 현재 소유자를 따른다`() {
+        val officialId = UUID.fromString("11111111-2222-3333-4444-555555555555")
+        val official = users.save(User(publicId = officialId, nickname = "마냑"))
+        val member = users.save(User(nickname = "일반작가"))
+        val original = stories.save(Story(userId = official.id, title = "공식 왕국"))
+        val ordinary = stories.save(Story(userId = member.id, title = "회원 왕국"))
+        // 현재 색인 생성기는 author.id를 채우지 않는다. 낡은 ID가 남아 있어도 정본 소유자가 기준이다.
+        val originalDoc = reader.read(original.id)!!
+        assertNull(originalDoc.author!!.id)
+        val ordinaryDoc = reader.read(ordinary.id)!!.apply { author!!.id = official.id }
+        val hits = listOf(originalDoc, ordinaryDoc).map { document ->
+            Hit.Builder<StorySearchDocument>().index("stories-dev").id(document.publicId).source(document).build()
+        }
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(hits))
+        clearInvocations(users)
+
+        client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+            .jsonPath("$.items[0].isOriginal").isEqualTo(true)
+            .jsonPath("$.items[1].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[0].original").doesNotExist()
+            .jsonPath("$.items[0].author.id").isEmpty
+            .jsonPath("$.items[1].author.id").isEmpty
+        verify(users).findByPublicId(officialId)
+        verifyNoInteractions(indexer)
+    }
+
+    @Test
+    fun `공식 회원이 없으면 검색 카드의 isOriginal은 false다`() {
+        val member = users.save(User(nickname = "일반작가"))
+        val story = stories.save(Story(userId = member.id, title = "회원 왕국"))
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(story))))
+        client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
     }
 
     @Test
@@ -309,4 +349,35 @@ class StorySearchControllerIntegrationTests {
     private fun response(hits: List<Hit<StorySearchDocument>>): SearchResponse<StorySearchDocument> =
         SearchResponse.Builder<StorySearchDocument>().took(1).timedOut(false)
             .shards { it.total(1).successful(1).failed(0) }.hits { it.hits(hits) }.build()
+}
+
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["manyak.official-user-public-id="],
+)
+class StorySearchOriginalUnconfiguredIntegrationTests {
+    @Autowired private lateinit var client: RestTestClient
+    @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var cleaner: DatabaseCleaner
+    @MockitoBean private lateinit var openSearch: OpenSearchClient
+    @MockitoBean private lateinit var indexer: StorySearchIndexer
+
+    @Test
+    fun `공식 계정 설정이 비면 검색 카드의 isOriginal은 false다`() {
+        cleaner.cleanAll()
+        val member = users.save(User(nickname = "일반작가"))
+        val story = stories.save(Story(userId = member.id, title = "회원 왕국"))
+        val document = StorySearchDocument(publicId = story.publicId.toString(), title = story.title, visible = true)
+        val hit = Hit.Builder<StorySearchDocument>().index("stories-dev").id(document.publicId).source(document).build()
+        val response = SearchResponse.Builder<StorySearchDocument>().took(1).timedOut(false)
+            .shards { it.total(1).successful(1).failed(0) }.hits { it.hits(listOf(hit)) }.build()
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenReturn(response)
+
+        client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[0].original").doesNotExist()
+    }
 }

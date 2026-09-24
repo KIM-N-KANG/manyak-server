@@ -70,6 +70,12 @@ Accept: application/json
                 `스토리 카드 필드(id, title)가 없습니다. actual=${JSON.stringify(b[0])}`);
         }
     });
+    client.test("내 스토리 카드에 isOriginal boolean이 있다", () => {
+        for (const card of b) {
+            client.assert(typeof card.isOriginal === "boolean" && !("original" in card),
+                `isOriginal boolean이 필요합니다. actual=${JSON.stringify(card)}`);
+        }
+    });
     client.test("생성 최신순으로 내림차순 정렬돼 있다", () => {
         for (let i = 1; i < b.length; i++) {
             client.assert(b[i - 1].createdAt >= b[i].createdAt,

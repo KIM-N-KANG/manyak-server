@@ -116,6 +116,15 @@ Accept: application/json
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     const items = response.body.items;
+    client.test("카드에 non-null isOriginal이 있고 일반 회원 스토리는 false다", () => {
+        for (const card of items) {
+            client.assert(typeof card.isOriginal === "boolean" && !("original" in card),
+                `isOriginal boolean이 필요합니다. actual=${JSON.stringify(card)}`);
+            if ([client.global.get("storyIdA"), client.global.get("storyIdB")].includes(card.id)) {
+                client.assert(card.isOriginal === false, `일반 회원 스토리는 false여야 합니다. actual=${card.isOriginal}`);
+            }
+        }
+    });
     client.test("응답이 items·nextCursor 계약을 지킨다", () => {
         client.assert(Array.isArray(items), `items가 배열이 아닙니다. actual=${JSON.stringify(response.body)}`);
         client.assert(response.body.nextCursor === null || typeof response.body.nextCursor === "string",
@@ -212,6 +221,11 @@ Accept: application/json
 > {%
     client.test("오리지널 필터 조회가 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.test("오리지널 필터의 모든 카드는 isOriginal=true다", () => {
+        for (const card of response.body.items) {
+            client.assert(card.isOriginal === true, `true여야 합니다. actual=${JSON.stringify(card)}`);
+        }
     });
     client.test("방금 만든 검증 스토리는 오리지널에 없다", () => {
         const ids = response.body.items.map(it => it.id);
