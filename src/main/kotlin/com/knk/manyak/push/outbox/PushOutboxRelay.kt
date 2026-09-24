@@ -4,12 +4,15 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
+/**
+ * 커밋된 임대 아래서 브로커 발행을 기다리고, 결과만 독립 트랜잭션으로 기록한다.
+ * 배치를 순차 대기하면 건수 × 전송 제한만큼 걸려 임대를 넘길 수 있으므로 한꺼번에 제출한다.
+ */
 @Component
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
 @EnableConfigurationProperties(PushOutboxProperties::class)
@@ -25,10 +28,10 @@ class PushOutboxRelay(
         meters.counter("manyak.push.outbox.result", "outcome", it)
     }
 
-    @Scheduled(fixedDelayString = "\${manyak.push.outbox.poll-interval:2s}")
     fun poll() {
         val rows = store.claim(clock.instant(), settings.lease, settings.batchSize)
-        // 포트는 즉시 future를 반환한다. 모든 전송을 제출하고 배치에 제한 시간 하나만 적용한다.
+        // 포트는 즉시 future를 반환한다. 모든 전송을 제출하고 배치 전체에 제한 시간 하나만 적용한다.
+        // 브로커 성공과 DB 완료 기록 사이 장애에는 재발행될 수 있어 소비자의 messageId 멱등 처리가 필요하다.
         val pending = rows.map { row ->
             row to try { publisher.publish(row.message) } catch (ex: Exception) { CompletableFuture.failedFuture<Unit>(ex) }
         }

@@ -11,6 +11,10 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 
+/**
+ * 완료 상태와 알림 요청을 원자적으로 기록한다. AFTER_COMMIT이나 비동기 수신으로 바꾸면
+ * 아웃박스 기록 실패 시 COMPLETED만 남아 복구 요청에서도 알림을 만들 수 없게 된다.
+ */
 @Component
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
 class StoryCompletionOutboxListener(
@@ -19,6 +23,7 @@ class StoryCompletionOutboxListener(
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    // MANDATORY로 완료 마킹 트랜잭션에 참여하고 예외를 전파해 기록 실패 시 COMPLETED도 롤백한다.
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     fun onStoryCompleted(event: StoryCompletedEvent) {
