@@ -1,87 +1,49 @@
-### 발송 실행 위치 전환 수동 검증(KNK-1375)
-### 준비: manyak-infra compose로 manyak-server와 manyak-notification을 함께 띄웁니다.
-###   MANYAK_PUSH_MODE=remote
-###   MANYAK_NOTIFICATION_BASE_URL=http://manyak-notification:8080
-###   MANYAK_INTERNAL_SHARED_SECRET는 두 컨테이너에 같은 값
-### 서버가 local 모드면 4번 요청 뒤에도 알림 서비스 로그에 아무것도 남지 않습니다(정상).
-### 실제 기기 수신까지 보려면 MANYAK_FCM_SERVICE_ACCOUNT_JSON을 알림 서비스에 주입합니다.
-### 비워 두면 알림 서비스가 자격 조회까지만 하고 SKIPPED/FCM_DISABLED로 응답합니다.
-### 발송 자체의 분기는 StoryCompletionPushModeTests에서 검증합니다. 이 파일은 컨테이너 사이 왕복을 봅니다.
+### 아웃박스·Kafka 발행 수동 검증(KNK-1378)
+### 준비: local 프로파일, MANYAK_PUSH_MODE=remote, SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+### compose 서버에서는 브로커의 내부 주소를 주입합니다(예: manyak-kafka:9092, 실제 listener 확인).
+### 아래 요청은 위에서부터 실행합니다. simpleCreationId와 storylineId는 본인 소유의 제작 데이터로 채웁니다.
+### Kafka가 중단된 동안 완성 요청 뒤 push_outbox가 PENDING으로 남는지 SQL로 확인합니다.
+### SELECT message_id, status, attempts, next_attempt_at FROM push_outbox ORDER BY id DESC;
+### Kafka 복구 뒤 같은 message_id가 PUBLISHED로 바뀌고 push.requested에 recipientId 키로 들어오는지 확인합니다.
+### 동일 요청을 재실행해도 행 수가 늘지 않아야 합니다. local 모드에서는 행이 생기지 않습니다.
+### 서비스 알림 동의는 소비자가 발송 직전에 확인하므로 remote 기록 자체는 동의와 무관합니다.
 
 @baseUrl = http://localhost:8080
-@notificationUrl = http://localhost:8081
 @accessToken = PUT_A_TEST_ACCESS_TOKEN_HERE
-@internalSecret = PUT_THE_SHARED_SECRET_HERE
+@simpleCreationId = 1
+@storylineId = 1
+@completionRequestId = 3df6f82d-48a0-4344-b0a2-fc3f6b29d906
 
-### 0. 두 서비스 상태
+### 1. 서버 상태
 GET {{baseUrl}}/actuator/health
 
 > {%
     client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
 %}
 
-### 1. 알림 서비스 상태
-GET {{notificationUrl}}/actuator/health
-
-> {%
-    client.test("알림 서비스 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
-%}
-
-### 2. 테스트 회원 publicId 저장
-GET {{baseUrl}}/api/v1/auth/me
-Authorization: Bearer {{accessToken}}
-
-> {%
-    client.test("회원 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
-    client.global.set("recipientId", response.body.publicId);
-%}
-
-### 3. 서비스 알림 수신을 켠다(껐으면 서버가 발송 전에 건너뛴다)
-PATCH {{baseUrl}}/api/v1/users/me/push-settings
+### 2. 스토리 완성 — 같은 requestId로 재실행해 멱등 replay 확인
+POST {{baseUrl}}/api/v1/stories/simple
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
+X-Manyak-Request-Id: req_outbox_manual
+X-Manyak-Session-Id: session_outbox_manual
 
 {
-  "servicePushEnabled": true
+  "requestId": "{{completionRequestId}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": []
 }
 
 > {%
-    client.test("설정 반영", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    client.test("스토리 완성", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
+    client.global.set("outboxStoryId", response.body.id);
 %}
 
-### 4. 알림 서비스를 직접 불러 왕복을 먼저 확인한다
-### 서버 경유가 아니라 알림 서비스 → 서버 내부 API 방향을 본다. reason이 서버에서 오면 왕복이 성립한다.
-POST {{notificationUrl}}/internal/notifications
-Content-Type: application/json
-X-Manyak-Internal-Secret: {{internalSecret}}
-X-Manyak-Request-Id: req_push_mode_manual
-
-{
-  "recipientId": "{{recipientId}}",
-  "kind": "SERVICE",
-  "type": "STORY_COMPLETED",
-  "data": {
-    "title": "스토리가 완성됐어요",
-    "body": "확인해 보세요",
-    "storyId": "00000000-0000-4000-8000-000000000000",
-    "deepLink": "https://manyak.app/stories/00000000-0000-4000-8000-000000000000"
-  }
-}
+### 3. 완성 결과 조회
+GET {{baseUrl}}/api/v1/stories/{{outboxStoryId}}
+Authorization: Bearer {{accessToken}}
 
 > {%
-    client.test("자격 조회 왕복", () => client.assert(response.status === 200 || response.status === 502,
-        `expected=200|502 actual=${response.status}`));
-    client.test("판정 근거가 서버에서 온다", () => {
-        const reason = response.body.reason;
-        client.assert(reason !== "ELIGIBILITY_UNAVAILABLE",
-            `서버 내부 API에 닿지 못했습니다. base-url과 시크릿을 확인하세요 (reason=${reason})`);
-    });
-    client.log(`outcome=${response.body.outcome} reason=${response.body.reason}`);
+    client.test("완성 스토리 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
 %}
-
-### 5. 스토리 완성까지 실제로 흘려 본다(간편 제작)
-### 완성 마킹이 커밋된 뒤 AFTER_COMMIT 리스너가 알림 서비스를 부릅니다. 응답은 발송과 무관하게 즉시 옵니다.
-### 완성까지 시간이 걸리니 아래 확인은 응답 뒤에 로그로 합니다:
-###   docker compose logs manyak-server | grep "알림 서비스에 발송을 요청했습니다"
-###   docker compose logs manyak-notification | grep req_
-### 요청 본문은 story/story-simple-create.http의 최신 계약을 그대로 씁니다(중복 정의하지 않습니다).

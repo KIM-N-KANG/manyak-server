@@ -1,9 +1,7 @@
 package com.knk.manyak.push.event
 
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.push.client.NotificationClient
 import com.knk.manyak.push.config.PushAsyncConfig
-import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.LoggerFactory
@@ -15,37 +13,11 @@ import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
 import java.util.concurrent.Executor
 
-/**
- * 스토리 완성 푸시(KNK-1115). 완성 마킹 트랜잭션이 커밋된 뒤 제작자에게 서비스 알림을 보낸다.
- *
- * - AFTER_COMMIT이라 생성이 롤백되면 보내지 않는다. 반대로 **발송 실패는 생성에 영향을 주지 않는다** —
- *   AFTER_COMMIT 콜백의 예외는 커밋을 되돌리지 못한 채 호출부로 전파되므로 여기서 삼키고 로그만 남긴다.
- * - 스토리 완성은 **서비스 알림**이다(사용자가 유발한 작업의 결과 통지). 광고 판정([canReceiveMarketingPush])이
- *   아니라 `servicePushEnabled`만 본다(KNK-1132, 정책 KNK-1129).
- * - 토큰이 없거나 정지·탈퇴 회원인 경우는 발송 실행 주체가 조용히 건너뛴다(KNK-1130).
- * - **발송 실행 위치는 `manyak.push.mode`가 가른다**(KNK-1375). `local`은 서버 안의 [FcmPushSender],
- *   `remote`는 알림 서비스([NotificationClient])다. 어느 쪽이든 **무엇을 보낼지와 보내도 되는지는 서버가
- *   판단한다** — 아래 수신 동의 확인은 모드와 무관하게 그대로 돈다. 기본값 `local`이라 배포만으로는
- *   경로가 바뀌지 않고, 환경변수 하나로 켜고 같은 값으로 되돌린다.
- * - **워커 스레드로 넘겨 요청 스레드와 분리한다**(피드백 알림 선례, Codex 리뷰 P1). AFTER_COMMIT 콜백은 원
- *   트랜잭션의 커넥션이 반납되기 전에 돌아, 여기서 DB를 읽으면 요청 하나가 커넥션 두 개를 동시에 쥔다. 풀이
- *   포화되면 커넥션 획득이 `connectionTimeout`으로 실패하고, 그 실패는 아래 try 바깥(트랜잭션 시작 시점)이라
- *   잡히지도 않아 이미 커밋된 생성의 응답이 500으로 뒤집힌다. 조회(회원)와 발송(토큰) 둘 다 DB를 타므로 접근을
- *   없앨 수는 없고, 스레드를 분리해 원 커넥션이 반납된 뒤에 읽는다.
- * - **`@Async` 대신 실행기에 직접 제출한다**(Codex 리뷰). `@Async`는 제출 자체가 프록시에서 일어나 큐가
- *   가득 찼을 때의 `TaskRejectedException`이 이 메서드 본문 **밖**에서 난다. 그러면 위와 같은 이유로 이미
- *   커밋된 생성이 500으로 뒤집힌다. 제출을 본문 안으로 들여 거부를 잡고 로그로 남긴다. 그 푸시는 유실되며,
- *   유실되지 않는 전달은 아웃박스와 큐를 넣는 3단계의 몫이다(KNK-1364).
- * - 실행기는 `Executor` 타입으로 받는다. 빈 선언 타입이 `Executor`라 `TaskExecutor`로는 주입되지 않는다
- *   (`chatSseExecutor`와 같은 관례). 주입 타입을 `TaskExecutor`로 쓰면 컨텍스트가 뜨지 않는다. 다만 이건
- *   주입 문제일 뿐이고, 생성된 인스턴스는 `ThreadPoolTaskExecutor`라 `@Async`의 후보 목록에는 그대로
- *   올라간다. 그 목록은 이 변경 전부터 이미 모호했다(KNK-1392).
- */
+/** local 모드의 커밋 후 발송. remote는 동기 아웃박스 리스너가 맡는다. */
 @Component
 class StoryCompletionPushListener(
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
-    private val notificationClient: NotificationClient,
     @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)
     private val pushExecutor: Executor,
     @Value("\${manyak.push.mode:local}")
@@ -57,6 +29,7 @@ class StoryCompletionPushListener(
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onStoryCompleted(event: StoryCompletedEvent) {
+        if (pushMode.equals(PUSH_MODE_REMOTE, ignoreCase = true)) return
         // 제출은 요청 스레드에서 일어난다. MDC가 아직 살아 있어야 PushAsyncConfig의 decorator가 워커로 옮긴다.
         try {
             pushExecutor.execute { dispatch(event) }
@@ -73,7 +46,7 @@ class StoryCompletionPushListener(
     // 트랜잭션을 열지 않는다 — 조회 한 번과 발송뿐이라 Spring Data가 여는 트랜잭션으로 충분하다.
     private fun dispatch(event: StoryCompletedEvent) {
         try {
-            // remote 모드는 수신자를 public_id로 넘기므로 회원 엔티티가 필요하다. 동의 확인은 두 모드가 공유한다.
+            // local 발송 직전에 서비스 알림 동의를 확인한다.
             val user = userRepository.findById(event.userId).orElse(null)
             if (user?.servicePushEnabled != true) {
                 log.debug(
@@ -88,11 +61,7 @@ class StoryCompletionPushListener(
                 "title" to event.title,
                 "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${event.storyPublicId}",
             )
-            if (pushMode.equals(PUSH_MODE_REMOTE, ignoreCase = true)) {
-                notificationClient.send(user.publicId, PushKind.SERVICE, STORY_COMPLETED_TYPE, data)
-            } else {
-                fcmPushSender.sendToUser(event.userId, data)
-            }
+            fcmPushSender.sendToUser(event.userId, data)
         } catch (ex: RuntimeException) {
             // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. 워커 스레드라 요청에 전파되지는
             // 않지만, 삼키지 않으면 스택트레이스만 남고 어느 회원의 발송이 깨졌는지 알 수 없다.
