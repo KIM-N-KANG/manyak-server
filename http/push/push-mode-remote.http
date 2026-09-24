@@ -1,6 +1,6 @@
 ### 아웃박스·Kafka 발행 수동 검증(KNK-1378)
 ### 준비: local 프로파일, MANYAK_PUSH_MODE=remote, SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-### compose 서버에서는 브로커의 내부 주소를 주입합니다(예: manyak-kafka:9092, 실제 listener 확인).
+### manyak-infra compose 서버에서는 kafka:19092를 주입합니다(서비스 이름 kafka, 컨테이너용 내부 리스너 19092).
 ### 아래 요청은 위에서부터 실행합니다. simpleCreationId와 storylineId는 본인 소유의 제작 데이터로 채웁니다.
 ### Kafka가 중단된 동안 완성 요청 뒤 push_outbox가 PENDING으로 남는지 SQL로 확인합니다.
 ### SELECT message_id, status, attempts, next_attempt_at FROM push_outbox ORDER BY id DESC;
