@@ -71,6 +71,12 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 
 `MANYAK_PUSH_WEB_BASE_URL`은 스토리 완성·출석 리마인드 푸시의 `deepLink`에 쓸 웹 주소입니다(기본 `https://manyak.app`). 개발 웹 주소가 필요한 환경에서는 이 값으로 재정의합니다.
 
+`MANYAK_PUSH_MODE=remote`는 스토리 완성의 `COMPLETED` 마킹과 같은 트랜잭션에 `push_outbox`를 기록합니다. 기본 `local`은 기존 서버 FCM 발송을 유지하고 아웃박스를 만들지 않습니다. remote의 동의·토큰 확인은 알림 서비스가 발송 직전에 수행합니다. 기존 HTTP 발송 클라이언트와 `manyak.push.notification.*` 설정은 제거했습니다.
+
+remote 발행 어댑터는 현재 **local 프로파일의 Kafka**만 지원합니다. `SPRING_KAFKA_BOOTSTRAP_SERVERS`(호스트 실행 기본 `localhost:9092`)를 주입하며 compose에서는 서버가 접근할 수 있는 브로커 listener 주소를 사용합니다. 토픽은 `push.requested`, 키는 회원 `publicId`입니다. SQS 어댑터 도입 전 dev/prod는 `MANYAK_PUSH_MODE=local`을 유지해야 합니다.
+
+`manyak.push.outbox.*` 설정은 `application.yml`에서 관리합니다. 기본 폴링 2초, 배치 100개, 임대 60초, 배치 전송 제한 20초, 실패 백오프 5초~5분, 포기 기준 24시간입니다. 릴레이는 내부 전용 단일 스레드 스케줄러에서 실행하므로 브로커 대기가 다른 정기 작업을 막지 않습니다. 이 스케줄러는 빈으로 노출하지 않아 기본 스케줄러와 `@Async` 실행기 선택을 유지합니다. Kafka 메타데이터 대기는 최대 1초, delivery 제한은 15초로 고정하며 배치 제한은 두 시간의 합보다 길고 임대보다 짧아야 합니다(기동 시 검증). 발행 결과는 `manyak.push.outbox.result` 카운터의 `published`·`retry`·`abandoned` outcome으로 관측합니다. DB 완료 기록 전 장애에는 중복 발행될 수 있으므로 소비자의 `messageId` 멱등 처리가 필요합니다. 수동 검증은 [remote 발행](http/push/push-mode-remote.http)을 따릅니다.
+
 `MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.2`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.4`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
 
 `MANYAK_INTERNAL_SHARED_SECRET`은 내부 발송 자격 조회의 공유 시크릿입니다(`manyak.internal.shared-secret`). 기본값은 빈 문자열이며 비어 있으면 `/internal/**` 요청에 404를 반환합니다. 설정된 경우 `X-Manyak-Internal-Secret` 헤더가 일치해야 하고, 사용자 Bearer 토큰은 내부 인증에 사용하지 않습니다. 공개 ALB의 내부 경로 라우팅 제외는 인프라 후속 작업입니다. 수동 검증은 [발송 자격 조회](http/internal/push-eligibility.http)를 따릅니다.

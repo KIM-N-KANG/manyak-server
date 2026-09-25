@@ -80,7 +80,7 @@ class StoryCreationRequestRecorder(
         ) -> T,
         /**
          * COMPLETED 마킹 **트랜잭션 안에서** 결과와 함께 한 번 호출된다(KNK-1115). 완성 알림처럼 "이 요청이
-         * 실제로 완료됐다"에 매달리는 부수 효과를 커밋 뒤로 미루는 자리다(`@TransactionalEventListener`).
+         * 실제로 완료됐다"에 매달리는 아웃박스를 동기로 기록하고 local 발송은 커밋 뒤로 미루는 자리다.
          * 멱등 replay는 이 지점에 도달하지 않아 재요청으로 다시 불리지 않는다.
          */
         onCompleted: ((T) -> Unit)? = null,

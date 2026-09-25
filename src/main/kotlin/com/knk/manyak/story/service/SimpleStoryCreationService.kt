@@ -636,7 +636,7 @@ class SimpleStoryCreationService(
             onCompleted = completionOwnerUserId?.let { ownerId ->
                 { response: SimpleStoryCreateResponse ->
                     eventPublisher.publishEvent(
-                        StoryCompletedEvent(userId = ownerId, storyPublicId = response.id, title = response.title),
+                        StoryCompletedEvent(userId = ownerId, requestId = request.requestId, storyPublicId = response.id, title = response.title),
                     )
                 }
             },

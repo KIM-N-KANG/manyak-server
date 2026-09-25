@@ -49,6 +49,7 @@
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
 | [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
+| [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
 
 ## Relations
 
@@ -558,6 +559,16 @@ erDiagram
   varchar_20_ doc_type
   varchar_20_ version
   timestamp_with_time_zone agreed_at
+}
+"public.push_outbox" {
+  bigint id
+  varchar_255_ message_id
+  jsonb payload
+  varchar_16_ status
+  integer attempts
+  timestamp_with_time_zone next_attempt_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone published_at
 }
 ```
 
