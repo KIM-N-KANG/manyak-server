@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_characters](public.story_characters.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.story_public_snapshots](public.story_public_snapshots.md) |  |  |
+| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_characters](public.story_characters.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.story_public_snapshots](public.story_public_snapshots.md) [public.story_submissions](public.story_submissions.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
@@ -54,6 +54,7 @@ erDiagram
 "public.story_likes" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
 
 "public.stories" {
@@ -174,6 +175,23 @@ erDiagram
   jsonb snapshot
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.story_submissions" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_10_ kind
+  jsonb payload
+  jsonb input_form
+  varchar_10_ status
+  jsonb issues
+  varchar_40_ error_code
+  integer attempt
+  timestamp_with_time_zone dispatched_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone decided_at
 }
 "public.image_presets" {
   bigint id
