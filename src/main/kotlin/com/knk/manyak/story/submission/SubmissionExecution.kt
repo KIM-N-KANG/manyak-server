@@ -2,6 +2,7 @@ package com.knk.manyak.story.submission
 
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.global.observability.MdcTaskDecorator
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.UpdateStoryRequest
@@ -10,6 +11,7 @@ import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryEditService
 import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
@@ -28,6 +30,7 @@ import tools.jackson.databind.ObjectMapper
 import tools.jackson.databind.JsonNode
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 
@@ -172,6 +175,14 @@ class SubmissionReclaimScheduler(
     fun reclaim() {
         val cutoff = Instant.now().minus(reclaimAfter)
         submissions.findByStatusAndDispatchedAtBefore(SubmissionStatus.PENDING, cutoff, PageRequest.of(0, 100))
-            .forEach { transactions.reclaim(it.id, cutoff) }
+            .forEach {
+                val previous = MDC.getCopyOfContextMap()
+                try {
+                    MDC.put(MdcKeys.REQUEST_ID, UUID.randomUUID().toString())
+                    transactions.reclaim(it.id, cutoff)
+                } finally {
+                    if (previous != null) MDC.setContextMap(previous) else MDC.clear()
+                }
+            }
     }
 }

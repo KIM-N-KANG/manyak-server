@@ -94,6 +94,65 @@ class ModerationOutboxIntegrationTests {
         assertEquals("story-moderation:${row.publicId}:1", messages.single().messageId)
     }
 
+
+    @Autowired private lateinit var scheduler: SubmissionReclaimScheduler
+    @MockitoBean private lateinit var ai: StoryModerationClient
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `회수마다 UUID 상관 ID를 AI와 아웃박스에 전달하고 스케줄러 MDC를 복원한다`(hasContext: Boolean) {
+        val previous = org.slf4j.MDC.getCopyOfContextMap()
+        try {
+            org.slf4j.MDC.clear()
+            if (hasContext) {
+                org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "scheduler-before")
+                org.slf4j.MDC.put("test_marker", "preserved")
+            }
+            val schedulerContext = org.slf4j.MDC.getCopyOfContextMap()
+            val user = users.save(User(nickname = "작가"))
+            repeat(2) {
+                val story = stories.save(Story(userId = user.id, title = "원본 $it"))
+                service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정 $it"), user.id)
+            }
+            submissions.findAll().forEach {
+                it.dispatchedAt = Instant.now().minusSeconds(301)
+                submissions.save(it)
+            }
+            val queued = mutableListOf<Runnable>()
+            val decorator = com.knk.manyak.global.observability.MdcTaskDecorator()
+            Mockito.doAnswer { call -> queued.add(decorator.decorate(call.getArgument(0))); null }
+                .`when`(executor).execute(Mockito.any(Runnable::class.java))
+            val messages = mutableListOf<PushMessage>()
+            Mockito.doAnswer { call -> messages.add(call.getArgument(0)); null }.`when`(store).insert(anyMessage(), anyInstant())
+            okhttp3.mockwebserver.MockWebServer().use { server ->
+                repeat(2) {
+                    server.enqueue(okhttp3.mockwebserver.MockResponse().setHeader("Content-Type", "application/json")
+                        .setBody("""{"decision":"APPROVED","issues":[],"error_code":null}"""))
+                }
+                val rest = RestStoryModerationClient(server.url("/").toString(), java.time.Duration.ofSeconds(180))
+                Mockito.doAnswer { call -> rest.moderate(call.getArgument(0)) }.`when`(ai)
+                    .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: tools.jackson.databind.json.JsonMapper().createObjectNode())
+                scheduler.reclaim()
+                assertEquals(schedulerContext, org.slf4j.MDC.getCopyOfContextMap())
+                assertEquals(2, queued.size)
+                queued.forEach { it.run() }
+                assertEquals(schedulerContext, org.slf4j.MDC.getCopyOfContextMap())
+                assertEquals(2, messages.size)
+                assertEquals(2, messages.map { it.requestId }.toSet().size)
+                messages.forEach { message ->
+                    assertNotEquals("unknown", message.requestId)
+                    assertEquals(message.requestId, java.util.UUID.fromString(message.requestId).toString())
+                    assertEquals("unknown", message.sessionId)
+                    val sent = server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS)!!
+                    assertEquals(message.requestId, sent.getHeader(com.knk.manyak.global.observability.CorrelationHeaders.HEADER_REQUEST_ID))
+                }
+                assertTrue(submissions.findAll().all { it.status == SubmissionStatus.APPROVED && it.attempt == 2 })
+            }
+        } finally {
+            if (previous == null) org.slf4j.MDC.clear() else org.slf4j.MDC.setContextMap(previous)
+        }
+    }
+
     // Mockito 매처가 반환하는 null을 Kotlin non-null 검사에 전달하지 않는다.
     private fun anyMessage(): PushMessage = Mockito.any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")
     private fun anyInstant(): Instant = Mockito.any(Instant::class.java) ?: Instant.EPOCH
