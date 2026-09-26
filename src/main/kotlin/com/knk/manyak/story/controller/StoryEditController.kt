@@ -16,7 +16,6 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
-import jakarta.validation.Valid
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -67,7 +66,7 @@ class StoryEditController(
         @Parameter(description = "스토리 ID(공개 식별자)")
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
-        @Valid @RequestBody request: UpdateStoryRequest,
+        @RequestBody request: UpdateStoryRequest,
     ): ResponseEntity<Any> {
         val result = submissions.update(storyId, request, userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED))
         return ResponseEntity.status(if (result is SubmissionAccepted) 202 else 200).body(result)

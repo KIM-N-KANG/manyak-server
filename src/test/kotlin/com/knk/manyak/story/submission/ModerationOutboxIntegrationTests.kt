@@ -64,6 +64,36 @@ class ModerationOutboxIntegrationTests {
         assertEquals("원본", stories.findById(story.id).orElseThrow().title)
         assertEquals(SubmissionStatus.PENDING, submissions.findById(row.id).orElseThrow().status)
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = SubmissionStatus::class, names = ["REJECTED", "FAILED"])
+    fun `반려와 실패도 아웃박스 장애 시 상태와 판정 필드를 롤백한다`(status: SubmissionStatus) {
+        Mockito.doThrow(org.springframework.dao.TransientDataAccessResourceException("database unavailable"))
+            .`when`(store).insert(anyMessage(), anyInstant())
+        val user = users.save(User(nickname = "작가"))
+        val story = stories.save(Story(userId = user.id, title = "원본"))
+        service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정"), user.id)
+        val row = submissions.findAll().single()
+        fun decide() {
+            if (status == SubmissionStatus.REJECTED) worker.finish(row.id, 1, ModerationResult("REJECTED", listOf(ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
+            else worker.fail(row.id, 1, "MODERATION_UNAVAILABLE")
+        }
+        assertThrows(org.springframework.dao.TransientDataAccessResourceException::class.java) { decide() }
+        val rolledBack = submissions.findById(row.id).orElseThrow()
+        assertEquals(SubmissionStatus.PENDING, rolledBack.status)
+        assertEquals(row.updatedAt, rolledBack.updatedAt)
+        assertNull(rolledBack.decidedAt)
+        assertNull(rolledBack.errorCode)
+        assertTrue(rolledBack.issues.isEmpty())
+        assertEquals("원본", stories.findById(story.id).orElseThrow().title)
+        val messages = mutableListOf<PushMessage>()
+        Mockito.doAnswer { call -> messages.add(call.getArgument(0)); null }.`when`(store).insert(anyMessage(), anyInstant())
+        decide()
+        assertEquals(status, submissions.findById(row.id).orElseThrow().status)
+        assertEquals(status.name, messages.single().data["status"])
+        assertEquals("story-moderation:${row.publicId}:1", messages.single().messageId)
+    }
+
     // Mockito 매처가 반환하는 null을 Kotlin non-null 검사에 전달하지 않는다.
     private fun anyMessage(): PushMessage = Mockito.any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")
     private fun anyInstant(): Instant = Mockito.any(Instant::class.java) ?: Instant.EPOCH

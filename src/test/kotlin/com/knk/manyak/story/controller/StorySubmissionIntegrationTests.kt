@@ -1,5 +1,12 @@
 package com.knk.manyak.story.controller
 
+import com.knk.manyak.story.submission.*
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.story.dto.UpdateStoryRequest
+import com.knk.manyak.story.entity.Story
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
@@ -46,7 +53,7 @@ class StorySubmissionIntegrationTests {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         val accepted = service.create(request(), user.id)
         val row = submissions.findByPublicId(java.util.UUID.fromString(accepted.submissionId))!!
-        worker.finish(row.id, 1, com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(com.knk.manyak.story.submission.ModerationIssue("title", "TEXT", "RULE", "사유")), null))
+        worker.finish(row.id, 1, com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(com.knk.manyak.story.submission.ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
         val retry = service.resubmit(accepted.submissionId, request().copy(title = "수정"), user.id)
         org.junit.jupiter.api.Assertions.assertEquals(accepted.submissionId, retry.submissionId)
         worker.finish(row.id, 1, com.knk.manyak.story.submission.ModerationResult("APPROVED", emptyList(), null))
@@ -161,7 +168,7 @@ class StorySubmissionIntegrationTests {
     @Test fun `이미지 이슈는 identity로 재매핑하고 사라진 대상은 제외한다`() {
         val original = mapper.readTree("""{"characters":[{"id":"c","images":[{"id":"a"},{"objectKey":"b"}]}]}""")
         val current = mapper.readTree("""{"characters":[{"id":"c","images":[{"objectKey":"b","imageUrl":"url"}]}]}""")
-        val issues = listOf(com.knk.manyak.story.submission.ModerationIssue("characters[0].images[0].imageUrl", "IMAGE", "RULE", "사유"), com.knk.manyak.story.submission.ModerationIssue("characters[0].images[1].imageUrl", "IMAGE", "RULE", "사유"))
+        val issues = listOf(com.knk.manyak.story.submission.ModerationIssue("characters[0].images[0].imageUrl", "IMAGE", "DRUGS", "사유"), com.knk.manyak.story.submission.ModerationIssue("characters[0].images[1].imageUrl", "IMAGE", "DRUGS", "사유"))
         org.junit.jupiter.api.Assertions.assertEquals(listOf("characters[0].images[0].imageUrl"), assembler.remap(issues, original, current).map { it.path })
     }
 
@@ -179,7 +186,7 @@ class StorySubmissionIntegrationTests {
         org.mockito.Mockito.doAnswer { call -> (call.arguments[0] as Runnable).run(); null }.`when`(pushExecutor)
             .execute(org.mockito.Mockito.any(Runnable::class.java))
         org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult {
-            worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(com.knk.manyak.story.submission.ModerationIssue("title", "TEXT", "RULE", "사유")), null))
+            worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(com.knk.manyak.story.submission.ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
             org.mockito.Mockito.verifyNoInteractions(pushSender)
         }
         org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.size)
@@ -244,4 +251,205 @@ class StorySubmissionIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON).body("{}").exchange().expectStatus().isUnauthorized
         client.get().uri("/api/v1/stories/submissions").exchange().expectStatus().isUnauthorized
     }
+    @Test fun `PENDING PATCH는 잘못된 genres보다 409를 우선한다`() {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "작가"))
+        val story = stories.save(com.knk.manyak.story.entity.Story(userId = user.id, title = "원본"))
+        service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(title = "변경"), user.id)
+        client.patch().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"genres":[]}""")
+            .exchange().expectStatus().isEqualTo(409)
+    }
+
+    @Test fun `타인과 미존재 제출본 PUT은 무효 입력보다 404를 우선한다`() {
+        val owner = users.save(com.knk.manyak.auth.entity.User(nickname = "작가"))
+        val other = users.save(com.knk.manyak.auth.entity.User(nickname = "타인"))
+        val accepted = service.create(request(), owner.id)
+        listOf(accepted.submissionId, java.util.UUID.randomUUID().toString()).forEach { id ->
+            client.put().uri("/api/v1/stories/submissions/$id")
+                .header("Authorization", "Bearer ${tokens.issueAccessToken(other.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(genres = emptyList())))
+                .exchange().expectStatus().isNotFound
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["UNKNOWN", "missingPath"])
+    fun `AI 계약 밖 rule과 path는 정상 반려가 아니라 실행 실패다`(invalid: String) {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "작가"))
+        service.create(request(), user.id)
+        val row = submissions.findAll().single()
+        val issue = com.knk.manyak.story.submission.ModerationIssue(
+            if (invalid == "missingPath") "startSettings[9].prologue" else "title",
+            "TEXT", if (invalid == "UNKNOWN") invalid else "DRUGS", "사유")
+        org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
+            .thenReturn(com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(issue), null))
+        runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
+        val result = submissions.findById(row.id).orElseThrow()
+        org.junit.jupiter.api.Assertions.assertEquals(com.knk.manyak.story.submission.SubmissionStatus.FAILED, result.status)
+        org.junit.jupiter.api.Assertions.assertEquals("MODERATION_UNAVAILABLE", result.errorCode)
+        org.junit.jupiter.api.Assertions.assertTrue(result.issues.isEmpty())
+        org.junit.jupiter.api.Assertions.assertEquals(0, stories.count())
+    }
+
+    @Test fun `제출본 payload는 submission 메타를 포함하지 않고 수정 폼만 포함한다`() {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "작가"))
+        val accepted = service.create(request(), user.id)
+        val row = submissions.findAll().single()
+        fun check() {
+            val payload = mapper.valueToTree<tools.jackson.databind.JsonNode>(service.get(accepted.submissionId, user.id))["payload"]
+            org.junit.jupiter.api.Assertions.assertFalse(payload.has("submission"))
+        }
+        check()
+        worker.finish(row.id, 1, com.knk.manyak.story.submission.ModerationResult("APPROVED", emptyList(), null))
+        check()
+        val story = stories.findAll().single()
+        service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(title = "수정"), user.id)
+        val update = submissions.findAll().first { it.kind == com.knk.manyak.story.submission.SubmissionKind.UPDATE }
+        val payload = mapper.valueToTree<tools.jackson.databind.JsonNode>(service.get(update.publicId.toString(), user.id))["payload"]
+        org.junit.jupiter.api.Assertions.assertFalse(payload.has("submission"))
+        org.junit.jupiter.api.Assertions.assertTrue(service.editForm(story.publicId.toString(), user.id).has("submission"))
+    }
+
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+
+    private fun seedSubmission(status: SubmissionStatus, userId: Long, update: Boolean = false): StorySubmission {
+        if (update) {
+            val story = stories.save(Story(userId = userId, title = "라이브"))
+            service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정"), userId)
+        } else service.create(request(), userId)
+        val row = submissions.findAll().maxBy { it.id }
+        when (status) {
+            SubmissionStatus.APPROVED -> worker.finish(row.id, 1, ModerationResult("APPROVED", emptyList(), null))
+            SubmissionStatus.REJECTED -> worker.finish(row.id, 1, ModerationResult("REJECTED", listOf(ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
+            SubmissionStatus.FAILED -> worker.fail(row.id, 1, "MODERATION_UNAVAILABLE")
+            SubmissionStatus.PENDING -> Unit
+        }
+        return submissions.findById(row.id).orElseThrow()
+    }
+
+    @ParameterizedTest @EnumSource(SubmissionStatus::class)
+    fun `상세 HTTP는 상태별 전체 계약 필드를 반환한다`(status: SubmissionStatus) {
+        val user = users.save(User(nickname = "작가"))
+        val row = seedSubmission(status, user.id)
+        val bytes = client.get().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!
+        val body = mapper.readTree(bytes)
+        assertEquals(setOf("submissionId", "storyId", "kind", "payload", "status", "issues", "errorCode", "createdAt", "updatedAt", "decidedAt"), body.properties().map { it.key }.toSet())
+        assertEquals(row.publicId.toString(), body["submissionId"].asText())
+        assertEquals("CREATE", body["kind"].asText())
+        assertEquals(status.name, body["status"].asText())
+        assertEquals("제목", body["payload"]["title"].asText())
+        assertFalse(body["payload"].has("submission"))
+        java.time.Instant.parse(body["createdAt"].asText())
+        java.time.Instant.parse(body["updatedAt"].asText())
+        if (status == SubmissionStatus.APPROVED) assertEquals(stories.findById(row.storyId!!).orElseThrow().publicId.toString(), body["storyId"].asText())
+        else assertTrue(body["storyId"].isNull)
+        if (status == SubmissionStatus.PENDING) assertTrue(body["decidedAt"].isNull)
+        else java.time.Instant.parse(body["decidedAt"].asText())
+        if (status == SubmissionStatus.REJECTED) {
+            assertEquals(mapper.valueToTree<tools.jackson.databind.JsonNode>(row.issues), body["issues"])
+        } else assertEquals(0, body["issues"].size())
+        if (status == SubmissionStatus.FAILED) assertEquals("MODERATION_UNAVAILABLE", body["errorCode"].asText())
+        else assertTrue(body["errorCode"].isNull)
+    }
+
+    @Test fun `목록 HTTP는 생성 시각과 ID 내림차순이며 타인과 APPROVED를 제외한다`() {
+        val user = users.save(User(nickname = "작가"))
+        val first = seedSubmission(SubmissionStatus.FAILED, user.id)
+        val second = seedSubmission(SubmissionStatus.REJECTED, user.id)
+        val newest = seedSubmission(SubmissionStatus.PENDING, user.id)
+        // 저장 순서와 생성 시각 순서를 달리하고 동률도 만든다.
+        val fixed = java.sql.Timestamp.from(java.time.Instant.parse("2026-01-02T00:00:00Z"))
+        listOf(first, second).forEach { jdbc.update("update story_submissions set created_at = ? where id = ?", fixed, it.id) }
+        jdbc.update("update story_submissions set created_at = ? where id = ?", java.sql.Timestamp.from(fixed.toInstant().minusSeconds(1)), newest.id)
+        seedSubmission(SubmissionStatus.APPROVED, user.id)
+        seedSubmission(SubmissionStatus.PENDING, users.save(User(nickname = "타인")).id)
+        val body = client.get().uri("/api/v1/stories/submissions")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!
+        assertEquals(listOf(second, first, newest).map { it.publicId.toString() }, mapper.readTree(body).toList().map { it["submissionId"].asText() })
+    }
+
+    @ParameterizedTest @EnumSource(SubmissionStatus::class)
+    fun `CREATE PUT은 상태를 먼저 확인하고 반려와 실패만 재제출한다`(status: SubmissionStatus) {
+        val user = users.save(User(nickname = "작가"))
+        val row = seedSubmission(status, user.id)
+        val auth = "Bearer ${tokens.issueAccessToken(user.publicId)}"
+        val retryable = status in setOf(SubmissionStatus.REJECTED, SubmissionStatus.FAILED)
+        client.put().uri("/api/v1/stories/submissions/${row.publicId}").header("Authorization", auth)
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(genres = emptyList())))
+            .exchange().expectStatus().isEqualTo(if (retryable) 400 else 409)
+        client.put().uri("/api/v1/stories/submissions/${row.publicId}").header("Authorization", auth)
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(title = "재제출")))
+            .exchange().expectStatus().isEqualTo(if (retryable) 202 else 409)
+        val current = submissions.findById(row.id).orElseThrow()
+        assertEquals(if (retryable) 2 else 1, current.attempt)
+        assertEquals(if (retryable) SubmissionStatus.PENDING else status, current.status)
+        if (retryable) {
+            assertTrue(current.issues.isEmpty())
+            assertNull(current.errorCode)
+            assertNull(current.decidedAt)
+            assertEquals("재제출", mapper.readTree(current.payload)["title"].asText())
+        }
+    }
+
+    @ParameterizedTest @EnumSource(SubmissionStatus::class)
+    fun `UPDATE 제출본 PUT은 모든 상태에서 거절한다`(status: SubmissionStatus) {
+        val user = users.save(User(nickname = "작가"))
+        val row = seedSubmission(status, user.id, update = true)
+        client.put().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request()))
+            .exchange().expectStatus().isEqualTo(409)
+        assertEquals(status, submissions.findById(row.id).orElseThrow().status)
+    }
+
+    @ParameterizedTest @EnumSource(SubmissionStatus::class)
+    fun `DELETE는 타인 404 승인 409이고 나머지는 물리 삭제한다`(status: SubmissionStatus) {
+        val user = users.save(User(nickname = "작가"))
+        val other = users.save(User(nickname = "타인"))
+        val row = seedSubmission(status, user.id)
+        client.delete().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(other.publicId)}")
+            .exchange().expectStatus().isNotFound
+        assertTrue(submissions.existsById(row.id))
+        client.delete().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isEqualTo(if (status == SubmissionStatus.APPROVED) 409 else 204)
+        assertEquals(status == SubmissionStatus.APPROVED, submissions.existsById(row.id))
+    }
+
+    @Autowired private lateinit var scheduler: SubmissionReclaimScheduler
+
+    @Test fun `실행기 거부에도 HTTP 202를 유지하고 스케줄러가 PENDING을 회수한다`() {
+        val user = users.save(User(nickname = "작가"))
+        org.mockito.Mockito.doThrow(java.util.concurrent.RejectedExecutionException("full"))
+            .`when`(executor).execute(org.mockito.Mockito.any(Runnable::class.java))
+        client.post().uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request()))
+            .exchange().expectStatus().isAccepted
+        val row = submissions.findAll().single()
+        assertEquals(SubmissionStatus.PENDING, row.status)
+        assertEquals(1, row.attempt)
+        org.mockito.Mockito.verifyNoInteractions(ai)
+        row.dispatchedAt = java.time.Instant.now().minusSeconds(301)
+        submissions.save(row)
+        org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
+            .thenReturn(ModerationResult("APPROVED", emptyList(), null))
+        val queued = mutableListOf<Runnable>()
+        org.mockito.Mockito.doAnswer { call -> queued.add(call.getArgument(0)); null }
+            .`when`(executor).execute(org.mockito.Mockito.any(Runnable::class.java))
+        scheduler.reclaim()
+        // 실제 실행기처럼 회수 트랜잭션의 afterCommit 콜백이 끝난 뒤 실행한다.
+        queued.single().run()
+        val recovered = submissions.findById(row.id).orElseThrow()
+        assertEquals(2, recovered.attempt)
+        assertEquals(SubmissionStatus.APPROVED, recovered.status)
+        assertNotNull(recovered.storyId)
+        assertEquals(1, stories.count())
+    }
+
 }

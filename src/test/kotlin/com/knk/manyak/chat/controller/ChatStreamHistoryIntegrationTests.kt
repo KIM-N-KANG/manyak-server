@@ -457,6 +457,49 @@ class ChatStreamHistoryIntegrationTests {
             .responseBody
             ?: error("재생성 스트리밍 응답 본문이 비어 있습니다.")
 
+
+    @Autowired private lateinit var submissions: com.knk.manyak.story.submission.StorySubmissionService
+    @Autowired private lateinit var submissionRows: com.knk.manyak.story.submission.StorySubmissionRepository
+    @Autowired private lateinit var moderation: com.knk.manyak.story.submission.SubmissionTransactions
+    @Autowired private lateinit var json: tools.jackson.databind.ObjectMapper
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
+    @Test
+    fun `미승인 UPDATE는 공개 상세 목록 채팅 AI와 스냅샷 어디에도 노출되지 않는다`() {
+        val (story, chat) = seedChatOnPublicStory()
+        val before = snapshotService.findByStoryId(story.id)!!
+        val update = json.readValue("""{
+            "title":"미승인 제목", "genres":["미스터리"],
+            "storySettings":{"worldSetting":"미승인 세계", "characterSetting":"미승인 인물", "userRoleSetting":"미승인 역할", "ruleSetting":"미승인 규칙"},
+            "startSettings":[{"name":"미승인 시작", "prologue":"미승인 도입", "startSituation":"미승인 상황", "suggestedInputs":["하나","둘","셋"]}]
+        }""", com.knk.manyak.story.dto.UpdateStoryRequest::class.java)
+        submissions.update(story.publicId.toString(), update, story.userId!!)
+        val row = submissionRows.findAll().single()
+        fun checkIsolation() {
+            assertThat(submissions.editForm(story.publicId.toString(), story.userId).path("title").asText()).isEqualTo("미승인 제목")
+            restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange().expectStatus().isOk
+                .expectBody().jsonPath("$.title").isEqualTo(story.title)
+                .jsonPath("$.startSettings[0].prologue").isEqualTo("원래 프롤로그")
+            restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
+                .expectBody().jsonPath("$.items[0].title").isEqualTo(story.title)
+            assertThat(snapshotService.findByStoryId(story.id)).isEqualTo(before)
+            capturingAiClient.lastRequest.set(null)
+            stream(chat.publicId.toString(), "다음 행동")
+            val sent = capturingAiClient.lastRequest.get() ?: error("AI 요청 누락")
+            assertThat(sent.genre).isEqualTo("판타지")
+            assertThat(sent.startSettings.prologue).isEqualTo("원래 프롤로그")
+            assertThat(json.writeValueAsString(sent)).doesNotContain("미승인")
+        }
+        checkIsolation()
+        moderation.finish(row.id, 1, com.knk.manyak.story.submission.ModerationResult("REJECTED",
+            listOf(com.knk.manyak.story.submission.ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
+        checkIsolation()
+        submissions.update(story.publicId.toString(), update, story.userId!!)
+        moderation.fail(row.id, 2, "MODERATION_UNAVAILABLE")
+        checkIsolation()
+    }
+
     private fun stream(chatId: String, userInput: String): String =
         restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")

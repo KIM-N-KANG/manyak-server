@@ -33,6 +33,16 @@ Content-Type: application/json
 
 > {% client.test("상태별 쓰기", () => client.assert([200,409].includes(response.status), `actual=${response.status}`)); %}
 
+### PENDING 유지 중 무효 본문도 입력 검증보다 409 우선
+# 즉시 승인 로컬 스텁에서는 이미 승인되어 400이 될 수 있다. PENDING이 유지되는 AI 대역에서 실행한다.
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"genres":[]}
+
+> {% client.test("PENDING 우선", () => client.assert(response.status === 409, `409 기대, actual=${response.status}`)); %}
+
 ### 반려·실패 입력도 수정 폼에 유지된다
 GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
 Authorization: Bearer {{accessToken}}

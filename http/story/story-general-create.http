@@ -37,6 +37,7 @@ Authorization: Bearer {{accessToken}}
 > {%
 client.test("제출본 복원", () => {
   client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(!("submission" in response.body.payload), "payload에 응답 전용 submission 없음");
   client.assert(response.body.payload.title === "달빛 아래의 계약", "입력 보존");
 });
 if (response.body.status === "APPROVED") client.global.set("createdStoryId", response.body.storyId);
@@ -101,6 +102,19 @@ GET {{baseUrl}}/api/v1/stories/submissions/00000000-0000-0000-0000-000000000000
 Authorization: Bearer {{accessToken}}
 
 > {% client.test("제출본 비노출", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 없는 제출본에 무효 본문 PUT: 입력 검증보다 404 우선 (타인 ID도 동일)
+PUT {{baseUrl}}/api/v1/stories/submissions/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title":"제목", "oneLineIntro":"소개", "genres":[],
+  "storySettings":{"worldSetting":"세계", "characterSetting":"인물", "userRoleSetting":"역할", "ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작", "prologue":"도입", "startSituation":"상황", "suggestedInputs":["하나","둘","셋"]}]
+}
+
+> {% client.test("소유권·존재 우선", () => client.assert(response.status === 404, `404 기대, actual=${response.status}`)); %}
 
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}

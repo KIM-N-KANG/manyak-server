@@ -60,7 +60,7 @@ class SubmissionExecutor(
     fun run(event: SubmissionRequested) {
         try {
             val input = transactions.start(event.id, event.attempt) ?: return
-            val result = try { client.moderate(input).validated() } catch (_: Exception) {
+            val result = try { client.moderate(input).validated(input) } catch (_: Exception) {
                 transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE")
                 return
             }

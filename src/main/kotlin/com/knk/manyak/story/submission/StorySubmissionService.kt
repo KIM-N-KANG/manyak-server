@@ -109,7 +109,8 @@ class StorySubmissionService(
     }
 
     private fun response(row: StorySubmission): Map<String, Any?> {
-        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) else currentForm(row)
+        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row)
+        form.remove("submission")
         return linkedMapOf("submissionId" to row.publicId.toString(), "storyId" to row.storyId?.let { stories.findById(it).orElse(null)?.publicId?.toString() },
             "kind" to row.kind, "payload" to form, "status" to row.status,
             "issues" to forms.remap(row.issues, mapper.readTree(row.inputForm), form), "errorCode" to row.errorCode,
