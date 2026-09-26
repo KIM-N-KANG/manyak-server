@@ -44,7 +44,12 @@ import java.time.Duration
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryImageUploadControllerIntegrationTests {
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
 
     @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
 
@@ -98,15 +103,15 @@ class StoryImageUploadControllerIntegrationTests {
             .apply { user?.let { header("Authorization", bearer(it)) } }
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
 
-    private fun addImage(story: Story, character: StoryCharacter, user: User, body: String) =
-        restTestClient.post()
-            .uri("/api/v1/stories/${story.publicId}/characters/${character.publicId}/images")
-            .header("Authorization", bearer(user))
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-            .exchange()
+    // 이미지 추가는 전체 인물 PATCH를 제출하고 승인한 뒤 검증한다.
+    private fun addImage(story: Story, character: StoryCharacter, user: User, body: String): RestTestClient.ResponseSpec {
+        val kept = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
+            .joinToString(",") { """{"id":"${it.publicId}"}""" }
+        val images = if (kept.isEmpty()) body else "$kept,$body"
+        return patchStory(story, user, """{"characters":[{"id":"${character.publicId}","name":"${character.name}","images":[$images]}]}""")
+    }
 
     private fun addImageBody(story: Story, imageName: String) =
         """{"objectKey":"${characterKey(story)}","imageName":"$imageName"}"""
@@ -127,7 +132,7 @@ class StoryImageUploadControllerIntegrationTests {
         )
         val character = saveCharacter(story)
 
-        addImage(story, character, owner, addImageBody(story, "세린_웃음")).expectStatus().isCreated
+        addImage(story, character, owner, addImageBody(story, "세린_웃음")).expectStatus().isOk
 
         val added = snapshotRepository.findById(story.id).orElseThrow().snapshot
         assertThat(added.characterImages.map { it.imageName }).containsExactly("세린_웃음")
@@ -282,7 +287,7 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner = null)
 
         // 게스트 스토리는 익명으로 수정할 수 있지만 이미지는 못 올린다.
-        patchStory(story, null, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isBadRequest
+        patchStory(story, null, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isUnauthorized
     }
 
     @Test
@@ -309,17 +314,17 @@ class StoryImageUploadControllerIntegrationTests {
     // ---- 인물 이미지 ----
 
     @Test
-    fun `인물 이미지를 연결하면 201이고 편집 폼에 실린다`() {
+    fun `인물 이미지를 승인하면 200이고 편집 폼에 실린다`() {
         val owner = saveUser()
         val story = saveStory(owner)
         val character = saveCharacter(story)
 
         addImage(story, character, owner, addImageBody(story, "세린_웃음"))
-            .expectStatus().isCreated
+            .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.imageName").isEqualTo("세린_웃음")
-            .jsonPath("$.imageUrl").isEqualTo("$BASE_URL/${characterKey(story)}")
-            .jsonPath("$.moderationStatus").isEqualTo("APPROVED")
+            .jsonPath("$.characters[0].images[0].imageName").isEqualTo("세린_웃음")
+            .jsonPath("$.characters[0].images[0].imageUrl").isEqualTo("$BASE_URL/${characterKey(story)}")
+            .jsonPath("$.characters[0].images[0].moderationStatus").isEqualTo("APPROVED")
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}/edit")
@@ -350,7 +355,7 @@ class StoryImageUploadControllerIntegrationTests {
         val owner = saveUser()
         val story = saveStory(owner)
         val character = saveCharacter(story)
-        addImage(story, character, owner, addImageBody(story, "세린_기본")).expectStatus().isCreated
+        addImage(story, character, owner, addImageBody(story, "세린_기본")).expectStatus().isOk
 
         addImage(story, character, owner, addImageBody(story, "세린_기본"))
             .expectStatus().isEqualTo(HttpStatus.CONFLICT)
@@ -364,7 +369,7 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner)
         val character = saveCharacter(story)
         (1..StoryCharacterImage.MAX_IMAGES_PER_CHARACTER).forEach {
-            addImage(story, character, owner, addImageBody(story, "세린_표정$it")).expectStatus().isCreated
+            addImage(story, character, owner, addImageBody(story, "세린_표정$it")).expectStatus().isOk
         }
 
         addImage(story, character, owner, addImageBody(story, "세린_초과")).expectStatus().isBadRequest
@@ -379,10 +384,10 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner)
         val character = saveCharacter(story)
         val imageId = addImage(story, character, owner, addImageBody(story, "세린_기본"))
-            .expectStatus().isCreated
+            .expectStatus().isOk
             .expectBody()
             .returnResult()
-            .let { IMAGE_ID_PATTERN.find(String(it.responseBody!!))!!.groupValues[1] }
+            .let { storyCharacterImageRepository.findAll().single().publicId.toString() }
 
         repeat(2) {
             restTestClient.delete()

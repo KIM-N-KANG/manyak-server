@@ -192,7 +192,7 @@ class StoryEditService(
         // 다를 수 있어 자식을 명시적으로 지운다(시작 설정 동기화와 같은 방식).
         existing.filter { it.id !in keptIds }.forEach { removed ->
             // 인물 행을 잠근 뒤 이미지를 읽는다. 잠그지 않으면 동시에 들어온 이미지 추가
-            // (POST .../characters/{id}/images는 인물 행만 잠근다)가 우리 조회 뒤에 커밋돼
+            // 승인 적용이 우리 조회 뒤에 커밋돼
             // 삭제 목록에서 빠지고, 인물만 지워져 FK가 깨진다(PR #273 Codex P2).
             storyCharacterRepository.findByIdForUpdate(removed.id)
             storyCharacterImageRepository.deleteAll(
@@ -243,7 +243,7 @@ class StoryEditService(
         inputs: List<GeneralCharacterImageInput>?,
         ownerPublicId: UUID?,
     ) {
-        // 이미지 목록을 읽기 전에 인물 행을 잠근다. 별도 추가 경로(POST .../characters/{id}/images)가 같은
+        // 이미지 목록을 읽기 전에 인물 행을 잠근다. 승인 적용과 이미지 삭제가 같은
         // 락을 쓰므로 두 경로가 직렬화된다 — 잠그지 않으면 우리가 목록을 읽은 뒤 커밋된 새 이미지가
         // 전체 교체(빈 배열 포함)를 그대로 살아남는다(PR #273 Codex P2).
         storyCharacterRepository.findByIdForUpdate(character.id)

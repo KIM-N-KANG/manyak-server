@@ -28,7 +28,7 @@ class UserWithdrawalServiceTest {
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
     private val refreshTokenStore: RefreshTokenStore = mock(RefreshTokenStore::class.java)
     private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
-    private val service = UserWithdrawalService(userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository)
+    private val service = UserWithdrawalService(org.mockito.Mockito.mock(com.knk.manyak.story.submission.StorySubmissionRepository::class.java), userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository)
 
     @Test
     fun `탈퇴는 사용자 행을 잠그고 읽는다`() {

@@ -50,7 +50,12 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryEditIntegrationTests {
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
 
     @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
 
@@ -166,7 +171,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(suspended)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC","title":"바뀐 제목"}""")
-            .exchange().expectStatus().isForbidden
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isForbidden
 
         val deleted = userRepository.save(User(nickname = "탈퇴자", status = UserStatus.DELETED))
         val deletedStory = seedStory(userId = deleted.id)
@@ -175,7 +180,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(deleted)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC","title":"바뀐 제목"}""")
-            .exchange().expectStatus().isUnauthorized
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isUnauthorized
 
         val reloadedSuspended = storyRepository.findById(suspendedStory.id).get()
         val reloadedDeleted = storyRepository.findById(deletedStory.id).get()
@@ -202,7 +207,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(owner)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             // 응답(편집 폼)에도 실려 폼 왕복이 보장된다.
@@ -220,7 +225,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(owner)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PRIVATE"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.visibility").isEqualTo("PRIVATE")
@@ -231,36 +236,19 @@ class StoryEditIntegrationTests {
     }
 
     @Test
-    fun `게스트는 소유자 없는 스토리를 공개로 바꿀 수 없고 400이다`() {
-        // 게스트 스토리는 게스트가 수정할 수 있지만(소유권 게이트 통과) 공개 전환만은 막는다.
-        // 작성자 신원이 없어 카드에 작성자를 표기할 수 없고 소셜 기능의 책임 주체가 없기 때문이다.
+    fun `게스트는 소유자 없는 스토리를 공개로 바꿀 수 없고 401이다`() {
         val story = seedStory(userId = null)
-        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
-
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"visibility":"PUBLIC"}""")
-            .exchange()
-            .expectStatus().isBadRequest
-            .expectBody()
-            .jsonPath("$.code").isEqualTo("GUEST_CANNOT_PUBLISH")
-
-        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
+            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
-    fun `게스트도 소유자 없는 스토리의 다른 필드는 수정할 수 있다`() {
-        // 공개 전환만 막고 나머지 수정 경로는 그대로다(회귀 가드).
+    fun `게스트도 소유자 없는 스토리의 다른 필드는 수정할 수 없다`() {
         val story = seedStory(userId = null)
-        storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
-
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"title":"게스트가 고친 제목"}""")
-            .exchange()
-            .expectStatus().isOk
-
-        assertEquals("게스트가 고친 제목", storyRepository.findById(story.id).get().title)
+            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
@@ -274,13 +262,13 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(other)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
-            .exchange().expectStatus().isForbidden
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isForbidden
 
         // 익명 요청도 회원 소유 스토리는 수정할 수 없다(기존 수정 API 소유권 관례).
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
-            .exchange().expectStatus().isForbidden
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isUnauthorized
 
         assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
     }
@@ -288,13 +276,13 @@ class StoryEditIntegrationTests {
     @Test
     fun `visibility를 생략하면 공개 범위는 바뀌지 않는다`() {
         // 부분 갱신 의미론: 미전송 필드는 유지다(null 명시 전송도 미전송과 동일).
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
 
-        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}").header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"title":"새 제목","visibility":null}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.title").isEqualTo("새 제목")
@@ -306,13 +294,13 @@ class StoryEditIntegrationTests {
     @Test
     fun `알 수 없는 visibility 값은 400이고 공개 범위는 그대로다`() {
         // 새 와이어 enum이 역직렬화 실패로 500이 되지 않는지 고정한다(GlobalExceptionHandler가 400으로 변환).
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         storyRepository.save(story.apply { visibility = StoryVisibility.PRIVATE })
 
-        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}").header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"EVERYONE"}""")
-            .exchange().expectStatus().isBadRequest
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isBadRequest
 
         assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).get().visibility)
     }
@@ -321,13 +309,13 @@ class StoryEditIntegrationTests {
     fun `PUBLISHED가 아닌 스토리의 공개 범위 변경은 400이고 값이 바뀌지 않는다`() {
         // 읽기 게이트가 PUBLISHED && PUBLIC이라 DRAFT에 PUBLIC을 저장하면 "공개인데 404"인 모순 상태가 된다.
         // 발행(status 전환)은 이 API의 범위가 아니므로 전환 자체를 400으로 거부한다(KNK-1021 리뷰).
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
 
-        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}").header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
-            .exchange().expectStatus().isBadRequest
+            .exchange().let { approvals.complete(it, edit = true) }.expectStatus().isBadRequest
 
         val reloaded = storyRepository.findById(story.id).get()
         assertEquals(StoryVisibility.PRIVATE, reloaded.visibility)
@@ -337,13 +325,13 @@ class StoryEditIntegrationTests {
     @Test
     fun `PUBLISHED가 아닌 스토리도 visibility를 빼면 다른 필드는 정상 수정된다`() {
         // 게이트는 공개 범위 변경만 막는다. DRAFT 스토리의 일반 편집까지 막으면 레거시 스토리를 손볼 수 없다.
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
 
-        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}").header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"title":"초안도 고칠 수 있다"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.title").isEqualTo("초안도 고칠 수 있다")
@@ -356,13 +344,13 @@ class StoryEditIntegrationTests {
     fun `PUBLISHED가 아닌 스토리도 현재와 같은 visibility를 실어 보내면 통과한다`() {
         // 수정 폼 응답이 visibility를 싣기 때문에(폼 왕복) 프론트가 전체 폼을 되돌려보내면 값이 그대로 실려 온다.
         // 실제 전환이 아닌 이 무변경 전송까지 400으로 막으면 DRAFT 스토리는 폼 저장 자체가 불가능해진다.
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         storyRepository.save(story.apply { status = StoryStatus.DRAFT; visibility = StoryVisibility.PRIVATE })
 
-        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}").header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"title":"폼 왕복 저장","visibility":"PRIVATE"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.title").isEqualTo("폼 왕복 저장")
@@ -382,7 +370,7 @@ class StoryEditIntegrationTests {
     ) {
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
-            .apply { accessToken?.let { header("Authorization", "Bearer $it") } }
+            .header("Authorization", accessToken?.let { "Bearer $it" } ?: approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -404,13 +392,13 @@ class StoryEditIntegrationTests {
                 }
                 """.trimIndent(),
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
     }
 
     @Test
     fun `공개 스토리를 수정하면 마지막 공개 버전 스냅샷이 함께 갱신된다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
 
         patchAll(story, startSetting.publicId.toString(), "v2 제목", "v2 프롤로그", "v2 엔딩")
@@ -434,16 +422,17 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `비공개로 전환하며 고친 값은 스냅샷에 들어가지 않는다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
         patchAll(story, startSetting.publicId.toString(), "공개 제목", "공개 프롤로그", "공개 엔딩")
 
         // 같은 요청에서 비공개로 내리고 값을 고친다 — 갱신은 저장 시점의 공개 상태로 판정하므로 no-op이어야 한다.
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PRIVATE","title":"비공개 개작 제목"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
 
         val reloaded = storyRepository.findById(story.id).get()
@@ -464,7 +453,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer $token")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PRIVATE","title":"개작 제목"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
 
         restTestClient.patch()
@@ -472,7 +461,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer $token")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"visibility":"PUBLIC"}""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
 
         // 다시 공개하면 개작본이 곧 현재 공개본이다.
@@ -487,12 +476,13 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `부분 갱신은 보낸 필드만 교체하고 id 매칭 시작 설정은 identity 보존 후 자식 전체 교체한다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
         val internalIdBefore = startSetting.id
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -511,7 +501,7 @@ class StoryEditIntegrationTests {
                 }
                 """.trimIndent(),
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.title").isEqualTo("새 제목")
@@ -533,12 +523,13 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `id 없는 시작 설정은 신규 추가되고 요청에서 빠진 기존은 삭제된다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         val existing = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
 
         // 기존(id 지정) 대신 id 없는 새 시작 설정 하나만 보내면: 기존은 삭제, 새것 1개만 남는다.
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -555,7 +546,7 @@ class StoryEditIntegrationTests {
                 }
                 """.trimIndent(),
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.startSettings.length()").isEqualTo(1)
@@ -572,10 +563,11 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `이 스토리에 속하지 않는 시작 설정 id로 수정하면 400이다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -593,7 +585,7 @@ class StoryEditIntegrationTests {
                 }
                 """.trimIndent(),
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isBadRequest
     }
 
@@ -608,18 +600,19 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(other)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{ "title": "탈취 시도" }""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isForbidden
     }
 
     @Test
     fun `요청 내 시작 설정 id가 중복되면 400이고 저장되지 않는다`() {
         // 전체 교체 계약에서 중복 id는 같은 행을 두 번 덮어 하나를 조용히 잃으므로 400으로 거부한다(silent wipe 방지).
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
         val startSetting = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(story.id).single()
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """
@@ -631,7 +624,7 @@ class StoryEditIntegrationTests {
                 }
                 """.trimIndent(),
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isBadRequest
 
         // 원본 시작 설정은 그대로 보존된다.
@@ -640,27 +633,29 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `시작 설정의 추천 입력을 3개가 아닌 값으로 보내면 400이다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """{ "startSettings": [ {"name":"n","prologue":"p","startSituation":"s","suggestedInputs":["하나","둘"],"endings":[]} ] }""",
             )
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isBadRequest
     }
 
     @Test
     fun `빈 제목으로 수정하면 400이다`() {
-        val story = seedStory(userId = null)
+        val story = seedStory(userId = owner().id)
 
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{ "title": "   " }""")
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
             .expectStatus().isBadRequest
     }
 
@@ -688,7 +683,7 @@ class StoryEditIntegrationTests {
             .header("Authorization", "Bearer ${tokenFor(user)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
 
     private fun storyCharacterKey(story: Story) = "characters/uploaded/${story.publicId}/new-face.webp"
 
@@ -824,21 +819,10 @@ class StoryEditIntegrationTests {
 
     @Test
     fun `게스트 스토리도 기존 이미지를 id로 되돌려 보내면 유지된다`() {
-        // 되돌려 보내는 것은 업로드가 아니다. 회원 업로더를 요구하면 게스트 스토리의 폼 왕복이 막힌다(Codex P2).
         val story = seedStory(userId = null)
-        val character = seedCharacter(story, "세린")
-        val image = seedImage(character, "세린_웃음")
-
-        restTestClient.patch()
-            .uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(
-                """{"characters": [{"id": "${character.publicId}", "name": "세린", "images": [{"id": "${image.publicId}"}]}]}""",
-            )
-            .exchange()
-            .expectStatus().isOk
-
-        assertEquals("세린_웃음", storyCharacterImageRepository.findAll().single().imageName)
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .exchange().expectStatus().isUnauthorized
     }
 
     @Test
@@ -991,15 +975,11 @@ class StoryEditIntegrationTests {
     }
 
     @Test
-    fun `게스트 스토리에 이미지를 붙이면 400이다`() {
-        // 소유자가 없으면 올린 이미지의 책임 주체가 없다(표지 교체와 같은 규칙).
+    fun `게스트 스토리에 이미지를 붙이면 401이다`() {
         val story = seedStory(userId = null)
-
-        restTestClient.patch()
-            .uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"characters": [{"name": "세린", "images": [{"objectKey": "${storyCharacterKey(story)}", "imageName": "세린_웃음"}]}]}""")
-            .exchange()
-            .expectStatus().isBadRequest
+        restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .exchange().expectStatus().isUnauthorized
     }
+
 }

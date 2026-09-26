@@ -17,12 +17,12 @@ const val GENERAL_SUGGESTED_INPUTS_SIZE = 3
 const val MAX_GENERAL_CHARACTERS = 6
 
 /**
- * 일반 제작 스토리 등록 요청(단발, 스펙 §4-3-8). 검증 후 그대로 저장하며 AI를 호출하지 않는다
+ * 일반 제작 스토리 등록 요청(단발, 스펙 §4-3-8). 검수 제출본으로 접수하며 승인 후 저장한다
  * (컴파일은 희소 입력 확장인데 일반 제작 입력은 이미 확장된 형태라 크레딧 소모·게스트 한도 카운트가 없다).
  * 표지·인물 이미지는 등록 전에 presign(`POST /stories/images/presign`)으로 올린 객체 키를 함께 보낸다(KNK-1390).
  * 이미지 필드는 **회원만** 쓸 수 있다 — 소유자가 없으면 올린 이미지의 책임 주체가 없다.
  */
-@Schema(description = "일반 제작 스토리 등록 요청(단발). 검증 후 그대로 저장하며 AI를 호출하지 않는다.")
+@Schema(description = "일반 제작 스토리 등록 요청(단발). 검수 제출본으로 접수하며 승인 후 저장한다.")
 data class CreateGeneralStoryRequest(
     @field:NotBlank(message = "제목은 비어 있을 수 없습니다.")
     @field:Size(max = 100, message = "제목은 100자를 넘을 수 없습니다.")
@@ -74,7 +74,11 @@ data class CreateGeneralStoryRequest(
     @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
     @field:Schema(description = "인물 목록(최대 6명, 선택). 이름은 스토리 안에서 유일하다.")
     val characters: List<@NotNull GeneralCharacterInput> = emptyList(),
-)
+) {
+    @AssertTrue(message = "장르는 공백 없이 각 30자 이하여야 합니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isGenresValid(): Boolean = genres.all { it.isNotBlank() && it.length <= 30 }
+}
 
 /**
  * 일반 제작 인물 입력(KNK-1390). 이름과 이미지만 받는다 — 외형 필드(성별·머리·의상)는 컴파일 산출물이라
@@ -111,7 +115,7 @@ data class GeneralCharacterInput(
 )
 
 /**
- * 인물 이미지 한 장의 입력(KNK-1390·1391). 연결 규칙은 등록 후 추가(`POST .../characters/{id}/images`)와 같다.
+ * 인물 이미지 한 장의 입력(KNK-1390·1391). 등록·수정 제출본의 이미지 검증 규칙을 공유한다.
  *
  * 항목은 **기존 유지([id])이거나 신규 추가([objectKey])** 둘 중 하나다. 수정 폼이 기존 이미지를 되돌려 보낼 때
  * `objectKey`를 쓸 수 없어(저장값이 URL이라 키를 모른다) id로 지목한다.
@@ -197,7 +201,11 @@ data class GeneralStartSettingInput(
     @field:Size(max = MAX_ENDINGS, message = "엔딩은 시작 설정당 최대 ${MAX_ENDINGS}개까지 등록할 수 있습니다.")
     @field:Schema(description = "엔딩 목록(시작 설정당 최대 10, 선택). 배열 순서가 표시 순서가 된다.")
     val endings: List<@NotNull GeneralEndingItem> = emptyList(),
-)
+) {
+    @AssertTrue(message = "추천 입력은 비어 있을 수 없습니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isSuggestedInputsValid(): Boolean = suggestedInputs.all { it.isNotBlank() }
+}
 
 @Schema(description = "엔딩 입력 항목(유형 없이 이름으로 식별)")
 data class GeneralEndingItem(

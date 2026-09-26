@@ -49,6 +49,7 @@ import java.util.UUID
 
 @Service
 class StoryService(
+    private val submissions: com.knk.manyak.story.submission.StorySubmissionRepository,
     private val storyLikeWriter: StoryLikeWriter,
     private val storyRepository: StoryRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
@@ -361,6 +362,7 @@ class StoryService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
         }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
+        submissions.deleteForStory(story.id)
         story.deletedAt = Instant.now()
         eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }

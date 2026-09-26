@@ -37,7 +37,12 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.test"])
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryThumbnailWiringIntegrationTests {
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -180,8 +185,8 @@ class StoryThumbnailWiringIntegrationTests {
             .header("Authorization", "Bearer $accessToken")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .exchange()
-            .expectStatus().isCreated
+            .exchange().let { approvals.complete(it) }
+            .expectStatus().isOk
             .expectBody()
             .returnResult()
             .let { String(it.responseBody!!) }

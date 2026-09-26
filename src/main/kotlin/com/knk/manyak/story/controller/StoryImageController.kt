@@ -1,7 +1,6 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.security.CurrentUserId
-import com.knk.manyak.story.dto.AddCharacterImageRequest
 import com.knk.manyak.story.dto.CharacterImageResponse
 import com.knk.manyak.story.dto.ImagePresignRequest
 import com.knk.manyak.story.dto.ImagePresignResponse
@@ -103,43 +102,6 @@ class StoryImageController(
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
     ) = storyImageService.deleteThumbnail(storyId, requireUser(userId))
-
-    @Operation(
-        summary = "인물 이미지 연결",
-        description = "업로드한 이미지를 인물에 연결합니다(KNK-1126). 이름은 `{인물이름}_{접미}` 형식이며 접미는 " +
-            "1~20자 한글·영문·숫자(표정·상황·감정)입니다. 같은 인물 안에서 이름이 겹치면 409, 형식이 어긋나면 400, " +
-            "인물당 10장을 넘으면 400입니다. 서버가 객체 키가 이 스토리의 업로드 경로 아래인지 확인하고 " +
-            "`HEAD`로 존재·크기·형식을 재검증합니다.",
-    )
-    @ApiResponses(
-        value = [
-            ApiResponse(
-                responseCode = "201",
-                description = "연결 성공",
-                content = [Content(schema = Schema(implementation = CharacterImageResponse::class))],
-            ),
-            ApiResponse(
-                responseCode = "400",
-                description = "이름 형식 위반·10장 초과·다른 스토리 키·형식/크기 위반, 업로드 미완료(code: UPLOAD_NOT_FOUND), 게스트 소유 스토리",
-                content = [Content(schema = Schema(hidden = true))],
-            ),
-            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "403", description = "타인 스토리 또는 정지된 계정", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "404", description = "스토리·인물을 찾을 수 없음", content = [Content(schema = Schema(hidden = true))]),
-            ApiResponse(responseCode = "409", description = "같은 이름의 이미지가 이미 있음", content = [Content(schema = Schema(hidden = true))]),
-        ],
-    )
-    @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping("/characters/{characterId}/images")
-    fun addCharacterImage(
-        @Parameter(description = "스토리 ID(공개 식별자)")
-        @PathVariable storyId: String,
-        @Parameter(description = "인물 ID(공개 식별자). 편집 폼 응답의 characters[].id")
-        @PathVariable characterId: String,
-        @CurrentUserId userId: Long?,
-        @Valid @RequestBody request: AddCharacterImageRequest,
-    ): CharacterImageResponse =
-        storyImageService.addCharacterImage(storyId, characterId, requireUser(userId), request)
 
     @Operation(
         summary = "인물 이미지 삭제",

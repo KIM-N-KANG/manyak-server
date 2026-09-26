@@ -39,27 +39,11 @@ data class ImagePresignResponse(
     val expiresInSeconds: Long,
 )
 
-/** 인물 이미지 연결 요청(KNK-1126). */
-@Schema(description = "인물 이미지 연결 요청")
-data class AddCharacterImageRequest(
-    @field:NotBlank
-    @field:Schema(description = "presign으로 받은 객체 키. 이 스토리의 인물 업로드 prefix 아래여야 한다")
-    val objectKey: String?,
-
-    @field:NotBlank
-    @field:Size(max = 120)
-    @field:Schema(
-        description = "`{인물이름}_{접미}` 형식. 접미는 1~20자 한글·영문·숫자(표정·상황·감정)이며 같은 인물 안에서 유일하다",
-        example = "세린_웃음",
-    )
-    val imageName: String?,
-)
-
 /** 인물 이미지 한 장(KNK-1126). 편집 폼과 연결 응답이 같은 모양을 쓴다. */
 @Schema(description = "인물 이미지")
 data class CharacterImageResponse(
     @field:Schema(description = "이미지 ID(공개 식별자). 삭제 요청에 쓴다")
-    val id: String,
+    val id: String?,
 
     @field:Schema(description = "이미지 이름", example = "세린_웃음")
     val imageName: String,
@@ -71,13 +55,15 @@ data class CharacterImageResponse(
     // 상태 자체를 싣지 않는다. 지금은 기본값이 APPROVED라 항상 APPROVED다.
     @field:Schema(description = "검수 상태(APPROVED · PENDING · REJECTED)", example = "APPROVED")
     val moderationStatus: ImageModerationStatus,
+    @field:Schema(description = "미승인 새 이미지의 업로드 객체 키", nullable = true)
+    val objectKey: String? = null,
 )
 
 /** 편집 폼의 인물 항목(KNK-1126). 상세 응답의 `characters[]`와 달리 이미지 전부와 인물 식별자를 싣는다. */
 @Schema(description = "편집 폼 인물(이미지 관리용)")
 data class StoryEditCharacterResponse(
     @field:Schema(description = "인물 ID(공개 식별자). 이미지 연결·삭제 경로에 쓴다")
-    val id: String,
+    val id: String?,
 
     @field:Schema(description = "인물 이름", example = "세린")
     val name: String,
