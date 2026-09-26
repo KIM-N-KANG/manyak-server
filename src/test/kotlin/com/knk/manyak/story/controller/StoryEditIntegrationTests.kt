@@ -239,7 +239,7 @@ class StoryEditIntegrationTests {
     fun `게스트는 소유자 없는 스토리를 공개로 바꿀 수 없고 401이다`() {
         val story = seedStory(userId = null)
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"visibility":"PUBLIC"}""")
             .exchange().expectStatus().isUnauthorized
     }
 
@@ -818,10 +818,13 @@ class StoryEditIntegrationTests {
     }
 
     @Test
-    fun `게스트 스토리도 기존 이미지를 id로 되돌려 보내면 유지된다`() {
+    fun `기존 이미지 ID가 있는 게스트 스토리도 미인증 수정은 401이다`() {
         val story = seedStory(userId = null)
+        val character = seedCharacter(story, "세린")
+        val image = seedImage(character, "세린_기본")
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"characters":[{"id":"${character.publicId}","name":"세린","images":[{"id":"${image.publicId}"}]}]}""")
             .exchange().expectStatus().isUnauthorized
     }
 
@@ -978,7 +981,7 @@ class StoryEditIntegrationTests {
     fun `게스트 스토리에 이미지를 붙이면 401이다`() {
         val story = seedStory(userId = null)
         restTestClient.patch().uri("/api/v1/stories/${story.publicId}")
-            .contentType(MediaType.APPLICATION_JSON).body("""{"title":"변경"}""")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"thumbnailObjectKey":"thumbnails/uploaded/drafts/unknown/cover.webp"}""")
             .exchange().expectStatus().isUnauthorized
     }
 

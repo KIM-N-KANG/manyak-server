@@ -1,3 +1,4 @@
+# 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
 # 공개 스토리 검색(KNK-1141). IntelliJ HTTP Client에서 위부터 순서대로 실행한다.
 # 사전 준비: Postgres·Redis 기동, 검색 FGAC/nori 설정(opensearch/README.md), ./gradlew bootRun.
 # accessToken은 로그인 검증 파일에서 발급해 client.global.set으로 저장한다.
@@ -22,7 +23,25 @@ Content-Type: application/json
 }
 
 > {%
-  client.test("준비 스토리 등록", () => client.assert(response.status === 201, `actual=${response.status}`));
+client.test("검수 제출 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("fixtureSubmissionId", response.body.submissionId);
+%}
+
+### 검수 완료 알림 뒤 조회: APPROVED가 되면 fixtureStoryId를 저장한다
+GET {{baseUrl}}/api/v1/stories/submissions/{{fixtureSubmissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("승인 완료", () => client.assert(response.status === 200 && response.body.status === "APPROVED", "검수 완료 후 실행하세요"));
+client.global.set("fixtureStoryId", response.body.storyId);
+%}
+
+### 승인된 라이브 응답으로 후속 검증용 식별자 저장
+GET {{baseUrl}}/api/v1/stories/{{fixtureStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+  client.test("준비 스토리 등록", () => client.assert(response.status === 200, `actual=${response.status}`));
   client.global.set("searchStoryId", response.body.id);
 %}
 

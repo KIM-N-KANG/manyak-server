@@ -134,9 +134,9 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
-    fun `익명 등록은 소유자 없이 기본 PRIVATE로 저장되고 응답은 간편 제작과 동일하다`() {
+    fun `공개 범위를 생략한 익명 일반 제작은 401이고 저장되지 않는다`() {
         restTestClient.post().uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON).body(body("PUBLIC"))
+            .contentType(MediaType.APPLICATION_JSON).body(body())
             .exchange().expectStatus().isUnauthorized
         assertEquals(0, storyRepository.count())
     }
@@ -226,9 +226,9 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
-    fun `게스트가 visibility PRIVATE로 등록하면 401이고 PRIVATE으로 저장된다`() {
+    fun `게스트가 visibility PRIVATE로 등록해도 401이고 저장되지 않는다`() {
         restTestClient.post().uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON).body(body("PUBLIC"))
+            .contentType(MediaType.APPLICATION_JSON).body(body("PRIVATE"))
             .exchange().expectStatus().isUnauthorized
         assertEquals(0, storyRepository.count())
     }
@@ -353,15 +353,15 @@ class GeneralStoryCreationIntegrationTests {
     @Test
     fun `게스트가 이미지를 보내면 401이고 저장되지 않는다`() {
         restTestClient.post().uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON).body(body("PUBLIC"))
+            .contentType(MediaType.APPLICATION_JSON).body(bodyWith(""""thumbnailObjectKey":"thumbnails/uploaded/drafts/unknown/test.webp""""))
             .exchange().expectStatus().isUnauthorized
         assertEquals(0, storyRepository.count())
     }
 
     @Test
-    fun `인물 이름 없이 인물만 등록하는 것은 게스트도 거부한다`() {
+    fun `이미지 없이 인물 이름만 보낸 게스트 등록도 401이다`() {
         restTestClient.post().uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON).body(body("PUBLIC"))
+            .contentType(MediaType.APPLICATION_JSON).body(bodyWith(""""characters":[{"name":"세린"}]"""))
             .exchange().expectStatus().isUnauthorized
         assertEquals(0, storyRepository.count())
     }
