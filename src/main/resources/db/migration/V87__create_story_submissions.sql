@@ -11,7 +11,7 @@ CREATE TABLE story_submissions (
     issues JSONB NOT NULL DEFAULT '[]'::jsonb,
     error_code VARCHAR(40),
     attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt > 0),
-    dispatched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    dispatched_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     decided_at TIMESTAMPTZ,
@@ -24,5 +24,9 @@ CREATE TABLE story_submissions (
 CREATE UNIQUE INDEX uq_story_submissions_pending ON story_submissions(story_id) WHERE story_id IS NOT NULL AND status = 'PENDING';
 CREATE UNIQUE INDEX uq_story_submissions_unapproved ON story_submissions(story_id) WHERE story_id IS NOT NULL AND status <> 'APPROVED';
 CREATE INDEX ix_story_submissions_owner ON story_submissions(user_id, created_at DESC, id DESC);
-CREATE INDEX ix_story_submissions_reclaim ON story_submissions(dispatched_at) WHERE status = 'PENDING';
+CREATE INDEX ix_story_submissions_claim ON story_submissions(id, dispatched_at) WHERE status = 'PENDING';
 COMMENT ON TABLE story_submissions IS '일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리';
+
+COMMENT ON COLUMN story_submissions.dispatched_at IS 'NULL은 미선점, 값은 임대 시작 시각. 임대 만료 뒤 재선점 가능';
+COMMENT ON COLUMN story_submissions.attempt IS '초기 1, 선점·재제출마다 증가하는 늦은 결과 차단 토큰';
+COMMENT ON COLUMN story_submissions.image_copies IS '원본 업로드 키 → 서버 전용 불변 복사본 키. 재선점은 재사용, 재제출은 초기화';

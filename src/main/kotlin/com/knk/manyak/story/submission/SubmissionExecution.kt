@@ -2,7 +2,6 @@ package com.knk.manyak.story.submission
 
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.global.observability.MdcTaskDecorator
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.UpdateStoryRequest
@@ -11,28 +10,18 @@ import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryEditService
 import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
-import org.slf4j.MDC
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.data.domain.PageRequest
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.transaction.event.TransactionPhase
-import org.springframework.transaction.event.TransactionalEventListener
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
-import tools.jackson.databind.JsonNode
-import java.time.Duration
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.Executor
-import java.util.concurrent.RejectedExecutionException
 
 @Configuration
 class ModerationExecutionConfig {
@@ -40,7 +29,7 @@ class ModerationExecutionConfig {
     fun executor(@Value("\${manyak.ai.moderation.pool-size:4}") poolSize: Int): Executor = ThreadPoolTaskExecutor().apply {
         corePoolSize = poolSize
         maxPoolSize = poolSize
-        queueCapacity = 100
+        queueCapacity = 0
         setThreadNamePrefix("story-moderation-")
         setTaskDecorator(MdcTaskDecorator())
         initialize()
@@ -50,23 +39,19 @@ class ModerationExecutionConfig {
 /** AI 왕복은 트랜잭션 밖. DB 실패는 PENDING을 남겨 회수 대상으로 둔다. */
 @Component
 class SubmissionExecutor(
-    @Qualifier("storyModerationExecutor") private val executor: Executor,
     private val transactions: SubmissionTransactions,
     private val client: StoryModerationClient,
     private val images: SubmissionImages,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    fun submitted(event: SubmissionRequested) {
-        try { executor.execute { run(event) } }
-        catch (_: RejectedExecutionException) { log.warn("moderation_dispatch_rejected submission={} attempt={}", event.id, event.attempt) }
-    }
     fun run(event: SubmissionRequested) {
         try {
             val work = transactions.start(event.id, event.attempt) ?: return
             val result = try {
                 val input = images.prepare(work) { source, destination -> transactions.recordCopy(event.id, event.attempt, source, destination) } ?: return
                 client.moderate(input).validated(input)
+            } catch (ex: org.springframework.dao.DataAccessException) {
+                throw ex // 복사 결과 저장 장애도 PENDING 임대를 남겨 재선점한다.
             } catch (_: Exception) {
                 transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE")
                 return
@@ -97,8 +82,6 @@ class SubmissionTransactions(
     @Transactional
     fun start(id: Long, attempt: Int): SubmissionWork? {
         val row = pending(id, attempt) ?: return null
-        row.dispatchedAt = Instant.now()
-        row.updatedAt = row.dispatchedAt
         return SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies)
     }
 
@@ -144,17 +127,6 @@ class SubmissionTransactions(
         decide(row, SubmissionStatus.FAILED, emptyList(), code)
     }
 
-    @Transactional
-    fun reclaim(id: Long, cutoff: Instant) {
-        val row = submissions.lockById(id) ?: return
-        entityManager.refresh(row)
-        if (row.status != SubmissionStatus.PENDING || row.dispatchedAt > cutoff) return
-        val copies = row.imageCopies
-        row.resubmit(row.payload)
-        row.imageCopies = copies
-        events.publishEvent(SubmissionRequested(row.id, row.attempt))
-    }
-
     private fun pending(id: Long, attempt: Int): StorySubmission? {
         val candidate = submissions.findById(id).orElse(null) ?: return null
         val userId = candidate.userId
@@ -178,27 +150,5 @@ class SubmissionTransactions(
         row.decidedAt = Instant.now()
         row.updatedAt = row.decidedAt!!
         events.publishEvent(StoryModerationCompleted(row.userId, row.publicId.toString(), row.storyId?.let { stories.findById(it).orElseThrow().publicId.toString() }, status, row.attempt))
-    }
-}
-
-@Component
-class SubmissionReclaimScheduler(
-    private val submissions: StorySubmissionRepository,
-    private val transactions: SubmissionTransactions,
-    @Value("\${manyak.ai.moderation.reclaim-after:300s}") private val reclaimAfter: Duration,
-) {
-    @Scheduled(fixedDelayString = "\${manyak.ai.moderation.reclaim-interval:60000}")
-    fun reclaim() {
-        val cutoff = Instant.now().minus(reclaimAfter)
-        submissions.findByStatusAndDispatchedAtBefore(SubmissionStatus.PENDING, cutoff, PageRequest.of(0, 100))
-            .forEach {
-                val previous = MDC.getCopyOfContextMap()
-                try {
-                    MDC.put(MdcKeys.REQUEST_ID, UUID.randomUUID().toString())
-                    transactions.reclaim(it.id, cutoff)
-                } finally {
-                    if (previous != null) MDC.setContextMap(previous) else MDC.clear()
-                }
-            }
     }
 }

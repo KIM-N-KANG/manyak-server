@@ -95,7 +95,7 @@ class ModerationOutboxIntegrationTests {
     }
 
 
-    @Autowired private lateinit var scheduler: SubmissionReclaimScheduler
+    @Autowired private lateinit var scheduler: SubmissionPoller
     @MockitoBean private lateinit var ai: StoryModerationClient
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -132,7 +132,7 @@ class ModerationOutboxIntegrationTests {
                 val rest = RestStoryModerationClient(server.url("/").toString(), java.time.Duration.ofSeconds(180))
                 Mockito.doAnswer { call -> rest.moderate(call.getArgument(0)) }.`when`(ai)
                     .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: tools.jackson.databind.json.JsonMapper().createObjectNode())
-                scheduler.reclaim()
+                scheduler.poll()
                 assertEquals(schedulerContext, org.slf4j.MDC.getCopyOfContextMap())
                 assertEquals(2, queued.size)
                 queued.forEach { it.run() }

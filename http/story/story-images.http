@@ -1,5 +1,6 @@
 ### 스토리 이미지 업로드와 검수 제출 (§4-3-8)
 # 준비: ./gradlew bootRun, docker compose up -d, accessToken, 승인된 createdStoryId.
+# 승인은 서버 전용 /uploaded/moderated/ 복사본 URL을 저장한다. 원본 PUT URL 재사용은 승인 이미지에 영향을 주지 않는다.
 # 이미지 저장소 설정 필요. presign 후 실제 파일 PUT을 마친 뒤 PATCH한다.
 # 순서: 폼 → presign → PUT → PATCH → 알림 뒤 폼 조회 → 삭제.
 # PENDING 중 삭제·PATCH는 409이며 presign은 계속 가능하다. 이미지 추가는 PATCH로만 제출한다.
@@ -56,6 +57,18 @@ client.global.set("submissionId", response.body.submissionId);
 GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
 Authorization: Bearer {{accessToken}}
 
+### 표지 승인 뒤 불변 URL 확인 (APPROVED일 때만 실행)
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("표지 복사본", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.thumbnailUrl.includes("/uploaded/moderated/"), "검수 복사본 경로 기대");
+  client.assert(!response.body.thumbnailUrl.endsWith(client.global.get("coverObjectKey")), "원본 키와 분리");
+});
+%}
+
 ### 인물 presign
 POST {{baseUrl}}/api/v1/stories/{{createdStoryId}}/images/presign
 Authorization: Bearer {{accessToken}}
@@ -95,7 +108,10 @@ Authorization: Bearer {{accessToken}}
 > {%
 client.test("폼 응답", () => client.assert(response.status === 200, `actual=${response.status}`));
 const image = response.body.characters[0]?.images[0];
-if (image?.id) client.global.set("characterImageId", image.id);
+if (image?.id) {
+  client.global.set("characterImageId", image.id);
+  client.test("인물 복사본", () => client.assert(image.imageUrl.includes("/uploaded/moderated/"), "검수 복사본 경로 기대"));
+}
 %}
 
 ### 이미지 삭제: PENDING이면 409, 아니면 멱등 204

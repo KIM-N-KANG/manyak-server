@@ -1,7 +1,8 @@
 ### 일반 제작 검수 제출 (§4-3-8, KNK-1161)
 # 준비: docker compose up -d, ./gradlew bootRun, auth/auth-login-google.http로 accessToken 설정.
 # 순서: 접수 → 알림 수신 후 제출본 조회 → 승인된 createdStoryId로 상세 조회.
-# 로컬 스텁은 자동 승인한다. 반려·실패 복구는 실제 AI 또는 테스트 대역이 필요하다.
+# 접수는 DB PENDING만 저장한다. 폴러(기본 1초)가 빈 실행 슬롯에 선점한 뒤 검수한다.
+# 로컬 스텁은 폴러 선점 후 자동 승인한다. 반려·실패 복구는 실제 AI 또는 테스트 대역이 필요하다.
 @baseUrl = http://localhost:8080
 
 ### 서버 확인

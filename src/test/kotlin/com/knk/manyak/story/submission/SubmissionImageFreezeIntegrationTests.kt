@@ -129,7 +129,7 @@ class SubmissionImageFreezeIntegrationTests {
         assertEquals(4, objects.copies.size)
         assertNotEquals(firstCopies, rows.findById(row.id).orElseThrow().imageCopies)
     }
-    @Test fun `UPDATE의 기존 라이브 이미지 ID는 다시 복사하지 않는다`() {
+    @Test fun `UPDATE는 기존 ID를 유지하고 새 이미지 바이트만 복사한다`() {
         val row = submit()
         Mockito.doReturn(ModerationResult("APPROVED", emptyList(), null)).`when`(ai)
             .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: mapper.createObjectNode())
@@ -138,13 +138,25 @@ class SubmissionImageFreezeIntegrationTests {
         val image = images.findAll().single()
         val form = service.editForm(story.publicId.toString(), row.userId)
         val characterId = form["characters"][0]["id"].asText()
-        service.update(story.publicId.toString(), mapper.readValue("""{"characters":[{"id":"$characterId","name":"세린","images":[{"id":"${image.publicId}"}]}]}""",
+        val newKey = "characters/uploaded/${story.publicId}/new.webp"
+        objects.bytes[newKey] = "새 이미지"
+        service.update(story.publicId.toString(), mapper.readValue("""{"characters":[{"id":"$characterId","name":"세린","images":[{"id":"${image.publicId}"},{"objectKey":"$newKey","imageName":"세린_새"}]}]}""",
             com.knk.manyak.story.dto.UpdateStoryRequest::class.java), row.userId)
         val update = rows.findAll().first { it.kind == SubmissionKind.UPDATE }
         runner.run(SubmissionRequested(update.id, update.attempt))
         assertEquals(SubmissionStatus.APPROVED, rows.findById(update.id).orElseThrow().status)
-        assertEquals(2, objects.copies.size)
-        assertEquals(image.imageUrl, images.findAll().single().imageUrl)
+        assertEquals(3, objects.copies.size)
+        assertEquals(newKey, objects.copies.last().first)
+        assertEquals(image.imageUrl, images.findById(image.id).orElseThrow().imageUrl)
+        assertTrue(images.findAll().single { it.id != image.id }.imageUrl.contains("/uploaded/moderated/"))
+    }
+
+    @Test fun `스토리지 미설정이면 제출 시 이미지 필드를 계속 거부한다`() {
+        Mockito.`when`(storage.isEnabled()).thenReturn(false)
+        val failure = assertThrows(org.springframework.web.server.ResponseStatusException::class.java) { submit() }
+        assertEquals(503, failure.statusCode.value())
+        assertEquals(0, rows.count())
+        assertTrue(objects.copies.isEmpty())
     }
 
 }

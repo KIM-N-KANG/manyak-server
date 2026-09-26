@@ -7,7 +7,6 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryEditService
 import com.knk.manyak.global.security.SuspensionGuard
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -25,14 +24,13 @@ class StorySubmissionService(
     private val forms: SubmissionFormAssembler,
     private val edit: StoryEditService,
     private val mapper: ObjectMapper,
-    private val events: ApplicationEventPublisher,
     private val suspension: SuspensionGuard,
 ) {
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
         requireMember(userId)
         val form = forms.create(request, userId)
-        return dispatch(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
+        return accept(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
             payload = mapper.writeValueAsString(request), inputForm = mapper.writeValueAsString(form))))
     }
 
@@ -55,7 +53,7 @@ class StorySubmissionService(
             storyId = story.id, kind = SubmissionKind.UPDATE, payload = mapper.writeValueAsString(request))
         if (previous != null) submission.resubmit(mapper.writeValueAsString(request))
         submission.inputForm = mapper.writeValueAsString(form)
-        return dispatch(submissions.save(submission))
+        return accept(submissions.save(submission))
     }
 
     @Transactional
@@ -67,7 +65,7 @@ class StorySubmissionService(
         val form = forms.create(request, userId)
         submission.resubmit(mapper.writeValueAsString(request))
         submission.inputForm = mapper.writeValueAsString(form)
-        return dispatch(submission)
+        return accept(submission)
     }
 
     @Transactional(readOnly = true)
@@ -103,10 +101,7 @@ class StorySubmissionService(
         if (submissions.existsByStoryIdAndStatus(storyId, SubmissionStatus.PENDING)) conflict()
     }
 
-    private fun dispatch(row: StorySubmission): SubmissionAccepted {
-        events.publishEvent(SubmissionRequested(row.id, row.attempt))
-        return SubmissionAccepted(row.publicId.toString())
-    }
+    private fun accept(row: StorySubmission) = SubmissionAccepted(row.publicId.toString())
 
     private fun response(row: StorySubmission): Map<String, Any?> {
         val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row)

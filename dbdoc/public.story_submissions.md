@@ -15,12 +15,12 @@
 | kind | varchar(10) |  | false |  |  |  |
 | payload | jsonb |  | false |  |  |  |
 | input_form | jsonb |  | false |  |  |  |
-| image_copies | jsonb | '{}'::jsonb | false |  |  |  |
+| image_copies | jsonb | '{}'::jsonb | false |  |  | 원본 업로드 키 → 서버 전용 불변 복사본 키. 재선점은 재사용, 재제출은 초기화 |
 | status | varchar(10) |  | false |  |  |  |
 | issues | jsonb | '[]'::jsonb | false |  |  |  |
 | error_code | varchar(40) |  | true |  |  |  |
-| attempt | integer | 1 | false |  |  |  |
-| dispatched_at | timestamp with time zone | now() | false |  |  |  |
+| attempt | integer | 1 | false |  |  | 초기 1, 선점·재제출마다 증가하는 늦은 결과 차단 토큰 |
+| dispatched_at | timestamp with time zone |  | true |  |  | NULL은 미선점, 값은 임대 시작 시각. 임대 만료 뒤 재선점 가능 |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | decided_at | timestamp with time zone |  | true |  |  |  |
@@ -52,7 +52,7 @@
 | uq_story_submissions_pending | CREATE UNIQUE INDEX uq_story_submissions_pending ON public.story_submissions USING btree (story_id) WHERE ((story_id IS NOT NULL) AND ((status)::text = 'PENDING'::text)) |
 | uq_story_submissions_unapproved | CREATE UNIQUE INDEX uq_story_submissions_unapproved ON public.story_submissions USING btree (story_id) WHERE ((story_id IS NOT NULL) AND ((status)::text <> 'APPROVED'::text)) |
 | ix_story_submissions_owner | CREATE INDEX ix_story_submissions_owner ON public.story_submissions USING btree (user_id, created_at DESC, id DESC) |
-| ix_story_submissions_reclaim | CREATE INDEX ix_story_submissions_reclaim ON public.story_submissions USING btree (dispatched_at) WHERE ((status)::text = 'PENDING'::text) |
+| ix_story_submissions_claim | CREATE INDEX ix_story_submissions_claim ON public.story_submissions USING btree (id, dispatched_at) WHERE ((status)::text = 'PENDING'::text) |
 
 ## Relations
 

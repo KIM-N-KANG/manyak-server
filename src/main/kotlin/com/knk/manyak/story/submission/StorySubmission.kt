@@ -30,7 +30,7 @@ class StorySubmission(
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable = false, columnDefinition = "jsonb") var issues: List<ModerationIssue> = emptyList(),
     @Column(name = "error_code") var errorCode: String? = null,
     @Column(nullable = false) var attempt: Int = 1,
-    @Column(name = "dispatched_at", nullable = false) var dispatchedAt: Instant = Instant.now(),
+    @Column(name = "dispatched_at") var dispatchedAt: Instant? = null,
     @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false) var updatedAt: Instant = Instant.now(),
     @Column(name = "decided_at") var decidedAt: Instant? = null,
@@ -43,7 +43,7 @@ class StorySubmission(
         errorCode = null
         decidedAt = null
         attempt++
-        dispatchedAt = now
+        dispatchedAt = null
         updatedAt = now
     }
 }
@@ -56,7 +56,6 @@ interface StorySubmissionRepository : JpaRepository<StorySubmission, Long> {
     fun existsByStoryIdAndStatus(storyId: Long, status: SubmissionStatus): Boolean
     fun findFirstByStoryIdAndStatusNotOrderByCreatedAtDescIdDesc(storyId: Long, status: SubmissionStatus): StorySubmission?
     fun findByUserIdAndStatusNotOrderByCreatedAtDescIdDesc(userId: Long, status: SubmissionStatus, pageable: Pageable): List<StorySubmission>
-    fun findByStatusAndDispatchedAtBefore(status: SubmissionStatus, cutoff: Instant, pageable: Pageable): List<StorySubmission>
     @Modifying @Query("delete from StorySubmission s where s.storyId = :storyId")
     fun deleteForStory(storyId: Long)
     @Modifying @Query("delete from StorySubmission s where s.userId = :userId")

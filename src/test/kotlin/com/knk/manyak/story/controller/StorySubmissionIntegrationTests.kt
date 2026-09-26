@@ -121,18 +121,21 @@ class StorySubmissionIntegrationTests {
         org.junit.jupiter.api.Assertions.assertNotNull(stories.findById(story.id).orElseThrow().deletedAt)
     }
 
-    @Test fun `회수는 dispatched_at 기준이고 FAILED를 자동 재시도하지 않는다`() {
-        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
+    @Autowired private lateinit var claims: SubmissionClaimStore
+
+    @Test fun `임대가 만료된 PENDING만 재선점하고 FAILED는 제외한다`() {
+        val user = users.save(User(nickname = "제작자"))
         service.create(request(), user.id)
-        var row = submissions.findAll().single()
-        worker.reclaim(row.id, row.dispatchedAt.minusSeconds(1))
-        org.junit.jupiter.api.Assertions.assertEquals(1, submissions.findById(row.id).orElseThrow().attempt)
-        worker.reclaim(row.id, row.dispatchedAt.plusSeconds(1))
-        row = submissions.findById(row.id).orElseThrow()
-        org.junit.jupiter.api.Assertions.assertEquals(2, row.attempt)
-        worker.fail(row.id, 2, "MODERATION_UNAVAILABLE")
-        worker.reclaim(row.id, java.time.Instant.now().plusSeconds(600))
-        org.junit.jupiter.api.Assertions.assertEquals(2, submissions.findById(row.id).orElseThrow().attempt)
+        val now = java.time.Instant.now()
+        val lease = java.time.Duration.ofSeconds(300)
+        val first = claims.claim(now, lease, 1).single()
+        assertTrue(claims.claim(now.plusSeconds(299), lease, 1).isEmpty())
+        val second = claims.claim(now.plusSeconds(301), lease, 1).single()
+        assertEquals(first.attempt + 1, second.attempt)
+        worker.finish(first.id, first.attempt, ModerationResult("APPROVED", emptyList(), null))
+        assertEquals(0, stories.count())
+        worker.fail(second.id, second.attempt, "MODERATION_UNAVAILABLE")
+        assertTrue(claims.claim(now.plusSeconds(900), lease, 1).isEmpty())
     }
 
     @Test fun `AI 호출 실패는 FAILED와 MODERATION_UNAVAILABLE이며 원문은 보존한다`() {
@@ -421,7 +424,7 @@ class StorySubmissionIntegrationTests {
         assertEquals(status == SubmissionStatus.APPROVED, submissions.existsById(row.id))
     }
 
-    @Autowired private lateinit var scheduler: SubmissionReclaimScheduler
+    @Autowired private lateinit var scheduler: SubmissionPoller
 
     @Test fun `실행기 거부에도 HTTP 202를 유지하고 스케줄러가 PENDING을 회수한다`() {
         val user = users.save(User(nickname = "작가"))
@@ -434,19 +437,19 @@ class StorySubmissionIntegrationTests {
         val row = submissions.findAll().single()
         assertEquals(SubmissionStatus.PENDING, row.status)
         assertEquals(1, row.attempt)
-        org.mockito.Mockito.verifyNoInteractions(ai)
-        row.dispatchedAt = java.time.Instant.now().minusSeconds(301)
-        submissions.save(row)
+        org.mockito.Mockito.verifyNoInteractions(executor, ai)
+        scheduler.poll() // 거부된 선점은 즉시 미선점으로 반환된다.
+        assertNull(submissions.findById(row.id).orElseThrow().dispatchedAt)
         org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
             .thenReturn(ModerationResult("APPROVED", emptyList(), null))
         val queued = mutableListOf<Runnable>()
         org.mockito.Mockito.doAnswer { call -> queued.add(call.getArgument(0)); null }
             .`when`(executor).execute(org.mockito.Mockito.any(Runnable::class.java))
-        scheduler.reclaim()
+        scheduler.poll()
         // 실제 실행기처럼 회수 트랜잭션의 afterCommit 콜백이 끝난 뒤 실행한다.
         queued.single().run()
         val recovered = submissions.findById(row.id).orElseThrow()
-        assertEquals(2, recovered.attempt)
+        assertEquals(3, recovered.attempt)
         assertEquals(SubmissionStatus.APPROVED, recovered.status)
         assertNotNull(recovered.storyId)
         assertEquals(1, stories.count())
