@@ -50,6 +50,7 @@
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
 | [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
 | [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
+| [public.story_submissions](public.story_submissions.md) | 16 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
 
 ## Relations
 
@@ -105,6 +106,8 @@ erDiagram
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -569,6 +572,24 @@ erDiagram
   timestamp_with_time_zone next_attempt_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone published_at
+}
+"public.story_submissions" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_10_ kind
+  jsonb payload
+  jsonb input_form
+  jsonb image_copies
+  varchar_10_ status
+  jsonb issues
+  varchar_40_ error_code
+  integer attempt
+  timestamp_with_time_zone dispatched_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone decided_at
 }
 ```
 

@@ -62,6 +62,7 @@ data class StoryEditFormResponse(
         arraySchema = Schema(description = "인물과 인물별 이미지 목록(KNK-1126). 인물이 없으면 빈 배열"),
     )
     val characters: List<StoryEditCharacterResponse> = emptyList(),
+    val submission: com.knk.manyak.story.submission.SubmissionMetadata? = null,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -126,4 +127,8 @@ data class UpdateStoryRequest(
     @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
     @field:Schema(description = "인물 목록(최대 6명). 생략하면 인물을 바꾸지 않는다.", nullable = true)
     val characters: List<@NotNull GeneralCharacterInput>? = null,
-)
+) {
+    @jakarta.validation.constraints.AssertTrue(message = "장르는 공백 없이 각 30자 이하여야 합니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isGenresValid(): Boolean = genres?.all { it.isNotBlank() && it.length <= 30 } ?: true
+}

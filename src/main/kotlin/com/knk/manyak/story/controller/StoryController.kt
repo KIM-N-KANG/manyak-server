@@ -12,7 +12,8 @@ import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.service.GeneralStoryCreationService
+import com.knk.manyak.story.submission.StorySubmissionService
+import com.knk.manyak.story.submission.SubmissionAccepted
 import com.knk.manyak.story.service.StoryImageService
 import com.knk.manyak.story.service.StoryListFilter
 import com.knk.manyak.story.service.StoryListSort
@@ -47,32 +48,23 @@ import org.springframework.web.server.ResponseStatusException
 class StoryController(
     private val storySearchService: StorySearchService,
     private val storyService: StoryService,
-    private val generalStoryCreationService: GeneralStoryCreationService,
+    private val submissions: StorySubmissionService,
     private val storyImageService: StoryImageService,
 ) {
 
-    @Operation(
-        summary = "일반 제작 스토리 등록",
-        description = "폼에 직접 입력한 스토리 구성 항목을 한 번에 등록합니다(단발, 임시저장 없음). 인증은 선택이며 " +
-            "유효 토큰이면 생성자 소유가 됩니다. AI를 호출하지 않아 크레딧 소모·게스트 한도 카운트가 없습니다. " +
-            "응답은 간편 제작과 동일합니다.",
-    )
-    @ApiResponses(
-        value = [
-            ApiResponse(
-                responseCode = "201",
-                description = "등록 성공",
-                content = [Content(schema = Schema(implementation = SimpleStoryCreateResponse::class))],
-            ),
-            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음", content = [Content(schema = Schema(hidden = true))]),
-        ],
-    )
-    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "일반 제작 검수 제출", description = "회원이 전체 입력을 제출하면 202로 접수합니다. AI 검수 승인 후 스토리를 생성하며 이프는 소모하지 않습니다.")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "202", description = "검수 접수", content = [Content(schema = Schema(implementation = SubmissionAccepted::class))]),
+        ApiResponse(responseCode = "400", description = "입력 검증 실패"),
+        ApiResponse(responseCode = "401", description = "인증 필요"),
+        ApiResponse(responseCode = "409", description = "이미지 이름 중복"),
+    ])
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/general")
     fun createGeneralStory(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: CreateGeneralStoryRequest,
-    ): SimpleStoryCreateResponse = generalStoryCreationService.createGeneralStory(request, userId)
+    ): SubmissionAccepted = submissions.create(request, userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED))
 
     @Operation(
         summary = "등록 전 이미지 업로드용 presigned URL 발급",

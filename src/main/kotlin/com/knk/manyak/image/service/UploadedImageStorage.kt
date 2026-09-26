@@ -36,6 +36,9 @@ interface UploadedImageStorage {
     /** 객체 메타데이터. 객체가 없으면 null이다. 저장소 미구성이면 null이라 호출부가 [isEnabled]로 먼저 가른다. */
     fun head(objectKey: String): UploadedObject?
 
+    /** 서버가 새 불변 키로 복사한다. 미설정·실패는 예외로 처리하며 기존 목적지를 재사용하지 않는다. */
+    fun copy(sourceKey: String, destinationKey: String) { error("Image copy is unavailable") }
+
     /** 저장소가 구성돼 업로드 기능을 쓸 수 있는지. */
     fun isEnabled(): Boolean
 
@@ -136,6 +139,13 @@ class S3UploadedImageStorage(
             // 403 같은 다른 상태는 권한·설정 문제다. "없음"으로 뭉개면 원인이 가려지므로 그대로 던진다.
             if (e.statusCode() == HTTP_NOT_FOUND) null else throw e
         }
+    }
+
+    override fun copy(sourceKey: String, destinationKey: String) {
+        val s3 = client ?: error("Image storage is unavailable")
+        val source = java.net.URLEncoder.encode("$bucket/$sourceKey", Charsets.UTF_8).replace("+", "%20")
+        s3.copyObject(software.amazon.awssdk.services.s3.model.CopyObjectRequest.builder()
+            .copySource(source).destinationBucket(bucket).destinationKey(destinationKey).build())
     }
 
     override fun serveUrlOf(objectKey: String): String? =
