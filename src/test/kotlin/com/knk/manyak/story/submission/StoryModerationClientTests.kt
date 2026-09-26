@@ -20,6 +20,22 @@ class StoryModerationClientTests {
             assertTrue(request.body.readUtf8().contains("thumbnailUrl"))
         }
     }
+    @Test fun `평문 HTTP 검수 요청은 h2c 업그레이드 헤더를 보내지 않는다`() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("""{"decision":"APPROVED","issues":[],"error_code":null}"""))
+            val client = RestStoryModerationClient(server.url("/").toString(), Duration.ofSeconds(180))
+            client.moderate(JsonMapper().readTree("""{"title":"검수"}"""))
+            val request = server.takeRequest()
+            assertAll(
+                { assertNull(request.getHeader("Upgrade")) },
+                { assertNull(request.getHeader("HTTP2-Settings")) },
+                { assertFalse(request.headers.values("Connection").any { value ->
+                    value.split(',').any { it.trim().equals("Upgrade", ignoreCase = true) }
+                }) },
+            )
+        }
+    }
     @Test fun `AI 제한 이하의 클라이언트 타임아웃은 설정 오류`() {
         assertThrows(IllegalArgumentException::class.java) { RestStoryModerationClient("http://localhost", Duration.ofSeconds(150)) }
     }

@@ -57,7 +57,7 @@ class RestStoryModerationClient(
 ) : StoryModerationClient {
     init { require(timeout > Duration.ofSeconds(150)) { "Moderation timeout must exceed 150 seconds" } }
     private val client = RestClient.builder().baseUrl(baseUrl)
-        .requestFactory(JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()).apply { setReadTimeout(timeout) }).build()
+        .requestFactory(JdkClientHttpRequestFactory(HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build()).apply { setReadTimeout(timeout) }).build()
     override fun moderate(input: JsonNode): ModerationResult = client.post().uri("/api/v1/moderation/story")
         .headers { headers -> CorrelationHeaders.forwardingHeadersFromMdc().forEach { (name, value) -> headers.set(name, value) } }
         .body(input).retrieve().body(ModerationResult::class.java)?.validated(input) ?: error("Empty moderation response")

@@ -18,6 +18,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.client.RestClientResponseException
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
@@ -52,7 +53,10 @@ class SubmissionExecutor(
                 client.moderate(input).validated(input)
             } catch (ex: org.springframework.dao.DataAccessException) {
                 throw ex // 복사 결과 저장 장애도 PENDING 임대를 남겨 재선점한다.
-            } catch (_: Exception) {
+            } catch (ex: Exception) {
+                // 예외 자체를 넘기지 않아 입력·URL·응답 본문이 로그에 포함되지 않게 한다.
+                log.warn("moderation_execution_failed submission={} attempt={} error={} status={}",
+                    event.id, event.attempt, ex.javaClass.simpleName, (ex as? RestClientResponseException)?.statusCode?.value())
                 transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE")
                 return
             }
