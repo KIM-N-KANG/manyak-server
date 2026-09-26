@@ -15,6 +15,7 @@
 | kind | varchar(10) |  | false |  |  |  |
 | payload | jsonb |  | false |  |  |  |
 | input_form | jsonb |  | false |  |  |  |
+| image_copies | jsonb | '{}'::jsonb | false |  |  |  |
 | status | varchar(10) |  | false |  |  |  |
 | issues | jsonb | '[]'::jsonb | false |  |  |  |
 | error_code | varchar(40) |  | true |  |  |  |
@@ -34,6 +35,7 @@
 | ck_story_submissions_json | CHECK | CHECK (((jsonb_typeof(payload) = 'object'::text) AND (jsonb_typeof(issues) = 'array'::text))) |
 | ck_story_submissions_target | CHECK | CHECK ((((kind)::text = 'CREATE'::text) OR (story_id IS NOT NULL))) |
 | story_submissions_attempt_check | CHECK | CHECK ((attempt > 0)) |
+| story_submissions_image_copies_check | CHECK | CHECK ((jsonb_typeof(image_copies) = 'object'::text)) |
 | story_submissions_kind_check | CHECK | CHECK (((kind)::text = ANY ((ARRAY['CREATE'::character varying, 'UPDATE'::character varying])::text[]))) |
 | story_submissions_status_check | CHECK | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'APPROVED'::character varying, 'REJECTED'::character varying, 'FAILED'::character varying])::text[]))) |
 | story_submissions_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
@@ -68,6 +70,7 @@ erDiagram
   varchar_10_ kind
   jsonb payload
   jsonb input_form
+  jsonb image_copies
   varchar_10_ status
   jsonb issues
   varchar_40_ error_code

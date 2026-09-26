@@ -25,6 +25,7 @@ class StorySubmission(
     @Enumerated(EnumType.STRING) @Column(nullable = false) val kind: SubmissionKind,
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable = false, columnDefinition = "jsonb") var payload: String,
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "input_form", nullable = false, columnDefinition = "jsonb") var inputForm: String = "{}",
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name = "image_copies", nullable = false, columnDefinition = "jsonb") var imageCopies: Map<String, String> = emptyMap(),
     @Enumerated(EnumType.STRING) @Column(nullable = false) var status: SubmissionStatus = SubmissionStatus.PENDING,
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable = false, columnDefinition = "jsonb") var issues: List<ModerationIssue> = emptyList(),
     @Column(name = "error_code") var errorCode: String? = null,
@@ -36,6 +37,7 @@ class StorySubmission(
 ) {
     fun resubmit(payload: String, now: Instant = Instant.now()) {
         this.payload = payload
+        imageCopies = emptyMap()
         status = SubmissionStatus.PENDING
         issues = emptyList()
         errorCode = null

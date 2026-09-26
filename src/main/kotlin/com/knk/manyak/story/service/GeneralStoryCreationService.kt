@@ -61,7 +61,7 @@ class GeneralStoryCreationService(
      * `{id, title, oneLineIntro, description, genres, startSetting}`이다.
      */
     @Transactional
-    fun createGeneralStory(request: CreateGeneralStoryRequest, userId: Long?): SimpleStoryCreateResponse {
+    fun createGeneralStory(request: CreateGeneralStoryRequest, userId: Long?, approvedImageUrls: Map<String, String> = emptyMap()): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         // 게스트는 공개(PUBLIC)를 지정할 수 없다(KNK-149). 조용히 PRIVATE으로 낮추지 않고 400으로 거부한다.
         requireOwnerCanPublish(ownerUserId = userId, requested = request.visibility)
@@ -69,7 +69,7 @@ class GeneralStoryCreationService(
         // 스토리가 롤백에 기대 남지 않게, 그리고 S3 왕복을 저장 이전으로 모아 두기 위해서다.
         val uploaderPublicId = resolveUploaderPublicId(request, userId)
         val thumbnailImageUrl = request.thumbnailObjectKey?.let { objectKey ->
-            storyImageAccess.resolveDraftUploadedUrl(requireNotNull(uploaderPublicId), UploadedImageKind.COVER, objectKey)
+            approvedImageUrls[objectKey] ?: storyImageAccess.resolveDraftUploadedUrl(requireNotNull(uploaderPublicId), UploadedImageKind.COVER, objectKey)
         }
         // 장르는 현행 방식대로 stories.genre에 쉼표 결합 저장한다(§4-3-8).
         val genre = request.genres.joinToString(separator = ", ").ifBlank { null }
@@ -115,7 +115,7 @@ class GeneralStoryCreationService(
             )
         }
 
-        persistCharacters(story, request.characters, uploaderPublicId)
+        persistCharacters(story, request.characters, uploaderPublicId, approvedImageUrls)
 
         // 시작 설정별로 저장한다(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정 스코프다.
         val startSettingResponses = request.startSettings.map { input -> persistStartSetting(story, input) }
@@ -213,7 +213,7 @@ class GeneralStoryCreationService(
      * 인물과 인물 이미지를 저장한다(KNK-1390). 인물 행 자체는 이미지가 아니라 게스트도 만들 수 있다 —
      * 이관 뒤에 이미지를 붙일 자리를 먼저 세운다. 이미지 규칙(이름 형식·10장 상한)은 등록 후 추가 경로와 같다.
      */
-    private fun persistCharacters(story: Story, characters: List<GeneralCharacterInput>, uploaderPublicId: UUID?) {
+    private fun persistCharacters(story: Story, characters: List<GeneralCharacterInput>, uploaderPublicId: UUID?, approvedImageUrls: Map<String, String>) {
         if (characters.isEmpty()) return
         requireDistinctCharacterNames(characters.map { it.name })
         characters.forEach { input ->
@@ -229,7 +229,7 @@ class GeneralStoryCreationService(
                     StoryCharacterImage(
                         character = character,
                         imageName = imageNames[index],
-                        imageUrl = storyImageAccess.resolveDraftUploadedUrl(
+                        imageUrl = approvedImageUrls[image.objectKey] ?: storyImageAccess.resolveDraftUploadedUrl(
                             requireNotNull(uploaderPublicId),
                             UploadedImageKind.CHARACTER,
                             requireNotNull(image.objectKey),

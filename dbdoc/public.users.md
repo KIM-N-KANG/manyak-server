@@ -182,6 +182,7 @@ erDiagram
   varchar_10_ kind
   jsonb payload
   jsonb input_form
+  jsonb image_copies
   varchar_10_ status
   jsonb issues
   varchar_40_ error_code

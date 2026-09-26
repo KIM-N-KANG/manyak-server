@@ -53,6 +53,7 @@ class SubmissionExecutor(
     @Qualifier("storyModerationExecutor") private val executor: Executor,
     private val transactions: SubmissionTransactions,
     private val client: StoryModerationClient,
+    private val images: SubmissionImages,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -62,8 +63,11 @@ class SubmissionExecutor(
     }
     fun run(event: SubmissionRequested) {
         try {
-            val input = transactions.start(event.id, event.attempt) ?: return
-            val result = try { client.moderate(input).validated(input) } catch (_: Exception) {
+            val work = transactions.start(event.id, event.attempt) ?: return
+            val result = try {
+                val input = images.prepare(work) { source, destination -> transactions.recordCopy(event.id, event.attempt, source, destination) } ?: return
+                client.moderate(input).validated(input)
+            } catch (_: Exception) {
                 transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE")
                 return
             }
@@ -88,13 +92,22 @@ class SubmissionTransactions(
     private val mapper: ObjectMapper,
     private val events: ApplicationEventPublisher,
     private val entityManager: EntityManager,
+    private val images: SubmissionImages,
 ) {
     @Transactional
-    fun start(id: Long, attempt: Int): JsonNode? {
+    fun start(id: Long, attempt: Int): SubmissionWork? {
         val row = pending(id, attempt) ?: return null
         row.dispatchedAt = Instant.now()
         row.updatedAt = row.dispatchedAt
-        return forms.aiInput(mapper.readTree(row.inputForm))
+        return SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies)
+    }
+
+    @Transactional
+    fun recordCopy(id: Long, attempt: Int, source: String, destination: String): String? {
+        val row = pending(id, attempt) ?: return null
+        val chosen = row.imageCopies[source] ?: destination
+        row.imageCopies = row.imageCopies + (source to chosen)
+        return chosen
     }
 
     @Transactional
@@ -105,8 +118,9 @@ class SubmissionTransactions(
         } else if (result.decision == "REJECTED") {
             decide(row, SubmissionStatus.REJECTED, result.issues, null)
         } else {
+            val approvedUrls = images.approvedUrls(SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies))
             if (row.kind == SubmissionKind.CREATE) {
-                val created = creation.createGeneralStory(mapper.readValue(row.payload, CreateGeneralStoryRequest::class.java), row.userId)
+                val created = creation.createGeneralStory(mapper.readValue(row.payload, CreateGeneralStoryRequest::class.java), row.userId, approvedUrls)
                 row.storyId = stories.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(created.id))!!.id
             } else {
                 val story = stories.findById(requireNotNull(row.storyId)).orElseThrow()
@@ -117,7 +131,7 @@ class SubmissionTransactions(
                     val kept = approvedForm.path("characters").path(index).path("images").mapNotNull { it.path("id").takeUnless { id -> id.isNull || id.isMissingNode }?.asText() }.toSet()
                     character.copy(images = character.images?.filter { it.id == null || it.id in kept })
                 })
-                edit.updateStory(story.publicId.toString(), row.userId, effective)
+                edit.updateStory(story.publicId.toString(), row.userId, effective, approvedUrls)
             }
             entityManager.flush()
             decide(row, SubmissionStatus.APPROVED, emptyList(), null)
@@ -135,7 +149,9 @@ class SubmissionTransactions(
         val row = submissions.lockById(id) ?: return
         entityManager.refresh(row)
         if (row.status != SubmissionStatus.PENDING || row.dispatchedAt > cutoff) return
+        val copies = row.imageCopies
         row.resubmit(row.payload)
+        row.imageCopies = copies
         events.publishEvent(SubmissionRequested(row.id, row.attempt))
     }
 

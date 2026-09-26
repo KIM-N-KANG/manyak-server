@@ -6,6 +6,7 @@ CREATE TABLE story_submissions (
     kind VARCHAR(10) NOT NULL CHECK (kind IN ('CREATE', 'UPDATE')),
     payload JSONB NOT NULL,
     input_form JSONB NOT NULL,
+    image_copies JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(image_copies) = 'object'),
     status VARCHAR(10) NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'FAILED')),
     issues JSONB NOT NULL DEFAULT '[]'::jsonb,
     error_code VARCHAR(40),

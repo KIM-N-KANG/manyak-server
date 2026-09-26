@@ -26,6 +26,9 @@ class SubmissionApprovalTestSupport(
         response.expectStatus().isAccepted
         val id = mapper.readTree(received.responseBody!!).path("submissionId").asText()
         val row = submissions.findByPublicId(UUID.fromString(id))!!
+        // 이 헬퍼는 기존 라이브 저장 검증용이다. 불변 복사는 별도 S3 통합 테스트에서 검증한다.
+        row.imageCopies = SubmissionImages.newKeys(mapper.readTree(row.inputForm)).associateWith { it }
+        submissions.save(row)
         transactions.finish(row.id, row.attempt, ModerationResult("APPROVED", emptyList(), null))
         val approved = submissions.findById(row.id).orElseThrow()
         org.junit.jupiter.api.Assertions.assertEquals(SubmissionStatus.APPROVED, approved.status)

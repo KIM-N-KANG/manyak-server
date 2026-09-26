@@ -74,7 +74,7 @@ class StoryEditService(
 
     /** 부분 갱신: 보낸(non-null) 필드만 교체하고 나머지는 유지한다. 리스트는 보내면 전체 교체다. */
     @Transactional
-    fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest): StoryEditFormResponse {
+    fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest, approvedImageUrls: Map<String, String> = emptyMap()): StoryEditFormResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 공개 전환 포함 수정 전반이 대상.
         // 쓰기 락으로 스토리 애그리거트를 잠가 동시 PATCH의 자식 리스트 교체 경합을 직렬화한다.
         val story = resolveStoryForUpdate(storyId)
@@ -112,7 +112,7 @@ class StoryEditService(
         request.thumbnailObjectKey?.let { objectKey ->
             val ownerPublicId = requireImageUploader(story)
             story.thumbnailImageUrl =
-                storyImageAccess.resolveUploadedUrl(story, ownerPublicId, UploadedImageKind.COVER, objectKey)
+                approvedImageUrls[objectKey] ?: storyImageAccess.resolveUploadedUrl(story, ownerPublicId, UploadedImageKind.COVER, objectKey)
             // 새 객체는 새 판정이다 — 이전 표지가 PENDING·REJECTED였다고 물려받으면 이미지를 바꿔도
             // 계속 가려진다. 자동 검수 도입 시 이 자리에서 판정 결과로 설정한다.
             story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
@@ -148,7 +148,7 @@ class StoryEditService(
         }
 
         // 인물 전체 교체(KNK-1391). 인물 이미지는 각 인물에 종속되므로 함께 동기화한다.
-        request.characters?.let { inputs -> syncCharacters(story, inputs) }
+        request.characters?.let { inputs -> syncCharacters(story, inputs, approvedImageUrls) }
 
         // 시작 설정 전체 교체(KNK-515 복수화). 추천 입력·엔딩은 각 시작 설정에 종속되므로 함께 동기화한다.
         request.startSettings?.let { inputs -> syncStartSettings(story, inputs) }
@@ -168,7 +168,7 @@ class StoryEditService(
      *
      * 삭제는 DB 행만 지우고 **S3 객체는 남긴다** — 지난 채팅의 `[[URL]]` 마커가 그 객체를 가리킨다(KNK-1126 결정).
      */
-    private fun syncCharacters(story: Story, inputs: List<GeneralCharacterInput>) {
+    private fun syncCharacters(story: Story, inputs: List<GeneralCharacterInput>, approvedImageUrls: Map<String, String>) {
         requireDistinctCharacterNames(inputs.map { it.name })
         val existing = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
         val existingByPublicId = existing.associateBy { it.publicId }
@@ -228,7 +228,7 @@ class StoryEditService(
             val previousName = match?.let { previousNames.getValue(it.id) } ?: input.name
             character.name = input.name
             val saved = storyCharacterRepository.save(character)
-            syncCharacterImages(story, saved, previousName, input.images, ownerPublicId)
+            syncCharacterImages(story, saved, previousName, input.images, ownerPublicId, approvedImageUrls)
         }
     }
 
@@ -242,6 +242,7 @@ class StoryEditService(
         previousName: String,
         inputs: List<GeneralCharacterImageInput>?,
         ownerPublicId: UUID?,
+        approvedImageUrls: Map<String, String>,
     ) {
         // 이미지 목록을 읽기 전에 인물 행을 잠근다. 승인 적용과 이미지 삭제가 같은
         // 락을 쓰므로 두 경로가 직렬화된다 — 잠그지 않으면 우리가 목록을 읽은 뒤 커밋된 새 이미지가
@@ -298,7 +299,7 @@ class StoryEditService(
                     StoryCharacterImage(
                         character = character,
                         imageName = finalNames[index],
-                        imageUrl = storyImageAccess.resolveUploadedUrl(
+                        imageUrl = approvedImageUrls[item.objectKey] ?: storyImageAccess.resolveUploadedUrl(
                             story,
                             ownerPublicId,
                             UploadedImageKind.CHARACTER,
