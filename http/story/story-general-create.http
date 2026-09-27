@@ -38,6 +38,9 @@ Authorization: Bearer {{accessToken}}
 > {%
 client.test("제출본 복원", () => {
   client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(Array.isArray(response.body.imageErrors), "imageErrors 배열 필수");
+  client.assert(response.body.imageErrors.every(e => typeof e.path === "string" &&
+    ["IMAGE_DOWNLOAD_FAILED", "IMAGE_INVALID", "IMAGE_UNREADABLE"].includes(e.errorCode) && !("error_code" in e)), "이미지 오류는 path/errorCode");
   client.assert(!("submission" in response.body.payload), "payload에 응답 전용 submission 없음");
   client.assert(response.body.payload.title === "달빛 아래의 계약", "입력 보존");
 });
@@ -56,6 +59,7 @@ Authorization: Bearer {{accessToken}}
 client.test("미승인만 반환", () => {
   client.assert(response.status === 200, `200 기대, actual=${response.status}`);
   client.assert(response.body.every(s => s.status !== "APPROVED"), "승인 제출본 제외");
+  client.assert(response.body.every(s => Array.isArray(s.imageErrors)), "목록에도 imageErrors 필수");
 });
 %}
 
@@ -120,3 +124,32 @@ Content-Type: application/json
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
 Authorization: Bearer {{accessToken}}
+
+### 이미지 실행 오류 확인 (실제 AI 또는 계약 대역에서 오류 결과가 나온 제출본으로 실행)
+# IMAGE_DOWNLOAD_FAILED: 재시도, IMAGE_INVALID·IMAGE_UNREADABLE: 이미지 교체·용량 축소 안내.
+# FAILED에도 내용 위반 issues가 함께 올 수 있다. imageErrors.path는 이 응답 payload 기준이다.
+# API 대역 예: REJECTED + issues(title/TEXT/DRUGS) + error_code IMAGE_INVALID
+# + image_errors [{path: thumbnailUrl, error_code: IMAGE_INVALID}]. 표지 포함 제출본이 필요하다.
+GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("실행 오류와 내용 위반 동시 보존", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.status === "FAILED", "이미지 오류 시 FAILED");
+  client.assert(["IMAGE_DOWNLOAD_FAILED", "IMAGE_INVALID", "IMAGE_UNREADABLE"].includes(response.body.errorCode), "AI 이미지 코드 유지");
+  client.assert(response.body.imageErrors.length > 0, "현재 폼에 남은 이미지 오류 존재");
+  client.assert(Array.isArray(response.body.issues), "내용 위반도 함께 표시");
+});
+%}
+
+### 재제출 후 초기화 확인 (위 PUT 성공 직후, 검수 대역을 PENDING 상태로 유지해 실행)
+GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("재제출은 오류 목록 초기화", () => {
+  client.assert(response.status === 200 && response.body.status === "PENDING", "PENDING 제출본 필요");
+  client.assert(response.body.imageErrors.length === 0 && response.body.issues.length === 0 && response.body.errorCode === null, "재제출 오류 초기화");
+});
+%}

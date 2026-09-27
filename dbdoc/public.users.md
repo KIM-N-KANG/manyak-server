@@ -191,6 +191,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone decided_at
+  jsonb image_errors
 }
 ```
 

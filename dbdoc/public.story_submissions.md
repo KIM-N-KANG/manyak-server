@@ -24,6 +24,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | decided_at | timestamp with time zone |  | true |  |  |  |
+| image_errors | jsonb | '[]'::jsonb | false |  |  | AI 이미지 실행 오류 목록(path, errorCode). 원본 입력 경로를 보존하고 조회 시 현재 폼으로 재매핑 |
 
 ## Constraints
 
@@ -36,6 +37,7 @@
 | ck_story_submissions_target | CHECK | CHECK ((((kind)::text = 'CREATE'::text) OR (story_id IS NOT NULL))) |
 | story_submissions_attempt_check | CHECK | CHECK ((attempt > 0)) |
 | story_submissions_image_copies_check | CHECK | CHECK ((jsonb_typeof(image_copies) = 'object'::text)) |
+| story_submissions_image_errors_check | CHECK | CHECK ((jsonb_typeof(image_errors) = 'array'::text)) |
 | story_submissions_kind_check | CHECK | CHECK (((kind)::text = ANY ((ARRAY['CREATE'::character varying, 'UPDATE'::character varying])::text[]))) |
 | story_submissions_status_check | CHECK | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'APPROVED'::character varying, 'REJECTED'::character varying, 'FAILED'::character varying])::text[]))) |
 | story_submissions_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
@@ -79,6 +81,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone decided_at
+  jsonb image_errors
 }
 "public.users" {
   bigint id

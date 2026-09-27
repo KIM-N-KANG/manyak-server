@@ -1,5 +1,6 @@
 package com.knk.manyak.story.submission
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.global.observability.CorrelationHeaders
 import org.springframework.beans.factory.annotation.Value
@@ -11,29 +12,44 @@ import tools.jackson.databind.JsonNode
 import java.net.http.HttpClient
 import java.time.Duration
 
-data class ModerationResult(val decision: String, val issues: List<ModerationIssue>, @JsonProperty("error_code") val errorCode: String?) {
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ModerationImageError(val path: String, @JsonProperty("error_code") val errorCode: String)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ModerationResult(
+    val decision: String,
+    val issues: List<ModerationIssue>,
+    @JsonProperty("error_code") val errorCode: String?,
+    @JsonProperty("image_errors") val imageErrors: List<ModerationImageError> = emptyList(),
+) {
     fun validated(input: JsonNode): ModerationResult {
         require(decision in setOf("APPROVED", "REJECTED"))
-        require(errorCode == null || errorCode in setOf("IMAGE_READ_FAILED", "MODEL_CALL_FAILED"))
+        require(errorCode == null || errorCode in IMAGE_ERROR_PRIORITY || errorCode == "MODEL_CALL_FAILED")
         require(when {
-            decision == "APPROVED" -> issues.isEmpty() && errorCode == null
-            errorCode != null -> issues.isEmpty()
-            else -> issues.isNotEmpty()
+            decision == "APPROVED" -> issues.isEmpty() && errorCode == null && imageErrors.isEmpty()
+            imageErrors.isNotEmpty() -> errorCode == IMAGE_ERROR_PRIORITY.firstOrNull { code -> imageErrors.any { it.errorCode == code } }
+            errorCode == "MODEL_CALL_FAILED" -> issues.isEmpty()
+            else -> errorCode == null && issues.isNotEmpty()
         })
         val paths = mutableMapOf<String, String>()
         fun collect(node: JsonNode, path: String) {
             when {
-                node.isObject -> node.properties().forEach { (key, value) -> collect(value, if (path.isEmpty()) key else "$path.$key") }
+                node.isObject -> node.properties().forEach { (key, value) ->
+                    if (path.isNotEmpty() || key !in setOf("submissionId", "storyId")) collect(value, if (path.isEmpty()) key else "$path.$key")
+                }
                 node.isArray -> node.forEachIndexed { index, value -> collect(value, "$path[$index]") }
                 node.isString -> paths[path] = if (path == "thumbnailUrl" || CHARACTER_IMAGE_PATH.matches(path)) "IMAGE" else "TEXT"
             }
         }
         collect(input, "")
         require(issues.all { paths[it.path] == it.type && it.rule in RULES && it.reason.isNotBlank() })
+        require(imageErrors.all { paths[it.path] == "IMAGE" && it.errorCode in IMAGE_ERROR_PRIORITY })
+        require(imageErrors.map { it.path }.distinct().size == imageErrors.size)
         return this
     }
 
     companion object {
+        private val IMAGE_ERROR_PRIORITY = listOf("IMAGE_INVALID", "IMAGE_UNREADABLE", "IMAGE_DOWNLOAD_FAILED")
         private val CHARACTER_IMAGE_PATH = Regex("""characters\[\d+]\.images\[\d+]\.imageUrl""")
         // AI Spec §5-3-6의 응답 코드 계약. 내용 판정 정책은 AI가 소유한다.
         private val RULES = setOf("MINOR_SEXUAL_EXPLOITATION", "EXPLICIT_SEXUAL_CONTENT",

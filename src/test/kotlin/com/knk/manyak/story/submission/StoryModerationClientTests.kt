@@ -11,10 +11,10 @@ class StoryModerationClientTests {
     @Test fun `camelCase 전체 입력과 snake_case 실행 오류를 교환한다`() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "application/json")
-                .setBody("""{"decision":"REJECTED","issues":[],"error_code":"IMAGE_READ_FAILED"}"""))
+                .setBody("""{"decision":"REJECTED","issues":[],"error_code":"IMAGE_DOWNLOAD_FAILED","image_errors":[{"path":"thumbnailUrl","error_code":"IMAGE_DOWNLOAD_FAILED"}]}"""))
             val client = RestStoryModerationClient(server.url("/").toString(), Duration.ofSeconds(180))
             val result = client.moderate(JsonMapper().readTree("""{"title":"검수","thumbnailUrl":"https://example.test/image"}"""))
-            assertEquals("IMAGE_READ_FAILED", result.errorCode)
+            assertEquals("IMAGE_DOWNLOAD_FAILED", result.errorCode)
             val request = server.takeRequest()
             assertEquals("/api/v1/moderation/story", request.path)
             assertTrue(request.body.readUtf8().contains("thumbnailUrl"))
