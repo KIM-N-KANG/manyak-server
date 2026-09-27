@@ -159,7 +159,7 @@ client.test("재제출은 오류 목록 초기화", () => {
 # 새 제출 전에 AI 대역을 MODEL_CALL_FAILED + issues=[] + image_errors=[]로 설정한다.
 # 로컬 즉시 승인 스텁은 끈다. 기본 1m,5m 또는 MANYAK_AI_MODERATION_RETRY_DELAYS=2s,7s로 재시도 간격을 줄인다.
 # 위 접수 요청 실행 → 총 3번 AI 호출 확인 → 아래 조회. 완료 푸시는 없고 보류 Slack 알림만 1건이다.
-# MANYAK_SLACK_MODERATION_WEBHOOK_URL이 비어 있으면 WARN 로그 1건으로 확인한다.
+# 검수 웹훅 미설정이면 MANYAK_SLACK_REPORT_WEBHOOK_URL을 쓴다. 둘 다 없으면 WARN 로그 1건으로 확인한다.
 GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
 Authorization: Bearer {{accessToken}}
 
