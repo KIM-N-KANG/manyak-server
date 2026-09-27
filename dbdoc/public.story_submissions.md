@@ -25,6 +25,10 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | decided_at | timestamp with time zone |  | true |  |  |  |
 | image_errors | jsonb | '[]'::jsonb | false |  |  | AI 이미지 실행 오류 목록(path, errorCode). 원본 입력 경로를 보존하고 조회 시 현재 폼으로 재매핑 |
+| retry_count | integer | 0 | false |  |  | 일시 실패 자동 재시도 예약 횟수(최대 2). 사용자 재제출 시 0 |
+| next_attempt_at | timestamp with time zone |  | true |  |  | 다음 자동 재시도 가능 시각. 선점 시 NULL |
+| held_at | timestamp with time zone |  | true |  |  | 자동 재시도 소진 보류 시각. PENDING 유지, 폴러 선점 제외 |
+| hold_reason | text |  | true |  |  | 보류 원인 코드. 사용자 응답에는 노출하지 않음 |
 
 ## Constraints
 
@@ -33,12 +37,14 @@
 | ck_story_submissions_approved_target | CHECK | CHECK ((((status)::text <> 'APPROVED'::text) OR (story_id IS NOT NULL))) |
 | ck_story_submissions_decision | CHECK | CHECK ((((status)::text = 'PENDING'::text) = (decided_at IS NULL))) |
 | ck_story_submissions_error | CHECK | CHECK ((((status)::text = 'FAILED'::text) = (error_code IS NOT NULL))) |
+| ck_story_submissions_hold | CHECK | CHECK ((((held_at IS NULL) AND (hold_reason IS NULL)) OR ((held_at IS NOT NULL) AND (hold_reason IS NOT NULL) AND ((status)::text = 'PENDING'::text) AND (next_attempt_at IS NULL)))) |
 | ck_story_submissions_json | CHECK | CHECK (((jsonb_typeof(payload) = 'object'::text) AND (jsonb_typeof(issues) = 'array'::text))) |
 | ck_story_submissions_target | CHECK | CHECK ((((kind)::text = 'CREATE'::text) OR (story_id IS NOT NULL))) |
 | story_submissions_attempt_check | CHECK | CHECK ((attempt > 0)) |
 | story_submissions_image_copies_check | CHECK | CHECK ((jsonb_typeof(image_copies) = 'object'::text)) |
 | story_submissions_image_errors_check | CHECK | CHECK ((jsonb_typeof(image_errors) = 'array'::text)) |
 | story_submissions_kind_check | CHECK | CHECK (((kind)::text = ANY ((ARRAY['CREATE'::character varying, 'UPDATE'::character varying])::text[]))) |
+| story_submissions_retry_count_check | CHECK | CHECK (((retry_count >= 0) AND (retry_count <= 2))) |
 | story_submissions_status_check | CHECK | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'APPROVED'::character varying, 'REJECTED'::character varying, 'FAILED'::character varying])::text[]))) |
 | story_submissions_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_submissions_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
@@ -54,7 +60,7 @@
 | uq_story_submissions_pending | CREATE UNIQUE INDEX uq_story_submissions_pending ON public.story_submissions USING btree (story_id) WHERE ((story_id IS NOT NULL) AND ((status)::text = 'PENDING'::text)) |
 | uq_story_submissions_unapproved | CREATE UNIQUE INDEX uq_story_submissions_unapproved ON public.story_submissions USING btree (story_id) WHERE ((story_id IS NOT NULL) AND ((status)::text <> 'APPROVED'::text)) |
 | ix_story_submissions_owner | CREATE INDEX ix_story_submissions_owner ON public.story_submissions USING btree (user_id, created_at DESC, id DESC) |
-| ix_story_submissions_claim | CREATE INDEX ix_story_submissions_claim ON public.story_submissions USING btree (id, dispatched_at) WHERE ((status)::text = 'PENDING'::text) |
+| ix_story_submissions_claim | CREATE INDEX ix_story_submissions_claim ON public.story_submissions USING btree (id, next_attempt_at, dispatched_at) WHERE (((status)::text = 'PENDING'::text) AND (held_at IS NULL)) |
 
 ## Relations
 
@@ -82,6 +88,10 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone decided_at
   jsonb image_errors
+  integer retry_count
+  timestamp_with_time_zone next_attempt_at
+  timestamp_with_time_zone held_at
+  text hold_reason
 }
 "public.users" {
   bigint id

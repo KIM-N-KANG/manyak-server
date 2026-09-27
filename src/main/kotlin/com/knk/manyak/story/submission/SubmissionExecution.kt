@@ -57,7 +57,8 @@ class SubmissionExecutor(
                 // 예외 자체를 넘기지 않아 입력·URL·응답 본문이 로그에 포함되지 않게 한다.
                 log.warn("moderation_execution_failed submission={} attempt={} error={} status={}",
                     event.id, event.attempt, ex.javaClass.simpleName, (ex as? RestClientResponseException)?.statusCode?.value())
-                transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE")
+                transactions.fail(event.id, event.attempt, "MODERATION_UNAVAILABLE",
+                    retryAllowed = (ex as? InvalidModerationResponse)?.retryAllowed ?: true)
                 return
             }
             try { transactions.finish(event.id, event.attempt, result) }
@@ -82,6 +83,7 @@ class SubmissionTransactions(
     private val events: ApplicationEventPublisher,
     private val entityManager: EntityManager,
     private val images: SubmissionImages,
+    private val retries: SubmissionRetryPolicy,
 ) {
     @Transactional
     fun start(id: Long, attempt: Int): SubmissionWork? {
@@ -102,6 +104,10 @@ class SubmissionTransactions(
     fun finish(id: Long, attempt: Int, result: ModerationResult) {
         val row = pending(id, attempt) ?: return
         if (result.errorCode != null) {
+            if (retries.isTransient(result.errorCode, result.issues, result.imageErrors)) {
+                defer(row, result.errorCode)
+                return
+            }
             decide(row, SubmissionStatus.FAILED, result.issues, result.errorCode, result.imageErrors.map { SubmissionImageError(it.path, it.errorCode) })
         } else if (result.decision == "REJECTED") {
             decide(row, SubmissionStatus.REJECTED, result.issues, null)
@@ -127,9 +133,10 @@ class SubmissionTransactions(
     }
 
     @Transactional
-    fun fail(id: Long, attempt: Int, code: String) {
+    fun fail(id: Long, attempt: Int, code: String, retryAllowed: Boolean = true) {
         val row = pending(id, attempt) ?: return
-        decide(row, SubmissionStatus.FAILED, emptyList(), code)
+        if (retryAllowed && retries.isTransient(code)) defer(row, code)
+        else decide(row, SubmissionStatus.FAILED, emptyList(), code)
     }
 
     private fun pending(id: Long, attempt: Int): StorySubmission? {
@@ -145,7 +152,23 @@ class SubmissionTransactions(
             entityManager.detach(story)
             if (stories.findByPublicIdAndDeletedAtIsNullForUpdate(story.publicId) == null) return null
         }
-        return submissions.lockById(id)?.takeIf { it.status == SubmissionStatus.PENDING && it.attempt == attempt }
+        return submissions.lockById(id)?.takeIf { it.status == SubmissionStatus.PENDING && it.attempt == attempt && it.nextAttemptAt == null && it.heldAt == null }
+    }
+
+    private fun defer(row: StorySubmission, code: String) {
+        val now = Instant.now()
+        row.dispatchedAt = null
+        row.updatedAt = now
+        val delay = retries.delays.getOrNull(row.retryCount)
+        if (delay != null) {
+            row.nextAttemptAt = now.plus(delay)
+            row.retryCount++
+        } else {
+            row.nextAttemptAt = null
+            row.heldAt = now
+            row.holdReason = code
+            events.publishEvent(SubmissionHeld(row.publicId, row.kind, code, row.retryCount + 1))
+        }
     }
 
     private fun decide(row: StorySubmission, status: SubmissionStatus, issues: List<ModerationIssue>, code: String?, imageErrors: List<SubmissionImageError> = emptyList()) {

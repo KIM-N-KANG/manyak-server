@@ -22,7 +22,16 @@ data class ModerationResult(
     @JsonProperty("error_code") val errorCode: String?,
     @JsonProperty("image_errors") val imageErrors: List<ModerationImageError> = emptyList(),
 ) {
-    fun validated(input: JsonNode): ModerationResult {
+    fun validated(input: JsonNode): ModerationResult = try {
+        validate(input)
+    } catch (_: IllegalArgumentException) {
+        // 응답 자체는 채택하지 않더라도 사용자 수정 사유를 일시 장애로 바꾸어 반복하지 않는다.
+        val permanentImageCodes = setOf("IMAGE_INVALID", "IMAGE_UNREADABLE")
+        throw InvalidModerationResponse(issues.isEmpty() && errorCode !in permanentImageCodes &&
+            imageErrors.none { it.errorCode in permanentImageCodes })
+    }
+
+    private fun validate(input: JsonNode): ModerationResult {
         require(decision in setOf("APPROVED", "REJECTED"))
         require(errorCode == null || errorCode in IMAGE_ERROR_PRIORITY || errorCode == "MODEL_CALL_FAILED")
         require(when {
@@ -57,6 +66,8 @@ data class ModerationResult(
             "SELF_HARM_PROMOTION", "HATE_VIOLENCE_INCITEMENT")
     }
 }
+class InvalidModerationResponse(val retryAllowed: Boolean) : IllegalArgumentException("Invalid moderation response")
+
 fun interface StoryModerationClient { fun moderate(input: JsonNode): ModerationResult }
 
 @Component

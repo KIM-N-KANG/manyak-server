@@ -140,18 +140,21 @@ class StorySubmissionIntegrationTests {
         assertEquals(first.attempt + 1, second.attempt)
         worker.finish(first.id, first.attempt, ModerationResult("APPROVED", emptyList(), null))
         assertEquals(0, stories.count())
-        worker.fail(second.id, second.attempt, "MODERATION_UNAVAILABLE")
+        worker.fail(second.id, second.attempt, "APPLY_FAILED")
         assertTrue(claims.claim(now.plusSeconds(900), lease, 1).isEmpty())
     }
 
-    @Test fun `AI 호출 실패는 FAILED와 MODERATION_UNAVAILABLE이며 원문은 보존한다`() {
+    @Test fun `AI 호출 실패는 재시도를 예약하고 원문은 보존한다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
         val row = submissions.findAll().single()
         org.mockito.Mockito.doThrow(IllegalStateException("external failure")).`when`(ai).moderate(moderationInput(row))
         runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
         val failed = submissions.findById(row.id).orElseThrow()
-        org.junit.jupiter.api.Assertions.assertEquals("MODERATION_UNAVAILABLE", failed.errorCode)
+        assertNull(failed.errorCode)
+        assertEquals(SubmissionStatus.PENDING, failed.status)
+        assertEquals(1, failed.retryCount)
+        assertNotNull(failed.nextAttemptAt)
         org.junit.jupiter.api.Assertions.assertEquals(row.payload, failed.payload)
         org.junit.jupiter.api.Assertions.assertTrue(failed.issues.isEmpty())
         org.junit.jupiter.api.Assertions.assertEquals(0, stories.count())
@@ -163,8 +166,9 @@ class StorySubmissionIntegrationTests {
         val row = submissions.findAll().single()
         worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", emptyList(), "MODEL_CALL_FAILED"))
         val failed = submissions.findById(row.id).orElseThrow()
-        org.junit.jupiter.api.Assertions.assertEquals(com.knk.manyak.story.submission.SubmissionStatus.FAILED, failed.status)
-        org.junit.jupiter.api.Assertions.assertEquals("MODEL_CALL_FAILED", failed.errorCode)
+        assertEquals(SubmissionStatus.PENDING, failed.status)
+        assertNull(failed.errorCode)
+        assertEquals(1, failed.retryCount)
     }
 
     @Test fun `AI 입력은 식별자 공개 범위 최소 턴 수를 제외한다`() {
@@ -205,7 +209,7 @@ class StorySubmissionIntegrationTests {
         user.servicePushEnabled = false
         users.save(user)
         service.resubmit(row.publicId.toString(), request(), user.id)
-        worker.fail(row.id, 2, "MODERATION_UNAVAILABLE")
+        worker.fail(row.id, 2, "APPLY_FAILED")
         org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.size)
     }
 
@@ -295,8 +299,9 @@ class StorySubmissionIntegrationTests {
             .thenReturn(com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(issue), null))
         runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
         val result = submissions.findById(row.id).orElseThrow()
-        org.junit.jupiter.api.Assertions.assertEquals(com.knk.manyak.story.submission.SubmissionStatus.FAILED, result.status)
-        org.junit.jupiter.api.Assertions.assertEquals("MODERATION_UNAVAILABLE", result.errorCode)
+        assertEquals(SubmissionStatus.FAILED, result.status)
+        assertEquals("MODERATION_UNAVAILABLE", result.errorCode)
+        assertEquals(0, result.retryCount)
         org.junit.jupiter.api.Assertions.assertTrue(result.issues.isEmpty())
         org.junit.jupiter.api.Assertions.assertEquals(0, stories.count())
     }
@@ -331,7 +336,7 @@ class StorySubmissionIntegrationTests {
         when (status) {
             SubmissionStatus.APPROVED -> worker.finish(row.id, 1, ModerationResult("APPROVED", emptyList(), null))
             SubmissionStatus.REJECTED -> worker.finish(row.id, 1, ModerationResult("REJECTED", listOf(ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
-            SubmissionStatus.FAILED -> worker.fail(row.id, 1, "MODERATION_UNAVAILABLE")
+            SubmissionStatus.FAILED -> worker.fail(row.id, 1, "APPLY_FAILED")
             SubmissionStatus.PENDING -> Unit
         }
         return submissions.findById(row.id).orElseThrow()
@@ -360,7 +365,7 @@ class StorySubmissionIntegrationTests {
         if (status == SubmissionStatus.REJECTED) {
             assertEquals(mapper.valueToTree<tools.jackson.databind.JsonNode>(row.issues), body["issues"])
         } else assertEquals(0, body["issues"].size())
-        if (status == SubmissionStatus.FAILED) assertEquals("MODERATION_UNAVAILABLE", body["errorCode"].asText())
+        if (status == SubmissionStatus.FAILED) assertEquals("APPLY_FAILED", body["errorCode"].asText())
         else assertTrue(body["errorCode"].isNull)
     }
 
@@ -501,6 +506,24 @@ class StorySubmissionIntegrationTests {
             .map { SubmissionImageError(it, "IMAGE_INVALID") }
         assertEquals(listOf("characters[1].images[1].imageUrl", "characters[1].images[0].imageUrl", "characters[0].images[0].imageUrl"),
             assembler.remapImageErrors(errors, original, current).map { it.path })
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings = ["issues", "IMAGE_INVALID", "IMAGE_UNREADABLE"])
+    fun `형식이 모순된 일시 오류도 사용자 수정 사유가 있으면 즉시 종료한다`(kind: String) {
+        val user = users.save(User(nickname = "작가"))
+        service.create(request(), user.id)
+        val row = submissions.findAll().single()
+        val response = ModerationResult("REJECTED",
+            if (kind == "issues") listOf(ModerationIssue("title", "TEXT", "DRUGS", "사유")) else emptyList(),
+            "MODEL_CALL_FAILED",
+            if (kind == "issues") emptyList() else listOf(ModerationImageError("thumbnailUrl", kind)))
+        org.mockito.Mockito.`when`(ai.moderate(moderationInput(row))).thenReturn(response)
+        runner.run(SubmissionRequested(row.id, row.attempt))
+        val saved = submissions.findById(row.id).orElseThrow()
+        assertEquals(SubmissionStatus.FAILED, saved.status)
+        assertEquals("MODERATION_UNAVAILABLE", saved.errorCode)
+        assertEquals(0, saved.retryCount)
+        assertNull(saved.nextAttemptAt)
     }
 
 }

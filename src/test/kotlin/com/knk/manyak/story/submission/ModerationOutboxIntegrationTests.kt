@@ -76,7 +76,7 @@ class ModerationOutboxIntegrationTests {
         val row = submissions.findAll().single()
         fun decide() {
             if (status == SubmissionStatus.REJECTED) worker.finish(row.id, 1, ModerationResult("REJECTED", listOf(ModerationIssue("title", "TEXT", "DRUGS", "사유")), null))
-            else worker.fail(row.id, 1, "MODERATION_UNAVAILABLE")
+            else worker.fail(row.id, 1, "APPLY_FAILED")
         }
         assertThrows(org.springframework.dao.TransientDataAccessResourceException::class.java) { decide() }
         val rolledBack = submissions.findById(row.id).orElseThrow()
