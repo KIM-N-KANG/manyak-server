@@ -226,8 +226,11 @@ manyak:
     chat-image-limit: ${MANYAK_GUEST_TRIAL_CHAT_IMAGE_LIMIT:5}
   push:
     # local: 서버 FCM, remote: 트랜잭션 아웃박스 → 브로커 → 알림 서비스.
-    # SQS 어댑터 도입 전 dev/prod는 local을 유지한다.
+    # dev/prod는 인프라 적용 후 별도 PR의 Terraform 변경으로 MANYAK_PUSH_MODE=remote를 주입해 전환한다.
     mode: ${MANYAK_PUSH_MODE:local}
+    # dev/prod + remote에서 필수. 누락·공백이면 기동에 실패한다.
+    queue-url: ${MANYAK_PUSH_QUEUE_URL:}
+    region: ${AWS_REGION:ap-northeast-2}
     outbox:
       poll-interval: 2s
       batch-size: 100

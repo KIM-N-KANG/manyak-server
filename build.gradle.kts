@@ -47,6 +47,7 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     // 컴파일이 생성한 인물 이미지를 S3에 올린다(KNK-966). 스프링 BOM이 관리하지 않아 버전을 명시한다.
     implementation("software.amazon.awssdk:s3:2.46.7")
+    implementation("software.amazon.awssdk:sqs:2.46.7")
     implementation("org.opensearch.client:opensearch-java:3.10.0")
     implementation("software.amazon.awssdk:auth:2.46.7")
     implementation("software.amazon.awssdk:apache-client:2.46.7")
