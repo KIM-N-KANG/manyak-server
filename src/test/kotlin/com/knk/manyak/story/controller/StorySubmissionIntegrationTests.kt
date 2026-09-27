@@ -36,6 +36,12 @@ class StorySubmissionIntegrationTests {
         "startSettings":[{"name":"시작", "prologue":"도입", "startSituation":"상황", "suggestedInputs":["하나","둘","셋"]}]
     }""", com.knk.manyak.story.dto.CreateGeneralStoryRequest::class.java)
 
+    private fun moderationInput(row: StorySubmission): tools.jackson.databind.JsonNode =
+        (assembler.aiInput(mapper.readTree(row.inputForm)) as tools.jackson.databind.node.ObjectNode).apply {
+            put("submissionId", row.publicId.toString())
+            row.storyId?.let { put("storyId", stories.findById(it).orElseThrow().publicId.toString()) }
+        }
+
     @Test fun `접수는 라이브를 만들지 않고 승인 회차를 한번만 적용한다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         val accepted = service.create(request(), user.id)
@@ -142,7 +148,7 @@ class StorySubmissionIntegrationTests {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
         val row = submissions.findAll().single()
-        org.mockito.Mockito.doThrow(IllegalStateException("external failure")).`when`(ai).moderate(assembler.aiInput(mapper.readTree(row.inputForm)))
+        org.mockito.Mockito.doThrow(IllegalStateException("external failure")).`when`(ai).moderate(moderationInput(row))
         runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
         val failed = submissions.findById(row.id).orElseThrow()
         org.junit.jupiter.api.Assertions.assertEquals("MODERATION_UNAVAILABLE", failed.errorCode)
@@ -155,10 +161,10 @@ class StorySubmissionIntegrationTests {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
         val row = submissions.findAll().single()
-        worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", emptyList(), "IMAGE_READ_FAILED"))
+        worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", emptyList(), "MODEL_CALL_FAILED"))
         val failed = submissions.findById(row.id).orElseThrow()
         org.junit.jupiter.api.Assertions.assertEquals(com.knk.manyak.story.submission.SubmissionStatus.FAILED, failed.status)
-        org.junit.jupiter.api.Assertions.assertEquals("IMAGE_READ_FAILED", failed.errorCode)
+        org.junit.jupiter.api.Assertions.assertEquals("MODEL_CALL_FAILED", failed.errorCode)
     }
 
     @Test fun `AI 입력은 식별자 공개 범위 최소 턴 수를 제외한다`() {
@@ -235,7 +241,7 @@ class StorySubmissionIntegrationTests {
         // 접수 이후 적용 불변식이 달라진 상황을 재현한다. 제목 변경 뒤 주요 사건 검증에서 실패한다.
         row.payload = """{"title":"변경","mainEvents":[{"name":"중복","description":"설명","keySentence":"문장"},{"name":"중복","description":"설명","keySentence":"문장"}]}"""
         submissions.save(row)
-        org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
+        org.mockito.Mockito.`when`(ai.moderate(moderationInput(row)))
             .thenReturn(com.knk.manyak.story.submission.ModerationResult("APPROVED", emptyList(), null))
         runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
         org.junit.jupiter.api.Assertions.assertEquals("원본", stories.findById(story.id).orElseThrow().title)
@@ -285,7 +291,7 @@ class StorySubmissionIntegrationTests {
         val issue = com.knk.manyak.story.submission.ModerationIssue(
             if (invalid == "missingPath") "startSettings[9].prologue" else "title",
             "TEXT", if (invalid == "UNKNOWN") invalid else "DRUGS", "사유")
-        org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
+        org.mockito.Mockito.`when`(ai.moderate(moderationInput(row)))
             .thenReturn(com.knk.manyak.story.submission.ModerationResult("REJECTED", listOf(issue), null))
         runner.run(com.knk.manyak.story.submission.SubmissionRequested(row.id, row.attempt))
         val result = submissions.findById(row.id).orElseThrow()
@@ -339,7 +345,7 @@ class StorySubmissionIntegrationTests {
             .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
             .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!
         val body = mapper.readTree(bytes)
-        assertEquals(setOf("submissionId", "storyId", "kind", "payload", "status", "issues", "errorCode", "createdAt", "updatedAt", "decidedAt"), body.properties().map { it.key }.toSet())
+        assertEquals(setOf("submissionId", "storyId", "kind", "payload", "status", "issues", "errorCode", "imageErrors", "createdAt", "updatedAt", "decidedAt"), body.properties().map { it.key }.toSet())
         assertEquals(row.publicId.toString(), body["submissionId"].asText())
         assertEquals("CREATE", body["kind"].asText())
         assertEquals(status.name, body["status"].asText())
@@ -440,7 +446,7 @@ class StorySubmissionIntegrationTests {
         org.mockito.Mockito.verifyNoInteractions(executor, ai)
         scheduler.poll() // 거부된 선점은 즉시 미선점으로 반환된다.
         assertNull(submissions.findById(row.id).orElseThrow().dispatchedAt)
-        org.mockito.Mockito.`when`(ai.moderate(assembler.aiInput(mapper.readTree(row.inputForm))))
+        org.mockito.Mockito.`when`(ai.moderate(moderationInput(row)))
             .thenReturn(ModerationResult("APPROVED", emptyList(), null))
         val queued = mutableListOf<Runnable>()
         org.mockito.Mockito.doAnswer { call -> queued.add(call.getArgument(0)); null }
@@ -453,6 +459,48 @@ class StorySubmissionIntegrationTests {
         assertEquals(SubmissionStatus.APPROVED, recovered.status)
         assertNotNull(recovered.storyId)
         assertEquals(1, stories.count())
+    }
+
+    @Test fun `이미지 실행 오류는 상세 목록 수정 폼에 camelCase로 노출되고 사라진 표지는 제외한다`() {
+        val user = users.save(User(nickname = "작가"))
+        val story = stories.save(Story(userId = user.id, title = "라이브", thumbnailImageUrl = "https://cdn.test/cover"))
+        service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정"), user.id)
+        val row = submissions.findAll().single()
+        val result = mapper.readValue("""{"decision":"REJECTED","issues":[{"path":"title","type":"TEXT","rule":"DRUGS","reason":"사유"}],
+            "error_code":"IMAGE_UNREADABLE","image_errors":[{"path":"thumbnailUrl","error_code":"IMAGE_UNREADABLE"}]}""", ModerationResult::class.java)
+        worker.finish(row.id, row.attempt, result)
+        val auth = "Bearer ${tokens.issueAccessToken(user.publicId)}"
+        val detail = mapper.readTree(client.get().uri("/api/v1/stories/submissions/${row.publicId}").header("Authorization", auth)
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!)
+        val list = mapper.readTree(client.get().uri("/api/v1/stories/submissions").header("Authorization", auth)
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!)
+        val edit = mapper.readTree(client.get().uri("/api/v1/stories/${story.publicId}/edit").header("Authorization", auth)
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!)
+        listOf(detail, list[0], edit["submission"]).forEach { body ->
+            assertEquals("FAILED", body["status"].asText())
+            assertEquals(1, body["issues"].size())
+            assertEquals("IMAGE_UNREADABLE", body["errorCode"].asText())
+            assertEquals("thumbnailUrl", body.path("imageErrors").path(0).path("path").asText())
+            assertEquals("IMAGE_UNREADABLE", body["imageErrors"][0]["errorCode"].asText())
+            assertFalse(body["imageErrors"][0].has("error_code"))
+        }
+        images.deleteThumbnail(story.publicId.toString(), user.id)
+        assertEquals(0, service.editForm(story.publicId.toString(), user.id).path("submission").path("imageErrors").size())
+        service.update(story.publicId.toString(), UpdateStoryRequest(title = "다시 수정"), user.id)
+        val retry = service.editForm(story.publicId.toString(), user.id)["submission"]
+        assertEquals("PENDING", retry["status"].asText())
+        assertTrue(retry.path("imageErrors").isArray)
+        assertEquals(0, retry["imageErrors"].size())
+        assertTrue(retry["errorCode"].isNull)
+    }
+
+    @Test fun `이미지 오류는 인물 이미지 순서 변경과 삭제를 원본 identity로 재매핑한다`() {
+        val original = mapper.readTree("""{"thumbnailUrl":"old","characters":[{"id":"c","images":[{"id":"a","imageUrl":"a"},{"objectKey":"b","imageUrl":"b"},{"id":"gone","imageUrl":"gone"}]},{"name":"새 인물","images":[{"objectKey":"new","imageUrl":"new"}]}]}""")
+        val current = mapper.readTree("""{"thumbnailUrl":"changed","characters":[{"name":"새 인물","images":[{"objectKey":"new","imageUrl":"new"}]},{"id":"c","images":[{"objectKey":"b","imageUrl":"b"},{"id":"a","imageUrl":"a"}]}]}""")
+        val errors = listOf("thumbnailUrl", "characters[0].images[0].imageUrl", "characters[0].images[1].imageUrl", "characters[0].images[2].imageUrl", "characters[1].images[0].imageUrl")
+            .map { SubmissionImageError(it, "IMAGE_INVALID") }
+        assertEquals(listOf("characters[1].images[1].imageUrl", "characters[1].images[0].imageUrl", "characters[0].images[0].imageUrl"),
+            assembler.remapImageErrors(errors, original, current).map { it.path })
     }
 
 }

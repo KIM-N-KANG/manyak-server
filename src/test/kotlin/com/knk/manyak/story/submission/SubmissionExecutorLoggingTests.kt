@@ -29,7 +29,7 @@ class SubmissionExecutorLoggingTests {
         val input = JsonMapper().readTree("""{"title":"private input","thumbnailUrl":"https://private.test/image"}""")
         val transactions = Mockito.mock(SubmissionTransactions::class.java)
         val forms = Mockito.mock(SubmissionFormAssembler::class.java)
-        Mockito.`when`(transactions.start(42L, 3)).thenReturn(SubmissionWork(input, emptyMap()))
+        Mockito.`when`(transactions.start(42L, 3)).thenReturn(SubmissionWork(input, emptyMap(), java.util.UUID.randomUUID()))
         Mockito.`when`(forms.aiInput(input)).thenReturn(input)
         val images = SubmissionImages(Mockito.mock(UploadedImageStorage::class.java), forms)
         val runner = SubmissionExecutor(transactions, StoryModerationClient { throw failure }, images)

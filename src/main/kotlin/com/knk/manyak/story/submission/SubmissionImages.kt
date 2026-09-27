@@ -6,7 +6,7 @@ import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ObjectNode
 import java.util.UUID
 
-data class SubmissionWork(val form: JsonNode, val copies: Map<String, String>)
+data class SubmissionWork(val form: JsonNode, val copies: Map<String, String>, val submissionId: UUID, val storyId: UUID? = null)
 
 /** 외부 PUT 권한이 없는 매번 새 키로 복사한다. S3 왕복 동안 DB 트랜잭션을 열지 않는다. */
 @Component
@@ -28,7 +28,10 @@ class SubmissionImages(private val storage: UploadedImageStorage, private val fo
         form.path("characters").forEach { character -> character.path("images").forEach { image ->
             image.path("objectKey").takeIf { it.isString }?.asText()?.let { (image as ObjectNode).put("imageUrl", url(copies.getValue(it))) }
         } }
-        return forms.aiInput(form)
+        return (forms.aiInput(form) as ObjectNode).apply {
+            put("submissionId", work.submissionId.toString())
+            work.storyId?.let { put("storyId", it.toString()) }
+        }
     }
     fun approvedUrls(work: SubmissionWork): Map<String, String> = newKeys(work.form).associateWith { source ->
         url(work.copies.getValue(source)) // 복사 결과가 없으면 원본 URL로 폴백하지 않는다.

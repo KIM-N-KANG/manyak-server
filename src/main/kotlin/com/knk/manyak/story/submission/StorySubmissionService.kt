@@ -82,7 +82,8 @@ class StorySubmissionService(
         val row = submissions.findFirstByStoryIdAndStatusNotOrderByCreatedAtDescIdDesc(story.id, SubmissionStatus.APPROVED)
         val form = if (row == null) mapper.valueToTree<tools.jackson.databind.node.ObjectNode>(live) else currentForm(row)
         form.set("submission", mapper.valueToTree(row?.let {
-            SubmissionMetadata(it.publicId.toString(), it.status, forms.remap(it.issues, mapper.readTree(it.inputForm), form), it.errorCode)
+            SubmissionMetadata(it.publicId.toString(), it.status, forms.remap(it.issues, mapper.readTree(it.inputForm), form), it.errorCode,
+                forms.remapImageErrors(it.imageErrors, mapper.readTree(it.inputForm), form))
         }))
         return form
     }
@@ -109,6 +110,7 @@ class StorySubmissionService(
         return linkedMapOf("submissionId" to row.publicId.toString(), "storyId" to row.storyId?.let { stories.findById(it).orElse(null)?.publicId?.toString() },
             "kind" to row.kind, "payload" to form, "status" to row.status,
             "issues" to forms.remap(row.issues, mapper.readTree(row.inputForm), form), "errorCode" to row.errorCode,
+            "imageErrors" to forms.remapImageErrors(row.imageErrors, mapper.readTree(row.inputForm), form),
             "createdAt" to row.createdAt, "updatedAt" to row.updatedAt, "decidedAt" to row.decidedAt)
     }
 

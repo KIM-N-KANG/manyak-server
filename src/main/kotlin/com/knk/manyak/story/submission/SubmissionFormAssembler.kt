@@ -110,7 +110,7 @@ class SubmissionFormAssembler(
     }
 
     fun aiInput(form: JsonNode): JsonNode {
-        val excluded = setOf("id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder")
+        val excluded = setOf("id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder", "submissionId", "storyId")
         fun strip(node: JsonNode): JsonNode = when {
             node.isObject -> mapper.createObjectNode().also { obj -> node.properties().forEach { (key, value) -> if (key !in excluded) obj.set(key, strip(value)) } }
             node.isArray -> mapper.createArrayNode().also { array -> node.forEach { array.add(strip(it)) } }
@@ -121,31 +121,39 @@ class SubmissionFormAssembler(
 
     /** 원본 검수 폼의 identity를 따라 현재 폼의 배열 인덱스로 옮긴다. 삭제된 대상은 제외한다. */
     fun remap(issues: List<ModerationIssue>, original: JsonNode, current: JsonNode): List<ModerationIssue> = issues.mapNotNull { issue ->
+        remapPath(issue.path, original, current)?.let { issue.copy(path = it) }
+    }
+
+    fun remapImageErrors(errors: List<SubmissionImageError>, original: JsonNode, current: JsonNode): List<SubmissionImageError> = errors.mapNotNull { error ->
+        remapPath(error.path, original, current)?.let { error.copy(path = it) }
+    }
+
+    private fun remapPath(sourcePath: String, original: JsonNode, current: JsonNode): String? {
         var before: JsonNode = original
         var after: JsonNode = current
         val path = StringBuilder()
-        val segments = Regex("([^.\\[\\]]+)|\\[(\\d+)\\]").findAll(issue.path)
+        val segments = Regex("([^.\\[\\]]+)|\\[(\\d+)\\]").findAll(sourcePath)
         for (segment in segments) {
             val key = segment.groups[1]?.value
             if (key != null) {
                 before = before.path(key)
                 after = after.path(key)
-                if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return@mapNotNull null
+                if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return null
                 if (path.isNotEmpty()) path.append('.')
                 path.append(key)
             } else {
                 val index = segment.groups[2]!!.value.toInt()
                 val item = before.path(index)
-                if (item.isMissingNode) return@mapNotNull null
+                if (item.isMissingNode) return null
                 val identity = listOf("id", "objectKey", "name").firstOrNull { !item.path(it).isMissingNode && !item.path(it).isNull }
                 val target = if (identity == null) index else after.indexOfFirst { it.path(identity) == item.path(identity) }
-                if (target < 0 || after.path(target).isMissingNode) return@mapNotNull null
+                if (target < 0 || after.path(target).isMissingNode) return null
                 before = item
                 after = after.path(target)
                 path.append('[').append(target).append(']')
             }
         }
-        issue.copy(path = path.toString())
+        return path.toString()
     }
 
     private fun validateBean(value: Any) {

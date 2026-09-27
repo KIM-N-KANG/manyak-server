@@ -84,6 +84,8 @@ class SubmissionImageFreezeIntegrationTests {
         Mockito.doAnswer { call -> input = call.getArgument(0); ModerationResult("APPROVED", emptyList(), null) }.`when`(ai)
             .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: mapper.createObjectNode())
         runner.run(SubmissionRequested(row.id, row.attempt))
+        assertEquals(row.publicId.toString(), input!!["submissionId"]?.asText())
+        assertFalse(input!!.has("storyId"))
         assertEquals(2, objects.copies.size)
         objects.copies.forEach { (source, _) -> objects.bytes[source] = "미검수 덮어쓰기" }
         val story = stories.findAll().single()
@@ -143,7 +145,12 @@ class SubmissionImageFreezeIntegrationTests {
         service.update(story.publicId.toString(), mapper.readValue("""{"characters":[{"id":"$characterId","name":"세린","images":[{"id":"${image.publicId}"},{"objectKey":"$newKey","imageName":"세린_새"}]}]}""",
             com.knk.manyak.story.dto.UpdateStoryRequest::class.java), row.userId)
         val update = rows.findAll().first { it.kind == SubmissionKind.UPDATE }
+        var sent: tools.jackson.databind.JsonNode? = null
+        Mockito.doAnswer { call -> sent = call.getArgument(0); ModerationResult("APPROVED", emptyList(), null) }.`when`(ai)
+            .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: mapper.createObjectNode())
         runner.run(SubmissionRequested(update.id, update.attempt))
+        assertEquals(update.publicId.toString(), sent!!["submissionId"]?.asText())
+        assertEquals(story.publicId.toString(), sent!!["storyId"]?.asText())
         assertEquals(SubmissionStatus.APPROVED, rows.findById(update.id).orElseThrow().status)
         assertEquals(3, objects.copies.size)
         assertEquals(newKey, objects.copies.last().first)
@@ -157,6 +164,31 @@ class SubmissionImageFreezeIntegrationTests {
         assertEquals(503, failure.statusCode.value())
         assertEquals(0, rows.count())
         assertTrue(objects.copies.isEmpty())
+    }
+
+    @Test fun `복사본의 이미지 오류와 내용 위반은 원본 폼으로 노출하고 재제출에 비운다`() {
+        val row = submit()
+        val result = mapper.readValue("""{"decision":"REJECTED","issues":[{"path":"title","type":"TEXT","rule":"DRUGS","reason":"사유"}],
+            "error_code":"IMAGE_INVALID","image_errors":[{"path":"thumbnailUrl","error_code":"IMAGE_INVALID"},
+            {"path":"characters[0].images[0].imageUrl","error_code":"IMAGE_UNREADABLE"}]}""", ModerationResult::class.java)
+        Mockito.doReturn(result).`when`(ai).moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: mapper.createObjectNode())
+        runner.run(SubmissionRequested(row.id, row.attempt))
+        val saved = rows.findById(row.id).orElseThrow()
+        assertEquals(SubmissionStatus.FAILED, saved.status)
+        assertEquals("IMAGE_INVALID", saved.errorCode)
+        assertEquals(1, saved.issues.size)
+        val body = mapper.valueToTree<tools.jackson.databind.JsonNode>(service.get(row.publicId.toString(), row.userId))
+        assertEquals(mapper.readTree("""[{"path":"thumbnailUrl","errorCode":"IMAGE_INVALID"},{"path":"characters[0].images[0].imageUrl","errorCode":"IMAGE_UNREADABLE"}]"""), body.path("imageErrors"))
+        assertEquals("IMAGE_INVALID", body["imageErrors"][0]["errorCode"].asText())
+        assertFalse(body["imageErrors"][0].has("error_code"))
+        assertTrue(body["payload"]["thumbnailUrl"].asText().contains("/drafts/"))
+        assertEquals(0, stories.count())
+        service.resubmit(row.publicId.toString(), mapper.readValue(row.payload, CreateGeneralStoryRequest::class.java), row.userId)
+        val retry = mapper.valueToTree<tools.jackson.databind.JsonNode>(service.get(row.publicId.toString(), row.userId))
+        assertTrue(retry.path("imageErrors").isArray)
+        assertEquals(0, retry["imageErrors"].size())
+        assertEquals(0, retry["issues"].size())
+        assertTrue(retry["errorCode"].isNull)
     }
 
 }

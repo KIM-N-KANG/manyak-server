@@ -86,7 +86,8 @@ class SubmissionTransactions(
     @Transactional
     fun start(id: Long, attempt: Int): SubmissionWork? {
         val row = pending(id, attempt) ?: return null
-        return SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies)
+        return SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies, row.publicId,
+            if (row.kind == SubmissionKind.UPDATE) stories.findById(requireNotNull(row.storyId)).orElseThrow().publicId else null)
     }
 
     @Transactional
@@ -101,11 +102,11 @@ class SubmissionTransactions(
     fun finish(id: Long, attempt: Int, result: ModerationResult) {
         val row = pending(id, attempt) ?: return
         if (result.errorCode != null) {
-            decide(row, SubmissionStatus.FAILED, emptyList(), result.errorCode)
+            decide(row, SubmissionStatus.FAILED, result.issues, result.errorCode, result.imageErrors.map { SubmissionImageError(it.path, it.errorCode) })
         } else if (result.decision == "REJECTED") {
             decide(row, SubmissionStatus.REJECTED, result.issues, null)
         } else {
-            val approvedUrls = images.approvedUrls(SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies))
+            val approvedUrls = images.approvedUrls(SubmissionWork(mapper.readTree(row.inputForm), row.imageCopies, row.publicId))
             if (row.kind == SubmissionKind.CREATE) {
                 val created = creation.createGeneralStory(mapper.readValue(row.payload, CreateGeneralStoryRequest::class.java), row.userId, approvedUrls)
                 row.storyId = stories.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(created.id))!!.id
@@ -147,9 +148,10 @@ class SubmissionTransactions(
         return submissions.lockById(id)?.takeIf { it.status == SubmissionStatus.PENDING && it.attempt == attempt }
     }
 
-    private fun decide(row: StorySubmission, status: SubmissionStatus, issues: List<ModerationIssue>, code: String?) {
+    private fun decide(row: StorySubmission, status: SubmissionStatus, issues: List<ModerationIssue>, code: String?, imageErrors: List<SubmissionImageError> = emptyList()) {
         row.status = status
         row.issues = issues
+        row.imageErrors = imageErrors
         row.errorCode = code
         row.decidedAt = Instant.now()
         row.updatedAt = row.decidedAt!!
