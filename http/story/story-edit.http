@@ -94,3 +94,32 @@ Content-Type: application/json
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
 Authorization: Bearer {{accessToken}}
+
+
+### PATCH 용량 초과 (400 IMAGES_TOO_LARGE)
+# story-general-create.http의 용량 준비 presign·파일 PUT부터 실행해 sizeObjectKey를 설정한다.
+# PENDING이 없는 내 createdStoryId를 사용한다. 유지되는 라이브 표지·인물 이미지도 합계에 포함한다.
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
+  "characters":[{"name":"세린","images":[
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_1"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_2"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_3"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_4"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_5"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_6"}
+  ]}]
+}
+
+> {%
+client.test("수정 용량 사전 검사", () => {
+  client.assert(response.status === 400, `400 기대, actual=${response.status}`);
+  client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
+});
+%}

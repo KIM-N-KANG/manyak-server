@@ -73,6 +73,7 @@ class StoryImageAccess(
         ownerPublicId: UUID?,
         kind: UploadedImageKind,
         objectKey: String,
+        onValidatedSize: (Long) -> Unit = {},
     ): String =
         resolveUploadedUrlUnder(
             // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작·수정 화면에서 같은
@@ -83,17 +84,19 @@ class StoryImageAccess(
             ),
             objectKey = objectKey,
             mismatchMessage = "내가 이 스토리에 올린 업로드 이미지가 아닙니다.",
+            onValidatedSize = onValidatedSize,
         )
 
     /**
      * 등록 전 업로드(일반 제작, KNK-1390)의 객체 키 검증. 스토리가 아직 없으니 소유는 사용자 공개 식별자로
      * 가른다. 그 밖의 규칙(HEAD 존재·5MB·형식)은 스토리 스코프와 같다.
      */
-    fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String): String =
+    fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String, onValidatedSize: (Long) -> Unit = {}): String =
         resolveUploadedUrlUnder(
             expectedPrefixes = listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"),
             objectKey = objectKey,
             mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
+            onValidatedSize = onValidatedSize,
         )
 
     /** 업로드 이미지를 쓸 수 있는 회원의 공개 식별자. 토큰은 유효하나 사용자가 사라졌으면 401이다. */
@@ -105,6 +108,7 @@ class StoryImageAccess(
         expectedPrefixes: List<String>,
         objectKey: String,
         mismatchMessage: String,
+        onValidatedSize: (Long) -> Unit,
     ): String {
         requireUploadEnabled()
         if (expectedPrefixes.none { objectKey.startsWith(it) }) {
@@ -120,7 +124,7 @@ class StoryImageAccess(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지는 5MB를 넘을 수 없습니다.")
         }
         requireSupportedContentType(uploaded.contentType)
-        // 자동 검수 훅 자리(KNK-1160~ 도입 시) — 표지·인물 연결이 모두 여기를 지나므로 한 곳이면 된다.
+        onValidatedSize(uploaded.contentLength)
         return uploadedImageStorage.serveUrlOf(objectKey) ?: throw uploadDisabled()
     }
 

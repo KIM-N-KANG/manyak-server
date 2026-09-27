@@ -22,22 +22,26 @@ class SubmissionFormAssembler(
     private val edit: StoryEditService,
     private val images: StoryImageAccess,
     private val storage: UploadedImageStorage,
+    private val size: SubmissionSizeCheck,
 ) {
     fun create(request: CreateGeneralStoryRequest, userId: Long, validate: Boolean = true): ObjectNode {
+        val validatedSizes = mutableMapOf<String, Long>()
         if (validate) validateBean(request)
         val form = mapper.valueToTree<ObjectNode>(request)
         if (validate) {
             requireDistinctMainEventNames(request.mainEvents.map { it.name })
             request.startSettings.forEach { requireDistinctEndingNames(it.endings.map { ending -> ending.name }) }
         }
-        form.set("characters", characters(request.characters, mapper.createArrayNode(), null, userId, validate, false))
-        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, null, userId, validate)) }
+        form.set("characters", characters(request.characters, mapper.createArrayNode(), null, userId, validate, false, validatedSizes = validatedSizes))
+        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, null, userId, validate, validatedSizes)) }
         form.put("thumbnailModerationStatus", "APPROVED")
         form.putNull("submission")
+        if (validate) size.check(form, aiInput(form), validatedSizes, isUpdate = false)
         return form
     }
 
     fun update(story: Story, request: UpdateStoryRequest, userId: Long, validate: Boolean = true, allowDeletedImages: Boolean = false, previousImageIds: Set<String> = emptySet()): ObjectNode {
+        val validatedSizes = mutableMapOf<String, Long>()
         if (validate) validateBean(request)
         val form = mapper.valueToTree<ObjectNode>(edit.getEditForm(story.publicId.toString(), userId))
         if (validate) {
@@ -55,13 +59,14 @@ class SubmissionFormAssembler(
         }
         val patch = mapper.valueToTree<ObjectNode>(request)
         patch.properties().forEach { (key, value) -> if (!value.isNull && key != "characters") form.set(key, value) }
-        request.characters?.let { form.set("characters", characters(it, form.path("characters"), story, userId, validate, allowDeletedImages, previousImageIds)) }
-        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, story, userId, validate)) }
+        request.characters?.let { form.set("characters", characters(it, form.path("characters"), story, userId, validate, allowDeletedImages, previousImageIds, validatedSizes)) }
+        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, story, userId, validate, validatedSizes)) }
         form.putNull("submission")
+        if (validate) size.check(form, aiInput(form), validatedSizes, isUpdate = true)
         return form
     }
 
-    private fun characters(inputs: List<GeneralCharacterInput>, existing: JsonNode, story: Story?, userId: Long, validate: Boolean, allowDeleted: Boolean, previousImageIds: Set<String> = emptySet()): JsonNode {
+    private fun characters(inputs: List<GeneralCharacterInput>, existing: JsonNode, story: Story?, userId: Long, validate: Boolean, allowDeleted: Boolean, previousImageIds: Set<String> = emptySet(), validatedSizes: MutableMap<String, Long>): JsonNode {
         if (validate) {
             requireDistinctCharacterNames(inputs.map { it.name })
             distinctIds(inputs.map { it.id })
@@ -91,7 +96,7 @@ class SubmissionFormAssembler(
                 val image = mapper.createObjectNode().put("id", item.id).put("imageName", finalName).put("moderationStatus", "APPROVED")
                 if (item.objectKey != null) {
                     image.put("objectKey", item.objectKey)
-                    image.put("imageUrl", url(item.objectKey, UploadedImageKind.CHARACTER, story, userId, validate))
+                    image.put("imageUrl", url(item.objectKey, UploadedImageKind.CHARACTER, story, userId, validate, validatedSizes))
                 } else image.put("imageUrl", prior?.path("imageUrl")?.asText())
                 output.add(image)
             }
@@ -103,10 +108,11 @@ class SubmissionFormAssembler(
         return result
     }
 
-    private fun url(key: String, kind: UploadedImageKind, story: Story?, userId: Long, validate: Boolean): String? {
+    private fun url(key: String, kind: UploadedImageKind, story: Story?, userId: Long, validate: Boolean, validatedSizes: MutableMap<String, Long>): String? {
         if (!validate) return storage.serveUrlOf(key)
         val owner = images.resolveUserPublicId(userId)
-        return if (story == null) images.resolveDraftUploadedUrl(owner, kind, key) else images.resolveUploadedUrl(story, owner, kind, key)
+        return if (story == null) images.resolveDraftUploadedUrl(owner, kind, key) { validatedSizes[key] = it }
+        else images.resolveUploadedUrl(story, owner, kind, key) { validatedSizes[key] = it }
     }
 
     fun aiInput(form: JsonNode): JsonNode {

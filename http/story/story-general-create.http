@@ -126,7 +126,7 @@ GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
 Authorization: Bearer {{accessToken}}
 
 ### 이미지 실행 오류 확인 (실제 AI 또는 계약 대역에서 오류 결과가 나온 제출본으로 실행)
-# IMAGE_DOWNLOAD_FAILED: 재시도, IMAGE_INVALID·IMAGE_UNREADABLE: 이미지 교체·용량 축소 안내.
+# IMAGE_DOWNLOAD_FAILED만 있으면 자동 재시도·보류(PENDING). issues 또는 영구 이미지 오류가 함께 있으면 즉시 FAILED.
 # FAILED에도 내용 위반 issues가 함께 올 수 있다. imageErrors.path는 이 응답 payload 기준이다.
 # API 대역 예: REJECTED + issues(title/TEXT/DRUGS) + error_code IMAGE_INVALID
 # + image_errors [{path: thumbnailUrl, error_code: IMAGE_INVALID}]. 표지 포함 제출본이 필요하다.
@@ -151,5 +151,117 @@ Authorization: Bearer {{accessToken}}
 client.test("재제출은 오류 목록 초기화", () => {
   client.assert(response.status === 200 && response.body.status === "PENDING", "PENDING 제출본 필요");
   client.assert(response.body.imageErrors.length === 0 && response.body.issues.length === 0 && response.body.errorCode === null, "재제출 오류 초기화");
+});
+%}
+
+
+### 자동 재시도·보류 확인
+# 새 제출 전에 AI 대역을 MODEL_CALL_FAILED + issues=[] + image_errors=[]로 설정한다.
+# 로컬 즉시 승인 스텁은 끈다. 기본 1m,5m 또는 MANYAK_AI_MODERATION_RETRY_DELAYS=2s,7s로 재시도 간격을 줄인다.
+# 위 접수 요청 실행 → 총 3번 AI 호출 확인 → 아래 조회. 완료 푸시는 없고 보류 Slack 알림만 1건이다.
+# MANYAK_SLACK_MODERATION_WEBHOOK_URL이 비어 있으면 WARN 로그 1건으로 확인한다.
+GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("재시도·보류 모두 사용자에게 검수 중", () => {
+  client.assert(response.status === 200 && response.body.status === "PENDING", `PENDING 기대, actual=${response.status}`);
+  client.assert(response.body.errorCode === null && response.body.decidedAt === null, "종료 판정 없음");
+  ["heldAt", "holdReason", "retryCount", "nextAttemptAt"].forEach(k => client.assert(!(k in response.body), `${k} 비노출`));
+});
+%}
+
+### 보류 중 재제출은 입력 검증보다 409 우선
+PUT {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title":"보류 입력", "oneLineIntro":"소개", "genres":[],
+  "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}]
+}
+
+> {% client.test("보류 재제출 충돌", () => client.assert(response.status === 409, `409 기대, actual=${response.status}`)); %}
+
+### 보류 중에도 취소 가능 (204)
+DELETE {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("보류 취소", () => client.assert(response.status === 204, `204 기대, actual=${response.status}`)); %}
+
+### 용량 초과 준비: 5MiB 인물 이미지의 draft presign
+# 저장소가 설정된 서버에서 실행한다. 아래 파일을 정확히 5242880바이트로 준비하거나
+# 실제 파일 크기에 맞춰 presign·PUT 크기를 바꾼다. 6개 참조 합계가 30MiB 이상이어야 기본 예산을 초과한다.
+POST {{baseUrl}}/api/v1/stories/images/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"kind":"CHARACTER","contentType":"image/webp","contentLength":5242880}
+
+> {%
+client.test("용량 검증 준비", () => client.assert(response.status === 201, `201 기대, actual=${response.status}`));
+client.global.set("sizeUploadUrl", response.body.uploadUrl);
+client.global.set("sizeObjectKey", response.body.objectKey);
+%}
+
+### 파일 업로드 (먼저 로컬 파일 준비)
+PUT {{sizeUploadUrl}}
+Content-Type: image/webp
+Content-Length: 5242880
+
+< ./size-test.webp
+
+
+### POST 용량 초과: 30MiB × 4/3 + JSON > 40MiB
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
+  "characters":[{"name":"세린","images":[
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_1"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_2"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_3"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_4"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_5"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_6"}
+  ]}]
+}
+
+> {%
+client.test("검수 요청 전 용량 초과 거절", () => {
+  client.assert(response.status === 400, `400 기대, actual=${response.status}`);
+  client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
+});
+%}
+
+
+### PUT 용량 초과: 별도로 준비한 CREATE REJECTED 또는 FAILED의 submissionId 사용
+PUT {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
+  "characters":[{"name":"세린","images":[
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_1"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_2"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_3"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_4"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_5"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_6"}
+  ]}]
+}
+
+> {%
+client.test("검수 요청 전 용량 초과 거절", () => {
+  client.assert(response.status === 400, `400 기대, actual=${response.status}`);
+  client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
 });
 %}

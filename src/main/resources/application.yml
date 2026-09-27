@@ -114,6 +114,8 @@ manyak:
       timeout: ${MANYAK_AI_MODERATION_TIMEOUT:180s}
       pool-size: ${MANYAK_AI_MODERATION_POOL_SIZE:4}
       retry-delays: ${MANYAK_AI_MODERATION_RETRY_DELAYS:1m,5m}
+      # AI 48MiB 한도에서 프롬프트 여유를 뺀 base64·입력 JSON 예산(byte).
+      request-budget-bytes: ${MANYAK_AI_MODERATION_REQUEST_BUDGET_BYTES:41943040}
       reclaim-after: ${MANYAK_AI_MODERATION_RECLAIM_AFTER:300s}
       poll-interval: ${MANYAK_AI_MODERATION_POLL_INTERVAL:1000}
       poll-enabled: ${MANYAK_AI_MODERATION_POLL_ENABLED:true}
