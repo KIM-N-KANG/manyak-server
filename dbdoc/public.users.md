@@ -192,6 +192,10 @@ erDiagram
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone decided_at
   jsonb image_errors
+  integer retry_count
+  timestamp_with_time_zone next_attempt_at
+  timestamp_with_time_zone held_at
+  text hold_reason
 }
 ```
 

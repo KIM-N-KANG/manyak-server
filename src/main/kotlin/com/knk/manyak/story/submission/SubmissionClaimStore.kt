@@ -16,12 +16,13 @@ class SubmissionClaimStore(private val jdbc: JdbcTemplate) {
         if (limit <= 0) return emptyList()
         val rows = jdbc.query("""
             SELECT id, attempt FROM story_submissions
-            WHERE status = 'PENDING' AND (dispatched_at IS NULL OR dispatched_at <= ?)
+            WHERE status = 'PENDING' AND held_at IS NULL
+              AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (dispatched_at IS NULL OR dispatched_at <= ?)
             ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED
         """.trimIndent(), { rs, _ -> SubmissionRequested(rs.getLong("id"), rs.getInt("attempt") + 1) },
-            Timestamp.from(now.minus(lease)), limit)
+            Timestamp.from(now), Timestamp.from(now.minus(lease)), limit)
         rows.forEach { row -> jdbc.update("""
-            UPDATE story_submissions SET dispatched_at = ?, updated_at = ?, attempt = ? WHERE id = ?
+            UPDATE story_submissions SET dispatched_at = ?, updated_at = ?, attempt = ?, next_attempt_at = NULL WHERE id = ?
         """.trimIndent(), Timestamp.from(now), Timestamp.from(now), row.attempt, row.id) }
         return rows
     }

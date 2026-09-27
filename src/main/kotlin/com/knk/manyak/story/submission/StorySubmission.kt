@@ -35,6 +35,10 @@ class StorySubmission(
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "image_errors", nullable = false, columnDefinition = "jsonb") var imageErrors: List<SubmissionImageError> = emptyList(),
     @Column(name = "error_code") var errorCode: String? = null,
     @Column(nullable = false) var attempt: Int = 1,
+    @Column(name = "retry_count", nullable = false) var retryCount: Int = 0,
+    @Column(name = "next_attempt_at") var nextAttemptAt: Instant? = null,
+    @Column(name = "held_at") var heldAt: Instant? = null,
+    @Column(name = "hold_reason") var holdReason: String? = null,
     @Column(name = "dispatched_at") var dispatchedAt: Instant? = null,
     @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false) var updatedAt: Instant = Instant.now(),
@@ -48,6 +52,10 @@ class StorySubmission(
         imageErrors = emptyList()
         errorCode = null
         decidedAt = null
+        retryCount = 0
+        nextAttemptAt = null
+        heldAt = null
+        holdReason = null
         attempt++
         dispatchedAt = null
         updatedAt = now

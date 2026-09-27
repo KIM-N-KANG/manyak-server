@@ -79,7 +79,7 @@ class SubmissionPollingIntegrationTests {
         val story = stories.save(Story(userId = user.id, title = "원본"))
         service.update(story.publicId.toString(), UpdateStoryRequest(title = "첫 입력"), user.id)
         val first = claims.claim(java.time.Instant.now(), java.time.Duration.ofSeconds(300), 1).single()
-        transactions.fail(first.id, first.attempt, "MODERATION_UNAVAILABLE")
+        transactions.fail(first.id, first.attempt, "APPLY_FAILED")
         service.update(story.publicId.toString(), UpdateStoryRequest(title = "새 입력"), user.id)
         val retry = rows.findById(first.id).orElseThrow()
         assertNull(retry.dispatchedAt)

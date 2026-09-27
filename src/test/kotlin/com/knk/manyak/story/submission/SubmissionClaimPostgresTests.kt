@@ -40,6 +40,7 @@ class SubmissionClaimPostgresTests {
         // FK 부모만 최소 구성한다. 제출본 테이블은 수정된 V87 원문을 적용한다.
         jdbc.execute("CREATE TABLE users(id BIGINT PRIMARY KEY); CREATE TABLE stories(id BIGINT PRIMARY KEY)")
         jdbc.execute(java.io.File("src/main/resources/db/migration/V87__create_story_submissions.sql").readText())
+        jdbc.execute(java.io.File("src/main/resources/db/migration/V89__add_submission_retry_hold.sql").readText())
         jdbc.execute("INSERT INTO users VALUES (1)")
         val manager = DataSourceTransactionManager(ds)
         tx = TransactionTemplate(manager)
@@ -92,4 +93,15 @@ class SubmissionClaimPostgresTests {
             assertEquals(listOf(lockedId), store.claim(now, lease, 2).map { it.id })
         } finally { release.countDown(); pool.shutdownNow() }
     }
+    @Test fun `예약 시각 전과 보류 행은 선점하지 않고 운영 해제 후 선점한다`() {
+        val waiting = insert()
+        val held = insert()
+        jdbc.update("UPDATE story_submissions SET next_attempt_at = ? WHERE id = ?", java.sql.Timestamp.from(now.plusSeconds(60)), waiting)
+        jdbc.update("UPDATE story_submissions SET held_at = ?, hold_reason = 'MODEL_CALL_FAILED', retry_count = 2 WHERE id = ?", java.sql.Timestamp.from(now), held)
+        assertTrue(store.claim(now.plusSeconds(59), lease, 10).isEmpty())
+        assertEquals(listOf(waiting), store.claim(now.plusSeconds(60), lease, 10).map { it.id })
+        jdbc.update("UPDATE story_submissions SET held_at = NULL, hold_reason = NULL, retry_count = 0, next_attempt_at = NULL, dispatched_at = NULL WHERE id = ?", held)
+        assertEquals(listOf(held), store.claim(now.plusSeconds(61), lease, 10).map { it.id })
+    }
+
 }

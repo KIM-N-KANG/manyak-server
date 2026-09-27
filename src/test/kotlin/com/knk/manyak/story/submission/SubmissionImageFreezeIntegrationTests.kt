@@ -99,13 +99,15 @@ class SubmissionImageFreezeIntegrationTests {
         runner.run(SubmissionRequested(row.id, row.attempt))
         assertEquals(2, objects.copies.size)
     }
-    @Test fun `복사 시 원본이 없으면 FAILED이고 AI를 부르지 않는다`() {
+    @Test fun `복사 시 원본이 없으면 재시도를 예약하고 AI를 부르지 않는다`() {
         val row = submit()
         objects.bytes.clear()
         runner.run(SubmissionRequested(row.id, row.attempt))
         val failed = rows.findById(row.id).orElseThrow()
-        assertEquals(SubmissionStatus.FAILED, failed.status)
-        assertEquals("MODERATION_UNAVAILABLE", failed.errorCode)
+        assertEquals(SubmissionStatus.PENDING, failed.status)
+        assertNull(failed.errorCode)
+        assertEquals(1, failed.retryCount)
+        assertNotNull(failed.nextAttemptAt)
         Mockito.verifyNoInteractions(ai)
         assertEquals(0, stories.count())
     }
