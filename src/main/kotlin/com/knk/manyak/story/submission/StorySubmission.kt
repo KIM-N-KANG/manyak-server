@@ -79,4 +79,4 @@ interface StorySubmissionRepository : JpaRepository<StorySubmission, Long> {
 data class SubmissionAccepted(val submissionId: String, val status: SubmissionStatus = SubmissionStatus.PENDING)
 data class SubmissionMetadata(val submissionId: String, val status: SubmissionStatus, val issues: List<ModerationIssue>, val errorCode: String?, val imageErrors: List<SubmissionImageError>)
 data class SubmissionRequested(val id: Long, val attempt: Int)
-data class StoryModerationCompleted(val userId: Long, val submissionId: String, val storyId: String?, val status: SubmissionStatus, val attempt: Int)
+data class StoryModerationCompleted(val userId: Long, val submissionId: String, val storyId: String?, val status: SubmissionStatus, val attempt: Int, val title: String)
