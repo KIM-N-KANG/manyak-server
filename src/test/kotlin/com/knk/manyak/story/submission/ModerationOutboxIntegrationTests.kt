@@ -19,6 +19,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Instant
 import java.util.concurrent.Executor
 
+@org.springframework.test.context.event.RecordApplicationEvents
 @ActiveProfiles("test")
 @SpringBootTest(properties = ["manyak.push.mode=remote"])
 class ModerationOutboxIntegrationTests {
@@ -32,6 +33,63 @@ class ModerationOutboxIntegrationTests {
     @MockitoBean private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
     @MockitoBean private lateinit var store: PushOutboxStore
     @BeforeEach fun reset() = cleaner.cleanAll()
+
+    @Autowired private lateinit var events: org.springframework.test.context.event.ApplicationEvents
+    @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(
+        "CREATE, APPROVED", "CREATE, REJECTED", "CREATE, FAILED",
+        "UPDATE, APPROVED", "UPDATE, REJECTED", "UPDATE, FAILED",
+    )
+    fun `새 등록과 수정의 종료 이벤트와 remote 메시지는 제출본 제목을 사용한다`(kind: SubmissionKind, status: SubmissionStatus) {
+        val messages = mutableListOf<PushMessage>()
+        Mockito.doAnswer { call -> messages.add(call.getArgument(0)); null }.`when`(store).insert(anyMessage(), anyInstant())
+        val user = users.save(User(nickname = "작가"))
+        if (kind == SubmissionKind.CREATE) {
+            service.create(mapper.readValue("""{
+                "title":"제출본 제목", "oneLineIntro":"소개", "genres":["판타지"],
+                "storySettings":{"worldSetting":"세계", "characterSetting":"인물", "userRoleSetting":"역할", "ruleSetting":"규칙"},
+                "startSettings":[{"name":"시작", "prologue":"도입", "startSituation":"상황", "suggestedInputs":["하나","둘","셋"]}]
+            }""", com.knk.manyak.story.dto.CreateGeneralStoryRequest::class.java), user.id)
+        } else {
+            val story = stories.save(Story(userId = user.id, title = "라이브 제목"))
+            service.update(story.publicId.toString(), UpdateStoryRequest(title = "제출본 제목"), user.id)
+        }
+        val row = submissions.findAll().single()
+        if (status == SubmissionStatus.FAILED) worker.fail(row.id, 1, "APPLY_FAILED")
+        else worker.finish(row.id, 1, ModerationResult(status.name, emptyList(), null))
+
+        val event = events.stream(StoryModerationCompleted::class.java).toList().single()
+        assertEquals("제출본 제목", event.title)
+        assertEquals(status, event.status)
+        val (title, body) = when (status) {
+            SubmissionStatus.APPROVED -> "검수를 통과했어요" to "「제출본 제목」이 등록됐어요. 지금 확인해 보세요."
+            SubmissionStatus.REJECTED -> "검수에서 반려됐어요" to "「제출본 제목」은 등록되지 않았어요. 내용을 수정해 다시 제출해 주세요."
+            SubmissionStatus.FAILED -> "검수를 진행하지 못했어요" to "「제출본 제목」 검수 중 문제가 생겼어요. 잠시 후 다시 제출해 주세요."
+            SubmissionStatus.PENDING -> error("종료 상태만 검증한다")
+        }
+        val data = messages.single().data
+        assertEquals(title, data["title"])
+        assertEquals(body, data["body"])
+        assertEquals("https://manyak.app/studio", data["deepLink"])
+        assertEquals(row.publicId.toString(), data["submissionId"])
+        assertEquals(status.name, data["status"])
+        if (kind == SubmissionKind.CREATE && status != SubmissionStatus.APPROVED) assertFalse(data.containsKey("storyId"))
+        else assertEquals(stories.findAll().single().publicId.toString(), data["storyId"])
+    }
+
+    @Test fun `제목을 생략한 수정도 제출 당시 폼의 제목을 이벤트에 싣는다`() {
+        val user = users.save(User(nickname = "작가"))
+        val story = stories.save(Story(userId = user.id, title = "제출 당시 제목"))
+        service.update(story.publicId.toString(), UpdateStoryRequest(oneLineIntro = "소개 수정"), user.id)
+        val row = submissions.findAll().single()
+        story.title = "이후 라이브 제목"
+        stories.save(story)
+        worker.finish(row.id, 1, ModerationResult("REJECTED", emptyList(), null))
+        val event = events.stream(StoryModerationCompleted::class.java).toList().single()
+        assertEquals("제출 당시 제목", event.title)
+    }
 
     @Test fun `종료와 remote 아웃박스는 한 트랜잭션이고 회차 멱등키를 사용한다`() {
         val messages = mutableListOf<PushMessage>()

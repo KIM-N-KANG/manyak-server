@@ -178,6 +178,6 @@ class SubmissionTransactions(
         row.errorCode = code
         row.decidedAt = Instant.now()
         row.updatedAt = row.decidedAt!!
-        events.publishEvent(StoryModerationCompleted(row.userId, row.publicId.toString(), row.storyId?.let { stories.findById(it).orElseThrow().publicId.toString() }, status, row.attempt))
+        events.publishEvent(StoryModerationCompleted(row.userId, row.publicId.toString(), row.storyId?.let { stories.findById(it).orElseThrow().publicId.toString() }, status, row.attempt, mapper.readTree(row.inputForm).path("title").asText()))
     }
 }
