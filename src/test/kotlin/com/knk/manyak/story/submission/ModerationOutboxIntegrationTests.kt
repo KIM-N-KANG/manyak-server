@@ -64,9 +64,9 @@ class ModerationOutboxIntegrationTests {
         assertEquals("제출본 제목", event.title)
         assertEquals(status, event.status)
         val (title, body) = when (status) {
-            SubmissionStatus.APPROVED -> "검수를 통과했어요" to "「제출본 제목」이 등록됐어요. 지금 확인해 보세요."
-            SubmissionStatus.REJECTED -> "검수에서 반려됐어요" to "「제출본 제목」은 등록되지 않았어요. 내용을 수정해 다시 제출해 주세요."
-            SubmissionStatus.FAILED -> "검수를 진행하지 못했어요" to "「제출본 제목」 검수 중 문제가 생겼어요. 잠시 후 다시 제출해 주세요."
+            SubmissionStatus.APPROVED -> "검수를 통과했어요" to "「제출본 제목」의 등록이 완료됐어요. 지금 확인해 보세요."
+            SubmissionStatus.REJECTED -> "검수에서 반려됐어요" to "「제출본 제목」의 내용을 수정해 다시 제출해 주세요."
+            SubmissionStatus.FAILED -> "검수를 진행하지 못했어요" to "「제출본 제목」의 검수 중 문제가 생겼어요. 잠시 후 다시 제출해 주세요."
             SubmissionStatus.PENDING -> error("종료 상태만 검증한다")
         }
         val data = messages.single().data

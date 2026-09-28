@@ -21,9 +21,9 @@ import java.util.concurrent.RejectedExecutionException
 
 internal fun StoryModerationCompleted.pushData(base: String): Map<String, String> = buildMap {
     val (notificationTitle, body) = when (status) {
-        SubmissionStatus.APPROVED -> "검수를 통과했어요" to "「$title」이 등록됐어요. 지금 확인해 보세요."
-        SubmissionStatus.REJECTED -> "검수에서 반려됐어요" to "「$title」은 등록되지 않았어요. 내용을 수정해 다시 제출해 주세요."
-        SubmissionStatus.FAILED -> "검수를 진행하지 못했어요" to "「$title」 검수 중 문제가 생겼어요. 잠시 후 다시 제출해 주세요."
+        SubmissionStatus.APPROVED -> "검수를 통과했어요" to "「$title」의 등록이 완료됐어요. 지금 확인해 보세요."
+        SubmissionStatus.REJECTED -> "검수에서 반려됐어요" to "「$title」의 내용을 수정해 다시 제출해 주세요."
+        SubmissionStatus.FAILED -> "검수를 진행하지 못했어요" to "「$title」의 검수 중 문제가 생겼어요. 잠시 후 다시 제출해 주세요."
         SubmissionStatus.PENDING -> error("Pending submissions cannot publish a moderation completion push")
     }
     put("title", notificationTitle)
