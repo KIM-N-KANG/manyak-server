@@ -89,7 +89,7 @@ remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
 
 발행 결과는 `manyak.push.outbox.result` 카운터의 `published`·`retry`·`abandoned` outcome으로 관측합니다. DB 완료 기록 전 장애에는 중복 발행될 수 있으므로 소비자의 `messageId` 멱등 처리가 필요합니다. 수동 검증은 [remote 발행](http/push/push-mode-remote.http)을 따릅니다.
 
-`MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.2`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.4`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
+`MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.4`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.7`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
 
 `MANYAK_INTERNAL_SHARED_SECRET`은 내부 발송 자격 조회의 공유 시크릿입니다(`manyak.internal.shared-secret`). 기본값은 빈 문자열이며 비어 있으면 `/internal/**` 요청에 404를 반환합니다. 설정된 경우 `X-Manyak-Internal-Secret` 헤더가 일치해야 하고, 사용자 Bearer 토큰은 내부 인증에 사용하지 않습니다. 공개 ALB의 내부 경로 라우팅 제외는 인프라 후속 작업입니다. 수동 검증은 [발송 자격 조회](http/internal/push-eligibility.http)를 따릅니다.
 

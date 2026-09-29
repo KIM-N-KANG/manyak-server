@@ -72,8 +72,8 @@ manyak:
   legal:
     # 임시 기본값. 게스트 발췌문 배포 시 웹 콘텐츠 version과 같은 릴리스에 맞춘다.
     guest-privacy-version: ${MANYAK_LEGAL_GUEST_PRIVACY_VERSION:v1.0}
-    terms-version: ${MANYAK_LEGAL_TERMS_VERSION:v1.2}
-    privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.4}
+    terms-version: ${MANYAK_LEGAL_TERMS_VERSION:v1.4}
+    privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.7}
   search:
     opensearch:
       endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
