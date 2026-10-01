@@ -219,7 +219,7 @@ class GeneralStoryCreationService(
         characters.forEach { input ->
             // 제작에는 매칭할 기존 인물·이미지가 없다. id를 보냈다면 수정 요청을 잘못 보낸 것이라 400으로 돌려준다.
             requireNoExistingIds(input)
-            val character = storyCharacterRepository.save(StoryCharacter(story = story, name = input.name))
+            val character = storyCharacterRepository.save(StoryCharacter(story = story, name = input.name, description = input.normalizedDescription()))
             val images = input.images.orEmpty()
             if (images.isEmpty()) return@forEach
             val imageNames = images.map { requireValidImageName(character.name, requireNotNull(it.imageName)) }

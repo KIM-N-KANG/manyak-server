@@ -123,3 +123,87 @@ client.test("수정 용량 사전 검사", () => {
   client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
 });
 %}
+
+### 인물 소개 수정 준비: PENDING이 없고 인물이 있는 내 스토리로 실행
+# story-general-create.http에서 인물이 있는 스토리를 만들고 승인된 createdStoryId를 사용한다.
+# 각 PATCH 뒤 검수 완료를 기다린 다음 다음 PATCH를 실행한다. PENDING이면 409가 우선한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("인물 소개 조회", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const characters = response.body.characters;
+  client.assert(characters.length > 0, "인물이 있는 스토리가 필요합니다");
+  client.assert(characters.every(c => "description" in c && (c.description === null || typeof c.description === "string")), "description은 string 또는 null이어야 합니다");
+  const inputs = characters.map(c => ({id: c.id, name: c.name}));
+  client.global.set("descriptionCharacterId", inputs[0].id);
+  inputs[0].description = "  왕국을 지키는 기사  ";
+  client.global.set("descriptionChangeBody", JSON.stringify({characters: inputs}));
+  inputs[0].description = "";
+  client.global.set("descriptionDeleteBody", JSON.stringify({characters: inputs}));
+  inputs[0].description = "가".repeat(81);
+  client.global.set("descriptionInvalidBody", JSON.stringify({characters: inputs}));
+});
+%}
+
+### 소개 변경 접수: 다른 인물과 이미지는 유지
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{{descriptionChangeBody}}
+
+> {%
+client.test("소개 검수 접수", () => client.assert(response.status === 202, `202 기대, actual=${response.status}`));
+client.global.set("submissionId", response.body.submissionId);
+%}
+
+### 수정 폼은 검수 중에도 제출한 소개를 공백 제거해 반환
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("제출한 소개 표시", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const character = response.body.characters.find(c => c.id === client.global.get("descriptionCharacterId"));
+  client.assert(character.description === "왕국을 지키는 기사", `actual=${character.description}`);
+});
+%}
+
+### 소개 변경 승인 후 상세 확인
+# 제출본 상태가 APPROVED가 된 뒤 실행한다. AI 수신 지원이 먼저 배포되어 있어야 한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("승인 소개 반영", () => client.assert(response.status === 200 && response.body.characters.some(c => c.description === "왕국을 지키는 기사"), "승인 후 상세 소개를 확인하세요")); %}
+
+### 소개 삭제 접수: 변경 검수 완료 뒤 실행
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{{descriptionDeleteBody}}
+
+> {% client.test("소개 삭제 검수 접수", () => client.assert(response.status === 202, `202 기대, actual=${response.status}`)); %}
+
+### 수정 폼 소개 삭제 확인
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("빈 소개는 null", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const character = response.body.characters.find(c => c.id === client.global.get("descriptionCharacterId"));
+  client.assert(character.description === null, `null 기대, actual=${character.description}`);
+});
+%}
+
+### 소개 81자는 400: 삭제 검수 완료 뒤 실행
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{{descriptionInvalidBody}}
+
+> {% client.test("소개 길이 검증", () => client.assert(response.status === 400, `400 기대, actual=${response.status}`)); %}

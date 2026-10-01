@@ -81,7 +81,7 @@ data class CreateGeneralStoryRequest(
 }
 
 /**
- * 일반 제작 인물 입력(KNK-1390). 이름과 이미지만 받는다 — 외형 필드(성별·머리·의상)는 컴파일 산출물이라
+ * 일반 제작 인물 입력(KNK-1390·1511). 이름, 소개와 이미지를 받는다. 외형 필드(성별·머리·의상)는 컴파일 산출물이라
  * 일반 제작에는 없고, 인물 묘사는 `storySettings.characterSetting` 통글이 담는다.
  */
 @Schema(description = "인물 입력(제작·수정 공용)")
@@ -112,7 +112,23 @@ data class GeneralCharacterInput(
         nullable = true,
     )
     val images: List<@NotNull GeneralCharacterImageInput>? = null,
-)
+
+    @field:Schema(
+        description = "인물 소개. 앞뒤 공백 제거 후 80자 이하, CR·LF·탭 금지. " +
+            "수정 시 생략·null은 유지하고 빈 문자열·공백만 보내면 삭제한다.",
+        nullable = true,
+    )
+    val description: String? = null,
+) {
+    @AssertTrue(message = "인물 소개는 앞뒤 공백 제거 후 80자 이하이며 CR·LF·탭을 포함할 수 없습니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isDescriptionValid(): Boolean = description == null ||
+        (description.trim().length <= 80 && description.none { it == '\r' || it == '\n' || it == '\t' })
+
+    /** 제출 폼과 승인 후 저장이 같은 유지·삭제·정규화 규칙을 사용한다. */
+    fun normalizedDescription(previous: String? = null): String? =
+        if (description == null) previous else description.trim().takeIf { it.isNotEmpty() }
+}
 
 /**
  * 인물 이미지 한 장의 입력(KNK-1390·1391). 등록·수정 제출본의 이미지 검증 규칙을 공유한다.

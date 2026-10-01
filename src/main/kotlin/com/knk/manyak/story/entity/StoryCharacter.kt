@@ -51,7 +51,7 @@ class StoryCharacter(
     var name: String,
 
     @Column(columnDefinition = "TEXT")
-    val description: String? = null,
+    var description: String? = null,
 
     @Column(name = "image_url", columnDefinition = "TEXT")
     val imageUrl: String? = null,

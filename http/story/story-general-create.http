@@ -19,7 +19,7 @@ Content-Type: application/json
   "genres": ["판타지"],
   "storySettings": {"worldSetting":"왕국", "characterSetting":"마법사", "userRoleSetting":"추적자", "ruleSetting":"마법에는 대가가 있다"},
   "startSettings": [{"name":"첫날", "prologue":"비가 내린다", "startSituation":"성문 앞", "suggestedInputs":["주변을 본다","문을 연다","말을 건다"], "endings":[]}],
-  "characters": [{"name":"세린", "images":[]}]
+  "characters": [{"name":"세린", "description":"  왕국을 지키는 기사  ", "images":[]}]
 }
 
 > {%
@@ -50,6 +50,13 @@ if (response.body.status === "APPROVED") client.global.set("createdStoryId", res
 ### 승인 후 상세 (위 조회가 APPROVED일 때 실행)
 GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("일반 제작 인물 소개 저장", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(response.body.characters[0].description === "왕국을 지키는 기사", `actual=${response.body.characters[0].description}`);
+});
+%}
 
 ### 내 미승인 목록 (APPROVED 제외, limit 1~100 보정)
 GET {{baseUrl}}/api/v1/stories/submissions?limit=100

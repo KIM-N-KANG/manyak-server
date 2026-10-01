@@ -427,4 +427,23 @@ class GeneralStoryCreationIntegrationTests {
         /** 업로드 이미지의 서빙 base URL. 실제 값은 환경 설정이고 테스트는 가짜 저장소가 이 값을 붙인다. */
         const val CDN_BASE_URL = "https://cdn.test"
     }
+    @Test
+    fun `일반 제작 소개는 공백 제거 후 승인되어 상세에 나오고 빈 소개는 null이다`() {
+        val user = member()
+        val description = "가".repeat(80)
+        postGeneral(user, bodyWith(""""characters":[
+            {"name":"세린","description":"  $description  "},
+            {"name":"루아","description":"   "},
+            {"name":"생략"},{"name":"null 소개","description":null}]"""))
+            .expectStatus().isOk
+        val story = storyRepository.findAll().single()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertEquals(description, saved[0].description)
+        saved.drop(1).forEach { org.junit.jupiter.api.Assertions.assertNull(it.description) }
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").isEqualTo(description)
+    }
+
 }

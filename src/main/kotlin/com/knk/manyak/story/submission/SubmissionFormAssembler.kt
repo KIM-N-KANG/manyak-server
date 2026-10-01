@@ -76,6 +76,8 @@ class SubmissionFormAssembler(
             val old = existing.firstOrNull { input.id != null && it.path("id").asText() == input.id }
             if (validate && input.id != null && old == null) bad("이 스토리에 속하지 않는 인물 ID입니다.")
             val character = mapper.createObjectNode().put("id", input.id).put("name", input.name)
+            val previousDescription = old?.path("description")?.takeUnless { it.isNull || it.isMissingNode }?.asText()
+            character.put("description", input.normalizedDescription(previousDescription))
             val priorImages = old?.path("images") ?: mapper.createArrayNode()
             val output = mapper.createArrayNode()
             val imageInputs = input.images ?: priorImages.toList().map { GeneralCharacterImageInput(id = it.path("id").asText()) }
