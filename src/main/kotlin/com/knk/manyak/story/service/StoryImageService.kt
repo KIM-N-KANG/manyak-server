@@ -72,7 +72,7 @@ class StoryImageService(
         )
     }
 
-    /** 표지 삭제(스펙 §4-3-8). 업로드·생성 URL만 지워 프리셋 폴백으로 내린다. 없어도 204(멱등). */
+    /** 표지 삭제(스펙 §4-3-8). 표지 URL과 프리셋 키를 모두 지운다. 없어도 204(멱등). */
     @Transactional
     fun deleteThumbnail(storyId: String, userId: Long) {
         suspensionGuard.requireActive(userId)
@@ -83,6 +83,7 @@ class StoryImageService(
         }
         // S3 객체는 지우지 않는다 — 지난 채팅 카드·스냅샷이 그 URL을 가리킬 수 있다(스펙 결정 기록).
         story.thumbnailImageUrl = null
+        story.thumbnailImageKey = null
         // 상태도 되돌린다. 남겨 두면 다음에 올린 표지가 옛 판정(PENDING·REJECTED)을 물려받아 안 보인다.
         story.thumbnailModerationStatus = ImageModerationStatus.APPROVED
         // 공개 스토리면 마지막 공개 재료도 같이 굳힌다(PR #273 Codex P2). 수정 API 밖에서 표지·인물 이미지를

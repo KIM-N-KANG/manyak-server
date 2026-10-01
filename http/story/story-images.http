@@ -126,6 +126,17 @@ Authorization: Bearer {{accessToken}}
 
 > {% client.test("표지 삭제 상태", () => client.assert([204,409].includes(response.status), `actual=${response.status}`)); %}
 
+### 표지 삭제가 204인 경우 실행: URL과 프리셋 키가 지워져 표지는 null이다
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("삭제 후 표지는 null", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(response.body.thumbnailUrl === null, `null 기대, actual=${JSON.stringify(response.body.thumbnailUrl)}`);
+});
+%}
+
 ### 미인증 presign 401
 POST {{baseUrl}}/api/v1/stories/{{createdStoryId}}/images/presign
 Content-Type: application/json

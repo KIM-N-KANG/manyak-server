@@ -135,7 +135,6 @@ class SimpleStoryCreationService(
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
-    private val storyThumbnailLinker: StoryThumbnailLinker,
     private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
     private val storyCreationRequestRepository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
@@ -937,8 +936,7 @@ class SimpleStoryCreationService(
      *
      * 장르는 세션 스코프(character 없음). 스토리라인 경로와 같은 정규화 키 기준으로 중복 제거한다.
      * 정렬 1순위가 tagSource인 이유(KNK-859): CUSTOM은 sortOrder 기본값이 0이라 이 기준이 없으면 직접 입력 장르가
-     * 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋나고,
-     * storyThumbnailLinker가 직접 입력 장르를 첫 장르로 보게 돼 제공 장르에 맞는 썸네일이 있어도 폴백으로 떨어진다.
+     * 시드 sortOrder를 가진 제공 장르를 앞지른다. 그러면 스토리라인 응답의 '사전 정의 → 직접 입력' 순서와 어긋난다.
      */
     private fun selectGenreTags(sessionTagRows: List<StoryCreationSessionTag>): List<StoryCreationTag> = sessionTagRows
         .map { it.tag }
@@ -1092,10 +1090,7 @@ class SimpleStoryCreationService(
                         oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
                         description = aiResponse.stories.description,
                         genre = genre,
-                        // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
-                        thumbnailImageKey = storyThumbnailLinker.linkFor(genreTags.map { it.name }),
-                        // 컴파일이 생성한 표지가 있으면 함께 굳힌다(KNK-1069). 프리셋 키는 생성 성공이어도 지우지
-                        // 않는다 — 생성 URL이 비면 노출이 자동으로 프리셋으로 떨어져야 한다(폴백은 ImageUrlResolver).
+                        // 컴파일 표지 업로드가 성공하면 URL을 저장하고, 실패하면 표지 없이 등록한다.
                         thumbnailImageUrl = uploadedThumbnail?.url,
                         // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
                         visibility = StoryVisibility.PRIVATE,

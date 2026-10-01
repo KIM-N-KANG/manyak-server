@@ -291,9 +291,10 @@ class StoryImageUploadControllerIntegrationTests {
     }
 
     @Test
-    fun `표지를 지우면 프리셋으로 내려가고 다시 지워도 204다`() {
+    fun `표지를 지우면 키와 URL이 null이고 다시 지워도 204다`() {
         val owner = saveUser()
-        val story = saveStory(owner)
+        val story = storyRepository.save(Story(userId = owner.id, title = "공개 표지",
+            thumbnailImageKey = "thumb_0001", visibility = StoryVisibility.PUBLIC))
         patchStory(story, owner, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isOk
 
         repeat(2) {
@@ -306,9 +307,15 @@ class StoryImageUploadControllerIntegrationTests {
 
         val reloaded = storyRepository.findById(story.id).get()
         assertThat(reloaded.thumbnailImageUrl).isNull()
-        // 프리셋 키는 그대로라 노출이 프리셋으로 떨어진다(사라지지 않는다).
-        assertThat(reloaded.thumbnailImageKey).isEqualTo("thumb_0001")
+        // 기존 프리셋 키도 함께 지운다.
+        assertThat(reloaded.thumbnailImageKey).isNull()
         assertThat(reloaded.thumbnailModerationStatus).isEqualTo(ImageModerationStatus.APPROVED)
+        val snapshot = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(snapshot.thumbnailImageKey).isNull()
+        assertThat(snapshot.thumbnailImageUrl).isNull()
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo(null)
     }
 
     // ---- 인물 이미지 ----
@@ -497,6 +504,20 @@ class StoryImageUploadControllerIntegrationTests {
                 assertThat(it).doesNotContain("uploaded")
                 assertThat(it).contains("thumb_0001")
             }
+    }
+
+    @Test
+    fun `프리셋 키 없는 스토리의 검수 대기 표지는 null이다`() {
+        val owner = saveUser()
+        val story = storyRepository.save(Story(
+            userId = owner.id, title = "새 스토리 검수 대기 표지",
+            visibility = StoryVisibility.PUBLIC,
+            thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/pending.webp",
+            thumbnailModerationStatus = ImageModerationStatus.PENDING,
+        ))
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo(null)
     }
 
     /**

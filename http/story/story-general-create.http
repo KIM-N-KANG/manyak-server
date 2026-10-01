@@ -52,6 +52,10 @@ GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Authorization: Bearer {{accessToken}}
 
 > {%
+client.test("표지 없는 등록은 null", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(response.body.thumbnailUrl === null, `null 기대, actual=${JSON.stringify(response.body.thumbnailUrl)}`);
+});
 client.test("일반 제작 인물 소개 저장", () => {
   client.assert(response.status === 200, `200 기대, actual=${response.status}`);
   client.assert(response.body.characters[0].description === "왕국을 지키는 기사", `actual=${response.body.characters[0].description}`);

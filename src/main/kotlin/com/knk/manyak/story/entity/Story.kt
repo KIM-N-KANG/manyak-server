@@ -42,20 +42,17 @@ class Story(
     @Column(length = 255)
     var genre: String? = null,
 
-    // 대표 이미지(표지)의 카탈로그 키. 등록 시 장르 매칭으로 1회 확정하며, 이후 수정으로 장르가 바뀌어도
-    // 재연결하지 않는다(스펙 §4-3-9). 서빙 URL은 저장하지 않고 ImageUrlResolver가 조합한다.
+    // 기존 스토리의 프리셋 표지 키. 새 등록에서는 채우지 않으며 표지 삭제 시 null로 만든다.
+    // 서빙 URL은 ImageUrlResolver가 조합한다(스펙 §4-3-9).
     @Column(name = "thumbnail_image_key", length = 64)
-    val thumbnailImageKey: String? = null,
+    var thumbnailImageKey: String? = null,
 
-    // 생성 표지(KNK-1069) 또는 소유자가 올린 표지(KNK-1126)의 절대 URL.
-    // 프리셋 키(thumbnailImageKey)와 **공존한다** — 생성·업로드 성공이어도 프리셋 연결은 지우지 않아, 이 값이
-    // 비면(구버전 AI·생성 실패·일반 제작·기존 스토리·표지 삭제) 노출이 자동으로 프리셋으로 떨어진다.
-    // 2단 폴백 판정은 ImageUrlResolver 한 곳이 소유한다(호출부에 분기를 흩뿌리지 않는다).
-    // 업로드 교체·삭제가 생기면서 var다(KNK-1126) — 등록 시 1회 확정이던 시절의 val이 아니다.
+    // 생성하거나 업로드한 표지의 절대 URL. 기존 프리셋 키가 있으면 함께 보존한다.
+    // 노출 판정은 ImageUrlResolver가 담당하며, 표지 삭제 시 URL과 프리셋 키를 모두 지운다.
     @Column(name = "thumbnail_image_url", columnDefinition = "TEXT")
     var thumbnailImageUrl: String? = null,
 
-    // 표지 검수 상태(KNK-1126, V76). APPROVED가 아니면 노출이 프리셋으로 떨어진다(ImageUrlResolver의 게이트).
+    // 표지 검수 상태(KNK-1126, V76). APPROVED가 아니면 기존 프리셋 키를 사용하고 키도 없으면 null이다.
     // 프리셋 표지는 팀 자산이라 검수 대상이 아니다 — 이 상태는 thumbnailImageUrl에만 걸린다.
     @Enumerated(EnumType.STRING)
     @Column(name = "thumbnail_moderation_status", nullable = false, length = 20)
