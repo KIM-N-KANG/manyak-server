@@ -1066,7 +1066,7 @@ class SimpleStoryCreationService(
         val imageBudget = ImageStageBudget.startingNow(GENERATED_IMAGE_STAGE_BUDGET)
         // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 저장한다.
         val uploadedImages = uploadCharacterImages(storyPublicId, imagesByName, imageBudget)
-        // 표지 썸네일도 같은 예산을 나눠 쓴다(KNK-1069). 실패하면 null이고 노출은 프리셋 표지로 떨어진다.
+        // 표지 썸네일도 같은 예산을 나눠 쓴다(KNK-1069). 실패하면 표지 URL과 노출 표지는 null이며 스토리 생성은 계속한다.
         val uploadedThumbnail = uploadThumbnailImage(storyPublicId, aiResponse.thumbnailImage, imageBudget)
         // 보상 삭제 대상은 인물·표지를 가리지 않고 "이번에 올린 객체 전부"다.
         val uploadedObjectKeys = uploadedImages.values.map { it.objectKey } + listOfNotNull(uploadedThumbnail?.objectKey)
@@ -1315,7 +1315,7 @@ class SimpleStoryCreationService(
     }.toMap()
 
     /**
-     * 컴파일이 생성한 표지 썸네일을 S3에 올린다(KNK-1069). 실패하면 null이고 노출은 프리셋 표지로 떨어진다.
+     * 컴파일이 생성한 표지 썸네일을 S3에 올린다(KNK-1069). 실패하면 표지 URL과 노출 표지는 null이며 스토리 생성은 계속한다.
      *
      * 인물 이미지와 같은 원칙이다 — **DB 트랜잭션 밖에서** 호출하고, 디코딩·업로드 실패는 흡수해 표지 없이
      * 저장을 이어간다(표지 한 장 때문에 스토리 생성이 실패해서는 안 된다). [AiThumbnailImage.error]가 있으면
