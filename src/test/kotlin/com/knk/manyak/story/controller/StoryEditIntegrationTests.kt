@@ -712,6 +712,29 @@ class StoryEditIntegrationTests {
     }
 
     @Test
+    fun `PATCH로 인물 이름을 바꿔도 같은 행의 소개를 유지한다`() {
+        val user = owner()
+        val story = seedStory(userId = user.id)
+        val character = storyCharacterRepository.save(
+            StoryCharacter(story = story, name = "세린", description = "왕국을 지키는 기사"),
+        )
+
+        patchCharacters(story, user, """{"characters":[{"id":"${character.publicId}","name":"루아"}]}""")
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").doesNotExist()
+
+        val saved = storyCharacterRepository.findAll().single()
+        assertEquals(character.id, saved.id)
+        assertEquals("루아", saved.name)
+        assertEquals("왕국을 지키는 기사", saved.description)
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].name").isEqualTo("루아")
+            .jsonPath("$.characters[0].description").isEqualTo("왕국을 지키는 기사")
+    }
+
+    @Test
     fun `인물 이름을 바꾸면 이미지 이름 접두도 함께 바뀐다`() {
         // 이미지 이름이 `{인물이름}_{접미}` 규칙이라 개명만 하면 기존 이미지가 규칙 위반으로 남는다.
         val user = owner()

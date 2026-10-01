@@ -137,6 +137,10 @@ data class AiStoryCompileResponse(
     @JsonProperty("story_endings")
     val storyEndings: List<AiStoryEnding> = emptyList(),
 
+    // 소개를 아직 보내지 않는 운영 AI 응답도 수용한다(KNK-1480).
+    @JsonProperty("character_introductions")
+    val characterIntroductions: List<AiCharacterIntroduction> = emptyList(),
+
     // 인물별 외형(인물 전원, 0~5개)과 인물별 이미지(외형이 있는 인물만). 두 배열의 길이는 다를 수 있고 name으로 매칭한다
     // (스펙 §5-3-3, KNK-414·940). storyMainEvents와 같은 이유로 기본값 emptyList다.
     @JsonProperty("character_appearances")
@@ -152,6 +156,13 @@ data class AiStoryCompileResponse(
     val thumbnailImage: AiThumbnailImage? = null,
 
     val meta: AiResponseMeta? = null,
+)
+
+/** 작품 페이지용 주변 인물 소개(스펙 §5-3-3, KNK-1458·1480). 이름으로 기존 인물에 연결한다. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AiCharacterIntroduction(
+    val name: String,
+    val description: String? = null,
 )
 
 /**

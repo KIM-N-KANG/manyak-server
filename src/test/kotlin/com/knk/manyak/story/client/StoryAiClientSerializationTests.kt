@@ -147,6 +147,26 @@ class StoryAiClientSerializationTests {
     }
 
     @Test
+    fun `compile 인물 소개는 snake case로 역직렬화하고 null 설명을 허용한다`() {
+        val json = COMPILE_RESPONSE_JSON.replace(
+            "\"story_main_events\":",
+            """"character_introductions":[{"name":"서준","description":"조용한 조력자","unknown":true},{"name":"하나","description":null}],"story_main_events":""",
+        )
+        val response = objectMapper.readValue(json, AiStoryCompileResponse::class.java)
+
+        assertEquals(listOf("서준", "하나"), response.characterIntroductions.map { it.name })
+        assertEquals("조용한 조력자", response.characterIntroductions.first().description)
+        assertNull(response.characterIntroductions.last().description)
+    }
+
+    @Test
+    fun `compile 인물 소개 필드가 없으면 빈 배열이다`() {
+        val response = objectMapper.readValue(COMPILE_RESPONSE_JSON, AiStoryCompileResponse::class.java)
+
+        assertTrue(response.characterIntroductions.isEmpty())
+    }
+
+    @Test
     fun `compile 응답의 meta를 역직렬화한다`() {
         val response = objectMapper.readValue(COMPILE_RESPONSE_JSON, AiStoryCompileResponse::class.java)
 

@@ -30,11 +30,9 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "customTags": [
-    { "name": "다크 판타지", "category": "GENRE" },
-    { "name": "정치극", "category": "GENRE" },
-    { "name": "신중한", "category": "PROTAGONIST" }
-  ]
+  "requestId": "{{$uuid}}",
+  "customGenreTags": ["다크 판타지", "정치극"],
+  "protagonist": {"customTags": ["신중한"]}
 }
 
 > {%
@@ -54,6 +52,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
+  "requestId": "{{$uuid}}",
   "simpleCreationId": {{simpleCreationId}},
   "storylineId": {{storylineId}},
   "additionalInfos": ["주인공은 복수보다 진실을 택한다"]
@@ -96,8 +95,9 @@ Accept: application/json
         client.assert(Array.isArray(b.startSettings[0].suggestedInputs) && b.startSettings[0].suggestedInputs.length > 0, "startSettings[0].suggestedInputs가 비어 있습니다.");
     });
     client.test("MVP 기본값이 계약대로다", () => {
-        // [KNK-515] coverImageUrl→thumbnailUrl(값 null 유지), chatCount→turnCount(채팅 없으면 0).
-        client.assert(b.thumbnailUrl === null, "thumbnailUrl은 null이어야 합니다.");
+        // 생성 표지나 프리셋이 있으면 thumbnailUrl이 채워진다. 채팅이 없으면 turnCount는 0이다.
+        client.assert(b.thumbnailUrl === null || typeof b.thumbnailUrl === "string",
+            `thumbnailUrl은 문자열·null이어야 합니다. actual=${JSON.stringify(b.thumbnailUrl)}`);
         // [KNK-1016] author는 실 작성자를 싣는다. 이 흐름은 게스트 생성이라 작성자가 없어 null이다.
         client.assert(b.author === null, "게스트 생성 스토리의 author는 null이어야 합니다.");
         client.assert(b.turnCount === 0 && b.likeCount === 0, "turnCount/likeCount는 채팅 없으면 0이어야 합니다.");
@@ -117,12 +117,15 @@ Accept: application/json
     // [KNK-1058] characters: 스토리 인물 목록(저장 순서 = 컴파일 응답 순서). 인물 행이 없으면 빈 배열이고,
     // 이미지 생성에 실패한 인물도 목록에서 빠지지 않고 imageUrl만 null이다. 실제 컴파일을 거친 이 흐름에서는
     // 보통 1건 이상이며, 인물 공개 식별자·외형 7필드는 노출하지 않는다.
-    client.test("characters가 {name, imageUrl}만 담은 배열이다", () => {
+    // [KNK-1480] 소개를 보내는 AI면 description이 채워진다. 구버전 AI·소개 없는 인물은 null이다.
+    client.test("characters가 {name, imageUrl, description}을 담은 배열이다", () => {
         client.assert(Array.isArray(b.characters), `characters가 배열이 아닙니다. actual=${JSON.stringify(b.characters)}`);
         b.characters.forEach((c, i) => {
             client.assert(typeof c.name === "string" && c.name.length > 0, `characters[${i}].name이 없습니다. actual=${JSON.stringify(c)}`);
             client.assert(c.imageUrl === null || typeof c.imageUrl === "string", `characters[${i}].imageUrl이 문자열·null이 아닙니다. actual=${JSON.stringify(c.imageUrl)}`);
-            client.assert(Object.keys(c).sort().join(",") === "imageUrl,name", `characters[${i}]에 노출하면 안 되는 필드가 있습니다. actual=${JSON.stringify(Object.keys(c))}`);
+            client.assert(c.description === null || (typeof c.description === "string" && c.description.length > 0 && c.description === c.description.trim()),
+                `characters[${i}].description은 공백 제거된 소개 또는 null이어야 합니다. actual=${JSON.stringify(c.description)}`);
+            client.assert(Object.keys(c).sort().join(",") === "description,imageUrl,name", `characters[${i}]에 노출하면 안 되는 필드가 있습니다. actual=${JSON.stringify(Object.keys(c))}`);
         });
     });
 
@@ -166,6 +169,7 @@ Accept: application/json
 #   - 소유 스토리: isOwner === true, author.nickname === 내 닉네임, author.id === null(내부 PK 비노출)
 #   - 타인 공개 스토리: isOwner === false, author에 그 작성자 닉네임
 #   - characters: 인물 이미지 생성까지 끝난 스토리면 imageUrl이 CDN 주소로 채워집니다(실패 인물은 null 유지, KNK-1058)
+#   - description: 컴파일 소개는 문자열입니다. 도입 이전·소개 없는 컴파일·일반 제작 인물은 null입니다(KNK-1480).
 GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
 Authorization: Bearer <액세스 토큰>
 Accept: application/json

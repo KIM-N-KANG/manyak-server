@@ -155,6 +155,7 @@ erDiagram
   text outfit
   text visual_identity
   timestamp_with_time_zone created_at
+  text description
 }
 "public.story_likes" {
   bigint id

@@ -6,6 +6,7 @@ import com.knk.manyak.image.entity.ImagePresetType
 import com.knk.manyak.image.repository.ImagePresetRepository
 import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.story.client.AiCharacterAppearance
+import com.knk.manyak.story.client.AiCharacterIntroduction
 import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
@@ -108,6 +109,9 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         @Volatile
         var characterImages: List<AiCharacterImage> = emptyList()
 
+        @Volatile
+        var characterIntroductions: List<AiCharacterIntroduction> = emptyList()
+
         // 컴파일 응답의 표지 썸네일(KNK-1069). null이면 필드 자체를 보내지 않는 구버전 AI와 같은 상태다.
         @Volatile
         var thumbnailImage: AiThumbnailImage? = null
@@ -166,6 +170,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storyEndings = endingsOverride ?: endings,
                     characterAppearances = characterAppearances,
                     characterImages = characterImages,
+                    characterIntroductions = characterIntroductions,
                     thumbnailImage = thumbnailImage,
                     meta = AiResponseMeta(),
                 )
@@ -230,6 +235,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         flipSessionToCreatedId = null
         characterAppearances = emptyList()
         characterImages = emptyList()
+        characterIntroductions = emptyList()
         thumbnailImage = null
         uploads.clear()
         deletes.clear()
@@ -463,6 +469,62 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(saved.single { it.name == "하나" }.imageUrl).isNull()
         assertThat(saved.single { it.name == "외형없음" }.imageUrl).isNull()
         assertThat(uploads).hasSize(1)
+    }
+
+    @Test
+    fun `인물 소개를 이름 정규화로 연결하고 공백 제거와 null을 상세에 반영한다`() {
+        characterAppearances = listOf(" 서준 ", "하나", "빈소개", "공백소개", "소개없음")
+            .map { AiCharacterAppearance(it) }
+        characterIntroductions = listOf(
+            AiCharacterIntroduction("서준  ", "  조용한 조력자  "),
+            AiCharacterIntroduction(" 하나 ", null),
+            AiCharacterIntroduction("빈소개", ""),
+            AiCharacterIntroduction("공백소개", "   "),
+            AiCharacterIntroduction("서준", "중복 소개는 버린다"),
+            AiCharacterIntroduction("소개만있는인물", "행을 만들지 않는다"),
+        )
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("서준", "하나", "빈소개", "공백소개", "소개없음")
+        assertThat(saved.map { it.description }).containsExactly("조용한 조력자", null, null, null, null)
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(5)
+            .jsonPath("$.characters[0].description").isEqualTo("조용한 조력자")
+            .jsonPath("$.characters[0].imageUrl").isEqualTo(null)
+            .jsonPath("$.characters[1].description").isEqualTo(null)
+            .jsonPath("$.characters[2].description").isEqualTo(null)
+            .jsonPath("$.characters[3].description").isEqualTo(null)
+            .jsonPath("$.characters[4].description").isEqualTo(null)
+    }
+
+    @Test
+    fun `소개만 있는 이름은 인물 집합에 추가하지 않는다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준"))
+        characterIntroductions = listOf(AiCharacterIntroduction("소개만있는인물", "소개"))
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).map { it.name })
+            .containsExactly("서준")
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(1)
+            .jsonPath("$.characters[0].description").isEqualTo(null)
+    }
+
+    @Test
+    fun `소개가 없는 컴파일도 인물을 저장하고 상세 소개는 null이다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준"))
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single().description).isNull()
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").isEqualTo(null)
     }
 
     @Test
