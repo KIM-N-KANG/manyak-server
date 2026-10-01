@@ -1061,6 +1061,9 @@ class SimpleStoryCreationService(
         val allowedNames = limitCharacterNames(normalizedAppearances.keys + normalizedImages.keys, storyPublicId)
         val appearancesByName = normalizedAppearances.filterKeys(allowedNames::contains)
         val imagesByName = normalizedImages.filterKeys(allowedNames::contains)
+        val descriptionsByName = normalizeByName(aiResponse.characterIntroductions) { it.name }
+            .filterKeys(allowedNames::contains)
+            .mapValues { (_, introduction) -> introduction.description }
         // 업로드와 보상 삭제가 같은 예산을 나눠 쓴다 — 이미지 단계 전체가 스토리 생성 요청을 끌고 가지 않게 한다.
         val imageBudget = ImageStageBudget.startingNow(GENERATED_IMAGE_STAGE_BUDGET)
         // 이미지 업로드는 트랜잭션 밖에서 끝내고, 성공한 URL만 트랜잭션 안에서 저장한다.
@@ -1183,7 +1186,7 @@ class SimpleStoryCreationService(
                     ).toList()
                 }
 
-                persistStoryCharacters(story, appearancesByName, imagesByName.keys, uploadedImages)
+                persistStoryCharacters(story, appearancesByName, imagesByName.keys, uploadedImages, descriptionsByName)
 
                 // 스토리 저장 경로는 모두 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 간편 제작은 항상
                 // PRIVATE로 등록하므로 지금은 no-op이지만, 기본 공개 범위가 바뀌면 이 한 줄이 없는 쪽이 유출이다.
@@ -1473,6 +1476,7 @@ class SimpleStoryCreationService(
         appearancesByName: Map<String, AiCharacterAppearance>,
         imageNames: Set<String>,
         uploadedImages: Map<String, UploadedImage>,
+        descriptionsByName: Map<String, String?>,
     ) {
         val names = (appearancesByName.keys + imageNames).toList()
         if (names.isEmpty()) {
@@ -1484,6 +1488,7 @@ class SimpleStoryCreationService(
                 StoryCharacter(
                     story = story,
                     name = name,
+                    description = descriptionsByName[name]?.trim()?.ifEmpty { null },
                     // 옛 컬럼에도 계속 쓴다(KNK-1126) — 읽는 코드는 새 테이블로 옮겼지만, 롤백하면 이 컬럼을
                     // 다시 읽으므로 컬럼 DROP 전까지 둘 다 채운다(계약 마이그레이션 두 릴리스 규칙).
                     imageUrl = uploadedImages[name]?.url,

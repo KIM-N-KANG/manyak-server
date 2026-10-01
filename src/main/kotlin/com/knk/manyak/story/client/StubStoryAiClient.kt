@@ -61,6 +61,9 @@ class StubStoryAiClient : StoryAiClient {
                 AiStoryEnding("스텁 노말 엔딩", 4, "무난히 일상으로 돌아간다.", "잔잔한 마무리 가이드입니다."),
                 AiStoryEnding("스텁 배드 엔딩", 3, "돌이킬 수 없는 결말에 이른다.", "비극적 마무리 가이드입니다."),
             ),
+            characterIntroductions = listOf(
+                AiCharacterIntroduction("스텁 주인공", "낡은 팔찌를 간직한 조력자. 주인공과 함께 길을 나선다."),
+            ),
             // 인물 외형과 함께 최소 크기 WebP 한 장을 실어, 로컬에서도 base64 디코딩·업로드·URL 저장 경로가 그대로 돈다.
             // 저장소가 미구성이면(버킷 빈 값) 업로드가 no-op이라 image_url만 NULL로 남는다(스펙 §5-3-3).
             characterAppearances = listOf(

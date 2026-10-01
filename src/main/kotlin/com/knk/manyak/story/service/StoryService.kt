@@ -451,7 +451,11 @@ class StoryService(
             val representative = images.firstOrNull {
                 it.imageName == StoryCharacterImage.defaultImageNameOf(character.name)
             } ?: images.firstOrNull()
-            StoryCharacterResponse(name = character.name, imageUrl = representative?.imageUrl)
+            StoryCharacterResponse(
+                name = character.name,
+                imageUrl = representative?.imageUrl,
+                description = character.description,
+            )
         }
     }
 

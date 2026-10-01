@@ -36,7 +36,7 @@
 | [public.story_creation_requests](public.story_creation_requests.md) | 12 |  | BASE TABLE |
 | [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 | [public.story_creation_characters](public.story_creation_characters.md) | 7 |  | BASE TABLE |
-| [public.story_characters](public.story_characters.md) | 13 |  | BASE TABLE |
+| [public.story_characters](public.story_characters.md) | 14 |  | BASE TABLE |
 | [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
@@ -462,6 +462,7 @@ erDiagram
   text outfit
   text visual_identity
   timestamp_with_time_zone created_at
+  text description
 }
 "public.story_likes" {
   bigint id
