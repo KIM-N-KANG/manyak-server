@@ -526,4 +526,134 @@ class StorySubmissionIntegrationTests {
         assertNull(saved.nextAttemptAt)
     }
 
+    @Autowired private lateinit var characters: com.knk.manyak.story.repository.StoryCharacterRepository
+
+    private fun characterStory(): Pair<User, Story> {
+        val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.entity.UserStatus.ACTIVE))
+        val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "세린", description = "왕국을 지키는 기사"))
+        characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "루아", description = "길을 안내하는 동료"))
+        characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "소개 없음"))
+        return user to story
+    }
+
+    private fun characterPatch(user: User, story: Story, body: String) = client.patch()
+        .uri("/api/v1/stories/${story.publicId}")
+        .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+        .contentType(MediaType.APPLICATION_JSON).body(body).exchange()
+
+    private fun characterForm(user: User, story: Story) = mapper.readTree(client.get()
+        .uri("/api/v1/stories/${story.publicId}/edit")
+        .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+        .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!)
+
+    @Test fun `수정 폼은 라이브 인물 소개와 명시적 null을 반환한다`() {
+        val (user, story) = characterStory()
+        val form = characterForm(user, story)["characters"]
+        assertEquals("왕국을 지키는 기사", form[0].path("description").asText())
+        assertTrue(form[2].has("description"))
+        assertTrue(form[2].path("description").isNull)
+    }
+
+    @Test fun `소개 수정은 검수 AI에 전송되고 승인 뒤 라이브와 상세에 반영된다`() {
+        val (user, story) = characterStory()
+        val character = characters.findByStoryIdOrderByIdAsc(story.id).first()
+        characterPatch(user, story, """{"characters":[{"id":"${character.publicId}","name":"세린","description":"  새로운 소개  "}]}""")
+            .expectStatus().isAccepted
+        assertEquals("왕국을 지키는 기사", characters.findById(character.id).orElseThrow().description)
+        val row = submissions.findAll().single()
+        org.mockito.Mockito.`when`(ai.moderate(moderationInput(row))).thenAnswer { call ->
+            val input = call.getArgument<tools.jackson.databind.JsonNode>(0)
+            assertEquals("새로운 소개", input.path("characters").path(0).path("description").asText())
+            assertFalse(input.path("characters").path(0).has("descriptionValid"))
+            ModerationResult("APPROVED", emptyList(), null)
+        }
+        runner.run(SubmissionRequested(row.id, row.attempt))
+        org.mockito.Mockito.verify(ai).moderate(moderationInput(row))
+        assertEquals(SubmissionStatus.APPROVED, submissions.findById(row.id).orElseThrow().status)
+        assertEquals("새로운 소개", characters.findById(character.id).orElseThrow().description)
+        client.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").isEqualTo("새로운 소개")
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["", "   "])
+    fun `빈 소개는 승인 뒤 null로 삭제한다`(description: String) {
+        val (user, story) = characterStory()
+        val character = characters.findByStoryIdOrderByIdAsc(story.id).first()
+        characterPatch(user, story, """{"characters":[{"id":"${character.publicId}","name":"세린","description":"$description"}]}""")
+            .expectStatus().isAccepted
+        assertTrue(characterForm(user, story)["characters"][0].path("description").isNull)
+        val row = submissions.findAll().single()
+        worker.finish(row.id, row.attempt, ModerationResult("APPROVED", emptyList(), null))
+        assertNull(characters.findById(character.id).orElseThrow().description)
+    }
+
+    @Test fun `null 소개는 개명해도 유지하고 새 인물은 소개 없이 저장한다`() {
+        val (user, story) = characterStory()
+        val character = characters.findByStoryIdOrderByIdAsc(story.id).first()
+        characterPatch(user, story, """{"characters":[{"id":"${character.publicId}","name":"새 이름","description":null},{"name":"신규"}]}""")
+            .expectStatus().isAccepted
+        val row = submissions.findAll().single()
+        worker.finish(row.id, row.attempt, ModerationResult("APPROVED", emptyList(), null))
+        val saved = characters.findByStoryIdOrderByIdAsc(story.id)
+        assertEquals("왕국을 지키는 기사", saved[0].description)
+        assertEquals(character.id, saved[0].id)
+        assertEquals("새 이름", saved[0].name)
+        assertNull(saved[1].description)
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["long", "cr", "lf", "tab"])
+    fun `잘못된 소개는 POST와 PATCH에서 제출본 없이 400이다`(kind: String) {
+        val (user, story) = characterStory()
+        val invalid = when (kind) {
+            "long" -> "가".repeat(81)
+            "cr" -> "\r소개"
+            "lf" -> "소개\n"
+            else -> "소\t개"
+        }
+        val input = mapper.createObjectNode().put("name", "새 인물").put("description", invalid)
+        val patch = mapper.createObjectNode().set("characters", mapper.createArrayNode().add(input))
+        characterPatch(user, story, mapper.writeValueAsString(patch)).expectStatus().isBadRequest
+        val create = mapper.valueToTree<tools.jackson.databind.node.ObjectNode>(request())
+        create.set("characters", patch["characters"])
+        client.post().uri("/api/v1/stories/general")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(create))
+            .exchange().expectStatus().isBadRequest
+        assertEquals(0, submissions.count())
+        assertEquals("왕국을 지키는 기사", characters.findByStoryIdOrderByIdAsc(story.id).first().description)
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SubmissionStatus::class, names = ["PENDING", "REJECTED", "FAILED"])
+    fun `미승인 수정 폼은 소개를 반영하고 생략한 소개는 id 기준으로 유지한다`(status: SubmissionStatus) {
+        val (user, story) = characterStory()
+        val live = characters.findByStoryIdOrderByIdAsc(story.id)
+        characterPatch(user, story, """{"characters":[
+            {"id":"${live[1].publicId}","name":"개명 동료"},
+            {"id":"${live[0].publicId}","name":"세린","description":"  제출한 소개  "},
+            {"name":"신규","description":"새 소개"},{"name":"빈 소개 신규"}]}""")
+            .expectStatus().isAccepted
+        val row = submissions.findAll().single()
+        if (status == SubmissionStatus.REJECTED) {
+            worker.finish(row.id, row.attempt, ModerationResult("REJECTED", listOf(ModerationIssue("characters[1].description", "TEXT", "DRUGS", "수정 필요")), null).validated(moderationInput(row)))
+        } else if (status == SubmissionStatus.FAILED) {
+            worker.fail(row.id, row.attempt, "MODERATION_UNAVAILABLE", retryAllowed = false)
+        }
+        val form = characterForm(user, story)
+        assertEquals(status.name, form["submission"]["status"].asText())
+        assertEquals("길을 안내하는 동료", form["characters"][0].path("description").asText())
+        assertEquals("제출한 소개", form["characters"][1].path("description").asText())
+        assertEquals("새 소개", form["characters"][2].path("description").asText())
+        assertTrue(form["characters"][3].path("description").isNull)
+        assertEquals("왕국을 지키는 기사", characters.findById(live[0].id).orElseThrow().description)
+        if (status == SubmissionStatus.REJECTED) {
+            assertEquals("characters[1].description", form["submission"]["issues"][0]["path"].asText())
+        }
+    }
+
 }

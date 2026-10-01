@@ -227,6 +227,7 @@ class StoryEditService(
             val character = match ?: StoryCharacter(story = story, name = input.name)
             val previousName = match?.let { previousNames.getValue(it.id) } ?: input.name
             character.name = input.name
+            character.description = input.normalizedDescription(character.description)
             val saved = storyCharacterRepository.save(character)
             syncCharacterImages(story, saved, previousName, input.images, ownerPublicId, approvedImageUrls)
         }
@@ -480,6 +481,7 @@ class StoryEditService(
             StoryEditCharacterResponse(
                 id = character.publicId.toString(),
                 name = character.name,
+                description = character.description,
                 // 소유자 화면이라 검수 상태와 무관하게 전부 싣고 상태를 함께 준다.
                 images = imagesByCharacterId[character.id].orEmpty().map { image ->
                     CharacterImageResponse(

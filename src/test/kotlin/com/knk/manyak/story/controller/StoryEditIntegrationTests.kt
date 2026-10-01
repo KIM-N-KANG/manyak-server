@@ -721,7 +721,7 @@ class StoryEditIntegrationTests {
 
         patchCharacters(story, user, """{"characters":[{"id":"${character.publicId}","name":"루아"}]}""")
             .expectStatus().isOk.expectBody()
-            .jsonPath("$.characters[0].description").doesNotExist()
+            .jsonPath("$.characters[0].description").isEqualTo("왕국을 지키는 기사")
 
         val saved = storyCharacterRepository.findAll().single()
         assertEquals(character.id, saved.id)

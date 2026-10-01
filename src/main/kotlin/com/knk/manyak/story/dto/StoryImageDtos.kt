@@ -70,4 +70,7 @@ data class StoryEditCharacterResponse(
 
     @field:Schema(description = "이 인물의 이미지 목록(표시 순서)")
     val images: List<CharacterImageResponse>,
+
+    @field:Schema(description = "인물 소개", nullable = true)
+    val description: String? = null,
 )
