@@ -394,6 +394,30 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
+    fun `공식 계정 미설정이어도 original의 망가진 커서는 400이다`() {
+        get("?filter=original&cursor=not-a-cursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이어도 original의 다른 정렬 커서는 400이다`() {
+        val author = saveUser()
+        saveStory(author, "하나")
+        saveStory(author, "둘")
+        val latestCursor = cursorOf(
+            get("?sort=latest&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
+        )
+
+        get("?filter=original&sort=popular&cursor=$latestCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이어도 original의 옛 p 접두 커서는 400이다`() {
+        val legacy = Base64.getUrlEncoder().withoutPadding().encodeToString("p:20:${UUID.randomUUID()}".toByteArray())
+
+        get("?filter=original&sort=popular&cursor=$legacy").expectStatus().isBadRequest
+    }
+
+    @Test
     fun `망가진 커서는 400이다`() {
         get("?cursor=not-a-cursor").expectStatus().isBadRequest
     }
