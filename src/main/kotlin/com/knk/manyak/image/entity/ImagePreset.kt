@@ -58,8 +58,7 @@ class ImagePreset(
     @Column(length = 50)
     val prop: String? = null,
 
-    // 장르는 복수(썸네일 최대 3개)이며 태그 마스터를 참조한다 — 값이 GENRE 마스터 태그명과 정확히 일치해야
-    // 스토리의 장르 문자열과 동등 비교로 매칭된다(스펙 §4-3-9 자동 연결).
+    // 카탈로그의 장르는 복수(썸네일 최대 3개)이며 GENRE 태그 마스터를 참조한다.
     @ManyToMany
     @JoinTable(
         name = "image_preset_genres",

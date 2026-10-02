@@ -63,7 +63,7 @@ data class CreateGeneralStoryRequest(
     val visibility: StoryVisibility = StoryVisibility.PRIVATE,
 
     // 표지 업로드(KNK-1390). presign으로 받은 draft 객체 키를 그대로 넣는다. 서버가 내 draft 경로 아래인지
-    // 확인하고 HEAD로 존재·크기·형식을 재검증한 뒤 절대 URL을 굳힌다. 없으면 프리셋 자동 연결만 남는다.
+    // 확인하고 HEAD로 존재·크기·형식을 재검증한 뒤 절대 URL을 굳힌다. 없으면 표지는 null이다.
     @field:Schema(
         description = "업로드한 표지의 객체 키(presign 응답의 objectKey). 회원만 쓸 수 있다.",
         nullable = true,

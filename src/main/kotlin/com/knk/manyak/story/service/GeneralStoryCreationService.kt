@@ -52,7 +52,6 @@ class GeneralStoryCreationService(
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val storyImageAccess: StoryImageAccess,
     private val suspensionGuard: SuspensionGuard,
-    private val storyThumbnailLinker: StoryThumbnailLinker,
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
 ) {
 
@@ -81,8 +80,6 @@ class GeneralStoryCreationService(
                 oneLineIntro = request.oneLineIntro,
                 description = request.description,
                 genre = genre,
-                // 표지는 등록 시 1회 확정한다(§4-3-9). 후보가 없으면 null이고 프론트엔드가 placeholder를 그린다.
-                thumbnailImageKey = storyThumbnailLinker.linkFor(request.genres),
                 // 업로드 표지는 생성 표지와 같은 컬럼을 쓴다 — 노출 폴백 규칙(§4-3-9)이 그대로 적용된다.
                 thumbnailImageUrl = thumbnailImageUrl,
                 // 등록 = 발행(초안 개념 없음). 공개 범위는 요청 선택값(기본 PRIVATE).

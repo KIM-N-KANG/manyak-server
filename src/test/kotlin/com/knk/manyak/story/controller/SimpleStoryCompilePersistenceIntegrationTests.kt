@@ -71,7 +71,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-// 프리셋 폴백 URL을 결정적으로 만든다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
+// 기존 프리셋 URL의 호스트를 고정한다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
 // 다르게 둬 어느 경로를 탔는지 어서션만 보고도 구분된다.
 @TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.preset.test"])
 class SimpleStoryCompilePersistenceIntegrationTests {
@@ -730,7 +730,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             contentType = "image/webp",
         )
         val storyline = persistStorylineWithGenre("로맨스")
-        // 프리셋도 붙는 상태로 둔다 — 생성 표지가 프리셋을 이기는지까지 와이어로 본다.
+        // 카탈로그에 프리셋이 있어도 새 스토리에는 연결하지 않는다.
         seedThumbnailPreset("로맨스", "thumb_0001")
 
         postSimpleStory(storyline).expectStatus().isCreated
@@ -743,8 +743,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(thumbnailUpload.second).isEqualTo("image/webp")
         assertThat(thumbnailUpload.third).isEqualTo(WEBP_BYTE_LENGTH)
         assertThat(story.thumbnailImageUrl).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
-        // 프리셋 연결은 생성 성공이어도 그대로 남는다(생성 URL이 비면 자동으로 여기로 떨어져야 한다).
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
+        // 생성 성공 여부와 관계없이 새 스토리의 프리셋 키는 비어 있다.
+        assertThat(story.thumbnailImageKey).isNull()
 
         // 상세 응답의 thumbnailUrl은 프리셋이 아니라 생성 표지를 가리킨다.
         assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
@@ -753,7 +753,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
-    fun `표지 생성이 실패하면 URL 없이 저장하고 프리셋 경로에 남는다`() {
+    fun `표지 생성이 실패하면 키와 URL 없이 저장하고 표지는 null이다`() {
         // 에러 코드가 있으면 base64가 함께 와도 실패로 본다(인물 이미지와 같은 원칙).
         thumbnailImage = AiThumbnailImage(
             imageName = "썸네일_기본",
@@ -769,10 +769,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val story = storyRepository.findAll().first()
         assertThat(story.thumbnailImageUrl).isNull()
         assertThat(uploads).isEmpty()
-        // 프리셋 자동 연결은 그대로 살아 있고, 노출도 프리셋 URL로 떨어진다.
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
-        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
-        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+        // 생성 실패 시 표지는 null이다.
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
     }
 
     @Test
@@ -787,9 +787,25 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val story = storyRepository.findAll().first()
         assertThat(story.thumbnailImageUrl).isNull()
         assertThat(uploads).isEmpty()
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
-        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
-        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
+    }
+
+    @Test
+    fun `표지 업로드가 실패해도 스토리는 생성되고 키와 URL은 null이다`() {
+        thumbnailImage = AiThumbnailImage(imageName = "썸네일", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        uploadFailureKeyMarker = FAIL_ALL_UPLOADS
+        val storyline = persistStorylineWithGenre("로맨스")
+        seedThumbnailPreset("로맨스", "thumb_0001")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
     }
 
     @Test
@@ -809,10 +825,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(deletes).containsExactly(uploads.single().first)
     }
 
-    /**
-     * 장르에 맞는 프리셋 표지를 **1장만** 심어 랜덤 선택을 결정적으로 만든다(자동 연결 규칙 자체는
-     * StoryThumbnailLinkerIntegrationTests가 덮는다). 장르 태그는 [persistStorylineWithGenre]가 만든 것을 쓴다.
-     */
+    /** 카탈로그에 프리셋이 있어도 연결하지 않는지 확인하기 위한 후보를 만든다. */
     private fun seedThumbnailPreset(genre: String, imageKey: String): ImagePreset {
         val genreTag = tagRepository.findAll()
             .first { it.category == SimpleStoryTagCategory.GENRE && it.name == genre }

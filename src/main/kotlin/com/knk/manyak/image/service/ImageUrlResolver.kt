@@ -38,9 +38,8 @@ class ImageUrlResolver(
     /**
      * 상세용 표지 URL. 컴파일이 생성한 표지가 있으면 그것을, 없으면 프리셋 키로 조합한 URL을 쓴다(KNK-1069).
      *
-     * **2단 폴백을 여기 한 곳에만 둔다.** 생성 성공이어도 프리셋 연결(`thumbnail_image_key`)은 지우지 않으므로
-     * 두 값이 함께 존재하는 게 정상이고, 어느 쪽을 보여줄지 판정은 호출부마다 흩어지면 곧 어긋난다.
-     * 공백 문자열은 값이 없는 것으로 본다(빈 URL이 저장돼도 프리셋으로 떨어지게).
+     * **2단 폴백을 여기 한 곳에만 둔다.** 기존 스토리의 프리셋 키는 계속 노출에 사용한다.
+     * 새 스토리는 프리셋 키가 없으므로 URL도 없으면 null이다. 공백 문자열도 값이 없는 것으로 본다.
      */
     fun thumbnailUrlFor(generatedUrl: String?, imageKey: String?): String? =
         generatedUrl?.takeIf { it.isNotBlank() } ?: urlFor(imageKey, ImagePresetType.THUMBNAIL)
@@ -56,7 +55,7 @@ class ImageUrlResolver(
 
     /**
      * **공개 노출용** 표지 URL(KNK-1126 검수 게이트). 업로드·생성 표지는 [ImageModeration.isVisible]을 통과할
-     * 때만 쓰고, 아니면 프리셋으로 떨어진다 — 검수에 걸린 이미지가 상세·목록·채팅 카드에 나가지 않게 한다.
+     * 때만 쓰고, 아니면 기존 프리셋 키를 사용한다. 키도 없으면 null이다.
      *
      * 소유자의 편집 폼은 이 게이트를 쓰지 않는다([thumbnailUrlFor]) — 본인이 올린 이미지는 상태와 함께
      * 그대로 보여야 무엇이 걸렸는지 알 수 있다.

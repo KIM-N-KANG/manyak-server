@@ -320,9 +320,9 @@ class StorySearchControllerIntegrationTests {
     }
 
     @Test
-    fun `표지 삭제는 검색 카드도 프리셋 폴백으로 갱신한다`() {
+    fun `표지 삭제는 검색 카드도 null로 갱신한다`() {
         val user = users.save(User(nickname = "표지검색작가", status = UserStatus.ACTIVE))
-        val story = stories.save(Story(userId = user.id, title = "표지", thumbnailImageUrl = "https://example.com/cover.webp"))
+        val story = stories.save(Story(userId = user.id, title = "표지", thumbnailImageKey = "thumb_0001", thumbnailImageUrl = "https://example.com/cover.webp"))
         storyImages.deleteThumbnail(story.publicId.toString(), user.id)
         indexed(story.id)
         assertNull(reader.read(story.id)!!.thumbnailUrlSm)

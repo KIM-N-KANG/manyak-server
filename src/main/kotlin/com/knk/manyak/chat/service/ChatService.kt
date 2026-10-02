@@ -267,8 +267,8 @@ class ChatService(
                 storyTitle = (if (showsCurrent) story.title else snapshot?.title).orEmpty(),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
                 // 생성 표지(KNK-1069)와 프리셋 키의 2단 폴백은 ImageUrlResolver가 소유한다.
-                // 읽을 수 없으면 **둘 다** 마지막 공개 버전 스냅샷에서 읽는다 — 스냅샷이 URL까지 담으므로
-                // 비공개로 되돌린 스토리의 카드가 프리셋 표지로 내려앉지 않는다(KNK-1069가 수용했던 화면 열화).
+                // 읽을 수 없으면 URL과 기존 프리셋 키를 마지막 공개 버전 스냅샷에서 읽는다.
+                // 비공개로 되돌린 스토리도 마지막 공개 당시의 표지를 유지하며, 둘 다 없으면 null이다.
                 thumbnailUrlSm = if (showsCurrent) {
                     imageUrlResolver.visibleThumbnailSmUrlFor(
                         story.thumbnailImageUrl,

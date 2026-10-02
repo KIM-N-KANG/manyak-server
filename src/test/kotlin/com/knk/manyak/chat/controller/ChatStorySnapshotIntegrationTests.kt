@@ -245,9 +245,8 @@ class ChatStorySnapshotIntegrationTests {
     /**
      * 비공개로 되돌린 뒤 썸네일 키까지 갈아끼운다.
      *
-     * `Story.thumbnailImageKey`는 등록 시 1회 확정되는 `val`이라 앱에서 바꿀 경로가 없다(스펙 §4-3-9).
-     * 그래서 컬럼을 직접 갱신해 "스토리 쪽 값이 달라진 상태"를 만든다 — 응답이 스토리 컬럼이 아니라
-     * 채팅 스냅샷을 읽고 있는지 가리는 게 목적이라, 값이 달라지기만 하면 검증은 성립한다.
+     * 컬럼을 직접 갱신해 스토리 쪽 값만 달라진 상태를 만든다.
+     * 응답이 현재 스토리 대신 공개 스냅샷을 읽는지 확인한다.
      */
     private fun hideStoryAndSwapThumbnail(story: Story, thumbnailKey: String) {
         hideAndRename(story, "바뀐 제목")

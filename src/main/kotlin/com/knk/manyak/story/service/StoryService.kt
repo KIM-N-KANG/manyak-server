@@ -234,7 +234,7 @@ class StoryService(
         return StoryDetailResponse(
             id = story.publicId.toString(),
             // 생성 표지가 있으면 그것을, 없으면 프리셋 키로 조합한다(2단 폴백은 리졸버 소유, KNK-1069).
-            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 프리셋으로 떨어진다.
+            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 기존 프리셋 키를 사용하고 키도 없으면 null이다.
             thumbnailUrl = imageUrlResolver.visibleThumbnailUrlFor(
                 story.thumbnailImageUrl,
                 story.thumbnailImageKey,
