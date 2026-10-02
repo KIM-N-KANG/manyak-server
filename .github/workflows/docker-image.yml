@@ -407,67 +407,51 @@ jobs:
           done
           [ "$STATE" = "COMPLETED" ]
 
-      # server 가 healthy 여도 ai 는 죽어 있을 수 있다 — ai 컨테이너는 essential=false 라
-      # 태스크를 죽이지 않고, ALB 헬스는 server 만 본다. 그래서 컨테이너 단위로 따로 확인한다.
-      - name: Verify container health (server·ai)
+      # server는 태스크마다 필수이며, 전환 중 남아 있는 ai 사이드카도 HEALTHY여야 한다.
+      # 사이드카 제거 후에는 ai 검사를 생략한다. log_router의 UNKNOWN은 검사하지 않는다.
+      - name: Verify container health (server, ai if present)
         if: steps.image.outputs.exists == 'true'
         run: |
-          # 단발 검사는 안 된다. 배포 완료 시점에도 ai 는 아직 UNKNOWN 일 수 있다 —
-          # 태스크 헬스체크에 start period 와 재시도가 있고, ai 는 essential=false 라
-          # 배포 완료 판정이 ai 의 healthy 를 기다려 주지 않는다.
-          # 문자열 부분일치를 쓰지 않는다 — UNHEALTHY 도 "HEALTHY" 로 끝나서 비정상을 정상으로 오판한다.
-          # 검사 대상은 healthCheck 가 정의된 server·ai 로 한정한다. 운영 태스크에는 로그 사이드카
-          # log_router(aws-for-fluent-bit)가 있는데 healthCheck 가 없어 healthStatus 가 영원히
-          # UNKNOWN 이다 — 전 컨테이너를 검사하면 매 배포가 여기서 타임아웃한다.
-          # 검사 대상은 이번 배포가 띄운 태스크로 한정한다. 서비스 태스크의 startedBy 는
-          # update-service 가 돌려준 배포 id(ecs-svc/...)와 같은 값이다(운영·개발 서비스에서 실측 확인).
-          # ListTasks 는 --started-by 를 다른 필터와 함께 쓸 수 없어(InvalidParameterException)
-          # --service-name 은 넣지 않는다. 배포 id 가 유일하므로 클러스터 범위로 충분하다.
-          # taskArns[0] 한 개만 보면 desiredCount 가 2 이상일 때 나머지를 놓치고,
-          # 드레이닝 중인 옛 배포의 태스크를 잘못 볼 수도 있다.
+          # describe-tasks 응답 하나로 태스크별 server 존재와 검사 대상의 상태를 집계한다.
+          container_health_counts() {
+            jq -er '
+              .tasks as $tasks
+              | [$tasks[].containers[] | select(.name == "server" or .name == "ai")] as $targets
+              | [($tasks | length),
+                 ([$tasks[] | select(([.containers[] | select(.name == "server")] | length) != 1)] | length),
+                 ($targets | length),
+                 ([$targets[] | select(.healthStatus != "HEALTHY" or .lastStatus != "RUNNING")] | length),
+                 ([$targets[] | select(.healthStatus == "UNHEALTHY" or .lastStatus == "STOPPED")] | length),
+                 ((.failures // []) | length)] | @tsv'
+          }
+          # 이번 deployment ID의 모든 태스크를 검사한다. ListTasks의 started-by는 다른 필터와 함께 쓰지 않는다.
           for i in $(seq 1 20); do
             TASKS=$(aws ecs list-tasks --cluster "$ECS_CLUSTER" --started-by "$DEPLOY_ID" \
               --query 'taskArns[]' --output text)
-            # 배포 COMPLETED 직후 목록이 잠깐 비어 오는 경우가 있어 즉시 실패시키지 않는다.
-            # 계속 비면 아래 루프 타임아웃에서 실패한다.
             if [ -z "$TASKS" ]; then
               echo "배포 $DEPLOY_ID 의 태스크 목록이 아직 비어 있습니다 — 재시도 $i/20 (15s)"; sleep 15; continue
             fi
-            aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks $TASKS \
-              --query 'tasks[].containers[].{task:taskArn,name:name,status:lastStatus,health:healthStatus}' --output table
-            # 대상 컨테이너를 이름별로 따로 세어 태스크 수와 정확히 일치하는지 본다.
-            # 합계만 보거나 0 인지만 보면, 태스크 정의에서 한쪽이 빠져도 남은 쪽 개수로 통과한다.
-            # 기대값: 태스크마다 server 1개 + ai 1개.
-            read -r TASK_COUNT SERVER_COUNT AI_COUNT <<< "$(aws ecs describe-tasks \
-              --cluster "$ECS_CLUSTER" --tasks $TASKS \
-              --query "[length(tasks), length(tasks[].containers[?name=='server'][]), length(tasks[].containers[?name=='ai'][])]" \
-              --output text)"
-            if [ "$SERVER_COUNT" != "$TASK_COUNT" ] || [ "$AI_COUNT" != "$TASK_COUNT" ]; then
-              echo "::error::태스크 $TASK_COUNT 개인데 server=$SERVER_COUNT ai=$AI_COUNT 입니다 — 컨테이너 누락 또는 이름 변경. 태스크 정의 확인"
+            TASK_JSON=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks $TASKS --output json)
+            echo "$TASK_JSON" | jq '.tasks[] | {taskArn, containers: [.containers[] | {name, lastStatus, healthStatus}]}'
+            COUNTS=$(container_health_counts <<< "$TASK_JSON")
+            read -r TASK_COUNT INVALID_SERVER TARGETS PENDING BAD FAILURES <<< "$COUNTS"
+            if [ "$INVALID_SERVER" != "0" ] || [ "$FAILURES" != "0" ]; then
+              echo "::error::태스크별 server 1개 조건 또는 태스크 조회 실패 — 태스크 정의와 describe-tasks 응답 확인"
               exit 1
             fi
-            TARGETS=$((SERVER_COUNT + AI_COUNT))
-            # 서비스의 desiredCount 와 대조한다. 일부 태스크만 떠 있는 순간에 통과하지 않도록.
+            if [ "$BAD" != "0" ]; then
+              echo "::error::server 또는 존재하는 ai가 UNHEALTHY 또는 STOPPED입니다 — CloudWatch /ecs/manyak-prod 로그 확인"
+              exit 1
+            fi
             DESIRED=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
               --query 'services[0].desiredCount' --output text)
-            PENDING=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks $TASKS \
-              --query "length(tasks[].containers[?(name=='server' || name=='ai') && healthStatus!='HEALTHY'][])" --output text)
-            if [ "$PENDING" = "0" ]; then
-              if [ "$TASK_COUNT" = "$DESIRED" ]; then
-                echo "✅ 전 태스크의 server·ai 전부 HEALTHY (태스크 $TASK_COUNT/$DESIRED, 대상 $TARGETS 개)"; exit 0
-              fi
-              # 헬스는 통과했지만 태스크 수가 아직 desired 에 못 미친다(교체 중일 수 있다) — 재시도.
-              echo "헬스 통과, 태스크 $TASK_COUNT/$DESIRED — 나머지 태스크 대기 $i/20 (15s)"; sleep 15; continue
+            if [ "$TASK_COUNT" -gt 0 ] && [ "$TASK_COUNT" = "$DESIRED" ] && [ "$PENDING" = "0" ]; then
+              echo "✅ 전 태스크의 server와 존재하는 ai가 HEALTHY (태스크 $TASK_COUNT/$DESIRED, 대상 $TARGETS 개)"; exit 0
             fi
-            BAD=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks $TASKS \
-              --query "length(tasks[].containers[?(name=='server' || name=='ai') && (healthStatus=='UNHEALTHY' || lastStatus=='STOPPED')][])" --output text)
-            if [ "$BAD" != "0" ]; then
-              echo "::error::UNHEALTHY 또는 STOPPED 컨테이너가 있습니다 — CloudWatch /ecs/manyak-prod 로그 확인"
-              exit 1
-            fi
-            echo "컨테이너 기동 대기 $i/20 (15s)..."; sleep 15
+            # UNKNOWN, 아직 기동 중인 컨테이너, desiredCount 미달은 기존처럼 제한 시간까지 기다린다.
+            echo "컨테이너 기동 대기 $i/20 (태스크 $TASK_COUNT/$DESIRED, 대기 대상 $PENDING 개)..."; sleep 15
           done
-          echo "::error::제한 시간 안에 server·ai 가 HEALTHY 가 되지 않았습니다 — CloudWatch /ecs/manyak-prod 로그 확인"; exit 1
+          echo "::error::제한 시간 안에 server와 존재하는 ai의 HEALTHY를 확인하지 못했습니다 — CloudWatch /ecs/manyak-prod 로그 확인"; exit 1
 
       - name: Smoke test (/actuator/health)
         if: steps.image.outputs.exists == 'true'
