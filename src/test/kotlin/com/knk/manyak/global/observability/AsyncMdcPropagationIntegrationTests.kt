@@ -14,13 +14,9 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * `@Async` 기본 실행기의 MDC 전파(KNK-1375).
+ * 푸시 전용 실행기의 MDC 전파와 상관 식별자가 없는 작업의 컨텍스트를 검증한다(KNK-1375).
  *
- * [MdcTaskDecorator]는 오래전부터 있었지만 `chatSseExecutor`에만 수동으로 붙어 있었다. 실행기를 지정하지 않은
- * `@Async`(스토리 완성 푸시 리스너 등)는 Boot가 자동 구성한 `applicationTaskExecutor`에서 도는데, 여기에는
- * decorator가 없어 워커 스레드의 MDC가 비었다. 그래서 그 스레드에서 만든 다운스트림 호출은 상관 헤더를
- * 실어 보내지 못했고, 서버와 알림 서비스 로그를 같은 요청으로 묶을 수 없었다.
- *
+ * 기본 `@Async` 실행기 선택은 FeedbackAsyncExecutorIntegrationTests에서 실제 리스너 경로로 검증한다.
  * 컨텍스트를 새로 띄우지 않으려고 가장 흔한 `@SpringBootTest` 형태를 그대로 쓴다(캐시 재사용).
  */
 @ActiveProfiles("test")
