@@ -2,18 +2,19 @@
 ### 공개 스토리 목록(Public Story List) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ### 위에서부터 순서대로 실행하면 회원 소유 공개 스토리를 둘 만든 뒤 최신순 조회 → 커서로 다음 페이지 →
-### 좋아요순·채팅순·오리지널 필터 조회 → 에러 케이스(filter·sort·limit·cursor)를 확인합니다.
+### 인기순·좋아요순·채팅순·오리지널 필터 조회 → 에러 케이스(filter·sort·limit·cursor)를 확인합니다.
 ###
 ### [KNK-149·KNK-1398] GET /api/v1/stories — 발행(PUBLISHED)·공개(PUBLIC)·미삭제·회원 소유 스토리만.
 ###   - 인증 불필요(요청자 신원을 쓰지 않습니다). 게스트 제작 스토리(소유자 없음)는 제외합니다.
 ###   - filter=all(기본) | original(마냑 공식 계정 소유만). 그 외 값은 400.
 ###     공식 계정(manyak.official-user-public-id) 미설정 환경에서 original은 빈 페이지입니다.
-###   - sort=latest(기본, 등록 최신순) | likes(좋아요 많은 순) | chats(누적 턴 수 많은 순). 그 외 값은 400.
-###     likes는 옛 이름 popular를 개명한 것이고 별칭이 없어 popular는 400입니다(KNK-1398).
+###   - sort=popular(기본, 인기순) | latest(등록 최신순) | likes(좋아요 많은 순) | chats(누적 턴 수 많은 순). 그 외 값은 400.
+###     인기 점수는 좋아요 수 × 서버 내부 가중치(현재 10) + 누적 턴 수입니다. 응답에 점수는 싣지 않습니다.
+###     인기순 커서 접두는 s이고 옛 p 커서는 400입니다(KNK-1489).
 ###   - limit 기본 20, 1~50으로 보정(0·100 같은 값은 400이 아니라 보정). 숫자가 아니면 400.
 ###   - 응답은 { items: [스토리 카드], nextCursor: string|null }. 다음 페이지는 nextCursor를 **같은 filter·sort로** 넘깁니다.
 ###     filter는 커서에 싣지 않으므로 다음 페이지 요청에 다시 붙여야 합니다.
-###   - 커서는 keyset(정렬값 + public_id)이라 페이지 사이에 중복·누락이 없습니다. 형식이 깨졌거나
+###   - 커서는 keyset(정렬값 + public_id)입니다. 요청 사이에 집계나 가중치가 바뀌면 중복·누락이 생길 수 있습니다. 형식이 깨졌거나
 ###     정렬이 다른 커서는 400입니다(최신순 커서를 likes에 넣으면 400).
 ###
 ### 사전 준비:
@@ -23,7 +24,7 @@
 ###     **회원 토큰이 필요합니다** — 익명으로 만든 스토리는 소유자가 없어 이 목록에 나오지 않습니다.
 ###   - 목록은 DB 전체를 봅니다. 다른 공개 스토리가 이미 있으면 "정확히 N건" 대신 순서·포함 여부를 확인하세요.
 ###
-### 실행 순서: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 6-1 → 6-2 → 7 → 7-1 → 7-2 → 8 → 9 → 9-1. 10·11은 자유 조회.
+### 실행 순서: 0 → 1 → 2 → 3 → 4 → 5 → 5-1 → 5-2 → 5-3 → 6 → 6-1 → 6-2 → 7 → 7-1 → 7-2 → 8 → 9 → 9-2 → 9-3 → 9-1. 10·11은 자유 조회.
 
 @baseUrl = http://localhost:8080
 
@@ -145,7 +146,7 @@ Authorization: Bearer {{accessToken}}
 %}
 
 ### 3. (핵심 검증) 인증 없이 최신순 첫 페이지 → 200, B가 A보다 앞
-GET {{baseUrl}}/api/v1/stories
+GET {{baseUrl}}/api/v1/stories?sort=latest
 Accept: application/json
 
 > {%
@@ -185,7 +186,7 @@ Accept: application/json
 %}
 
 ### 4. (커서) limit=1 로 첫 페이지 → nextCursor 를 전역에 저장
-GET {{baseUrl}}/api/v1/stories?limit=1
+GET {{baseUrl}}/api/v1/stories?sort=latest&limit=1
 Accept: application/json
 
 > {%
@@ -201,7 +202,7 @@ Accept: application/json
 %}
 
 ### 5. (커서) 저장한 커서로 다음 페이지 → 첫 페이지 항목이 다시 나오지 않는다
-GET {{baseUrl}}/api/v1/stories?limit=1&cursor={{latestCursor}}
+GET {{baseUrl}}/api/v1/stories?sort=latest&limit=1&cursor={{latestCursor}}
 Accept: application/json
 
 > {%
@@ -212,6 +213,46 @@ Accept: application/json
         const ids = response.body.items.map(it => it.id);
         client.assert(ids.indexOf(client.global.get("firstPageId")) < 0,
             `첫 페이지 항목이 다시 나왔습니다. ids=${ids.join(",")}`);
+    });
+%}
+
+### 5-1. (기본값) sort 생략 시 인기순 첫 페이지
+GET {{baseUrl}}/api/v1/stories?limit=1
+Accept: application/json
+
+> {%
+    client.test("기본 정렬 조회가 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("defaultPopularId", response.body.items[0].id);
+%}
+
+### 5-2. (정렬) 명시적 인기순과 기본 정렬 비교, 커서 저장
+# 요청 사이 좋아요·턴이 변하지 않는 상태에서 실행하세요. 가중치는 서버 내부 값입니다.
+GET {{baseUrl}}/api/v1/stories?sort=popular&limit=1
+Accept: application/json
+
+> {%
+    client.test("popular가 기본 정렬이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.items[0].id === client.global.get("defaultPopularId"),
+            `기본 정렬과 다릅니다. actual=${response.body.items[0].id}`);
+        client.assert(typeof response.body.nextCursor === "string",
+            `다음 페이지 커서가 없습니다. actual=${response.body.nextCursor}`);
+    });
+    client.global.set("popularCursor", response.body.nextCursor);
+    client.global.set("popularFirstId", response.body.items[0].id);
+%}
+
+### 5-3. (커서) 인기순 다음 페이지
+GET {{baseUrl}}/api/v1/stories?sort=popular&limit=1&cursor={{popularCursor}}
+Accept: application/json
+
+> {%
+    client.test("인기순 다음 페이지에 중복이 없다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.items.every(it => it.id !== client.global.get("popularFirstId")),
+            `첫 페이지 항목이 다시 나왔습니다. actual=${JSON.stringify(response.body.items)}`);
     });
 %}
 
@@ -252,7 +293,7 @@ Accept: application/json
 ### 6-2. (필터) 오리지널만 조회 → 200
 # 공식 계정이 설정된 환경에서는 그 계정 소유 스토리만, 미설정 환경에서는 빈 페이지입니다.
 # 위에서 만든 검증 스토리는 공식 계정 소유가 아니므로 여기에 나오면 안 됩니다.
-GET {{baseUrl}}/api/v1/stories?filter=original&limit=20
+GET {{baseUrl}}/api/v1/stories?filter=original&sort=popular&limit=20
 Accept: application/json
 
 > {%
@@ -281,14 +322,16 @@ Accept: application/json
     });
 %}
 
-### 7-1. (에러) 개명 전 이름 popular → 400
-# likes로 개명하면서 별칭을 두지 않았습니다(KNK-1398). 옛 이름은 조용히 받지 않고 거부합니다.
-GET {{baseUrl}}/api/v1/stories?sort=popular
+### 7-1. (에러) 옛 p 접두 커서 → 400
+# Base64URL("p:20:11111111-2222-3333-4444-555555555555")
+GET {{baseUrl}}/api/v1/stories?sort=popular&cursor=cDoyMDoxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTU
 Accept: application/json
 
 > {%
-    client.test("popular는 더 이상 받지 않는다", () => {
+    client.test("옛 p 커서는 400이다", () => {
         client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "커서가 올바르지 않습니다.",
+            `커서 오류 메시지가 다릅니다. actual=${response.body.message}`);
     });
 %}
 
@@ -320,6 +363,30 @@ Accept: application/json
 > {%
     client.test("다른 정렬의 커서는 400이다", () => {
         client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 9-2. (에러) 인기순 커서를 최신순에 사용 → 400
+GET {{baseUrl}}/api/v1/stories?sort=latest&cursor={{popularCursor}}
+Accept: application/json
+
+> {%
+    client.test("인기순 커서는 최신순에서 거부한다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "커서가 올바르지 않습니다.",
+            `커서 오류 메시지가 다릅니다. actual=${response.body.message}`);
+    });
+%}
+
+### 9-3. (에러) 최신순 커서를 인기순에 사용 → 400
+GET {{baseUrl}}/api/v1/stories?sort=popular&cursor={{latestCursor}}
+Accept: application/json
+
+> {%
+    client.test("최신순 커서는 인기순에서 거부한다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.message === "커서가 올바르지 않습니다.",
+            `커서 오류 메시지가 다릅니다. actual=${response.body.message}`);
     });
 %}
 
