@@ -9,16 +9,20 @@ import java.util.UUID
  * 공개 스토리 목록 정렬(KNK-149, KNK-1398). [prefix]는 커서에 박아 정렬이 다른 커서를 섞어 쓰는 것을 막는다 —
  * 좋아요 정렬 커서의 "정렬값"은 좋아요 수라 최신 정렬에 그대로 넣으면 엉뚱한 시각으로 해석된다.
  *
- * [LIKES]는 옛 이름 `popular`를 개명한 것이고 **별칭을 두지 않는다**(접두도 `p`에서 `k`로 바뀐다).
- * 옛 이름을 조용히 받아 주면 클라이언트 전환이 끝났는지 알 수 없다.
+ * [POPULAR]는 좋아요 수와 누적 턴 수를 합산한 인기순이다(KNK-1489).
+ * 옛 좋아요 기반 인기순의 `p` 커서와 혼동하지 않도록 접두 `s`를 쓴다.
  */
 enum class StoryListSort(val parameter: String, val prefix: String) {
+    POPULAR("popular", "s"),
     LATEST("latest", "l"),
     LIKES("likes", "k"),
     CHATS("chats", "c"),
     ;
 
     companion object {
+        // 정렬 JPQL과 카드 기반 커서 계산에서 같은 가중치를 공유한다.
+        const val POPULAR_LIKE_WEIGHT = 10L
+
         fun from(value: String): StoryListSort =
             entries.firstOrNull { it.parameter == value }
                 ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬입니다: $value")
@@ -49,11 +53,12 @@ enum class StoryListFilter(val parameter: String) {
  * 2차 키가 내부 PK가 아니라 `public_id`인 이유는 외부 노출 식별자 규칙 때문이다(순차 PK를 API에 실으면 IDOR).
  * UUID는 랜덤이지만 안정적이라 동률 구간의 순서를 결정적으로 만든다.
  *
- * 1차 키 값([sortValue])은 정렬별로 뜻이 다르다 — 최신순은 `createdAt`의 **epoch nanos**, 좋아요순은 좋아요 수,
- * 채팅순은 누적 턴 수다.
+ * 1차 키 값([sortValue])은 인기순은 인기 점수, 최신순은 `createdAt`의 **epoch nanos**,
+ * 좋아요순은 좋아요 수, 채팅순은 누적 턴 수다.
  * millis가 아니라 nanos인 이유는 PostgreSQL `timestamptz`가 마이크로초까지 담기 때문이다. 밀리초로 자르면
  * 같은 밀리초 안의 뒤쪽 행이 `createdAt < 커서`에도 `= 커서`에도 걸리지 않아 페이지 경계에서 통째로 사라진다.
- * offset이 아니라 keyset이라 페이지 사이에 행이 끼어들어도 중복·누락이 없다.
+ * 정렬값이 유지되면 keyset은 페이지 사이에 행이 끼어들어도 중복·누락이 없다.
+ * 집계 정렬은 요청 사이에 집계값이 바뀌면 중복·누락이 생길 수 있다.
  */
 data class StoryListCursor(
     val sortValue: Long,

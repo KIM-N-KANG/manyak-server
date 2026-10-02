@@ -32,6 +32,7 @@ import com.knk.manyak.story.repository.StoryReportRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
@@ -121,11 +122,11 @@ class StoryService(
      * 소유자 조건은 커서에 싣지 않으므로 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
      *
      * 격리 수준이 REPEATABLE_READ인 이유는 **정렬 집계와 커서값의 출처를 같은 스냅샷으로 묶기** 위해서다.
-     * `likes`·`chats`는 1차 키가 컬럼이 아니라 집계라 정렬 쿼리가 한 번, 카드 매핑의 배치 집계가 또 한 번
+     * `popular`·`likes`·`chats`는 1차 키가 컬럼이 아니라 집계라 정렬 쿼리가 한 번, 카드 매핑의 배치 집계가 또 한 번
      * 센다. READ_COMMITTED는 문장마다 스냅샷을 새로 떠서, 그 사이에 좋아요나 턴이 커밋되면 커서에 실리는
      * 값이 정렬에 쓰인 값과 어긋나고 다음 페이지에 같은 스토리가 다시 나온다. PostgreSQL의 REPEATABLE_READ는
      * 트랜잭션 첫 문장 시점 스냅샷을 이후 문장이 공유하므로 두 집계가 같은 값을 본다. 읽기 전용이라
-     * 직렬화 실패로 재시도할 일도 없다. 집계를 정렬 쿼리에서 함께 꺼내 오는 프로젝션 방식은 JPQL 6개를
+     * 직렬화 실패로 재시도할 일도 없다. 집계를 정렬 쿼리에서 함께 꺼내 오는 프로젝션 방식은 JPQL 8개를
      * 전부 DTO 프로젝션으로 바꿔야 해서 택하지 않았다.
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -145,6 +146,12 @@ class StoryService(
         // 다음 페이지 유무 판정용으로 한 건 더 읽는다. 응답에는 limit개까지만 싣는다.
         val pageable = PageRequest.of(0, limit + 1)
         val fetched = when (sort) {
+            StoryListSort.POPULAR ->
+                if (cursor == null) {
+                    storyRepository.findPublicPopular(ownerId, pageable)
+                } else {
+                    storyRepository.findPublicPopularAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
+                }
             StoryListSort.LATEST ->
                 if (cursor == null) {
                     storyRepository.findPublicLatest(ownerId, pageable)
@@ -171,6 +178,7 @@ class StoryService(
             val sortValue = when (sort) {
                 StoryListSort.LATEST -> epochNanosOf(last.createdAt)
                 // 커서 값은 방금 매핑한 카드의 집계를 재사용한다(배치 집계라 추가 조회가 없다).
+                StoryListSort.POPULAR -> items.last().likeCount * POPULAR_LIKE_WEIGHT + items.last().turnCount
                 StoryListSort.LIKES -> items.last().likeCount
                 StoryListSort.CHATS -> items.last().turnCount
             }

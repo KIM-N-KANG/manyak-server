@@ -3,6 +3,7 @@ package com.knk.manyak.story.repository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
 import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -101,6 +102,50 @@ interface StoryRepository : JpaRepository<Story, Long> {
     fun findPublicLatestAfter(
         @Param("ownerId") ownerId: Long?,
         @Param("createdAt") createdAt: Instant,
+        @Param("publicId") publicId: UUID,
+        pageable: Pageable,
+    ): List<Story>
+
+    /** 인기순 첫 페이지(KNK-1489). 좋아요 수 가중 합과 미삭제 채팅의 누적 턴 수를 더한다. */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+          AND (:ownerId IS NULL OR s.userId = :ownerId)
+        ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
+                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicPopular(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
+
+    /** 인기순 다음 페이지. 점수가 같은 동률 구간은 `public_id`로 갈라 결정적으로 이어진다. */
+    @Query(
+        """
+        SELECT s FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND s.userId IS NOT NULL
+          AND (:ownerId IS NULL OR s.userId = :ownerId)
+          AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
+                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) < :score
+               OR (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
+                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) = :score
+                   AND s.publicId < :publicId))
+        ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
+                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) DESC, s.publicId DESC
+        """,
+    )
+    fun findPublicPopularAfter(
+        @Param("ownerId") ownerId: Long?,
+        @Param("score") score: Long,
         @Param("publicId") publicId: UUID,
         pageable: Pageable,
     ): List<Story>

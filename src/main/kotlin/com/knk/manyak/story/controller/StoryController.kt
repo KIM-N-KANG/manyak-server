@@ -183,7 +183,7 @@ class StoryController(
     @Operation(
         summary = "공개 스토리 목록 조회",
         description = "발행·공개 상태의 회원 스토리 카드를 커서 페이지네이션으로 반환합니다(KNK-149). 인증은 필요 " +
-            "없고 요청자 신원도 쓰지 않습니다. 정렬은 latest(기본, 등록 최신순)·likes(좋아요 많은 순)·" +
+            "없고 요청자 신원도 쓰지 않습니다. 정렬은 popular(기본, 인기순)·latest(등록 최신순)·likes(좋아요 많은 순)·" +
             "chats(누적 턴 수 많은 순)이고, filter는 all(기본)과 original(마냑 공식 계정 소유만)입니다. " +
             "다음 페이지는 응답의 nextCursor를 **같은 filter·sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·" +
             "초안과 게스트 제작 스토리(소유자 없음)는 제외합니다.",
@@ -206,8 +206,8 @@ class StoryController(
     fun getPublicStories(
         @Parameter(description = "필터. all(기본) 또는 original(마냑 공식 계정 소유만)", example = "all")
         @RequestParam(defaultValue = "all") filter: String,
-        @Parameter(description = "정렬. latest(기본), likes 또는 chats", example = "latest")
-        @RequestParam(defaultValue = "latest") sort: String,
+        @Parameter(description = "정렬. popular(기본), latest, likes 또는 chats", example = "popular")
+        @RequestParam(defaultValue = "popular") sort: String,
         @Parameter(description = "한 페이지 개수(기본 20, 1~50으로 보정)")
         @RequestParam(defaultValue = "$DEFAULT_LIMIT") limit: Int,
         @Parameter(description = "이전 응답의 nextCursor. 첫 페이지는 생략합니다.")
