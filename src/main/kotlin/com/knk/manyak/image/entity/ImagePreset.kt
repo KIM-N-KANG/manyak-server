@@ -24,13 +24,14 @@ enum class ImagePresetType(val prefix: String) {
 }
 
 /**
- * 팀 제작 이미지 카탈로그. 런타임 매칭의 정본이며, 원본 파일명은 시드 매니페스트의 입력일 뿐이다(스펙 §4-3-9).
+ * 팀 제작 이미지 카탈로그. 기존 스토리의 프리셋 키와 계획된 배경 기능을 위해 유지한다(스펙 §4-3-9).
+ * 새 스토리에는 프리셋 표지를 연결하지 않으며, 기존 키의 노출 폴백은 비활성 여부와 무관하다.
  *
  * `imageKey`는 불변이고 이미지 교체는 새 키 발급이다 — 저장된 지난 턴이 언제 봐도 같아야 하기 때문이다.
  * 서빙 URL은 저장하지 않고 [com.knk.manyak.image.service.ImageUrlResolver]가 조합한다.
  *
- * 카탈로그 행은 삭제하지 않는다. 운영 제외는 [deactivatedAt] 기록으로만 하며, 불리언이 아니라 시각인 이유는
- * 지난 턴 `images[]` 재구성이 "그 턴의 확정 시각 시점에 활성이었나"를 판정해야 하기 때문이다(KNK-544).
+ * 카탈로그 행은 삭제하지 않는다. [deactivatedAt]은 계획된 배경 기능의 후보 제외와
+ * 지난 턴 `images[]` 재구성 시 확정 시각 기준 판정에 사용한다(KNK-544). 배경 마커는 아직 구현하지 않았다.
  *
  * 의미 태그 3축의 뜻은 타입마다 다르다: [mood]는 분위기(THUMBNAIL·BACKGROUND) 또는 성격(CHARACTER),
  * [subject]는 장소(THUMBNAIL·BACKGROUND) 또는 성별(CHARACTER), [prop]은 공통으로 소품이다.
