@@ -136,13 +136,13 @@ class StoryService(
         limit: Int,
         rawCursor: String?,
     ): StoryPageResponse {
+        val cursor = rawCursor?.let { StoryListCursor.decode(it, sort) }
         // 공식 계정이 설정되지 않았거나 그 publicId의 회원이 없으면 목록 조회 없이 빈 페이지다.
         val officialId = officialStoryAccount.officialUserId()
         val ownerId = when (filter) {
             StoryListFilter.ALL -> null
             StoryListFilter.ORIGINAL -> officialId ?: return StoryPageResponse(items = emptyList(), nextCursor = null)
         }
-        val cursor = rawCursor?.let { StoryListCursor.decode(it, sort) }
         // 다음 페이지 유무 판정용으로 한 건 더 읽는다. 응답에는 limit개까지만 싣는다.
         val pageable = PageRequest.of(0, limit + 1)
         val fetched = when (sort) {
