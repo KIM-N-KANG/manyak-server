@@ -52,6 +52,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryEditIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
     @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
@@ -368,6 +369,7 @@ class StoryEditIntegrationTests {
         endingName: String,
         accessToken: String? = null,
     ) {
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "$title 장르")
         restTestClient.patch()
             .uri("/api/v1/stories/${story.publicId}")
             .header("Authorization", accessToken?.let { "Bearer $it" } ?: approvals.bearer(story.userId!!))

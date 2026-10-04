@@ -84,8 +84,10 @@ class StoryCreationRequestRecorder(
          * 멱등 replay는 이 지점에 도달하지 않아 재요청으로 다시 불리지 않는다.
          */
         onCompleted: ((T) -> Unit)? = null,
+        // 기존 요청은 소유권·상태 분기가 우선이다. 신규 입력만 삽입과 AI 호출 전에 검사한다.
+        validateNewRequest: (() -> Unit)? = null,
     ): T {
-        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
+        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink, validateNewRequest)
         while (claim is Claim.Replay) {
             try {
                 return objectMapper.readValue(claim.resultJson, responseType)
@@ -178,7 +180,14 @@ class StoryCreationRequestRecorder(
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         parentLink: ParentCreationLink?,
+        validateNewRequest: (() -> Unit)?,
     ): Claim {
+        if (validateNewRequest != null) {
+            if (repository.findByRequestId(requestId) != null) {
+                return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
+            }
+            validateNewRequest()
+        }
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         if (insertedId != null) {
             // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가). 방금 삽입한 체인이 그대로 정본이다.

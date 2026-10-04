@@ -64,6 +64,7 @@ import java.util.concurrent.atomic.AtomicReference
     ],
 )
 class ChatStreamHistoryIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
 
     /** 전달받은 [ChatTurnAiRequest]를 캡처하고 정상 결과를 반환하는 가짜 AI 클라이언트. */
     class CapturingChatTurnAiClient : ChatTurnAiClient {
@@ -143,6 +144,7 @@ class ChatStreamHistoryIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "미스터리")
     }
 
     @Test

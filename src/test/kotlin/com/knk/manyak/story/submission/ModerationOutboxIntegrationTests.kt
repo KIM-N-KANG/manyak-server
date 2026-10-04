@@ -23,6 +23,7 @@ import java.util.concurrent.Executor
 @ActiveProfiles("test")
 @SpringBootTest(properties = ["manyak.push.mode=remote"])
 class ModerationOutboxIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var stories: StoryRepository
@@ -32,7 +33,7 @@ class ModerationOutboxIntegrationTests {
     @MockitoBean(name = "storyModerationExecutor") private lateinit var executor: Executor
     @MockitoBean private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
     @MockitoBean private lateinit var store: PushOutboxStore
-    @BeforeEach fun reset() = cleaner.cleanAll()
+    @BeforeEach fun reset() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
 
     @Autowired private lateinit var events: org.springframework.test.context.event.ApplicationEvents
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper

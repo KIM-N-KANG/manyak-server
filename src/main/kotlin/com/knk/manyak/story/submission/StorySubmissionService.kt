@@ -5,6 +5,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.GenreInputValidator
 import com.knk.manyak.story.service.StoryEditService
 import com.knk.manyak.global.security.SuspensionGuard
 import org.springframework.data.domain.PageRequest
@@ -25,13 +26,15 @@ class StorySubmissionService(
     private val edit: StoryEditService,
     private val mapper: ObjectMapper,
     private val suspension: SuspensionGuard,
+    private val genres: GenreInputValidator,
 ) {
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
         requireMember(userId)
-        val form = forms.create(request, userId)
+        val normalized = request.copy(genres = genres.normalize(request.genres))
+        val form = forms.create(normalized, userId)
         return accept(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
-            payload = mapper.writeValueAsString(request), inputForm = mapper.writeValueAsString(form))))
+            payload = mapper.writeValueAsString(normalized), inputForm = mapper.writeValueAsString(form))))
     }
 
     @Transactional
@@ -47,11 +50,12 @@ class StorySubmissionService(
         val priorImageIds = previous?.let { mapper.readTree(it.inputForm).path("characters").toList()
             .flatMap { character -> character.path("images").toList() }
             .mapNotNull { image -> image.path("id").takeUnless { it.isNull || it.isMissingNode }?.asText() }.toSet() }.orEmpty()
-        val form = forms.update(story, request, userId, allowDeletedImages = previous != null, previousImageIds = priorImageIds)
-        // 재제출에서 삭제된 기존 이미지 참조는 적용 시에도 제외한다. 원문 payload는 그대로 보존한다.
+        val normalized = request.copy(genres = request.genres?.let { genres.normalize(it, story.genre) })
+        val form = forms.update(story, normalized, userId, allowDeletedImages = previous != null, previousImageIds = priorImageIds)
+        // 장르는 제출 시 확정한다. 승인 경로는 이 payload를 다시 검증하지 않는다.
         val submission = previous?.let { submissions.lockById(it.id) } ?: StorySubmission(userId = userId,
-            storyId = story.id, kind = SubmissionKind.UPDATE, payload = mapper.writeValueAsString(request))
-        if (previous != null) submission.resubmit(mapper.writeValueAsString(request))
+            storyId = story.id, kind = SubmissionKind.UPDATE, payload = mapper.writeValueAsString(normalized))
+        if (previous != null) submission.resubmit(mapper.writeValueAsString(normalized))
         submission.inputForm = mapper.writeValueAsString(form)
         return accept(submissions.save(submission))
     }
@@ -62,8 +66,9 @@ class StorySubmissionService(
         val row = owned(id, userId)
         val submission = submissions.lockById(row.id) ?: missing()
         if (submission.kind != SubmissionKind.CREATE || submission.status !in setOf(SubmissionStatus.REJECTED, SubmissionStatus.FAILED)) conflict()
-        val form = forms.create(request, userId)
-        submission.resubmit(mapper.writeValueAsString(request))
+        val normalized = request.copy(genres = genres.normalize(request.genres))
+        val form = forms.create(normalized, userId)
+        submission.resubmit(mapper.writeValueAsString(normalized))
         submission.inputForm = mapper.writeValueAsString(form)
         return accept(submission)
     }

@@ -90,7 +90,8 @@ data class UpdateStoryRequest(
 
     // 보내면 최소 1개. stories.genre(VARCHAR(255)) 결합 저장이라 개수·길이 상한을 둔다(일반 제작과 동일).
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
-    val genres: List<@NotBlank(message = "장르는 비어 있을 수 없습니다.") @Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>? = null,
+    @field:Schema(description = "활성 제공 장르의 정식 이름 또는 이 스토리에 이미 저장된 장르. 생략/null은 유지")
+    val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>? = null,
 
     @field:Valid
     val storySettings: GeneralStorySettingsInput? = null,
@@ -128,7 +129,7 @@ data class UpdateStoryRequest(
     @field:Schema(description = "인물 목록(최대 6명). 생략하면 인물을 바꾸지 않는다.", nullable = true)
     val characters: List<@NotNull GeneralCharacterInput>? = null,
 ) {
-    @jakarta.validation.constraints.AssertTrue(message = "장르는 공백 없이 각 30자 이하여야 합니다.")
+    @jakarta.validation.constraints.AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
     @com.fasterxml.jackson.annotation.JsonIgnore
-    fun isGenresValid(): Boolean = genres?.all { it.isNotBlank() && it.length <= 30 } ?: true
+    fun isGenresValid(): Boolean = genres?.all { it.length <= 30 } ?: true
 }

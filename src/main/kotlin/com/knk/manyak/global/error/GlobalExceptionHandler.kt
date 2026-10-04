@@ -47,6 +47,7 @@ class GlobalExceptionHandler {
                     code = (exception as? CodedResponseStatusException)?.errorCode ?: status.name,
                     message = exception.reason ?: status.reasonPhrase,
                     path = request.requestURI,
+                    details = (exception as? CodedResponseStatusException)?.details.orEmpty(),
                 ),
             )
     }

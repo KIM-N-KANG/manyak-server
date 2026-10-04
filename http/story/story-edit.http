@@ -207,3 +207,46 @@ Content-Type: application/json
 {{descriptionInvalidBody}}
 
 > {% client.test("소개 길이 검증", () => client.assert(response.status === 400, `400 기대, actual=${response.status}`)); %}
+
+
+### 새 미제공 장르 추가 거절 (PENDING 제출본이 없을 때 실행)
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"genres":["BL","새로운미제공장르"]}
+
+> {%
+client.test("PATCH 신규 무효 장르", () => {
+  client.assert(response.status === 400 && response.body.code === "INVALID_GENRE", `actual=${response.status}/${response.body.code}`);
+  client.assert(response.body.details[0].field === "genres[1]", "인덱스 불일치");
+});
+%}
+
+### 기존 라이브 장르 보존 준비
+# createdStoryId를 커스텀 장르가 저장된 본인 스토리로 바꾸면 과거 장르 보존도 확인 가능하다.
+# 최신 제출본이 있으면 폼은 미승인 값을 덧씌우므로 승인 완료 후 실행한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("라이브 폼 준비", () => {
+  client.assert(response.status === 200 && response.body.submission === null, "승인된 라이브 폼 필요");
+  const genres = [...response.body.genres];
+  if (!genres.includes("BL") && genres.length < 8) genres.push("BL");
+  client.global.set("preservedGenresJson", JSON.stringify(genres));
+});
+%}
+
+### 기존 커스텀은 유지하고 새 제공 장르를 추가
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"genres":{{preservedGenresJson}}}
+
+> {% client.test("기존 장르 보존 수정 접수", () => client.assert(response.status === 202, `actual=${response.status}`)); %}
+
+### 자유 조회 (검수 승인 후 장르 확인)
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}

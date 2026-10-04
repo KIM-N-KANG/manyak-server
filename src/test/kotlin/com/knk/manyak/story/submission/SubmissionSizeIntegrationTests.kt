@@ -26,6 +26,7 @@ import tools.jackson.databind.ObjectMapper
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class SubmissionSizeIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
     @Autowired lateinit var rows: StorySubmissionRepository
@@ -39,6 +40,7 @@ class SubmissionSizeIntegrationTests {
     @MockitoBean lateinit var ai: StoryModerationClient
     @BeforeEach fun clean() {
         cleaner.cleanAll()
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")
         `when`(storage.isEnabled()).thenReturn(true)
         `when`(storage.head(anyString())).thenReturn(UploadedObject("image/webp", 5L * 1024 * 1024))
         doAnswer { "https://cdn.test/${it.getArgument<String>(0)}" }.`when`(storage).serveUrlOf(anyString())

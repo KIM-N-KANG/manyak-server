@@ -24,6 +24,7 @@ import java.util.concurrent.Executor
 @ActiveProfiles("test")
 @SpringBootTest
 class SubmissionImageFreezeIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     class Objects : S3Client {
         val bytes = mutableMapOf<String, String>()
         val copies = mutableListOf<Pair<String, String>>()
@@ -59,7 +60,8 @@ class SubmissionImageFreezeIntegrationTests {
     @MockitoBean(name = "storyModerationExecutor") lateinit var executor: Executor
     @MockitoBean lateinit var ai: StoryModerationClient
     @BeforeEach fun clean() {
-        cleaner.cleanAll(); objects.bytes.clear(); objects.copies.clear()
+        cleaner.cleanAll()
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리"); objects.bytes.clear(); objects.copies.clear()
         Mockito.`when`(storage.isEnabled()).thenReturn(true)
         Mockito.doAnswer { call -> s3.head(call.getArgument(0)) }.`when`(storage).head(Mockito.anyString())
         Mockito.doAnswer { call -> s3.serveUrlOf(call.getArgument(0)) }.`when`(storage).serveUrlOf(Mockito.anyString())

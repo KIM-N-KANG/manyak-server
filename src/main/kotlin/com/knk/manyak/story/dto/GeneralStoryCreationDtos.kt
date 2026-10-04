@@ -40,8 +40,8 @@ data class CreateGeneralStoryRequest(
     // 장르는 stories.genre(VARCHAR(255))에 쉼표 결합 저장하므로, 개수·길이 상한으로 컬럼 초과를 막는다.
     // 최대 8개 × 30자 + 구분자 → 최대 254자 ≤ 255. 상한이 없으면 긴 입력이 검증(400)을 통과한 뒤 insert에서 500이 난다.
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
-    @field:Schema(description = "장르 태그 목록(1~8개, 각 30자 이내)", example = "[\"판타지\",\"미스터리\"]")
-    val genres: List<@NotBlank(message = "장르는 비어 있을 수 없습니다.") @Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>,
+    @field:Schema(description = "활성 제공 장르의 정식 이름 목록(1~8개, 각 30자 이내). 검색 별칭은 제출할 수 없습니다.", example = "[\"판타지\",\"미스터리\"]")
+    val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>,
 
     @field:Valid
     @field:NotNull(message = "스토리 설정은 필수입니다.")
@@ -75,9 +75,9 @@ data class CreateGeneralStoryRequest(
     @field:Schema(description = "인물 목록(최대 6명, 선택). 이름은 스토리 안에서 유일하다.")
     val characters: List<@NotNull GeneralCharacterInput> = emptyList(),
 ) {
-    @AssertTrue(message = "장르는 공백 없이 각 30자 이하여야 합니다.")
+    @AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
     @com.fasterxml.jackson.annotation.JsonIgnore
-    fun isGenresValid(): Boolean = genres.all { it.isNotBlank() && it.length <= 30 }
+    fun isGenresValid(): Boolean = genres.all { it.length <= 30 }
 }
 
 /**

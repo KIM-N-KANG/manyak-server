@@ -16,7 +16,7 @@ Content-Type: application/json
 {
   "title": "달빛 아래의 계약",
   "oneLineIntro": "기억을 잃은 마법사의 여정",
-  "genres": ["판타지"],
+  "genres": ["무협", " b l ", "BL"],
   "storySettings": {"worldSetting":"왕국", "characterSetting":"마법사", "userRoleSetting":"추적자", "ruleSetting":"마법에는 대가가 있다"},
   "startSettings": [{"name":"첫날", "prologue":"비가 내린다", "startSituation":"성문 앞", "suggestedInputs":["주변을 본다","문을 연다","말을 건다"], "endings":[]}],
   "characters": [{"name":"세린", "description":"  왕국을 지키는 기사  ", "images":[]}]
@@ -43,6 +43,7 @@ client.test("제출본 복원", () => {
     ["IMAGE_DOWNLOAD_FAILED", "IMAGE_INVALID", "IMAGE_UNREADABLE"].includes(e.errorCode) && !("error_code" in e)), "이미지 오류는 path/errorCode");
   client.assert(!("submission" in response.body.payload), "payload에 응답 전용 submission 없음");
   client.assert(response.body.payload.title === "달빛 아래의 계약", "입력 보존");
+  client.assert(JSON.stringify(response.body.payload.genres) === JSON.stringify(["무협", "BL"]), "장르 정규화와 최초 순서 중복 제거");
 });
 if (response.body.status === "APPROVED") client.global.set("createdStoryId", response.body.storyId);
 %}
@@ -82,7 +83,7 @@ Content-Type: application/json
 {
   "title": "달빛 아래의 계약",
   "oneLineIntro": "기억을 잃은 마법사의 여정",
-  "genres": ["판타지"],
+  "genres": ["무협"],
   "storySettings": {"worldSetting":"왕국", "characterSetting":"마법사", "userRoleSetting":"추적자", "ruleSetting":"마법에는 대가가 있다"},
   "startSettings": [{"name":"첫날", "prologue":"비가 내린다", "startSituation":"성문 앞", "suggestedInputs":["주변을 본다","문을 연다","말을 건다"], "endings":[]}],
   "characters": [{"name":"세린", "images":[]}]
@@ -230,7 +231,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["무협"],
   "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
   "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
   "characters":[{"name":"세린","images":[
@@ -257,7 +258,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["무협"],
   "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
   "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
   "characters":[{"name":"세린","images":[
@@ -274,5 +275,23 @@ Content-Type: application/json
 client.test("검수 요청 전 용량 초과 거절", () => {
   client.assert(response.status === 400, `400 기대, actual=${response.status}`);
   client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
+});
+%}
+
+
+### 장르 별칭과 미제공 이름은 인덱스별 400 (KNK-1537 2단계)
+# 로판은 검색용 별칭이다. 제출할 때는 로맨스판타지를 사용한다.
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"title":"장르 검증","oneLineIntro":"소개","genres":["BL","로판","없는장르"],
+ "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+ "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}]}
+
+> {%
+client.test("무효 장르의 원본 인덱스", () => {
+  client.assert(response.status === 400 && response.body.code === "INVALID_GENRE", `actual=${response.status}/${response.body.code}`);
+  client.assert(JSON.stringify(response.body.details.map(d => d.field)) === JSON.stringify(["genres[1]", "genres[2]"]), "인덱스 불일치");
 });
 %}
