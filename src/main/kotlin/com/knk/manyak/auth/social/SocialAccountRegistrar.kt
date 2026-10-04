@@ -1,5 +1,7 @@
 package com.knk.manyak.auth.social
 
+import com.knk.manyak.user.consent.UserConsentRequest
+import com.knk.manyak.user.consent.UserConsentService
 import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
@@ -28,6 +30,7 @@ class SocialAccountRegistrar(
     private val socialAccountRepository: SocialAccountRepository,
     private val uniqueNicknameIssuer: UniqueNicknameIssuer,
     private val profileImagePresetService: ProfileImagePresetService,
+    private val consentService: UserConsentService,
 ) {
 
     /**
@@ -69,6 +72,39 @@ class SocialAccountRegistrar(
         // 갱신 이후 탈퇴가 커밋됐으면 여기서 DELETED가 보인다. 401이 아니라 null이다 — 그 소셜 신원은
         // 여전히 로그인에 쓸 수 있고(재가입), 바깥이 tombstone claim 재가입 경로로 이어 가면 된다.
         return user.takeIf { it.status != UserStatus.DELETED }
+    }
+
+    /** 동의 대기 판정에서는 last_login_at을 갱신하지 않는다. */
+    @Transactional(readOnly = true)
+    fun findForAuthentication(provider: SocialProvider, info: SocialUserInfo): User? {
+        val social = socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(provider, info.providerUserId)
+            ?: return null
+        return userRepository.findById(social.userId).orElse(null)?.takeIf { it.status != UserStatus.DELETED }
+    }
+
+    @Transactional
+    fun completeExistingAuthentication(provider: SocialProvider, info: SocialUserInfo, request: UserConsentRequest): User? {
+        // 스칼라 owner 조회 뒤 users를 먼저 잠가 탈퇴와 잠금 순서를 맞춘다.
+        val ownerId = socialAccountRepository.findOwnerUserId(provider, info.providerUserId) ?: return null
+        val user = userRepository.findByIdForUpdate(ownerId) ?: return null
+        val social = socialAccountRepository.findByProviderAndProviderUserIdAndDeletedAtIsNull(provider, info.providerUserId)
+            ?: return null
+        if (social.userId != user.id) throw DataIntegrityViolationException("소셜 연동 소유자 경합")
+        if (user.status == UserStatus.DELETED) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        }
+        consentService.recordForAuthentication(user.id, request)
+        socialAccountRepository.touchLastLoginAt(social.id, Instant.now())
+        return user
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    fun createWithConsents(provider: SocialProvider, info: SocialUserInfo, request: UserConsentRequest): User {
+        consentService.validateRequired(null, request)
+        val user = createUserAndAccount(provider, info, Instant.now())
+        // self-invocation은 의도적이다. 계정과 동의를 현재 REQUIRES_NEW 경계 안에서 함께 커밋한다.
+        consentService.recordForAuthentication(user.id, request)
+        return user
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.knk.manyak.global.error
 
+import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.global.observability.ApiRequestLoggingFilter
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
@@ -138,7 +139,15 @@ class GlobalExceptionHandler {
         exception: HttpMessageNotReadableException,
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
-        log.debug("Malformed request body: path={}, message={}", request.requestURI, exception.message)
+        if (request.servletPath.startsWith("/api/v1/auth/")) {
+            // DTO 파싱은 인증 서비스의 보호 구간보다 먼저 실행된다. 파서 메시지에는 토큰 원문이 포함될 수 있다.
+            log.debug(
+                "Malformed request body: path={}, error_type={}, request_id={}",
+                request.servletPath, exception.javaClass.simpleName, MDC.get(MdcKeys.REQUEST_ID),
+            )
+        } else {
+            log.debug("Malformed request body: path={}, message={}", request.requestURI, exception.message)
+        }
         return badRequest(request = request, details = emptyList())
     }
 
