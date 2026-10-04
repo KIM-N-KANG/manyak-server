@@ -54,6 +54,25 @@ Micrometer Timer  →  OtlpMeterRegistry  ──60초──▶  Grafana Cloud OT
 
 **설정 위치는 `application.yml`의 `management.*`** 입니다. 히스토그램 on/off와 버킷 구간이 여기 있고, 이 값이 대시보드 해석에 직접 영향을 줍니다(아래 히스토그램 상한 절).
 
+**여러 서버의 카운터는 인스턴스별로 분리합니다.**
+`management.opentelemetry.resource-attributes.service.instance.id`는 `${random.uuid}`를
+앱 기동 시 한 번 바인딩합니다. 같은 실행에서는 유지되고, 다른 실행·재시작에서는 새 UUID가 됩니다.
+OTLP 수집기가 이를 Prometheus의 `instance` 라벨로 매핑하므로 서버별 누적 카운터가 섞이지 않습니다.
+`service.name`과 기존 `service_name` 필터는 유지합니다. 이 값은 서버 리소스 식별자이며
+사용자·요청 ID를 공통 메트릭 태그에 추가하는 것이 아닙니다.
+
+Spring 설정으로 `service.instance.id`를 명시하면 그 값이 우선합니다. 수동 지정 시에도
+실행 중인 각 프로세스의 값은 서로 달라야 합니다. 모든 태스크에 같은 고정값을 주입하면 충돌이 재발합니다.
+Spring resource 속성은 `OTEL_RESOURCE_ATTRIBUTES`보다 우선하므로 인스턴스 ID를 덮어쓸 때는
+`management.opentelemetry.resource-attributes[service.instance.id]`를 사용합니다.
+
+식별자가 없으면 두 서버의 고정된 누적값 `1`과 `3`이 한 시계열에서 교대로 나타날 수 있습니다.
+Prometheus는 감소를 counter reset으로 보정하므로 실제 새 실패 없이도 `increase(...[10m])`가
+약 30으로 계산됩니다. 알림 임계값이나 재전송 주기를 올려도 이 집계 오류는 해결되지 않습니다.
+수정 후 active series는 실행 중인 인스턴스 수에 따라 늘어나므로 무료 티어 예산 패널도 확인합니다.
+
+배포 후 확인 절차는 [`ALERTS.md`의 인스턴스 분리 검증](./ALERTS.md#인스턴스-분리-배포-검증)을 따릅니다.
+
 **이름이 두 번 바뀝니다.** 코드의 `manyak.ai.call.duration`이 Prometheus 노출에서 `manyak_ai_call_duration_seconds_*`가 되고, OTLP 전송에서는 기본 시간 단위가 달라 **`_milliseconds_*`** 로 도착합니다. 쿼리를 쓸 때 이 차이가 가장 흔한 실수입니다.
 
 ## 왜 이 지표들인가
