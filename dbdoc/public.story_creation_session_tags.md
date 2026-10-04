@@ -64,6 +64,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_60_ normalized_name
+  integer featured_order
 }
 "public.story_creation_characters" {
   bigint id

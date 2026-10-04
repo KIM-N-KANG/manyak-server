@@ -48,6 +48,9 @@ class StoryCreationTag(
     @Column(name = "sort_order", nullable = false)
     val sortOrder: Int = 0,
 
+    @Column(name = "featured_order")
+    val featuredOrder: Int? = null,
+
     @Column(name = "is_active", nullable = false)
     val isActive: Boolean = true,
 

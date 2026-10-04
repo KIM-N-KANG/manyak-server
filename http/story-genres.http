@@ -1,0 +1,99 @@
+# 제공 장르 조회와 검색 (KNK-1537 1단계)
+# 준비: PostgreSQL에 V91까지 적용하고 ./gradlew bootRun. AI 서버는 조회에 불필요.
+# 위에서부터 실행. 전체/대표 검증은 승인된 초기 197개/15개 카탈로그 기준이다.
+@baseUrl = http://localhost:8080
+
+### 1. 헬스 체크
+GET {{baseUrl}}/actuator/health
+
+### 2. 게스트 전체 조회, 같은 장르 ID와 대표 순서
+GET {{baseUrl}}/api/v1/stories/genres
+
+> {%
+client.test("전체 197개와 대표 15개", () => {
+  client.assert(response.status === 200, `status=${response.status}`);
+  const b = response.body;
+  client.assert(b.genres.length === 197, `genres=${b.genres.length}`);
+  const featured = ["계약결혼","괴담","로맨스판타지","먼치킨","복수","빙의","삼각관계","아포칼립스","현대판타지","역하렘","집착","헌터물","BL","회귀","탈출"];
+  client.assert(JSON.stringify(b.featuredGenres.map(g => g.name)) === JSON.stringify(featured), "대표 순서 불일치");
+  b.featuredGenres.forEach(g => client.assert(b.genres.some(a => a.id === g.id && a.name === g.name), `ID 불일치 ${g.name}`));
+  client.global.set("genreCatalogIds", JSON.stringify(b.genres.map(g => g.id)));
+});
+%}
+
+### 3. 공백 질의는 같은 전체 순서
+GET {{baseUrl}}/api/v1/stories/genres?query=%20%20
+
+> {%
+client.test("공백은 전체", () => {
+  client.assert(JSON.stringify(response.body.genres.map(g => g.id)) === client.global.get("genreCatalogIds"), "전체 순서 불일치");
+});
+%}
+
+### 4. 정식 이름 완전 일치 우선
+GET {{baseUrl}}/api/v1/stories/genres?query=로맨스
+
+> {%
+client.test("로맨스 완전 일치 우선", () => {
+  client.assert(response.body.genres[0].name === "로맨스", "첫 결과 불일치");
+  client.assert(response.body.genres.some(g => g.name === "로맨스판타지"), "부분 일치 누락");
+});
+%}
+
+### 5. 한글 초성
+GET {{baseUrl}}/api/v1/stories/genres?query=ㄹㅁㅅ
+
+> {%
+client.test("초성 검색", () => {
+  client.assert(response.body.genres.some(g => g.name === "로맨스판타지"), "초성 결과 누락");
+});
+%}
+
+### 6. 별칭은 정식 이름과 ID 반환
+GET {{baseUrl}}/api/v1/stories/genres?query=로판
+
+> {%
+client.test("별칭", () => {
+  client.assert(response.body.genres.length === 1 && response.body.genres[0].name === "로맨스판타지", "별칭 결과 불일치");
+});
+%}
+
+### 7. 공백과 영문 대소문자
+GET {{baseUrl}}/api/v1/stories/genres?query=%20b%20l%20
+
+> {%
+client.test("BL 정규화", () => { client.assert(response.body.genres[0].name === "BL", "정규화 불일치"); });
+%}
+
+### 8. 결과 없어도 대표 유지
+GET {{baseUrl}}/api/v1/stories/genres?query=존재하지않는검색어
+
+> {%
+client.test("빈 검색 결과", () => {
+  client.assert(response.body.genres.length === 0 && response.body.featuredGenres.length === 15, "빈 결과/대표 불일치");
+});
+%}
+
+### 9. 31자 질의는 400
+GET {{baseUrl}}/api/v1/stories/genres?query=1234567890123456789012345678901
+
+> {%
+client.test("길이 초과", () => {
+  client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `status=${response.status}`);
+});
+%}
+
+### 10. 구버전 태그 목록은 장르 대표 15개와 인물 특징 유지
+GET {{baseUrl}}/api/v1/stories/simple/tags
+
+> {%
+client.test("호환 목록", () => {
+  const b = response.body;
+  client.assert(b.filter(t => t.category === "GENRE").length === 15, "장르 개수 불일치");
+  client.assert(b.filter(t => t.category === "PROTAGONIST").length === 15, "주인공 특징 불일치");
+  client.assert(b.filter(t => t.category === "SUPPORTING_CHARACTER").length === 10, "주변 인물 특징 불일치");
+});
+%}
+
+### 자유 조회
+GET {{baseUrl}}/api/v1/stories/genres?query=현대%20판타지
