@@ -111,6 +111,32 @@ sum(increase(manyak_chat_turn_refund_total{service_name="manyak-server", outcome
 
 ## 발화 테스트
 
+### 인스턴스 분리 배포 검증
+
+`service.instance.id` 추가는 앱 설정 변경이므로 새 이미지의 운영 배포가 필요합니다.
+dev 머지만으로 운영 알림이 해제되지 않습니다. 모든 기존 태스크가 교체된 뒤 확인합니다.
+
+1. 아래 쿼리의 각 시계열에 서로 다른 `instance`가 있는지 확인합니다.
+   실패가 없는 서버에는 실패 타이머가 아직 없을 수 있으므로 전체 `outcome`을 조회합니다.
+
+   ```promql
+   manyak_ai_call_duration_milliseconds_count{service_name="manyak-server"}
+   ```
+
+2. 새 인스턴스의 실패 카운터가 `1 → 3 → 1`처럼 교차하지 않는지 확인합니다.
+   다음 쿼리는 각 시계열의 최근 10분 감소 횟수이며, 새 인스턴스는 보통 0입니다.
+
+   ```promql
+   resets(manyak_ai_call_duration_milliseconds_count{service_name="manyak-server", instance!="", outcome="failure"}[10m])
+   ```
+
+3. 기존 식별자 없는 시계열이 알림의 `[10m]` 창에서 빠질 때까지 마지막 수집 후 최소 10분 기다립니다.
+   규칙 2의 값이 5 이하 또는 No Data가 되면 Normal로 돌아가고, 해제 통지는 group interval에 따라 늦을 수 있습니다.
+   계속 5를 넘으면 인스턴스별 실제 실패와 로그를 조사합니다. 오발화를 숨기기 위해 임계값을 바꾸지 않습니다.
+4. 전체 active series와 수집 한도를 확인합니다. 올바르게 분리된 인스턴스 수만큼 시계열이 늘어납니다.
+
+### 규칙 발화 확인
+
 **규칙을 만든 직후 반드시 한 번 울려 봅니다.** 알림의 유일한 실패 모드는 조용히 안 오는 것이고, 그건 진짜 장애 때 알게 됩니다.
 
 가장 싼 방법은 임계값을 잠깐 뒤집는 것입니다.
