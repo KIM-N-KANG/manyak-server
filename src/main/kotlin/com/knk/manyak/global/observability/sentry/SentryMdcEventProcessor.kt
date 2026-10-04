@@ -4,8 +4,12 @@ import com.knk.manyak.global.observability.MdcKeys
 import io.sentry.EventProcessor
 import io.sentry.Hint
 import io.sentry.SentryEvent
+import io.sentry.protocol.Request
+import io.sentry.protocol.SentryTransaction
 import org.slf4j.MDC
 import org.springframework.stereotype.Component
+import java.net.URI
+import java.net.URISyntaxException
 
 /**
  * 모든 Sentry 이벤트에 MDC 상관관계 식별자를 부착한다.
@@ -20,6 +24,7 @@ import org.springframework.stereotype.Component
 class SentryMdcEventProcessor : EventProcessor {
 
     override fun process(event: SentryEvent, hint: Hint): SentryEvent {
+        scrubSocialAuthentication(event.request)
         mdc(MdcKeys.REQUEST_ID)?.let { event.setTag(MdcKeys.REQUEST_ID, it) }
 
         val identity = buildMap {
@@ -32,10 +37,31 @@ class SentryMdcEventProcessor : EventProcessor {
         return event
     }
 
+    override fun process(transaction: SentryTransaction, hint: Hint): SentryTransaction {
+        scrubSocialAuthentication(transaction.request)
+        return transaction
+    }
+
+    private fun scrubSocialAuthentication(request: Request?) {
+        val url = request?.url ?: return
+        val path = try { URI(url).path } catch (_: URISyntaxException) { return }
+        if (path !in SOCIAL_AUTH_PATHS) return
+        // custom 헤더는 SDK의 기본 PII 제거 목록에 의존하지 않는다.
+        request.data = null
+        request.queryString = null
+        request.cookies = null
+        request.headers = emptyMap()
+    }
+
     // "unknown"(헤더 누락 시 필터 기본값)은 노이즈이므로 부착하지 않는다.
     private fun mdc(key: String): String? = MDC.get(key)?.takeIf { it.isNotBlank() && it != UNKNOWN }
 
     private companion object {
         const val UNKNOWN = "unknown"
+        val SOCIAL_AUTH_PATHS = setOf(
+            "/api/v1/auth/social/google",
+            "/api/v1/auth/social/kakao",
+            "/api/v1/auth/social/complete",
+        )
     }
 }

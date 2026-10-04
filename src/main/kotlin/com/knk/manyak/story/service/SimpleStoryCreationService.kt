@@ -192,6 +192,10 @@ class SimpleStoryCreationService(
     fun getSimpleStoryTags(): List<SimpleStoryTagListItemResponse> =
         storyCreationTagRepository
             .findByTagSourceAndIsActiveTrueOrderByCategoryAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
+            .filter { it.category != SimpleStoryTagCategory.GENRE || it.featuredOrder != null }
+            .sortedWith(compareBy<StoryCreationTag> { it.category.name }
+                .thenBy { if (it.category == SimpleStoryTagCategory.GENRE) it.featuredOrder else it.sortOrder }
+                .thenBy { it.id })
             .map { tag ->
                 SimpleStoryTagListItemResponse(
                     id = tag.id,

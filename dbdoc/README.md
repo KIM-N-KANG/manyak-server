@@ -4,7 +4,7 @@
 
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
-| [public.story_creation_tags](public.story_creation_tags.md) | 9 |  | BASE TABLE |
+| [public.story_creation_tags](public.story_creation_tags.md) | 10 |  | BASE TABLE |
 | [public.story_creation_sessions](public.story_creation_sessions.md) | 8 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
@@ -51,6 +51,7 @@
 | [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
 | [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
 | [public.story_submissions](public.story_submissions.md) | 21 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
+| [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -108,6 +109,7 @@ erDiagram
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_creation_tag_aliases" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -119,6 +121,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_60_ normalized_name
+  integer featured_order
 }
 "public.story_creation_sessions" {
   bigint id
@@ -596,6 +599,12 @@ erDiagram
   timestamp_with_time_zone next_attempt_at
   timestamp_with_time_zone held_at
   text hold_reason
+}
+"public.story_creation_tag_aliases" {
+  bigint id
+  bigint tag_id FK
+  varchar_30_ alias
+  varchar_60_ normalized_alias
 }
 ```
 

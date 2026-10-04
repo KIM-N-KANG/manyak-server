@@ -21,6 +21,9 @@ class CodedResponseStatusException(
 object ApiErrorCodes {
     const val CUSTOM_GENRE_NOT_ALLOWED = "CUSTOM_GENRE_NOT_ALLOWED"
     const val INVALID_GENRE = "INVALID_GENRE"
+    const val CONSENT_TOKEN_INVALID = "CONSENT_TOKEN_INVALID"
+    const val CONSENT_REQUIRED_MISSING = "CONSENT_REQUIRED_MISSING"
+    const val CONSENT_REQUIRED = "CONSENT_REQUIRED"
 
     /** 검수 제출(400): base64 이미지와 입력 JSON의 합계 예산 초과. */
     const val IMAGES_TOO_LARGE = "IMAGES_TOO_LARGE"

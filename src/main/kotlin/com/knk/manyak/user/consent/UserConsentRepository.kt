@@ -5,6 +5,8 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
 
 interface UserConsentRepository : Repository<UserConsent, UserConsentId> {
+    fun existsByUserIdAndDocTypeAndVersion(userId: Long, docType: ConsentDocType, version: String): Boolean
+
     fun findAllByUserId(userId: Long): List<UserConsent>
 
     // H2 PostgreSQL 모드는 충돌 대상 컬럼 구문을 지원하지 않는다. 유일한 유니크 제약이 복합 PK라

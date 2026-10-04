@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_creation_tags_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.image_preset_genres](public.image_preset_genres.md) |  |  |
+| id | bigint | nextval('story_creation_tags_id_seq'::regclass) | false | [public.story_creation_session_tags](public.story_creation_session_tags.md) [public.image_preset_genres](public.image_preset_genres.md) [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) |  |  |
 | tag_type | varchar(50) |  | false |  |  |  |
 | name | varchar(30) |  | false |  |  |  |
 | tag_source | varchar(20) |  | false |  |  |  |
@@ -13,6 +13,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | normalized_name | varchar(60) |  | false |  |  |  |
+| featured_order | integer |  | true |  |  |  |
 
 ## Constraints
 
@@ -39,6 +40,7 @@ erDiagram
 
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.image_preset_genres" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+"public.story_creation_tag_aliases" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -50,6 +52,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_60_ normalized_name
+  integer featured_order
 }
 "public.story_creation_session_tags" {
   bigint id
@@ -61,6 +64,12 @@ erDiagram
 "public.image_preset_genres" {
   bigint image_preset_id FK
   bigint tag_id FK
+}
+"public.story_creation_tag_aliases" {
+  bigint id
+  bigint tag_id FK
+  varchar_30_ alias
+  varchar_60_ normalized_alias
 }
 ```
 

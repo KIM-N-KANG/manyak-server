@@ -103,7 +103,8 @@ class StoryControllerIntegrationTests {
     @Test
     fun `간편 제작 태그 목록을 조회한다`() {
         seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "비밀스러운 조력자", 10)
-        seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        val featured = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        jdbcTemplate.update("UPDATE story_creation_tags SET featured_order=1 WHERE id=?", featured.id)
         seedTag(SimpleStoryTagCategory.PROTAGONIST, "기억상실", 10)
         tagRepository.save(
             StoryCreationTag(
