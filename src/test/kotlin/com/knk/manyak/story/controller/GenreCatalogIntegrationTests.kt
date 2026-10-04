@@ -19,6 +19,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class GenreCatalogIntegrationTests {
+    @Autowired lateinit var authProperties: com.knk.manyak.auth.config.AuthProperties
+    @Autowired lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var tags: StoryCreationTagRepository
     @Autowired lateinit var jdbc: JdbcTemplate
@@ -97,6 +99,38 @@ class GenreCatalogIntegrationTests {
             .expectBody().jsonPath("$.code").isEqualTo("BAD_REQUEST")
     }
 
+    @Test fun `만료 서명 토큰과 위조 Authorization도 공개 카탈로그를 반환한다`() {
+        val id = tag("로맨스", featured = 1)
+        val provider = com.knk.manyak.auth.jwt.JwtTokenProvider(authProperties,
+            java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC))
+        val expired = provider.issueAccessToken(java.util.UUID.randomUUID())
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.security.oauth2.jwt.JwtValidationException::class.java) {
+            provider.jwtDecoder().decode(expired)
+        }
+        for (token in listOf(expired, "not-a-real-jwt.forged.token")) {
+            client.get().uri("/api/v1/stories/genres").header("Authorization", "Bearer $token")
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.genres[0].id").isEqualTo(id)
+                .jsonPath("$.featuredGenres[0].id").isEqualTo(id)
+        }
+    }
+
+    @Test fun `쌍자음 초성과 혼합 이름은 비한글 문자를 건너뛰지 않는다`() {
+        val doubled = tag("까따빠싸짜", 30)
+        val prefix = tag("꿈나라BL", 20)
+        val contains = tag("BL꿈나라", 10)
+        tag("꿈BL나라", 1)
+        get("ㄲㄸㅃㅆㅉ").expectStatus().isOk.expectBody()
+            .jsonPath("$.genres.length()").isEqualTo(1).jsonPath("$.genres[0].id").isEqualTo(doubled)
+        get("ㄲㄴ").expectStatus().isOk.expectBody()
+            .jsonPath("$.genres.length()").isEqualTo(2)
+            .jsonPath("$.genres[0].id").isEqualTo(prefix).jsonPath("$.genres[1].id").isEqualTo(contains)
+        // 영문이 섞인 질의 자체는 초성 검색이 아닌 일반 이름 검색이다.
+        get("blㄲㄴ").expectStatus().isOk.expectBody().jsonPath("$.genres.length()").isEqualTo(0)
+        get("bl꿈").expectStatus().isOk.expectBody()
+            .jsonPath("$.genres.length()").isEqualTo(1).jsonPath("$.genres[0].id").isEqualTo(contains)
+    }
+
     @Test fun `전체 197개와 대표 15개는 자료 순서이고 simple tags는 대표와 인물만 제공한다`() {
         val names = javaClass.getResourceAsStream("/genres/catalog.csv")!!.bufferedReader().readLines()
             .drop(1).map { it.substringAfter(',') }
@@ -110,6 +144,12 @@ class GenreCatalogIntegrationTests {
             .jsonPath("$.featuredGenres.length()").isEqualTo(15)
         names.forEachIndexed { i, name -> body.jsonPath("$.genres[$i].name").isEqualTo(name) }
         featured.forEachIndexed { i, name -> body.jsonPath("$.featuredGenres[$i].id").isEqualTo(ids[names.indexOf(name)]) }
+        alias(ids[names.indexOf("로맨스판타지")], "로판")
+        val expectedFeatured = mapper.readTree(body.returnResult().responseBody!!)["featuredGenres"]
+        for (query in listOf("", " ", "로맨스", "ㄹㅁㅅ", "로판", " b l ", "없는검색어")) {
+            val actual = get(query).expectStatus().isOk.expectBody().returnResult().responseBody!!
+            org.junit.jupiter.api.Assertions.assertEquals(expectedFeatured, mapper.readTree(actual)["featuredGenres"], query)
+        }
         val legacy = client.get().uri("/api/v1/stories/simple/tags").exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.length()").isEqualTo(18)
         featured.forEachIndexed { i, name -> legacy.jsonPath("$[$i].name").isEqualTo(name) }

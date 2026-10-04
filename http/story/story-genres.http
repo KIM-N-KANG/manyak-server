@@ -17,6 +17,7 @@ client.test("전체 197개와 대표 15개", () => {
   const featured = ["계약결혼","괴담","로맨스판타지","먼치킨","복수","빙의","삼각관계","아포칼립스","현대판타지","역하렘","집착","헌터물","BL","회귀","탈출"];
   client.assert(JSON.stringify(b.featuredGenres.map(g => g.name)) === JSON.stringify(featured), "대표 순서 불일치");
   b.featuredGenres.forEach(g => client.assert(b.genres.some(a => a.id === g.id && a.name === g.name), `ID 불일치 ${g.name}`));
+  client.global.set("genreFeatured", JSON.stringify(b.featuredGenres));
   client.global.set("genreCatalogIds", JSON.stringify(b.genres.map(g => g.id)));
 });
 %}
@@ -26,6 +27,7 @@ GET {{baseUrl}}/api/v1/stories/genres?query=%20%20
 
 > {%
 client.test("공백은 전체", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
   client.assert(JSON.stringify(response.body.genres.map(g => g.id)) === client.global.get("genreCatalogIds"), "전체 순서 불일치");
 });
 %}
@@ -35,6 +37,7 @@ GET {{baseUrl}}/api/v1/stories/genres?query=로맨스
 
 > {%
 client.test("로맨스 완전 일치 우선", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
   client.assert(response.body.genres[0].name === "로맨스", "첫 결과 불일치");
   client.assert(response.body.genres.some(g => g.name === "로맨스판타지"), "부분 일치 누락");
 });
@@ -45,6 +48,7 @@ GET {{baseUrl}}/api/v1/stories/genres?query=ㄹㅁㅅ
 
 > {%
 client.test("초성 검색", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
   client.assert(response.body.genres.some(g => g.name === "로맨스판타지"), "초성 결과 누락");
 });
 %}
@@ -54,6 +58,7 @@ GET {{baseUrl}}/api/v1/stories/genres?query=로판
 
 > {%
 client.test("별칭", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
   client.assert(response.body.genres.length === 1 && response.body.genres[0].name === "로맨스판타지", "별칭 결과 불일치");
 });
 %}
@@ -62,7 +67,10 @@ client.test("별칭", () => {
 GET {{baseUrl}}/api/v1/stories/genres?query=%20b%20l%20
 
 > {%
-client.test("BL 정규화", () => { client.assert(response.body.genres[0].name === "BL", "정규화 불일치"); });
+client.test("BL 정규화", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
+  client.assert(response.body.genres[0].name === "BL", "정규화 불일치");
+});
 %}
 
 ### 8. 결과 없어도 대표 유지
@@ -70,6 +78,7 @@ GET {{baseUrl}}/api/v1/stories/genres?query=존재하지않는검색어
 
 > {%
 client.test("빈 검색 결과", () => {
+  client.assert(JSON.stringify(response.body.featuredGenres) === client.global.get("genreFeatured"), "대표 배열 불일치");
   client.assert(response.body.genres.length === 0 && response.body.featuredGenres.length === 15, "빈 결과/대표 불일치");
 });
 %}
@@ -97,3 +106,16 @@ client.test("호환 목록", () => {
 
 ### 자유 조회
 GET {{baseUrl}}/api/v1/stories/genres?query=현대%20판타지
+
+### 위조 Authorization도 공개 조회 200
+GET {{baseUrl}}/api/v1/stories/genres
+Authorization: Bearer not-a-real-jwt.forged.token
+
+> {% client.test("위조 헤더 무시", () => client.assert(response.status === 200, `status=${response.status}`)); %}
+
+### 만료 Authorization도 공개 조회 200
+# 같은 환경에서 정상 발급되었으나 만료된 access token을 expiredAccessToken 환경 변수에 넣는다.
+GET {{baseUrl}}/api/v1/stories/genres
+Authorization: Bearer {{expiredAccessToken}}
+
+> {% client.test("만료 헤더 무시", () => client.assert(response.status === 200, `status=${response.status}`)); %}
