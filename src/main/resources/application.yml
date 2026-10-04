@@ -12,6 +12,11 @@ spring:
       port: ${SPRING_DATA_REDIS_PORT:${MANYAK_REDIS_PORT:6379}}
 
 management:
+  opentelemetry:
+    resource-attributes:
+      # 앱 기동별로 한 번 바인딩한다. 여러 ECS 태스크의 누적 카운터가 같은 시계열에
+      # 섞여 가짜 reset/increase를 만드는 것을 막는다. 공통 메트릭 태그가 아닌 OTLP 리소스 식별자다.
+      service.instance.id: ${random.uuid}
   endpoints:
     web:
       exposure:
