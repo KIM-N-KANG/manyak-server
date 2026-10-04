@@ -485,7 +485,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             {
               "requestId": "$requestId",
               "genreTagIds": [${genreB.id}, ${genreA.id}],
-              "customGenreTags": ["학원물", "느와르"],
+              "customGenreTags": [],
               "protagonist": {"customTags": ["회귀"]}
             }
         """.trimIndent()
@@ -498,7 +498,9 @@ class SimpleStoryCreationRecoveryIntegrationTests {
                 .exchange()
         }
 
-        val first = postRich().expectStatus().isCreated.expectBody().returnResult()
+        postRich().expectStatus().isCreated
+        addLegacyGenre("학원물")
+        addLegacyGenre("느와르")
         assertThat(createStorylinesCalls.get()).isEqualTo(1)
 
         simulateStorylineCrashWindow(requestId, deviceA)
@@ -507,7 +509,8 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
         assertThat(createStorylinesCalls.get()).isEqualTo(1)
         assertThat(sessionRepository.count()).isEqualTo(1)
-        assertThat(String(second.responseBody!!)).isEqualTo(String(first.responseBody!!))
+        val replay = postRich().expectStatus().isCreated.expectBody().returnResult()
+        assertThat(String(second.responseBody!!)).isEqualTo(String(replay.responseBody!!))
 
         restTestClient.get()
             .uri("/api/v1/stories/simple/creation-requests/$requestId")
@@ -702,10 +705,11 @@ class SimpleStoryCreationRecoveryIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 """{"requestId":"${UUID.randomUUID()}","genreTagIds":[${genreB.id},${genreA.id}],""" +
-                    """"customGenreTags":["학원물"],"protagonist":{}}""",
+                    """"customGenreTags":[],"protagonist":{}}""",
             )
             .exchange()
             .expectStatus().isCreated
+        addLegacyGenre("학원물")
         val session = sessionRepository.findAll().single()
         val storyline = storylineRepository.findAll().first()
         val requestId = UUID.randomUUID()
@@ -1010,6 +1014,15 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
     private fun storylineResultCount(outcome: String): Double =
         meterRegistry.find("manyak.storyline.creation.result").tag("outcome", outcome).counter()?.count() ?: 0.0
+
+    @Autowired private lateinit var legacySessionTags: com.knk.manyak.story.repository.StoryCreationSessionTagRepository
+    private fun addLegacyGenre(name: String) {
+        val tag = tagRepository.save(com.knk.manyak.story.entity.StoryCreationTag(
+            name = name, category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
+            tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.CUSTOM))
+        legacySessionTags.save(com.knk.manyak.story.entity.StoryCreationSessionTag(
+            creationSession = sessionRepository.findAll().single(), tag = tag))
+    }
 
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository

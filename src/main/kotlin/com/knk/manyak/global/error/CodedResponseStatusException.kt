@@ -14,10 +14,14 @@ class CodedResponseStatusException(
     val errorCode: String,
     reason: String,
     cause: Throwable? = null,
+    val details: List<ApiErrorDetail> = emptyList(),
 ) : ResponseStatusException(status, reason, cause)
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    const val CUSTOM_GENRE_NOT_ALLOWED = "CUSTOM_GENRE_NOT_ALLOWED"
+    const val INVALID_GENRE = "INVALID_GENRE"
+
     /** 검수 제출(400): base64 이미지와 입력 JSON의 합계 예산 초과. */
     const val IMAGES_TOO_LARGE = "IMAGES_TOO_LARGE"
 

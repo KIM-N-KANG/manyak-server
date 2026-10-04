@@ -40,6 +40,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class GeneralStoryCreationIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var legacyCreation: com.knk.manyak.story.service.GeneralStoryCreationService
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
@@ -63,6 +64,7 @@ class GeneralStoryCreationIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")
         `when`(uploadedImageStorage.isEnabled()).thenReturn(true)
         `when`(uploadedImageStorage.serveUrlOf(anyString())).thenAnswer { "$CDN_BASE_URL/${it.arguments[0]}" }
         `when`(uploadedImageStorage.head(anyString())).thenReturn(UploadedObject("image/webp", 1024))

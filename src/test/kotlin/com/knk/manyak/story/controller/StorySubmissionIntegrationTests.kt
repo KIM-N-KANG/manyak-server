@@ -19,6 +19,7 @@ import org.springframework.http.MediaType
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class StorySubmissionIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var users: com.knk.manyak.auth.repository.UserRepository
     @Autowired private lateinit var stories: com.knk.manyak.story.repository.StoryRepository
     @Autowired private lateinit var submissions: com.knk.manyak.story.submission.StorySubmissionRepository
@@ -28,7 +29,7 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var cleaner: com.knk.manyak.support.DatabaseCleaner
     @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
     private lateinit var executor: java.util.concurrent.Executor
-    @org.junit.jupiter.api.BeforeEach fun clean() = cleaner.cleanAll()
+    @org.junit.jupiter.api.BeforeEach fun clean() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
 
     private fun request() = mapper.readValue("""{
         "title":"제목", "oneLineIntro":"소개", "genres":["판타지"],

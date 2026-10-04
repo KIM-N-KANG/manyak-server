@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.error.ApiErrorDetail
 import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditReason
@@ -209,6 +210,14 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
+        if (request.customGenreTags.isNotEmpty()) {
+            throw CodedResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                ApiErrorCodes.CUSTOM_GENRE_NOT_ALLOWED,
+                "요청 값이 올바르지 않습니다.",
+                details = listOf(ApiErrorDetail("customGenreTags", "제공 장르에서 선택해 주세요.")),
+            )
+        }
         // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
         val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때

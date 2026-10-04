@@ -48,16 +48,9 @@ data class GenerateSimpleStorylinesRequest(
     )
     val genreTagIds: List<@Min(1) Long> = emptyList(),
 
-    // KNK-859: 인물 단위 계약 교체(KNK-845)에서 함께 빠졌던 장르 직접 입력을 되살린다. 인물 특징의
-    // [SimpleStoryCharacterRequest.customTags]와 같은 규칙으로, 정규화 키가 같은 사전 정의 장르가 있으면 그 행에 연결한다.
-    @field:Size(max = 20)
-    @field:Schema(description = "사용자가 직접 입력한 장르 이름 목록", example = """["학원물"]""")
-    @field:ArraySchema(
-        schema = Schema(description = "직접 입력한 장르 이름", example = "학원물", maxLength = 30),
-        maxItems = 20,
-        arraySchema = Schema(description = "사용자가 직접 입력한 장르 이름 목록", example = """["학원물"]"""),
-    )
-    val customGenreTags: List<@NotBlank @Size(max = 30) String> = emptyList(),
+    // KNK-1537: 와이어 필드는 유지하되 값이 있으면 서비스에서 전용 오류 코드로 거절한다.
+    @field:Schema(description = "종료된 장르 직접 입력. 누락 또는 빈 배열만 허용", example = "[]", deprecated = true)
+    val customGenreTags: List<String> = emptyList(),
 
     @field:Valid
     @field:Schema(description = "주인공 입력", requiredMode = Schema.RequiredMode.REQUIRED)
@@ -91,25 +84,10 @@ data class GenerateSimpleStorylinesRequest(
     )
     val parentCreationId: UUID? = null,
 ) {
-    // 장르 총량 상한(KNK-859). 필드별 @Size(max = 20)만으로는 선택 20 + 직접 입력 20 = 40까지 열려, 옛 계약의
-    // 실질 상한(장르 합산 20)보다 늘어난다. 인물 특징의 [SimpleStoryCharacterRequest.hasAtMostThreeFeatures]와 같이
-    // 중복 제거 전 요청 항목 수로 센다.
+    // customGenreTags는 값이 있으면 거절하므로 허용되는 합산 상한은 genreTagIds 20개다.
     @AssertTrue(message = "장르는 선택과 직접 입력을 합쳐 최대 20개까지 입력할 수 있습니다.")
     @Schema(hidden = true)
-    fun hasAtMostTwentyGenres(): Boolean = genreTagIds.size + customGenreTags.size <= 20
-
-    /**
-     * [customGenreTags] 원소 길이 검증(KNK-859).
-     *
-     * KNK-862에서 `-Xemit-jvm-type-annotations`를 켜 원소 `@NotBlank`·`@Size`도 이제 실제로 발동하지만,
-     * 이 메서드 제약은 남겨 둔다. 중복이 아니라 더 엄격하기 때문이다 — 원소 `@Size(max = 30)`은 입력 문자열
-     * 그대로를 재는 반면 여기는 trim 후를 재고, 서버는 trim 후 값을 `story_creation_tags.name`(길이 30)에
-     * 저장한다. 즉 앞뒤 공백을 포함해 30자를 넘는 입력은 원소 제약이 먼저 걸러 주고, 이 메서드는 저장되는
-     * 값 기준의 상한을 지킨다. 지우면 후자가 사라진다.
-     */
-    @AssertTrue(message = "직접 입력 장르는 공백을 제외하고 1자 이상 30자 이하여야 합니다.")
-    @Schema(hidden = true)
-    fun hasValidCustomGenreTags(): Boolean = customGenreTags.all { it.trim().length in 1..30 }
+    fun hasAtMostTwentyGenres(): Boolean = genreTagIds.size <= 20
 
     @AssertTrue(message = "인물 이름은 중복될 수 없습니다.")
     @Schema(hidden = true)
