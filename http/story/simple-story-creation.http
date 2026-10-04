@@ -319,7 +319,8 @@ Accept: application/json
 %}
 
 ### 3-3. 장르 직접 입력 종료 (KNK-1537 2단계)
-# 웹과 앱 전환 후 적용하는 계약. 정식 이름, 빈 문자열, 공백, 과길이 값도 전용 코드로 거절한다.
+# 웹과 앱 전환 후 새 requestId에 적용한다. 정식 이름, 빈 문자열, 공백, 과길이 값도 전용 코드로 거절한다.
+# 배포 전 요청의 같은 requestId와 본문 재시도는 소유권·상태 검증 후 replay/회수를 허용한다(POST 201, 복구 GET 200).
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json

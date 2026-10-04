@@ -473,6 +473,63 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         assertThat(reconciled.resultJson).isNotNull()
     }
 
+    @Autowired private lateinit var legacyMapper: tools.jackson.databind.ObjectMapper
+
+    private fun legacyCustomRequest(): UUID {
+        val id = UUID.randomUUID()
+        postStorylines(id, seedGenreTag().id, deviceA).expectStatus().isCreated
+        addLegacyGenre("옛커스텀")
+        val row = requestRepository.findByRequestId(id)!!
+        val result = legacyMapper.readTree(row.resultJson!!)
+        val custom = tagRepository.findAll().single { it.name == "옛커스텀" }
+        (result["selectedTags"]["genreTags"] as tools.jackson.databind.node.ArrayNode)
+            .addObject().put("id", custom.id).put("name", custom.name).put("category", "GENRE")
+        row.resultJson = legacyMapper.writeValueAsString(result)
+        requestRepository.saveAndFlush(row)
+        return id
+    }
+
+    private fun postLegacyCustom(id: UUID, device: String = deviceA) = restTestClient.post()
+        .uri("/api/v1/stories/simple/storylines").header("X-Manyak-Device-Id", device)
+        .contentType(MediaType.APPLICATION_JSON)
+        .body("""{"requestId":"$id","customGenreTags":["옛커스텀"],"protagonist":{}}""").exchange()
+
+    @Test fun `배포 전 커스텀 요청은 같은 ID로 완료 replay하고 복구 조회는 200이다`() {
+        val id = legacyCustomRequest()
+        val expected = legacyMapper.readTree(requestRepository.findByRequestId(id)!!.resultJson!!)
+        val replay = postLegacyCustom(id).expectStatus().isCreated.expectBody().returnResult()
+        assertThat(legacyMapper.readTree(replay.responseBody!!)).isEqualTo(expected)
+        restTestClient.get().uri("/api/v1/stories/simple/creation-requests/$id")
+            .header("X-Manyak-Device-Id", deviceA).exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.result.selectedTags.genreTags[1].name").isEqualTo("옛커스텀")
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+    }
+
+    @Test fun `배포 전 커스텀 요청의 오래된 PENDING은 기존 세션에서 회수한다`() {
+        val id = legacyCustomRequest()
+        simulateStorylineCrashWindow(id, deviceA)
+        postLegacyCustom(id).expectStatus().isCreated.expectBody()
+            .jsonPath("$.selectedTags.genreTags[1].name").isEqualTo("옛커스텀")
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+        assertThat(sessionRepository.count()).isEqualTo(1)
+        assertThat(requestRepository.findByRequestId(id)!!.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+    }
+
+    @Test fun `기존 커스텀 요청도 다른 소유자는 409이고 새 ID는 기록 전 400이다`() {
+        val id = legacyCustomRequest()
+        postLegacyCustom(id, "different-owner").expectStatus().isEqualTo(409)
+        val fresh = UUID.randomUUID()
+        postLegacyCustom(fresh).expectStatus().isBadRequest.expectBody()
+            .jsonPath("$.code").isEqualTo("CUSTOM_GENRE_NOT_ALLOWED")
+        assertThat(requestRepository.findByRequestId(fresh)).isNull()
+        restTestClient.post().uri("/api/v1/stories/simple/storylines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$id","customGenreTags":["옛커스텀"],"protagonist":{}}""")
+            .exchange().expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("CUSTOM_GENRE_NOT_ALLOWED")
+        assertThat(createStorylinesCalls.get()).isEqualTo(1)
+    }
+
     @Test
     fun `직접 입력 장르가 섞인 회수 재구성도 최초 응답과 같은 순서를 돌려준다`() {
         // KNK-859: 커스텀 장르는 사전 정의 장르 뒤에 저장되므로(st.id 오름차순), 회수 재구성도 같은 순서여야 한다.

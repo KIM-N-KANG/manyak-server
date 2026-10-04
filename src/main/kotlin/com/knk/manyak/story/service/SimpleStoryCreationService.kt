@@ -210,14 +210,6 @@ class SimpleStoryCreationService(
         userId: Long? = null,
         deviceId: String? = null,
     ): GenerateSimpleStorylinesResponse {
-        if (request.customGenreTags.isNotEmpty()) {
-            throw CodedResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                ApiErrorCodes.CUSTOM_GENRE_NOT_ALLOWED,
-                "요청 값이 올바르지 않습니다.",
-                details = listOf(ApiErrorDetail("customGenreTags", "제공 장르에서 선택해 주세요.")),
-            )
-        }
         // 부모 링크 검증은 요청 행 삽입(recordOrRun 안의 별도 트랜잭션)보다 먼저 끝나야 한다 — 결과 3값이 그 삽입에 실린다.
         val parentLink = resolveParentLink(request, userId, deviceIdHashOrNull(deviceId))
         // 체인은 위에서 검증한 값이 아니라 **요청 행에 실제로 기록된 값**(recordedParentLink)을 쓴다 — 재실행이면 최초 삽입 때
@@ -267,6 +259,16 @@ class SimpleStoryCreationService(
             GenerateSimpleStorylinesResponse::class.java,
             parentLink,
             block = generate,
+            validateNewRequest = {
+                if (request.customGenreTags.isNotEmpty()) {
+                    throw CodedResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        ApiErrorCodes.CUSTOM_GENRE_NOT_ALLOWED,
+                        "요청 값이 올바르지 않습니다.",
+                        details = listOf(ApiErrorDetail("customGenreTags", "제공 장르에서 선택해 주세요.")),
+                    )
+                }
+            },
         )
     }
 
@@ -320,11 +322,13 @@ class SimpleStoryCreationService(
         ) -> T,
         // COMPLETED 마킹 트랜잭션 안에서 실행할 부수 효과(KNK-1115 완성 푸시 발행). 기록하지 않는 경로는 부르지 않는다.
         onCompleted: ((T) -> Unit)? = null,
+        validateNewRequest: (() -> Unit)? = null,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
         if (ownerUserId == null && ownerDeviceIdHash == null) {
             // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
+            validateNewRequest?.invoke()
             return block(false, false, parentLink)
         }
         return storyCreationRequestRecorder.execute(
@@ -336,6 +340,7 @@ class SimpleStoryCreationService(
             parentLink,
             block,
             onCompleted,
+            validateNewRequest,
         )
     }
 
