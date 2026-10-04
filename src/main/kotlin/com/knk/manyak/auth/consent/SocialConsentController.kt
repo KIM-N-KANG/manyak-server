@@ -24,12 +24,12 @@ import org.springframework.web.server.ResponseStatusException
 @RequestMapping("/api/v1/auth/social")
 class SocialConsentController(private val service: SocialConsentService) {
     @Operation(summary = "소셜 인증과 필수 동의 확인", description = "Google 또는 Kakao ID 토큰을 검증합니다. 동의가 필요하면 계정과 정식 토큰을 만들지 않고 대기 코드를 발급합니다.",
-        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json", 
+        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json",
             schema = Schema(implementation = SocialLoginRequest::class),
             examples = [ExampleObject(value = """{"idToken":"<provider-id-token>","handoffCode":"<optional-handoff-code>"}""")],
         )]))
     @ApiResponses(value = [
-        ApiResponse(responseCode = "200", description = "로그인 완료 또는 필수 동의 대기", content = [Content(mediaType = "application/json", 
+        ApiResponse(responseCode = "200", description = "로그인 완료 또는 필수 동의 대기", content = [Content(mediaType = "application/json",
             schema = Schema(implementation = SocialAuthResponse::class), examples = [
                 ExampleObject(name = "동의 대기", value = """{"status":"CONSENT_REQUIRED","consentToken":"<opaque-code>","expiresAt":"2026-10-05T00:10:00Z","isNewUser":true,"consents":{"terms":{"requiredVersion":"v1.4","needsConsent":true},"privacy":{"requiredVersion":"v1.7","needsConsent":true},"age14":{"requiredVersion":"1","needsConsent":true}}}"""),
                 ExampleObject(name = "로그인 완료", value = """{"status":"COMPLETED","token":{"accessToken":"<access>","refreshToken":"<refresh>","expiresIn":1800,"tokenType":"Bearer","isNewUser":false}}"""),
@@ -46,7 +46,7 @@ class SocialConsentController(private val service: SocialConsentService) {
     ): SocialAuthResponse = service.start(providerOf(provider), request.idToken, deviceId, request.handoffCode)
 
     @Operation(summary = "필수 동의와 소셜 가입 완료", description = "현행 필수 항목을 모두 제출합니다. 계정과 동의를 함께 저장한 뒤 토큰을 발급하며 성공 시에만 대기 코드를 소비합니다. 정지 회원도 이 경로로 로그인할 수 있습니다.",
-        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json", 
+        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json",
             schema = Schema(implementation = UserConsentRequest::class),
             examples = [ExampleObject(value = """{"terms":"v1.4","privacy":"v1.7","age14":"1"}""")],
         )]))
