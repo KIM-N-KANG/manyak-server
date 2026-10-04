@@ -204,21 +204,116 @@ class SocialConsentIntegrationTests {
         complete(code).expectStatus().isOk
     }
 
-    @Test fun `재가입 동의 저장 실패도 tombstone 소유자와 정지를 보존한다`() {
-        val oldToken = token("rollback-rejoin")["accessToken"].asText()
-        val oldId = users.findAll().single().id
-        client.delete().uri("/api/v1/users/me").header("Authorization", "Bearer $oldToken").exchange().expectStatus().isNoContent
-        val code = start("rollback-rejoin")["consentToken"].asText()
+    private fun suspendedBundle(): Long {
+        val access = token("bundle-google")["accessToken"].asText()
+        val old = users.findAll().single()
+        val inviter = users.saveAndFlush(com.knk.manyak.auth.entity.User(nickname = "초대자"))
+        old.status = UserStatus.SUSPENDED
+        old.inviterUserId = inviter.id
+        old.migrationAttempts = 4
+        old.rewardIdentityUserId = old.id
+        users.saveAndFlush(old)
+        socials.saveAndFlush(com.knk.manyak.auth.entity.SocialAccount(
+            userId = old.id, provider = SocialProvider.KAKAO, providerUserId = "bundle-kakao",
+        ))
+        client.delete().uri("/api/v1/users/me").header("Authorization", "Bearer $access")
+            .exchange().expectStatus().isNoContent
+        val withdrawn = users.findById(old.id).orElseThrow()
+        assertThat(withdrawn.status).isEqualTo(UserStatus.DELETED)
+        assertThat(withdrawn.withdrawnFromStatus).isEqualTo(UserStatus.SUSPENDED)
+        assertThat(socials.findByUserId(old.id)).hasSize(2).allSatisfy { assertThat(it.deletedAt).isNotNull() }
+        return old.id
+    }
+
+    private fun assertRejoinedBundle(oldId: Long) {
+        val old = users.findById(oldId).orElseThrow()
+        val bundle = socials.findAll()
+        assertThat(bundle).hasSize(2)
+        assertThat(bundle.map { it.provider }).containsExactlyInAnyOrder(SocialProvider.GOOGLE, SocialProvider.KAKAO)
+        assertThat(bundle.map { it.userId }.distinct()).hasSize(1)
+        assertThat(bundle).allSatisfy { assertThat(it.deletedAt).isNull() }
+        val fresh = users.findById(bundle.first().userId).orElseThrow()
+        assertThat(fresh.id).isNotEqualTo(oldId)
+        assertThat(fresh.status).isEqualTo(UserStatus.SUSPENDED)
+        assertThat(fresh.inviterUserId).isEqualTo(old.inviterUserId).isNotNull()
+        assertThat(fresh.migrationAttempts).isEqualTo(4)
+        assertThat(fresh.rewardIdentityUserId).isEqualTo(old.rewardIdentityUserId)
+        assertThat(fresh.rejoinedAt).isNotNull()
+        assertThat(count("users")).isEqualTo(3) // 이전 회원, 초대자, 재가입 회원
+        assertThat(count("user_consents")).isEqualTo(3)
+        assertThat(count("credit_transactions")).isEqualTo(1)
+    }
+
+    @Test fun `새 완료는 같은 이전 회원의 Google Kakao 묶음과 정지 및 자격 표식을 승계한다`() {
+        val oldId = suspendedBundle()
+        val google = start("bundle-google")["consentToken"].asText()
+        val kakao = start("bundle-kakao", "kakao")["consentToken"].asText()
+        complete(google).expectStatus().isOk.expectBody().jsonPath("$.isNewUser").isEqualTo(true)
+        assertRejoinedBundle(oldId)
+        val agreed = jdbc.queryForList("SELECT * FROM user_consents ORDER BY doc_type")
+        complete(kakao).expectStatus().isOk.expectBody().jsonPath("$.isNewUser").isEqualTo(false)
+        assertRejoinedBundle(oldId)
+        assertThat(jdbc.queryForList("SELECT * FROM user_consents ORDER BY doc_type")).isEqualTo(agreed)
+    }
+
+    @Test fun `재가입 동의 실패는 소셜 묶음과 이전 소유자의 모든 승계 표식을 롤백한다`() {
+        val oldId = suspendedBundle()
+        val beforeUsers = jdbc.queryForList("SELECT * FROM users ORDER BY id")
+        val beforeSocials = jdbc.queryForList("SELECT * FROM social_accounts ORDER BY id")
+        val code = start("bundle-kakao", "kakao")["consentToken"].asText()
         jdbc.execute("ALTER TABLE user_consents ADD CONSTRAINT consent_test_failure CHECK (doc_type <> 'PRIVACY')")
         try {
             complete(code).expectStatus().is5xxServerError
-            assertThat(count("users")).isEqualTo(1)
+            // 전체 행 비교로 owner, deleted_at, 정지, inviter, migrationAttempts, rewardIdentity를 함께 고정한다.
+            assertThat(jdbc.queryForList("SELECT * FROM users ORDER BY id")).isEqualTo(beforeUsers)
+            assertThat(jdbc.queryForList("SELECT * FROM social_accounts ORDER BY id")).isEqualTo(beforeSocials)
             assertThat(count("user_consents")).isZero()
-            val tombstone = socials.findAll().single()
-            assertThat(tombstone.userId).isEqualTo(oldId)
-            assertThat(tombstone.deletedAt).isNotNull()
+            assertThat(count("credit_transactions")).isEqualTo(1)
+            assertThat(codes.find(code)).isNotNull()
         } finally { jdbc.execute("ALTER TABLE user_consents DROP CONSTRAINT consent_test_failure") }
         complete(code).expectStatus().isOk
+        assertRejoinedBundle(oldId)
+    }
+
+    @Test fun `인증 JSON 파싱 실패 DEBUG 로그는 원문 없이 경로 종류 요청 ID만 남기고 일반 API는 보존한다`() {
+        val access = token("log-control")["accessToken"].asText()
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.error.GlobalExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val original = logger.level
+        val appender = object : ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>() {
+            override fun append(event: ch.qos.logback.classic.spi.ILoggingEvent) {
+                event.prepareForDeferredProcessing()
+                super.append(event)
+            }
+        }.apply { start() }
+        logger.level = ch.qos.logback.classic.Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            val secret = "ReviewSyntheticSecretToken"
+            for (path in listOf("social/google", "social/kakao", "social/complete", "login/google", "login/kakao")) {
+                appender.list.clear()
+                val uri = "/api/v1/auth/$path"
+                client.post().uri(uri).header("X-Manyak-Request-Id", "req-parse-test")
+                    .contentType(MediaType.APPLICATION_JSON).body("""{"idToken":$secret}""")
+                    .exchange().expectStatus().isBadRequest
+                val event = appender.list.single()
+                assertThat(event.level).isEqualTo(ch.qos.logback.classic.Level.DEBUG)
+                assertThat(event.formattedMessage).isEqualTo(
+                    "Malformed request body: path=$uri, error_type=HttpMessageNotReadableException, request_id=req-parse-test",
+                )
+                assertThat(event.formattedMessage).doesNotContain(secret)
+                assertThat(event.argumentArray.map { it.toString() }.joinToString()).doesNotContain(secret)
+                assertThat(event.throwableProxy).isNull()
+            }
+            appender.list.clear()
+            client.post().uri("/api/v1/users/me/consents").header("Authorization", "Bearer $access")
+                .contentType(MediaType.APPLICATION_JSON).body("""{"terms":$secret}""")
+                .exchange().expectStatus().isBadRequest
+            assertThat(appender.list.single().formattedMessage).contains("message=", secret)
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = original
+            appender.stop()
+        }
     }
 
     @Test fun `보상 저장 실패 후 완료 재시도는 동의 시각과 계정을 보존하고 보상을 한번 지급한다`() {

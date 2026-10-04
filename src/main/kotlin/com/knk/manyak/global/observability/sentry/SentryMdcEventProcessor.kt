@@ -8,6 +8,8 @@ import io.sentry.protocol.Request
 import io.sentry.protocol.SentryTransaction
 import org.slf4j.MDC
 import org.springframework.stereotype.Component
+import java.net.URI
+import java.net.URISyntaxException
 
 /**
  * 모든 Sentry 이벤트에 MDC 상관관계 식별자를 부착한다.
@@ -41,7 +43,9 @@ class SentryMdcEventProcessor : EventProcessor {
     }
 
     private fun scrubSocialAuthentication(request: Request?) {
-        if (request?.url?.contains("/api/v1/auth/social/") != true) return
+        val url = request?.url ?: return
+        val path = try { URI(url).path } catch (_: URISyntaxException) { return }
+        if (path !in SOCIAL_AUTH_PATHS) return
         // custom 헤더는 SDK의 기본 PII 제거 목록에 의존하지 않는다.
         request.data = null
         request.queryString = null
@@ -54,5 +58,10 @@ class SentryMdcEventProcessor : EventProcessor {
 
     private companion object {
         const val UNKNOWN = "unknown"
+        val SOCIAL_AUTH_PATHS = setOf(
+            "/api/v1/auth/social/google",
+            "/api/v1/auth/social/kakao",
+            "/api/v1/auth/social/complete",
+        )
     }
 }
