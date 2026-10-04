@@ -1,5 +1,6 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.user.consent.UserConsentService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
@@ -37,6 +38,8 @@ class SecurityConfig {
         environment: Environment,
         userRepository: UserRepository,
         objectMapper: ObjectMapper,
+        consentService: UserConsentService,
+        @Value("\${manyak.auth.consent-gate.enabled:false}") consentGateEnabled: Boolean,
         @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
     ): SecurityFilterChain =
         http
@@ -135,7 +138,7 @@ class SecurityConfig {
             // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
             // 인증 확정 이후에 놓아, 엔드포인트가 principal을 읽는 방식과 무관하게 같은 계약을 보장한다.
             .addFilterAfter(
-                DeletedAccountRejectionFilter(userRepository, objectMapper),
+                DeletedAccountRejectionFilter(userRepository, objectMapper, consentService, consentGateEnabled),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
@@ -187,6 +190,9 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/google"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/kakao"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/complete"),
             // 게스트 동의는 회원 토큰과 상태를 사용하지 않고 디바이스 헤더로만 식별한다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/guests/consents"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/guests/consents"),

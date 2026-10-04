@@ -1,5 +1,7 @@
 package com.knk.manyak.global.security
 
+import com.knk.manyak.user.consent.UserConsentService
+import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorResponse
@@ -25,6 +27,8 @@ class DeletedAccountRejectionFilter(
     private val userRepository: UserRepository,
     // 필터 계층이라 GlobalExceptionHandler를 못 타므로 같은 오류 바디(ApiErrorResponse)를 직접 쓴다.
     private val objectMapper: ObjectMapper,
+    private val consentService: UserConsentService,
+    private val consentGateEnabled: Boolean,
 ) : OncePerRequestFilter() {
 
     override fun doFilterInternal(
@@ -52,8 +56,33 @@ class DeletedAccountRejectionFilter(
                 )
                 return
             }
+            if (user != null && consentGateEnabled && !consentAllowed(request.method, request.servletPath)) {
+                val consents = consentService.authenticationStatus(user.id)
+                if (consents.terms.needsConsent || consents.privacy.needsConsent || consents.age14.needsConsent) {
+                    response.status = HttpStatus.FORBIDDEN.value()
+                    response.contentType = MediaType.APPLICATION_JSON_VALUE
+                    response.characterEncoding = Charsets.UTF_8.name()
+                    response.writer.write(objectMapper.writeValueAsString(ApiErrorResponse(
+                        status = HttpStatus.FORBIDDEN.value(), code = ApiErrorCodes.CONSENT_REQUIRED,
+                        message = "현행 필수 항목에 동의해 주세요.", path = request.requestURI,
+                    )))
+                    return
+                }
+            }
         }
         filterChain.doFilter(request, response)
+    }
+
+    private fun consentAllowed(method: String, path: String): Boolean = when (method) {
+        "GET" -> path in setOf(
+            "/api/v1/users/me/consents", "/api/v1/auth/me", "/api/v1/credits/policies",
+            "/api/v1/credits/products", "/api/v1/profile-presets", "/api/v1/stories/simple/tags",
+            // KNK-1537의 장르 API는 구현 전부터 공개 카탈로그 허용 목록에 포함한다.
+            "/api/v1/stories/genres",
+        )
+        "POST" -> path == "/api/v1/users/me/consents"
+        "DELETE" -> path == "/api/v1/users/me" || path == "/api/v1/users/me/push-tokens"
+        else -> false
     }
 
     private fun parsePublicIdOrNull(subject: String?): UUID? {

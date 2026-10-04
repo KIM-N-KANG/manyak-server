@@ -16,6 +16,7 @@
     아래 부정 조건을 **함께** 고쳐야 한다.
 -->
 <configuration>
+    <turboFilter class="com.knk.manyak.auth.consent.SocialAuthPrivacyFilter"/>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
     <springProfile name="prod,dev,jsonlog">

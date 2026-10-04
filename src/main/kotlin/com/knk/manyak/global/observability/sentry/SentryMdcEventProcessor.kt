@@ -4,6 +4,8 @@ import com.knk.manyak.global.observability.MdcKeys
 import io.sentry.EventProcessor
 import io.sentry.Hint
 import io.sentry.SentryEvent
+import io.sentry.protocol.Request
+import io.sentry.protocol.SentryTransaction
 import org.slf4j.MDC
 import org.springframework.stereotype.Component
 
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Component
 class SentryMdcEventProcessor : EventProcessor {
 
     override fun process(event: SentryEvent, hint: Hint): SentryEvent {
+        scrubSocialAuthentication(event.request)
         mdc(MdcKeys.REQUEST_ID)?.let { event.setTag(MdcKeys.REQUEST_ID, it) }
 
         val identity = buildMap {
@@ -30,6 +33,20 @@ class SentryMdcEventProcessor : EventProcessor {
             event.contexts["identity"] = identity
         }
         return event
+    }
+
+    override fun process(transaction: SentryTransaction, hint: Hint): SentryTransaction {
+        scrubSocialAuthentication(transaction.request)
+        return transaction
+    }
+
+    private fun scrubSocialAuthentication(request: Request?) {
+        if (request?.url?.contains("/api/v1/auth/social/") != true) return
+        // custom 헤더는 SDK의 기본 PII 제거 목록에 의존하지 않는다.
+        request.data = null
+        request.queryString = null
+        request.cookies = null
+        request.headers = emptyMap()
     }
 
     // "unknown"(헤더 누락 시 필터 기본값)은 노이즈이므로 부착하지 않는다.

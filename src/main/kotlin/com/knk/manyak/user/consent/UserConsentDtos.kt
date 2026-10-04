@@ -17,7 +17,7 @@ data class UserConsentResponse(
     val age14: ConsentStatusResponse,
 )
 
-@Schema(description = "명시적으로 수락한 버전만 제출. 최소 한 항목 필수이며 누락·null은 미제출")
+@Schema(description = "명시적으로 수락한 버전만 제출. 누락·null은 미제출. 회원 동의 API는 최소 한 항목, 인증 완료는 현재 필요한 모든 항목 필수")
 data class UserConsentRequest(
     @field:Schema(description = "수락한 이용약관 버전", example = "v1.4")
     val terms: String? = null,

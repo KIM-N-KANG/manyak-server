@@ -19,6 +19,21 @@ class SentryMdcEventProcessorTests {
     }
 
     @Test
+    fun `소셜 인증 Sentry 요청에는 동의 코드와 ID 토큰 본문을 싣지 않는다`() {
+        val request = io.sentry.protocol.Request().apply {
+            url = "https://api.example.com/api/v1/auth/social/complete"
+            headers = mapOf("X-Manyak-Consent-Token" to "secret-code", "Content-Type" to "application/json")
+            data = "private-id-token"
+            queryString = "private-query"
+        }
+        val event = SentryEvent().apply { this.request = request }
+        processor.process(event, Hint())
+        assertNull(event.request!!.data)
+        assertNull(event.request!!.queryString)
+        assertNull(event.request!!.headers?.get("X-Manyak-Consent-Token"))
+    }
+
+    @Test
     fun `request_id는 tag, session·device는 identity context로 부착한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, "sess_1")

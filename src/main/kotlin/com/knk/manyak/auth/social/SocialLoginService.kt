@@ -69,12 +69,7 @@ class SocialLoginService(
     ): TokenResponse {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
         // validation, provider 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
-        val info = try {
-            verifierFor(provider).verify(idToken)
-        } catch (e: Exception) {
-            serverAnalytics.socialLoginFailed(provider, classifyVerifyError(e))
-            throw e
-        }
+        val info = verifyIdentity(provider, idToken)
         // 인앱 브라우저에서 넘어온 로그인이면 핸드오프에 보관된 원본 디바이스 ID가 요청 헤더보다 우선한다(스펙 §4-3-5).
         // 외부 브라우저의 새 디바이스 ID로 시드하면 인앱에서 쓴 게스트 사용량이 리셋돼 파밍 우회로가 열린다.
         // 무효·만료 코드는 예외가 아니라 null이므로 헤더 폴백으로 로그인은 정상 진행한다.
@@ -84,38 +79,62 @@ class SocialLoginService(
         val effectiveDeviceId = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
         return try {
             val (user, isNewUser) = findOrCreateUser(provider, info)
-            // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
-            // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
-            // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
-            // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
-            // 재가입 계정(KNK-1053)은 디바이스를 넘기지 않아 "미증명" 경로로 흘린다 → 한도값 시드 = 무료 체험 미부여.
-            // 이전 계정이 회원 체험을 이미 썼는지 알 방법이 없고, 안 쓴 경우까지 부여하면 탈퇴·재가입 반복으로
-            // 무료 스토리 1편 + 채팅 5턴을 무한히 얻는다. 과소 부여가 파밍 허용보다 안전하다.
-            val snapshotDeviceId = effectiveDeviceId.takeIf { user.rejoinedAt == null }
-            val seeded = user.memberTrialSeededAt != null ||
-                guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId).also { snapshotted ->
-                    if (snapshotted) userRepository.markMemberTrialSeeded(user.id, Instant.now())
-                }
-            // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
-            rewardSignup(user)
-            // 핸드오프 소비(= 게스트 데이터 이관)는 이 호출이 겸한다. 별도 호출로 미루면 "로그인 → 이관 → 복귀"
-            // 순서 경쟁이 생기고, 시드는 이미 확정된 뒤라 되돌릴 수 없다(스펙 §4-3-5). 이미 소비된 코드는 멱등 no-op.
-            //
-            // 단, 시드가 실패했으면(Redis 장애 → 미시드로 남아 다음 로그인이 재시도) 소비하지 않는다.
-            // 소비는 보관 규칙상 원본 디바이스 ID를 지우므로, 여기서 소비해 버리면 재시도가 인앱 디바이스를
-            // 잃고 외부 브라우저 디바이스로 시드해 게스트 사용량이 리셋되거나 소진으로 잘못 확정된다.
-            if (handoff != null && handoffCode != null && seeded) {
-                consumeHandoffQuietly(handoffCode, handoff, user.id)
-            }
-            // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.
-            val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
-            serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser)
-            tokens
+            finishLogin(provider, user, isNewUser, effectiveDeviceId, handoffCode, handoff)
         } catch (e: Exception) {
             // 검증 통과 후 사용자 저장·보상·토큰 발급 중 실패는 서버 내부 처리 실패로 분류한다(스펙 §6-6-7).
             serverAnalytics.socialLoginFailed(provider, AnalyticsErrorType.SERVER)
             throw e
         }
+    }
+
+    fun verifyIdentity(provider: SocialProvider, idToken: String): SocialUserInfo {
+        return try {
+            verifierFor(provider).verify(idToken)
+        } catch (e: Exception) {
+            serverAnalytics.socialLoginFailed(provider, classifyVerifyError(e))
+            throw e
+        }
+    }
+
+    /** 동의 확인 이후 새 경로도 동일한 멱등 후속 처리를 사용한다. */
+    fun finishLogin(
+        provider: SocialProvider,
+        user: User,
+        isNewUser: Boolean,
+        effectiveDeviceId: String?,
+        handoffCode: String?,
+        handoff: LoginHandoff?,
+        beforeSuccess: () -> Unit = {},
+    ): TokenResponse {
+        // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
+        // 체험을 초기화하는 파밍 차단). 아직 미스냅샷(member_trial_seeded_at NULL)인 계정만 시도하며, 기존 회원(마이그레이션이
+        // 채움)·이미 스냅샷한 계정은 건너뛰어 남은 회원 체험을 훼손하지 않는다. device 헤더가 없으면 소진 시드로 무료 체험을
+        // 부여하지 않는다(우회 차단). 완료(true)했을 때만 완료 시각을 기록하고, Redis 장애면 미기록으로 다음 로그인이 재시도한다.
+        // 재가입 계정(KNK-1053)은 디바이스를 넘기지 않아 "미증명" 경로로 흘린다 → 한도값 시드 = 무료 체험 미부여.
+        // 이전 계정이 회원 체험을 이미 썼는지 알 방법이 없고, 안 쓴 경우까지 부여하면 탈퇴·재가입 반복으로
+        // 무료 스토리 1편 + 채팅 5턴을 무한히 얻는다. 과소 부여가 파밍 허용보다 안전하다.
+        val snapshotDeviceId = effectiveDeviceId.takeIf { user.rejoinedAt == null }
+        val seeded = user.memberTrialSeededAt != null ||
+            guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId).also { snapshotted ->
+                if (snapshotted) userRepository.markMemberTrialSeeded(user.id, Instant.now())
+            }
+        // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
+        rewardSignup(user)
+        // 핸드오프 소비(= 게스트 데이터 이관)는 이 호출이 겸한다. 별도 호출로 미루면 "로그인 → 이관 → 복귀"
+        // 순서 경쟁이 생기고, 시드는 이미 확정된 뒤라 되돌릴 수 없다(스펙 §4-3-5). 이미 소비된 코드는 멱등 no-op.
+        //
+        // 단, 시드가 실패했으면(Redis 장애 → 미시드로 남아 다음 로그인이 재시도) 소비하지 않는다.
+        // 소비는 보관 규칙상 원본 디바이스 ID를 지우므로, 여기서 소비해 버리면 재시도가 인앱 디바이스를
+        // 잃고 외부 브라우저 디바이스로 시드해 게스트 사용량이 리셋되거나 소진으로 잘못 확정된다.
+        if (handoff != null && handoffCode != null && seeded) {
+            consumeHandoffQuietly(handoffCode, handoff, user.id)
+        }
+        // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.
+        val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
+        // 완료 경로는 코드 소비까지 성공해야 성공 요청으로 집계한다. 기존 로그인은 추가 작업이 없다.
+        beforeSuccess()
+        serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser)
+        return tokens
     }
 
     /**
