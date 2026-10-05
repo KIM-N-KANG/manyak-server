@@ -558,25 +558,26 @@ class StorySubmissionIntegrationTests {
 
     @Test fun `소개 수정은 검수 AI에 전송되고 승인 뒤 라이브와 상세에 반영된다`() {
         val (user, story) = characterStory()
+        val description = "가".repeat(150)
         val character = characters.findByStoryIdOrderByIdAsc(story.id).first()
-        characterPatch(user, story, """{"characters":[{"id":"${character.publicId}","name":"세린","description":"  새로운 소개  "}]}""")
+        characterPatch(user, story, """{"characters":[{"id":"${character.publicId}","name":"세린","description":"  $description  "}]}""")
             .expectStatus().isAccepted
         assertEquals("왕국을 지키는 기사", characters.findById(character.id).orElseThrow().description)
         val row = submissions.findAll().single()
         org.mockito.Mockito.`when`(ai.moderate(moderationInput(row))).thenAnswer { call ->
             val input = call.getArgument<tools.jackson.databind.JsonNode>(0)
-            assertEquals("새로운 소개", input.path("characters").path(0).path("description").asText())
+            assertEquals(description, input.path("characters").path(0).path("description").asText())
             assertFalse(input.path("characters").path(0).has("descriptionValid"))
             ModerationResult("APPROVED", emptyList(), null)
         }
         runner.run(SubmissionRequested(row.id, row.attempt))
         org.mockito.Mockito.verify(ai).moderate(moderationInput(row))
         assertEquals(SubmissionStatus.APPROVED, submissions.findById(row.id).orElseThrow().status)
-        assertEquals("새로운 소개", characters.findById(character.id).orElseThrow().description)
+        assertEquals(description, characters.findById(character.id).orElseThrow().description)
         client.get().uri("/api/v1/stories/${story.publicId}")
             .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
             .exchange().expectStatus().isOk.expectBody()
-            .jsonPath("$.characters[0].description").isEqualTo("새로운 소개")
+            .jsonPath("$.characters[0].description").isEqualTo(description)
     }
 
     @ParameterizedTest
@@ -611,7 +612,7 @@ class StorySubmissionIntegrationTests {
     fun `잘못된 소개는 POST와 PATCH에서 제출본 없이 400이다`(kind: String) {
         val (user, story) = characterStory()
         val invalid = when (kind) {
-            "long" -> "가".repeat(81)
+            "long" -> "가".repeat(151)
             "cr" -> "\r소개"
             "lf" -> "소개\n"
             else -> "소\t개"

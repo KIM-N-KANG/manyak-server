@@ -114,16 +114,16 @@ data class GeneralCharacterInput(
     val images: List<@NotNull GeneralCharacterImageInput>? = null,
 
     @field:Schema(
-        description = "인물 소개. 앞뒤 공백 제거 후 80자 이하, CR·LF·탭 금지. " +
+        description = "인물 소개. 앞뒤 공백 제거 후 150자 이하, CR·LF·탭 금지. " +
             "수정 시 생략·null은 유지하고 빈 문자열·공백만 보내면 삭제한다.",
         nullable = true,
     )
     val description: String? = null,
 ) {
-    @AssertTrue(message = "인물 소개는 앞뒤 공백 제거 후 80자 이하이며 CR·LF·탭을 포함할 수 없습니다.")
+    @AssertTrue(message = "인물 소개는 앞뒤 공백 제거 후 150자 이하이며 CR·LF·탭을 포함할 수 없습니다.")
     @com.fasterxml.jackson.annotation.JsonIgnore
     fun isDescriptionValid(): Boolean = description == null ||
-        (description.trim().length <= 80 && description.none { it == '\r' || it == '\n' || it == '\t' })
+        (description.trim().length <= 150 && description.none { it == '\r' || it == '\n' || it == '\t' })
 
     /** 제출 폼과 승인 후 저장이 같은 유지·삭제·정규화 규칙을 사용한다. */
     fun normalizedDescription(previous: String? = null): String? =

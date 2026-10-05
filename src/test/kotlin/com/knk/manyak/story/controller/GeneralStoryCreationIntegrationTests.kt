@@ -432,7 +432,7 @@ class GeneralStoryCreationIntegrationTests {
     @Test
     fun `일반 제작 소개는 공백 제거 후 승인되어 상세에 나오고 빈 소개는 null이다`() {
         val user = member()
-        val description = "가".repeat(80)
+        val description = "가".repeat(150)
         postGeneral(user, bodyWith(""""characters":[
             {"name":"세린","description":"  $description  "},
             {"name":"루아","description":"   "},
