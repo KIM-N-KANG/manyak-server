@@ -142,7 +142,7 @@ client.test("인물 소개 조회", () => {
   client.global.set("descriptionChangeBody", JSON.stringify({characters: inputs}));
   inputs[0].description = "";
   client.global.set("descriptionDeleteBody", JSON.stringify({characters: inputs}));
-  inputs[0].description = "가".repeat(81);
+  inputs[0].description = "가".repeat(151);
   client.global.set("descriptionInvalidBody", JSON.stringify({characters: inputs}));
 });
 %}
@@ -199,7 +199,7 @@ client.test("빈 소개는 null", () => {
 });
 %}
 
-### 소개 81자는 400: 삭제 검수 완료 뒤 실행
+### 소개 151자는 400: 삭제 검수 완료 뒤 실행
 PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
