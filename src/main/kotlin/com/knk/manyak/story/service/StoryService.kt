@@ -32,16 +32,17 @@ import com.knk.manyak.story.repository.StoryReportRepository
 import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
-import org.springframework.beans.factory.annotation.Value
 import com.knk.manyak.story.report.StoryReportedEvent
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -49,6 +50,7 @@ import java.util.UUID
 
 @Service
 class StoryService(
+    private val submissions: com.knk.manyak.story.submission.StorySubmissionRepository,
     private val storyLikeWriter: StoryLikeWriter,
     private val storyRepository: StoryRepository,
     private val startSettingResponseAssembler: StartSettingResponseAssembler,
@@ -66,13 +68,8 @@ class StoryService(
     private val storyChatRepository: StoryChatRepository,
     private val imageUrlResolver: ImageUrlResolver,
     private val userRepository: UserRepository,
-    // 마냑 공식 계정(오리지널 스토리 소유자)의 user public_id. 미설정(빈 값)이면 오리지널 목록은 빈 배열이다(KNK-975).
-    @Value("\${manyak.official-user-public-id:}") officialUserPublicId: String,
+    private val officialStoryAccount: OfficialStoryAccount,
 ) {
-
-    // 잘못된 UUID는 기동 시점에 실패시켜 조용한 빈 목록 오설정을 막는다.
-    private val officialUserPublicId: UUID? =
-        officialUserPublicId.takeIf { it.isNotBlank() }?.let(UUID::fromString)
 
     @Transactional(readOnly = true)
     fun getLorebooks(genre: String?): List<LorebookListItemResponse> {
@@ -97,7 +94,7 @@ class StoryService(
         // 요청 순서를 보존한다. 존재하지 않거나 삭제된 스토리는 자연히 제외된다.
         return requestedPublicIds
             .mapNotNull { storiesByPublicId[it] }
-            .toSummaryResponses()
+            .toSummaryResponses(officialStoryAccount.officialUserId())
     }
 
     /**
@@ -108,7 +105,7 @@ class StoryService(
     fun getMyStories(userId: Long, limit: Int): List<StorySummaryResponse> =
         storyRepository
             .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId, PageRequest.of(0, limit))
-            .toSummaryResponses()
+            .toSummaryResponses(officialStoryAccount.officialUserId())
 
     /**
      * 공개 스토리 목록(KNK-149). 노출 조건은 발행(PUBLISHED)·공개(PUBLIC)·미삭제·**회원 소유** 넷을 모두
@@ -120,34 +117,70 @@ class StoryService(
      *
      * 페이지네이션은 offset이 아니라 keyset이다 — 새 스토리가 앞에 끼어들어도 다음 페이지에 중복·누락이 없다.
      * [limit] + 1건을 읽어 다음 페이지 유무를 판정하고, 마지막 페이지면 `nextCursor`는 null이다.
+     *
+     * [filter]가 `ORIGINAL`이면 공식 계정 소유로 좁힌다(KNK-1398, 폐기 예정인 [getOriginalStories] 대체).
+     * 소유자 조건은 커서에 싣지 않으므로 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
+     *
+     * 격리 수준이 REPEATABLE_READ인 이유는 **정렬 집계와 커서값의 출처를 같은 스냅샷으로 묶기** 위해서다.
+     * `popular`·`likes`·`chats`는 1차 키가 컬럼이 아니라 집계라 정렬 쿼리가 한 번, 카드 매핑의 배치 집계가 또 한 번
+     * 센다. READ_COMMITTED는 문장마다 스냅샷을 새로 떠서, 그 사이에 좋아요나 턴이 커밋되면 커서에 실리는
+     * 값이 정렬에 쓰인 값과 어긋나고 다음 페이지에 같은 스토리가 다시 나온다. PostgreSQL의 REPEATABLE_READ는
+     * 트랜잭션 첫 문장 시점 스냅샷을 이후 문장이 공유하므로 두 집계가 같은 값을 본다. 읽기 전용이라
+     * 직렬화 실패로 재시도할 일도 없다. 집계를 정렬 쿼리에서 함께 꺼내 오는 프로젝션 방식은 JPQL 8개를
+     * 전부 DTO 프로젝션으로 바꿔야 해서 택하지 않았다.
      */
-    @Transactional(readOnly = true)
-    fun getPublicStories(sort: StoryListSort, limit: Int, rawCursor: String?): StoryPageResponse {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    fun getPublicStories(
+        filter: StoryListFilter,
+        sort: StoryListSort,
+        limit: Int,
+        rawCursor: String?,
+    ): StoryPageResponse {
         val cursor = rawCursor?.let { StoryListCursor.decode(it, sort) }
+        // 공식 계정이 설정되지 않았거나 그 publicId의 회원이 없으면 목록 조회 없이 빈 페이지다.
+        val officialId = officialStoryAccount.officialUserId()
+        val ownerId = when (filter) {
+            StoryListFilter.ALL -> null
+            StoryListFilter.ORIGINAL -> officialId ?: return StoryPageResponse(items = emptyList(), nextCursor = null)
+        }
         // 다음 페이지 유무 판정용으로 한 건 더 읽는다. 응답에는 limit개까지만 싣는다.
         val pageable = PageRequest.of(0, limit + 1)
         val fetched = when (sort) {
-            StoryListSort.LATEST ->
-                if (cursor == null) {
-                    storyRepository.findPublicLatest(pageable)
-                } else {
-                    storyRepository.findPublicLatestAfter(instantOfEpochNanos(cursor.sortValue), cursor.publicId, pageable)
-                }
             StoryListSort.POPULAR ->
                 if (cursor == null) {
-                    storyRepository.findPublicPopular(pageable)
+                    storyRepository.findPublicPopular(ownerId, pageable)
                 } else {
-                    storyRepository.findPublicPopularAfter(cursor.sortValue, cursor.publicId, pageable)
+                    storyRepository.findPublicPopularAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
+                }
+            StoryListSort.LATEST ->
+                if (cursor == null) {
+                    storyRepository.findPublicLatest(ownerId, pageable)
+                } else {
+                    storyRepository.findPublicLatestAfter(ownerId, instantOfEpochNanos(cursor.sortValue), cursor.publicId, pageable)
+                }
+            StoryListSort.LIKES ->
+                if (cursor == null) {
+                    storyRepository.findPublicLikes(ownerId, pageable)
+                } else {
+                    storyRepository.findPublicLikesAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
+                }
+            StoryListSort.CHATS ->
+                if (cursor == null) {
+                    storyRepository.findPublicChats(ownerId, pageable)
+                } else {
+                    storyRepository.findPublicChatsAfter(ownerId, cursor.sortValue, cursor.publicId, pageable)
                 }
         }
         val page = fetched.take(limit)
-        val items = page.toSummaryResponses()
+        val items = page.toSummaryResponses(officialId)
         val nextCursor = if (fetched.size > limit) {
             val last = page.last()
             val sortValue = when (sort) {
                 StoryListSort.LATEST -> epochNanosOf(last.createdAt)
-                // 커서 값은 방금 매핑한 카드의 좋아요 수를 재사용한다(배치 집계라 추가 조회가 없다).
-                StoryListSort.POPULAR -> items.last().likeCount
+                // 커서 값은 방금 매핑한 카드의 집계를 재사용한다(배치 집계라 추가 조회가 없다).
+                StoryListSort.POPULAR -> items.last().likeCount * POPULAR_LIKE_WEIGHT + items.last().turnCount
+                StoryListSort.LIKES -> items.last().likeCount
+                StoryListSort.CHATS -> items.last().turnCount
             }
             StoryListCursor(sortValue, last.publicId).encode(sort)
         } else {
@@ -168,19 +201,22 @@ class StoryService(
 
     /**
      * 마냑 오리지널 스토리 목록(KNK-975). 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환한다.
-     * 피드·검색이 나오기 전까지 홈의 오리지널 섹션이 소비하며, 공식 계정 미설정 환경은 빈 목록이다.
+     * 공식 계정 미설정 환경은 빈 목록이다.
      */
+    @Deprecated(
+        "GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.",
+        ReplaceWith("getPublicStories(StoryListFilter.ORIGINAL, StoryListSort.LATEST, limit, null)"),
+    )
     @Transactional(readOnly = true)
     fun getOriginalStories(): List<StorySummaryResponse> {
-        val publicId = officialUserPublicId ?: return emptyList()
-        val official = userRepository.findByPublicId(publicId) ?: return emptyList()
+        val officialId = officialStoryAccount.officialUserId() ?: return emptyList()
         return storyRepository
             .findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
-                official.id,
+                officialId,
                 StoryStatus.PUBLISHED,
                 StoryVisibility.PUBLIC,
             )
-            .toSummaryResponses()
+            .toSummaryResponses(officialId)
     }
 
     @Transactional(readOnly = true)
@@ -206,7 +242,7 @@ class StoryService(
         return StoryDetailResponse(
             id = story.publicId.toString(),
             // 생성 표지가 있으면 그것을, 없으면 프리셋 키로 조합한다(2단 폴백은 리졸버 소유, KNK-1069).
-            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 프리셋으로 떨어진다.
+            // 검수 게이트(KNK-1126): APPROVED가 아닌 업로드 표지는 기존 프리셋 키를 사용하고 키도 없으면 null이다.
             thumbnailUrl = imageUrlResolver.visibleThumbnailUrlFor(
                 story.thumbnailImageUrl,
                 story.thumbnailImageKey,
@@ -334,6 +370,7 @@ class StoryService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "스토리를 삭제할 권한이 없습니다.")
         }
         // @Transactional 트랜잭션 커밋 시 더티 체킹으로 deletedAt 변경이 반영된다. 명시적 save 불필요.
+        submissions.deleteForStory(story.id)
         story.deletedAt = Instant.now()
         eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
     }
@@ -422,11 +459,15 @@ class StoryService(
             val representative = images.firstOrNull {
                 it.imageName == StoryCharacterImage.defaultImageNameOf(character.name)
             } ?: images.firstOrNull()
-            StoryCharacterResponse(name = character.name, imageUrl = representative?.imageUrl)
+            StoryCharacterResponse(
+                name = character.name,
+                imageUrl = representative?.imageUrl,
+                description = character.description,
+            )
         }
     }
 
-    private fun List<Story>.toSummaryResponses(): List<StorySummaryResponse> {
+    private fun List<Story>.toSummaryResponses(officialId: Long?): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()
         }
@@ -441,6 +482,7 @@ class StoryService(
                 turnCount = turnCountByStoryId[it.id] ?: 0,
                 likeCount = likeCountByStoryId[it.id] ?: 0,
                 author = it.userId?.let(authorByUserId::get),
+                isOriginal = officialId != null && it.userId == officialId,
             )
         }
     }
@@ -449,9 +491,11 @@ class StoryService(
         turnCount: Long,
         likeCount: Long,
         author: StoryAuthorResponse? = null,
+        isOriginal: Boolean,
     ): StorySummaryResponse =
         StorySummaryResponse(
             id = publicId.toString(),
+            isOriginal = isOriginal,
             // 목록 카드는 축소 변형을 쓴다(상세만 원본 — 스펙 §4-3-9 반응형 변형). 단 생성 표지는 축소본이
             // 없어 원본 URL이 그대로 실린다(KNK-1069, 무게는 후속 과제).
             thumbnailUrlSm = imageUrlResolver.visibleThumbnailSmUrlFor(

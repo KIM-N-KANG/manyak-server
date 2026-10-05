@@ -4,13 +4,18 @@ import com.knk.manyak.search.service.StorySearchService
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
+import com.knk.manyak.story.dto.ImagePresignRequest
+import com.knk.manyak.story.dto.ImagePresignResponse
 import com.knk.manyak.story.dto.LorebookListItemResponse
 import com.knk.manyak.story.dto.SimpleStoryCreateResponse
 import com.knk.manyak.story.dto.StoryDetailResponse
 import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.dto.StoryReportRequest
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.service.GeneralStoryCreationService
+import com.knk.manyak.story.submission.StorySubmissionService
+import com.knk.manyak.story.submission.SubmissionAccepted
+import com.knk.manyak.story.service.StoryImageService
+import com.knk.manyak.story.service.StoryListFilter
 import com.knk.manyak.story.service.StoryListSort
 import com.knk.manyak.story.service.StoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -43,31 +48,58 @@ import org.springframework.web.server.ResponseStatusException
 class StoryController(
     private val storySearchService: StorySearchService,
     private val storyService: StoryService,
-    private val generalStoryCreationService: GeneralStoryCreationService,
+    private val submissions: StorySubmissionService,
+    private val storyImageService: StoryImageService,
 ) {
 
+    @Operation(summary = "일반 제작 검수 제출", description = "회원이 전체 입력을 제출하면 202로 접수합니다. AI 검수 승인 후 스토리를 생성하며 이프는 소모하지 않습니다.")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "202", description = "검수 접수", content = [Content(schema = Schema(implementation = SubmissionAccepted::class))]),
+        ApiResponse(responseCode = "400", description = "입력 검증 실패"),
+        ApiResponse(responseCode = "401", description = "인증 필요"),
+        ApiResponse(responseCode = "409", description = "이미지 이름 중복"),
+    ])
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PostMapping("/general")
+    fun createGeneralStory(
+        @CurrentUserId userId: Long?,
+        @Valid @RequestBody request: CreateGeneralStoryRequest,
+    ): SubmissionAccepted = submissions.create(request, userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED))
+
     @Operation(
-        summary = "일반 제작 스토리 등록",
-        description = "폼에 직접 입력한 스토리 구성 항목을 한 번에 등록합니다(단발, 임시저장 없음). 인증은 선택이며 " +
-            "유효 토큰이면 생성자 소유가 됩니다. AI를 호출하지 않아 크레딧 소모·게스트 한도 카운트가 없습니다. " +
-            "응답은 간편 제작과 동일합니다.",
+        summary = "등록 전 이미지 업로드용 presigned URL 발급",
+        description = "스토리를 만들기 전에 표지·인물 이미지를 올릴 서명 URL을 발급합니다(KNK-1390). 객체 키는 " +
+            "`{thumbnails|characters}/uploaded/drafts/{내 식별자}/{uuid}.{ext}`이며, PUT을 마친 뒤 그 `objectKey`를 " +
+            "`POST /stories/general`의 `thumbnailObjectKey`·`characters[].images[].objectKey`에 넣습니다. " +
+            "규칙(형식 3종·5MB·만료 10분)은 스토리 스코프 발급과 같고 **인증이 필요**합니다.",
     )
     @ApiResponses(
         value = [
             ApiResponse(
                 responseCode = "201",
-                description = "등록 성공",
-                content = [Content(schema = Schema(implementation = SimpleStoryCreateResponse::class))],
+                description = "발급 성공",
+                content = [Content(schema = Schema(implementation = ImagePresignResponse::class))],
             ),
-            ApiResponse(responseCode = "400", description = "요청 값이 올바르지 않음", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "400", description = "지원하지 않는 형식·크기 초과", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "401", description = "인증 실패", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(responseCode = "403", description = "정지된 계정", content = [Content(schema = Schema(hidden = true))]),
+            ApiResponse(
+                responseCode = "503",
+                description = "이미지 저장소가 설정되지 않음(로컬 기본값)",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
         ],
     )
+    @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
     @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping("/general")
-    fun createGeneralStory(
+    @PostMapping("/images/presign")
+    fun presignDraftImage(
         @CurrentUserId userId: Long?,
-        @Valid @RequestBody request: CreateGeneralStoryRequest,
-    ): SimpleStoryCreateResponse = generalStoryCreationService.createGeneralStory(request, userId)
+        @Valid @RequestBody request: ImagePresignRequest,
+    ): ImagePresignResponse = storyImageService.presignDraft(
+        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다."),
+        request,
+    )
 
     @Operation(
         summary = "스토리 ID 목록으로 스토리 목록 조회",
@@ -128,9 +160,11 @@ class StoryController(
     ): List<LorebookListItemResponse> = storyService.getLorebooks(genre)
 
     @Operation(
-        summary = "오리지널 스토리 목록 조회",
-        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 피드·검색이 나오기 전까지 " +
-            "홈의 오리지널 섹션이 사용하며, 인증은 필요 없습니다. 공식 계정 미설정 환경은 빈 목록입니다.",
+        summary = "오리지널 스토리 목록 조회(폐기 예정)",
+        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 인증은 필요 없고 공식 계정 " +
+            "미설정 환경은 빈 목록입니다. **폐기 예정**: GET /stories?filter=original이 대체하며, 클라이언트 " +
+            "전환 후 KNK-1400에서 제거합니다.",
+        deprecated = true,
     )
     @ApiResponses(
         value = [
@@ -141,15 +175,18 @@ class StoryController(
             ),
         ],
     )
+    @Deprecated("GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.")
     @GetMapping("/originals")
+    @Suppress("DEPRECATION")
     fun getOriginalStories(): List<StorySummaryResponse> = storyService.getOriginalStories()
 
     @Operation(
         summary = "공개 스토리 목록 조회",
         description = "발행·공개 상태의 회원 스토리 카드를 커서 페이지네이션으로 반환합니다(KNK-149). 인증은 필요 " +
-            "없고 요청자 신원도 쓰지 않습니다. 정렬은 latest(기본, 등록 최신순)와 popular(좋아요 많은 순)이며, " +
-            "다음 페이지는 응답의 nextCursor를 **같은 sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·초안과 " +
-            "게스트 제작 스토리(소유자 없음)는 제외합니다.",
+            "없고 요청자 신원도 쓰지 않습니다. 정렬은 popular(기본, 인기순)·latest(등록 최신순)·likes(좋아요 많은 순)·" +
+            "chats(누적 턴 수 많은 순)이고, filter는 all(기본)과 original(마냑 공식 계정 소유만)입니다. " +
+            "다음 페이지는 응답의 nextCursor를 **같은 filter·sort로** 다시 넘겨 읽습니다. 소프트 삭제·비공개·" +
+            "초안과 게스트 제작 스토리(소유자 없음)는 제외합니다.",
     )
     @ApiResponses(
         value = [
@@ -160,21 +197,24 @@ class StoryController(
             ),
             ApiResponse(
                 responseCode = "400",
-                description = "알 수 없는 sort, 숫자가 아닌 limit, 형식이 깨졌거나 정렬이 다른 cursor",
+                description = "알 수 없는 filter·sort, 숫자가 아닌 limit, 형식이 깨졌거나 정렬이 다른 cursor",
                 content = [Content(schema = Schema(hidden = true))],
             ),
         ],
     )
     @GetMapping
     fun getPublicStories(
-        @Parameter(description = "정렬. latest(기본) 또는 popular", example = "latest")
-        @RequestParam(defaultValue = "latest") sort: String,
+        @Parameter(description = "필터. all(기본) 또는 original(마냑 공식 계정 소유만)", example = "all")
+        @RequestParam(defaultValue = "all") filter: String,
+        @Parameter(description = "정렬. popular(기본), latest, likes 또는 chats", example = "popular")
+        @RequestParam(defaultValue = "popular") sort: String,
         @Parameter(description = "한 페이지 개수(기본 20, 1~50으로 보정)")
         @RequestParam(defaultValue = "$DEFAULT_LIMIT") limit: Int,
         @Parameter(description = "이전 응답의 nextCursor. 첫 페이지는 생략합니다.")
         @RequestParam(required = false) cursor: String?,
     ): StoryPageResponse =
         storyService.getPublicStories(
+            filter = StoryListFilter.from(filter),
             sort = StoryListSort.from(sort),
             limit = limit.coerceIn(MIN_LIMIT, MAX_LIMIT),
             rawCursor = cursor,

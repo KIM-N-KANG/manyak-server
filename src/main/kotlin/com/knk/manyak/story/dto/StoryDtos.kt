@@ -48,6 +48,10 @@ data class StorySummaryResponse(
     @field:Schema(description = "스토리 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val id: String,
 
+    @get:JsonProperty("isOriginal")
+    @field:Schema(description = "공식 계정 소유 스토리인지. 공식 계정 미설정 또는 회원 부재 시 false.", example = "false")
+    val isOriginal: Boolean,
+
     @field:Schema(
         description = "썸네일 축소 변형 URL(§4-3-9 반응형 변형). 목록 카드용. 소스가 없으면 null. " +
             "컴파일이 생성한 표지가 있으면 축소본 없이 그 원본 URL(webp)이 실린다(KNK-1069).",
@@ -182,7 +186,7 @@ data class StoryDetailResponse(
     val createdAt: Instant,
 )
 
-@Schema(description = "스토리 인물(이름과 인물 이미지). 외형 필드·인물 식별자는 노출하지 않는다.")
+@Schema(description = "스토리 인물(이름·이미지·소개). 외형 필드·인물 식별자는 노출하지 않는다.")
 data class StoryCharacterResponse(
     @field:Schema(description = "인물 이름", example = "레이")
     val name: String,
@@ -193,6 +197,13 @@ data class StoryCharacterResponse(
         nullable = true,
     )
     val imageUrl: String?,
+
+    @field:Schema(
+        description = "인물 소개. 소개 없는 컴파일·기존 스토리·일반 제작이나 수정으로 추가한 인물은 null이다.",
+        example = "기록을 지키는 과묵한 사서. 주인공의 조사를 조용히 돕는다.",
+        nullable = true,
+    )
+    val description: String?,
 )
 
 @Schema(description = "스토리가 참조하는 로어북(장르 공용 용어 사전)")

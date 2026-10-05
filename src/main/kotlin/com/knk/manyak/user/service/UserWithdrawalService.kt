@@ -29,6 +29,7 @@ import java.time.Instant
  */
 @Service
 class UserWithdrawalService(
+    private val submissions: com.knk.manyak.story.submission.StorySubmissionRepository,
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
     private val refreshTokenStore: RefreshTokenStore,
@@ -73,6 +74,7 @@ class UserWithdrawalService(
             social.deletedAt = now
             social.email = null
         }
+        submissions.deleteForUser(id)
         devicePushTokenRepository.deleteByUserId(id)
         refreshTokenStore.revokeAllForUser(id)
     }

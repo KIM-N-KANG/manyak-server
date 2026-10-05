@@ -10,6 +10,11 @@ interface StoryCreationTagRepository : JpaRepository<StoryCreationTag, Long> {
         tagSource: StoryCreationTagSource,
     ): List<StoryCreationTag>
 
+    fun findByTagSourceAndCategoryAndIsActiveTrueOrderBySortOrderAscIdAsc(
+        tagSource: StoryCreationTagSource,
+        category: SimpleStoryTagCategory,
+    ): List<StoryCreationTag>
+
     fun findByIdInAndTagSourceAndIsActiveTrue(
         ids: Collection<Long>,
         tagSource: StoryCreationTagSource,

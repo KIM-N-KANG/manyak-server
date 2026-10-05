@@ -49,6 +49,11 @@ interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
     @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId AND t.id IN :ids")
     fun deleteByUserIdAndIdIn(@Param("userId") userId: Long, @Param("ids") ids: Collection<Long>): Int
 
+    // 내부 호출자가 FCM에서 무효 판정을 받은 전역 유일 토큰이므로 소유자 조건을 두지 않는다.
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM DevicePushToken t WHERE t.token = :token")
+    fun deleteByToken(@Param("token") token: String): Int
+
     /** 탈퇴 정리(UserWithdrawalService). 같은 이유로 조건부 DELETE다. 지운 행 수를 돌려준다. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId")

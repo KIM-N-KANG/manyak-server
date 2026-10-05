@@ -26,13 +26,27 @@ object UploadedImageObjectKeys {
     /** 업로드 상한 5MB. presign 요청 검증과 연결 시 HEAD 재검증이 같은 값을 쓴다. */
     const val MAX_CONTENT_LENGTH = 5L * 1024 * 1024
 
+    /**
+     * 등록 전 업로드(일반 제작, KNK-1390)의 스코프 세그먼트. 스토리가 아직 없어 스토리 대신 **사용자**
+     * 공개 식별자로 소유를 가른다. UUID와 겹치지 않는 고정 문자열이라 스토리 경로와 섞이지 않는다.
+     */
+    const val DRAFT_SEGMENT = "drafts"
+
     fun prefixOf(kind: UploadedImageKind, storyPublicId: UUID): String =
         "${kind.keyPrefix}/$storyPublicId"
 
-    fun newObjectKey(kind: UploadedImageKind, storyPublicId: UUID, contentType: String): String {
-        val extension = EXTENSION_BY_CONTENT_TYPE.getValue(contentType)
-        return "${prefixOf(kind, storyPublicId)}/${UUID.randomUUID()}.$extension"
-    }
+    /** 등록 전 업로드 경로. `{prefix}/drafts/{userPublicId}`이며 등록 요청이 같은 규칙으로 소유를 확인한다. */
+    fun draftPrefixOf(kind: UploadedImageKind, userPublicId: UUID): String =
+        "${kind.keyPrefix}/$DRAFT_SEGMENT/$userPublicId"
+
+    fun newObjectKey(kind: UploadedImageKind, storyPublicId: UUID, contentType: String): String =
+        "${prefixOf(kind, storyPublicId)}/${newFileName(contentType)}"
+
+    fun newDraftObjectKey(kind: UploadedImageKind, userPublicId: UUID, contentType: String): String =
+        "${draftPrefixOf(kind, userPublicId)}/${newFileName(contentType)}"
+
+    private fun newFileName(contentType: String): String =
+        "${UUID.randomUUID()}.${EXTENSION_BY_CONTENT_TYPE.getValue(contentType)}"
 }
 
 /** 업로드 대상. 객체 키 prefix가 갈린다. */

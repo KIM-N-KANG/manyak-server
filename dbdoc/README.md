@@ -4,7 +4,7 @@
 
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
-| [public.story_creation_tags](public.story_creation_tags.md) | 9 |  | BASE TABLE |
+| [public.story_creation_tags](public.story_creation_tags.md) | 10 |  | BASE TABLE |
 | [public.story_creation_sessions](public.story_creation_sessions.md) | 8 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
@@ -36,7 +36,7 @@
 | [public.story_creation_requests](public.story_creation_requests.md) | 12 |  | BASE TABLE |
 | [public.story_chat_shares](public.story_chat_shares.md) | 5 |  | BASE TABLE |
 | [public.story_creation_characters](public.story_creation_characters.md) | 7 |  | BASE TABLE |
-| [public.story_characters](public.story_characters.md) | 13 |  | BASE TABLE |
+| [public.story_characters](public.story_characters.md) | 14 |  | BASE TABLE |
 | [public.story_likes](public.story_likes.md) | 4 |  | BASE TABLE |
 | [public.story_reports](public.story_reports.md) | 6 |  | BASE TABLE |
 | [public.credit_policies](public.credit_policies.md) | 4 |  | BASE TABLE |
@@ -49,6 +49,9 @@
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
 | [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
+| [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
+| [public.story_submissions](public.story_submissions.md) | 21 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
+| [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
 
 ## Relations
 
@@ -104,6 +107,9 @@ erDiagram
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_creation_tag_aliases" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -115,6 +121,7 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_60_ normalized_name
+  integer featured_order
 }
 "public.story_creation_sessions" {
   bigint id
@@ -458,6 +465,7 @@ erDiagram
   text outfit
   text visual_identity
   timestamp_with_time_zone created_at
+  text description
 }
 "public.story_likes" {
   bigint id
@@ -558,6 +566,45 @@ erDiagram
   varchar_20_ doc_type
   varchar_20_ version
   timestamp_with_time_zone agreed_at
+}
+"public.push_outbox" {
+  bigint id
+  varchar_255_ message_id
+  jsonb payload
+  varchar_16_ status
+  integer attempts
+  timestamp_with_time_zone next_attempt_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone published_at
+}
+"public.story_submissions" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  bigint story_id FK
+  varchar_10_ kind
+  jsonb payload
+  jsonb input_form
+  jsonb image_copies
+  varchar_10_ status
+  jsonb issues
+  varchar_40_ error_code
+  integer attempt
+  timestamp_with_time_zone dispatched_at
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone decided_at
+  jsonb image_errors
+  integer retry_count
+  timestamp_with_time_zone next_attempt_at
+  timestamp_with_time_zone held_at
+  text hold_reason
+}
+"public.story_creation_tag_aliases" {
+  bigint id
+  bigint tag_id FK
+  varchar_30_ alias
+  varchar_60_ normalized_alias
 }
 ```
 

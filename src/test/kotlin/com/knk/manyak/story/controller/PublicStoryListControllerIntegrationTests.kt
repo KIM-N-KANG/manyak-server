@@ -1,7 +1,10 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryLike
 import com.knk.manyak.story.entity.StoryStatus
@@ -11,19 +14,30 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.verify
+import org.springframework.http.MediaType
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
+import java.util.UUID
+import java.util.Base64
+import tools.jackson.databind.ObjectMapper
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 
 /**
  * 공개 스토리 목록 조회 통합 검증(KNK-149).
  * - 비로그인으로 200이고 공개(PUBLISHED∧PUBLIC)·미삭제·회원 소유 스토리만 나온다.
  * - 게스트 소유(user_id NULL)는 공개 범위를 고를 수 없어 기본값 PUBLIC으로 생긴 체험 스토리라 제외한다.
- * - latest는 createdAt 내림차순, popular는 좋아요 수 내림차순이고 동률은 publicId 내림차순으로 결정적이다.
+ * - popular는 좋아요 가중 합, latest는 createdAt, likes는 좋아요 수, chats는 누적 턴 수 내림차순이다.
+ * - 동률은 publicId 내림차순이며 기본 정렬은 popular다.
  * - 커서는 keyset이라 페이지 사이에 중복·누락이 없고, 정렬이 다른 커서는 400이다.
+ * - filter=original은 공식 계정 소유만 싣고, 공식 계정 미설정 환경은 빈 페이지다(KNK-1398).
  * - 만료·위조 access 헤더가 자동 첨부돼도 401이 아니다(로그아웃 상태 화면이 부르는 경로).
  */
 @ActiveProfiles("test")
@@ -35,6 +49,7 @@ class PublicStoryListControllerIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyLikeRepository: StoryLikeRepository
     @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -64,6 +79,17 @@ class PublicStoryListControllerIntegrationTests {
         ),
     )
 
+    /** 누적 턴 수를 심는다. [deleted]면 소프트 삭제 채팅이라 합계에서 빠져야 한다. */
+    private fun chat(story: Story, turns: Int, deleted: Boolean = false) {
+        storyChatRepository.save(
+            StoryChat(
+                storyId = story.id,
+                currentTurn = turns,
+                deletedAt = if (deleted) Instant.now() else null,
+            ),
+        )
+    }
+
     private fun like(story: Story, times: Int) {
         repeat(times) { storyLikeRepository.save(StoryLike(userId = saveUser("좋아요$it-${story.id}").id, storyId = story.id)) }
     }
@@ -77,7 +103,7 @@ class PublicStoryListControllerIntegrationTests {
         val older = saveStory(author, "먼저", createdAt = Instant.parse("2026-06-01T00:00:00Z"))
         val newer = saveStory(author, "나중", createdAt = Instant.parse("2026-06-02T00:00:00Z"))
 
-        get("")
+        get("?sort=latest")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(2)
@@ -112,11 +138,13 @@ class PublicStoryListControllerIntegrationTests {
         saveStory(author, "삭제됨", deletedAt = Instant.now())
         saveStory(null, "게스트 제작")
 
-        get("")
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.items.length()").isEqualTo(1)
-            .jsonPath("$.items[0].id").isEqualTo(visible.publicId.toString())
+        for (sort in listOf("popular", "latest", "likes", "chats")) {
+            get("?sort=$sort")
+                .expectStatus().isOk
+                .expectBody()
+                .jsonPath("$.items.length()").isEqualTo(1)
+                .jsonPath("$.items[0].id").isEqualTo(visible.publicId.toString())
+        }
     }
 
     @Test
@@ -127,7 +155,7 @@ class PublicStoryListControllerIntegrationTests {
         }
         val expectedOrder = stories.reversed().map { it.publicId.toString() }
 
-        val firstPage = get("?limit=2").expectStatus().isOk
+        val firstPage = get("?sort=latest&limit=2").expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(2)
             .jsonPath("$.items[0].id").isEqualTo(expectedOrder[0])
@@ -136,7 +164,7 @@ class PublicStoryListControllerIntegrationTests {
             .returnResult()
         val cursor = cursorOf(firstPage.responseBody)
 
-        get("?limit=2&cursor=$cursor")
+        get("?sort=latest&limit=2&cursor=$cursor")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(1)
@@ -145,7 +173,7 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `popular는 좋아요 수 내림차순이고 동률은 publicId 내림차순이다`() {
+    fun `likes는 좋아요 수 내림차순이고 동률은 publicId 내림차순이다`() {
         val author = saveUser()
         val hot = saveStory(author, "인기")
         val mild = saveStory(author, "보통")
@@ -158,7 +186,7 @@ class PublicStoryListControllerIntegrationTests {
         // 둘의 순서가 갈리므로 기대값도 DB와 같은 정렬(정규 표기 문자열 = 부호 없는 바이트 순)로 만든다.
         val tiedExpected = listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending()
 
-        get("?sort=popular")
+        get("?sort=likes")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(4)
@@ -170,7 +198,7 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `popular도 커서로 이어 읽는다`() {
+    fun `likes도 커서로 이어 읽는다`() {
         val author = saveUser()
         val hot = saveStory(author, "인기")
         val mild = saveStory(author, "보통")
@@ -178,13 +206,13 @@ class PublicStoryListControllerIntegrationTests {
         like(hot, 3)
         like(mild, 1)
 
-        val firstPage = get("?sort=popular&limit=2").expectStatus().isOk
+        val firstPage = get("?sort=likes&limit=2").expectStatus().isOk
             .expectBody()
             .jsonPath("$.items[0].id").isEqualTo(hot.publicId.toString())
             .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
             .returnResult()
 
-        get("?sort=popular&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
+        get("?sort=likes&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(1)
@@ -199,10 +227,194 @@ class PublicStoryListControllerIntegrationTests {
         saveStory(author, "둘")
 
         val latestCursor = cursorOf(
-            get("?limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
+            get("?sort=latest&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
         )
 
-        get("?sort=popular&limit=1&cursor=$latestCursor").expectStatus().isBadRequest
+        get("?sort=likes&limit=1&cursor=$latestCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `chats는 미삭제 채팅의 누적 턴 수 내림차순이고 동률은 publicId 내림차순이다`() {
+        val author = saveUser()
+        val busy = saveStory(author, "많이 논 스토리")
+        val mild = saveStory(author, "조금 논 스토리")
+        val tiedA = saveStory(author, "동률A")
+        val tiedB = saveStory(author, "동률B")
+        chat(busy, 7)
+        chat(busy, 3)
+        chat(mild, 4)
+        // 소프트 삭제된 채팅의 턴은 카드 turnCount와 마찬가지로 합계에서 빠진다.
+        chat(mild, 99, deleted = true)
+
+        val tiedExpected = listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending()
+
+        get("?sort=chats")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(4)
+            .jsonPath("$.items[0].id").isEqualTo(busy.publicId.toString())
+            .jsonPath("$.items[0].turnCount").isEqualTo(10)
+            .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
+            .jsonPath("$.items[1].turnCount").isEqualTo(4)
+            .jsonPath("$.items[2].id").isEqualTo(tiedExpected[0])
+            .jsonPath("$.items[3].id").isEqualTo(tiedExpected[1])
+    }
+
+    @Test
+    fun `chats도 커서로 이어 읽고 중복도 누락도 없다`() {
+        val author = saveUser()
+        val busy = saveStory(author, "많이")
+        val mild = saveStory(author, "조금")
+        val idle = saveStory(author, "없음")
+        chat(busy, 5)
+        chat(mild, 2)
+
+        val firstPage = get("?sort=chats&limit=2").expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items[0].id").isEqualTo(busy.publicId.toString())
+            .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
+            .returnResult()
+
+        get("?sort=chats&limit=2&cursor=${cursorOf(firstPage.responseBody)}")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(idle.publicId.toString())
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `chats 커서를 likes에 넘기면 400이다`() {
+        val author = saveUser()
+        saveStory(author, "하나")
+        saveStory(author, "둘")
+
+        val chatsCursor = cursorOf(
+            get("?sort=chats&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
+        )
+
+        get("?sort=likes&limit=1&cursor=$chatsCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `popular는 좋아요 가중 합으로 정렬하고 생략 시에도 인기순이다`() {
+        val author = saveUser()
+        val a = saveStory(author, "A", createdAt = Instant.parse("2026-06-02T00:00:00Z"))
+        val b = saveStory(author, "B", createdAt = Instant.parse("2026-06-03T00:00:00Z"))
+        val c = saveStory(author, "C", createdAt = Instant.parse("2026-06-01T00:00:00Z"))
+        like(a, 2)
+        chat(b, 15)
+        like(c, 1)
+        chat(c, 5)
+        chat(c, 7)
+        chat(b, 100, deleted = true)
+
+        for ((query, expected) in listOf(
+            "?sort=popular" to listOf(c, a, b),
+            "" to listOf(c, a, b),
+            "?sort=likes" to listOf(a, c, b),
+            "?sort=chats" to listOf(b, c, a),
+        )) {
+            val body = get(query).expectStatus().isOk.expectBody()
+                .jsonPath("$.items.length()").isEqualTo(3)
+                .jsonPath("$.items[0].score").doesNotExist()
+            expected.forEachIndexed { i, story ->
+                body.jsonPath("$.items[$i].id").isEqualTo(story.publicId.toString())
+            }
+        }
+    }
+
+    @Test
+    fun `popular 동률은 publicId 내림차순이며 limit 1과 2로 빠짐없이 이어 읽는다`() {
+        val author = saveUser()
+        val top = saveStory(author, "최상위")
+        val a = saveStory(author, "동률 좋아요")
+        val b = saveStory(author, "동률 턴")
+        val zero = saveStory(author, "집계 없음")
+        like(top, 3)
+        like(a, 2)
+        chat(b, 20)
+        chat(zero, 100, deleted = true)
+        val expected = listOf(top.publicId.toString()) +
+            listOf(a, b).map { it.publicId.toString() }.sortedDescending() + zero.publicId.toString()
+        val mapper = ObjectMapper()
+
+        for (limit in listOf(1, 2)) {
+            val actual = mutableListOf<String>()
+            var cursor: String? = null
+            repeat((expected.size + limit - 1) / limit) {
+                val query = "?sort=popular&limit=$limit" + (cursor?.let { "&cursor=$it" } ?: "")
+                val body = get(query).expectStatus().isOk.expectBody().returnResult().responseBody!!
+                val page = mapper.readTree(body)
+                val items = page["items"]
+                actual.addAll(items.toList().map { it["id"].asText() })
+                cursor = page["nextCursor"].takeUnless { it.isNull }?.asText()
+                cursor?.let {
+                    val last = items.last()
+                    val score = last["likeCount"].asLong() * 10 + last["turnCount"].asLong()
+                    assertEquals("s:$score:${last["id"].asText()}", String(Base64.getUrlDecoder().decode(it)))
+                }
+            }
+            assertEquals(expected, actual)
+            assertNull(cursor)
+        }
+    }
+
+    @Test
+    fun `popular 커서는 다른 정렬과 호환되지 않고 옛 p 접두도 거부한다`() {
+        val author = saveUser()
+        saveStory(author, "하나")
+        saveStory(author, "둘")
+        val popular = cursorOf(get("?sort=popular&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody)
+        for (sort in listOf("latest", "likes", "chats")) {
+            get("?sort=$sort&cursor=$popular").expectStatus().isBadRequest
+            val other = cursorOf(get("?sort=$sort&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody)
+            get("?sort=popular&cursor=$other").expectStatus().isBadRequest
+        }
+        val legacy = Base64.getUrlEncoder().withoutPadding().encodeToString("p:20:${UUID.randomUUID()}".toByteArray())
+        get("?sort=popular&cursor=$legacy").expectStatus().isBadRequest
+        get("?cursor=$legacy").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `알 수 없는 filter는 400이다`() {
+        get("?filter=mine").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이면 filter=original은 빈 페이지다`() {
+        val author = saveUser()
+        saveStory(author, "공개")
+
+        get("?filter=original")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `공식 계정 미설정이어도 original의 망가진 커서는 400이다`() {
+        get("?filter=original&cursor=not-a-cursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이어도 original의 다른 정렬 커서는 400이다`() {
+        val author = saveUser()
+        saveStory(author, "하나")
+        saveStory(author, "둘")
+        val latestCursor = cursorOf(
+            get("?sort=latest&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody,
+        )
+
+        get("?filter=original&sort=popular&cursor=$latestCursor").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `공식 계정 미설정이어도 original의 옛 p 접두 커서는 400이다`() {
+        val legacy = Base64.getUrlEncoder().withoutPadding().encodeToString("p:20:${UUID.randomUUID()}".toByteArray())
+
+        get("?filter=original&sort=popular&cursor=$legacy").expectStatus().isBadRequest
     }
 
     @Test
@@ -245,6 +457,8 @@ class PublicStoryListControllerIntegrationTests {
             .jsonPath("$.items[0].turnCount").isEqualTo(0)
             .jsonPath("$.items[0].genres[0]").isEqualTo("판타지")
             .jsonPath("$.items[0].status").isEqualTo("PUBLISHED")
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[0].original").doesNotExist()
     }
 
     /** 응답 본문에서 nextCursor 값을 뽑는다(테스트 사이 값 전달용). */
@@ -255,5 +469,172 @@ class PublicStoryListControllerIntegrationTests {
     companion object {
         private const val PATH = "/api/v1/stories"
         private val CURSOR_PATTERN = """"nextCursor":"([^"]+)"""".toRegex()
+    }
+}
+
+/**
+ * 공식 계정이 설정된 환경의 `filter=original` 검증(KNK-1398).
+ * 폐기 예정인 `GET /stories/originals`를 대체하는 경로라 소유자 필터가 정확해야 한다.
+ */
+@ActiveProfiles("test")
+@AutoConfigureRestTestClient
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["manyak.official-user-public-id=11111111-2222-3333-4444-555555555555"],
+)
+class PublicStoryListOriginalFilterIntegrationTests {
+
+    @Autowired private lateinit var jwt: JwtTokenProvider
+
+    @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var storyChatRepository: StoryChatRepository
+    @MockitoSpyBean private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+    }
+
+    private fun saveOfficialUser(): User =
+        userRepository.save(User(publicId = OFFICIAL_PUBLIC_ID, nickname = "마냑"))
+
+    private fun saveStory(owner: User, title: String, createdAt: Instant): Story =
+        storyRepository.save(
+            Story(userId = owner.id, title = title, oneLineIntro = "$title 소개", genre = "판타지", createdAt = createdAt),
+        )
+
+    @Test
+    fun `filter=original은 공식 계정 소유 스토리만 최신순으로 반환한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        val older = saveStory(official, "오리지널 먼저", Instant.parse("2026-08-01T00:00:00Z"))
+        val newer = saveStory(official, "오리지널 나중", Instant.parse("2026-08-02T00:00:00Z"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-03T00:00:00Z"))
+
+        clearInvocations(userRepository)
+        restTestClient.get().uri("/api/v1/stories?filter=original&sort=latest").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+            .jsonPath("$.items[0].id").isEqualTo(newer.publicId.toString())
+            .jsonPath("$.items[1].id").isEqualTo(older.publicId.toString())
+            .jsonPath("$.items[0].isOriginal").isEqualTo(true)
+            .jsonPath("$.items[1].isOriginal").isEqualTo(true)
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
+    }
+
+    @Test
+    fun `filter=original과 popular는 첫 페이지와 다음 페이지 모두 공식 계정만 반환한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        val low = saveStory(official, "오리지널 낮음", Instant.now())
+        val high = saveStory(official, "오리지널 높음", Instant.now())
+        val outside = saveStory(other, "다른 계정", Instant.now())
+        storyChatRepository.save(StoryChat(storyId = high.id, currentTurn = 12))
+        storyChatRepository.save(StoryChat(storyId = outside.id, currentTurn = 5))
+        restTestClient.get().uri("/api/v1/stories?filter=original&sort=popular")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+        val first = restTestClient.get().uri("/api/v1/stories?filter=original&sort=popular&limit=1")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].id").isEqualTo(high.publicId.toString())
+            .jsonPath("$.items[0].isOriginal").isEqualTo(true).returnResult()
+        val cursor = ObjectMapper().readTree(first.responseBody!!)["nextCursor"].asText()
+        restTestClient.get().uri("/api/v1/stories?filter=original&sort=popular&limit=1&cursor=$cursor")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(low.publicId.toString())
+            .jsonPath("$.items[0].isOriginal").isEqualTo(true)
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `filter=all은 공식 계정 밖의 스토리도 함께 반환한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        saveStory(official, "오리지널", Instant.parse("2026-08-01T00:00:00Z"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-02T00:00:00Z"))
+
+        clearInvocations(userRepository)
+        restTestClient.get().uri("/api/v1/stories?filter=all&sort=latest").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(2)
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+            .jsonPath("$.items[1].isOriginal").isEqualTo(true)
+            .jsonPath("$.items[0].original").doesNotExist()
+            .jsonPath("$.items[1].original").doesNotExist()
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
+    }
+
+    @Test
+    fun `공식 계정 publicId에 해당하는 회원이 없으면 빈 페이지다`() {
+        val other = userRepository.save(User(nickname = "다른유저"))
+        saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-01T00:00:00Z"))
+
+        restTestClient.get().uri("/api/v1/stories?filter=original").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+            .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `배치 카드도 공식 계정만 오리지널이며 게스트와 비공개 읽기 규칙을 유지한다`() {
+        val official = saveOfficialUser()
+        val other = userRepository.save(User(nickname = "일반작가"))
+        val original = saveStory(official, "오리지널", Instant.now())
+        val member = saveStory(other, "회원 스토리", Instant.now())
+        val guest = storyRepository.save(Story(title = "게스트"))
+        val draft = storyRepository.save(Story(userId = official.id, title = "공식 초안", status = StoryStatus.DRAFT))
+        clearInvocations(userRepository)
+
+        restTestClient.post().uri("/api/v1/stories/batch").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(original, member, guest, draft).map { it.publicId.toString() }))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.length()").isEqualTo(3)
+            .jsonPath("$[0].id").isEqualTo(original.publicId.toString())
+            .jsonPath("$[0].isOriginal").isEqualTo(true)
+            .jsonPath("$[1].isOriginal").isEqualTo(false)
+            .jsonPath("$[2].isOriginal").isEqualTo(false)
+            .jsonPath("$[0].author.id").isEmpty
+        verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
+    }
+
+    @Test
+    fun `내 스토리는 공개 여부와 관계없이 공식 계정 소유를 오리지널로 판정한다`() {
+        val official = saveOfficialUser()
+        val member = userRepository.save(User(nickname = "일반작가"))
+        storyRepository.save(Story(userId = official.id, title = "공식 초안", status = StoryStatus.DRAFT, visibility = StoryVisibility.PRIVATE))
+        saveStory(official, "공식 공개", Instant.now())
+        saveStory(member, "일반 공개", Instant.now())
+
+        for ((user, expected) in listOf(official to true, member to false)) {
+            restTestClient.get().uri("/api/v1/users/me/stories")
+                .header("Authorization", "Bearer ${jwt.issueAccessToken(user.publicId)}")
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$[*].isOriginal").isEqualTo(if (expected) listOf(true, true) else listOf(false))
+        }
+    }
+
+    @Test
+    fun `공식 계정이 DB에 없으면 전체 카드의 isOriginal은 false다`() {
+        val other = userRepository.save(User(nickname = "일반작가"))
+        saveStory(other, "일반 공개", Instant.now())
+        restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].isOriginal").isEqualTo(false)
+    }
+
+    @Test
+    fun `OpenAPI 카드 필드명은 original이 아닌 isOriginal이다`() {
+        restTestClient.get().uri("/v3/api-docs").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.components.schemas.StorySummaryResponse.properties.isOriginal.type").isEqualTo("boolean")
+            .jsonPath("$.components.schemas.StorySummaryResponse.properties.original").doesNotExist()
+    }
+
+    companion object {
+        private val OFFICIAL_PUBLIC_ID: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555")
     }
 }

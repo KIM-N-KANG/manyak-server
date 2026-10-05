@@ -17,6 +17,7 @@
 | outfit | text |  | true |  |  |  |
 | visual_identity | text |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| description | text |  | true |  |  | 스토리 상세용 주변 인물 소개. 소개가 없으면 NULL |
 
 ## Constraints
 
@@ -57,6 +58,7 @@ erDiagram
   text outfit
   text visual_identity
   timestamp_with_time_zone created_at
+  text description
 }
 "public.story_character_images" {
   bigint id

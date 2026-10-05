@@ -62,6 +62,7 @@ data class StoryEditFormResponse(
         arraySchema = Schema(description = "인물과 인물별 이미지 목록(KNK-1126). 인물이 없으면 빈 배열"),
     )
     val characters: List<StoryEditCharacterResponse> = emptyList(),
+    val submission: com.knk.manyak.story.submission.SubmissionMetadata? = null,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -89,7 +90,8 @@ data class UpdateStoryRequest(
 
     // 보내면 최소 1개. stories.genre(VARCHAR(255)) 결합 저장이라 개수·길이 상한을 둔다(일반 제작과 동일).
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
-    val genres: List<@NotBlank(message = "장르는 비어 있을 수 없습니다.") @Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>? = null,
+    @field:Schema(description = "활성 제공 장르의 정식 이름 또는 이 스토리에 이미 저장된 장르. 생략/null은 유지")
+    val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>? = null,
 
     @field:Valid
     val storySettings: GeneralStorySettingsInput? = null,
@@ -118,4 +120,16 @@ data class UpdateStoryRequest(
         nullable = true,
     )
     val thumbnailObjectKey: String? = null,
-)
+
+    // 인물 동기화(KNK-1391). 보내면 컬렉션 전체를 교체한다: id가 기존과 맞으면 개명(in-place), 없으면 신규
+    // 추가, 요청에서 빠진 기존 인물은 이미지와 함께 삭제한다. 빈 배열이면 인물을 전부 지운다.
+    // 각 인물의 images를 생략하면 그 인물의 기존 이미지는 유지된다(null = 미전송).
+    @field:Valid
+    @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
+    @field:Schema(description = "인물 목록(최대 6명). 생략하면 인물을 바꾸지 않는다.", nullable = true)
+    val characters: List<@NotNull GeneralCharacterInput>? = null,
+) {
+    @jakarta.validation.constraints.AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isGenresValid(): Boolean = genres?.all { it.length <= 30 } ?: true
+}

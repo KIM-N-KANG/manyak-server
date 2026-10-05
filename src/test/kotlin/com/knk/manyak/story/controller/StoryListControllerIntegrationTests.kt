@@ -57,6 +57,8 @@ class StoryListControllerIntegrationTests {
             .jsonPath("$[0].genres.length()").isEqualTo(1)
             .jsonPath("$[0].genres[0]").isEqualTo("로맨스")
             .jsonPath("$[0].author").isEmpty
+            .jsonPath("$[0].isOriginal").isEqualTo(false)
+            .jsonPath("$[1].isOriginal").isEqualTo(false)
             .jsonPath("$[0].turnCount").isEqualTo(0)
             .jsonPath("$[0].likeCount").isEqualTo(0)
             .jsonPath("$[0].status").isEqualTo("PUBLISHED")

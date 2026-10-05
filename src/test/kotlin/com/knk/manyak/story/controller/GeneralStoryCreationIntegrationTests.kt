@@ -4,8 +4,13 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.image.service.ImageModerationStatus
+import com.knk.manyak.image.service.UploadedImageStorage
+import com.knk.manyak.image.service.UploadedObject
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCharacterImageRepository
+import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -16,11 +21,14 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.anyString
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -30,18 +38,37 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class GeneralStoryCreationIntegrationTests {
+    @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
+    @Autowired private lateinit var legacyCreation: com.knk.manyak.story.service.GeneralStoryCreationService
+    @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
+
+    @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storySettingRepository: StorySettingRepository
     @Autowired private lateinit var storyMainEventRepository: StoryMainEventRepository
     @Autowired private lateinit var storyEndingRepository: StoryEndingRepository
+    @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
+    @Autowired private lateinit var storyCharacterImageRepository: StoryCharacterImageRepository
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
-    @BeforeEach fun setUp() = databaseCleaner.cleanAll()
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+        com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")
+        `when`(uploadedImageStorage.isEnabled()).thenReturn(true)
+        `when`(uploadedImageStorage.serveUrlOf(anyString())).thenAnswer { "$CDN_BASE_URL/${it.arguments[0]}" }
+        `when`(uploadedImageStorage.head(anyString())).thenReturn(UploadedObject("image/webp", 1024))
+    }
     @AfterEach fun tearDown() = databaseCleaner.cleanAll()
 
     private fun body(visibility: String? = null): String {
@@ -86,7 +113,7 @@ class GeneralStoryCreationIntegrationTests {
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(suspended.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body())
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isForbidden
 
         assertEquals(0, storyRepository.findAll().size)
@@ -102,52 +129,23 @@ class GeneralStoryCreationIntegrationTests {
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(withdrawn.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body())
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isUnauthorized
 
         assertEquals(0, storyRepository.findAll().size)
     }
 
     @Test
-    fun `익명 등록은 소유자 없이 기본 PRIVATE로 저장되고 응답은 간편 제작과 동일하다`() {
-        restTestClient.post()
-            .uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body())
-            .exchange()
-            .expectStatus().isCreated
-            .expectBody()
-            .jsonPath("$.id").isNotEmpty
-            .jsonPath("$.title").isEqualTo("달빛 아래의 계약")
-            .jsonPath("$.genres.length()").isEqualTo(2)
-            .jsonPath("$.startSettings.length()").isEqualTo(1)
-            .jsonPath("$.startSettings[0].id").isNotEmpty
-            .jsonPath("$.startSettings[0].name").isEqualTo("선왕의 장례식 날")
-            .jsonPath("$.startSettings[0].startSituation").isEqualTo("장례식이 끝난 늦은 밤")
-            .jsonPath("$.startSettings[0].suggestedInputs.length()").isEqualTo(3)
-            .jsonPath("$.startSettings[0].endings[0].name").isEqualTo("왕좌를 되찾다")
-
-        val story = storyRepository.findAll().single()
-        assertNull(story.userId)
-        assertEquals(StoryStatus.PUBLISHED, story.status)
-        assertEquals(StoryVisibility.PRIVATE, story.visibility)
-        assertEquals("판타지, 미스터리", story.genre)
-
-        val setting = storySettingRepository.findAll().single()
-        assertEquals("몰락한 왕국 아르덴", setting.worldSetting)
-        assertEquals("마법은 대가를 요구한다", setting.ruleSetting)
-        assertEquals(1, storyMainEventRepository.findAll().size)
-        assertEquals(1, storyEndingRepository.findAll().size)
+    fun `공개 범위를 생략한 익명 일반 제작은 401이고 저장되지 않는다`() {
+        restTestClient.post().uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON).body(body())
+            .exchange().expectStatus().isUnauthorized
+        assertEquals(0, storyRepository.count())
     }
 
     @Test
     fun `소유자 없는 스토리는 UUID로 상세 조회되고 엔딩이 이름기반 2파라미터로 왕복된다`() {
-        restTestClient.post()
-            .uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body())
-            .exchange()
-            .expectStatus().isCreated
+        legacyCreation.createGeneralStory(mapper.readValue(body(), com.knk.manyak.story.dto.CreateGeneralStoryRequest::class.java), null)
 
         val story = storyRepository.findAll().single()
 
@@ -178,8 +176,8 @@ class GeneralStoryCreationIntegrationTests {
             .header("Authorization", "Bearer $token")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body())
-            .exchange()
-            .expectStatus().isCreated
+            .exchange().let { approvals.complete(it) }
+            .expectStatus().isOk
 
         val story = storyRepository.findAll().single()
         assertEquals(owner.id, story.userId)
@@ -208,8 +206,8 @@ class GeneralStoryCreationIntegrationTests {
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body(visibility = "PUBLIC"))
-            .exchange()
-            .expectStatus().isCreated
+            .exchange().let { approvals.complete(it) }
+            .expectStatus().isOk
 
         val story = storyRepository.findAll().single()
         assertEquals(StoryVisibility.PUBLIC, story.visibility)
@@ -222,33 +220,19 @@ class GeneralStoryCreationIntegrationTests {
     }
 
     @Test
-    fun `게스트가 visibility PUBLIC로 등록하면 400이고 저장되지 않는다`() {
-        // 조용히 PRIVATE으로 낮추지 않는다 — 사용자가 고른 값을 서버가 몰래 뒤집으면
-        // "공개했는데 왜 안 보이냐"가 된다. 공개는 로그인해 이관한 뒤에만 가능하다.
-        restTestClient.post()
-            .uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body(visibility = "PUBLIC"))
-            .exchange()
-            .expectStatus().isBadRequest
-            .expectBody()
-            .jsonPath("$.code").isEqualTo("GUEST_CANNOT_PUBLISH")
-
-        assertEquals(0, storyRepository.findAll().size)
+    fun `게스트가 visibility PUBLIC로 등록하면 401이고 저장되지 않는다`() {
+        restTestClient.post().uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON).body(body("PUBLIC"))
+            .exchange().expectStatus().isUnauthorized
+        assertEquals(0, storyRepository.count())
     }
 
     @Test
-    fun `게스트가 visibility PRIVATE로 등록하면 201이고 PRIVATE으로 저장된다`() {
-        restTestClient.post()
-            .uri("/api/v1/stories/general")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body(visibility = "PRIVATE"))
-            .exchange()
-            .expectStatus().isCreated
-
-        val story = storyRepository.findAll().single()
-        assertNull(story.userId)
-        assertEquals(StoryVisibility.PRIVATE, story.visibility)
+    fun `게스트가 visibility PRIVATE로 등록해도 401이고 저장되지 않는다`() {
+        restTestClient.post().uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON).body(body("PRIVATE"))
+            .exchange().expectStatus().isUnauthorized
+        assertEquals(0, storyRepository.count())
     }
 
     @Test
@@ -260,9 +244,10 @@ class GeneralStoryCreationIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", approvals.bearer(member().id))
             .contentType(MediaType.APPLICATION_JSON)
             .body(invalid)
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isBadRequest
     }
 
@@ -281,9 +266,10 @@ class GeneralStoryCreationIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", approvals.bearer(member().id))
             .contentType(MediaType.APPLICATION_JSON)
             .body(invalid)
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isBadRequest
 
         assertEquals(0, storyRepository.findAll().size)
@@ -295,9 +281,10 @@ class GeneralStoryCreationIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", approvals.bearer(member().id))
             .contentType(MediaType.APPLICATION_JSON)
             .body(invalid)
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isBadRequest
     }
 
@@ -309,9 +296,156 @@ class GeneralStoryCreationIntegrationTests {
 
         restTestClient.post()
             .uri("/api/v1/stories/general")
+            .header("Authorization", approvals.bearer(member().id))
             .contentType(MediaType.APPLICATION_JSON)
             .body(invalid)
-            .exchange()
+            .exchange().let { approvals.complete(it) }
             .expectStatus().isBadRequest
     }
+
+    // ---- 등록 요청 이미지(KNK-1390, 스펙 §4-3-8) ----
+
+    /** [body]의 여는 중괄호 바로 뒤에 필드를 끼워 넣는다. 이미지 필드만 다른 요청을 만들 때 쓴다. */
+    private fun bodyWith(vararg extraFields: String): String =
+        body().replaceFirst("{", "{\n" + extraFields.joinToString("") { "  $it,\n" })
+
+    private fun charactersField(characterName: String, objectKey: String, imageName: String) =
+        """"characters": [{"name": "$characterName", "images": [{"objectKey": "$objectKey", "imageName": "$imageName"}]}]"""
+
+    private fun postGeneral(user: User?, body: String) =
+        restTestClient.post()
+            .uri("/api/v1/stories/general")
+            .apply { user?.let { header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(it.publicId)}") } }
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+            .exchange().let { approvals.complete(it) }
+
+    private fun member(nickname: String = "그림작가") =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+
+    private fun coverKey(user: User) = "thumbnails/uploaded/drafts/${user.publicId}/cover.webp"
+
+    private fun characterKey(user: User) = "characters/uploaded/drafts/${user.publicId}/serin-smile.webp"
+
+    @Test
+    fun `회원이 표지와 인물 이미지를 함께 등록하면 서빙 URL로 굳어 저장된다`() {
+        val owner = member()
+
+        postGeneral(
+            owner,
+            bodyWith(
+                """"thumbnailObjectKey": "${coverKey(owner)}"""",
+                charactersField("세린", characterKey(owner), "세린_웃음"),
+            ),
+        ).expectStatus().isOk
+
+        val story = storyRepository.findAll().single()
+        assertEquals("$CDN_BASE_URL/${coverKey(owner)}", story.thumbnailImageUrl)
+
+        val character = storyCharacterRepository.findAll().single()
+        assertEquals("세린", character.name)
+        assertEquals(story.id, character.story.id)
+
+        val image = storyCharacterImageRepository.findAll().single()
+        assertEquals("세린_웃음", image.imageName)
+        assertEquals("$CDN_BASE_URL/${characterKey(owner)}", image.imageUrl)
+        assertEquals(ImageModerationStatus.APPROVED, image.moderationStatus)
+    }
+
+    @Test
+    fun `게스트가 이미지를 보내면 401이고 저장되지 않는다`() {
+        restTestClient.post().uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON).body(bodyWith(""""thumbnailObjectKey":"thumbnails/uploaded/drafts/unknown/test.webp""""))
+            .exchange().expectStatus().isUnauthorized
+        assertEquals(0, storyRepository.count())
+    }
+
+    @Test
+    fun `이미지 없이 인물 이름만 보낸 게스트 등록도 401이다`() {
+        restTestClient.post().uri("/api/v1/stories/general")
+            .contentType(MediaType.APPLICATION_JSON).body(bodyWith(""""characters":[{"name":"세린"}]"""))
+            .exchange().expectStatus().isUnauthorized
+        assertEquals(0, storyRepository.count())
+    }
+
+    @Test
+    fun `타인의 draft 키는 400이고 저장되지 않는다`() {
+        // 키가 내 drafts 경로 아래인지 먼저 본다 — HEAD로 남의 객체 존재를 알아낼 수 없어야 한다.
+        val owner = member()
+        val other = member("타인")
+
+        postGeneral(owner, bodyWith(""""thumbnailObjectKey": "${coverKey(other)}"""")).expectStatus().isBadRequest
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
+    fun `업로드를 마치지 않은 키는 400 UPLOAD_NOT_FOUND다`() {
+        val owner = member()
+        `when`(uploadedImageStorage.head(anyString())).thenReturn(null)
+
+        postGeneral(owner, bodyWith(""""thumbnailObjectKey": "${coverKey(owner)}""""))
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("UPLOAD_NOT_FOUND")
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
+    fun `인물 이름이 겹치면 400이고 저장되지 않는다`() {
+        // story_characters의 (story_id, name) 유니크가 최종 방어선이지만, 커밋 전에 400으로 돌려준다.
+        val owner = member()
+
+        postGeneral(owner, bodyWith(""""characters": [{"name": "세린"}, {"name": "세린"}]"""))
+            .expectStatus().isBadRequest
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
+    fun `이미지 이름이 인물 이름 접두를 따르지 않으면 400이다`() {
+        val owner = member()
+
+        postGeneral(owner, bodyWith(charactersField("세린", characterKey(owner), "루아_웃음")))
+            .expectStatus().isBadRequest
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    @Test
+    fun `같은 인물 안에서 이미지 이름이 겹치면 409이다`() {
+        val owner = member()
+        val duplicated = """"characters": [{"name": "세린", "images": [""" +
+            """{"objectKey": "${characterKey(owner)}", "imageName": "세린_웃음"},""" +
+            """{"objectKey": "${characterKey(owner)}", "imageName": "세린_웃음"}]}]"""
+
+        postGeneral(owner, bodyWith(duplicated)).expectStatus().isEqualTo(409)
+
+        assertEquals(0, storyRepository.findAll().size)
+    }
+
+    private companion object {
+        /** 업로드 이미지의 서빙 base URL. 실제 값은 환경 설정이고 테스트는 가짜 저장소가 이 값을 붙인다. */
+        const val CDN_BASE_URL = "https://cdn.test"
+    }
+    @Test
+    fun `일반 제작 소개는 공백 제거 후 승인되어 상세에 나오고 빈 소개는 null이다`() {
+        val user = member()
+        val description = "가".repeat(150)
+        postGeneral(user, bodyWith(""""characters":[
+            {"name":"세린","description":"  $description  "},
+            {"name":"루아","description":"   "},
+            {"name":"생략"},{"name":"null 소개","description":null}]"""))
+            .expectStatus().isOk
+        val story = storyRepository.findAll().single()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertEquals(description, saved[0].description)
+        saved.drop(1).forEach { org.junit.jupiter.api.Assertions.assertNull(it.description) }
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").isEqualTo(description)
+    }
+
 }

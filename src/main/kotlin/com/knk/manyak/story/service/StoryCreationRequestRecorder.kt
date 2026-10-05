@@ -80,12 +80,14 @@ class StoryCreationRequestRecorder(
         ) -> T,
         /**
          * COMPLETED 마킹 **트랜잭션 안에서** 결과와 함께 한 번 호출된다(KNK-1115). 완성 알림처럼 "이 요청이
-         * 실제로 완료됐다"에 매달리는 부수 효과를 커밋 뒤로 미루는 자리다(`@TransactionalEventListener`).
+         * 실제로 완료됐다"에 매달리는 아웃박스를 동기로 기록하고 local 발송은 커밋 뒤로 미루는 자리다.
          * 멱등 replay는 이 지점에 도달하지 않아 재요청으로 다시 불리지 않는다.
          */
         onCompleted: ((T) -> Unit)? = null,
+        // 기존 요청은 소유권·상태 분기가 우선이다. 신규 입력만 삽입과 AI 호출 전에 검사한다.
+        validateNewRequest: (() -> Unit)? = null,
     ): T {
-        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
+        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink, validateNewRequest)
         while (claim is Claim.Replay) {
             try {
                 return objectMapper.readValue(claim.resultJson, responseType)
@@ -178,7 +180,14 @@ class StoryCreationRequestRecorder(
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         parentLink: ParentCreationLink?,
+        validateNewRequest: (() -> Unit)?,
     ): Claim {
+        if (validateNewRequest != null) {
+            if (repository.findByRequestId(requestId) != null) {
+                return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
+            }
+            validateNewRequest()
+        }
         val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
         if (insertedId != null) {
             // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가). 방금 삽입한 체인이 그대로 정본이다.

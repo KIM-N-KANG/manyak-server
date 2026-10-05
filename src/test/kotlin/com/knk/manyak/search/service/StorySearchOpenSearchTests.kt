@@ -5,6 +5,7 @@ import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import org.mockito.Mockito.*
 import org.junit.jupiter.api.Assertions.*
@@ -64,9 +65,9 @@ class StorySearchOpenSearchTests {
                         Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
                             visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
                     })
-                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java))
+                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java))
                     val first = service.search("왕국", 1, null)
-                    assertEquals(documents[0].toSummary(), first.items.single())
+                    assertEquals(documents[0].toSummary(isOriginal = false), first.items.single())
                     assertNotNull(first.nextCursor)
                     val second = service.search("왕국", 1, first.nextCursor)
                     assertEquals(documents[1].publicId, second.items.single().id)

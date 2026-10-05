@@ -57,6 +57,11 @@ class DevicePushTokenService(
         }
     }
 
+    @Transactional
+    fun deleteInvalidToken(token: String) {
+        devicePushTokenRepository.deleteByToken(token)
+    }
+
     /** 요청자 소유 토큰만 지운다. 없거나 남의 토큰이면 조용히 0건이다(멱등). */
     @Transactional
     fun unregister(userId: Long, token: String) {

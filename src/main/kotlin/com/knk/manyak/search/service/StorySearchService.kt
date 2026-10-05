@@ -4,6 +4,7 @@ import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.dto.StoryPageResponse
+import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import java.util.UUID
 import org.opensearch.client.opensearch.OpenSearchClient
@@ -22,6 +23,7 @@ class StorySearchService(
     private val properties: StorySearchProperties,
     private val stories: StoryRepository,
     private val indexer: StorySearchIndexer,
+    private val officialStoryAccount: OfficialStoryAccount,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -59,7 +61,7 @@ class StorySearchService(
         val publicIds = documents.mapNotNull { runCatching { UUID.fromString(it.publicId) }.getOrNull() }.distinct()
         // 파생 visible은 지연·실패로 낡을 수 있다. 정본을 한 번 조회해 공개 철회를 응답 전에 차단한다.
         val currentStories = if (publicIds.isEmpty()) emptyList() else stories.findAllByPublicIdIn(publicIds)
-        val visibleIds = currentStories.filter { it.isPubliclyListed() }.map { it.publicId.toString() }.toSet()
+        val visibleStories = currentStories.filter { it.isPubliclyListed() }.associateBy { it.publicId.toString() }
         currentStories.filterNot { it.isPubliclyListed() }.forEach { story ->
             try {
                 // 검색에는 원 트랜잭션이 없으므로 AFTER_COMMIT 이벤트가 아닌 동기 호출로 복구한다.
@@ -68,8 +70,13 @@ class StorySearchService(
                 log.warn("검색 비공개 문서 재색인 실패 (storyId={}, error={})", story.id, ex.javaClass.simpleName)
             }
         }
+        val officialId = officialStoryAccount.officialUserId()
         return StoryPageResponse(
-            items = documents.filter { it.publicId in visibleIds }.map { it.toSummary() },
+            items = documents.mapNotNull { document ->
+                val story = visibleStories[document.publicId] ?: return@mapNotNull null
+                // 색인의 author.id는 null일 수 있다. 공개 게이트가 조회한 정본 소유자로 재색인 없이 판정한다.
+                document.toSummary(isOriginal = officialId != null && story.userId == officialId)
+            },
             // 필터 전 마지막 hit로 진행한다. 전부 제외돼 빈 페이지여도 다음 후보를 계속 탐색할 수 있다.
             nextCursor = if (hits.size > pageSize) StorySearchCursor.fromSort(page.last().sort()).encode(query) else null,
         )

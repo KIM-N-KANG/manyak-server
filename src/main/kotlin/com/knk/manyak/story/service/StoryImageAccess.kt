@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.image.service.UploadedImageKind
@@ -17,13 +18,12 @@ import java.util.UUID
 /**
  * 스토리 이미지 업로드의 공통 게이트(KNK-1126, 스펙 §4-3-8) — 소유권 판정, 인물 조회, 업로드 객체 검증.
  *
- * [StoryImageService]와 [CharacterImageAdder]가 함께 쓴다. 둘로 나뉜 이유는 유니크 위반을 트랜잭션 밖에서
- * 409로 바꾸기 위해서인데(같은 클래스 자기 호출은 프록시를 안 탄다), 그 둘이 서로를 참조하면 순환이 된다.
- * 공통 부분을 여기로 빼 순환 없이 공유한다.
+ * 제출 검증·승인 적용·이미지 발급 서비스가 함께 쓴다.
  */
 @Component
 class StoryImageAccess(
     private val storyRepository: StoryRepository,
+    private val userRepository: UserRepository,
     private val storyCharacterRepository: StoryCharacterRepository,
     private val uploadedImageStorage: UploadedImageStorage,
 ) {
@@ -34,6 +34,20 @@ class StoryImageAccess(
      */
     fun resolveOwnedStory(storyId: String, userId: Long): Story {
         val story = storyRepository.findByPublicIdAndDeletedAtIsNull(parsePublicIdOrNull(storyId) ?: notFoundStory())
+            ?: notFoundStory()
+        requireUploadableOwner(story, userId)
+        return story
+    }
+
+    /**
+     * 위와 같지만 **스토리 행을 쓰기 락으로 잠근다**(PR #273 Codex P1). 이미지를 바꾸면서 공개 스냅샷을
+     * 갱신하는 경로가 대상이다: 잠그지 않으면 동시에 커밋된 비공개 전환을 못 보고, 낡은 PUBLIC 판정으로
+     * **비공개 개작을 공개 스냅샷에 덮어써** 기존 독자에게 유출된다. 수정 API와 같은 락이라 두 경로가
+     * 스토리 단위로 직렬화된다.
+     */
+    fun resolveOwnedStoryForUpdate(storyId: String, userId: Long): Story {
+        val story = storyRepository
+            .findByPublicIdAndDeletedAtIsNullForUpdate(parsePublicIdOrNull(storyId) ?: notFoundStory())
             ?: notFoundStory()
         requireUploadableOwner(story, userId)
         return story
@@ -54,11 +68,51 @@ class StoryImageAccess(
      * 그다음 객체를 확인한다. presign 서명이 형식·크기를 고정하지만, 서명 없이 올라온 객체나 재사용된 키가
      * 있을 수 있어 신뢰 경계에서 한 번 더 본다.
      */
-    fun resolveUploadedUrl(story: Story, kind: UploadedImageKind, objectKey: String): String {
+    fun resolveUploadedUrl(
+        story: Story,
+        ownerPublicId: UUID?,
+        kind: UploadedImageKind,
+        objectKey: String,
+        onValidatedSize: (Long) -> Unit = {},
+    ): String =
+        resolveUploadedUrlUnder(
+            // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작·수정 화면에서 같은
+            // 업로드 컴포넌트를 쓰면 수정 중에도 draft 키가 올라오는데, 내가 올린 객체라면 막을 이유가 없다.
+            expectedPrefixes = listOfNotNull(
+                "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+                ownerPublicId?.let { "${UploadedImageObjectKeys.draftPrefixOf(kind, it)}/" },
+            ),
+            objectKey = objectKey,
+            mismatchMessage = "내가 이 스토리에 올린 업로드 이미지가 아닙니다.",
+            onValidatedSize = onValidatedSize,
+        )
+
+    /**
+     * 등록 전 업로드(일반 제작, KNK-1390)의 객체 키 검증. 스토리가 아직 없으니 소유는 사용자 공개 식별자로
+     * 가른다. 그 밖의 규칙(HEAD 존재·5MB·형식)은 스토리 스코프와 같다.
+     */
+    fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String, onValidatedSize: (Long) -> Unit = {}): String =
+        resolveUploadedUrlUnder(
+            expectedPrefixes = listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"),
+            objectKey = objectKey,
+            mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
+            onValidatedSize = onValidatedSize,
+        )
+
+    /** 업로드 이미지를 쓸 수 있는 회원의 공개 식별자. 토큰은 유효하나 사용자가 사라졌으면 401이다. */
+    fun resolveUserPublicId(userId: Long): UUID =
+        userRepository.findById(userId).orElse(null)?.publicId
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+
+    private fun resolveUploadedUrlUnder(
+        expectedPrefixes: List<String>,
+        objectKey: String,
+        mismatchMessage: String,
+        onValidatedSize: (Long) -> Unit,
+    ): String {
         requireUploadEnabled()
-        val expectedPrefix = "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/"
-        if (!objectKey.startsWith(expectedPrefix)) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리의 업로드 이미지가 아닙니다.")
+        if (expectedPrefixes.none { objectKey.startsWith(it) }) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, mismatchMessage)
         }
         val uploaded = uploadedImageStorage.head(objectKey)
             ?: throw CodedResponseStatusException(
@@ -70,7 +124,7 @@ class StoryImageAccess(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지는 5MB를 넘을 수 없습니다.")
         }
         requireSupportedContentType(uploaded.contentType)
-        // 자동 검수 훅 자리(KNK-1160~ 도입 시) — 표지·인물 연결이 모두 여기를 지나므로 한 곳이면 된다.
+        onValidatedSize(uploaded.contentLength)
         return uploadedImageStorage.serveUrlOf(objectKey) ?: throw uploadDisabled()
     }
 

@@ -14,10 +14,20 @@ class CodedResponseStatusException(
     val errorCode: String,
     reason: String,
     cause: Throwable? = null,
+    val details: List<ApiErrorDetail> = emptyList(),
 ) : ResponseStatusException(status, reason, cause)
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    const val CUSTOM_GENRE_NOT_ALLOWED = "CUSTOM_GENRE_NOT_ALLOWED"
+    const val INVALID_GENRE = "INVALID_GENRE"
+    const val CONSENT_TOKEN_INVALID = "CONSENT_TOKEN_INVALID"
+    const val CONSENT_REQUIRED_MISSING = "CONSENT_REQUIRED_MISSING"
+    const val CONSENT_REQUIRED = "CONSENT_REQUIRED"
+
+    /** 검수 제출(400): base64 이미지와 입력 JSON의 합계 예산 초과. */
+    const val IMAGES_TOO_LARGE = "IMAGES_TOO_LARGE"
+
     /** 문서 동의(400): 제출한 버전이 현행 요구 버전과 다르다. */
     const val CONSENT_VERSION_MISMATCH = "CONSENT_VERSION_MISMATCH"
 
@@ -41,6 +51,12 @@ object ApiErrorCodes {
 
     /** 초대 코드 입력(409): 초대자가 정지 상태라 지금은 쓸 수 없는 코드다(KNK-1053). 탈퇴와 구분한다. */
     const val INVITE_INVITER_UNAVAILABLE = "INVITE_INVITER_UNAVAILABLE"
+
+    /**
+     * 초대 코드 입력(409): 초대자가 제출자보다 나중에 가입한 회원이다(KNK-1404). 가입 순서는 보상 신원 id로 비교해
+     * 상호·순환 등록을 막는다.
+     */
+    const val INVITE_INVITER_NEWER = "INVITE_INVITER_NEWER"
 
     /**
      * 이미지 연결(400): presign으로 받은 객체 키에 아직 파일이 올라오지 않았다(KNK-1126).

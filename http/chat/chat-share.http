@@ -1,3 +1,4 @@
+# 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
 ### 채팅 공유(Chat Share) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.
 ### 위에서부터 순서대로 실행하면 스토리·채팅을 만든 뒤 공유 발급(201) → 멱등 재발급 → 무인증 열람(200)
@@ -406,8 +407,26 @@ Accept: application/json
 }
 
 > {%
+client.test("검수 제출 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("fixtureSubmissionId", response.body.submissionId);
+%}
+
+### 검수 완료 알림 뒤 조회: APPROVED가 되면 fixtureStoryId를 저장한다
+GET {{baseUrl}}/api/v1/stories/submissions/{{fixtureSubmissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("승인 완료", () => client.assert(response.status === 200 && response.body.status === "APPROVED", "검수 완료 후 실행하세요"));
+client.global.set("fixtureStoryId", response.body.storyId);
+%}
+
+### 승인된 라이브 응답으로 후속 검증용 식별자 저장
+GET {{baseUrl}}/api/v1/stories/{{fixtureStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
     client.test("스토리 등록이 성공한다", () => {
-        client.assert(response.status === 201, `201이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+        client.assert(response.status === 200, `200이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
     });
     client.global.set("snapStoryId", response.body.id);
 %}
@@ -489,6 +508,21 @@ Accept: application/json
     }
   ]
 }
+
+> {%
+client.test("수정 검수 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("fixtureSubmissionId", response.body.submissionId);
+%}
+
+### 검수 완료 알림 뒤 승인 확인 (완료 전에 다음 단계로 넘어가지 않는다)
+GET {{baseUrl}}/api/v1/stories/submissions/{{fixtureSubmissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("수정 승인", () => client.assert(response.status === 200 && response.body.status === "APPROVED", "검수 완료 후 실행하세요")); %}
+
+### 승인 후 수정 폼 검증
+GET {{baseUrl}}/api/v1/stories/{{snapStoryId}}/edit
+Authorization: Bearer {{accessToken}}
 
 > {%
     client.test("수정이 성공한다", () => {

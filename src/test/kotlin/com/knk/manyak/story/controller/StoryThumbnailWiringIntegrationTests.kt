@@ -25,19 +25,17 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
-/**
- * 스토리 등록 시 확정된 썸네일이 상세·목록 응답에 `thumbnailUrl`로 실리는지 검증한다(스펙 §4-3-9).
- *
- * 자동 연결 규칙 자체는 [com.knk.manyak.story.service.StoryThumbnailLinkerIntegrationTests]가 덮는다.
- * 여기서는 등록 → 저장(`stories.thumbnail_image_key`) → URL 조합 → 와이어 노출의 배선을 확인한다.
- *
- * 매칭 장르의 썸네일을 1장만 심어 랜덤 선택을 결정적으로 만든다.
- */
+/** 새 스토리의 표지 null과 기존 프리셋 표지의 상세, 목록 노출을 검증한다. */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.test"])
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryThumbnailWiringIntegrationTests {
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -61,6 +59,7 @@ class StoryThumbnailWiringIntegrationTests {
                 sortOrder = 10,
             ),
         )
+        com.knk.manyak.support.seedProvidedGenres(storyCreationTagRepository, "미스터리")
         imagePresetRepository.save(
             ImagePreset(imageKey = "thumb_0001", type = ImagePresetType.THUMBNAIL, genres = setOf(fantasy)),
         )
@@ -72,10 +71,10 @@ class StoryThumbnailWiringIntegrationTests {
     fun tearDown() = databaseCleaner.cleanAll()
 
     @Test
-    fun `등록된 스토리의 상세 응답에 썸네일 URL이 실린다`() {
+    fun `프리셋이 있어도 표지 없는 일반 제작의 키와 상세 표지는 null이다`() {
         val storyId = createStory(visibility = "PRIVATE")
 
-        assertThat(storyRepository.findAll().single().thumbnailImageKey).isEqualTo("thumb_0001")
+        assertThat(storyRepository.findAll().single().thumbnailImageKey).isNull()
 
         restTestClient.get()
             .uri("/api/v1/stories/$storyId")
@@ -84,12 +83,11 @@ class StoryThumbnailWiringIntegrationTests {
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.thumbnailUrl").isEqualTo("https://cdn.test/thumbnails/thumb_0001.png")
+            .jsonPath("$.thumbnailUrl").isEqualTo(null)
     }
 
-    /** 목록 카드는 축소 변형(`_sm`)을 쓴다 — 상세만 원본이다(스펙 §4-3-9 반응형 변형, KNK-548). */
     @Test
-    fun `목록 항목 응답에는 축소 변형 썸네일 URL이 실린다`() {
+    fun `표지 없는 일반 제작의 목록 표지는 null이다`() {
         val storyId = createStory(visibility = "PUBLIC")
 
         restTestClient.post()
@@ -99,13 +97,13 @@ class StoryThumbnailWiringIntegrationTests {
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$[0].thumbnailUrlSm").isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
+            .jsonPath("$[0].thumbnailUrlSm").isEqualTo(null)
             .jsonPath("$[0].thumbnailUrl").doesNotExist()
     }
 
     /** 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9). */
     @Test
-    fun `채팅 카드 응답에도 축소 변형 썸네일 URL이 실린다`() {
+    fun `표지 없는 일반 제작의 채팅 카드 표지는 null이다`() {
         val storyId = createStory(visibility = "PUBLIC")
 
         val chatId = restTestClient.post()
@@ -127,10 +125,9 @@ class StoryThumbnailWiringIntegrationTests {
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$[0].thumbnailUrlSm").isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
+            .jsonPath("$[0].thumbnailUrlSm").isEqualTo(null)
     }
 
-    /** 카탈로그에 후보가 없으면 연결하지 않는다 — 무관한 이미지를 임의로 붙이지 않는다. */
     @Test
     fun `썸네일 후보가 없으면 thumbnailUrl은 null이다`() {
         imagePresetRepository.deleteAll()
@@ -147,6 +144,25 @@ class StoryThumbnailWiringIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.thumbnailUrl").doesNotExist()
+    }
+
+    @Test
+    fun `기존 프리셋 키가 저장된 스토리는 상세와 목록에 계속 노출된다`() {
+        val story = storyRepository.save(
+            com.knk.manyak.story.entity.Story(
+                title = "기존 프리셋 스토리",
+                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                thumbnailImageKey = "thumb_0001",
+            ),
+        )
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo("https://cdn.test/thumbnails/thumb_0001.png")
+        restTestClient.post().uri("/api/v1/stories/batch")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyIds": ["${story.publicId}"]}""")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$[0].thumbnailUrlSm").isEqualTo("https://cdn.test/thumbnails/thumb_0001_sm.png")
     }
 
     private fun createStory(visibility: String): String {
@@ -180,8 +196,8 @@ class StoryThumbnailWiringIntegrationTests {
             .header("Authorization", "Bearer $accessToken")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .exchange()
-            .expectStatus().isCreated
+            .exchange().let { approvals.complete(it) }
+            .expectStatus().isOk
             .expectBody()
             .returnResult()
             .let { String(it.responseBody!!) }

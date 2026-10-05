@@ -1,11 +1,9 @@
-### 스토리 썸네일 자동 연결(Story Thumbnail Auto Link) API 수동 검증
-### IntelliJ HTTP Client / VS Code REST Client 호환.
+# 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
+### 스토리 표지 저장과 노출 API 수동 검증
+### IntelliJ HTTP Client 호환.
 ###
-### [KNK-409] 스토리 등록 시 팀 이미지 카탈로그에서 표지를 자동 연결한다(§4-3-9).
-###   - 규칙: 첫 번째 장르와 일치하는 썸네일 중 랜덤 1개 → 없으면 장르 무관 랜덤 1개 → 하나도 없으면 null.
-###   - 등록 시 1회 확정. 이후 수정으로 장르가 바뀌어도 재연결하지 않는다(story-edit.http로 확인 가능).
-###   - [KNK-548] 반응형 변형: 상세는 원본 thumbnailUrl, 목록·채팅 카드는 축소 thumbnailUrlSm(파생 키 {imageKey}_sm.png).
-###     imageKey 는 카탈로그 그대로이고 _sm 은 URL 조합 시에만 파생된다(DB 미저장). 변형은 썸네일에만 있다.
+### 등록 시 프리셋을 연결하지 않는다. 표지 없는 일반 제작의 상세, 목록과 채팅 카드 표지는 null이다.
+### 기존 스토리의 프리셋 키는 유지하며 상세는 원본, 목록과 채팅 카드는 _sm URL을 사용한다.
 ###
 ### 사전 준비:
 ###   - Postgres 기동(docker compose up -d) 후 Flyway V44~V46 적용 → image_presets 210행 시드
@@ -21,8 +19,9 @@
 GET {{baseUrl}}/actuator/health
 Accept: application/json
 
-### 1. (해피 패스) 장르 '무협'으로 등록 → 201. 표지가 확정되고 id 를 전역에 저장한다.
+### 1. 장르 무협으로 표지 없이 등록 → 202. 승인 후 스토리 id를 저장한다.
 POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -49,13 +48,31 @@ Content-Type: application/json
 }
 
 > {%
-    client.test("등록은 201이다", () => {
-        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+client.test("검수 제출 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("fixtureSubmissionId", response.body.submissionId);
+%}
+
+### 검수 완료 알림 뒤 조회: APPROVED가 되면 fixtureStoryId를 저장한다
+GET {{baseUrl}}/api/v1/stories/submissions/{{fixtureSubmissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("승인 완료", () => client.assert(response.status === 200 && response.body.status === "APPROVED", "검수 완료 후 실행하세요"));
+client.global.set("fixtureStoryId", response.body.storyId);
+%}
+
+### 승인된 라이브 응답으로 후속 검증용 식별자 저장
+GET {{baseUrl}}/api/v1/stories/{{fixtureStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("등록은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
     client.global.set("storyId", response.body.id);
 %}
 
-### 2. 상세 조회 → thumbnailUrl 확인. 카탈로그가 시드돼 있으면 무협 썸네일이 붙는다.
+### 2. 상세 조회 → 카탈로그 유무와 관계없이 thumbnailUrl은 null이다.
 GET {{baseUrl}}/api/v1/stories/{{storyId}}
 Accept: application/json
 
@@ -67,18 +84,12 @@ Accept: application/json
     const url = response.body.thumbnailUrl;
     client.global.set("detailThumbnailUrl", String(url));
 
-    client.test("thumbnailUrl 은 null 이거나 thumbnails 경로의 png 다", () => {
-        const ok = url === null || (typeof url === "string" && /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url));
-        client.assert(ok, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+    client.test("표지 없는 일반 제작의 thumbnailUrl은 null이다", () => {
+        client.assert(url === null, `null 기대, actual=${JSON.stringify(url)}`);
     });
-
-    // MANYAK_IMAGE_BASE_URL 미설정이면 null 이 정상이다. 이 경우 아래 안내만 남긴다.
-    if (url === null) {
-        client.log("thumbnailUrl 이 null 입니다. MANYAK_IMAGE_BASE_URL 미설정이거나 카탈로그가 비어 있습니다.");
-    }
 %}
 
-### 3. 목록 항목(batch) 조회 → 축소 변형 thumbnailUrlSm 이 실린다(상세의 원본에 _sm 을 붙인 파생 키).
+### 3. 목록 항목(batch) 조회 → thumbnailUrlSm은 null이다.
 POST {{baseUrl}}/api/v1/stories/batch
 Content-Type: application/json
 
@@ -97,14 +108,8 @@ Content-Type: application/json
         client.assert(response.body[0].thumbnailUrl === undefined,
             "목록에 thumbnailUrl 이 남아 있습니다(계약은 thumbnailUrlSm).");
     });
-    client.test("thumbnailUrlSm 은 상세의 원본 URL 에 _sm 을 붙인 값이다", () => {
-        const detailUrl = client.global.get("detailThumbnailUrl");
-        if (detailUrl === "null") {
-            client.assert(smUrl === null, `상세가 null 인데 목록은 ${JSON.stringify(smUrl)} 입니다.`);
-            return;
-        }
-        const expected = detailUrl.replace(/\.png$/, "_sm.png");
-        client.assert(smUrl === expected, `기대=${expected} actual=${JSON.stringify(smUrl)}`);
+    client.test("표지 없는 일반 제작의 목록 표지는 null이다", () => {
+        client.assert(smUrl === null, `null 기대, actual=${JSON.stringify(smUrl)}`);
     });
 %}
 
@@ -139,8 +144,9 @@ Content-Type: application/json
     });
 %}
 
-### 4. (폴백) 카탈로그에 없는 장르로 등록 → 장르 무관 썸네일이 붙는다(카탈로그가 비었으면 null).
+### 4. 카탈로그에 없는 장르로 등록해도 표지는 null이다.
 POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -167,24 +173,41 @@ Content-Type: application/json
 }
 
 > {%
-    client.test("등록은 201이다", () => {
-        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
-    });
-    client.global.set("fallbackStoryId", response.body.id);
+client.test("검수 제출 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("fixtureSubmissionId", response.body.submissionId);
 %}
 
-### 5. 폴백 스토리 상세 → 장르가 맞는 이미지가 없어도 표지는 붙는다(장르 무관 랜덤 1장).
-GET {{baseUrl}}/api/v1/stories/{{fallbackStoryId}}
+### 검수 완료 알림 뒤 조회: APPROVED가 되면 fixtureStoryId를 저장한다
+GET {{baseUrl}}/api/v1/stories/submissions/{{fixtureSubmissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("승인 완료", () => client.assert(response.status === 200 && response.body.status === "APPROVED", "검수 완료 후 실행하세요"));
+client.global.set("fixtureStoryId", response.body.storyId);
+%}
+
+### 승인된 라이브 응답으로 후속 검증용 식별자 저장
+GET {{baseUrl}}/api/v1/stories/{{fixtureStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("등록은 200이다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+    client.global.set("unmatchedGenreStoryId", response.body.id);
+%}
+
+### 5. 장르 불일치 스토리 상세 → 표지는 null이다.
+GET {{baseUrl}}/api/v1/stories/{{unmatchedGenreStoryId}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 > {%
     client.test("상세 조회는 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
-    client.test("thumbnailUrl 형식은 동일하다(또는 카탈로그가 비어 null)", () => {
-        const url = response.body.thumbnailUrl;
-        const ok = url === null || /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url);
-        client.assert(ok, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+    client.test("장르와 관계없이 표지는 null이다", () => {
+        client.assert(response.body.thumbnailUrl === null, `null 기대, actual=${JSON.stringify(response.body.thumbnailUrl)}`);
     });
 %}
 
@@ -193,18 +216,17 @@ GET {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
 Accept: application/json
 
 ### ─────────────────────────────────────────────────────────────────────────────
-### [KNK-1069] 컴파일이 생성한 표지 썸네일(생성 표지 우선, 프리셋 폴백)
+### [KNK-1069] 컴파일이 생성한 표지 썸네일(생성 실패 시 null)
 ###   - manyak-ai가 컴파일 응답에 thumbnail_image(768x1024 세로 WebP 1장)를 실어 보내면, 서버가 S3에 올리고
 ###     stories.thumbnail_image_url(TEXT)에 절대 URL을 굳힌다. 객체 키는 thumbnails/generated/{storyPublicId}/{이름}_{uuid8}.webp.
-###   - 프리셋 자동 연결(thumbnail_image_key)은 생성 성공이어도 그대로 남는다. 생성 URL이 비면(구버전 AI·생성 실패·
-###     일반 제작·기존 스토리) 노출이 자동으로 프리셋으로 떨어진다(2단 폴백은 ImageUrlResolver 한 곳이 소유).
+###   - thumbnail_image_key는 null이다. 생성 이미지가 없거나 업로드가 실패하면 노출 표지도 null이다.
 ###   - 생성 표지는 _sm 축소본을 만들지 않는다. 목록·채팅 카드의 thumbnailUrlSm에도 같은 원본 URL이 실린다.
 ###
 ### 사전 준비(위 1~6번과 별개):
 ###   - manyak-ai를 KNK-1047 이후 버전으로 띄우고 MANYAK_AI_BASE_URL을 scheme까지 포함해 주입(http://localhost:8000)
 ###   - S3 호환 저장소 설정: MANYAK_CHARACTER_IMAGE_BUCKET · MANYAK_CHARACTER_IMAGE_BASE_URL
 ###     (설정 키 이름은 인물 이미지 시절 그대로다 — 표지도 같은 버킷·설정을 쓴다)
-###     둘 중 하나라도 비면 업로드는 no-op이라 thumbnail_image_url 이 null 이고 프리셋 표지가 그대로 보인다(정상 폴백).
+###     둘 중 하나라도 비면 업로드는 no-op이라 thumbnail_image_url과 노출 표지가 null이다.
 ###   - 아래 7~11번은 위에서부터 순서대로 실행한다(7 → 8 → 9 → 10 → 11).
 
 ### 7. 간편 제작 태그 조회 → 장르 태그 ID 확보
@@ -264,7 +286,7 @@ Accept: application/json
     client.global.set("generatedStoryId", response.body.id);
 %}
 
-### 10. 상세 조회 → thumbnailUrl 이 생성 표지(webp) 또는 프리셋 표지(png) 중 하나다
+### 10. 상세 조회 → thumbnailUrl은 생성 표지(webp) 또는 null이다
 GET {{baseUrl}}/api/v1/stories/{{generatedStoryId}}
 Accept: application/json
 
@@ -276,17 +298,16 @@ Accept: application/json
     const url = response.body.thumbnailUrl;
     client.global.set("generatedDetailThumbnailUrl", String(url));
 
-    client.test("thumbnailUrl 은 생성 표지(webp)이거나 프리셋(png)이거나 null 이다", () => {
+    client.test("thumbnailUrl은 생성 표지(webp)이거나 null이다", () => {
         const isGenerated = typeof url === "string" && /\/thumbnails\/generated\/[0-9a-f-]{36}\/.+\.webp$/.test(url);
-        const isPreset = typeof url === "string" && /\/thumbnails\/[a-z0-9_]{1,64}\.png$/.test(url);
-        client.assert(url === null || isGenerated || isPreset, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
+        client.assert(url === null || isGenerated, `형식이 어긋납니다. actual=${JSON.stringify(url)}`);
     });
 
     // 어느 경로를 탔는지 눈으로 확인한다. 생성 표지가 아니면 AI 버전 또는 S3 설정을 점검한다.
     if (typeof url === "string" && url.indexOf("/thumbnails/generated/") >= 0) {
         client.log("생성 표지가 실렸습니다: " + url);
     } else {
-        client.log("프리셋 표지로 폴백했습니다(구버전 AI · 생성 실패 · S3 미설정 중 하나). actual=" + JSON.stringify(url));
+        client.log("표지가 null입니다(AI 표지 없음, 생성 실패 또는 S3 업로드 불가). actual=" + JSON.stringify(url));
     }
 %}
 
@@ -305,14 +326,12 @@ Content-Type: application/json
     const smUrl = response.body[0].thumbnailUrlSm;
     const detailUrl = client.global.get("generatedDetailThumbnailUrl");
 
-    client.test("생성 표지면 목록도 같은 원본 URL, 프리셋이면 _sm 파생 URL이다", () => {
+    client.test("생성 표지면 목록도 같은 원본 URL이고 표지가 없으면 null이다", () => {
         if (detailUrl === "null") {
             client.assert(smUrl === null, `상세가 null 인데 목록은 ${JSON.stringify(smUrl)} 입니다.`);
             return;
         }
-        const expected = detailUrl.indexOf("/thumbnails/generated/") >= 0
-            ? detailUrl
-            : detailUrl.replace(/\.png$/, "_sm.png");
+        const expected = detailUrl;
         client.assert(smUrl === expected, `기대=${expected} actual=${JSON.stringify(smUrl)}`);
     });
 %}

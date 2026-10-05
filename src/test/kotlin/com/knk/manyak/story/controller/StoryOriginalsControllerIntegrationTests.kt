@@ -97,6 +97,8 @@ class StoryOriginalsControllerIntegrationTests {
             .jsonPath("$[0].title").isEqualTo("유운잔검기")
             .jsonPath("$[0].author.nickname").isEqualTo("마냑")
             .jsonPath("$[0].status").isEqualTo("PUBLISHED")
+            .jsonPath("$[0].isOriginal").isEqualTo(true)
+            .jsonPath("$[1].isOriginal").isEqualTo(true)
             .jsonPath("$[1].id").isEqualTo(second.publicId.toString())
             .jsonPath("$[1].author.nickname").isEqualTo("마냑")
     }

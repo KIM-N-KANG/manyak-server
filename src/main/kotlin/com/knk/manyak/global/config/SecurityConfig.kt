@@ -1,7 +1,9 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.user.consent.UserConsentService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
 import com.knk.manyak.global.security.DeletedAccountRejectionFilter
 import com.knk.manyak.global.security.OptionalJwtAuthenticationFilter
 import jakarta.servlet.http.HttpServletRequest
@@ -36,6 +38,9 @@ class SecurityConfig {
         environment: Environment,
         userRepository: UserRepository,
         objectMapper: ObjectMapper,
+        consentService: UserConsentService,
+        @Value("\${manyak.auth.consent-gate.enabled:false}") consentGateEnabled: Boolean,
+        @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
     ): SecurityFilterChain =
         http
             .cors { }
@@ -86,13 +91,12 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/search")).permitAll()
                     // 스토리 ID도 추측 불가능한 공개 식별자(UUID)다(KNK-256). 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다(IDOR 차단).
+                    .requestMatchers("/api/v1/stories/submissions", "/api/v1/stories/submissions/**").authenticated()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}")).permitAll()
-                    // 일반 제작 등록은 인증 선택(익명 허용, 유효 토큰이면 user_id 귀속). 간편 제작과 동일 계층이다(§4-3-8).
-                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general")).permitAll()
-                    // 스토리 수정(§4-3-8): 수정 폼 조회·부분 갱신은 인증 선택. 소유권 검증(403)은 서비스가 처리한다.
+                    // 일반 제작 등록·PATCH·제출본 API는 인증 필수(§4-3-8).
+                    // 수정 폼 조회의 기존 게스트 접근만 유지한다. 소유권 검증은 서비스가 처리한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit")).permitAll()
-                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PATCH, "/api/v1/stories/{storyId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple")).permitAll()
@@ -114,9 +118,15 @@ class SecurityConfig {
                     // 두 경로 모두 bearerTokenResolver에서도 토큰을 무시하므로(아래 resolver),
                     // 클라이언트가 자동 첨부한 만료/위조 access 헤더로 막히지 않는다.
                     // /api/v1/auth/me 는 anyRequest().authenticated() 로 보호된다.
+                    // 내부 경로는 사용자 인증 대신 InternalSecretAuthenticationFilter가 시크릿을 검증한다.
+                    .requestMatchers(INTERNAL_API_MATCHER).permitAll()
                     .requestMatchers(*BEARER_SKIP_MATCHERS).permitAll()
                     .anyRequest().authenticated()
             }
+            .addFilterBefore(
+                InternalSecretAuthenticationFilter(internalSharedSecret, INTERNAL_API_MATCHER, objectMapper),
+                BearerTokenAuthenticationFilter::class.java,
+            )
             // optional 인증 필터. 익명 허용(permitAll) 도메인 경로(OPTIONAL_AUTH_MATCHERS)에서만 동작하며,
             // 유효 access 토큰이면 principal(Jwt)을 채우고 토큰이 없거나 만료·위조면 익명으로 통과시킨다(401 없음).
             // 이 경로들은 아래 bearerTokenResolver에서 토큰 resolve를 건너뛰므로 RS 필터(BearerTokenAuthenticationFilter)가
@@ -128,7 +138,7 @@ class SecurityConfig {
             // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
             // 인증 확정 이후에 놓아, 엔드포인트가 principal을 읽는 방식과 무관하게 같은 계약을 보장한다.
             .addFilterAfter(
-                DeletedAccountRejectionFilter(userRepository, objectMapper),
+                DeletedAccountRejectionFilter(userRepository, objectMapper, consentService, consentGateEnabled),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
@@ -153,6 +163,7 @@ class SecurityConfig {
         val delegate = DefaultBearerTokenResolver()
         return BearerTokenResolver { request: HttpServletRequest ->
             if (
+                INTERNAL_API_MATCHER.matches(request) ||
                 BEARER_SKIP_MATCHERS.any { it.matches(request) } ||
                 OPTIONAL_AUTH_MATCHERS.any { it.matches(request) } ||
                 PUBLIC_STATIC_MATCHERS.any { it.matches(request) }
@@ -168,6 +179,8 @@ class SecurityConfig {
     }
 
     private companion object {
+        val INTERNAL_API_MATCHER = PathPatternRequestMatcher.withDefaults().matcher("/internal/**")
+
         // 공개 정적 자산(프로필 프리셋 이미지, 스펙 §4-5 B7). permitAll이면서, 모바일 등이 자동 첨부한 만료/위조
         // access 헤더가 리소스 서버 필터에 걸려 401이 나지 않도록 토큰 resolve도 건너뛴다(공개 응답 author.profileImageUrl로 참조).
         val PUBLIC_STATIC_MATCHERS = arrayOf(
@@ -177,6 +190,9 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/google"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/kakao"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/complete"),
             // 게스트 동의는 회원 토큰과 상태를 사용하지 않고 디바이스 헤더로만 식별한다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/guests/consents"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/guests/consents"),
@@ -217,9 +233,7 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/search"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/general"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PATCH, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple"),

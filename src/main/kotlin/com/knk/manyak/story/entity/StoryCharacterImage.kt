@@ -47,15 +47,17 @@ class StoryCharacterImage(
     @JoinColumn(name = "character_id", nullable = false)
     val character: StoryCharacter,
 
+    // 인물 개명·이름 수정으로 바뀐다(KNK-1391). 같은 인물 안에서 유일해야 한다.
     @Column(name = "image_name", nullable = false, length = 120)
-    val imageName: String,
+    var imageName: String,
 
     @Column(name = "image_url", nullable = false, columnDefinition = "TEXT")
     val imageUrl: String,
 
     // 표시 순서(등록 순서, 0부터). 재정렬 API는 아직 없다.
+    // 표시 순서. 수정의 이미지 동기화가 요청 배열 순서로 다시 매긴다(KNK-1391).
     @Column(name = "sort_order", nullable = false)
-    val sortOrder: Int = 0,
+    var sortOrder: Int = 0,
 
     // 검수 상태(스펙 §4-3-8 검수 게이트). APPROVED만 상세·채팅 요청에 나간다. 소유자의 편집 폼은 상태와
     // 함께 전부 본다. 지금은 기본값이 APPROVED라 즉시 반영이다.

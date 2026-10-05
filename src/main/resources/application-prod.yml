@@ -1,4 +1,9 @@
 spring:
+  data:
+    redis:
+      # KNK-1528: 연결 제한은 명령 제한보다 짧게 둔다. 운영 지연 관측 후 조정한다.
+      connect-timeout: 1s
+      timeout: 2s
   datasource:
     url: ${MANYAK_DB_URL}
     username: ${MANYAK_DB_USERNAME}
@@ -21,6 +26,9 @@ springdoc:
     enabled: false
 
 manyak:
+  redis:
+    reconnect-min-delay: 1s
+    reconnect-max-delay: 2s
   # auth.jwt.secret 은 여기에 하드코딩하지 않는다. 운영은 env(MANYAK_AUTH_JWT_SECRET)로만 주입한다(application.yml 기본 바인딩).
   google-form:
     feedback:

@@ -72,11 +72,13 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  internal:
+    shared-secret: ${MANYAK_INTERNAL_SHARED_SECRET:}
   legal:
     # 임시 기본값. 게스트 발췌문 배포 시 웹 콘텐츠 version과 같은 릴리스에 맞춘다.
     guest-privacy-version: ${MANYAK_LEGAL_GUEST_PRIVACY_VERSION:v1.0}
-    terms-version: ${MANYAK_LEGAL_TERMS_VERSION:v1.2}
-    privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.4}
+    terms-version: ${MANYAK_LEGAL_TERMS_VERSION:v1.4}
+    privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.7}
   search:
     opensearch:
       endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
@@ -87,6 +89,10 @@ manyak:
   # 미설정(빈 값)이면 GET /stories/originals는 빈 목록을 반환한다(KNK-975).
   official-user-public-id: ${MANYAK_OFFICIAL_USER_PUBLIC_ID:}
   auth:
+    consent-token:
+      ttl: ${MANYAK_AUTH_CONSENT_TOKEN_TTL:PT10M}
+    consent-gate:
+      enabled: ${MANYAK_AUTH_CONSENT_GATE_ENABLED:false}
     jwt:
       # access JWT(HS256) 서명·검증용 대칭키. 운영은 env(MANYAK_AUTH_JWT_SECRET)로 주입한다.
       # 기본값은 빈 문자열이라 미주입 시 빈 초기화에서 실패한다(잘못된 운영 기동을 조기 차단). 최소 32바이트 필요.
@@ -112,6 +118,16 @@ manyak:
       reauth-max-age: PT10M
   ai:
     base-url: ${MANYAK_AI_BASE_URL}
+    moderation:
+      # AI 요청 제한 150초보다 길게 둔다. local·test는 별도 스텁 설정을 사용한다.
+      timeout: ${MANYAK_AI_MODERATION_TIMEOUT:180s}
+      pool-size: ${MANYAK_AI_MODERATION_POOL_SIZE:4}
+      retry-delays: ${MANYAK_AI_MODERATION_RETRY_DELAYS:1m,5m}
+      # AI 48MiB 한도에서 프롬프트 여유를 뺀 base64·입력 JSON 예산(byte).
+      request-budget-bytes: ${MANYAK_AI_MODERATION_REQUEST_BUDGET_BYTES:41943040}
+      reclaim-after: ${MANYAK_AI_MODERATION_RECLAIM_AFTER:300s}
+      poll-interval: ${MANYAK_AI_MODERATION_POLL_INTERVAL:1000}
+      poll-enabled: ${MANYAK_AI_MODERATION_POLL_ENABLED:true}
   asset:
     # 프로필 프리셋 이미지(static/profile-presets/{명사}.png) 서빙 base URL(스펙 §4-5 B7).
     # profile_image_url = base-url + "/profile-presets/{명사}.png". 후속 S3/CDN 전환은 이 값 치환만으로 된다.
@@ -221,6 +237,20 @@ manyak:
     chat-turn-limit: ${MANYAK_GUEST_TRIAL_CHAT_TURN_LIMIT:5}
     chat-image-limit: ${MANYAK_GUEST_TRIAL_CHAT_IMAGE_LIMIT:5}
   push:
+    # local: 서버 FCM, remote: 트랜잭션 아웃박스 → 브로커 → 알림 서비스.
+    # dev/prod는 인프라 적용 후 별도 PR의 Terraform 변경으로 MANYAK_PUSH_MODE=remote를 주입해 전환한다.
+    mode: ${MANYAK_PUSH_MODE:local}
+    # dev/prod + remote에서 필수. 누락·공백이면 기동에 실패한다.
+    queue-url: ${MANYAK_PUSH_QUEUE_URL:}
+    region: ${AWS_REGION:ap-northeast-2}
+    outbox:
+      poll-interval: 2s
+      batch-size: 100
+      lease: 60s
+      send-timeout: 20s
+      give-up-after: 24h
+      backoff-initial: 5s
+      backoff-max: 5m
     web-base-url: ${MANYAK_PUSH_WEB_BASE_URL:https://manyak.app}
     web:
       icon-url: ${MANYAK_PUSH_WEB_ICON_URL:https://manyak.app/icons/icon-192.png}
@@ -250,6 +280,8 @@ manyak:
         title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:오늘의 출석 이프를 아직 안 받았어요}
         body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.}
   slack:
+    # 미설정이면 신고 알림 웹훅을 쓴다(같은 운영 조치 채널), 둘 다 없으면 WARN 로그
+    moderation-webhook-url: ${MANYAK_SLACK_MODERATION_WEBHOOK_URL:${MANYAK_SLACK_REPORT_WEBHOOK_URL:}}
     # 신규 피드백 알림용 Incoming Webhook URL. 미설정(빈 값)이면 알림 발송을 건너뛴다.
     feedback-webhook-url: ${MANYAK_SLACK_FEEDBACK_WEBHOOK_URL:}
     # 스토리 신고 알림용 Incoming Webhook URL(피드백과 채널 분리 — 조치가 필요한 운영 이벤트). 미설정이면 건너뛴다.

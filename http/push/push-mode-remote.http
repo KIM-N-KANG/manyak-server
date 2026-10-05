@@ -1,0 +1,49 @@
+### 아웃박스·Kafka 발행 수동 검증(KNK-1378)
+### 준비: local 프로파일, MANYAK_PUSH_MODE=remote, SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+### manyak-infra compose 서버에서는 kafka:19092를 주입합니다(서비스 이름 kafka, 컨테이너용 내부 리스너 19092).
+### 아래 요청은 위에서부터 실행합니다. simpleCreationId와 storylineId는 본인 소유의 제작 데이터로 채웁니다.
+### Kafka가 중단된 동안 완성 요청 뒤 push_outbox가 PENDING으로 남는지 SQL로 확인합니다.
+### SELECT message_id, status, attempts, next_attempt_at FROM push_outbox ORDER BY id DESC;
+### Kafka 복구 뒤 같은 message_id가 PUBLISHED로 바뀌고 push.requested에 recipientId 키로 들어오는지 확인합니다.
+### 동일 요청을 재실행해도 행 수가 늘지 않아야 합니다. local 모드에서는 행이 생기지 않습니다.
+### 서비스 알림 동의는 소비자가 발송 직전에 확인하므로 remote 기록 자체는 동의와 무관합니다.
+
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_TEST_ACCESS_TOKEN_HERE
+@simpleCreationId = 1
+@storylineId = 1
+@completionRequestId = 3df6f82d-48a0-4344-b0a2-fc3f6b29d906
+
+### 1. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 2. 스토리 완성 — 같은 requestId로 재실행해 멱등 replay 확인
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+X-Manyak-Request-Id: req_outbox_manual
+X-Manyak-Session-Id: session_outbox_manual
+
+{
+  "requestId": "{{completionRequestId}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": []
+}
+
+> {%
+    client.test("스토리 완성", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
+    client.global.set("outboxStoryId", response.body.id);
+%}
+
+### 3. 완성 결과 조회
+GET {{baseUrl}}/api/v1/stories/{{outboxStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("완성 스토리 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}

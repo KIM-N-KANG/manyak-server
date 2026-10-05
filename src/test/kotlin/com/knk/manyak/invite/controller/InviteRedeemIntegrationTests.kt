@@ -26,7 +26,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - 성공: 초대자·제출자 양쪽 INVITE_REWARD 적립, 초대 관계(inviter_user_id) 저장, {amount, balance} 응답.
  * - 정규화: 제출 code는 trim·대문자 변환 후 비교한다.
  * - 오류 계약: 빈 값·형식 위반 400, 매칭 없음 404, 자기 코드 409 INVITE_SELF_CODE,
- *   재제출(평생 1회 소진) 409 INVITE_ALREADY_REDEEMED, 정지 계정 403, 미인증 401.
+ *   재제출(평생 1회 소진) 409 INVITE_ALREADY_REDEEMED, 초대자가 나중 가입 409 INVITE_INVITER_NEWER(KNK-1404),
+ *   정지 계정 403, 미인증 401.
  * - 초대자 월 상한(10회) 도달 시 초대자 적립만 건너뛰고 제출자는 적립하며 응답은 200.
  */
 @ActiveProfiles("test")
@@ -283,6 +284,67 @@ class InviteRedeemIntegrationTests {
         assertThat(inviteRewards(withdrawn.id)).isEmpty()
         assertThat(inviteRewards(redeemer.id)).isEmpty()
         assertThat(userRepository.findById(redeemer.id).orElseThrow().inviterUserId).isNull()
+    }
+
+    @Test
+    fun `먼저 가입한 회원이 나중 가입자의 코드를 제출하면 409 INVITE_INVITER_NEWER다`() {
+        // KNK-1404: 초대자는 제출자보다 먼저 가입한 회원이어야 한다(보상 신원 id 비교).
+        val earlier = saveUser("먼저가입")
+        val later = saveUser("나중가입", inviteCode = "LATER777")
+
+        redeem(tokenOf(earlier), "LATER777")
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("INVITE_INVITER_NEWER")
+
+        // 거부는 관계 저장·적립 전에 일어나 양쪽 잔액과 평생 1회 자격이 그대로다.
+        assertThat(creditWalletService.balanceOf(earlier.id)).isZero()
+        assertThat(creditWalletService.balanceOf(later.id)).isZero()
+        assertThat(userRepository.findById(earlier.id).orElseThrow().inviterUserId).isNull()
+    }
+
+    @Test
+    fun `나중 가입자의 제출이 성공한 뒤 반대 방향 제출은 409 INVITE_INVITER_NEWER다`() {
+        // KNK-1404 상호 등록 차단: A는 아직 제출한 적이 없어 재제출(INVITE_ALREADY_REDEEMED)이 아니라 가입 순서로 거부된다.
+        val a = saveUser("먼저가입", inviteCode = "MUTUALA7")
+        val b = saveUser("나중가입", inviteCode = "MUTUALB7")
+
+        redeem(tokenOf(b), "MUTUALA7").expectStatus().isOk
+
+        redeem(tokenOf(a), "MUTUALB7")
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("INVITE_INVITER_NEWER")
+
+        assertThat(creditWalletService.balanceOf(a.id)).isEqualTo(inviteReward)
+        assertThat(creditWalletService.balanceOf(b.id)).isEqualTo(inviteReward)
+        assertThat(userRepository.findById(a.id).orElseThrow().inviterUserId).isNull()
+    }
+
+    @Test
+    fun `가입 순서는 user id가 아니라 보상 신원 id로 판정한다`() {
+        // KNK-1404: 재가입 계정은 최초 계정의 신원을 승계하므로, 새 행의 id가 커도 먼저 가입한 회원으로 본다.
+        val original = saveUser("최초계정")
+        val middle = saveUser("중간가입", inviteCode = "MIDDLE77")
+        val rejoined = userRepository.save(
+            User(
+                nickname = "재가입계정",
+                status = UserStatus.ACTIVE,
+                inviteCode = "REJOIN77",
+                rewardIdentityUserId = original.id,
+            ),
+        )
+        assertThat(rejoined.id).isGreaterThan(middle.id)
+
+        // 재가입 계정(신원 = 최초 계정)은 중간 가입자의 코드를 낼 수 없다.
+        redeem(tokenOf(rejoined), "MIDDLE77")
+            .expectStatus().isEqualTo(409)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("INVITE_INVITER_NEWER")
+
+        // 중간 가입자는 재가입 계정의 코드를 낼 수 있다(초대자 신원이 더 먼저다).
+        redeem(tokenOf(middle), "REJOIN77").expectStatus().isOk
+        assertThat(userRepository.findById(middle.id).orElseThrow().inviterUserId).isEqualTo(rejoined.id)
     }
 
     @Test

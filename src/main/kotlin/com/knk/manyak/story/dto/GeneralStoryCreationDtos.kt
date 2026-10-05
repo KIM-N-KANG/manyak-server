@@ -1,8 +1,10 @@
 package com.knk.manyak.story.dto
 
+import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
+import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
@@ -11,12 +13,16 @@ import jakarta.validation.constraints.Size
 /** 추천 입력 개수(채팅 시작 화면 계약과 동일, 정확히 3개). */
 const val GENERAL_SUGGESTED_INPUTS_SIZE = 3
 
+/** 인물 수 상한. 간편 제작(주인공 1 + 주변 인물 5)과 같은 실질 상한을 쓴다. */
+const val MAX_GENERAL_CHARACTERS = 6
+
 /**
- * 일반 제작 스토리 등록 요청(단발, 스펙 §4-3-8). 검증 후 그대로 저장하며 AI를 호출하지 않는다
+ * 일반 제작 스토리 등록 요청(단발, 스펙 §4-3-8). 검수 제출본으로 접수하며 승인 후 저장한다
  * (컴파일은 희소 입력 확장인데 일반 제작 입력은 이미 확장된 형태라 크레딧 소모·게스트 한도 카운트가 없다).
- * 이미지·썸네일은 §4-3-9 이미지 인프라 범위라 이 요청에서 제외한다.
+ * 표지·인물 이미지는 등록 전에 presign(`POST /stories/images/presign`)으로 올린 객체 키를 함께 보낸다(KNK-1390).
+ * 이미지 필드는 **회원만** 쓸 수 있다 — 소유자가 없으면 올린 이미지의 책임 주체가 없다.
  */
-@Schema(description = "일반 제작 스토리 등록 요청(단발). 검증 후 그대로 저장하며 AI를 호출하지 않는다.")
+@Schema(description = "일반 제작 스토리 등록 요청(단발). 검수 제출본으로 접수하며 승인 후 저장한다.")
 data class CreateGeneralStoryRequest(
     @field:NotBlank(message = "제목은 비어 있을 수 없습니다.")
     @field:Size(max = 100, message = "제목은 100자를 넘을 수 없습니다.")
@@ -34,8 +40,8 @@ data class CreateGeneralStoryRequest(
     // 장르는 stories.genre(VARCHAR(255))에 쉼표 결합 저장하므로, 개수·길이 상한으로 컬럼 초과를 막는다.
     // 최대 8개 × 30자 + 구분자 → 최대 254자 ≤ 255. 상한이 없으면 긴 입력이 검증(400)을 통과한 뒤 insert에서 500이 난다.
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
-    @field:Schema(description = "장르 태그 목록(1~8개, 각 30자 이내)", example = "[\"판타지\",\"미스터리\"]")
-    val genres: List<@NotBlank(message = "장르는 비어 있을 수 없습니다.") @Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>,
+    @field:Schema(description = "활성 제공 장르의 정식 이름 목록(1~8개, 각 30자 이내). 검색 별칭은 제출할 수 없습니다.", example = "[\"판타지\",\"미스터리\"]")
+    val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>,
 
     @field:Valid
     @field:NotNull(message = "스토리 설정은 필수입니다.")
@@ -55,7 +61,106 @@ data class CreateGeneralStoryRequest(
 
     @field:Schema(description = "공개 범위. 생략하면 PRIVATE.", example = "PRIVATE", defaultValue = "PRIVATE")
     val visibility: StoryVisibility = StoryVisibility.PRIVATE,
-)
+
+    // 표지 업로드(KNK-1390). presign으로 받은 draft 객체 키를 그대로 넣는다. 서버가 내 draft 경로 아래인지
+    // 확인하고 HEAD로 존재·크기·형식을 재검증한 뒤 절대 URL을 굳힌다. 없으면 표지는 null이다.
+    @field:Schema(
+        description = "업로드한 표지의 객체 키(presign 응답의 objectKey). 회원만 쓸 수 있다.",
+        nullable = true,
+    )
+    val thumbnailObjectKey: String? = null,
+
+    @field:Valid
+    @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
+    @field:Schema(description = "인물 목록(최대 6명, 선택). 이름은 스토리 안에서 유일하다.")
+    val characters: List<@NotNull GeneralCharacterInput> = emptyList(),
+) {
+    @AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isGenresValid(): Boolean = genres.all { it.length <= 30 }
+}
+
+/**
+ * 일반 제작 인물 입력(KNK-1390·1511). 이름, 소개와 이미지를 받는다. 외형 필드(성별·머리·의상)는 컴파일 산출물이라
+ * 일반 제작에는 없고, 인물 묘사는 `storySettings.characterSetting` 통글이 담는다.
+ */
+@Schema(description = "인물 입력(제작·수정 공용)")
+data class GeneralCharacterInput(
+    // 수정(PATCH)에서만 쓰는 매칭 키(공개 식별자 UUID). 기존 인물을 지목해 개명하고, 없으면(null) 새 인물로
+    // 추가한다. 제작(POST)에는 매칭할 기존 인물이 없으므로 지정하면 400이다(시작 설정과 달리 조용히 무시하지
+    // 않는다 — 인물 id는 이미지 연결 대상이라 잘못 지목하면 엉뚱한 인물에 붙는다).
+    @field:Schema(
+        description = "인물 ID(공개 식별자). 수정 시 기존 인물 매칭 키로 쓴다.",
+        example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        nullable = true,
+    )
+    val id: String? = null,
+
+    @field:NotBlank(message = "인물 이름은 비어 있을 수 없습니다.")
+    @field:Size(max = 100, message = "인물 이름은 100자를 넘을 수 없습니다.")
+    @field:Schema(description = "인물 이름(스토리 내 유일)", example = "세린")
+    val name: String,
+
+    @field:Valid
+    @field:Size(
+        max = StoryCharacterImage.MAX_IMAGES_PER_CHARACTER,
+        message = "인물당 이미지는 ${StoryCharacterImage.MAX_IMAGES_PER_CHARACTER}장까지 올릴 수 있습니다.",
+    )
+    @field:Schema(
+        description = "이 인물의 이미지 목록(최대 10장). 배열 순서가 표시 순서가 된다. " +
+            "**수정에서 생략하면 기존 이미지를 유지**하고 빈 배열이면 모두 삭제한다.",
+        nullable = true,
+    )
+    val images: List<@NotNull GeneralCharacterImageInput>? = null,
+
+    @field:Schema(
+        description = "인물 소개. 앞뒤 공백 제거 후 150자 이하, CR·LF·탭 금지. " +
+            "수정 시 생략·null은 유지하고 빈 문자열·공백만 보내면 삭제한다.",
+        nullable = true,
+    )
+    val description: String? = null,
+) {
+    @AssertTrue(message = "인물 소개는 앞뒤 공백 제거 후 150자 이하이며 CR·LF·탭을 포함할 수 없습니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isDescriptionValid(): Boolean = description == null ||
+        (description.trim().length <= 150 && description.none { it == '\r' || it == '\n' || it == '\t' })
+
+    /** 제출 폼과 승인 후 저장이 같은 유지·삭제·정규화 규칙을 사용한다. */
+    fun normalizedDescription(previous: String? = null): String? =
+        if (description == null) previous else description.trim().takeIf { it.isNotEmpty() }
+}
+
+/**
+ * 인물 이미지 한 장의 입력(KNK-1390·1391). 등록·수정 제출본의 이미지 검증 규칙을 공유한다.
+ *
+ * 항목은 **기존 유지([id])이거나 신규 추가([objectKey])** 둘 중 하나다. 수정 폼이 기존 이미지를 되돌려 보낼 때
+ * `objectKey`를 쓸 수 없어(저장값이 URL이라 키를 모른다) id로 지목한다.
+ */
+@Schema(description = "인물 이미지 입력")
+data class GeneralCharacterImageInput(
+    @field:Schema(description = "기존 이미지 ID(공개 식별자). 이 이미지를 그대로 유지한다.", nullable = true)
+    val id: String? = null,
+
+    @field:Schema(description = "presign으로 받은 객체 키(신규 추가). 내 업로드 prefix 아래여야 한다", nullable = true)
+    val objectKey: String? = null,
+
+    @field:Size(max = 120, message = "이미지 이름은 120자를 넘을 수 없습니다.")
+    @field:Schema(
+        description = "`{인물이름}_{접미}` 형식. 접미는 1~20자 한글·영문·숫자이며 같은 인물 안에서 유일하다. " +
+            "신규 추가에는 필수이고, 기존 유지에서 생략하면 현재 이름을 유지한다(인물 개명 시 접두만 갱신).",
+        example = "세린_웃음",
+        nullable = true,
+    )
+    val imageName: String? = null,
+) {
+    @AssertTrue(message = "이미지 항목은 기존 이미지 id 또는 새 objectKey 중 하나만 지정해야 합니다.")
+    @Schema(hidden = true)
+    fun hasExactlyOneSource(): Boolean = id.isNullOrBlank() != objectKey.isNullOrBlank()
+
+    @AssertTrue(message = "새로 추가하는 이미지는 이름이 필요합니다.")
+    @Schema(hidden = true)
+    fun hasImageNameWhenNew(): Boolean = objectKey.isNullOrBlank() || !imageName.isNullOrBlank()
+}
 
 @Schema(description = "스토리 설정 통글 4필드(모두 필수)")
 data class GeneralStorySettingsInput(
@@ -112,7 +217,11 @@ data class GeneralStartSettingInput(
     @field:Size(max = MAX_ENDINGS, message = "엔딩은 시작 설정당 최대 ${MAX_ENDINGS}개까지 등록할 수 있습니다.")
     @field:Schema(description = "엔딩 목록(시작 설정당 최대 10, 선택). 배열 순서가 표시 순서가 된다.")
     val endings: List<@NotNull GeneralEndingItem> = emptyList(),
-)
+) {
+    @AssertTrue(message = "추천 입력은 비어 있을 수 없습니다.")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    fun isSuggestedInputsValid(): Boolean = suggestedInputs.all { it.isNotBlank() }
+}
 
 @Schema(description = "엔딩 입력 항목(유형 없이 이름으로 식별)")
 data class GeneralEndingItem(

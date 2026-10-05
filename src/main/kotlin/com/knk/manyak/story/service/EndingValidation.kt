@@ -4,7 +4,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
 
 /**
- * 이름으로 식별하는 저작 요소(엔딩·주요 사건)의 이름 유니크를 강제한다(중복이면 400).
+ * 이름으로 식별하는 저작 요소(엔딩·주요 사건·인물)의 이름 유니크를 강제한다(중복이면 400).
  *
  * 채팅 런타임이 도달 엔딩·완결/목표 주요 사건을 **이름으로** 주고받고(reachedEndings·occurred/target,
  * KNK-462·523), 백엔드는 `findFirstBy...Name`으로 id를 해소한다. 같은 스코프에 같은 이름이 둘 이상이면
@@ -18,6 +18,14 @@ fun requireDistinctEndingNames(names: List<String>) =
 /** 주요 사건 이름 유니크(스토리 스코프). */
 fun requireDistinctMainEventNames(names: List<String>) =
     requireDistinctNames(names, "주요 사건 이름은 스토리 내에서 중복될 수 없습니다.")
+
+/** 인물 이름 유니크(스토리 스코프). DB의 `uq_story_characters_name`이 최종 방어선이고 여기서 먼저 400을 낸다. */
+fun requireDistinctCharacterNames(names: List<String>) =
+    requireDistinctNames(names, "인물 이름은 스토리 내에서 중복될 수 없습니다.")
+
+/** 인물 이미지 이름 유니크(인물 스코프). 등록 후 추가 경로는 같은 중복을 409로 내지만, 한 요청 안의 중복은 400이다. */
+fun requireDistinctCharacterImageNames(names: List<String>) =
+    requireDistinctNames(names, "이미지 이름은 인물 내에서 중복될 수 없습니다.")
 
 private fun requireDistinctNames(names: List<String>, message: String) {
     if (names.size != names.toSet().size) {

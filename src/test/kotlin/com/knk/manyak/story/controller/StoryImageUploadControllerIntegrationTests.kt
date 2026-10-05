@@ -12,6 +12,9 @@ import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
@@ -41,7 +44,12 @@ import java.time.Duration
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
 class StoryImageUploadControllerIntegrationTests {
+    @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    private lateinit var moderationExecutor: java.util.concurrent.Executor
+
 
     @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
 
@@ -51,6 +59,7 @@ class StoryImageUploadControllerIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
     @Autowired private lateinit var storyCharacterImageRepository: StoryCharacterImageRepository
+    @Autowired private lateinit var snapshotRepository: StoryPublicSnapshotRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -94,18 +103,50 @@ class StoryImageUploadControllerIntegrationTests {
             .apply { user?.let { header("Authorization", bearer(it)) } }
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
-            .exchange()
+            .exchange().let { approvals.complete(it, edit = true) }
 
-    private fun addImage(story: Story, character: StoryCharacter, user: User, body: String) =
-        restTestClient.post()
-            .uri("/api/v1/stories/${story.publicId}/characters/${character.publicId}/images")
-            .header("Authorization", bearer(user))
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-            .exchange()
+    // 이미지 추가는 전체 인물 PATCH를 제출하고 승인한 뒤 검증한다.
+    private fun addImage(story: Story, character: StoryCharacter, user: User, body: String): RestTestClient.ResponseSpec {
+        val kept = storyCharacterImageRepository.findByCharacterIdOrderBySortOrderAscIdAsc(character.id)
+            .joinToString(",") { """{"id":"${it.publicId}"}""" }
+        val images = if (kept.isEmpty()) body else "$kept,$body"
+        return patchStory(story, user, """{"characters":[{"id":"${character.publicId}","name":"${character.name}","images":[$images]}]}""")
+    }
 
     private fun addImageBody(story: Story, imageName: String) =
         """{"objectKey":"${characterKey(story)}","imageName":"$imageName"}"""
+
+    @Test
+    fun `공개 스토리의 인물 이미지를 추가·삭제하면 공개 스냅샷도 따라 갱신된다`() {
+        // 수정 API 밖에서 이미지를 바꾸는 경로가 스냅샷을 갱신하지 않으면, 나중에 비공개로 내려갔을 때
+        // 기존 독자에게 가는 재료가 공개 당시와 어긋난다(PR #273 Codex P2).
+        val owner = saveUser()
+        val story = storyRepository.save(
+            Story(
+                userId = owner.id,
+                title = "공개 스토리",
+                thumbnailImageKey = "thumb_0001",
+                status = StoryStatus.PUBLISHED,
+                visibility = StoryVisibility.PUBLIC,
+            ),
+        )
+        val character = saveCharacter(story)
+
+        addImage(story, character, owner, addImageBody(story, "세린_웃음")).expectStatus().isOk
+
+        val added = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(added.characterImages.map { it.imageName }).containsExactly("세린_웃음")
+
+        val imageId = storyCharacterImageRepository.findAll().single().publicId
+        restTestClient.delete()
+            .uri("/api/v1/stories/${story.publicId}/characters/${character.publicId}/images/$imageId")
+            .header("Authorization", bearer(owner))
+            .exchange()
+            .expectStatus().isNoContent
+
+        val removed = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(removed.characterImages).isEmpty()
+    }
 
     // ---- presign ----
 
@@ -123,6 +164,37 @@ class StoryImageUploadControllerIntegrationTests {
                 assertThat(it).endsWith(".webp")
             }
             .jsonPath("$.expiresInSeconds").isEqualTo(600)
+    }
+
+    @Test
+    fun `스토리 없이 발급한 draft 키는 내 drafts 경로 아래다`() {
+        // 일반 제작(KNK-1390)은 등록 전에 올린다. 스토리가 아직 없어 사용자 공개 식별자로 소유를 가른다.
+        val owner = saveUser()
+
+        restTestClient.post()
+            .uri("/api/v1/stories/images/presign")
+            .header("Authorization", bearer(owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(coverBody())
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.uploadUrl").isNotEmpty
+            .jsonPath("$.objectKey").value<String> {
+                assertThat(it).startsWith("thumbnails/uploaded/drafts/${owner.publicId}/")
+                assertThat(it).endsWith(".webp")
+            }
+            .jsonPath("$.expiresInSeconds").isEqualTo(600)
+    }
+
+    @Test
+    fun `미인증 draft presign은 401이다`() {
+        restTestClient.post()
+            .uri("/api/v1/stories/images/presign")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(coverBody())
+            .exchange()
+            .expectStatus().isUnauthorized
     }
 
     @Test
@@ -215,13 +287,14 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner = null)
 
         // 게스트 스토리는 익명으로 수정할 수 있지만 이미지는 못 올린다.
-        patchStory(story, null, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isBadRequest
+        patchStory(story, null, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isUnauthorized
     }
 
     @Test
-    fun `표지를 지우면 프리셋으로 내려가고 다시 지워도 204다`() {
+    fun `표지를 지우면 키와 URL이 null이고 다시 지워도 204다`() {
         val owner = saveUser()
-        val story = saveStory(owner)
+        val story = storyRepository.save(Story(userId = owner.id, title = "공개 표지",
+            thumbnailImageKey = "thumb_0001", visibility = StoryVisibility.PUBLIC))
         patchStory(story, owner, """{"thumbnailObjectKey":"${coverKey(story)}"}""").expectStatus().isOk
 
         repeat(2) {
@@ -234,25 +307,31 @@ class StoryImageUploadControllerIntegrationTests {
 
         val reloaded = storyRepository.findById(story.id).get()
         assertThat(reloaded.thumbnailImageUrl).isNull()
-        // 프리셋 키는 그대로라 노출이 프리셋으로 떨어진다(사라지지 않는다).
-        assertThat(reloaded.thumbnailImageKey).isEqualTo("thumb_0001")
+        // 기존 프리셋 키도 함께 지운다.
+        assertThat(reloaded.thumbnailImageKey).isNull()
         assertThat(reloaded.thumbnailModerationStatus).isEqualTo(ImageModerationStatus.APPROVED)
+        val snapshot = snapshotRepository.findById(story.id).orElseThrow().snapshot
+        assertThat(snapshot.thumbnailImageKey).isNull()
+        assertThat(snapshot.thumbnailImageUrl).isNull()
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo(null)
     }
 
     // ---- 인물 이미지 ----
 
     @Test
-    fun `인물 이미지를 연결하면 201이고 편집 폼에 실린다`() {
+    fun `인물 이미지를 승인하면 200이고 편집 폼에 실린다`() {
         val owner = saveUser()
         val story = saveStory(owner)
         val character = saveCharacter(story)
 
         addImage(story, character, owner, addImageBody(story, "세린_웃음"))
-            .expectStatus().isCreated
+            .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.imageName").isEqualTo("세린_웃음")
-            .jsonPath("$.imageUrl").isEqualTo("$BASE_URL/${characterKey(story)}")
-            .jsonPath("$.moderationStatus").isEqualTo("APPROVED")
+            .jsonPath("$.characters[0].images[0].imageName").isEqualTo("세린_웃음")
+            .jsonPath("$.characters[0].images[0].imageUrl").isEqualTo("$BASE_URL/${characterKey(story)}")
+            .jsonPath("$.characters[0].images[0].moderationStatus").isEqualTo("APPROVED")
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}/edit")
@@ -283,7 +362,7 @@ class StoryImageUploadControllerIntegrationTests {
         val owner = saveUser()
         val story = saveStory(owner)
         val character = saveCharacter(story)
-        addImage(story, character, owner, addImageBody(story, "세린_기본")).expectStatus().isCreated
+        addImage(story, character, owner, addImageBody(story, "세린_기본")).expectStatus().isOk
 
         addImage(story, character, owner, addImageBody(story, "세린_기본"))
             .expectStatus().isEqualTo(HttpStatus.CONFLICT)
@@ -297,7 +376,7 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner)
         val character = saveCharacter(story)
         (1..StoryCharacterImage.MAX_IMAGES_PER_CHARACTER).forEach {
-            addImage(story, character, owner, addImageBody(story, "세린_표정$it")).expectStatus().isCreated
+            addImage(story, character, owner, addImageBody(story, "세린_표정$it")).expectStatus().isOk
         }
 
         addImage(story, character, owner, addImageBody(story, "세린_초과")).expectStatus().isBadRequest
@@ -312,10 +391,10 @@ class StoryImageUploadControllerIntegrationTests {
         val story = saveStory(owner)
         val character = saveCharacter(story)
         val imageId = addImage(story, character, owner, addImageBody(story, "세린_기본"))
-            .expectStatus().isCreated
+            .expectStatus().isOk
             .expectBody()
             .returnResult()
-            .let { IMAGE_ID_PATTERN.find(String(it.responseBody!!))!!.groupValues[1] }
+            .let { storyCharacterImageRepository.findAll().single().publicId.toString() }
 
         repeat(2) {
             restTestClient.delete()
@@ -425,6 +504,20 @@ class StoryImageUploadControllerIntegrationTests {
                 assertThat(it).doesNotContain("uploaded")
                 assertThat(it).contains("thumb_0001")
             }
+    }
+
+    @Test
+    fun `프리셋 키 없는 스토리의 검수 대기 표지는 null이다`() {
+        val owner = saveUser()
+        val story = storyRepository.save(Story(
+            userId = owner.id, title = "새 스토리 검수 대기 표지",
+            visibility = StoryVisibility.PUBLIC,
+            thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/pending.webp",
+            thumbnailModerationStatus = ImageModerationStatus.PENDING,
+        ))
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.thumbnailUrl").isEqualTo(null)
     }
 
     /**

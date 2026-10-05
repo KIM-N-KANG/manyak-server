@@ -6,6 +6,7 @@ import com.knk.manyak.image.entity.ImagePresetType
 import com.knk.manyak.image.repository.ImagePresetRepository
 import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.story.client.AiCharacterAppearance
+import com.knk.manyak.story.client.AiCharacterIntroduction
 import com.knk.manyak.story.client.AiCharacterImage
 import com.knk.manyak.story.client.AiResponseMeta
 import com.knk.manyak.story.client.AiStoryCompileRequest
@@ -70,7 +71,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-// 프리셋 폴백 URL을 결정적으로 만든다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
+// 기존 프리셋 URL의 호스트를 고정한다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
 // 다르게 둬 어느 경로를 탔는지 어서션만 보고도 구분된다.
 @TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.preset.test"])
 class SimpleStoryCompilePersistenceIntegrationTests {
@@ -107,6 +108,9 @@ class SimpleStoryCompilePersistenceIntegrationTests {
 
         @Volatile
         var characterImages: List<AiCharacterImage> = emptyList()
+
+        @Volatile
+        var characterIntroductions: List<AiCharacterIntroduction> = emptyList()
 
         // 컴파일 응답의 표지 썸네일(KNK-1069). null이면 필드 자체를 보내지 않는 구버전 AI와 같은 상태다.
         @Volatile
@@ -166,6 +170,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     storyEndings = endingsOverride ?: endings,
                     characterAppearances = characterAppearances,
                     characterImages = characterImages,
+                    characterIntroductions = characterIntroductions,
                     thumbnailImage = thumbnailImage,
                     meta = AiResponseMeta(),
                 )
@@ -230,6 +235,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         flipSessionToCreatedId = null
         characterAppearances = emptyList()
         characterImages = emptyList()
+        characterIntroductions = emptyList()
         thumbnailImage = null
         uploads.clear()
         deletes.clear()
@@ -466,6 +472,62 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
+    fun `인물 소개를 이름 정규화로 연결하고 공백 제거와 null을 상세에 반영한다`() {
+        characterAppearances = listOf(" 서준 ", "하나", "빈소개", "공백소개", "소개없음")
+            .map { AiCharacterAppearance(it) }
+        characterIntroductions = listOf(
+            AiCharacterIntroduction("서준  ", "  조용한 조력자  "),
+            AiCharacterIntroduction(" 하나 ", null),
+            AiCharacterIntroduction("빈소개", ""),
+            AiCharacterIntroduction("공백소개", "   "),
+            AiCharacterIntroduction("서준", "중복 소개는 버린다"),
+            AiCharacterIntroduction("소개만있는인물", "행을 만들지 않는다"),
+        )
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
+        assertThat(saved.map { it.name }).containsExactly("서준", "하나", "빈소개", "공백소개", "소개없음")
+        assertThat(saved.map { it.description }).containsExactly("조용한 조력자", null, null, null, null)
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(5)
+            .jsonPath("$.characters[0].description").isEqualTo("조용한 조력자")
+            .jsonPath("$.characters[0].imageUrl").isEqualTo(null)
+            .jsonPath("$.characters[1].description").isEqualTo(null)
+            .jsonPath("$.characters[2].description").isEqualTo(null)
+            .jsonPath("$.characters[3].description").isEqualTo(null)
+            .jsonPath("$.characters[4].description").isEqualTo(null)
+    }
+
+    @Test
+    fun `소개만 있는 이름은 인물 집합에 추가하지 않는다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준"))
+        characterIntroductions = listOf(AiCharacterIntroduction("소개만있는인물", "소개"))
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).map { it.name })
+            .containsExactly("서준")
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters.length()").isEqualTo(1)
+            .jsonPath("$.characters[0].description").isEqualTo(null)
+    }
+
+    @Test
+    fun `소개가 없는 컴파일도 인물을 저장하고 상세 소개는 null이다`() {
+        characterAppearances = listOf(AiCharacterAppearance("서준"))
+        postSimpleStory(persistStorylineWithGenre("로맨스")).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id).single().description).isNull()
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.characters[0].description").isEqualTo(null)
+    }
+
+    @Test
     fun `인물 배열이 비어 있으면 story_characters를 만들지 않고 스토리만 저장한다`() {
         val storyline = persistStorylineWithGenre("로맨스")
 
@@ -668,7 +730,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
             contentType = "image/webp",
         )
         val storyline = persistStorylineWithGenre("로맨스")
-        // 프리셋도 붙는 상태로 둔다 — 생성 표지가 프리셋을 이기는지까지 와이어로 본다.
+        // 카탈로그에 프리셋이 있어도 새 스토리에는 연결하지 않는다.
         seedThumbnailPreset("로맨스", "thumb_0001")
 
         postSimpleStory(storyline).expectStatus().isCreated
@@ -681,8 +743,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(thumbnailUpload.second).isEqualTo("image/webp")
         assertThat(thumbnailUpload.third).isEqualTo(WEBP_BYTE_LENGTH)
         assertThat(story.thumbnailImageUrl).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
-        // 프리셋 연결은 생성 성공이어도 그대로 남는다(생성 URL이 비면 자동으로 여기로 떨어져야 한다).
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
+        // 생성 성공 여부와 관계없이 새 스토리의 프리셋 키는 비어 있다.
+        assertThat(story.thumbnailImageKey).isNull()
 
         // 상세 응답의 thumbnailUrl은 프리셋이 아니라 생성 표지를 가리킨다.
         assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.test/${thumbnailUpload.first}")
@@ -691,7 +753,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     }
 
     @Test
-    fun `표지 생성이 실패하면 URL 없이 저장하고 프리셋 경로에 남는다`() {
+    fun `표지 생성이 실패하면 키와 URL 없이 저장하고 표지는 null이다`() {
         // 에러 코드가 있으면 base64가 함께 와도 실패로 본다(인물 이미지와 같은 원칙).
         thumbnailImage = AiThumbnailImage(
             imageName = "썸네일_기본",
@@ -707,10 +769,10 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val story = storyRepository.findAll().first()
         assertThat(story.thumbnailImageUrl).isNull()
         assertThat(uploads).isEmpty()
-        // 프리셋 자동 연결은 그대로 살아 있고, 노출도 프리셋 URL로 떨어진다.
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
-        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
-        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+        // 생성 실패 시 표지는 null이다.
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
     }
 
     @Test
@@ -725,9 +787,25 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         val story = storyRepository.findAll().first()
         assertThat(story.thumbnailImageUrl).isNull()
         assertThat(uploads).isEmpty()
-        assertThat(story.thumbnailImageKey).isEqualTo("thumb_0001")
-        assertThat(detailThumbnailUrl(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001.png")
-        assertThat(listThumbnailUrlSm(story.publicId)).isEqualTo("https://cdn.preset.test/thumbnails/thumb_0001_sm.png")
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
+    }
+
+    @Test
+    fun `표지 업로드가 실패해도 스토리는 생성되고 키와 URL은 null이다`() {
+        thumbnailImage = AiThumbnailImage(imageName = "썸네일", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        uploadFailureKeyMarker = FAIL_ALL_UPLOADS
+        val storyline = persistStorylineWithGenre("로맨스")
+        seedThumbnailPreset("로맨스", "thumb_0001")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        val story = storyRepository.findAll().single()
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(story.thumbnailImageUrl).isNull()
+        assertThat(detailThumbnailUrl(story.publicId)).isNull()
+        assertThat(listThumbnailUrlSm(story.publicId)).isNull()
     }
 
     @Test
@@ -747,10 +825,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         assertThat(deletes).containsExactly(uploads.single().first)
     }
 
-    /**
-     * 장르에 맞는 프리셋 표지를 **1장만** 심어 랜덤 선택을 결정적으로 만든다(자동 연결 규칙 자체는
-     * StoryThumbnailLinkerIntegrationTests가 덮는다). 장르 태그는 [persistStorylineWithGenre]가 만든 것을 쓴다.
-     */
+    /** 카탈로그에 프리셋이 있어도 연결하지 않는지 확인하기 위한 후보를 만든다. */
     private fun seedThumbnailPreset(genre: String, imageKey: String): ImagePreset {
         val genreTag = tagRepository.findAll()
             .first { it.category == SimpleStoryTagCategory.GENRE && it.name == genre }

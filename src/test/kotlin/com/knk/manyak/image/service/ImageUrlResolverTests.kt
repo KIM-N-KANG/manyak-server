@@ -95,4 +95,17 @@ class ImageUrlResolverTests {
             .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012_sm.png")
         assertThat(resolver.thumbnailSmUrlFor(null, null)).isNull()
     }
+    @Test
+    fun `검수 대기와 반려 표지는 기존 키가 있을 때만 폴백한다`() {
+        for (status in listOf(ImageModerationStatus.PENDING, ImageModerationStatus.REJECTED)) {
+            val url = "https://cdn.test/thumbnails/uploaded/pending.webp"
+            assertThat(resolver.visibleThumbnailUrlFor(url, null, status)).isNull()
+            assertThat(resolver.visibleThumbnailSmUrlFor(url, null, status)).isNull()
+            assertThat(resolver.visibleThumbnailUrlFor(url, "thumb_0012", status))
+                .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012.png")
+            assertThat(resolver.visibleThumbnailSmUrlFor(url, "thumb_0012", status))
+                .isEqualTo("https://cdn.manyak.app/thumbnails/thumb_0012_sm.png")
+        }
+    }
+
 }

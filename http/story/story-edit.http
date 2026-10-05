@@ -1,266 +1,252 @@
-### 스토리 수정(Story Edit) API 수동 검증
-### IntelliJ HTTP Client / VS Code REST Client 호환.
-###
-### [KNK-404] GET /api/v1/stories/{id}/edit · PATCH /api/v1/stories/{id} (스펙 §4-3-8).
-###   - GET /edit : 수정 폼 조회(통글 4필드 포함). 인증 선택 — 회원 소유는 소유자만(타인·미인증 403), 게스트 스토리는 게스트(토큰 없음)만(회원 403, KNK-480 이관 후 접근).
-###   - PATCH     : 보낸 필드만 교체·나머지 유지. 리스트는 보내면 전체 교체. 소유권 403, 검증 400, 없는 스토리 404.
-###   - [KNK-1021] 공개 전환: 별도 엔드포인트 없이 PATCH의 visibility 부분 갱신으로 PRIVATE↔PUBLIC을 오간다(§4-3-8·B26). 소유자만 가능하고 전환은 읽기 가시성에 즉시 반영된다. GET /edit 응답에도 visibility가 실린다(폼 왕복).
-###   - [KNK-149] 게스트(소유자 없는) 스토리는 PUBLIC으로 전환할 수 없다 → 400 `GUEST_CANNOT_PUBLISH`(E7). 공개는 로그인해 이관한 뒤에 가능하다(E12~E15가 소유자 경로).
-###   - [KNK-515] 시작 설정 복수화: startSettings[]로 전체 교체(동기화). 각 원소 id(공개 식별자)가 기존과 일치하면 in-place 갱신(행 identity 보존), 없으면 추가, 빠진 기존은 삭제. 추천 입력·엔딩은 각 시작 설정에 중첩.
-###
-### 사전 준비: 서버 실행(./gradlew bootRun), Postgres 기동. 아래 E1이 익명으로 스토리를 만들어 편집 대상 id를 확보한다.
-###   공개 전환 소유권 케이스(E12~E15)는 서로 다른 두 계정의 access 토큰이 필요합니다(아래 변수).
-
+### 스토리 수정 검수 제출 (§4-3-8)
+# 준비: 서버·Postgres 기동, accessToken 설정, story-general-create.http 승인 후 createdStoryId 설정.
+# 텍스트 수정은 202, visibility 단독 변경은 PENDING이 없으면 즉시 200.
 @baseUrl = http://localhost:8080
 
-# 소유권 케이스(E12~E15)용. auth-login-google.http 5번을 먼저 실행했다면 전역 accessToken 이 이 값을 덮어씁니다.
-@accessToken = PUT_OWNER_ACCESS_TOKEN_HERE
-# 소유자와 다른 계정의 토큰(타인 공개 전환 403 확인용).
-@otherAccessToken = PUT_ANOTHER_USER_ACCESS_TOKEN_HERE
-
-### 0. 백엔드 상태 확인
+### 서버 확인
 GET {{baseUrl}}/actuator/health
-Accept: application/json
 
-### E1. (준비) 편집 대상 스토리를 익명 등록해 id를 전역에 저장 (소유자 없어 익명으로 편집 가능)
-POST {{baseUrl}}/api/v1/stories/general
+### 현재 폼: submission은 항상 존재하고 없으면 null
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("제출 상태 필드", () => client.assert(response.status === 200 && "submission" in response.body, `actual=${response.status}`)); %}
+
+### 텍스트 수정 접수
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{
-  "title": "잿빛 왕관",
-  "oneLineIntro": "몰락한 왕국의 이야기",
-  "genres": ["다크 판타지", "미스터리"],
-  "storySettings": { "worldSetting": "몰락한 왕국 아르덴", "characterSetting": "기사", "userRoleSetting": "추적자", "ruleSetting": "규칙" },
-  "startSettings": [
-    {
-      "name": "장례식 날",
-      "prologue": "잿빛 비가 내린다",
-      "startSituation": "늦은 밤",
-      "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
-      "endings": [ {"name": "왕좌를 되찾다", "requirement": {"minTurns": 10, "achievementCondition": "왕좌를 되찾는다"}, "epilogue": "대관식"} ]
-    }
-  ],
-  "mainEvents": [ {"name": "편지 발견", "description": "편지를 찾는다", "keySentence": "편지를 연다"} ]
-}
+{"title":"달빛 아래의 새 계약"}
 
 > {%
-    client.test("등록 201", () => { client.assert(response.status === 201, `actual=${response.status}`); });
-    client.global.set("editStoryId", response.body.id);
+client.test("검수 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("submissionId", response.body.submissionId);
 %}
 
-### E2. 수정 폼 조회 → 통글 4필드까지 전체 왕복
-GET {{baseUrl}}/api/v1/stories/{{editStoryId}}/edit
-Accept: application/json
-
-> {%
-    client.test("폼 조회 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
-    client.test("통글 4필드·시작 설정 중첩(추천 입력·엔딩) 포함", () => {
-        client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "worldSetting 불일치");
-        client.assert(response.body.startSettings.length === 1, "startSettings 개수 불일치");
-        client.assert(response.body.startSettings[0].endings[0].name === "왕좌를 되찾다", "endings 불일치");
-        client.assert(response.body.startSettings[0].suggestedInputs.length === 3, "suggestedInputs 개수 불일치");
-    });
-    // E3에서 id 매칭 in-place 갱신을 검증하려고 시작 설정 공개 식별자를 저장한다.
-    client.global.set("editStartSettingId", response.body.startSettings[0].id);
-%}
-
-### E3. (해피 패스) 제목 + id 매칭 시작 설정 갱신 → 제목 교체·미전송 스토리 설정 유지·시작 설정 identity 보존·엔딩 전체 교체
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+### PENDING 중이면 409 (로컬 즉시 승인 스텁에서는 승인 이후 200일 수 있음)
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{
-  "title": "새 제목",
-  "startSettings": [
-    {
-      "id": "{{editStartSettingId}}",
-      "name": "장례식 날",
-      "prologue": "잿빛 비가 내린다",
-      "startSituation": "늦은 밤",
-      "suggestedInputs": ["주변을 본다", "편지를 읽는다", "기사에게 묻는다"],
-      "endings": [ {"name": "새 엔딩", "requirement": {"minTurns": 3, "achievementCondition": "조건"}, "epilogue": "에필로그"} ]
-    }
-  ]
-}
+{"visibility":"PUBLIC"}
 
-> {%
-    client.test("수정 200", () => { client.assert(response.status === 200, `actual=${response.status}`); });
-    client.test("보낸 필드 교체·미전송 유지·시작 설정 identity 보존·엔딩 교체", () => {
-        client.assert(response.body.title === "새 제목", "title 미교체");
-        client.assert(response.body.storySettings.worldSetting === "몰락한 왕국 아르덴", "미전송 필드가 바뀜");
-        client.assert(response.body.startSettings.length === 1, "startSettings 개수 불일치");
-        client.assert(response.body.startSettings[0].id === client.global.get("editStartSettingId"), "id 매칭 in-place 실패(행 identity 미보존)");
-        client.assert(response.body.startSettings[0].suggestedInputs.length === 3, "추천 입력 유지 실패");
-        client.assert(response.body.startSettings[0].endings.length === 1 && response.body.startSettings[0].endings[0].name === "새 엔딩", "엔딩 교체 실패");
-    });
-%}
+> {% client.test("상태별 쓰기", () => client.assert([200,409].includes(response.status), `actual=${response.status}`)); %}
 
-### E4. (에러) 시작 설정의 추천 입력을 3개가 아닌 값으로 → 400
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+### PENDING 유지 중 무효 본문도 입력 검증보다 409 우선
+# 즉시 승인 로컬 스텁에서는 이미 승인되어 400이 될 수 있다. PENDING이 유지되는 AI 대역에서 실행한다.
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "startSettings": [ {"name": "n", "prologue": "p", "startSituation": "s", "suggestedInputs": ["하나", "둘"], "endings": []} ] }
+{"genres":[]}
+
+> {% client.test("PENDING 우선", () => client.assert(response.status === 409, `409 기대, actual=${response.status}`)); %}
+
+### 반려·실패 입력도 수정 폼에 유지된다
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
 
 > {%
-    client.test("검증 실패 400", () => { client.assert(response.status === 400, `actual=${response.status}`); });
+client.test("수정 폼 이미지 오류 계약", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const submission = response.body.submission;
+  if (submission !== null) {
+    client.assert(Array.isArray(submission.imageErrors), "submission.imageErrors 배열 필수");
+    client.assert(submission.imageErrors.every(e => typeof e.path === "string" && typeof e.errorCode === "string" && !("error_code" in e)), "camelCase 이미지 오류");
+  }
+});
 %}
 
-### E5. (에러) 없는 스토리 수정 → 404
-PATCH {{baseUrl}}/api/v1/stories/00000000-0000-0000-0000-000000000000
+# 반려·실패 후 이미지 삭제 시 해당 오류는 제외되고, 남은 이미지 경로는 현재 폼 인덱스로 이동한다.
+# PATCH 재제출 후 PENDING에서는 issues/imageErrors가 빈 배열, errorCode는 null이다.
+
+### 검수 알림 뒤 상태 조회
+GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+### PENDING이 없을 때 공개 범위만 즉시 변경 (200)
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "title": "없는 스토리" }
+{"visibility":"PRIVATE"}
 
-> {%
-    client.test("없는 스토리 404", () => { client.assert(response.status === 404, `actual=${response.status}`); });
-%}
+> {% client.test("공개 범위 변경", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
 
-###############################################################################
-### 공개 전환(KNK-1021) — E6~E11
-### 참고: PUBLISHED가 아닌(DRAFT) 스토리의 공개 범위 변경은 400입니다. 등록 API가 status를 항상 PUBLISHED로
-###   저장해 DRAFT는 레거시 데이터로만 존재하므로, 이 케이스는 DB에서 status를 직접 DRAFT로 바꿔야 재현됩니다
-###   (UPDATE stories SET status = 'DRAFT' WHERE public_id = '...'). 통합 테스트가 같은 동작을 고정합니다.
-### E1이 만든 익명 스토리로 이어서 확인합니다(익명 스토리는 토큰 없이 수정 가능).
-### 회원 소유 스토리의 소유권 403은 E10~E11에서 별도 토큰으로 확인합니다.
-###############################################################################
-
-### E6. 현재 공개 범위 확인 — 수정 폼 응답에 visibility가 실린다(폼 왕복).
-# 일반 제작 등록 시 visibility를 생략했으므로 기본값 PRIVATE입니다.
-GET {{baseUrl}}/api/v1/stories/{{editStoryId}}/edit
-Accept: application/json
-
-> {%
-    client.test("수정 폼에 visibility가 실린다", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PRIVATE", `기본값이 PRIVATE가 아닙니다. actual=${response.body.visibility}`);
-    });
-%}
-
-### E7. (에러, KNK-149) 게스트 스토리의 공개 전환 → 400. 소유자 없는 스토리는 공개할 수 없습니다.
-# 작성자 신원이 없어 카드에 작성자를 표기할 수 없고 좋아요·신고의 책임 주체가 없기 때문입니다.
-# 소유자가 있는 스토리의 공개 전환 해피 패스는 아래 E12~E15입니다.
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+### 미인증 수정 401
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Content-Type: application/json
 
-{ "visibility": "PUBLIC" }
+{"title":"허용 안 됨"}
 
-> {%
-    client.test("게스트 스토리의 공개 전환은 400이다", () => {
-        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
-    });
-    client.test("code 가 GUEST_CANNOT_PUBLISH 다", () => {
-        client.assert(response.body.code === "GUEST_CANNOT_PUBLISH", `code 가 다릅니다. actual=${response.body.code}`);
-    });
-%}
+> {% client.test("회원 전용", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
 
-### E8. 거부돼도 게스트 스토리는 UUID 보유자가 계속 읽습니다(게스트 스토리 규칙 — 공개 여부와 무관).
-# 즉 "공개 전환 거부"가 게스트의 자기 스토리 접근을 막지는 않습니다. 목록 노출만 빠집니다.
-GET {{baseUrl}}/api/v1/stories/{{editStoryId}}
-Accept: application/json
-
-> {%
-    client.test("게스트 스토리는 미인증 상세 조회가 200이다", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-    });
-    client.test("공개 범위는 PRIVATE 그대로다(거부된 전환이 반영되지 않았다)", () => {
-        client.assert(response.body.visibility === "PRIVATE", `actual=${response.body.visibility}`);
-    });
-%}
-
-### E9. (해피 패스) 게스트도 PRIVATE 지정은 통과합니다 — 막히는 것은 PUBLIC 하나뿐입니다.
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
+### 잘못된 제목 (PENDING이 없을 때 400)
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "visibility": "PRIVATE" }
+{"title":" "}
 
-> {%
-    client.test("PRIVATE 지정은 200이고 응답이 PRIVATE이다", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PRIVATE", `actual=${response.body.visibility}`);
-    });
-    client.test("visibility만 보내도 다른 필드는 유지된다(부분 갱신)", () => {
-        client.assert(response.body.title === "새 제목", `title이 바뀜. actual=${response.body.title}`);
-        client.assert(response.body.startSettings.length === 1, "startSettings가 유실됨");
-    });
-%}
+> {% client.test("빈 제목 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
-### E10. (부분 갱신) visibility를 생략하면 공개 범위는 바뀌지 않는다.
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
-Content-Type: application/json
+### 자유 조회
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
 
-{ "oneLineIntro": "공개 범위는 그대로여야 합니다" }
 
-> {%
-    client.test("미전송 visibility는 유지된다", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PRIVATE", `visibility가 바뀜. actual=${response.body.visibility}`);
-        client.assert(response.body.oneLineIntro === "공개 범위는 그대로여야 합니다", "보낸 필드가 반영되지 않음");
-    });
-%}
-
-### E11. (에러) 알 수 없는 visibility 값 → 400
-PATCH {{baseUrl}}/api/v1/stories/{{editStoryId}}
-Content-Type: application/json
-
-{ "visibility": "EVERYONE" }
-
-> {%
-    client.test("알 수 없는 값은 400이다", () => { client.assert(response.status === 400, `actual=${response.status}`); });
-%}
-
-### E12. (소유권) 회원 소유 스토리 준비 — 소유자 토큰으로 등록해 id를 저장합니다.
-# auth-login-google.http 5번으로 accessToken을, 다른 계정 토큰을 otherAccessToken에 채운 뒤 실행하세요.
-POST {{baseUrl}}/api/v1/stories/general
+### PATCH 용량 초과 (400 IMAGES_TOO_LARGE)
+# story-general-create.http의 용량 준비 presign·파일 PUT부터 실행해 sizeObjectKey를 설정한다.
+# PENDING이 없는 내 createdStoryId를 사용한다. 유지되는 라이브 표지·인물 이미지도 합계에 포함한다.
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "title": "공개 전환 소유권 검증용",
-  "oneLineIntro": "소유자만 공개 전환할 수 있는지 확인",
-  "genres": ["판타지"],
-  "visibility": "PRIVATE",
-  "storySettings": { "worldSetting": "세계", "characterSetting": "인물", "userRoleSetting": "역할", "ruleSetting": "규칙" },
-  "startSettings": [
-    { "name": "시작", "prologue": "도입", "startSituation": "상황", "suggestedInputs": ["하나", "둘", "셋"], "endings": [] }
-  ],
-  "mainEvents": []
+  "title":"용량 검사", "oneLineIntro":"소개", "genres":["판타지"],
+  "storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}],
+  "characters":[{"name":"세린","images":[
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_1"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_2"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_3"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_4"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_5"},
+    {"objectKey":"{{sizeObjectKey}}","imageName":"세린_6"}
+  ]}]
 }
 
 > {%
-    client.test("소유 스토리 등록 201", () => { client.assert(response.status === 201, `actual=${response.status}`); });
-    client.global.set("ownedStoryId", response.body.id);
+client.test("수정 용량 사전 검사", () => {
+  client.assert(response.status === 400, `400 기대, actual=${response.status}`);
+  client.assert(response.body.code === "IMAGES_TOO_LARGE", `actual=${response.body.code}`);
+});
 %}
 
-### E13. (에러) 타인이 공개 전환 시도 → 403
-PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
-Authorization: Bearer {{otherAccessToken}}
-Content-Type: application/json
-
-{ "visibility": "PUBLIC" }
+### 인물 소개 수정 준비: PENDING이 없고 인물이 있는 내 스토리로 실행
+# story-general-create.http에서 인물이 있는 스토리를 만들고 승인된 createdStoryId를 사용한다.
+# 각 PATCH 뒤 검수 완료를 기다린 다음 다음 PATCH를 실행한다. PENDING이면 409가 우선한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
 
 > {%
-    client.test("타인의 공개 전환은 403이다", () => { client.assert(response.status === 403, `actual=${response.status}`); });
+client.test("인물 소개 조회", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const characters = response.body.characters;
+  client.assert(characters.length > 0, "인물이 있는 스토리가 필요합니다");
+  client.assert(characters.every(c => "description" in c && (c.description === null || typeof c.description === "string")), "description은 string 또는 null이어야 합니다");
+  const inputs = characters.map(c => ({id: c.id, name: c.name}));
+  client.global.set("descriptionCharacterId", inputs[0].id);
+  inputs[0].description = "  왕국을 지키는 기사  ";
+  client.global.set("descriptionChangeBody", JSON.stringify({characters: inputs}));
+  inputs[0].description = "";
+  client.global.set("descriptionDeleteBody", JSON.stringify({characters: inputs}));
+  inputs[0].description = "가".repeat(151);
+  client.global.set("descriptionInvalidBody", JSON.stringify({characters: inputs}));
+});
 %}
 
-### E14. (에러) 미인증 요청이 회원 소유 스토리를 공개 전환 시도 → 403
-PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
-Content-Type: application/json
-
-{ "visibility": "PUBLIC" }
-
-> {%
-    client.test("미인증 공개 전환은 403이다", () => { client.assert(response.status === 403, `actual=${response.status}`); });
-%}
-
-### E15. (해피 패스) 소유자 본인의 공개 전환 → 200
-PATCH {{baseUrl}}/api/v1/stories/{{ownedStoryId}}
+### 소개 변경 접수: 다른 인물과 이미지는 유지
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "visibility": "PUBLIC" }
+{{descriptionChangeBody}}
 
 > {%
-    client.test("소유자 공개 전환 200", () => {
-        client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.visibility === "PUBLIC", `actual=${response.body.visibility}`);
-    });
+client.test("소개 검수 접수", () => client.assert(response.status === 202, `202 기대, actual=${response.status}`));
+client.global.set("submissionId", response.body.submissionId);
 %}
+
+### 수정 폼은 검수 중에도 제출한 소개를 공백 제거해 반환
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("제출한 소개 표시", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const character = response.body.characters.find(c => c.id === client.global.get("descriptionCharacterId"));
+  client.assert(character.description === "왕국을 지키는 기사", `actual=${character.description}`);
+});
+%}
+
+### 소개 변경 승인 후 상세 확인
+# 제출본 상태가 APPROVED가 된 뒤 실행한다. AI 수신 지원이 먼저 배포되어 있어야 한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("승인 소개 반영", () => client.assert(response.status === 200 && response.body.characters.some(c => c.description === "왕국을 지키는 기사"), "승인 후 상세 소개를 확인하세요")); %}
+
+### 소개 삭제 접수: 변경 검수 완료 뒤 실행
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{{descriptionDeleteBody}}
+
+> {% client.test("소개 삭제 검수 접수", () => client.assert(response.status === 202, `202 기대, actual=${response.status}`)); %}
+
+### 수정 폼 소개 삭제 확인
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("빈 소개는 null", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const character = response.body.characters.find(c => c.id === client.global.get("descriptionCharacterId"));
+  client.assert(character.description === null, `null 기대, actual=${character.description}`);
+});
+%}
+
+### 소개 151자는 400: 삭제 검수 완료 뒤 실행
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{{descriptionInvalidBody}}
+
+> {% client.test("소개 길이 검증", () => client.assert(response.status === 400, `400 기대, actual=${response.status}`)); %}
+
+
+### 새 미제공 장르 추가 거절 (PENDING 제출본이 없을 때 실행)
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"genres":["BL","새로운미제공장르"]}
+
+> {%
+client.test("PATCH 신규 무효 장르", () => {
+  client.assert(response.status === 400 && response.body.code === "INVALID_GENRE", `actual=${response.status}/${response.body.code}`);
+  client.assert(response.body.details[0].field === "genres[1]", "인덱스 불일치");
+});
+%}
+
+### 기존 라이브 장르 보존 준비
+# createdStoryId를 커스텀 장르가 저장된 본인 스토리로 바꾸면 과거 장르 보존도 확인 가능하다.
+# 최신 제출본이 있으면 폼은 미승인 값을 덧씌우므로 승인 완료 후 실행한다.
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("라이브 폼 준비", () => {
+  client.assert(response.status === 200 && response.body.submission === null, "승인된 라이브 폼 필요");
+  const genres = [...response.body.genres];
+  if (!genres.includes("BL") && genres.length < 8) genres.push("BL");
+  client.global.set("preservedGenresJson", JSON.stringify(genres));
+});
+%}
+
+### 기존 커스텀은 유지하고 새 제공 장르를 추가
+PATCH {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"genres":{{preservedGenresJson}}}
+
+> {% client.test("기존 장르 보존 수정 접수", () => client.assert(response.status === 202, `actual=${response.status}`)); %}
+
+### 자유 조회 (검수 승인 후 장르 확인)
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
+Authorization: Bearer {{accessToken}}

@@ -26,4 +26,15 @@ interface StoryCharacterRepository : JpaRepository<StoryCharacter, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM StoryCharacter c WHERE c.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): StoryCharacter?
+
+    /**
+     * 위와 같은 락을 잡되 **이름을 스칼라로** 돌려준다(PR #273 Codex P2).
+     *
+     * 엔티티 조회는 이미 1차 캐시에 있는 인스턴스를 그대로 돌려줄 수 있어, 락을 기다리는 동안 다른
+     * 트랜잭션이 개명을 커밋해도 옛 이름이 보인다. 스칼라 조회는 캐시를 타지 않아 잠근 행의 현재 값이다.
+     * 행이 사라졌으면 null이므로 호출부가 삭제된 인물을 404로 가른다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c.name FROM StoryCharacter c WHERE c.id = :id")
+    fun findNameByIdForUpdate(@Param("id") id: Long): String?
 }
