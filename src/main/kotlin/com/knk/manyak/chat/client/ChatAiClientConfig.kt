@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
+import io.micrometer.observation.ObservationRegistry
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.netty.http.client.HttpClient
 
@@ -29,10 +30,13 @@ class ChatAiClientConfig {
     fun chatTurnWebClient(
         @Value("\${manyak.ai.base-url}") baseUrl: String,
         @Value("\${manyak.ai.chat.connect-timeout:5s}") connectTimeout: Duration,
+        // 관측 레지스트리를 달아야 호출이 스팬이 되고 traceparent가 AI로 전파된다(KNK-1552). 추적이 꺼져 있으면 no-op이다.
+        observationRegistry: ObservationRegistry,
     ): WebClient {
         val httpClient = HttpClient.create()
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeout.toMillis().toInt())
         return WebClient.builder()
+            .observationRegistry(observationRegistry)
             .baseUrl(baseUrl)
             .clientConnector(ReactorClientHttpConnector(httpClient))
             .build()

@@ -1,5 +1,6 @@
 package com.knk.manyak.push.outbox
 
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
@@ -8,6 +9,7 @@ import org.springframework.context.annotation.Profile
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.sqs.SqsAsyncClient
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest
 import tools.jackson.databind.ObjectMapper
 import java.time.Duration
@@ -17,12 +19,19 @@ class SqsPushPublisher(
     private val sqs: SqsAsyncClient,
     private val mapper: ObjectMapper,
     private val queueUrl: String,
+    private val traceHeaders: TraceHeaders = TraceHeaders.NONE,
 ) : PushPublisher {
     override fun publish(message: PushMessage): CompletableFuture<Unit> =
         try {
+            // traceparent 등 추적 헤더는 본문이 아니라 메시지 속성으로 싣는다. 본문 계약(schemaVersion)을 건드리지 않는다.
+            val attributes = LinkedHashMap<String, MessageAttributeValue>()
+            traceHeaders.inject { name, value ->
+                attributes[name] = MessageAttributeValue.builder().dataType("String").stringValue(value).build()
+            }
             val request = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(mapper.writeValueAsString(message))
+                .apply { if (attributes.isNotEmpty()) messageAttributes(attributes) }
                 .build()
             sqs.sendMessage(request).thenApply { Unit }
         } catch (ex: Exception) {
@@ -61,7 +70,8 @@ class SqsPushConfig {
         sqs: SqsAsyncClient,
         mapper: ObjectMapper,
         @Value("\${manyak.push.queue-url:}") queueUrl: String,
-    ) = SqsPushPublisher(sqs, mapper, queueUrl)
+        traceHeaders: ObjectProvider<TraceHeaders>,
+    ) = SqsPushPublisher(sqs, mapper, queueUrl, traceHeaders.getIfAvailable { TraceHeaders.NONE })
 
     companion object {
         // 재시도를 포함한 SDK 호출 < 배치 전송 제한 < 임대.

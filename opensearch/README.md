@@ -169,7 +169,7 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 앱이 OTLP gRPC로 보낸 스팬을 Data Prepper가 받아 두 인덱스로 나눕니다. 로그 경로(Fluent Bit, Vector)와는 따로 갑니다.
 
 ```
-앱(OTLP gRPC :4317) → Data Prepper ─ otel_traces → otel-v1-apm-span-*        (트레이스 목록, traceGroup)
+앱(OTLP :4317, gRPC 또는 HTTP/protobuf /v1/traces) → Data Prepper ─ otel_traces → otel-v1-apm-span-*        (트레이스 목록, traceGroup)
                                     └ service_map → otel-v1-apm-service-map  (서비스 맵)
 ```
 
@@ -183,6 +183,14 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
   traces --otlp-insecure --otlp-endpoint host.docker.internal:4317 --traces 3 --child-spans 2
 curl -s 'localhost:9200/otel-v1-apm-span-*/_count'
 ```
+
+앱에서 보내려면 서버 추적을 켭니다(기본 off). compose의 `app` 프로파일에는 이미 들어 있습니다.
+
+```bash
+MANYAK_TRACING_ENABLED=true MANYAK_OTLP_TRACES_ENDPOINT=http://localhost:4317/v1/traces
+```
+
+켜면 HTTP 요청, AI 호출(RestClient, WebClient), JDBC, Redis, 채팅 워커 큐 대기(`chat.turn.queue`)가 스팬이 되고, 로그에 `traceId`, `spanId`가 붙어 트레이스 화면의 Related logs와 이어집니다. SQS 메시지 속성과 Kafka 헤더에 `traceparent`가 실려 알림 서비스가 같은 트레이스를 잇습니다. 예약 작업(1초 주기 검수 폴러 등), actuator 요청, 요청 바깥의 DB와 Redis 호출, Spring Security 내부 관측은 `TracingNoiseFilter`가 걸러 트레이스를 만들지 않습니다. 표준 `OTEL_EXPORTER_OTLP_ENDPOINT`는 쓰지 않습니다. 메트릭 OtlpConfig가 그 변수를 먼저 읽어 메트릭이 트레이스 주소로 가 버립니다.
 
 화면은 두 가지입니다.
 

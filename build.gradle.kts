@@ -32,9 +32,17 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
-    // OTLP 메트릭 자동구성(OtlpMetricsExportAutoConfiguration.otlpConfig)이 이 모듈의 OpenTelemetryProperties 빈을
-    // 인자로 받는다. 빼면 OTLP 레지스트리가 아예 뜨지 않는다(레지스트리 자동구성 조건 미충족).
-    implementation("org.springframework.boot:spring-boot-opentelemetry")
+    // OTLP 메트릭(기존)과 트레이스(KNK-1552)를 함께 묶는 스타터. spring-boot-opentelemetry(메트릭 자동구성이
+    // 받는 OpenTelemetryProperties 빈), micrometer-registry-otlp, micrometer-tracing-bridge-otel, otlp 익스포터를 포함한다.
+    // 추적은 management.tracing.enabled 기본 off라 의존성만으로는 스팬을 만들지 않는다.
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry") {
+        // 익스포터 기본 전송은 okhttp 5인데 테스트의 MockWebServer 4.12가 okhttp 4 내부 클래스를 써서 깨진다.
+        // JDK HttpClient 전송(sender-jdk)으로 바꿔 okhttp 의존 자체를 뺀다. 이 전송은 HTTP/protobuf만 지원해 transport=http다.
+        exclude(group = "io.opentelemetry", module = "opentelemetry-exporter-sender-okhttp")
+    }
+    runtimeOnly("io.opentelemetry:opentelemetry-exporter-sender-jdk")
+    // JDBC 쿼리를 스팬으로 남긴다(datasource-micrometer). Boot는 JDBC 관측을 자동 구성하지 않는다.
+    implementation("net.ttddyy.observation:datasource-micrometer-spring-boot:2.3.0")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
@@ -43,6 +51,7 @@ dependencies {
     implementation("io.sentry:sentry-spring-boot-4:8.43.1")
     // 메트릭은 OTLP push로 Grafana Cloud에 보낸다(스펙 §4-7). prometheus 레지스트리는 로컬에서
     // /actuator/prometheus로 export 내용을 눈으로 확인하는 용도이며 운영에서는 export를 끈다.
+    // 스타터가 runtime으로만 넘겨 OtlpInstanceIdentityTests 등 컴파일 참조가 안 된다. 메트릭 레지스트리는 명시한다.
     implementation("io.micrometer:micrometer-registry-otlp")
     implementation("io.micrometer:micrometer-registry-prometheus")
     // 컴파일이 생성한 인물 이미지를 S3에 올린다(KNK-966). 스프링 BOM이 관리하지 않아 버전을 명시한다.
