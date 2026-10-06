@@ -10,6 +10,7 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 | `parsers.conf` | 위에서 쓰는 JSON 파서 정의 |
 | `vector.yaml` | 중앙 가공·버퍼 계층 설정 |
 | `data-prepper/` | 트레이스 수집 파이프라인([KNK-1551](https://kimandkang.atlassian.net/browse/KNK-1551)) |
+| `setup-traces.sh`, `opensearch_dashboards.yml` | 트레이스 화면(Explore) 설정 |
 
 ## 시작하기
 
@@ -183,7 +184,10 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
 curl -s 'localhost:9200/otel-v1-apm-span-*/_count'
 ```
 
-화면은 OpenSearch Dashboards의 Observability > Traces(`http://localhost:5601/app/observability-traces`)에서 봅니다. 서비스 맵 간선은 서비스가 둘 이상 이어진 트레이스에서만 생기고, 처리 창 때문에 1분 남짓 늦게 나타납니다.
+화면은 두 가지입니다.
+
+- **Explore > Traces**: 스팬을 부모, 자식 계층과 시간 막대로 펼쳐 봅니다. 워크스페이스와 트레이스 데이터셋이 있어야 열리므로, 스팬이 한 건 이상 들어온 뒤 `./opensearch/setup-traces.sh`를 한 번 실행합니다. 출력된 주소에서 스팬의 SpanID 링크를 누르면 트레이스 상세가 열립니다. 기능 플래그는 `opensearch_dashboards.yml`에 있습니다.
+- **Observability > Trace analytics**(`http://localhost:5601/app/observability-traces`): 예전 화면입니다. 설정 없이 열리고 서비스 맵을 보여 줍니다. 서비스 맵 간선은 서비스가 둘 이상 이어진 트레이스에서만 생기고, 처리 창 때문에 1분 남짓 늦게 나타납니다.
 
 운영은 같은 프로세서와 인덱스 유형을 쓰는 OpenSearch Ingestion(OSIS)으로 받습니다. 비용 최적화 단계에서 Fargate Data Prepper로 바꿀 예정이라, 이 파이프라인 파일이 그때 거의 그대로 쓰입니다.
 
