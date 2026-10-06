@@ -152,6 +152,7 @@ class ChatService(
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
+        suspensionGuard.requireActive(userId)
         val persona = request.personaId?.let {
             if (userId == null) throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "페르소나 선택은 회원만 가능합니다.")
             personaService.snapshot(userId, it)
