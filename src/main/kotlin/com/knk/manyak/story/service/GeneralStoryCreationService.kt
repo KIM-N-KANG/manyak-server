@@ -53,6 +53,7 @@ class GeneralStoryCreationService(
     private val storyImageAccess: StoryImageAccess,
     private val suspensionGuard: SuspensionGuard,
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
+    private val protagonistNames: ProtagonistNameValidation,
 ) {
 
     /**
@@ -61,6 +62,7 @@ class GeneralStoryCreationService(
      */
     @Transactional
     fun createGeneralStory(request: CreateGeneralStoryRequest, userId: Long?, approvedImageUrls: Map<String, String> = emptyMap()): SimpleStoryCreateResponse {
+        protagonistNames.validate(request)
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         // 게스트는 공개(PUBLIC)를 지정할 수 없다(KNK-149). 조용히 PRIVATE으로 낮추지 않고 400으로 거부한다.
         requireOwnerCanPublish(ownerUserId = userId, requested = request.visibility)
@@ -77,6 +79,7 @@ class GeneralStoryCreationService(
             Story(
                 userId = userId,
                 title = request.title,
+                protagonistName = normalizeProtagonistName(request.protagonistName),
                 oneLineIntro = request.oneLineIntro,
                 description = request.description,
                 genre = genre,
@@ -128,7 +131,7 @@ class GeneralStoryCreationService(
             description = story.description,
             genres = request.genres,
             startSettings = startSettingResponses,
-        )
+        ).rendered(story.protagonistName)
     }
 
     /** 시작 설정 하나와 그 스코프의 추천 입력·엔딩을 저장하고 응답 객체로 만든다(KNK-515 복수화). */

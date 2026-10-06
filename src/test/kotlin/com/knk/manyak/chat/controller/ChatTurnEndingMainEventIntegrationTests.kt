@@ -69,11 +69,15 @@ class ChatTurnEndingMainEventIntegrationTests {
 
     class JudgingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
+        val lastChoicesRequest = AtomicReference<ChatTurnAiRequest>()
 
         @Volatile
         var result: ChatTurnAiResult = ChatTurnAiResult(aiOutput = "응답 본문", choices = listOf("선택 1"))
 
-        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
+        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult {
+            lastChoicesRequest.set(request)
+            return ChatChoicesResult(listOf("하나", "둘", "셋"))
+        }
         override fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink,
@@ -712,5 +716,130 @@ class ChatTurnEndingMainEventIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+    }
+    @Autowired private lateinit var settings: com.knk.manyak.story.repository.StorySettingRepository
+    @Autowired private lateinit var chatService: com.knk.manyak.chat.service.ChatService
+
+    @Test fun `페르소나 AI 이름 충돌을 원문 사건으로 복원하고 같은 표로 되돌린다`() {
+        story.protagonistName = "기본"
+        storyRepository.saveAndFlush(story)
+        settings.save(com.knk.manyak.story.entity.StorySetting(story = story, worldSetting = "{username}은(는)", userRoleSetting = "원래 역할"))
+        listOf("{username}의 사건", "민우의 사건", "민우의 사건 (2)").forEachIndexed { i, name ->
+            storyMainEventRepository.save(StoryMainEvent(story = story, name = name, description = "{username}과(와)", keySentence = "{username}이(가)", sortOrder = (i + 2).toShort()))
+        }
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id, personaNameSnapshot = "민우", personaDescriptionSnapshot = "완전히 다른 역할 {username}"))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "{username} 출력 원문", choices = listOf("{username} 선택지"), occurredMainEventName = "민우의 사건 (3)", targetMainEvent = ChatTurnTargetMainEventResult("민우의 사건", 2))
+        streamGuest(chat.publicId.toString(), "{username} 입력 원문")
+        val request = judgingAiClient.lastRequest.get()
+        assertThat(request.storySettings.protagonistName).isEqualTo("민우")
+        assertThat(request.storySettings.userRoleSetting).isEqualTo("완전히 다른 역할 {username}")
+        assertThat(request.storySettings.worldSetting).isEqualTo("민우는")
+        assertThat(request.mainEvents.takeLast(3).map { it.name }).containsExactly("민우의 사건", "민우의 사건 (3)", "민우의 사건 (2)")
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.occurredMainEventNamesSnapshot).containsExactly("민우의 사건")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "다음 원문", choices = emptyList())
+        streamGuest(chat.publicId.toString(), "다음")
+        val next = judgingAiClient.lastRequest.get()
+        assertThat(next.targetMainEvent!!.name).isEqualTo("민우의 사건")
+        assertThat(next.occurredMainEventNames).containsExactly("민우의 사건 (3)")
+        assertThat(next.history.map { it.content }).contains("{username} 입력 원문", "{username} 출력 원문")
+        val turn = chatService.getChatDetail(chat.publicId.toString(), null).turns.last()
+        chatService.generateChoices(chat.publicId.toString(), turn.id, null)
+        assertThat(judgingAiClient.lastChoicesRequest.get().storySettings.protagonistName).isEqualTo("민우")
+        assertThat(judgingAiClient.lastChoicesRequest.get().storySettings.userRoleSetting).isEqualTo("완전히 다른 역할 {username}")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "재생성", choices = emptyList(), endingName = "해피")
+        restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/regenerate/stream")
+            .header("X-Manyak-Device-Id", "test-device").contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"turnId":${turn.id},"realtimeImage":false}""").exchange().expectStatus().isOk.expectBody(String::class.java)
+        assertThat(judgingAiClient.lastRequest.get().storySettings.protagonistName).isEqualTo("민우")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().reachedEndingNameSnapshot).isNull()
+
+    }
+
+    @Test fun `엔딩은 원문으로 저장하고 SSE 상세 공유는 채팅 이름 카드는 기본 이름이다`() {
+        story.protagonistName = "기본"
+        storyRepository.saveAndFlush(story)
+        val tokenEnding = storyEndingRepository.save(StoryEnding(startSetting = startSetting, name = "{username}의 끝", minTurns = 0, achievementCondition = "조건", epilogue = "끝", sortOrder = 3))
+        storyEndingRepository.save(StoryEnding(startSetting = startSetting, name = "민우의 끝", minTurns = 0, achievementCondition = "조건", epilogue = "끝", sortOrder = 4))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id, personaNameSnapshot = "민우", personaDescriptionSnapshot = "설명"))
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "{username} 그대로", choices = emptyList(), endingName = "민우의 끝")
+        val body = streamGuest(chat.publicId.toString(), "끝")
+        val updated = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(updated.reachedEndingId).isEqualTo(tokenEnding.id)
+        assertThat(updated.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
+        assertThat(body).contains("\"reachedEnding\":\"민우의 끝\"")
+        val detail = chatService.getChatDetail(chat.publicId.toString(), null)
+        assertThat(detail.turns.single().reachedEnding).isEqualTo("민우의 끝")
+        assertThat(detail.turns.single().aiOutput).isEqualTo("{username} 그대로")
+        val card = chatService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), null).single()
+        assertThat(card.reachedEndings).containsExactly("기본의 끝")
+        val share = chatService.createChatShare(chat.publicId.toString(), null)
+        assertThat(chatService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("민우의 끝")
+    }
+    @Autowired private lateinit var personas: com.knk.manyak.user.service.UserPersonaService
+    @Autowired private lateinit var storyService: com.knk.manyak.story.service.StoryService
+
+    @Test fun `서로 다른 페르소나와 기본 주인공의 같은 엔딩은 원문 하나로 집계된다`() {
+        story.protagonistName = "기본"
+        storyRepository.saveAndFlush(story)
+        replaceEndings("{username}의 끝")
+        val member = userRepository.save(User(nickname = "플레이어"))
+        jdbcTemplate.update("UPDATE stories SET user_id = ? WHERE id = ?", member.id, story.id)
+        creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val first = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("하늘", "항해사"))
+        val second = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("서윤", "탐험가"))
+        val token = jwtTokenProvider.issueAccessToken(member.publicId)
+        for ((personaId, name) in listOf(first.id to "하늘", second.id to "서윤", null to "기본")) {
+            val created = chatService.createChat(com.knk.manyak.chat.dto.CreateChatRequest(story.publicId.toString(), personaId = personaId), member.id)
+            judgingAiClient.result = ChatTurnAiResult(aiOutput = "끝", choices = emptyList(), endingName = "${name}의 끝")
+            streamMember(created.id, "도달한다", token)
+            val saved = storyChatRepository.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(created.id))!!
+            assertThat(saved.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
+            assertThat(chatService.getChatDetail(created.id, member.id).turns.single().reachedEnding).isEqualTo("${name}의 끝")
+        }
+        val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
+        assertThat(reaches).hasSize(1)
+        assertThat(reaches.single().endingNameSnapshot).isEqualTo("{username}의 끝")
+        assertThat(storyService.getStoryDetail(story.publicId.toString(), member.id).reachedEndings).containsExactly("기본의 끝")
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `토큰 후보 라이브 행 교체 후 원문 기록과 채팅 표시를 유지한다`(sameName: Boolean) {
+        story.protagonistName = "기본"
+        storyRepository.saveAndFlush(story)
+        replaceEndings("{username}의 끝")
+        replaceMainEvents("{username}의 사건")
+        val oldEndingId = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single().id
+        val oldEventId = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).single().id
+        publish()
+        val member = userRepository.save(User(nickname = "독자"))
+        creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id, startSettingId = startSetting.id, personaNameSnapshot = "하늘", personaDescriptionSnapshot = "항해사"))
+        hideStoryFromReaders()
+        replaceEndings(if (sameName) "{username}의 끝" else "개작 엔딩")
+        replaceMainEvents(if (sameName) "{username}의 사건" else "개작 사건")
+        judgingAiClient.result = ChatTurnAiResult(aiOutput = "끝", choices = emptyList(), endingName = "하늘의 끝", occurredMainEventName = "하늘의 사건")
+        val body = streamMember(chat.publicId.toString(), "도달한다", jwtTokenProvider.issueAccessToken(member.publicId))
+        val saved = storyChatRepository.findById(chat.id).orElseThrow()
+        assertThat(saved.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
+        assertThat(saved.occurredMainEventNamesSnapshot).containsExactly("{username}의 사건")
+        assertThat(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id).single { it.role == MessageRole.ASSISTANT }.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
+        val events = storyChatMainEventRepository.findByChatId(chat.id)
+        if (sameName) {
+            val liveEnding = storyEndingRepository.findByStartSettingIdAndEnabledTrueOrderBySortOrderAsc(startSetting.id).single()
+            val liveEvent = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id).single()
+            assertThat(saved.reachedEndingId).isEqualTo(liveEnding.id).isNotEqualTo(oldEndingId)
+            assertThat(events.single().mainEventId).isEqualTo(liveEvent.id).isNotEqualTo(oldEventId)
+        } else {
+            assertThat(saved.reachedEndingId).isNull()
+            assertThat(events).isEmpty()
+        }
+        assertThat(userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id).single().endingNameSnapshot).isEqualTo("{username}의 끝")
+        assertThat(body).contains("\"reachedEnding\":\"하늘의 끝\"")
+        assertThat(chatService.getChatDetail(chat.publicId.toString(), member.id).turns.single().reachedEnding).isEqualTo("하늘의 끝")
+        assertThat(chatService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), member.id).single().reachedEndings).containsExactly("기본의 끝")
+        val share = chatService.createChatShare(chat.publicId.toString(), member.id)
+        assertThat(chatService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("하늘의 끝")
     }
 }

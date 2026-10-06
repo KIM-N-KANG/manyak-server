@@ -248,6 +248,8 @@ data class AiStorySettings(
     val userRoleSetting: String,
     @JsonProperty("rule_setting")
     val ruleSetting: String,
+    @JsonProperty("protagonist_name")
+    val protagonistName: String? = null,
 )
 
 data class AiStoryStartSettings(

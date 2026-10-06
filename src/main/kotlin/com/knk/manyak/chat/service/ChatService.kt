@@ -1,5 +1,9 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.story.service.UsernameTokenRenderer.render
+import com.knk.manyak.chat.dto.ChatPersonaResponse
+import com.knk.manyak.user.service.UserPersonaService
+
 import com.knk.manyak.chat.client.ChatHistoryMessage
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatCharacterImage
@@ -101,6 +105,7 @@ class ChatService(
     private val storyRepository: StoryRepository,
     // 조립 재료를 현재 값·스냅샷 어느 쪽에서 오든 같은 모양으로 뜨는 몫(KNK-1065).
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
+    private val personaService: UserPersonaService,
     private val imageUrlResolver: ImageUrlResolver,
     private val storyStartSettingRepository: StoryStartSettingRepository,
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
@@ -147,10 +152,15 @@ class ChatService(
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
+        val persona = request.personaId?.let {
+            if (userId == null) throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "페르소나 선택은 회원만 가능합니다.")
+            personaService.snapshot(userId, it)
+        }
         // 스토리 공개 식별자(public_id)로 받아 삭제되지 않은 내부 스토리를 조회한다.
         // 이 한 번의 조회가 KNK-256(public_id 해석)과 KNK-257(삭제된 스토리로 채팅 생성 차단)을 함께 처리한다.
         // 형식 오류·미존재·삭제는 모두 404로 통일된다.
         val story = resolveStory(request.storyId)
+        val chatName = persona?.name ?: story.protagonistName
         // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 채팅을 시작할 수 있다(KNK-401). 비공개·초안은 소유자 외엔 404.
         if (!story.isReadableBy(userId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
@@ -168,6 +178,8 @@ class ChatService(
             StoryChat(
                 userId = userId,
                 storyId = story.id,
+                personaNameSnapshot = persona?.name,
+                personaDescriptionSnapshot = persona?.description,
                 startSettingId = startSetting?.id,
                 // AI trace 여정(KNK-751): 이 스토리를 만든 간편 제작 세션의 creation_id를 여기서 **한 번만** 해석해 박는다.
                 // 턴마다 역조회하지 않기 위해서다. 일반 제작(저작) 스토리는 세션이 없어 null이고 헤더가 생략된다.
@@ -176,7 +188,7 @@ class ChatService(
                     ?.storylineRequestId,
                 // 프롤로그는 시작 설정이 삭제되면 조회 키(start_setting_id)가 NULL이 돼 되찾을 수 없어 박아 둔다.
                 // 제목·썸네일 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 V71에서 지웠다.
-                storyPrologueSnapshot = startSetting?.prologue,
+                storyPrologueSnapshot = startSetting?.prologue?.let { render(it, chatName) },
             ),
         )
         structuredLogger.event(
@@ -191,8 +203,9 @@ class ChatService(
         return CreateChatResponse(
             id = chat.publicId.toString(),
             storyId = story.publicId.toString(),
-            prologue = startSetting?.prologue.orEmpty(),
-            suggestedInputs = suggestedInputs,
+            persona = persona?.let { ChatPersonaResponse(it.name) },
+            prologue = render(startSetting?.prologue.orEmpty(), chatName),
+            suggestedInputs = suggestedInputs.map { render(it, chatName) },
             createdAt = chat.createdAt,
         )
     }
@@ -264,10 +277,13 @@ class ChatService(
             val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
             // 읽을 수 없으면 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷에서 멈춘다(KNK-1065).
             val snapshot = if (showsCurrent) null else story?.let { snapshotByStoryId[it.id] }
+            val defaultName = if (showsCurrent) story?.protagonistName else snapshot?.protagonistName
+            val chatName = chat.personaNameSnapshot ?: defaultName
             ChatSummaryResponse(
+                persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
                 id = chat.publicId.toString(),
                 storyId = story?.publicId?.toString().orEmpty(),
-                storyTitle = (if (showsCurrent) story.title else snapshot?.title).orEmpty(),
+                storyTitle = render((if (showsCurrent) story.title else snapshot?.title).orEmpty(), chatName),
                 // 채팅 카드(46×62)도 목록과 같은 축소 변형을 공유한다(스펙 §4-3-9 반응형 변형).
                 // 생성 표지(KNK-1069)와 프리셋 키의 2단 폴백은 ImageUrlResolver가 소유한다.
                 // 읽을 수 없으면 URL과 기존 프리셋 키를 마지막 공개 버전 스냅샷에서 읽는다.
@@ -290,7 +306,7 @@ class ChatService(
                 // 턴 수는 persistTurn이 턴 저장과 원자적으로 증가시키는 비정규화 카운터를 그대로 읽는다.
                 turnCount = chat.currentTurn,
                 reachedEndings = libraryReachedEndingName(chat, showsCurrent, endingNameById, snapshot)
-                    ?.let(::listOf)
+                    ?.let { listOf(render(it, defaultName)) }
                     .orEmpty(),
                 updatedAt = chat.updatedAt,
             )
@@ -387,6 +403,7 @@ class ChatService(
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
         // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 스냅샷에서 멈춘다(KNK-1065).
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
+        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
         val storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
@@ -423,14 +440,15 @@ class ChatService(
         }
 
         return ChatDetailResponse(
+            persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = storyTitle,
+            storyTitle = render(storyTitle, chatName),
             prologue = (
                 if (showsCurrentStory) {
-                    startSetting?.prologue
+                    startSetting?.prologue?.let { render(it, chatName) }
                 } else {
-                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue?.let { render(it, chatName) } ?: brokenReferencePrologue(chat)
                 }
                 ).orEmpty(),
             turns = turns.map { assistant ->
@@ -445,11 +463,11 @@ class ChatService(
                         endingNameById,
                         snapshot,
                         fallbackName = assistant.reachedEndingNameSnapshot,
-                    ),
+                    )?.let { render(it, chatName) },
                     createdAt = assistant.createdAt,
                 )
             },
-            suggestedInputs = suggestedInputs,
+            suggestedInputs = suggestedInputs.map { render(it, chatName) },
         )
     }
 
@@ -510,6 +528,7 @@ class ChatService(
         val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
         val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
+        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
@@ -522,12 +541,12 @@ class ChatService(
         return ChatShareResponse(
             id = share.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
-            storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty(),
+            storyTitle = render((if (showsCurrentStory) story.title else snapshot?.title).orEmpty(), chatName),
             prologue = (
                 if (showsCurrentStory) {
-                    startSetting?.prologue
+                    startSetting?.prologue?.let { render(it, chatName) }
                 } else {
-                    snapshot?.startSettingOf(chat.startSettingId)?.prologue ?: brokenReferencePrologue(chat)
+                    snapshot?.startSettingOf(chat.startSettingId)?.prologue?.let { render(it, chatName) } ?: brokenReferencePrologue(chat)
                 }
                 ).orEmpty(),
             turns = turns.map { assistant ->
@@ -540,7 +559,7 @@ class ChatService(
                         endingNameById,
                         snapshot,
                         fallbackName = assistant.reachedEndingNameSnapshot,
-                    ),
+                    )?.let { render(it, chatName) },
                     createdAt = assistant.createdAt,
                 )
             },
@@ -1104,7 +1123,7 @@ class ChatService(
                                 turnId = persistedTurn.turnId,
                                 aiOutput = result.aiOutput,
                                 choices = result.choices,
-                                reachedEnding = persistedTurn.reachedEnding?.name,
+                                reachedEnding = persistedTurn.reachedEnding?.name?.let { render(it, aiCall.protagonistName) },
                             ),
                         ),
                 )
@@ -1359,6 +1378,8 @@ class ChatService(
         }
         val startSetting = material?.startSettingOf(chat.startSettingId)
         val mainEvents = material?.mainEvents.orEmpty()
+        val chatName = chat.personaNameSnapshot ?: material?.protagonistName
+        val eventNames = ChatJudgmentNameMapping(mainEvents.map { it.name }, chatName)
 
         // 주요 사건 런타임 상태(§4-3-10, D11). AI가 무상태이므로 백엔드가 매 턴 되돌려 싣는다.
         //
@@ -1372,29 +1393,31 @@ class ChatService(
                     ?: storyMainEventRepository.findById(targetId).orElse(null)
                         ?.let { live -> mainEvents.firstOrNull { it.name == live.name } }
                 )
-                ?.let { ChatTurnTargetMainEvent(name = it.name, progressTurns = chat.targetProgressTurns) }
+                ?.let { ChatTurnTargetMainEvent(name = eventNames.aiName(it.name), progressTurns = chat.targetProgressTurns) }
         }
         // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
         val endings = eligibleEndings(chat, startSetting)
+        val endingNames = ChatJudgmentNameMapping(endings.map { it.name }, chatName)
 
         AiTurnCall(
             request = ChatTurnAiRequest(
                 genre = material?.genre.orEmpty(),
                 storySettings = ChatTurnStorySettings(
-                    worldSetting = material?.storySettings?.worldSetting.orEmpty(),
-                    characterSetting = material?.storySettings?.characterSetting.orEmpty(),
-                    userRoleSetting = material?.storySettings?.userRoleSetting.orEmpty(),
-                    ruleSetting = material?.storySettings?.ruleSetting.orEmpty(),
+                    protagonistName = chatName.orEmpty(),
+                    worldSetting = render(material?.storySettings?.worldSetting.orEmpty(), chatName),
+                    characterSetting = render(material?.storySettings?.characterSetting.orEmpty(), chatName),
+                    userRoleSetting = chat.personaDescriptionSnapshot ?: render(material?.storySettings?.userRoleSetting.orEmpty(), chatName),
+                    ruleSetting = render(material?.storySettings?.ruleSetting.orEmpty(), chatName),
                 ),
                 startSettings = ChatTurnStartSettings(
-                    name = startSetting?.name.orEmpty(),
+                    name = render(startSetting?.name.orEmpty(), chatName),
                     // 시작 설정 참조가 끊겼으면(항목 삭제 → FK로 start_setting_id NULL) 채팅에 박아둔
                     // 프롤로그로 복구한다. 이름·시작 상황은 채팅에 없어 빈 값으로 남는 부분 복구다.
                     prologue = (
-                        startSetting?.prologue
+                        startSetting?.prologue?.let { render(it, chatName) }
                             ?: if (showsCurrentStory) null else brokenReferencePrologue(chat)
                         ).orEmpty(),
-                    startSituation = startSetting?.startSituation.orEmpty(),
+                    startSituation = render(startSetting?.startSituation.orEmpty(), chatName),
                 ),
                 history = history,
                 userInput = userInput,
@@ -1407,10 +1430,10 @@ class ChatService(
                 characterImages = material?.characterImages.orEmpty()
                     .map { ChatCharacterImage(name = it.name, imageName = it.imageName, imageUrl = it.imageUrl) },
                 userSource = userSource,
-                mainEvents = mainEvents.map { ChatTurnMainEvent(it.name, it.description, it.keySentence) },
+                mainEvents = mainEvents.map { ChatTurnMainEvent(eventNames.aiName(it.name), render(it.description, chatName), render(it.keySentence, chatName)) },
                 targetMainEvent = targetMainEvent,
-                occurredMainEventNames = resolveOccurredMainEventNames(chat, mainEvents),
-                endings = endings.map { ChatTurnEnding(it.name, it.achievementCondition, it.epilogue) },
+                occurredMainEventNames = resolveOccurredMainEventNames(chat, mainEvents).map(eventNames::aiName),
+                endings = endings.map { ChatTurnEnding(endingNames.aiName(it.name), render(it.achievementCondition, chatName), render(it.epilogue, chatName)) },
             ),
             traceLink = AiTraceLink(
                 // 간편 제작 스토리만 값이 있다(채팅 생성 시 1회 해석해 박아 둔 값). 일반 제작은 null이라 헤더가 생략된다.
@@ -1425,7 +1448,8 @@ class ChatService(
                 turnNumber = turnNumber,
                 isRegenerated = isRegenerated,
             ),
-            judgmentSource = TurnJudgmentSource(endings = endings, mainEvents = mainEvents),
+            judgmentSource = TurnJudgmentSource(endings = endings, mainEvents = mainEvents, endingNames = endingNames, eventNames = eventNames),
+            protagonistName = chatName,
         )
     } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
 
@@ -1439,6 +1463,7 @@ class ChatService(
          * 읽으면 조립이 스냅샷을 봤는지 현재 값을 봤는지 알 수 없어 매칭이 갈라진다.
          */
         val judgmentSource: TurnJudgmentSource,
+        val protagonistName: String?,
     )
 
     /**

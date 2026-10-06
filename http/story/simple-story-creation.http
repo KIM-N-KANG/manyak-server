@@ -1084,3 +1084,14 @@ Accept: application/json
             `details[0].field가 genreTagIds[0]이 아닙니다: ${JSON.stringify(response.body.details)}`);
     });
 %}
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+# 일반 제작의 이름 토큰 등록·검수 원문·승인 응답 검증은 http/user/user-personas.http를 실행한다.
+# 간편 제작은 AI #155 응답의 protagonist_name을 저장한다. 위 제작으로 얻은 ID의 편집 폼에서
+# protagonistName과 토큰 원문을 확인하고 상세에서는 실제 기본 이름이 표시되는지 비교한다.
+GET {{baseUrl}}/api/v1/stories/{{personaStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("기본 이름 원문 폼", () => client.assert(response.status === 200 && response.body.protagonistName === "민우", `actual=${response.status}`)); %}

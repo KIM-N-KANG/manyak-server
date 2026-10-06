@@ -115,4 +115,13 @@ class ChatTurnAiClientSerializationTests {
             userInput = "마법수정에 손을 올린다.",
             summary = "",
         )
+    @Test fun `주인공 이름은 snake case이며 기존 요청 기본값은 빈 문자열이다`() {
+        val request = sampleRequest()
+        val old = objectMapper.readTree(objectMapper.writeValueAsString(request))
+        assertEquals("", old.path("story_settings").path("protagonist_name").asText())
+        val named = request.copy(storySettings = request.storySettings.copy(protagonistName = "민우"))
+        val json = objectMapper.readTree(objectMapper.writeValueAsString(named))
+        assertEquals("민우", json.path("story_settings").path("protagonist_name").asText())
+        assertFalse(json.path("story_settings").has("protagonistName"))
+    }
 }

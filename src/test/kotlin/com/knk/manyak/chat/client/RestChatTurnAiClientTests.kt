@@ -438,6 +438,7 @@ class RestChatTurnAiClientTests {
         assertTrue(body.contains(""""ai_output":"검사장은 조용해졌다.""""), "ai_output이 없습니다: $body")
         assertTrue(body.contains(""""genre":"판타지""""), "평탄화된 genre가 없습니다: $body")
         assertTrue(body.contains(""""story_settings""""), "평탄화된 story_settings가 없습니다: $body")
+        assertTrue(body.contains(""""protagonist_name":"민우""""))
     }
 
     private fun client() = RestChatTurnAiClient(
@@ -455,6 +456,7 @@ class RestChatTurnAiClientTests {
         ChatTurnAiRequest(
             genre = "판타지",
             storySettings = ChatTurnStorySettings(
+                protagonistName = "민우",
                 worldSetting = "마법 아카데미",
                 characterSetting = "강진우",
                 userRoleSetting = "신입생",

@@ -492,3 +492,16 @@ Accept: application/json
             `썸네일이 바뀌었습니다. expected=${client.global.get("snapThumbnailUrlSm")} actual=${card.thumbnailUrlSm}`);
     });
 %}
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+GET {{baseUrl}}/api/v1/users/me/chats
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("이름 표시와 응답 계약", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.some(c => c.id === client.global.get("personaChatId") && c.persona.name === "하늘"), "이름 또는 응답 계약 확인");
+});
+%}

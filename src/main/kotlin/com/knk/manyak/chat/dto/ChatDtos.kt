@@ -22,6 +22,7 @@ data class CreateChatRequest(
         nullable = true,
     )
     val startSettingId: String? = null,
+    val personaId: String? = null,
 )
 
 @Schema(description = "채팅 생성 응답")
@@ -52,6 +53,7 @@ data class CreateChatResponse(
 
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:00:00Z")
     val createdAt: Instant,
+    val persona: ChatPersonaResponse? = null,
 )
 
 @Schema(description = "채팅 ID 목록 조회 요청")
@@ -107,6 +109,7 @@ data class ChatSummaryResponse(
 
     @field:Schema(description = "마지막 진행 시각", example = "2026-06-12T12:10:00Z")
     val updatedAt: Instant,
+    val persona: ChatPersonaResponse? = null,
 )
 
 @Schema(description = "채팅 상세 응답")
@@ -146,6 +149,7 @@ data class ChatDetailResponse(
         ),
     )
     val suggestedInputs: List<String>,
+    val persona: ChatPersonaResponse? = null,
 )
 
 @Schema(description = "채팅 진행 턴")
@@ -360,3 +364,6 @@ data class ChatStreamErrorEvent(
     @field:Schema(description = "오류 메시지", example = "AI 응답 생성 중 오류가 발생했습니다.")
     val message: String,
 )
+
+/** 채팅 응답에는 선택한 페르소나의 이름만 공개한다. */
+data class ChatPersonaResponse(val name: String)

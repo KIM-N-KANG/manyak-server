@@ -24,12 +24,17 @@
 | story_prologue_snapshot | text |  | true |  |  |  |
 | reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
 | occurred_main_event_names_snapshot | jsonb |  | true |  |  |  |
+| persona_name_snapshot | text |  | true |  |  |  |
+| persona_description_snapshot | text |  | true |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_story_chats_current_turn | CHECK | CHECK ((current_turn >= 0)) |
+| ck_story_chats_persona_description_length | CHECK | CHECK (((persona_description_snapshot IS NULL) OR ((char_length(persona_description_snapshot) >= 1) AND (char_length(persona_description_snapshot) <= 1000)))) |
+| ck_story_chats_persona_name_length | CHECK | CHECK (((persona_name_snapshot IS NULL) OR ((char_length(persona_name_snapshot) >= 1) AND (char_length(persona_name_snapshot) <= 20)))) |
+| ck_story_chats_persona_pair | CHECK | CHECK (((persona_name_snapshot IS NULL) = (persona_description_snapshot IS NULL))) |
 | ck_story_chats_regenerated_count | CHECK | CHECK ((regenerated_count >= 0)) |
 | ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
@@ -83,6 +88,8 @@ erDiagram
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
   jsonb occurred_main_event_names_snapshot
+  text persona_name_snapshot
+  text persona_description_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -134,6 +141,7 @@ erDiagram
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 "public.story_start_settings" {
   bigint id

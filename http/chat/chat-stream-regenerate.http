@@ -280,3 +280,17 @@ Accept: text/event-stream
 GET {{baseUrl}}/api/v1/users/me/trials
 X-Manyak-Device-Id: {{deviceId}}
 Accept: application/json
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+# chat-stream.http의 KNK-1482 요청 완료 후 실행한다. 엔딩 도달 상태면 기존대로 409다.
+POST {{baseUrl}}/api/v1/chats/{{personaChatId}}/turns/regenerate/stream
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: persona-manual-check
+Accept: text/event-stream
+Content-Type: application/json
+
+{"turnId":{{personaTurnId}},"realtimeImage":false}
+
+# 재생성에도 하늘 및 같은 snapshot 설명이 적용되는지 본문과 AI 요청 관측으로 확인한다.

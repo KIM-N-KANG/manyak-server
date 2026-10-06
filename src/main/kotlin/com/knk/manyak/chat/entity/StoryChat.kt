@@ -38,6 +38,12 @@ class StoryChat(
     @Column(name = "story_id", nullable = false)
     val storyId: Long,
 
+    @Column(name = "persona_name_snapshot", columnDefinition = "TEXT", updatable = false)
+    val personaNameSnapshot: String? = null,
+
+    @Column(name = "persona_description_snapshot", columnDefinition = "TEXT", updatable = false)
+    val personaDescriptionSnapshot: String? = null,
+
     @Column(name = "start_setting_id")
     val startSettingId: Long? = null,
 

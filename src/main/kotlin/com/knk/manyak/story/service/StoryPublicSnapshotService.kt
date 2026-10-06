@@ -89,6 +89,7 @@ class StoryPublicSnapshotService(
     fun captureTurnMaterial(story: Story, startSettingId: Long?): StoryPublicSnapshot {
         val startSetting = startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
         return StoryPublicSnapshot(
+            protagonistName = story.protagonistName,
             title = story.title,
             thumbnailImageKey = story.thumbnailImageKey,
             thumbnailImageUrl = story.thumbnailImageUrl,
@@ -136,6 +137,7 @@ class StoryPublicSnapshotService(
         }
 
         return StoryPublicSnapshot(
+            protagonistName = story.protagonistName,
             title = story.title,
             thumbnailImageKey = story.thumbnailImageKey,
             thumbnailImageUrl = story.thumbnailImageUrl,

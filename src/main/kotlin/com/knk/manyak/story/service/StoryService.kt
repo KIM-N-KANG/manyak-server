@@ -269,7 +269,7 @@ class StoryService(
             characters = characters,
             reachedEndings = reachedEndings,
             createdAt = story.createdAt,
-        )
+        ).rendered(story.protagonistName)
     }
 
     /**
@@ -511,5 +511,5 @@ class StoryService(
             likeCount = likeCount,
             status = this.status,
             createdAt = createdAt,
-        )
+        ).rendered(protagonistName)
 }
