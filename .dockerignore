@@ -5,7 +5,11 @@
 .idea
 .kotlin
 .vscode
-build
+# CI 이미지에 필요한 단일 JAR만 빌드 컨텍스트에 포함한다.
+build/*
+!build/libs/
+build/libs/*
+!build/libs/app.jar
 out
 wiki
 
