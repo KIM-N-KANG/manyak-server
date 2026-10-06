@@ -55,8 +55,10 @@ jobs:
           HEAD_TREE=$(git rev-parse 'HEAD^{tree}')
           RUNS_FILE=$(mktemp)
           trap 'rm -f "$RUNS_FILE"' EXIT
-          if ! gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/docker-image.yml/runs?branch=dev&status=success&event=push&per_page=100" \
+          # 2026-10-07 실측: status=success 필터가 최신 실행을 빠뜨려 conclusion은 jq에서 검사한다.
+          # 최신 dev push 100개면 충분하므로 첫 페이지만 조회한다.
+          if ! gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/docker-image.yml/runs?branch=dev&event=push&per_page=100" \
             --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "dev" and .event == "push") | [.id, .head_sha] | @tsv' > "$RUNS_FILE"; then
             echo "::notice::dev 성공 실행 조회 실패: 테스트를 실행합니다 (tree=$HEAD_TREE)"
             exit 0
