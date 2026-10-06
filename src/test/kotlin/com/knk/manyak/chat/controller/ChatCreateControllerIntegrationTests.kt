@@ -289,6 +289,44 @@ class ChatCreateControllerIntegrationTests {
         assertThat(storyChatRepository.count()).isZero()
     }
 
+    @Test
+    fun `정지 회원이 채팅을 생성하면 403이고 채팅이 저장되지 않는다`() {
+        val member = userRepository.save(User(nickname = "정지 회원", status = UserStatus.SUSPENDED))
+        val story = storyRepository.save(Story(title = "내 스토리", userId = member.id))
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}"}""")
+            .exchange()
+            .expectStatus().isForbidden
+            .expectBody()
+            .jsonPath("$.message").isEqualTo("정지된 계정입니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
+    @Test
+    fun `정지 회원이 personaId를 보내면 페르소나 조회보다 먼저 403으로 차단된다`() {
+        val member = userRepository.save(User(nickname = "정지 회원", status = UserStatus.SUSPENDED))
+        val story = storyRepository.save(Story(title = "내 스토리", userId = member.id))
+        // 존재하지 않는 페르소나의 404보다 정지 계정의 403이 우선해야 한다.
+        val personaId = java.util.UUID.randomUUID()
+
+        restTestClient.post()
+            .uri("/api/v1/chats")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"storyId":"${story.publicId}","personaId":"$personaId"}""")
+            .exchange()
+            .expectStatus().isForbidden
+            .expectBody()
+            .jsonPath("$.message").isEqualTo("정지된 계정입니다.")
+
+        assertThat(storyChatRepository.count()).isZero()
+    }
+
     // ---- 소유권 게이트(§4-5, KNK-480): 회원-게스트 교차 접근 ----
 
     @Test
