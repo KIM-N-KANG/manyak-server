@@ -95,7 +95,8 @@ class SubmissionPollingIntegrationTests {
     @Test fun `임대가 AI 타임아웃 이하이면 기동 설정을 거부한다`() {
         assertThrows(IllegalArgumentException::class.java) {
             SubmissionPoller(claims, Mockito.mock(SubmissionExecutor::class.java), executor, 4,
-                java.time.Duration.ofSeconds(180), java.time.Duration.ofSeconds(180), false)
+                java.time.Duration.ofSeconds(180), java.time.Duration.ofSeconds(180), false,
+                io.micrometer.observation.ObservationRegistry.NOOP)
         }
     }
 

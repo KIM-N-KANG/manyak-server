@@ -11,6 +11,7 @@ import org.springframework.http.MediaType
 import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.stereotype.Component
+import io.micrometer.observation.ObservationRegistry
 import org.springframework.web.client.RestClient
 import java.net.URI
 import java.time.Duration
@@ -265,12 +266,14 @@ class RestStoryAiClient(
     connectTimeout: Duration = Duration.ofSeconds(5),
     storylineReadTimeout: Duration = Duration.ofSeconds(90),
     compileReadTimeout: Duration = Duration.ofSeconds(180),
+    // 관측 레지스트리를 달아야 호출이 스팬이 되고 traceparent가 AI로 전파된다(KNK-1552). 테스트는 기본값(NOOP)으로 만든다.
+    observationRegistry: ObservationRegistry = ObservationRegistry.NOOP,
 ) : StoryAiClient {
     private val validatedAiBaseUrl = validateAiBaseUrl(aiBaseUrl)
 
     // storyline 생성과 compile은 응답 시간 특성이 달라 read timeout을 분리한다.
-    private val storylineRestClient = buildRestClient(connectTimeout, storylineReadTimeout)
-    private val compileRestClient = buildRestClient(connectTimeout, compileReadTimeout)
+    private val storylineRestClient = buildRestClient(observationRegistry, connectTimeout, storylineReadTimeout)
+    private val compileRestClient = buildRestClient(observationRegistry, connectTimeout, compileReadTimeout)
 
     override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
         storylineRestClient
@@ -296,9 +299,10 @@ class RestStoryAiClient(
             .body(AiStoryCompileResponse::class.java)
             ?: throw IllegalStateException("AI story compile response body is empty")
 
-    private fun buildRestClient(connectTimeout: Duration, readTimeout: Duration): RestClient =
+    private fun buildRestClient(observationRegistry: ObservationRegistry, connectTimeout: Duration, readTimeout: Duration): RestClient =
         RestClient
             .builder()
+            .observationRegistry(observationRegistry)
             .baseUrl(validatedAiBaseUrl.toString())
             .requestInterceptor(correlationForwardingInterceptor())
             .requestFactory(

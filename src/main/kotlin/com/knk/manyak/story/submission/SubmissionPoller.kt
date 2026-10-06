@@ -1,6 +1,8 @@
 package com.knk.manyak.story.submission
 
 import com.knk.manyak.global.observability.MdcKeys
+import io.micrometer.observation.Observation
+import io.micrometer.observation.ObservationRegistry
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Qualifier
@@ -22,6 +24,7 @@ class SubmissionPoller(
     @Value("\${manyak.ai.moderation.reclaim-after:300s}") private val lease: Duration,
     @Value("\${manyak.ai.moderation.timeout:180s}") timeout: Duration,
     @Value("\${manyak.ai.moderation.poll-enabled:true}") private val enabled: Boolean,
+    private val observationRegistry: ObservationRegistry,
 ) {
     init {
         require(poolSize > 0)
@@ -47,7 +50,16 @@ class SubmissionPoller(
             val previous = MDC.getCopyOfContextMap()
             try {
                 MDC.put(MdcKeys.REQUEST_ID, UUID.randomUUID().toString())
-                executor.execute { try { runner.run(row) } finally { slots.release() } }
+                executor.execute {
+                    try {
+                        Observation.createNotStarted("story.moderation.run", observationRegistry)
+                            .contextualName("moderation")
+                            .lowCardinalityKeyValue("attempt", row.attempt.toString())
+                            .observe { runner.run(row) }
+                    } finally {
+                        slots.release()
+                    }
+                }
             } catch (ex: RuntimeException) {
                 slots.release()
                 try { store.release(row) } catch (_: Exception) { /* DB 장애면 임대 만료 후 다시 선점한다. */ }

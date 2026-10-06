@@ -3,6 +3,7 @@ package com.knk.manyak.push.outbox
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -53,5 +54,27 @@ class SqsPushPublisherTests {
         `when`(client.sendMessage(request)).thenThrow(failure)
         val result = publisher.publish(message)
         assertThatThrownBy { result.join() }.hasCause(failure)
+    }
+
+    @Test
+    fun `현재 추적 컨텍스트를 traceparent 메시지 속성으로 싣는다`() {
+        val traced = SqsPushPublisher(client, mapper, queueUrl) { sink -> sink("traceparent", "00-trace-span-01") }
+        val captor = ArgumentCaptor.forClass(SendMessageRequest::class.java)
+        `when`(client.sendMessage(captor.capture()))
+            .thenReturn(CompletableFuture.completedFuture(SendMessageResponse.builder().build()))
+
+        traced.publish(message).join()
+
+        val attributes = captor.value.messageAttributes()
+        assertThat(attributes["traceparent"]?.stringValue()).isEqualTo("00-trace-span-01")
+        assertThat(attributes["traceparent"]?.dataType()).isEqualTo("String")
+        assertThat(captor.value.messageBody()).isEqualTo(request.messageBody())
+    }
+
+    @Test
+    fun `추적 컨텍스트가 없으면 메시지 속성을 붙이지 않는다`() {
+        `when`(client.sendMessage(request)).thenReturn(CompletableFuture.completedFuture(SendMessageResponse.builder().build()))
+        publisher.publish(message).join()
+        verify(client).sendMessage(request)
     }
 }

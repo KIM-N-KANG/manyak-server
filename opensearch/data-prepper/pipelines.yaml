@@ -9,6 +9,10 @@ entry-pipeline:
     otel_trace_source:
       # 로컬 학습 전용. 운영 OSIS는 SigV4로 받는다.
       ssl: false
+      # gRPC 프레임 없는 OTLP HTTP/protobuf도 같은 포트에서 받는다. 서버는 gRPC 전송 라이브러리(okhttp, grpc-java) 없이
+      # JDK HttpClient로 이 경로에 보낸다(KNK-1552). OSIS otel_trace_source도 같은 HTTP 경로 방식이다.
+      unframed_requests: true
+      path: /v1/traces
   buffer:
     bounded_blocking:
       buffer_size: 10240
