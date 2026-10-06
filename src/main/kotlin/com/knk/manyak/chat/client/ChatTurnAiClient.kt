@@ -146,6 +146,8 @@ data class ChatTurnStorySettings(
     val userRoleSetting: String,
     @JsonProperty("rule_setting")
     val ruleSetting: String,
+    @JsonProperty("protagonist_name")
+    val protagonistName: String = "",
 )
 
 data class ChatTurnStartSettings(

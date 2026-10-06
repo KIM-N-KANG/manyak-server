@@ -33,6 +33,9 @@ class Story(
     @Column(nullable = false, length = 100)
     var title: String,
 
+    @Column(name = "protagonist_name", columnDefinition = "TEXT")
+    var protagonistName: String? = null,
+
     @Column(name = "one_line_intro", length = 255)
     var oneLineIntro: String? = null,
 

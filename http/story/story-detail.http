@@ -181,3 +181,16 @@ Accept: application/json
 GET {{baseUrl}}/api/v1/stories/3f2504e0-4f89-41d3-9a0c-0305e82c3301
 Authorization: Bearer <액세스 토큰>
 Accept: application/json
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+GET {{baseUrl}}/api/v1/stories/{{personaStoryId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("이름 표시와 응답 계약", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.title === "민우의 귀환", "이름 또는 응답 계약 확인");
+});
+%}

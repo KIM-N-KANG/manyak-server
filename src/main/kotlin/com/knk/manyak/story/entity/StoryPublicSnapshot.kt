@@ -63,6 +63,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class StoryPublicSnapshot(
+    val protagonistName: String? = null,
     val title: String = "",
     val thumbnailImageKey: String? = null,
     // 컴파일이 생성한 표지의 절대 URL(KNK-1069). 프리셋 키와 공존하며 2단 폴백은 ImageUrlResolver가 소유한다.

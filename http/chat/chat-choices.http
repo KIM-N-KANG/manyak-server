@@ -219,3 +219,12 @@ Accept: application/json
             `choices가 3개가 아닙니다. actual=${JSON.stringify(response.body.choices)}`);
     });
 %}
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+# chat-stream.http의 KNK-1482 요청 완료 후 실행한다.
+POST {{baseUrl}}/api/v1/chats/{{personaChatId}}/turns/{{personaTurnId}}/choices
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("선택지 생성", () => client.assert(response.status === 200 && Array.isArray(response.body.choices), `actual=${response.status}`)); %}

@@ -407,3 +407,16 @@ Accept: application/json
 ### 11. (자유 조회) 필터·정렬 조합 눈으로 확인. filter는 커서에 실리지 않으니 다음 페이지에도 붙이세요. 어서션 없음.
 GET {{baseUrl}}/api/v1/stories?filter=original&sort=chats&limit=10
 Accept: application/json
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+GET {{baseUrl}}/api/v1/stories
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("이름 표시와 응답 계약", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(Array.isArray(response.body.items), "이름 또는 응답 계약 확인");
+});
+%}

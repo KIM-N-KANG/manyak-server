@@ -19,11 +19,13 @@
 | thumbnail_image_key | varchar(64) |  | true |  | [public.image_presets](public.image_presets.md) |  |
 | thumbnail_image_url | text |  | true |  |  |  |
 | thumbnail_moderation_status | varchar(20) | 'APPROVED'::character varying | false |  |  |  |
+| protagonist_name | text |  | true |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_stories_protagonist_name_length | CHECK | CHECK (((protagonist_name IS NULL) OR ((char_length(protagonist_name) >= 1) AND (char_length(protagonist_name) <= 30)))) |
 | ck_stories_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying])::text[]))) |
 | ck_stories_thumbnail_moderation | CHECK | CHECK (((thumbnail_moderation_status)::text = ANY ((ARRAY['APPROVED'::character varying, 'PENDING'::character varying, 'REJECTED'::character varying])::text[]))) |
 | ck_stories_visibility | CHECK | CHECK (((visibility)::text = ANY ((ARRAY['PUBLIC'::character varying, 'PRIVATE'::character varying])::text[]))) |
@@ -73,6 +75,7 @@ erDiagram
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 "public.story_settings" {
   bigint id
@@ -115,6 +118,8 @@ erDiagram
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
   jsonb occurred_main_event_names_snapshot
+  text persona_name_snapshot
+  text persona_description_snapshot
 }
 "public.story_lorebooks" {
   bigint id

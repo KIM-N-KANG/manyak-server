@@ -113,16 +113,16 @@ class CreditTransactionHistoryService(
                     val story = storyById[chat.storyId]
                     // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 제목에서 멈춘다(KNK-1065).
                     if (story?.isCurrentMetadataVisibleTo(userId) == true) {
-                        story.title
+                        com.knk.manyak.story.service.UsernameTokenRenderer.render(story.title, story.protagonistName)
                     } else {
-                        story?.let { snapshotByStoryId[it.id] }?.title
+                        story?.let { snapshotByStoryId[it.id] }?.let { com.knk.manyak.story.service.UsernameTokenRenderer.render(it.title, it.protagonistName) }
                     }
                 }
                 // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
                 REF_STORY -> storyIdBySession[row.refId]
                     ?.let { storyById[it] }
                     ?.takeIf { it.deletedAt == null }
-                    ?.title
+                    ?.let { com.knk.manyak.story.service.UsernameTokenRenderer.render(it.title, it.protagonistName) }
                 else -> null
             } ?: return@mapNotNull null
             row.id to title

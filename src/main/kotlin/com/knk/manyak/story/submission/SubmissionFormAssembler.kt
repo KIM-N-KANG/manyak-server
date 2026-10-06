@@ -23,6 +23,7 @@ class SubmissionFormAssembler(
     private val images: StoryImageAccess,
     private val storage: UploadedImageStorage,
     private val size: SubmissionSizeCheck,
+    private val protagonistNames: ProtagonistNameValidation,
 ) {
     fun create(request: CreateGeneralStoryRequest, userId: Long, validate: Boolean = true): ObjectNode {
         val validatedSizes = mutableMapOf<String, Long>()
@@ -36,6 +37,7 @@ class SubmissionFormAssembler(
         request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, null, userId, validate, validatedSizes)) }
         form.put("thumbnailModerationStatus", "APPROVED")
         form.putNull("submission")
+        if (validate) protagonistNames.validate(form)
         if (validate) size.check(form, aiInput(form), validatedSizes, isUpdate = false)
         return form
     }
@@ -62,6 +64,7 @@ class SubmissionFormAssembler(
         request.characters?.let { form.set("characters", characters(it, form.path("characters"), story, userId, validate, allowDeletedImages, previousImageIds, validatedSizes)) }
         request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, story, userId, validate, validatedSizes)) }
         form.putNull("submission")
+        if (validate) protagonistNames.validate(form)
         if (validate) size.check(form, aiInput(form), validatedSizes, isUpdate = true)
         return form
     }
@@ -124,7 +127,9 @@ class SubmissionFormAssembler(
             node.isArray -> mapper.createArrayNode().also { array -> node.forEach { array.add(strip(it)) } }
             else -> node
         }
-        return strip(form)
+        return (strip(form) as ObjectNode).apply {
+            remove("protagonistName")?.let { set("protagonist_name", it) }
+        }
     }
 
     /** 원본 검수 폼의 identity를 따라 현재 폼의 배열 인덱스로 옮긴다. 삭제된 대상은 제외한다. */
@@ -144,8 +149,9 @@ class SubmissionFormAssembler(
         for (segment in segments) {
             val key = segment.groups[1]?.value
             if (key != null) {
-                before = before.path(key)
-                after = after.path(key)
+                val formKey = if (key == "protagonist_name") "protagonistName" else key
+                before = before.path(formKey)
+                after = after.path(formKey)
                 if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return null
                 if (path.isNotEmpty()) path.append('.')
                 path.append(key)

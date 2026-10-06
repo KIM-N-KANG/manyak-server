@@ -79,6 +79,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     companion object {
         @Volatile
         var capturedRequest: AiStoryCompileRequest? = null
+        var protagonistName: String? = null
+        var tokenTitle: String? = null
 
         val mainEvents = listOf(
             AiStoryMainEvent("발단", "이야기가 시작된다", "주인공이 길을 나선다"),
@@ -162,8 +164,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                     }
                 }
                 return AiStoryCompileResponse(
-                    stories = AiStoryMeta("생성된 스토리", "한 줄 소개", "설명"),
-                    storySettings = AiStorySettings("세계관", "캐릭터", "역할", "규칙"),
+                    stories = AiStoryMeta(tokenTitle ?: "생성된 스토리", "한 줄 소개", "설명"),
+                    storySettings = AiStorySettings("세계관", "캐릭터", "역할", "규칙", protagonistName = protagonistName),
                     storyStartSettings = AiStoryStartSettings("시작", "상황", "프롤로그"),
                     storySuggestedInputs = listOf("추천1", "추천2", "추천3"),
                     storyMainEvents = mainEventsOverride ?: mainEvents,
@@ -230,6 +232,8 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @BeforeEach
     fun setUp() {
         capturedRequest = null
+        protagonistName = null
+        tokenTitle = null
         endingsOverride = null
         mainEventsOverride = null
         flipSessionToCreatedId = null
@@ -889,4 +893,29 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                 """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
             )
             .exchange()
+    @Test fun `컴파일 기본 이름은 trim하고 원문 토큰을 저장한다`() {
+        protagonistName = " 민우 "
+        tokenTitle = "{username}의 귀환"
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isCreated
+        val story = storyRepository.findAll().single()
+        assertThat(story.protagonistName).isEqualTo("민우")
+        assertThat(story.title).isEqualTo("{username}의 귀환")
+    }
+    @Test fun `이름 없는 토큰 컴파일은 업로드 전 응답 검증 실패다`() {
+        tokenTitle = "{username}의 귀환"
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isEqualTo(502)
+        assertThat(storyRepository.count()).isZero()
+        assertThat(attemptedUploadKeys).isEmpty()
+    }
+    @Test fun `컴파일 이름은 절단하지 않고 삼십 자 상한을 검사한다`() {
+        protagonistName = "가".repeat(31)
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isEqualTo(502)
+        assertThat(storyRepository.count()).isZero()
+    }
+    @Test fun `컴파일 제목 절단은 토큰 조사 전체를 제외한다`() {
+        protagonistName = "민우"
+        tokenTitle = "가".repeat(98) + "{username}은(는) 귀환했다"
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isCreated
+        assertThat(storyRepository.findAll().single().title).isEqualTo("가".repeat(98))
+    }
 }
