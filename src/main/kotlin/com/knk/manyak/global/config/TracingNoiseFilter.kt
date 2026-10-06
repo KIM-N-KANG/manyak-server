@@ -1,6 +1,9 @@
 package com.knk.manyak.global.config
 
 import io.micrometer.observation.Observation
+import io.micrometer.observation.ObservationRegistry
+import net.ttddyy.observation.tracing.QueryContext
+import org.springframework.beans.factory.ObjectProvider
 import io.micrometer.observation.ObservationPredicate
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -19,7 +22,8 @@ import org.springframework.http.server.observation.ServerRequestObservationConte
 @Configuration(proxyBeanMethods = false)
 class TracingNoiseFilter {
     @Bean
-    fun tracingNoisePredicate(): ObservationPredicate = predicate()
+    fun tracingNoisePredicate(registries: ObjectProvider<ObservationRegistry>): ObservationPredicate =
+        predicate { registries.ifAvailable?.currentObservation }
 
     companion object {
         private const val SCHEDULED = "tasks.scheduled.execution"
@@ -28,7 +32,14 @@ class TracingNoiseFilter {
         private const val JDBC_PREFIX = "jdbc."
         private const val REDIS = "lettuce"
 
-        fun predicate() = ObservationPredicate { name, context ->
+        fun predicate(currentObservation: () -> Observation? = { null }) = ObservationPredicate { name, context ->
+            // datasource-micrometer 2.3.0은 QUERY만 켜도 부모에 NOOP connection을 저장한다.
+            // 관측 시작 전 현재 요청/작업 부모로 복구한다. 현재 스코프도 NOOP면 아래 루트 규칙으로 거른다.
+            if (name == "jdbc.query" && context is QueryContext &&
+                (context.parentObservation as? Observation)?.isNoop == true
+            ) {
+                context.parentObservation = currentObservation()
+            }
             when {
                 name == SCHEDULED -> false
                 name.startsWith(SECURITY_PREFIX) -> false

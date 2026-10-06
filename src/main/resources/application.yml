@@ -11,6 +11,13 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:${MANYAK_REDIS_PORT:6379}}
 
+jdbc:
+  # 연결 획득·결과 순회 대신 쿼리만 추적하여 요청 바로 아래에 남긴다.
+  includes: [QUERY]
+  datasource-proxy:
+    # placeholder SQL은 유지하지만 바인딩한 값은 수집하지 않는다.
+    include-parameter-values: false
+
 management:
   opentelemetry:
     resource-attributes:
