@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # 성공한 dev 워크플로 실행 확인
   packages: write # GHCR(dev) 푸시
   id-token: write # AWS OIDC(dev·main) 인증
 
@@ -30,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 성공한 dev 커밋의 트리 비교
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -40,8 +43,47 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run tests
-        run: ./gradlew test --no-daemon
+      # main push만 dev의 성공한 동일 트리 검증을 재사용한다. 조회 실패·불일치는 항상 테스트한다.
+      - name: Check successful dev tree
+        id: dev-tests
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          HEAD_TREE=$(git rev-parse 'HEAD^{tree}')
+          RUNS_FILE=$(mktemp)
+          trap 'rm -f "$RUNS_FILE"' EXIT
+          if ! gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/docker-image.yml/runs?branch=dev&status=success&event=push&per_page=100" \
+            --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "dev" and .event == "push") | [.id, .head_sha] | @tsv' > "$RUNS_FILE"; then
+            echo "::notice::dev 성공 실행 조회 실패: 테스트를 실행합니다 (tree=$HEAD_TREE)"
+            exit 0
+          fi
+          while IFS=$'\t' read -r RUN_ID DEV_SHA; do
+            [[ "$RUN_ID" =~ ^[0-9]+$ && "$DEV_SHA" =~ ^[0-9a-f]{40}$ ]] || continue
+            if ! DEV_TREE=$(git rev-parse --verify "${DEV_SHA}^{tree}" 2>/dev/null); then
+              continue
+            fi
+            if [ "$HEAD_TREE" = "$DEV_TREE" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+              echo "::notice::동일 트리의 dev 테스트 재사용: run=$RUN_ID sha=$DEV_SHA tree=$HEAD_TREE"
+              exit 0
+            fi
+          done < "$RUNS_FILE"
+          echo "::notice::동일 트리의 dev 성공 실행 없음: 테스트를 실행합니다 (tree=$HEAD_TREE)"
+
+      - name: Test and build JAR
+        env:
+          SKIP_TESTS: ${{ steps.dev-tests.outputs.skip }}
+        run: |
+          if [ "$SKIP_TESTS" = "true" ]; then
+            ./gradlew bootJar --no-daemon
+          else
+            ./gradlew test bootJar --no-daemon
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -106,6 +148,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: ci-runtime
           platforms: linux/amd64,linux/arm64
           push: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
           tags: ${{ steps.image-tags.outputs.tags }}
