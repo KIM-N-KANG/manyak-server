@@ -16,7 +16,7 @@ class JdbcQuerySpanNamingTests {
             "INSERT INTO story_messages (content) values (?)" to "INSERT story_messages",
             "update story_messages sm set content=? where sm.id=?" to "UPDATE story_messages",
             "delete from story_messages sm where sm.id=?" to "DELETE story_messages",
-            "/* Hibernate */ select count(s.id) from public.stories s" to "SELECT public.stories",
+            "select count(s.id) from public.stories s" to "SELECT public.stories",
             "select 'from fake_table' from stories s" to "SELECT stories",
         ).forEach { (sql, expected) ->
             assertThat(apply(sql).contextualName).describedAs(sql).isEqualTo(expected)
@@ -24,15 +24,30 @@ class JdbcQuerySpanNamingTests {
     }
 
     @Test
-    fun `식별자나 일반 문자열 끝의 e는 E-string 접두사로 보지 않는다`() {
+    fun `일반 문자열 끝의 e는 E-string 접두사로 보지 않는다`() {
         listOf(
             "select 'from fake_table' from stories s",
             "select 'NAME' from stories",
             "select '1e' from stories",
             "select '_e' from stories",
-            "select \"name'\" from stories",
         ).forEach { sql ->
             assertThat(apply(sql).contextualName).describedAs(sql).isEqualTo("SELECT stories")
+        }
+    }
+
+    @Test
+    fun `인용 식별자와 주석이 있는 SQL은 내용을 해석하지 않는다`() {
+        listOf(
+            "SELECT 1 AS \"FROM synthetic_marker42 \" FROM stories",
+            "SELECT /* outer /* inner */ FROM synthetic_marker73 */ id FROM stories",
+            "SELECT -- FROM synthetic_marker84\n id FROM stories",
+            "/* Hibernate */ select count(s.id) from public.stories s",
+            "select \"name'\" from stories",
+        ).forEach { sql ->
+            val context = apply(sql)
+            assertThat(context.contextualName).describedAs(sql).isEqualTo("query")
+            assertThat(context.name).isEqualTo("jdbc.query")
+            assertThat(context.queries).containsExactly(sql)
         }
     }
 

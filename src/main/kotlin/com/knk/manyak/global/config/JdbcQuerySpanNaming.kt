@@ -19,10 +19,10 @@ class JdbcQuerySpanNaming {
 
     private fun summary(sql: String?): String? {
         if (sql == null || sql.length > 4096) return null
-        // PostgreSQL dollar quoting과 E-string은 단순 정규식으로 해석하지 않는다.
-        // 리터럴 내용이 이름에 들어가지 않도록 원문에서 먼저 보수적으로 제외한다.
-        if ('$' in sql || escapeStringStart.containsMatchIn(sql)) return null
-        val normalized = literalsAndComments.replace(sql, " ").trim()
+        // 일반 작은따옴표 문자열과 비인용 식별자로 된 단순 SQL만 요약한다.
+        // 인용 식별자·특수 문자열·주석이 있으면 내용을 해석하지 않고 기존 이름을 유지한다.
+        if (unsupportedSyntax.containsMatchIn(sql)) return null
+        val normalized = stringLiterals.replace(sql, " ").trim()
         val operation = firstWord.find(normalized)?.value?.uppercase(Locale.ROOT) ?: return null
         // CTE·중첩 SELECT 등은 단순 규칙으로 테이블을 추측하지 않는다.
         val table = when (operation) {
@@ -39,12 +39,11 @@ class JdbcQuerySpanNaming {
     }
 
     private companion object {
-        // 식별자 문자 뒤의 e'는 E-string 접두사가 아니다(예: 'fake_table').
-        val escapeStringStart = Regex("""(?<![A-Za-z0-9_])[Ee]'""")
-        val literalsAndComments = Regex("""'(?:''|[^'])*'|/\*.*?\*/|--[^\r\n]*""", RegexOption.DOT_MATCHES_ALL)
+        val unsupportedSyntax = Regex("""["$]|/\*|--|(?<![A-Za-z0-9_])[Ee]'""")
+        val stringLiterals = Regex("""'(?:''|[^'])*'""")
         val firstWord = Regex("""^[A-Za-z]+\b""")
         val selectWord = Regex("""\bSELECT\b""", RegexOption.IGNORE_CASE)
-        const val TABLE = "([A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)?)(?=\\s|[,;(]|$)"
+        const val TABLE = "([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)(?=\\s|[,;(]|$)"
         val fromTable = Regex("""\bFROM\s+$TABLE""", RegexOption.IGNORE_CASE)
         val insertTable = Regex("""^INSERT\s+INTO\s+$TABLE""", RegexOption.IGNORE_CASE)
         val updateTable = Regex("""^UPDATE\s+$TABLE""", RegexOption.IGNORE_CASE)
