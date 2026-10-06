@@ -943,7 +943,7 @@ class SimpleStoryCreationService(
                         endings = endings,
                     ),
                 ),
-            ),
+            ).rendered(story.protagonistName),
             aiCallLogId = null,
         )
     }
@@ -1063,6 +1063,7 @@ class SimpleStoryCreationService(
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리 생성 요청에 실패했습니다.", exception)
         }
         val aiResponse = recorded.result
+        val protagonistName = validateCompileProtagonist(aiResponse)
 
         val genre = genreTags.joinToString(separator = ", ") { it.name }.ifEmpty { null }
 
@@ -1104,8 +1105,9 @@ class SimpleStoryCreationService(
                     Story(
                         publicId = storyPublicId,
                         userId = attributedUserId,
-                        title = aiResponse.stories.title.take(STORY_TITLE_MAX_LENGTH),
-                        oneLineIntro = aiResponse.stories.oneLineIntro.take(STORY_ONE_LINE_INTRO_MAX_LENGTH),
+                        title = UsernameTokenRenderer.truncateRaw(aiResponse.stories.title, STORY_TITLE_MAX_LENGTH),
+                        protagonistName = protagonistName,
+                        oneLineIntro = UsernameTokenRenderer.truncateRaw(aiResponse.stories.oneLineIntro, STORY_ONE_LINE_INTRO_MAX_LENGTH),
                         description = aiResponse.stories.description,
                         genre = genre,
                         // 컴파일 표지 업로드가 성공하면 URL을 저장하고, 실패하면 표지 없이 등록한다.
@@ -1158,7 +1160,7 @@ class SimpleStoryCreationService(
                 if (aiResponse.storyMainEvents.isNotEmpty()) {
                     // 저장 이름(방어적 절단 후)이 스토리 안에서 유니크여야 이름 기반 완결·목표 매칭이 무모호하다.
                     // 중복은 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다(엔딩과 동일).
-                    val mainEventNames = aiResponse.storyMainEvents.map { it.name.take(STORY_MAIN_EVENT_NAME_MAX_LENGTH) }
+                    val mainEventNames = aiResponse.storyMainEvents.map { UsernameTokenRenderer.truncateRaw(it.name, STORY_MAIN_EVENT_NAME_MAX_LENGTH) }
                     if (mainEventNames.size != mainEventNames.toSet().size) {
                         throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 주요 사건 이름이 중복됩니다.")
                     }
@@ -1181,7 +1183,7 @@ class SimpleStoryCreationService(
                 } else {
                     // 저장 이름(방어적 절단 후)이 시작 설정 안에서 유니크여야 이름 기반 도달 매칭이 무모호하다(제작·수정과 동일 불변식).
                     // 중복은 사용자 입력이 아니라 AI 응답의 결함이므로 400이 아니라 502(불완전 AI 응답)로 처리하고 저장을 롤백한다.
-                    val endingNames = aiResponse.storyEndings.map { it.name.take(STORY_ENDING_NAME_MAX_LENGTH) }
+                    val endingNames = aiResponse.storyEndings.map { UsernameTokenRenderer.truncateRaw(it.name, STORY_ENDING_NAME_MAX_LENGTH) }
                     if (endingNames.size != endingNames.toSet().size) {
                         throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 컴파일 응답의 엔딩 이름이 중복됩니다.")
                     }
@@ -1233,7 +1235,7 @@ class SimpleStoryCreationService(
                                 endings = savedEndings.map { it.toEndingResponse() },
                             ),
                         ),
-                    ),
+                    ).rendered(story.protagonistName),
                     aiCallLogId = recorded.aiCallLogId,
                 )
             } ?: throw IllegalStateException("Story creation transaction result is empty")

@@ -222,7 +222,8 @@ class ChatTurnPersister(
         if (endingName == null || chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return null
         }
-        val candidate = judgmentSource.endings.firstOrNull { it.name == endingName } ?: return null
+        val original = judgmentSource.endingNames.originalName(endingName) ?: return null
+        val candidate = judgmentSource.endings.firstOrNull { it.name == original } ?: return null
         if (candidate.minTurns > chat.currentTurn + 1) {
             return null
         }
@@ -255,6 +256,7 @@ class ChatTurnPersister(
         // 완결 사건 기록(최초 1회 upsert). 이름 스냅샷은 이름으로, 조인 행은 (chat_id, main_event_id)
         // 유니크로 각각 중복을 막는다.
         judgment.occurredMainEventName
+            ?.let(judgmentSource.eventNames::originalName)
             // 후보 판정은 AI에게 보낸 목록이 한다(엔딩과 같은 규칙). 없는 이름은 환각·낡은 값이다.
             ?.takeIf { name -> judgmentSource.mainEvents.any { it.name == name } }
             ?.let { name ->
@@ -277,6 +279,7 @@ class ChatTurnPersister(
         // 목표 사건: AI가 지목하면 그 사건·진행 턴 수로, null이면 목표 해제(진행 0).
         // 목표는 FK 컬럼 하나뿐이라 라이브 id가 없으면 남길 자리가 없다(이름을 남기지 않는 이유는 위 KDoc).
         val target = judgment.targetMainEvent
+            ?.let { target -> judgmentSource.eventNames.originalName(target.name)?.let { target.copy(name = it) } }
             ?.takeIf { t -> judgmentSource.mainEvents.any { it.name == t.name } }
         val targetEventId = target?.let { liveMainEventId(chat, it.name) }
         if (target != null && targetEventId != null) {
@@ -517,4 +520,6 @@ data class TargetMainEventJudgment(val name: String, val progressTurns: Int)
 data class TurnJudgmentSource(
     val endings: List<EndingSnapshot> = emptyList(),
     val mainEvents: List<MainEventSnapshot> = emptyList(),
+    val endingNames: ChatJudgmentNameMapping = ChatJudgmentNameMapping(endings.map { it.name }, null),
+    val eventNames: ChatJudgmentNameMapping = ChatJudgmentNameMapping(mainEvents.map { it.name }, null),
 )

@@ -31,7 +31,7 @@ class StorySubmissionService(
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
         requireMember(userId)
-        val normalized = request.copy(genres = genres.normalize(request.genres))
+        val normalized = request.copy(protagonistName = com.knk.manyak.story.service.normalizeProtagonistName(request.protagonistName), genres = genres.normalize(request.genres))
         val form = forms.create(normalized, userId)
         return accept(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
             payload = mapper.writeValueAsString(normalized), inputForm = mapper.writeValueAsString(form))))
@@ -50,7 +50,7 @@ class StorySubmissionService(
         val priorImageIds = previous?.let { mapper.readTree(it.inputForm).path("characters").toList()
             .flatMap { character -> character.path("images").toList() }
             .mapNotNull { image -> image.path("id").takeUnless { it.isNull || it.isMissingNode }?.asText() }.toSet() }.orEmpty()
-        val normalized = request.copy(genres = request.genres?.let { genres.normalize(it, story.genre) })
+        val normalized = request.copy(protagonistName = com.knk.manyak.story.service.normalizeProtagonistName(request.protagonistName), genres = request.genres?.let { genres.normalize(it, story.genre) })
         val form = forms.update(story, normalized, userId, allowDeletedImages = previous != null, previousImageIds = priorImageIds)
         // 장르는 제출 시 확정한다. 승인 경로는 이 payload를 다시 검증하지 않는다.
         val submission = previous?.let { submissions.lockById(it.id) } ?: StorySubmission(userId = userId,
@@ -66,7 +66,7 @@ class StorySubmissionService(
         val row = owned(id, userId)
         val submission = submissions.lockById(row.id) ?: missing()
         if (submission.kind != SubmissionKind.CREATE || submission.status !in setOf(SubmissionStatus.REJECTED, SubmissionStatus.FAILED)) conflict()
-        val normalized = request.copy(genres = genres.normalize(request.genres))
+        val normalized = request.copy(protagonistName = com.knk.manyak.story.service.normalizeProtagonistName(request.protagonistName), genres = genres.normalize(request.genres))
         val form = forms.create(normalized, userId)
         submission.resubmit(mapper.writeValueAsString(normalized))
         submission.inputForm = mapper.writeValueAsString(form)

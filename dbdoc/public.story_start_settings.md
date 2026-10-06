@@ -77,6 +77,8 @@ erDiagram
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
   jsonb occurred_main_event_names_snapshot
+  text persona_name_snapshot
+  text persona_description_snapshot
 }
 "public.story_endings" {
   bigint id
@@ -109,6 +111,7 @@ erDiagram
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 ```
 

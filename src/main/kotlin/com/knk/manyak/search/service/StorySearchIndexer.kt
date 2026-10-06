@@ -35,7 +35,8 @@ class StorySearchDocumentReader(
         stories.findAll(PageRequest.of(page, 500, Sort.by("id"))).content.map(::document)
 
     private fun document(story: Story): StorySearchDocument = StorySearchDocument(
-        publicId = story.publicId.toString(), title = story.title, oneLineIntro = story.oneLineIntro.orEmpty(),
+        publicId = story.publicId.toString(), title = com.knk.manyak.story.service.UsernameTokenRenderer.render(story.title, story.protagonistName),
+        oneLineIntro = com.knk.manyak.story.service.UsernameTokenRenderer.render(story.oneLineIntro.orEmpty(), story.protagonistName),
         genres = story.genre?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty(),
         characterNames = characters.findByStoryIdOrderByIdAsc(story.id).map { it.name },
         thumbnailUrlSm = images.visibleThumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey, story.thumbnailModerationStatus),

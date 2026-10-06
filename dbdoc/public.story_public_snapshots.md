@@ -55,6 +55,7 @@ erDiagram
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 ```
 

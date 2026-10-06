@@ -658,4 +658,39 @@ class StorySubmissionIntegrationTests {
         }
     }
 
+    @Test fun `주인공 이름과 토큰은 제출 승인 편집 폼에 원문으로 보존한다`() {
+        val user = users.save(User(nickname = "제작자"))
+        val accepted = service.create(request().copy(title = "{username}의 귀환", protagonistName = " 민우 "), user.id)
+        val row = submissions.findByPublicId(java.util.UUID.fromString(accepted.submissionId))!!
+        assertEquals("민우", mapper.readTree(row.inputForm).path("protagonistName").asText())
+        assertEquals("민우", mapper.readTree(row.payload).path("protagonistName").asText())
+        val input = moderationInput(row)
+        assertEquals("민우", input.path("protagonist_name").asText())
+        assertEquals("{username}의 귀환", input.path("title").asText())
+        ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null).validated(input)
+        worker.finish(row.id, 1, ModerationResult("APPROVED", emptyList(), null))
+        val story = stories.findAll().single()
+        assertEquals("민우", story.protagonistName)
+        assertEquals("{username}의 귀환", story.title)
+        assertEquals("{username}의 귀환", service.editForm(story.publicId.toString(), user.id).path("title").asText())
+        assertEquals("민우", service.editForm(story.publicId.toString(), user.id).path("protagonistName").asText())
+    }
+
+    @Test fun `이름 없는 토큰은 제출 전에 거부하고 레거시 무토큰 등록은 허용한다`() {
+        val user = users.save(User(nickname = "제작자"))
+        val ex = assertThrows(org.springframework.web.server.ResponseStatusException::class.java) {
+            service.create(request().copy(title = "{username}의 귀환"), user.id)
+        }
+        assertEquals(400, ex.statusCode.value())
+        for (name in listOf(" ", "가".repeat(31))) {
+            assertThrows(org.springframework.web.server.ResponseStatusException::class.java) { service.create(request().copy(protagonistName = name), user.id) }
+        }
+        service.create(request(), user.id)
+        val legacy = stories.save(Story(userId = user.id, title = "원문"))
+        val bad = assertThrows(org.springframework.web.server.ResponseStatusException::class.java) {
+            service.update(legacy.publicId.toString(), UpdateStoryRequest(description = "{username}은(는)"), user.id)
+        }
+        assertEquals(400, bad.statusCode.value())
+    }
+
 }

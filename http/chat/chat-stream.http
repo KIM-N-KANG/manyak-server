@@ -609,3 +609,23 @@ Accept: text/event-stream
 GET {{baseUrl}}/api/v1/users/me/trials
 X-Manyak-Device-Id: {{deviceId}}
 Accept: application/json
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+POST {{baseUrl}}/api/v1/chats/{{personaChatId}}/turns/stream
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: persona-manual-check
+Accept: text/event-stream
+Content-Type: application/json
+
+{"userInput":"여정을 시작한다","realtimeImage":false}
+
+# AI는 하늘 및 시작 시 설명을 사용한다. completed의 turnId를 아래 personaTurnId 전역 변수에 저장한다.
+> {%
+const text = response.body;
+const data = typeof text === "string" ? text.split(/\r?\n/).filter(x => x.startsWith("data:")).map(x => { try { return JSON.parse(x.slice(5).trim()); } catch (_) { return null; } }).filter(Boolean) : [];
+const completed = data.find(x => x.turnId);
+if (completed) client.global.set("personaTurnId", completed.turnId);
+client.test("턴 완료", () => client.assert(!!completed, "completed 확인"));
+%}

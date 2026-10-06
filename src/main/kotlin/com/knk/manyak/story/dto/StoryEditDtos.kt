@@ -63,6 +63,7 @@ data class StoryEditFormResponse(
     )
     val characters: List<StoryEditCharacterResponse> = emptyList(),
     val submission: com.knk.manyak.story.submission.SubmissionMetadata? = null,
+    val protagonistName: String? = null,
 )
 
 @Schema(description = "스토리 설정 통글 4필드(아직 비어 있으면 null)")
@@ -128,6 +129,7 @@ data class UpdateStoryRequest(
     @field:Size(max = MAX_GENERAL_CHARACTERS, message = "인물은 최대 ${MAX_GENERAL_CHARACTERS}명까지 등록할 수 있습니다.")
     @field:Schema(description = "인물 목록(최대 6명). 생략하면 인물을 바꾸지 않는다.", nullable = true)
     val characters: List<@NotNull GeneralCharacterInput>? = null,
+    val protagonistName: String? = null,
 ) {
     @jakarta.validation.constraints.AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
     @com.fasterxml.jackson.annotation.JsonIgnore

@@ -9,11 +9,11 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 15 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 16 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 20 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 22 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 8 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -52,6 +52,7 @@
 | [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
 | [public.story_submissions](public.story_submissions.md) | 21 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
 | [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
+| [public.user_personas](public.user_personas.md) | 8 |  | BASE TABLE |
 
 ## Relations
 
@@ -110,6 +111,7 @@ erDiagram
 "public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_creation_tag_aliases" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
+"public.user_personas" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -171,6 +173,7 @@ erDiagram
   varchar_64_ thumbnail_image_key FK
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 "public.story_settings" {
   bigint id
@@ -220,6 +223,8 @@ erDiagram
   text story_prologue_snapshot
   varchar_100_ reached_ending_name_snapshot
   jsonb occurred_main_event_names_snapshot
+  text persona_name_snapshot
+  text persona_description_snapshot
 }
 "public.story_messages" {
   bigint id
@@ -605,6 +610,16 @@ erDiagram
   bigint tag_id FK
   varchar_30_ alias
   varchar_60_ normalized_alias
+}
+"public.user_personas" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  text name
+  text description
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
 }
 ```
 

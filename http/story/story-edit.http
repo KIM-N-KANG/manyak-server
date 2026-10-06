@@ -250,3 +250,16 @@ Content-Type: application/json
 ### 자유 조회 (검수 승인 후 장르 확인)
 GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}/edit
 Authorization: Bearer {{accessToken}}
+
+
+### KNK-1482 이름 토큰 검증
+# 먼저 http/user/user-personas.http의 준비 흐름으로 personaStoryId·personaChatId·personaShareId를 설정한다.
+GET {{baseUrl}}/api/v1/stories/{{personaStoryId}}/edit
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("편집 원문 왕복", () => {
+  client.assert(response.body.protagonistName === "민우", "기본 이름 보존");
+  client.assert(response.body.title === "{username}의 귀환", "토큰 원문 보존");
+});
+%}
