@@ -1,0 +1,51 @@
+# 트레이스 파이프라인(KNK-1551). 앱이 OTLP gRPC로 보낸 스팬을 받아 두 갈래로 나눈다.
+#   raw         : 스팬 원본 → otel-v1-apm-span-* (Trace Analytics 트레이스 목록)
+#   service-map : 서비스 간 호출 관계 → otel-v1-apm-service-map (서비스 맵)
+# 운영 OSIS 블루프린트도 같은 프로세서(otel_traces, service_map)와 인덱스 유형을 쓴다.
+# 그래서 이 파일에서 확인한 구성이 운영 파이프라인으로 그대로 넘어간다.
+entry-pipeline:
+  delay: "100"
+  source:
+    otel_trace_source:
+      # 로컬 학습 전용. 운영 OSIS는 SigV4로 받는다.
+      ssl: false
+      # gRPC 프레임 없는 OTLP HTTP/protobuf도 같은 포트에서 받는다. 서버는 gRPC 전송 라이브러리(okhttp, grpc-java) 없이
+      # JDK HttpClient로 이 경로에 보낸다(KNK-1552). OSIS otel_trace_source도 같은 HTTP 경로 방식이다.
+      unframed_requests: true
+      path: /v1/traces
+  buffer:
+    bounded_blocking:
+      buffer_size: 10240
+      batch_size: 160
+  sink:
+    - pipeline:
+        name: "raw-pipeline"
+    - pipeline:
+        name: "service-map-pipeline"
+
+raw-pipeline:
+  source:
+    pipeline:
+      name: "entry-pipeline"
+  processor:
+    # traceGroup(루트 스팬 이름)을 자식 스팬에 채운다. 트레이스가 끝날 때까지 스팬을 들고 있어야 해서
+    # 상태를 가진 처리기다. Vector로 대체할 수 없는 이유가 이것이다.
+    - otel_traces:
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        index_type: trace-analytics-raw
+
+service-map-pipeline:
+  delay: "100"
+  source:
+    pipeline:
+      name: "entry-pipeline"
+  processor:
+    # 일정 시간 창 안의 부모, 자식 스팬을 짝지어 서비스 간 간선을 만든다.
+    - service_map:
+        window_duration: 180
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        index_type: trace-analytics-service-map

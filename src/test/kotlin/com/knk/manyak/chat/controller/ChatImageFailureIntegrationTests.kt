@@ -160,6 +160,31 @@ class ChatImageFailureIntegrationTests {
         assertThat(spends()).isEmpty()
     }
 
+    @Test fun `큐 대기 중 취소하면 대기 관측을 정확히 한번 닫는다`() {
+        val registry = io.micrometer.observation.ObservationRegistry.create()
+        val stopped = mutableListOf<io.micrometer.observation.Observation.Context>()
+        registry.observationConfig().observationHandler(object : io.micrometer.observation.ObservationHandler<io.micrometer.observation.Observation.Context> {
+            override fun supportsContext(context: io.micrometer.observation.Observation.Context) = true
+            override fun onStop(context: io.micrometer.observation.Observation.Context) { stopped.add(context) }
+        })
+        val originalRegistry = ReflectionTestUtils.getField(service, "observationRegistry")
+        ReflectionTestUtils.setField(service, "observationRegistry", registry)
+        try {
+            val emitter = start()
+            assertThat(stopped.filter { it.name == "chat.turn.queue" }).isEmpty()
+            callback(emitter, "timeoutCallback")
+            callback(emitter, "completionCallback")
+            queued.get().run()
+            val queues = stopped.filter { it.name == "chat.turn.queue" }
+            assertThat(queues).hasSize(1)
+            assertThat(queues.single().getLowCardinalityKeyValue("outcome")?.value).isEqualTo("cancelled")
+            assertThat(GatedChatTurnAiClientConfig.lastRequest).isNull()
+            assertRestored(1, false)
+        } finally {
+            ReflectionTestUtils.setField(service, "observationRegistry", originalRegistry)
+        }
+    }
+
     @BeforeEach fun setup() {
         cleaner.cleanAll()
         policy.refresh()

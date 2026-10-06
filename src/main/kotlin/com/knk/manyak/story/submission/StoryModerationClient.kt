@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 import org.springframework.http.client.JdkClientHttpRequestFactory
+import io.micrometer.observation.ObservationRegistry
 import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
 import java.net.http.HttpClient
@@ -81,9 +82,11 @@ class StubStoryModerationClient : StoryModerationClient {
 class RestStoryModerationClient(
     @Value("\${manyak.ai.base-url}") baseUrl: String,
     @Value("\${manyak.ai.moderation.timeout:180s}") timeout: Duration,
+    // 관측 레지스트리를 달아야 호출이 스팬이 되고 traceparent가 AI로 전파된다(KNK-1552). 테스트는 기본값(NOOP)으로 만든다.
+    observationRegistry: ObservationRegistry = ObservationRegistry.NOOP,
 ) : StoryModerationClient {
     init { require(timeout > Duration.ofSeconds(150)) { "Moderation timeout must exceed 150 seconds" } }
-    private val client = RestClient.builder().baseUrl(baseUrl)
+    private val client = RestClient.builder().observationRegistry(observationRegistry).baseUrl(baseUrl)
         .requestFactory(JdkClientHttpRequestFactory(HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build()).apply { setReadTimeout(timeout) }).build()
     override fun moderate(input: JsonNode): ModerationResult = client.post().uri("/api/v1/moderation/story")
         .headers { headers -> CorrelationHeaders.forwardingHeadersFromMdc().forEach { (name, value) -> headers.set(name, value) } }

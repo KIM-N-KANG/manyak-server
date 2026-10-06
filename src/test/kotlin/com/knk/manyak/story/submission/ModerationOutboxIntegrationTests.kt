@@ -192,10 +192,11 @@ class ModerationOutboxIntegrationTests {
                 Mockito.doAnswer { call -> rest.moderate(call.getArgument(0)) }.`when`(ai)
                     .moderate(Mockito.any(tools.jackson.databind.JsonNode::class.java) ?: tools.jackson.databind.json.JsonMapper().createObjectNode())
                 scheduler.poll()
-                assertEquals(schedulerContext, org.slf4j.MDC.getCopyOfContextMap())
+                // 추적이 켜진 뒤(KNK-1552) 스팬이 끝나면 MDC에서 traceId를 지워 빈 맵이 남는다. 비어 있음과 없음은 같은 복원 상태다.
+                assertEquals(schedulerContext ?: emptyMap<String, String>(), org.slf4j.MDC.getCopyOfContextMap() ?: emptyMap<String, String>())
                 assertEquals(2, queued.size)
                 queued.forEach { it.run() }
-                assertEquals(schedulerContext, org.slf4j.MDC.getCopyOfContextMap())
+                assertEquals(schedulerContext ?: emptyMap<String, String>(), org.slf4j.MDC.getCopyOfContextMap() ?: emptyMap<String, String>())
                 assertEquals(2, messages.size)
                 assertEquals(2, messages.map { it.requestId }.toSet().size)
                 messages.forEach { message ->

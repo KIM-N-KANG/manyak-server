@@ -72,6 +72,8 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.observation.Observation
+import io.micrometer.observation.ObservationRegistry
 import io.sentry.Sentry
 import io.sentry.protocol.SentryId
 import org.springframework.beans.factory.annotation.Qualifier
@@ -126,6 +128,7 @@ class ChatService(
     // 채팅 턴 1회 소모량(재생성도 동일 값·사유를 공유). 운영 중 조정 가능한 정책값이라 턴마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     private val meterRegistry: MeterRegistry,
+    private val observationRegistry: ObservationRegistry,
     transactionManager: PlatformTransactionManager,
 ) {
 
@@ -971,8 +974,19 @@ class ChatService(
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
         val futureRef = AtomicReference<CompletableFuture<Void>>()
 
+        // 제출부터 워커 진입까지를 스팬으로 남긴다. chatSseExecutor가 포화되면 이 구간이 길어진다(KNK-1552).
+        val queueWait = Observation.createNotStarted("chat.turn.queue", observationRegistry).start()
+        val queueWaitFinished = AtomicBoolean(false)
+        fun finishQueueWait(error: Throwable? = null, cancelled: Boolean = false) {
+            if (!queueWaitFinished.compareAndSet(false, true)) return
+            if (cancelled) queueWait.lowCardinalityKeyValue("outcome", "cancelled")
+            if (error != null) queueWait.error(error)
+            queueWait.stop()
+        }
+
         fun cancelPendingWorker() {
             if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
+                finishQueueWait(cancelled = true)
                 recordChatTurnResult(OUTCOME_CANCELLED)
                 refundImageQuietly()
                 refundTurn()
@@ -983,14 +997,18 @@ class ChatService(
             futureRef.get()?.cancel(true)
         }
         emitter.onTimeout {
+            // 120초 안에 completed·error가 못 나간 경우다. 워커가 큐에서 못 나왔는지, 돌다가 멈췄는지를 남긴다(KNK-1552).
+            structuredLogger.event("chat_turn_timeout", "chat_id" to chatId, "worker_state" to workerState.get().name)
             cancelWorker()
-            emitter.complete()
+            // 아무것도 쓰지 못한 응답은 Tomcat이 이미 정리해 complete()가 NPE를 낸다. 타임아웃 자체는 위 이벤트로 남겼다.
+            runCatching { emitter.complete() }
         }
         emitter.onCompletion { cancelWorker() }
         emitter.onError { cancelWorker() }
 
         val future = try {
             CompletableFuture.runAsync({
+            finishQueueWait()
             // CompletableFuture가 실행권을 얻은 뒤 취소가 끼어도 CANCELLED면 AI 호출·저장 없이 끝낸다.
             if (!workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.RUNNING)) return@runAsync
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
@@ -1138,6 +1156,7 @@ class ChatService(
             }
         }, chatSseExecutor)
         } catch (rejected: Throwable) {
+            finishQueueWait(error = rejected)
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).

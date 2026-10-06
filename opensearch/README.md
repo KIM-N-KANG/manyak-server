@@ -9,6 +9,8 @@ manyak 애플리케이션 로그를 OpenSearch에 적재하기 위한 자산입�
 | `fluent-bit.conf` | 로그 수집·파싱·전송 설정 |
 | `parsers.conf` | 위에서 쓰는 JSON 파서 정의 |
 | `vector.yaml` | 중앙 가공·버퍼 계층 설정 |
+| `data-prepper/` | 트레이스 수집 파이프라인([KNK-1551](https://kimandkang.atlassian.net/browse/KNK-1551)) |
+| `setup-traces.sh`, `opensearch_dashboards.yml` | 트레이스 화면(Explore) 설정 |
 
 ## 시작하기
 
@@ -64,14 +66,14 @@ Vector가 맡는 나머지 일은 **가공**입니다. `vector.yaml`의 VRL이 `
 | 만든 곳 | Datadog(Timber.io 인수) | OpenSearch 프로젝트 |
 | 언어 | Rust | Java |
 | 로그 | 가볍고 VRL로 변환이 자유롭다 | 되지만 무겁다 |
-| 트레이스 | **서비스 맵을 만들 수 없다** | `service_map_stateful` 전용 프로세서 |
+| 트레이스 | **서비스 맵을 만들 수 없다** | `service_map` 전용 프로세서(옛 이름 `service_map_stateful`) |
 | 목적지 | OpenSearch·S3·Kafka·CloudWatch 등 다수 | OpenSearch 중심 |
 
 **로그만 놓고 보면 Vector가 낫습니다.** 메모리를 적게 쓰고, VRL이 Data Prepper의 프로세서 조합보다 표현력이 좋으며, 디스크 버퍼가 제대로 동작합니다.
 
-**트레이스는 얘기가 다릅니다.** OpenSearch Dashboards의 Trace Analytics는 `otel-v1-apm-span-*`과 `otel-v1-apm-service-map` 인덱스를 읽는데, 뒤쪽을 만드는 `service_map_stateful` 프로세서가 Data Prepper에만 있습니다. Vector에는 대응물이 없습니다. 그래서 트레이스를 붙일 때는 **로그는 Vector, 트레이스는 Data Prepper**로 두 경로를 따로 두게 됩니다. 둘 중 하나를 고르는 문제가 아닙니다.
+**트레이스는 얘기가 다릅니다.** OpenSearch Dashboards의 Trace Analytics는 `otel-v1-apm-span-*`과 `otel-v1-apm-service-map` 인덱스를 읽는데, 뒤쪽을 만드는 `service_map` 프로세서가 Data Prepper에만 있습니다. Vector에는 대응물이 없습니다. 그래서 트레이스를 붙일 때는 **로그는 Vector, 트레이스는 Data Prepper**로 두 경로를 따로 두게 됩니다. 둘 중 하나를 고르는 문제가 아닙니다.
 
-트레이스는 이 스택의 범위 밖이라 Data Prepper는 두지 않았습니다. 필요해지는 시점은 로그만으로 장애 원인을 못 좁힐 때입니다.
+그래서 트레이스를 붙이면서 Data Prepper를 트레이스 전용으로 추가했습니다(아래 [트레이스](#트레이스)).
 
 ### Fluent Bit → Vector는 forward가 아니라 HTTP입니다
 
@@ -161,6 +163,41 @@ curl -X PUT "http://localhost:9200/_index_template/manyak-logs" \
 `dynamic_templates`가 **모르는 문자열을 `keyword`로** 잡습니다(`ignore_above: 1024`). 기본 동작인 `text` + `.keyword` 이중 매핑을 막아 저장 중복과 매핑 폭증을 피하기 위해서입니다. 숫자는 그대로 `long`이 됩니다.
 
 덕분에 `StructuredLogger`에 인자를 추가하거나 manyak-ai가 자기 필드를 실어 보내도(KNK-852) 템플릿을 고치지 않아도 됩니다. 다만 **집계·범위 검색을 쓸 만큼 중요한 필드는 위 `properties`에 명시**하는 편이 낫습니다. 타입을 의도대로 못 박고 문서로 남길 수 있기 때문입니다.
+
+## 트레이스
+
+앱이 OTLP gRPC로 보낸 스팬을 Data Prepper가 받아 두 인덱스로 나눕니다. 로그 경로(Fluent Bit, Vector)와는 따로 갑니다.
+
+```
+앱(OTLP :4317, gRPC 또는 HTTP/protobuf /v1/traces) → Data Prepper ─ otel_traces → otel-v1-apm-span-*        (트레이스 목록, traceGroup)
+                                    └ service_map → otel-v1-apm-service-map  (서비스 맵)
+```
+
+`otel_traces`는 루트 스팬 이름(`traceGroup`)을 자식 스팬에 채우려고 트레이스가 끝날 때까지 스팬을 들고 있습니다. `service_map`은 3분 창 안의 부모, 자식 스팬을 짝지어 서비스 간 간선을 만듭니다. 둘 다 상태를 가진 처리라 Vector로는 대신할 수 없습니다.
+
+```bash
+docker compose -f docker-compose.observability.yml up -d opensearch dashboards data-prepper
+# 샘플 트레이스 3개(루트 1 + 자식 2)
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:latest \
+  traces --otlp-insecure --otlp-endpoint host.docker.internal:4317 --traces 3 --child-spans 2
+curl -s 'localhost:9200/otel-v1-apm-span-*/_count'
+```
+
+앱에서 보내려면 서버 추적을 켭니다(기본 off). compose의 `app` 프로파일에는 이미 들어 있습니다.
+
+```bash
+MANYAK_TRACING_ENABLED=true MANYAK_OTLP_TRACES_ENDPOINT=http://localhost:4317/v1/traces
+```
+
+켜면 HTTP 요청, AI 호출(RestClient, WebClient), JDBC, Redis, 채팅 워커 큐 대기(`chat.turn.queue`)가 스팬이 되고, 로그에 `traceId`, `spanId`가 붙어 트레이스 화면의 Related logs와 이어집니다. SQS 메시지 속성과 Kafka 헤더에 `traceparent`가 실려 알림 서비스가 같은 트레이스를 잇습니다. 예약 작업(1초 주기 검수 폴러 등), actuator 요청, 요청 바깥의 DB와 Redis 호출, Spring Security 내부 관측은 `TracingNoiseFilter`가 걸러 트레이스를 만들지 않습니다. 표준 `OTEL_EXPORTER_OTLP_ENDPOINT`는 쓰지 않습니다. 메트릭 OtlpConfig가 그 변수를 먼저 읽어 메트릭이 트레이스 주소로 가 버립니다.
+
+화면은 두 가지입니다.
+
+- **Explore > Traces**: 스팬을 부모, 자식 계층과 시간 막대로 펼쳐 봅니다. 워크스페이스와 트레이스 데이터셋이 있어야 열리므로, 스팬이 한 건 이상 들어온 뒤 `./opensearch/setup-traces.sh`를 한 번 실행합니다. 출력된 주소에서 스팬의 SpanID 링크를 누르면 트레이스 상세가 열립니다. 기능 플래그는 `opensearch_dashboards.yml`에 있습니다.
+- **Observability > Trace analytics**(`http://localhost:5601/app/observability-traces`): 예전 화면입니다. 설정 없이 열리고 서비스 맵을 보여 줍니다. 서비스 맵 간선은 서비스가 둘 이상 이어진 트레이스에서만 생기고, 처리 창 때문에 1분 남짓 늦게 나타납니다.
+
+운영은 같은 프로세서와 인덱스 유형을 쓰는 OpenSearch Ingestion(OSIS)으로 받습니다. 비용 최적화 단계에서 Fargate Data Prepper로 바꿀 예정이라, 이 파이프라인 파일이 그때 거의 그대로 쓰입니다.
 
 ## 운영에서 달라지는 것
 

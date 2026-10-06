@@ -1,0 +1,13 @@
+# 로컬 Dashboards 설정(KNK-1551). 새 Explore의 트레이스 화면(스팬을 계층과 소요 시간으로 펼쳐 보는 화면)을 켠다.
+# 이 화면은 워크스페이스 안에서만 열리고, 쿼리 확장(PPL)이 켜져 있어야 데이터셋을 읽는다.
+# 설정은 OpenSearch Observability Stack(opensearch-project/observability-stack)의 Dashboards 템플릿을 따랐다.
+server.host: "0.0.0.0"
+opensearch.hosts: ["http://opensearch:9200"]
+explore.enabled: true
+explore.discoverTraces.enabled: true
+workspace.enabled: true
+data_source.enabled: true
+datasetManagement.enabled: true
+uiSettings.overrides.home:useNewHomePage: true
+uiSettings.overrides.query:enhancements:enabled: true
+uiSettings.overrides.explore:experimental: true

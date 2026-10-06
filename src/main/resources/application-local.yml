@@ -1,6 +1,9 @@
 spring:
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    template:
+      # 로컬 푸시 발행(Kafka)도 traceparent 헤더를 싣는다. SQS는 SqsPushPublisher가 메시지 속성으로 싣는다(KNK-1552).
+      observation-enabled: true
   datasource:
     url: ${MANYAK_DB_URL}
     username: ${MANYAK_DB_USERNAME}
