@@ -69,6 +69,9 @@ services:
     ports:
       # 브라우저로 http://localhost:5601 접속.
       - "5601:5601"
+    volumes:
+      # 새 Explore 트레이스 화면과 워크스페이스를 켠다(KNK-1551).
+      - ./opensearch/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro
 
   vector:
     # Fluent Bit과 OpenSearch 사이의 중앙 가공·버퍼 계층(vector.yaml).
@@ -101,6 +104,25 @@ services:
       # 설정 파일을 읽기 전용으로 넣는다. 파일을 고치고 `restart`만 하면 반영된다.
       - ./opensearch/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./opensearch/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+
+  data-prepper:
+    # 트레이스 수집기(KNK-1551). 앱이 OTLP로 보낸 스팬을 Trace Analytics 인덱스로 가공해 넣는다.
+    # 로그는 위 Fluent Bit, Vector 경로를 그대로 쓰고 트레이스만 이쪽을 거친다.
+    # Vector에는 traceGroup 채우기와 서비스 맵 생성이 없어 OpenSearch Trace Analytics를 못 쓴다(2026-10-05 조사).
+    # 2.16.0 이미지는 amd64만 있어 Apple Silicon에서는 에뮬레이션으로 돈다.
+    image: opensearchproject/data-prepper:2.16.0
+    platform: linux/amd64
+    container_name: manyak-data-prepper
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    ports:
+      # OTLP gRPC 표준 포트(4317)로 게시해 앱 설정이 운영과 같은 모양이 되게 한다.
+      # 컨테이너 안의 otel_trace_source 기본 포트는 21890이다.
+      - "4317:21890"
+    volumes:
+      - ./opensearch/data-prepper/pipelines.yaml:/usr/share/data-prepper/pipelines/pipelines.yaml:ro
+      - ./opensearch/data-prepper/data-prepper-config.yaml:/usr/share/data-prepper/config/data-prepper-config.yaml:ro
 
   app:
     # 로컬 만약 서버를 **컨테이너로** 띄워, 운영(ECS FireLens)과 같은 경로로 로그를 흘린다.
