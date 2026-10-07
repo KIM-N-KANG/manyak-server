@@ -304,9 +304,10 @@ manyak:
     templates:
       # 알림 문구의 기본값(정본). DB(push_message_templates)에 유효한 행이 있으면 그 값이 이긴다.
       # (광고) 표기는 여기 넣지 않는다 — 서버가 발송 시점에 붙인다(빠뜨리면 되돌릴 수 없는 발송이 된다).
+      # 문구의 250은 출석 지급량(manyak.credit.attendance-reward)과 별도로 관리한다.
       attendance-reminder:
-        title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:오늘의 출석 이프를 아직 안 받았어요}
-        body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:지금 출석하고 이프를 받아 새 이야기를 시작해 보세요.}
+        title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:이프 250이 도착했어요 🍃}
+        body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?}
   slack:
     # 미설정이면 신고 알림 웹훅을 쓴다(같은 운영 조치 채널), 둘 다 없으면 WARN 로그
     moderation-webhook-url: ${MANYAK_SLACK_MODERATION_WEBHOOK_URL:${MANYAK_SLACK_REPORT_WEBHOOK_URL:}}
