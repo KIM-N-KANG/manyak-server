@@ -1,0 +1,4 @@
+tokens*.json
+stories.json
+results/
+__pycache__/

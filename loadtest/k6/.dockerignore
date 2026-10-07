@@ -1,0 +1,4 @@
+tokens*.json
+*.env
+results/
+__pycache__/
