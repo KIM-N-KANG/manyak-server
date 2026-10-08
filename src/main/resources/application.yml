@@ -100,6 +100,10 @@ springdoc:
     path: /swagger-ui.html
 
 manyak:
+  chat:
+    sse-executor:
+      concurrency: ${MANYAK_CHAT_SSE_CONCURRENCY:64}
+      queue-capacity: ${MANYAK_CHAT_SSE_QUEUE_CAPACITY:100}
   internal:
     shared-secret: ${MANYAK_INTERNAL_SHARED_SECRET:}
   legal:
