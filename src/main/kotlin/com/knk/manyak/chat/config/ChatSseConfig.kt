@@ -12,17 +12,15 @@ class ChatSseConfig {
 
     @Bean(name = ["chatSseExecutor"])
     fun chatSseExecutor(
-        @Value("\${manyak.chat.sse-executor.core-pool-size:64}") core: Int,
-        @Value("\${manyak.chat.sse-executor.max-pool-size:64}") max: Int,
+        @Value("\${manyak.chat.sse-executor.concurrency:64}") concurrency: Int,
         @Value("\${manyak.chat.sse-executor.queue-capacity:100}") queue: Int,
     ): Executor {
-        require(core >= 1) { "chat SSE core-pool-size must be at least 1" }
-        require(max >= core) { "chat SSE max-pool-size must be at least core-pool-size" }
+        require(concurrency >= 1) { "chat SSE concurrency must be at least 1" }
         require(queue >= 0) { "chat SSE queue-capacity must be nonnegative" }
         return ThreadPoolTaskExecutor().apply {
-            // ThreadPoolExecutor는 큐가 찰 때까지 core 이상 늘지 않아 기본 core=max로 즉시 확장한다.
-            corePoolSize = core
-            maxPoolSize = max
+            // ThreadPoolExecutor는 큐가 찰 때까지 core 이상 늘지 않으므로 core=max로 고정한다.
+            corePoolSize = concurrency
+            maxPoolSize = concurrency
             queueCapacity = queue
             setAllowCoreThreadTimeOut(true)
             setThreadNamePrefix("chat-sse-")

@@ -28,14 +28,13 @@ class ChatSseConfigTests {
     @Test
     fun `외부 설정으로 실행기 크기를 바꿀 수 있다`() {
         runner().withPropertyValues(
-            "manyak.chat.sse-executor.core-pool-size=8",
-            "manyak.chat.sse-executor.max-pool-size=12",
+            "manyak.chat.sse-executor.concurrency=8",
             "manyak.chat.sse-executor.queue-capacity=25",
         ).run { context ->
             assertThat(context).hasNotFailed()
             val executor = context.getBean("chatSseExecutor", ThreadPoolTaskExecutor::class.java)
             assertThat(executor.corePoolSize).isEqualTo(8)
-            assertThat(executor.maxPoolSize).isEqualTo(12)
+            assertThat(executor.maxPoolSize).isEqualTo(8)
             assertThat(executor.threadPoolExecutor.queue.remainingCapacity()).isEqualTo(25)
         }
     }
@@ -50,11 +49,10 @@ class ChatSseConfigTests {
     }
 
     @ParameterizedTest
-    @CsvSource("0,64,100", "-1,64,100", "64,63,100", "64,64,-1")
-    fun `잘못된 크기는 기동을 거부한다`(core: Int, max: Int, queue: Int) {
+    @CsvSource("0,100", "-1,100", "64,-1")
+    fun `잘못된 크기는 기동을 거부한다`(concurrency: Int, queue: Int) {
         runner().withPropertyValues(
-            "manyak.chat.sse-executor.core-pool-size=$core",
-            "manyak.chat.sse-executor.max-pool-size=$max",
+            "manyak.chat.sse-executor.concurrency=$concurrency",
             "manyak.chat.sse-executor.queue-capacity=$queue",
         ).run { context -> assertThat(context).hasFailed() }
     }
