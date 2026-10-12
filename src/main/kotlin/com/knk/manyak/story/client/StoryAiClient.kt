@@ -107,6 +107,9 @@ data class AiStoryCompileRequest(
     @JsonProperty("additional_info")
     val additionalInfo: String,
 
+    @JsonProperty("art_style")
+    val artStyle: String = "ANIME",
+
     // 장르 공용 로어북(선택). 백엔드가 스토리 장르로 선별해 세계관·용어 확장 재료로 전달한다(스펙 §5-3-3).
     // 빈 배열이면 AI가 프롬프트에 주입하지 않는다(하위호환).
     val lorebooks: List<AiLorebookItem> = emptyList(),
