@@ -312,6 +312,32 @@ class SimpleStoryCreationCreditIntegrationTests {
     }
 
     @Test
+    fun `완료된 요청은 선택 화풍이 비활성화되어도 같은 결과를 재생하고 추가 차감하지 않는다`() {
+        seedStyle("SEMI_REAL")
+        val user = saveUser()
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val storyline = persistStorylineOwnedBy(user.id)
+        val authorization = "Bearer ${validToken(user)}"
+        val requestId = java.util.UUID.randomUUID()
+        val first = postSimpleStory(storyline, authorization, ",\"artStyle\":\"SEMI_REAL\"", requestId)
+            .expectStatus().isCreated.expectBody().returnResult().responseBody!!
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
+        val transactions = creditTransactionRepository.count()
+        val trialCounters = redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }
+
+        jdbc.update("UPDATE art_styles SET is_active = false WHERE code = 'SEMI_REAL'")
+        val replay = postSimpleStory(storyline, authorization, ",\"artStyle\":\"SEMI_REAL\"", requestId)
+            .expectStatus().isCreated.expectBody().returnResult().responseBody!!
+
+        assertThat(mapper.readTree(replay)).isEqualTo(mapper.readTree(first))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
+        assertThat(creditTransactionRepository.count()).isEqualTo(transactions)
+        assertThat(redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }).isEqualTo(trialCounters)
+    }
+
+    @Test
     fun `미등록 비활성 빈 화풍은 회원 차감과 게스트 및 회원 체험 예약과 AI 호출 전에 400이다`() {
         seedStyle("HIDDEN", active = false)
         for (style in listOf("UNKNOWN", "HIDDEN", "", "ANIME", "anime", " ANIME ")) {
@@ -387,7 +413,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         )
     }
 
-    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?, artStyleJson: String = ""): RestTestClient.ResponseSpec {
+    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?, artStyleJson: String = "", requestId: java.util.UUID = java.util.UUID.randomUUID()): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
             // 게스트 요청에 필요한 헤더(스펙 §4-3-7). 회원 요청에는 무해하다(회원은 이 헤더를 쓰지 않음).
@@ -396,7 +422,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         authorization?.let { spec.header("Authorization", it) }
         return spec
             .body(
-                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]$artStyleJson}""",
+                """{"requestId":"$requestId","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]$artStyleJson}""",
             )
             .exchange()
     }

@@ -1231,3 +1231,49 @@ Accept: application/json
         client.assert(response.body.thumbnailUrl === null && response.body.thumbnailUrlSm === null, `expected=null actual=${JSON.stringify(response.body)}`);
     });
 %}
+
+### 화풍 비활성화 후 완료 요청 재생 — 최초 생성
+# 위 '화풍 선택 전용 준비'만 새로 실행한 뒤 이 요청을 실행하세요(NONE 생성은 건너뜁니다).
+# memberAccessToken은 유효 회원 토큰으로 설정합니다. 제작 전후 잔액과 재생 후 잔액을 비교하세요.
+# 새로운 시나리오를 실행할 때 artReplayRequestId도 새 UUID로 바꿉니다.
+@artReplayRequestId = dcb299b3-116b-45a8-a5d2-b8c80af0dbb1
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{memberAccessToken}}
+X-Manyak-Device-Id: {{artDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{artReplayRequestId}}",
+  "simpleCreationId": {{artCreationId}},
+  "storylineId": {{artStorylineId}},
+  "artStyle": "SEMI_REAL"
+}
+
+> {%
+    client.test("활성 화풍 생성은 성공한다", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+    });
+    if (response.status === 201) client.global.set("artReplayStoryId", response.body.id);
+%}
+
+### 같은 완료 요청 재생 — 화풍을 비활성화해도 같은 스토리
+# 앞 요청 성공 후 로컬 SQL 실행: UPDATE art_styles SET is_active = false WHERE code = 'SEMI_REAL';
+# AI 재호출과 추가 차감이 없어야 합니다. 검증 종료 후 같은 행을 is_active = true로 복원하세요.
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{memberAccessToken}}
+X-Manyak-Device-Id: {{artDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{artReplayRequestId}}",
+  "simpleCreationId": {{artCreationId}},
+  "storylineId": {{artStorylineId}},
+  "artStyle": "SEMI_REAL"
+}
+
+> {%
+    client.test("비활성 화풍의 완료 요청도 같은 결과를 반환한다", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(response.body.id === client.global.get("artReplayStoryId"), `스토리 불일치: expected=${client.global.get("artReplayStoryId")} actual=${response.body.id}`);
+    });
+%}
