@@ -55,6 +55,19 @@ Accept: application/json
     });
 %}
 
+### -0-2. 동의 게이트가 켜져도 미동의 회원의 화풍 카탈로그 조회는 200
+# 서버 설정 MANYAK_AUTH_CONSENT_GATE_ENABLED=true. memberAccessToken은 현행 필수 동의가 없는 회원 토큰으로 설정합니다.
+GET {{baseUrl}}/api/v1/stories/art-styles
+Authorization: Bearer {{memberAccessToken}}
+Accept: application/json
+
+> {%
+    client.test("미동의 회원도 화풍 목록을 조회한다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status} body=${JSON.stringify(response.body)}`);
+        client.assert(Array.isArray(response.body), `expected=array actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
 ### 0. AI 서버 직접 스토리라인 생성 확인
 # 백엔드 2번 요청이 실패하면 먼저 이 요청이 200으로 성공하는지 확인합니다.
 POST {{aiBaseUrl}}/api/v1/story/storylines
@@ -461,6 +474,8 @@ Accept: application/json
 %}
 
 ### 5-art-미등록. 미등록 화풍은 소모 전에 400
+# 실행 전후 manyak.story.creation.duration의 outcome=rejected count가 1 증가하고,
+# story_create_failed 로그의 error_code=BAD_REQUEST가 기록되는지 확인합니다.
 # 2번 준비 흐름 직후 실행합니다. 같은 진행으로 7번 성공이 가능해야 합니다.
 POST {{baseUrl}}/api/v1/stories/simple
 X-Manyak-Device-Id: {{deviceId}}

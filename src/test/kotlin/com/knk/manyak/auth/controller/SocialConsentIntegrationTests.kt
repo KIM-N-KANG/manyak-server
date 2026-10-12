@@ -157,6 +157,15 @@ class SocialConsentIntegrationTests {
         assertThat(count("user_consents")).isEqualTo(3)
     }
 
+    @Test fun `동의 게이트가 켜져도 미동의 회원은 화풍 카탈로그를 조회한다`() {
+        val accessToken = token("art-style-consent")["accessToken"].asText()
+        assertThat(count("user_consents")).isZero()
+
+        client.get().uri("/api/v1/stories/art-styles")
+            .header("Authorization", "Bearer $accessToken")
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.length()").isEqualTo(0)
+    }
+
     @Test fun `게이트는 선택적 인증도 차단하고 허용 목록과 DELETED 401을 보존한다`() {
         val access = token("gated")["accessToken"].asText()
         client.get().uri("/api/v1/stories").header("Authorization", "Bearer $access").exchange()

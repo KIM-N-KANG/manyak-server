@@ -337,6 +337,24 @@ class SimpleStoryCreationCreditIntegrationTests {
         assertThat(redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }).isEqualTo(trialCounters)
     }
 
+    @Autowired private lateinit var meterRegistry: io.micrometer.core.instrument.MeterRegistry
+
+    @Test
+    fun `무효 화풍 400은 story_creation_duration rejected를 한 번 올린다`() {
+        fun count(outcome: String): Long =
+            meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
+        val beforeRejected = count("rejected")
+        val beforeFailure = count("failure")
+        val beforeSuccess = count("success")
+
+        postSimpleStory(persistStoryline(), null, ",\"artStyle\":\"UNKNOWN\"").expectStatus().isBadRequest
+
+        assertThat(count("rejected")).isEqualTo(beforeRejected + 1)
+        assertThat(count("failure")).isEqualTo(beforeFailure)
+        assertThat(count("success")).isEqualTo(beforeSuccess)
+        assertThat(compileStoryCalls.get()).isZero()
+    }
+
     @Test
     fun `미등록 비활성 빈 화풍은 회원 차감과 게스트 및 회원 체험 예약과 AI 호출 전에 400이다`() {
         seedStyle("HIDDEN", active = false)

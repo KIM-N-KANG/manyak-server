@@ -607,13 +607,13 @@ class SimpleStoryCreationService(
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
         val create: (Boolean, Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _, _ ->
-            val artStyle = artStyleCatalogService.resolve(request.artStyle)
             val startNanos = System.nanoTime()
             // AI compile에 진입했는지. 실패 outcome을 rejected(밀리초 거부)와 failure(실제 생성 실패)로 가르는 기준이다
             // — HTTP 상태만으로는 compile을 마친 뒤 나는 4xx(세션 경합 409 등)를 구분할 수 없다([creationOutcomeOf]).
             var compileStarted = false
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
+                val artStyle = artStyleCatalogService.resolve(request.artStyle)
                 val outcome = doCreateSimpleStory(request, artStyle, userId, deviceId, isReclaim) { compileStarted = true }
                 // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
                 val durationNanos = System.nanoTime() - startNanos
