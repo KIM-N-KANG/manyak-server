@@ -78,7 +78,7 @@ class DeletedAccountRejectionFilter(
             "/api/v1/users/me/consents", "/api/v1/auth/me", "/api/v1/credits/policies",
             "/api/v1/credits/products", "/api/v1/profile-presets", "/api/v1/stories/simple/tags",
             // KNK-1537의 장르 API는 구현 전부터 공개 카탈로그 허용 목록에 포함한다.
-            "/api/v1/stories/genres",
+            "/api/v1/stories/genres", "/api/v1/stories/art-styles",
         )
         "POST" -> path == "/api/v1/users/me/consents"
         "DELETE" -> path == "/api/v1/users/me" || path == "/api/v1/users/me/push-tokens"

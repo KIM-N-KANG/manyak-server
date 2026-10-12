@@ -276,6 +276,9 @@ data class CreateSimpleStoryRequest(
     @field:Size(max = 13)
     val additionalInfos: List<@Size(max = 100) String> = emptyList(),
 
+    @field:Schema(description = "활성 화풍 코드. 누락·null이면 ANIME. 미등록·비활성·빈 문자열은 400. NONE도 기존 제작가 유지", example = "ANIME", nullable = true)
+    val artStyle: String? = null,
+
     // AI trace 연결용 통과 필드(KNK-751). 서버는 판단하지 않고 전달만 하며, 없으면 헤더를 생략한다.
     @field:Schema(
         description = "이 완성 요청이 재생성인지 여부. 서버는 판단하지 않고 AI 호출에 그대로 전달합니다.",

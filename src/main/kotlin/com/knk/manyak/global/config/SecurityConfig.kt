@@ -97,6 +97,7 @@ class SecurityConfig {
                     // 일반 제작 등록·PATCH·제출본 API는 인증 필수(§4-3-8).
                     // 수정 폼 조회의 기존 게스트 접근만 유지한다. 소유권 검증은 서비스가 처리한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/art-styles")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple")).permitAll()
@@ -234,6 +235,7 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/stories/{storyId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/{storyId}/edit"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/art-styles"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/simple/tags"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple/storylines"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/stories/simple"),

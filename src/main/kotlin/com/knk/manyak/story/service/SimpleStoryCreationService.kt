@@ -129,6 +129,7 @@ class SimpleStoryCreationService(
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val generatedImageStorage: GeneratedImageStorage,
     private val storyAiClient: StoryAiClient,
+    private val artStyleCatalogService: ArtStyleCatalogService,
     private val structuredLogger: StructuredLogger,
     private val meterRegistry: MeterRegistry,
     private val aiCallRecorder: AiCallRecorder,
@@ -837,7 +838,9 @@ class SimpleStoryCreationService(
         // 스토리 장르로 로어북을 선별해 compile 요청에 세계관·용어 확장 재료로 싣는다(스펙 §4-3-6·§5-3-3).
         // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
         val selectedLorebooks = selectLorebooksForGenres(genreTags)
+        val artStyle = artStyleCatalogService.resolve(request.artStyle)
         val aiRequest = AiStoryCompileRequest(
+            artStyle = artStyle,
             genreTags = genreTags.map { it.name },
             protagonist = aiProtagonist,
             supportingCharacters = aiSupportingCharacters,
