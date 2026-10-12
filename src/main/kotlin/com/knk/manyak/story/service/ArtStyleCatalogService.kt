@@ -17,9 +17,13 @@ class ArtStyleCatalogService(private val artStyles: ArtStyleRepository) {
     fun resolve(code: String?): String {
         // 누락·null 기본값은 카탈로그 조회 없이 허용한다(기존 클라이언트 호환).
         if (code == null) return "ANIME"
-        if (!artStyles.existsByCodeAndIsActiveTrue(code)) {
+        if (!CODE_PATTERN.matches(code) || !artStyles.existsByCodeAndIsActiveTrue(code)) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "활성 화풍 코드를 선택해야 합니다.")
         }
         return code
+    }
+
+    private companion object {
+        val CODE_PATTERN = Regex("^[A-Z_]{1,50}$")
     }
 }

@@ -337,6 +337,53 @@ class SimpleStoryCreationCreditIntegrationTests {
         assertThat(redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }).isEqualTo(trialCounters)
     }
 
+    @Autowired private lateinit var requests: com.knk.manyak.story.repository.StoryCreationRequestRepository
+
+    @Test
+    fun `오래된 PENDING 회수는 화풍이 비활성화되어도 저장된 스토리를 재구성한다`() {
+        seedStyle("SEMI_REAL")
+        val user = saveUser()
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val storyline = persistStorylineOwnedBy(user.id)
+        val authorization = "Bearer ${validToken(user)}"
+        val requestId = java.util.UUID.randomUUID()
+        val first = postSimpleStory(storyline, authorization, ",\"artStyle\":\"SEMI_REAL\"", requestId)
+            .expectStatus().isCreated.expectBody().returnResult().responseBody!!
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
+        val transactions = creditTransactionRepository.count()
+        val trialCounters = redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }
+
+        // 기존 회수 테스트처럼 요청 행만 지우고 aged PENDING으로 다시 심는다(@PreUpdate 방지).
+        requests.delete(requests.findByRequestId(requestId)!!)
+        requests.flush()
+        requests.saveAndFlush(com.knk.manyak.story.entity.StoryCreationRequest(
+            requestId = requestId,
+            userId = user.id,
+            stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION,
+            status = com.knk.manyak.story.entity.StoryCreationRequestStatus.PENDING,
+            updatedAt = java.time.Instant.now().minusSeconds(600),
+        ))
+        val timerCounts = listOf("success", "failure", "rejected").associateWith {
+            meterRegistry.find("manyak.story.creation.duration").tag("outcome", it).timer()?.count() ?: 0L
+        }
+        jdbc.update("UPDATE art_styles SET is_active = false WHERE code = 'SEMI_REAL'")
+        val replay = postSimpleStory(storyline, authorization, ",\"artStyle\":\"SEMI_REAL\"", requestId)
+            .expectStatus().isCreated.expectBody().returnResult().responseBody!!
+
+        val reconciled = requests.findByRequestId(requestId)!!
+        assertThat(reconciled.status).isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.resultJson).isNotNull()
+        assertThat(listOf("success", "failure", "rejected").associateWith {
+            meterRegistry.find("manyak.story.creation.duration").tag("outcome", it).timer()?.count() ?: 0L
+        }).isEqualTo(timerCounts)
+        assertThat(mapper.readTree(replay)).isEqualTo(mapper.readTree(first))
+        assertThat(compileStoryCalls.get()).isEqualTo(1)
+        assertThat(storyRepository.count()).isEqualTo(1)
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
+        assertThat(creditTransactionRepository.count()).isEqualTo(transactions)
+        assertThat(redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }).isEqualTo(trialCounters)
+    }
+
     @Autowired private lateinit var meterRegistry: io.micrometer.core.instrument.MeterRegistry
 
     @Test
