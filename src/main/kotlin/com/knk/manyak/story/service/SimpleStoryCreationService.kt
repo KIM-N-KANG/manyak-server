@@ -129,6 +129,7 @@ class SimpleStoryCreationService(
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val generatedImageStorage: GeneratedImageStorage,
     private val storyAiClient: StoryAiClient,
+    private val artStyleCatalogService: ArtStyleCatalogService,
     private val structuredLogger: StructuredLogger,
     private val meterRegistry: MeterRegistry,
     private val aiCallRecorder: AiCallRecorder,
@@ -604,6 +605,7 @@ class SimpleStoryCreationService(
         deviceId: String? = null,
     ): SimpleStoryCreateResponse {
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499). 요청 기록 전에 거부한다.
+        val artStyle = artStyleCatalogService.resolve(request.artStyle)
         // 완성 경로는 재생성 체인을 쓰지 않는다(체인은 스토리라인 단계의 개념).
         val create: (Boolean, Boolean, ParentCreationLink?) -> SimpleStoryCreateResponse = { isReclaim, _, _ ->
             val startNanos = System.nanoTime()
@@ -612,7 +614,7 @@ class SimpleStoryCreationService(
             var compileStarted = false
             structuredLogger.event("story_create_requested", "creation_id" to request.simpleCreationId)
             try {
-                val outcome = doCreateSimpleStory(request, userId, deviceId, isReclaim) { compileStarted = true }
+                val outcome = doCreateSimpleStory(request, artStyle, userId, deviceId, isReclaim) { compileStarted = true }
                 // 시계는 한 번만 읽어 구조화 로그(duration_ms)와 메트릭이 같은 구간을 가리키게 한다.
                 val durationNanos = System.nanoTime() - startNanos
                 // aiCallLogId가 null이면 회수 재실행 재구성(reconcile) — AI·저장을 타지 않은 조회 경로라 측정에서 뺀다.
@@ -762,6 +764,7 @@ class SimpleStoryCreationService(
 
     private fun doCreateSimpleStory(
         request: CreateSimpleStoryRequest,
+        artStyle: String,
         userId: Long?,
         deviceId: String?,
         // 소유 검증된 회수(reclaim)인지. 완성된 세션의 스토리 재구성은 회수일 때만 허용한다(Codex P1 — 신규 requestId로 남의 스토리 열람 차단).
@@ -838,6 +841,7 @@ class SimpleStoryCreationService(
         // 전달분은 저장 성공 시 story_lorebooks에 연결한다(compileAndPersist).
         val selectedLorebooks = selectLorebooksForGenres(genreTags)
         val aiRequest = AiStoryCompileRequest(
+            artStyle = artStyle,
             genreTags = genreTags.map { it.name },
             protagonist = aiProtagonist,
             supportingCharacters = aiSupportingCharacters,

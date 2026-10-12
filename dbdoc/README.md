@@ -53,6 +53,7 @@
 | [public.story_submissions](public.story_submissions.md) | 21 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
 | [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
 | [public.user_personas](public.user_personas.md) | 8 |  | BASE TABLE |
+| [public.art_styles](public.art_styles.md) | 8 |  | BASE TABLE |
 
 ## Relations
 
@@ -620,6 +621,16 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+}
+"public.art_styles" {
+  varchar_50_ code
+  varchar_30_ name
+  text description
+  text preview_image_url
+  integer sort_order
+  boolean is_active
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

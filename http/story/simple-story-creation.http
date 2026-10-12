@@ -1,3 +1,4 @@
+# 간편 제작 수동 검증. docker compose up -d 및 ./gradlew bootRun 후 위에서부터 실행합니다.
 @baseUrl = http://localhost:8080
 @aiBaseUrl = http://localhost:8000
 
@@ -37,6 +38,21 @@ Accept: application/json
 
 > {%
     client.global.set("deviceId", "manual-verify-" + Date.now());
+%}
+
+### -0-1. 화풍 카탈로그 — 게스트 조회
+# 초기 시드는 아래 11개 순서이며 미리보기 URL은 null입니다.
+# 운영 SQL로 표시 정보·순서를 변경하거나 비활성화했다면 기대 목록도 맞춰 확인하세요.
+GET {{baseUrl}}/api/v1/stories/art-styles
+Accept: application/json
+
+> {%
+    client.test("활성 화풍 초기 11개를 정해진 순서로 반환한다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const expected = ["ANIME", "SEMI_REAL", "LIGHT_NOVEL", "CINEMATIC", "WEBTOON", "SHOJO", "MOE", "RETRO", "OIL_PAINTING", "INK_WASH", "NONE"];
+        client.assert(JSON.stringify(response.body.map(x => x.code)) === JSON.stringify(expected), `expected=${expected} actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.every(x => x.name && x.description && x.previewImageUrl === null), `초기 표시 정보·미리보기 불일치: actual=${JSON.stringify(response.body)}`);
+    });
 %}
 
 ### 0. AI 서버 직접 스토리라인 생성 확인
@@ -441,6 +457,67 @@ Accept: application/json
 > {%
     client.test("정규화 후 중복 이름은 400이다", () => {
         client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}, body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 5-art-미등록. 미등록 화풍은 소모 전에 400
+# 2번 준비 흐름 직후 실행합니다. 같은 진행으로 7번 성공이 가능해야 합니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "artStyle": "UNKNOWN"
+}
+
+> {%
+    client.test("무효 화풍은 400이다", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status} body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `expected=BAD_REQUEST actual=${response.body.code}`);
+    });
+%}
+
+### 5-art-빈 문자열. 빈 문자열 화풍은 소모 전에 400
+# 2번 준비 흐름 직후 실행합니다. 같은 진행으로 7번 성공이 가능해야 합니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "artStyle": ""
+}
+
+> {%
+    client.test("무효 화풍은 400이다", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status} body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `expected=BAD_REQUEST actual=${response.body.code}`);
+    });
+%}
+
+### 5-art-비활성. 비활성 화풍은 소모 전에 400
+# 2번 준비 흐름 직후 실행합니다. 같은 진행으로 7번 성공이 가능해야 합니다.
+# 비활성 케이스 준비 SQL(로컬 DB): INSERT INTO art_styles (code, name, description, sort_order, is_active) VALUES ('DISABLED_TEST', '검증용', '검증용', 12, false);
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "artStyle": "DISABLED_TEST"
+}
+
+> {%
+    client.test("무효 화풍은 400이다", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status} body=${JSON.stringify(response.body)}`);
+        client.assert(response.body.code === "BAD_REQUEST", `expected=BAD_REQUEST actual=${response.body.code}`);
     });
 %}
 
@@ -1095,3 +1172,62 @@ GET {{baseUrl}}/api/v1/stories/{{personaStoryId}}/edit
 Authorization: Bearer {{accessToken}}
 
 > {% client.test("기본 이름 원문 폼", () => client.assert(response.status === 200 && response.body.protagonistName === "민우", `actual=${response.status}`)); %}
+
+### 화풍 선택 전용 준비 — 기존 검증과 독립 실행
+# 아래 두 요청을 순서대로 실행합니다. 재실행할 때는 준비 요청부터 다시 실행하세요.
+# artStyle은 NONE, SEMI_REAL 등 활성 코드로 바꿀 수 있습니다. null 또는 필드 제거 시 ANIME 기본값입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: art-style-{{$uuid}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [],
+  "protagonist": {"name": "아린", "gender": "FEMALE", "featureTagIds": [], "customTags": []},
+  "supportingCharacters": []
+}
+
+> {%
+    client.test("화풍 검증용 진행 생성", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+    });
+    if (response.status === 201) {
+        client.global.set("artCreationId", response.body.simpleCreationId);
+        client.global.set("artStorylineId", response.body.storylines[0].id);
+        client.global.set("artDeviceId", "art-style-complete-" + Date.now());
+    }
+%}
+
+### NONE 선택 — 기존 제작가 유지, 표지 없이 저장
+# 실제 AI가 NONE을 지원하는 배포인지 확인합니다. 구버전 AI는 art_style을 무시하고 ANIME으로 그립니다.
+# AI 로그/트레이스에서 art_style 전달도 확인합니다(서버 응답은 선택값을 저장·노출하지 않음).
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{artDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{artCreationId}},
+  "storylineId": {{artStorylineId}},
+  "artStyle": "NONE",
+  "additionalInfos": []
+}
+
+> {%
+    client.test("NONE도 스토리를 생성한다", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status} body=${JSON.stringify(response.body)}`);
+        client.assert(Boolean(response.body.id), `스토리 ID 없음: actual=${JSON.stringify(response.body)}`);
+    });
+    if (response.status === 201) client.global.set("artStoryId", response.body.id);
+%}
+
+### 생성 결과 자유 조회 — NONE이면 두 표지 URL null, 인물 소개·외형 유지 확인
+GET {{baseUrl}}/api/v1/stories/{{artStoryId}}
+Accept: application/json
+
+> {%
+    client.test("NONE 생성 표지는 null이다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.thumbnailUrl === null && response.body.thumbnailUrlSm === null, `expected=null actual=${JSON.stringify(response.body)}`);
+    });
+%}

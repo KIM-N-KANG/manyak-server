@@ -62,6 +62,8 @@ class SimpleStoryCreationCreditIntegrationTests {
         // true면 compileStory가 예외를 던져 compile 실패(→ 환불)를 강제한다.
         @Volatile
         var failCompile = false
+        var lastCompileRequest: AiStoryCompileRequest? = null
+        var skipImages = false
     }
 
     @TestConfiguration
@@ -74,6 +76,7 @@ class SimpleStoryCreationCreditIntegrationTests {
 
             override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 compileStoryCalls.incrementAndGet()
+                lastCompileRequest = request
                 if (failCompile) {
                     throw IllegalStateException("AI compile 강제 실패")
                 }
@@ -95,6 +98,12 @@ class SimpleStoryCreationCreditIntegrationTests {
                         prologue = "프롤로그",
                     ),
                     storySuggestedInputs = listOf("추천1"),
+                    thumbnailImage = if (skipImages) com.knk.manyak.story.client.AiThumbnailImage(
+                        imageName = "썸네일_기본", contentType = "image/webp", error = "skipped",
+                    ) else null,
+                    characterImages = emptyList(),
+                    characterIntroductions = if (skipImages) listOf(com.knk.manyak.story.client.AiCharacterIntroduction("아린", "동료를 지키는 기사")) else emptyList(),
+                    characterAppearances = if (skipImages) listOf(com.knk.manyak.story.client.AiCharacterAppearance(name = "아린", hair = "검은 머리")) else emptyList(),
                     meta = AiResponseMeta(),
                 )
             }
@@ -124,6 +133,8 @@ class SimpleStoryCreationCreditIntegrationTests {
     fun setUp() {
         compileStoryCalls.set(0)
         failCompile = false
+        lastCompileRequest = null
+        skipImages = false
         databaseCleaner.cleanAll()
     }
 
@@ -249,6 +260,105 @@ class SimpleStoryCreationCreditIntegrationTests {
         assertThat(storyRepository.findAll().first().userId).isNull()
     }
 
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+    @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
+    @Autowired private lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+    @Autowired private lateinit var characters: com.knk.manyak.story.repository.StoryCharacterRepository
+    @Autowired private lateinit var characterImages: com.knk.manyak.story.repository.StoryCharacterImageRepository
+
+    private fun seedStyle(code: String, order: Int = 1, active: Boolean = true) {
+        jdbc.update("INSERT INTO art_styles (code, name, description, sort_order, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            code, "이름 $code", "설명 $code", order, active)
+    }
+
+    @Test
+    fun `게스트 화풍 목록은 활성 행을 순서대로 표시 정보와 null 미리보기로 반환한다`() {
+        seedStyle("NONE", 11)
+        seedStyle("ANIME", 2)
+        seedStyle("HIDDEN", 2, false)
+        for (token in listOf(null, "Bearer forged.token")) {
+            val spec = restTestClient.get().uri("/api/v1/stories/art-styles")
+            token?.let { spec.header("Authorization", it) }
+            spec.exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.length()").isEqualTo(2)
+                .jsonPath("$[0].code").isEqualTo("ANIME")
+                .jsonPath("$[0].name").isEqualTo("이름 ANIME")
+                .jsonPath("$[0].description").isEqualTo("설명 ANIME")
+                .jsonPath("$[0].previewImageUrl").isEqualTo(null)
+                .jsonPath("$[1].code").isEqualTo("NONE")
+        }
+        jdbc.update("UPDATE art_styles SET sort_order = 1, name = '바뀐 이름', preview_image_url = 'https://example.com/none.webp' WHERE code = 'NONE'")
+        restTestClient.get().uri("/api/v1/stories/art-styles").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$[0].name").isEqualTo("바뀐 이름")
+            .jsonPath("$[0].previewImageUrl").isEqualTo("https://example.com/none.webp")
+    }
+
+    @Test
+    fun `화풍 누락과 null은 카탈로그 시드 없이 AI art_style ANIME으로 전달한다`() {
+        for (field in listOf("", ",\"artStyle\":null")) {
+            databaseCleaner.cleanAll()
+            postSimpleStory(persistStoryline(), null, field).expectStatus().isCreated
+            val wire = mapper.readTree(mapper.writeValueAsString(lastCompileRequest!!))
+            assertThat(wire["art_style"].asText()).isEqualTo("ANIME")
+            assertThat(wire.has("artStyle")).isFalse()
+        }
+    }
+
+    @Test
+    fun `활성 화풍 코드는 변환 없이 AI art_style로 전달한다`() {
+        seedStyle("SEMI_REAL")
+        postSimpleStory(persistStoryline(), null, ",\"artStyle\":\"SEMI_REAL\"").expectStatus().isCreated
+        assertThat(mapper.readTree(mapper.writeValueAsString(lastCompileRequest!!))["art_style"].asText()).isEqualTo("SEMI_REAL")
+    }
+
+    @Test
+    fun `미등록 비활성 빈 화풍은 회원 차감과 게스트 및 회원 체험 예약과 AI 호출 전에 400이다`() {
+        seedStyle("HIDDEN", active = false)
+        for (style in listOf("UNKNOWN", "HIDDEN", "", "ANIME", "anime", " ANIME ")) {
+            for (mode in listOf("guest", "paid", "trial")) {
+                val user = when (mode) {
+                    "paid" -> saveUser()
+                    "trial" -> userRepository.save(User(nickname = "체험회원", status = UserStatus.ACTIVE))
+                    else -> null
+                }
+                if (user != null) creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+                val beforeKeys = redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }
+                val beforeTransactions = creditTransactionRepository.count()
+                postSimpleStory(persistStorylineSession(user?.id), user?.let { "Bearer ${validToken(it)}" },
+                    ",\"artStyle\":\"$style\"").expectStatus().isBadRequest
+                assertThat(compileStoryCalls.get()).isZero()
+                assertThat(creditTransactionRepository.count()).isEqualTo(beforeTransactions)
+                assertThat(redis.keys("*trial:*").associateWith { redis.opsForValue().get(it) }).isEqualTo(beforeKeys)
+                if (user != null) assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance)
+            }
+        }
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
+    fun `NONE과 skipped 표지는 스토리를 표지 없이 저장하고 기존 제작가를 차감한다`() {
+        seedStyle("NONE")
+        skipImages = true
+        val user = saveUser()
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        postSimpleStory(persistStorylineOwnedBy(user.id), "Bearer ${validToken(user)}", ",\"artStyle\":\"NONE\"")
+            .expectStatus().isCreated
+        assertThat(mapper.readTree(mapper.writeValueAsString(lastCompileRequest!!))["art_style"].asText()).isEqualTo("NONE")
+        val story = storyRepository.findAll().single()
+        assertThat(story.title).isEqualTo("생성된 스토리")
+        assertThat(story.thumbnailImageKey).isNull()
+        assertThat(story.thumbnailImageUrl).isNull()
+        val character = characters.findAll().single()
+        assertThat(character.name).isEqualTo("아린")
+        assertThat(character.description).isEqualTo("동료를 지키는 기사")
+        assertThat(character.hair).isEqualTo("검은 머리")
+        assertThat(character.imageUrl).isNull()
+        assertThat(characterImages.findAll()).isEmpty()
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance - storyCreationCost)
+        assertThat(creditTransactionRepository.findAll().filter { it.reason == CreditReason.STORY_CREATION }.single().amount)
+            .isEqualTo(-storyCreationCost)
+    }
+
     @Autowired
     private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService
 
@@ -277,7 +387,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         )
     }
 
-    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?): RestTestClient.ResponseSpec {
+    private fun postSimpleStory(storyline: StoryCreationStoryline, authorization: String?, artStyleJson: String = ""): RestTestClient.ResponseSpec {
         val spec = restTestClient.post()
             .uri("/api/v1/stories/simple")
             // 게스트 요청에 필요한 헤더(스펙 §4-3-7). 회원 요청에는 무해하다(회원은 이 헤더를 쓰지 않음).
@@ -286,7 +396,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         authorization?.let { spec.header("Authorization", it) }
         return spec
             .body(
-                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]$artStyleJson}""",
             )
             .exchange()
     }
