@@ -165,8 +165,20 @@ class StoryDraftControllerIntegrationTests {
         val first = put(id, body("""{"a":1,"b":[2,3]}""")).expectStatus().isOk.expectBody().returnResult().responseBody!!
         val replay = put(id, body("""{ "b": [2,3], "a": 1 }""", ",\"baseVersion\":999")).expectStatus().isOk.expectBody().returnResult().responseBody!!
         assertEquals(mapper.readTree(first), mapper.readTree(replay))
-        put(id, body("""{"b":[3,2],"a":1}""")).expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("DRAFT_VERSION_CONFLICT").jsonPath("$.details[0].message").isEqualTo("1").jsonPath("$.details[1].field").isEqualTo("updatedAt")
-        put(id, body("{}", ",\"baseVersion\":1,\"title\":\"제목\"")).expectStatus().isOk.expectBody().jsonPath("$.version").isEqualTo(2)
+        val nullReplay = put(id, body("""{ "b": [2,3], "a": 1 }""", ",\"baseVersion\":null")).expectStatus().isOk.expectBody().returnResult().responseBody!!
+        assertEquals(mapper.readTree(first), mapper.readTree(nullReplay))
+        val conflict = put(id, body("""{"b":[3,2],"a":1}""")).expectStatus().isEqualTo(409).expectBody()
+            .jsonPath("$.code").isEqualTo("DRAFT_VERSION_CONFLICT").returnResult().responseBody!!
+        val current = mapper.readTree(first)
+        val details = mapper.readTree(conflict).path("details")
+        assertEquals("version", details[0].path("field").asText())
+        assertEquals(current.path("version").asText(), details[0].path("message").asText())
+        assertEquals("updatedAt", details[1].path("field").asText())
+        assertEquals(current.path("updatedAt").asText(), details[1].path("message").asText())
+        val updated = mapper.readTree(put(id, body("{}", ",\"baseVersion\":1,\"title\":\"제목\"")).expectStatus().isOk.expectBody()
+            .jsonPath("$.version").isEqualTo(2).returnResult().responseBody!!)
+        assertEquals(current.path("createdAt"), updated.path("createdAt"))
+        kotlin.test.assertNotEquals(current.path("updatedAt"), updated.path("updatedAt"))
         get(id).expectStatus().isOk.expectBody().jsonPath("$.payload").isEqualTo(emptyMap<String, Any>()).jsonPath("$.title").isEqualTo("제목")
         put(id, body("{}", ",\"baseVersion\":2")).expectStatus().isOk.expectBody().jsonPath("$.version").isEqualTo(3)
         get(id).expectStatus().isOk.expectBody().jsonPath("$.title").isEqualTo(null)
@@ -207,18 +219,32 @@ class StoryDraftControllerIntegrationTests {
     }
     @Test fun `목록은 유효한 내 PENDING 두 단계와 초안을 최초 생성 시각 역순으로 합친다`() {
         val now = Instant.now()
+        val other = users.save(User(nickname = "타인"))
+        val otherDraft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), other.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val recentlyUpdated = StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id,
+            stage = StoryCreationStage.STORYLINE_GENERATION, createdAt = now.minusSeconds(1000), updatedAt = now)
+        val failed = StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id,
+            stage = StoryCreationStage.STORYLINE_GENERATION, status = StoryCreationRequestStatus.FAILED)
+        val foreign = StoryCreationRequest(requestId = UUID.randomUUID(), userId = other.id, stage = StoryCreationStage.STORYLINE_GENERATION)
         requests.saveAll(listOf(
+            recentlyUpdated,
+            failed,
+            foreign,
             StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id, stage = StoryCreationStage.STORYLINE_GENERATION, createdAt = now.minusSeconds(10)),
             StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id, stage = StoryCreationStage.STORY_COMPLETION, createdAt = now.plusSeconds(10)),
             StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id, stage = StoryCreationStage.STORY_COMPLETION, updatedAt = now.minusSeconds(301)),
             StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id, stage = StoryCreationStage.STORY_COMPLETION, status = StoryCreationRequestStatus.COMPLETED),
-            StoryCreationRequest(requestId = UUID.randomUUID(), userId = users.save(User(nickname = "타인")).id, stage = StoryCreationStage.STORYLINE_GENERATION)
         ))
         put(UUID.randomUUID(), body()).expectStatus().isOk
-        client.get().uri(path).header("Authorization", auth).exchange().expectStatus().isOk.expectBody()
-            .jsonPath("$.length()").isEqualTo(3).jsonPath("$[0].stage").isEqualTo("STORY_COMPLETION")
+        val bytes = client.get().uri(path).header("Authorization", auth).exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.length()").isEqualTo(4).jsonPath("$[0].stage").isEqualTo("STORY_COMPLETION")
             .jsonPath("$[1].kind").isEqualTo("DRAFT").jsonPath("$[1].payload").doesNotExist()
             .jsonPath("$[2].stage").isEqualTo("STORYLINE_GENERATION")
+            .jsonPath("$[3].requestId").isEqualTo(recentlyUpdated.requestId.toString()).returnResult().responseBody!!
+        val cards = mapper.readTree(bytes)
+        kotlin.test.assertFalse(cards.any { it.path("draftId").asText() == otherDraft.id.toString() })
+        kotlin.test.assertFalse(cards.any { it.path("requestId").asText() in setOf(failed.requestId.toString(), foreign.requestId.toString()) })
     }
     @Test fun `스토리 초안은 내 스토리라인 요청만 연결하고 복구 스키마를 반환한다`() {
         val id = UUID.randomUUID(); val requestId = UUID.randomUUID()
@@ -229,5 +255,8 @@ class StoryDraftControllerIntegrationTests {
         get(id).expectStatus().isOk.expectBody().jsonPath("$.generation.status").isEqualTo("COMPLETED").jsonPath("$.generation.result.simpleCreationId").isEqualTo(7)
         val wrong = requests.save(StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id, stage = StoryCreationStage.STORY_COMPLETION))
         put(UUID.randomUUID(), request.replace(requestId.toString(), wrong.requestId.toString())).expectStatus().isBadRequest
+        val foreign = requests.save(StoryCreationRequest(requestId = UUID.randomUUID(), userId = users.save(User(nickname = "타인")).id,
+            stage = StoryCreationStage.STORYLINE_GENERATION))
+        put(UUID.randomUUID(), request.replace(requestId.toString(), foreign.requestId.toString())).expectStatus().isBadRequest
     }
 }
