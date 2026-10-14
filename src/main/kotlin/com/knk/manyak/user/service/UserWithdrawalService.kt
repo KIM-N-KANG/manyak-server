@@ -34,6 +34,7 @@ class UserWithdrawalService(
     private val socialAccountRepository: SocialAccountRepository,
     private val refreshTokenStore: RefreshTokenStore,
     private val devicePushTokenRepository: DevicePushTokenRepository,
+    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
 ) {
 
     @Transactional
@@ -75,6 +76,7 @@ class UserWithdrawalService(
             social.email = null
         }
         submissions.deleteForUser(id)
+        drafts.deleteForUser(id)
         devicePushTokenRepository.deleteByUserId(id)
         refreshTokenStore.revokeAllForUser(id)
     }

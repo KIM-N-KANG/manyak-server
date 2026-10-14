@@ -37,6 +37,9 @@ interface StoryDraftRepository : JpaRepository<StoryDraft, UUID> {
     @Modifying
     @Query("delete from StoryDraft d where d.id = :id and d.userId = :userId")
     fun deleteOwned(id: UUID, userId: Long): Int
+    @Modifying
+    @Query("delete from StoryDraft d where d.userId = :userId")
+    fun deleteForUser(userId: Long): Int
 }
 
 data class PutStoryDraftRequest(
