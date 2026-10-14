@@ -1,6 +1,7 @@
 package com.knk.manyak.auth.controller
 
 import com.knk.manyak.auth.config.AuthProperties
+import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -12,6 +13,7 @@ import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -31,7 +33,7 @@ import java.util.UUID
  * /api/v1/auth (/me, /token/refresh) 통합 검증.
  *
  * - /me: 토큰 없음·위조·만료 → 401, 유효 access → 200+본문, 사용자 없는 토큰 → 401.
- * - /token/refresh: 유효 → 새 토큰, 무효 → 401, 회전 후 옛 refresh 재사용 → 401.
+ * - /token/refresh: 유효 → 새 토큰, 무효 → 401, 유예 안의 동일 refresh → 같은 원문. 후속 회전 뒤 과거 refresh 재사용 → 401.
  *
  * refresh 저장은 Redis 인프라 없이 검증하기 위해 InMemoryRefreshTokenStore(@Primary)로 대체한다.
  */
@@ -280,26 +282,36 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
-    fun `회전 후 옛 refresh를 재사용하면 401이다`() {
-        val user = saveUser()
-        val issued = authTokenService.issueTokens(user)
+    fun `같은 refresh 연속 재발급은 모두 200이고 같은 refresh로 다음 회전도 성공한다`() {
+        val issued = authTokenService.issueTokens(saveUser())
+        val rotated = refreshSuccessfully(issued.refreshToken)
+        val replayed = refreshSuccessfully(issued.refreshToken)
 
-        // 1차 회전: 성공하고 새 토큰을 받는다.
-        restTestClient.post()
-            .uri("/api/v1/auth/token/refresh")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"refreshToken":"${issued.refreshToken}"}""")
-            .exchange()
-            .expectStatus().isOk
-
-        // 같은(옛) refresh 재사용: 이미 폐기됐으므로 401.
-        restTestClient.post()
-            .uri("/api/v1/auth/token/refresh")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body("""{"refreshToken":"${issued.refreshToken}"}""")
-            .exchange()
-            .expectStatus().isUnauthorized
+        assertThat(replayed.refreshToken).isEqualTo(rotated.refreshToken)
+        assertThat(replayed.accessToken).isNotBlank()
+        assertThat(refreshSuccessfully(replayed.refreshToken).refreshToken).isNotEqualTo(replayed.refreshToken)
     }
+
+    @Test
+    fun `후속 회전 후 가장 오래된 refresh 재사용은 401이다`() {
+        val issued = authTokenService.issueTokens(saveUser())
+        val rotated = refreshSuccessfully(issued.refreshToken)
+        val current = refreshSuccessfully(rotated.refreshToken)
+
+        for (token in listOf(issued.refreshToken, current.refreshToken)) {
+            restTestClient.post().uri("/api/v1/auth/token/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"refreshToken":"$token"}""")
+                .exchange().expectStatus().isUnauthorized
+        }
+    }
+
+    private fun refreshSuccessfully(token: String): TokenResponse =
+        restTestClient.post().uri("/api/v1/auth/token/refresh")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"refreshToken":"$token"}""")
+            .exchange().expectStatus().isOk
+            .expectBody(TokenResponse::class.java).returnResult().responseBody!!
 
     // ---- POST /api/v1/auth/logout ----
 

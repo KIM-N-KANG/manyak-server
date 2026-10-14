@@ -12,6 +12,7 @@ import java.util.UUID
  * 키 구조(모두 TTL 적용):
  * - `rt:fam:{familyId}` → `"userId:currentTokenHash"` — family 레코드(소유자 + 현재 유효 토큰).
  * - `rt:tok:{tokenHash}` → familyId — 발급된 모든 토큰(과거 포함)의 family 매핑(재사용 탐지용).
+ * - `rt:grace:{presentedHash}` → `"newHash:newRaw"` — 유예 시간 동안만 보관하는 회전 결과.
  * - `rt:user:{userId}`   → familyId SET — 사용자의 모든 family 인덱스(전체 폐기용).
  *
  * 회전/폐기는 Lua 스크립트로 **원자 실행**한다. Redis는 스크립트를 단일 원자 단위로 돌리므로,
@@ -36,7 +37,13 @@ class RedisRefreshTokenStore(
         return familyId
     }
 
-    override fun rotate(presentedTokenHash: String, newTokenHash: String, ttl: Duration): RotateResult {
+    override fun rotate(
+        presentedTokenHash: String,
+        newTokenHash: String,
+        newRefreshToken: String,
+        ttl: Duration,
+        reuseGrace: Duration,
+    ): RotateResult {
         if (ttl.isZero || ttl.isNegative) return RotateResult.Invalid // 회전은 양수 TTL 전제(실제 refreshTtl).
         val result = redisTemplate.execute(
             ROTATE_SCRIPT,
@@ -44,6 +51,8 @@ class RedisRefreshTokenStore(
             presentedTokenHash,
             newTokenHash,
             ttl.seconds.toString(),
+            newRefreshToken,
+            reuseGrace.toMillis().toString(),
         ) ?: return RotateResult.Invalid
         return parseRotate(result)
     }
@@ -58,6 +67,11 @@ class RedisRefreshTokenStore(
 
     private fun parseRotate(result: String): RotateResult = when {
         result.startsWith(ROTATED_PREFIX) -> RotateResult.Rotated(result.removePrefix(ROTATED_PREFIX).toLong())
+        result.startsWith(GRACE_PREFIX) -> {
+            val payload = result.removePrefix(GRACE_PREFIX)
+            val separator = payload.indexOf(':')
+            RotateResult.GraceReplayed(payload.substring(0, separator).toLong(), payload.substring(separator + 1))
+        }
         result.startsWith(REUSE_PREFIX) -> RotateResult.ReuseDetected(result.removePrefix(REUSE_PREFIX).toLong())
         else -> RotateResult.Invalid
     }
@@ -72,11 +86,12 @@ class RedisRefreshTokenStore(
         private const val USER_PREFIX = "rt:user:"
 
         private const val ROTATED_PREFIX = "ROTATED:"
+        private const val GRACE_PREFIX = "GRACE:"
         private const val REUSE_PREFIX = "REUSE:"
 
         /**
-         * 회전을 원자적으로 수행한다. ARGV: [1]=제시 토큰 해시, [2]=새 토큰 해시, [3]=TTL(초).
-         * 반환: `INVALID` | `ROTATED:{userId}` | `REUSE:{userId}`.
+         * 회전을 원자적으로 수행한다. ARGV: [1]=제시 해시, [2]=새 해시, [3]=TTL(초), [4]=새 원문, [5]=유예(밀리초).
+         * 반환: `INVALID` | `ROTATED:{userId}` | `GRACE:{userId}:{raw}` | `REUSE:{userId}`.
          * userId는 정수, 토큰 해시는 base64url(콜론 없음)이라 family 값은 첫 ':'로 안전하게 나뉜다.
          */
         private val ROTATE_SCRIPT = DefaultRedisScript<String>().apply {
@@ -90,7 +105,15 @@ class RedisRefreshTokenStore(
                 local sep = string.find(fam, ':')
                 local userId = string.sub(fam, 1, sep - 1)
                 local currentHash = string.sub(fam, sep + 1)
+                local graceMillis = tonumber(ARGV[5])
                 if currentHash ~= ARGV[1] then
+                    local grace = redis.call('GET', 'rt:grace:' .. ARGV[1])
+                    if graceMillis > 0 and grace then
+                        local graceSep = string.find(grace, ':')
+                        if graceSep and string.sub(grace, 1, graceSep - 1) == currentHash then
+                            return 'GRACE:' .. userId .. ':' .. string.sub(grace, graceSep + 1)
+                        end
+                    end
                     redis.call('DEL', 'rt:fam:' .. familyId)
                     redis.call('SREM', 'rt:user:' .. userId, familyId)
                     return 'REUSE:' .. userId
@@ -99,6 +122,9 @@ class RedisRefreshTokenStore(
                 redis.call('SET', 'rt:fam:' .. familyId, userId .. ':' .. ARGV[2], 'EX', ttl)
                 redis.call('SET', 'rt:tok:' .. ARGV[2], familyId, 'EX', ttl)
                 redis.call('EXPIRE', 'rt:user:' .. userId, ttl)
+                if graceMillis > 0 then
+                    redis.call('SET', 'rt:grace:' .. ARGV[1], ARGV[2] .. ':' .. ARGV[4], 'PX', graceMillis)
+                end
                 return 'ROTATED:' .. userId
                 """.trimIndent(),
             )

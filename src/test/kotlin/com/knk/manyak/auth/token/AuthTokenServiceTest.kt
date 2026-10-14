@@ -5,14 +5,21 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.observability.StructuredLogger
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.web.server.ResponseStatusException
 import java.time.Duration
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.Optional
 
 /**
@@ -22,7 +29,7 @@ import java.util.Optional
  * 사용자 조회(UserRepository.findById)만 mock으로 대체한다(JPA는 이 단위 테스트의 관심사 밖).
  *
  * - issueTokens: access + 새 refresh를 발급하고 새 세션 family를 만든다.
- * - rotate: 현재 토큰 → old 폐기 + new 발급. 무효/사용자 부재/재사용 → 401(재사용 시 family 폐기).
+ * - rotate: 현재 토큰 → old 폐기 + new 발급. 유예 응답 → 같은 refresh. 무효/사용자 부재/유예 밖 재사용 → 401.
  * - logout: family 단위 폐기(동시 회전으로 발급된 새 토큰까지 무효화).
  */
 class AuthTokenServiceTest {
@@ -34,9 +41,16 @@ class AuthTokenServiceTest {
         accessTtl = Duration.ofMinutes(30),
         refreshTtl = Duration.ofDays(14),
     )
-    private val jwtTokenProvider = JwtTokenProvider(properties)
+    private var now = Instant.now()
+    private val clock = object : Clock() {
+        override fun instant(): Instant = now
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: ZoneId?): Clock = this
+    }
+    private val jwtTokenProvider = JwtTokenProvider(properties, clock)
+    private val structuredLogger = mock(StructuredLogger::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
-    private val service = AuthTokenService(jwtTokenProvider, store, userRepository, properties)
+    private val service = AuthTokenService(jwtTokenProvider, store, userRepository, properties, structuredLogger)
 
     /** id가 고정된 User를 만들고, repository.findById(id)가 이를 반환하도록 스텁한다. */
     private fun registerUser(id: Long): User {
@@ -82,10 +96,10 @@ class AuthTokenServiceTest {
     }
 
     @Test
-    fun `회전 후 옛 refresh를 재사용하면 401이고 family 전체가 폐기된다`() {
+    fun `후속 회전 후 가장 오래된 refresh 재사용은 401이고 family 전체가 폐기된다`() {
         val user = registerUser(4L)
         val issued = service.issueTokens(user)
-        val rotated = service.rotate(issued.refreshToken)
+        val rotated = service.rotate(service.rotate(issued.refreshToken).refreshToken)
 
         // 옛(이미 회전된) refresh 재사용 → 401.
         assertThatThrownBy { service.rotate(issued.refreshToken) }
@@ -168,5 +182,56 @@ class AuthTokenServiceTest {
     @Test
     fun `발급된 적 없는 refresh를 logout해도 예외 없이 멱등하다`() {
         service.logout("never-issued-token")
+    }
+
+    @Test
+    fun `유예 응답은 같은 refresh와 새 access를 반환하고 public_id로 이벤트를 기록한다`() {
+        val user = registerUser(42L)
+        val issued = service.issueTokens(user)
+        val rotated = service.rotate(issued.refreshToken)
+        now = now.plusSeconds(1)
+
+        val replayed = service.rotate(issued.refreshToken)
+
+        assertThat(replayed.refreshToken).isEqualTo(rotated.refreshToken)
+        assertThat(replayed.accessToken).isNotEqualTo(rotated.accessToken)
+        assertThat(jwtTokenProvider.jwtDecoder().decode(replayed.accessToken).subject).isEqualTo(user.publicId.toString())
+        assertThat(replayed.expiresIn).isEqualTo(properties.accessTtl.seconds)
+        verify(structuredLogger).event("refresh_reuse_grace_applied", mapOf("user_public_id" to user.publicId.toString()))
+        assertThat(service.rotate(replayed.refreshToken).refreshToken).isNotEqualTo(replayed.refreshToken)
+    }
+
+    @Test
+    fun `유예 응답 중 탈퇴 계정은 401이고 현재 토큰의 family가 폐기된다`() {
+        assertGraceAccountRejected(UserStatus.DELETED, "401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `유예 응답 중 정지 계정은 403이고 현재 토큰의 family가 폐기된다`() {
+        assertGraceAccountRejected(UserStatus.SUSPENDED, "403 FORBIDDEN")
+    }
+
+    @Test
+    fun `유예 응답 중 사용자 부재는 401이고 현재 토큰의 family가 폐기된다`() {
+        assertGraceAccountRejected(null, "401 UNAUTHORIZED")
+    }
+
+    private fun assertGraceAccountRejected(status: UserStatus?, expected: String) {
+        val user = registerUser(42L)
+        val issued = service.issueTokens(user)
+        val rotated = service.rotate(issued.refreshToken)
+        if (status == null) `when`(userRepository.findById(42L)).thenReturn(Optional.empty())
+        else user.status = status
+
+        assertThatThrownBy { service.rotate(issued.refreshToken) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode").hasToString(expected)
+        // 계정이 다시 활성 상태여도 폐기된 family는 복구되지 않는다.
+        user.status = UserStatus.ACTIVE
+        `when`(userRepository.findById(42L)).thenReturn(Optional.of(user))
+        assertThatThrownBy { service.rotate(rotated.refreshToken) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode").hasToString("401 UNAUTHORIZED")
+        verifyNoInteractions(structuredLogger)
     }
 }

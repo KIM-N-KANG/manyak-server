@@ -3,7 +3,7 @@
 ###
 ### [KNK-56] 토큰 기반 머신러리:
 ###   - access 토큰 = HS256 JWT (Authorization: Bearer <accessToken>). sub=user.public_id(UUID).
-###   - refresh 토큰 = 불투명 랜덤 문자열(JWT 아님). 저장소에는 SHA-256 해시만 둔다. 회전 시 1회용으로 폐기된다.
+###   - refresh 토큰 = 불투명 랜덤 문자열(JWT 아님). 평소 해시만 저장하며 회전 결과의 원문은 기본 10초 유예 동안만 Redis에 보관한다.
 ###
 ### 주의(유효 토큰 준비):
 ###   "토큰 없음/위조/만료 → 401", "refresh 검증 실패 → 400/401" 같은 **준비가 필요 없는 케이스**는
@@ -147,7 +147,8 @@ Accept: application/json
 
 ### 9. (해피 패스 + 회전) 유효한 refresh 로 새 토큰 발급
 # @refreshToken 을 실제 유효 토큰으로 교체한 뒤 실행하세요.
-# 응답의 새 accessToken / refreshToken 을 전역 변수에 저장해 10번에서 "옛 refresh 재사용 → 401"을 검증합니다.
+# 9 → 9-1 → 9-2 → 10 순서로 실행합니다. 9-1은 유예 시간(기본 10초) 안에 실행하세요.
+# 응답 토큰은 전역 변수에 저장하며 유예 응답과 후속 회전 뒤 재사용 탐지를 확인합니다.
 POST {{baseUrl}}/api/v1/auth/token/refresh
 Content-Type: application/json
 Accept: application/json
@@ -170,8 +171,8 @@ Accept: application/json
     client.global.set("rotatedRefreshToken", b.refreshToken);
 %}
 
-### 10. (회전 검증) 9번에서 쓴 옛 refresh 를 재사용 → 401
-# 9번을 먼저 실행해야 usedRefreshToken 변수가 채워집니다. 1회용이라 회전 후 옛 토큰은 폐기되어 401이어야 합니다.
+### 9-1. 같은 refresh로 연속 재발급 → 둘 다 200이며 refresh 원문 동일
+# 9번 직후 기본 10초 안에 실행하세요. 유예가 0이면 이 요청은 401입니다.
 POST {{baseUrl}}/api/v1/auth/token/refresh
 Content-Type: application/json
 Accept: application/json
@@ -179,8 +180,54 @@ Accept: application/json
 { "refreshToken": "{{usedRefreshToken}}" }
 
 > {%
-    client.test("회전 후 옛 refresh 재사용은 401이다", () => {
-        client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+    client.test("유예 안의 재발급은 같은 refresh를 반환한다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const expected = client.global.get("rotatedRefreshToken");
+        client.assert(response.body.refreshToken === expected, "첫 회전 응답과 refresh 원문이 다릅니다.");
+        client.assert(!!response.body.accessToken, "새 accessToken이 없습니다.");
+    });
+    if (response.status === 200) client.global.set("graceRefreshToken", response.body.refreshToken);
+%}
+
+### 9-2. 유예 응답의 refresh로 다음 회전 → 200
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "{{graceRefreshToken}}" }
+
+> {%
+    client.test("유예 응답 뒤 현재 토큰으로 회전한다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.refreshToken !== client.global.get("graceRefreshToken"), "다음 회전에 새 refresh가 발급되지 않았습니다.");
+    });
+    if (response.status === 200) client.global.set("currentRefreshToken", response.body.refreshToken);
+%}
+
+### 10. 후속 회전 뒤 가장 오래된 refresh 재사용 → 401과 family 폐기
+# 9-2까지 먼저 실행해야 합니다. 유예 시간 안이어도 현재 토큰이 한 번 더 회전됐으므로 거절합니다.
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "{{usedRefreshToken}}" }
+
+> {%
+    client.test("후속 회전 뒤 과거 refresh 재사용은 401이다", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
+    });
+%}
+
+### 10-1. 폐기된 family의 현재 refresh도 401
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+Accept: application/json
+
+{ "refreshToken": "{{currentRefreshToken}}" }
+
+> {%
+    client.test("재사용 탐지가 현재 토큰까지 폐기한다", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
     });
 %}
 

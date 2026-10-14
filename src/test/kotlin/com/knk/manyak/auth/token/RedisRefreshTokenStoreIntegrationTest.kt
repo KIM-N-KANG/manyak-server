@@ -15,6 +15,8 @@ import org.springframework.test.context.DynamicPropertySource
 import redis.embedded.RedisServer
 import java.net.ServerSocket
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -26,15 +28,15 @@ import java.util.concurrent.TimeUnit
 @DataRedisTest
 @Import(RedisRefreshTokenStore::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class RedisRefreshTokenStoreIntegrationTest {
+class RedisRefreshTokenStoreIntegrationTest : RefreshTokenStoreContractTest() {
 
     @Autowired
     private lateinit var redisTemplate: StringRedisTemplate
 
     @Autowired
-    private lateinit var store: RedisRefreshTokenStore
+    private lateinit var redisStore: RedisRefreshTokenStore
 
-    private val ttl = Duration.ofMinutes(30)
+    override val store: RedisRefreshTokenStore get() = redisStore
 
     @BeforeEach
     fun flush() {
@@ -42,7 +44,7 @@ class RedisRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    fun `createFamily는 family·토큰·사용자 인덱스 키를 TTL과 함께 만든다`() {
+    fun `Redis createFamily는 family·토큰·사용자 인덱스 키를 TTL과 함께 만든다`() {
         val familyId = store.createFamily(tokenHash = "t1", userId = 42L, ttl = ttl)
 
         assertThat(redisTemplate.opsForValue().get("rt:fam:$familyId")).isEqualTo("42:t1")
@@ -53,7 +55,7 @@ class RedisRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    fun `TTL이 0 이하면 아무 키도 만들지 않는다`() {
+    fun `Redis TTL이 0 이하면 아무 키도 만들지 않는다`() {
         val familyId = store.createFamily("t0", 1L, Duration.ZERO)
 
         assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
@@ -61,71 +63,146 @@ class RedisRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    fun `현재 토큰 회전은 Rotated이고 새 토큰이 현재가 된다`() {
+    fun `Redis 현재 토큰 회전은 Rotated이고 새 토큰이 현재가 된다`() {
         val familyId = store.createFamily("t1", 1L, ttl)
 
-        assertThat(store.rotate("t1", "t2", ttl)).isEqualTo(RotateResult.Rotated(1L))
+        assertThat(store.rotate("t1", "t2", "t2", ttl, Duration.ZERO)).isEqualTo(RotateResult.Rotated(1L))
         assertThat(redisTemplate.opsForValue().get("rt:fam:$familyId")).isEqualTo("1:t2")
         assertThat(redisTemplate.opsForValue().get("rt:tok:t2")).isEqualTo(familyId)
         // 새 토큰으로 다시 회전된다.
-        assertThat(store.rotate("t2", "t3", ttl)).isEqualTo(RotateResult.Rotated(1L))
+        assertThat(store.rotate("t2", "t3", "t3", ttl, Duration.ZERO)).isEqualTo(RotateResult.Rotated(1L))
     }
 
     @Test
-    fun `알 수 없는 토큰 회전은 Invalid다`() {
-        assertThat(store.rotate("unknown", "new", ttl)).isEqualTo(RotateResult.Invalid)
+    fun `Redis 알 수 없는 토큰 회전은 Invalid다`() {
+        assertThat(store.rotate("unknown", "new", "new", ttl, Duration.ZERO)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `과거 토큰 재사용은 ReuseDetected이고 family 레코드와 사용자 인덱스가 삭제된다`() {
+    fun `Redis 과거 토큰 재사용은 ReuseDetected이고 family 레코드와 사용자 인덱스가 삭제된다`() {
         val familyId = store.createFamily("t1", 7L, ttl)
-        store.rotate("t1", "t2", ttl) // t1은 과거, t2가 현재.
+        store.rotate("t1", "t2", "t2", ttl, Duration.ZERO) // t1은 과거, t2가 현재.
 
-        assertThat(store.rotate("t1", "tx", ttl)).isEqualTo(RotateResult.ReuseDetected(7L))
+        assertThat(store.rotate("t1", "tx", "tx", ttl, Duration.ZERO)).isEqualTo(RotateResult.ReuseDetected(7L))
         // family 레코드 삭제 → 현재 토큰이던 t2도 무효.
         assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
         assertThat(redisTemplate.opsForSet().isMember("rt:user:7", familyId)).isFalse()
-        assertThat(store.rotate("t2", "ty", ttl)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("t2", "ty", "ty", ttl, Duration.ZERO)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `revokeFamilyByToken은 과거 토큰으로도 family 전체를 폐기한다 (logout vs 동시 회전 경합 차단)`() {
+    fun `Redis revokeFamilyByToken은 과거 토큰으로도 family 전체를 폐기한다 (logout vs 동시 회전 경합 차단)`() {
         val familyId = store.createFamily("t1", 1L, ttl)
-        store.rotate("t1", "t2", ttl) // 동시 회전이 새 토큰(t2)을 발급한 상황 모사.
+        store.rotate("t1", "t2", "t2", ttl, Duration.ZERO) // 동시 회전이 새 토큰(t2)을 발급한 상황 모사.
 
         store.revokeFamilyByToken("t1") // 로그아웃이 과거 토큰을 제시.
 
         assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
-        assertThat(store.rotate("t2", "t3", ttl)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("t2", "t3", "t3", ttl, Duration.ZERO)).isEqualTo(RotateResult.Invalid)
     }
 
     @Test
-    fun `revokeFamilyByToken은 멱등하다`() {
+    fun `Redis revokeFamilyByToken은 멱등하다`() {
         store.revokeFamilyByToken("never-issued") // 예외 없이 무시한다.
     }
 
     @Test
-    fun `revokeAllForUser는 사용자의 모든 family를 폐기하고 다른 사용자는 보존한다`() {
+    fun `Redis revokeAllForUser는 사용자의 모든 family를 폐기하고 다른 사용자는 보존한다`() {
         store.createFamily("a1", 99L, ttl)
         store.createFamily("a2", 99L, ttl)
         store.createFamily("b1", 100L, ttl)
 
         store.revokeAllForUser(99L)
 
-        assertThat(store.rotate("a1", "x", ttl)).isEqualTo(RotateResult.Invalid)
-        assertThat(store.rotate("a2", "y", ttl)).isEqualTo(RotateResult.Invalid)
-        assertThat(store.rotate("b1", "z", ttl)).isEqualTo(RotateResult.Rotated(100L))
+        assertThat(store.rotate("a1", "x", "x", ttl, Duration.ZERO)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("a2", "y", "y", ttl, Duration.ZERO)).isEqualTo(RotateResult.Invalid)
+        assertThat(store.rotate("b1", "z", "z", ttl, Duration.ZERO)).isEqualTo(RotateResult.Rotated(100L))
         assertThat(redisTemplate.hasKey("rt:user:99")).isFalse()
     }
 
     @Test
-    fun `회전은 family TTL을 갱신한다 (sliding)`() {
+    fun `Redis 회전은 family TTL을 갱신한다 (sliding)`() {
         val familyId = store.createFamily("t1", 1L, Duration.ofSeconds(60))
 
-        store.rotate("t1", "t2", Duration.ofMinutes(30))
+        store.rotate("t1", "t2", "t2", Duration.ofMinutes(30), Duration.ZERO)
 
         val famTtl = redisTemplate.getExpire("rt:fam:$familyId", TimeUnit.SECONDS)
         assertThat(famTtl).isGreaterThan(120)
+    }
+
+    @Test
+    fun `Redis 유예 키는 밀리초 TTL로 원문과 해시를 저장하고 재응답은 family TTL을 갱신하지 않는다`() {
+        val familyId = store.createFamily("g1", 42L, ttl)
+        store.rotate("g1", "g2", "raw-g2", ttl, Duration.ofMillis(750))
+        assertThat(redisTemplate.opsForValue().get("rt:grace:g1")).isEqualTo("g2:raw-g2")
+        assertThat(redisTemplate.getExpire("rt:grace:g1", TimeUnit.MILLISECONDS)).isBetween(1L, 750L)
+        val before = redisTemplate.getExpire("rt:fam:$familyId", TimeUnit.MILLISECONDS)
+
+        assertThat(store.rotate("g1", "unused", "unused-raw", Duration.ofHours(1), Duration.ofSeconds(10)))
+            .isEqualTo(RotateResult.GraceReplayed(42L, "raw-g2"))
+        assertThat(redisTemplate.getExpire("rt:fam:$familyId", TimeUnit.MILLISECONDS)).isBetween(1L, before)
+        assertThat(redisTemplate.hasKey("rt:tok:unused")).isFalse()
+    }
+
+    @Test
+    fun `Redis 유예 0 이하이면 grace 키를 만들지 않는다`() {
+        for (grace in listOf(Duration.ZERO, Duration.ofMillis(-1))) {
+            store.createFamily("g1", 42L, ttl)
+            store.rotate("g1", "g2", "raw-g2", ttl, grace)
+            assertThat(redisTemplate.hasKey("rt:grace:g1")).isFalse()
+            assertThat(store.rotate("g1", "unused", "unused-raw", ttl, grace))
+                .isEqualTo(RotateResult.ReuseDetected(42L))
+        }
+    }
+
+    @Test
+    fun `Redis 유예 키 만료 뒤 재사용은 family와 사용자 인덱스를 폐기한다`() {
+        val familyId = store.createFamily("g1", 42L, ttl)
+        store.rotate("g1", "g2", "raw-g2", ttl, Duration.ofSeconds(10))
+        redisTemplate.delete("rt:grace:g1") // TTL이 만료돼 키가 사라진 상태.
+
+        assertThat(store.rotate("g1", "unused", "unused-raw", ttl, Duration.ofSeconds(10)))
+            .isEqualTo(RotateResult.ReuseDetected(42L))
+        assertThat(redisTemplate.hasKey("rt:fam:$familyId")).isFalse()
+        assertThat(redisTemplate.opsForSet().isMember("rt:user:42", familyId)).isFalse()
+    }
+
+    @Test
+    fun `Redis 같은 토큰의 동시 회전은 한 번만 회전하고 나머지는 같은 원문을 유예 응답한다`() {
+        val familyId = store.createFamily("concurrent-old", 42L, ttl)
+        val ready = CountDownLatch(3)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(3)
+        try {
+            val futures = (1..3).map { index ->
+                executor.submit<Pair<Int, RotateResult>> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS)) { "동시 회전 시작 신호 시간 초과" }
+                    index to store.rotate(
+                        "concurrent-old", "new-hash-$index", "new-raw-$index", ttl, Duration.ofSeconds(10),
+                    )
+                }
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue()
+            start.countDown()
+            val results = futures.map { it.get(5, TimeUnit.SECONDS) }
+            val rotated = results.filter { it.second is RotateResult.Rotated }
+            val replayed = results.map { it.second }.filterIsInstance<RotateResult.GraceReplayed>()
+
+            assertThat(rotated).hasSize(1)
+            assertThat(rotated.single().second).isEqualTo(RotateResult.Rotated(42L))
+            assertThat(replayed).hasSize(2)
+            val winner = rotated.single().first
+            assertThat(replayed).allSatisfy { result ->
+                assertThat(result).isEqualTo(RotateResult.GraceReplayed(42L, "new-raw-$winner"))
+            }
+            assertThat(redisTemplate.opsForValue().get("rt:fam:$familyId")).isEqualTo("42:new-hash-$winner")
+            assertThat(store.rotate("new-hash-$winner", "next-hash", "next-raw", ttl, Duration.ofSeconds(10)))
+                .isEqualTo(RotateResult.Rotated(42L))
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
     }
 
     companion object {

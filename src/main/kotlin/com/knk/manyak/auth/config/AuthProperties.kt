@@ -12,6 +12,7 @@ import java.time.Duration
  * - [issuer]: 발급자(iss) 클레임 값. 검증 시 동일 issuer만 허용한다.
  * - [accessTtl]: access 토큰 수명(짧게). 만료 시 refresh로 회전한다.
  * - [refreshTtl]: refresh 토큰 수명(길게). 저장소(RefreshTokenStore) TTL과 동일하다.
+ * - [refreshReuseGrace]: 동시 재발급 유예. 기본 10초이며 0 이하이면 유예 원문을 저장하지 않는다.
  */
 @ConfigurationProperties(prefix = "manyak.auth.jwt")
 data class AuthProperties(
@@ -19,4 +20,5 @@ data class AuthProperties(
     val issuer: String,
     val accessTtl: Duration,
     val refreshTtl: Duration,
+    val refreshReuseGrace: Duration = Duration.ofSeconds(10),
 )
