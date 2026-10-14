@@ -114,7 +114,7 @@ class UserWithdrawalIntegrationTests {
         assertNull(tombstone.email)
         assertEquals(user.id, tombstone.userId)
         // refresh family 전체 폐기 — 남은 토큰으로 회전하면 Invalid다.
-        assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", Duration.ofHours(1)) is RotateResult.Invalid)
+        assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", "new-raw", Duration.ofHours(1), Duration.ZERO) is RotateResult.Invalid)
     }
 
     @Test

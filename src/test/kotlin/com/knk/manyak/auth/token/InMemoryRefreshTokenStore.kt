@@ -22,6 +22,9 @@ class InMemoryRefreshTokenStore(
     /** 발급된 토큰 해시 → familyId (과거 토큰 포함, 재사용 탐지용) + 만료. */
     private data class TokenRef(val familyId: String, val expiresAt: Instant)
 
+    private data class Grace(val tokenHash: String, val rawToken: String, val expiresAt: Instant)
+    private val graceTokens = mutableMapOf<String, Grace>()
+
     private val families = mutableMapOf<String, Family>()
     private val tokens = mutableMapOf<String, TokenRef>()
 
@@ -34,11 +37,21 @@ class InMemoryRefreshTokenStore(
         return familyId
     }
 
-    override fun rotate(presentedTokenHash: String, newTokenHash: String, ttl: Duration): RotateResult {
+    override fun rotate(
+        presentedTokenHash: String,
+        newTokenHash: String,
+        newRefreshToken: String,
+        ttl: Duration,
+        reuseGrace: Duration,
+    ): RotateResult {
         if (ttl.isZero || ttl.isNegative) return RotateResult.Invalid // 회전은 양수 TTL 전제(실제 refreshTtl).
         val tokenRef = tokens[presentedTokenHash]?.takeUnless { isExpired(it.expiresAt) } ?: return RotateResult.Invalid
         val family = families[tokenRef.familyId]?.takeUnless { isExpired(it.expiresAt) } ?: return RotateResult.Invalid
         if (family.currentTokenHash != presentedTokenHash) {
+            val grace = graceTokens[presentedTokenHash]?.takeUnless { isExpired(it.expiresAt) }
+            if (reuseGrace.toMillis() > 0 && grace != null && grace.tokenHash == family.currentTokenHash) {
+                return RotateResult.GraceReplayed(family.userId, grace.rawToken)
+            }
             // 과거(이미 회전된) 토큰의 재사용 → family 전체 폐기(탈취 정황).
             revokeFamily(tokenRef.familyId)
             return RotateResult.ReuseDetected(family.userId)
@@ -47,6 +60,13 @@ class InMemoryRefreshTokenStore(
         families[tokenRef.familyId] = family.copy(currentTokenHash = newTokenHash, expiresAt = expiresAt)
         // 과거 토큰 매핑(presentedTokenHash)은 남겨 둔다 — 이후 재사용 시 family를 찾아 탐지하기 위해.
         tokens[newTokenHash] = TokenRef(familyId = tokenRef.familyId, expiresAt = expiresAt)
+        if (reuseGrace.toMillis() > 0) {
+            val graceExpiresAt = clock.instant().plusMillis(reuseGrace.toMillis())
+            graceTokens[presentedTokenHash] = Grace(newTokenHash, newRefreshToken, graceExpiresAt)
+            if (tokenRef.expiresAt.isBefore(graceExpiresAt)) {
+                tokens[presentedTokenHash] = tokenRef.copy(expiresAt = graceExpiresAt)
+            }
+        }
         return RotateResult.Rotated(family.userId)
     }
 

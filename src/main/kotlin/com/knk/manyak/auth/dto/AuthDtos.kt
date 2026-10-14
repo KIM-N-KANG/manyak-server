@@ -14,7 +14,7 @@ data class TokenResponse(
     val accessToken: String,
 
     @field:Schema(
-        description = "refresh 토큰(불투명 랜덤 문자열). access 만료 시 /token/refresh 로 회전한다. 1회용이며 회전 후 폐기된다.",
+        description = "refresh 토큰(불투명 랜덤 문자열). access 만료 시 /token/refresh 로 회전한다. 1회용이며 회전 후 유예 조건을 만족하는 재요청에만 같은 회전 결과를 반환한다.",
         example = "Qm9vdHN0cmFwUmVmcmVzaFRva2VuRXhhbXBsZVZhbHVlMTIz",
     )
     val refreshToken: String,
