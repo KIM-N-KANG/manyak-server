@@ -99,6 +99,20 @@ class StoryImageAccess(
             onValidatedSize = onValidatedSize,
         )
 
+    /** 초안 저장·조회는 객체 존재와 메타데이터를 검사하지 않는다. */
+    fun requireDraftPrefix(userPublicId: UUID, kind: UploadedImageKind, objectKey: String) {
+        requirePrefix(listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"), objectKey, "내가 올린 업로드 이미지가 아닙니다.")
+    }
+
+    fun draftReadUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String): String {
+        requireDraftPrefix(userPublicId, kind, objectKey)
+        return uploadedImageStorage.serveUrlOf(objectKey) ?: throw uploadDisabled()
+    }
+
+    private fun requirePrefix(prefixes: List<String>, objectKey: String, message: String) {
+        if (prefixes.none { objectKey.startsWith(it) }) throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
+    }
+
     /** 업로드 이미지를 쓸 수 있는 회원의 공개 식별자. 토큰은 유효하나 사용자가 사라졌으면 401이다. */
     fun resolveUserPublicId(userId: Long): UUID =
         userRepository.findById(userId).orElse(null)?.publicId
@@ -111,9 +125,7 @@ class StoryImageAccess(
         onValidatedSize: (Long) -> Unit,
     ): String {
         requireUploadEnabled()
-        if (expectedPrefixes.none { objectKey.startsWith(it) }) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, mismatchMessage)
-        }
+        requirePrefix(expectedPrefixes, objectKey, mismatchMessage)
         val uploaded = uploadedImageStorage.head(objectKey)
             ?: throw CodedResponseStatusException(
                 HttpStatus.BAD_REQUEST,

@@ -31,6 +31,51 @@ class StorySubmissionIntegrationTests {
     private lateinit var executor: java.util.concurrent.Executor
     @org.junit.jupiter.api.BeforeEach fun clean() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
 
+    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+
+    @Test fun `일반 접수 202에서 내 초안을 삭제하고 타인과 미존재 초안은 무시한다`() {
+        val owner = users.save(User(nickname = "작가"))
+        val other = users.save(User(nickname = "타인"))
+        fun draft(userId: Long) = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), userId,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val mine = draft(owner.id); val theirs = draft(other.id)
+        val auth = "Bearer ${tokens.issueAccessToken(owner.publicId)}"
+        for (id in listOf(mine.id, theirs.id, java.util.UUID.randomUUID())) {
+            client.post().uri("/api/v1/stories/general").header("Authorization", auth)
+                .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(draftId = id)))
+                .exchange().expectStatus().isAccepted
+        }
+        assertFalse(drafts.existsById(mine.id))
+        assertTrue(drafts.existsById(theirs.id))
+        assertEquals(3, submissions.count())
+        assertEquals(0, stories.count())
+    }
+
+    @Test fun `일반 접수 검증 실패는 초안을 유지한다`() {
+        val owner = users.save(User(nickname = "작가"))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        client.post().uri("/api/v1/stories/general").header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(title = "", draftId = draft.id)))
+            .exchange().expectStatus().isBadRequest
+        assertTrue(drafts.existsById(draft.id))
+    }
+
+    @Test fun `일반 접수 트랜잭션 롤백은 제출본과 초안 삭제를 함께 되돌린다`() {
+        val owner = users.save(User(nickname = "작가"))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        assertThrows(IllegalStateException::class.java) {
+            org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult {
+                service.create(request().copy(draftId = draft.id), owner.id)
+                assertFalse(drafts.existsById(draft.id))
+                throw IllegalStateException("접수 후 롤백")
+            }
+        }
+        assertTrue(drafts.existsById(draft.id))
+        assertEquals(0, submissions.count())
+    }
+
     private fun request() = mapper.readValue("""{
         "title":"제목", "oneLineIntro":"소개", "genres":["판타지"],
         "storySettings":{"worldSetting":"세계", "characterSetting":"인물", "userRoleSetting":"역할", "ruleSetting":"규칙"},

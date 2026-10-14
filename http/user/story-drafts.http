@@ -1,0 +1,250 @@
+### 스토리 제작 임시 저장 수동 검증
+# 준비: 실 Postgres·AI를 연결한 ./gradlew bootRun, http/auth 로그인으로 accessToken 설정.
+# 위에서부터 실행한다. 내 초안이 0개인 회원으로 시작하면 상한 검증을 그대로 실행할 수 있다.
+# 다른 계정의 otherAccessToken·otherDraftId, 정지 계정의 suspendedAccessToken은 별도 로그인으로 설정한다.
+@baseUrl = http://localhost:8080
+@draftId = 16410000-0000-4000-8000-000000000001
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 신규 초안 — 미완성 입력도 저장한다
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{"form":{"title":"작성 중"}},"title":"임시 제목"}
+
+> {%
+client.test("신규 200 버전 1", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.version === 1, `version=${response.body.version}`);
+});
+client.global.set("draftCreatedAt", response.body.createdAt);
+client.global.set("draftUpdatedAt", response.body.updatedAt);
+%}
+
+### 같은 내용 재전송 — 잘못된 기준 버전도 허용
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"title":"임시 제목","payload":{"form":{"title":"작성 중"}},"schemaVersion":1,"stage":"GENERAL_DRAFT","mode":"GENERAL","baseVersion":999}
+
+> {%
+client.test("멱등 200", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.version === 1, `version=${response.body.version}`);
+  client.assert(response.body.updatedAt === client.global.get("draftUpdatedAt"), "updatedAt 변경됨");
+});
+%}
+
+### 다른 내용과 잘못된 기준 버전 — 충돌
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{},"baseVersion":99}
+
+> {%
+client.test("409 충돌 details", () => {
+  client.assert(response.status === 409, `actual=${response.status}`);
+  client.assert(response.body.code === "DRAFT_VERSION_CONFLICT", `code=${response.body.code}`);
+  client.assert(response.body.details[0].field === "version" && response.body.details[0].message === "1", "버전 details 불일치");
+  client.assert(response.body.details[1].field === "updatedAt", "시각 details 누락");
+});
+%}
+
+### 정상 전체 교체 — 요약 누락은 null
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{},"baseVersion":1}
+
+> {%
+client.test("갱신 버전 2 최초 시각 유지", () => {
+  client.assert(response.status === 200 && response.body.version === 2, `actual=${response.status}`);
+  client.assert(response.body.createdAt === client.global.get("draftCreatedAt"), "createdAt 변경됨");
+});
+%}
+
+### 상세와 목록
+GET {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("상세 payload 요약 복구", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.title === null, "누락 요약은 null");
+  client.assert(response.body.generation === null, "일반 초안은 generation null");
+  client.assert(Object.keys(response.body.imageUrls).length === 0, "이미지 없는 초안");
+});
+%}
+
+### 목록 — 실행 중 간편 생성·완성 요청이 있으면 CREATION_REQUEST도 포함
+GET {{baseUrl}}/api/v1/users/me/story-drafts
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("카드 목록 payload 제외 정렬", () => {
+  client.assert(response.status === 200 && Array.isArray(response.body), `actual=${response.status}`);
+  response.body.forEach((card, i) => {
+    client.assert(!Object.prototype.hasOwnProperty.call(card, "payload"), "payload 노출");
+    if (i) client.assert(Date.parse(response.body[i-1].createdAt) >= Date.parse(card.createdAt), "정렬 불일치");
+  });
+});
+%}
+
+### 잘못된 단계 — 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"STORY_DRAFT","schemaVersion":1,"payload":{}}
+
+> {% client.test("단계 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 객체 아닌 payload — 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":[]}
+
+> {% client.test("payload 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 남의 draft prefix — 400, HEAD 하지 않는다
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{"nested":[{"image":"characters/uploaded/drafts/00000000-0000-4000-8000-000000000000/missing.png"}]}}
+
+> {% client.test("prefix 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 미존재 생성 요청 연결 — 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"STORY_DRAFT","schemaVersion":1,"payload":{},"generationRequestId":"00000000-0000-4000-8000-000000000000"}
+
+> {% client.test("생성 요청 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 64KB 초과 — 요청 스크립트로 65537바이트 payload를 준비
+< {% request.variables.set("largePayload", JSON.stringify({x: "a".repeat(65529)})); %}
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{{largePayload}}}
+
+> {% client.test("크기 400", () => client.assert(response.status === 400 && response.body.code === "DRAFT_PAYLOAD_TOO_LARGE", `actual=${response.status}`)); %}
+
+### 추가 초안 2
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000002
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"KEYWORD_DRAFT","schemaVersion":1,"payload":{}}
+
+### 추가 초안 3
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000003
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"KEYWORD_DRAFT","schemaVersion":1,"payload":{}}
+
+### 추가 초안 4
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000004
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"KEYWORD_DRAFT","schemaVersion":1,"payload":{}}
+
+### 추가 초안 5
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000005
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"KEYWORD_DRAFT","schemaVersion":1,"payload":{}}
+
+### 여섯 번째 신규 — 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000006
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"SIMPLE","stage":"KEYWORD_DRAFT","schemaVersion":1,"payload":{}}
+
+> {% client.test("상한 400", () => client.assert(response.status === 400 && response.body.code === "DRAFT_LIMIT_EXCEEDED", `actual=${response.status}`)); %}
+
+### 일반 제작 등록 — 승인 전 202 접수 때 초안 삭제
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"draftId":"{{draftId}}","title":"임시 저장에서 등록","oneLineIntro":"소개","genres":["판타지"],"storySettings":{"worldSetting":"세계","characterSetting":"인물","userRoleSetting":"역할","ruleSetting":"규칙"},"startSettings":[{"name":"시작","prologue":"도입","startSituation":"상황","suggestedInputs":["하나","둘","셋"]}]}
+
+> {% client.test("접수 202", () => client.assert(response.status === 202, `actual=${response.status}`)); %}
+
+### 등록된 초안 상세 — 404
+GET {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("초안 삭제 404", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 삭제 — 없어진 초안도 204
+DELETE {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("멱등 204", () => client.assert(response.status === 204, `actual=${response.status}`)); %}
+
+### 미인증 — 401
+GET {{baseUrl}}/api/v1/users/me/story-drafts
+
+> {% client.test("미인증 401", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 타인 상세 — 404 (otherAccessToken 준비)
+GET {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000002
+Authorization: Bearer {{otherAccessToken}}
+
+> {% client.test("타인 404", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 정지 회원 — 403 (suspendedAccessToken 준비)
+GET {{baseUrl}}/api/v1/users/me/story-drafts
+Authorization: Bearer {{suspendedAccessToken}}
+
+> {% client.test("정지 403", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 자유 상세 조회 — 실제 draftId로 변경
+GET {{baseUrl}}/api/v1/users/me/story-drafts/{{otherDraftId}}
+Authorization: Bearer {{accessToken}}
+
+### 선택 검증: 간편 제작 완성 — http/story/simple-story-creation.http 등에서 simpleCreationId·storylineId 준비
+# 초안 2가 남아 있는 상태에서 실행한다. 이프 또는 회원 체험 한도가 필요하다.
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"requestId":"{{$uuid}}","simpleCreationId":{{simpleCreationId}},"storylineId":{{storylineId}},"draftId":"16410000-0000-4000-8000-000000000002"}
+
+> {% client.test("완성 201", () => client.assert(response.status === 201, `actual=${response.status}`)); %}
+
+### 간편 완성 후 초안도 미존재
+GET {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000002
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("완성 초안 삭제", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 수동 검증 데이터 정리 — 남아 있는 초안 삭제
+DELETE {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000003
+Authorization: Bearer {{accessToken}}
+
+### 초안 4 정리
+DELETE {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000004
+Authorization: Bearer {{accessToken}}
+
+### 초안 5 정리
+DELETE {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000005
+Authorization: Bearer {{accessToken}}

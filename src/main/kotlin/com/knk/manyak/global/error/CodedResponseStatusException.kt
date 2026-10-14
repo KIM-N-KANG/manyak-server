@@ -19,6 +19,9 @@ class CodedResponseStatusException(
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    const val DRAFT_LIMIT_EXCEEDED = "DRAFT_LIMIT_EXCEEDED"
+    const val DRAFT_PAYLOAD_TOO_LARGE = "DRAFT_PAYLOAD_TOO_LARGE"
+    const val DRAFT_VERSION_CONFLICT = "DRAFT_VERSION_CONFLICT"
     const val CUSTOM_GENRE_NOT_ALLOWED = "CUSTOM_GENRE_NOT_ALLOWED"
     const val INVALID_GENRE = "INVALID_GENRE"
     const val CONSENT_TOKEN_INVALID = "CONSENT_TOKEN_INVALID"

@@ -117,6 +117,56 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
 
+    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+    @Autowired private lateinit var wallets: com.knk.manyak.credit.service.CreditWalletService
+
+    @Test fun `간편 완성은 요청 행 기록 때 초안을 삭제해 생성 실패에도 복원하지 않는다`() {
+        val owner = userRepository.save(User(nickname = "제작자"))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), owner.id,
+            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        val requestId = UUID.randomUUID()
+        // 세션 미존재로 본 생성은 실패하지만 PENDING 기록 트랜잭션은 먼저 커밋된다.
+        restTestClient.post().uri("/api/v1/stories/simple")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","simpleCreationId":999999,"storylineId":999999,"draftId":"${draft.id}"}""")
+            .exchange().expectStatus().isNotFound
+        assertThat(drafts.existsById(draft.id)).isFalse()
+        assertThat(requestRepository.findByRequestId(requestId)!!.status).isEqualTo(StoryCreationRequestStatus.FAILED)
+    }
+
+    @Test fun `실패한 완성 요청 재접수도 PENDING 기록과 함께 초안을 삭제한다`() {
+        val owner = userRepository.save(User(nickname = "제작자"))
+        val requestId = UUID.randomUUID()
+        requestRepository.save(StoryCreationRequest(requestId = requestId, userId = owner.id,
+            stage = StoryCreationStage.STORY_COMPLETION, status = StoryCreationRequestStatus.FAILED))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), owner.id,
+            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        restTestClient.post().uri("/api/v1/stories/simple")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"$requestId","simpleCreationId":999999,"storylineId":999999,"draftId":"${draft.id}"}""")
+            .exchange().expectStatus().isNotFound
+        assertThat(drafts.existsById(draft.id)).isFalse()
+    }
+
+    @Test fun `간편 완성은 타인과 미존재 초안 때문에 실패하지 않고 타인 초안을 유지한다`() {
+        val owner = userRepository.save(User(nickname = "제작자"))
+        wallets.reward(owner.id, 1000, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        val other = userRepository.save(User(nickname = "타인"))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), other.id,
+            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        for (id in listOf(draft.id, UUID.randomUUID())) {
+            val storyline = seedGeneratedStoryline()
+            restTestClient.post().uri("/api/v1/stories/simple")
+                .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"requestId":"${UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"draftId":"$id"}""")
+                .exchange().expectStatus().isCreated
+        }
+        assertThat(drafts.existsById(draft.id)).isTrue()
+    }
+
     private val deviceA = "device-a"
     private val deviceB = "device-b"
 
