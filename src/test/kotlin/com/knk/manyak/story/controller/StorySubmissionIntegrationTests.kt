@@ -76,6 +76,38 @@ class StorySubmissionIntegrationTests {
         assertEquals(0, submissions.count())
     }
 
+    @Test fun `REJECTED 제출본을 draftId와 함께 재제출하면 202이고 소유 초안이 삭제된다`() {
+        val owner = users.save(User(nickname = "재제출 작가"))
+        val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        client.put().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(draftId = draft.id)))
+            .exchange().expectStatus().isAccepted.expectBody()
+            .jsonPath("$.submissionId").isEqualTo(row.publicId.toString()).jsonPath("$.status").isEqualTo("PENDING")
+        assertFalse(drafts.existsById(draft.id))
+        assertEquals(SubmissionStatus.PENDING, submissions.findById(row.id).orElseThrow().status)
+    }
+
+    @Test fun `타인과 미존재 draftId는 무시하고 재제출 성공`() {
+        val owner = users.save(User(nickname = "재제출 작가"))
+        val other = users.save(User(nickname = "타인"))
+        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), other.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        for (id in listOf(draft.id, java.util.UUID.randomUUID())) {
+            val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
+            client.put().uri("/api/v1/stories/submissions/${row.publicId}")
+                .header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(draftId = id)))
+                .exchange().expectStatus().isAccepted.expectBody()
+                .jsonPath("$.submissionId").isEqualTo(row.publicId.toString()).jsonPath("$.status").isEqualTo("PENDING")
+            assertEquals(SubmissionStatus.PENDING, submissions.findById(row.id).orElseThrow().status)
+        }
+        assertTrue(drafts.existsById(draft.id))
+        assertEquals(other.id, drafts.findById(draft.id).orElseThrow().userId)
+    }
+
     private fun request() = mapper.readValue("""{
         "title":"제목", "oneLineIntro":"소개", "genres":["판타지"],
         "storySettings":{"worldSetting":"세계", "characterSetting":"인물", "userRoleSetting":"역할", "ruleSetting":"규칙"},

@@ -73,6 +73,7 @@ class StorySubmissionService(
         val form = forms.create(normalized, userId)
         submission.resubmit(mapper.writeValueAsString(normalized))
         submission.inputForm = mapper.writeValueAsString(form)
+        request.draftId?.let { drafts.deleteOwned(it, userId) }
         return accept(submission)
     }
 
