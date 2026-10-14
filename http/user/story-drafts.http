@@ -47,6 +47,10 @@ Content-Type: application/json
 client.test("신규 200 버전 1", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   client.assert(response.body.version === 1, `version=${response.body.version}`);
+  for (const field of ["createdAt", "updatedAt"]) {
+    const fraction = response.body[field].match(/\.(\d+)Z$/);
+    client.assert(!fraction || fraction[1].length <= 6, `${field}가 마이크로초를 초과합니다. actual=${response.body[field]}`);
+  }
 });
 client.global.set("draftCreatedAt", response.body.createdAt);
 client.global.set("draftUpdatedAt", response.body.updatedAt);

@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Service
@@ -84,7 +85,7 @@ class StoryDraftService(
                 details = listOf(ApiErrorDetail("version", old.version.toString()), ApiErrorDetail("updatedAt", old.updatedAt.toString())))
             old.mode = request.mode; old.stage = request.stage; old.schemaVersion = request.schemaVersion; old.payload = payload
             old.title = request.title; old.oneLineIntro = request.oneLineIntro; old.thumbnailObjectKey = request.thumbnailObjectKey
-            old.generationRequestId = request.generationRequestId; old.version++; old.updatedAt = Instant.now()
+            old.generationRequestId = request.generationRequestId; old.version++; old.updatedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
             return saved(old)
         }
         if (request.baseVersion != null) bad("새 초안의 baseVersion은 null이어야 합니다.")

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import tools.jackson.databind.JsonNode
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 enum class StoryDraftMode { SIMPLE, GENERAL }
@@ -27,7 +28,7 @@ class StoryDraft(
     @Column(name = "thumbnail_object_key", columnDefinition = "TEXT") var thumbnailObjectKey: String? = null,
     @Column(name = "generation_request_id") var generationRequestId: UUID? = null,
     @Column(nullable = false) var version: Int = 1,
-    @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now(),
+    @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now().truncatedTo(ChronoUnit.MICROS),
     @Column(name = "updated_at", nullable = false) var updatedAt: Instant = createdAt,
 )
 

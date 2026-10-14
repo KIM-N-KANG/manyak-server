@@ -47,6 +47,30 @@ class StoryDraftControllerIntegrationTests {
     private fun get(id: UUID) = client.get().uri("$path/$id").header("Authorization", auth).exchange()
     private fun delete(id: UUID) = client.delete().uri("$path/$id").header("Authorization", auth).exchange()
 
+    @Test fun `나노초 시계에서도 초안 생성 갱신과 DB 재조회 시각은 마이크로초로 같다`() {
+        val id = UUID.randomUUID().toString()
+        val initialTime = Instant.parse("2026-10-14T12:00:00.123456789Z")
+        val changedTime = Instant.parse("2026-10-14T12:00:01.987654321Z")
+        val initialMicros = initialTime.truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+        val changedMicros = changedTime.truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+        val initialRequest = mapper.readValue(body(), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)
+        val changedRequest = mapper.readValue(body("{\"x\":1}", ",\"baseVersion\":1"), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)
+        // static mock은 현재 테스트 스레드에만 적용한다. 실제 서비스와 DB를 쓰고 Clock 의존성은 추가하지 않는다.
+        org.mockito.Mockito.mockStatic(Instant::class.java, org.mockito.Mockito.CALLS_REAL_METHODS).use { clock ->
+            clock.`when`<Instant> { Instant.now() }.thenReturn(initialTime)
+            val created = service.put(user.id, id, initialRequest)
+            assertEquals(initialMicros, created.createdAt)
+            assertEquals(initialMicros, created.updatedAt)
+            assertEquals(created, service.put(user.id, id, initialRequest))
+
+            clock.`when`<Instant> { Instant.now() }.thenReturn(changedTime)
+            val changed = service.put(user.id, id, changedRequest)
+            assertEquals(initialMicros, changed.createdAt)
+            assertEquals(changedMicros, changed.updatedAt)
+            assertEquals(changed, service.put(user.id, id, changedRequest))
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = ["../", "./", "%2e%2e/", "/", "\\", "?", "#", "%2f"])
     fun `이미지 경로 변형은 표지와 중첩 payload 모두 400`(variant: String) {
