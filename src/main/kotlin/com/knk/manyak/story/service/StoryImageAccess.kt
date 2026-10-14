@@ -101,6 +101,10 @@ class StoryImageAccess(
 
     /** 초안 저장·조회는 객체 존재와 메타데이터를 검사하지 않는다. */
     fun requireDraftPrefix(userPublicId: UUID, kind: UploadedImageKind, objectKey: String) {
+        // presign 발급 형태만 허용한다. 경로 소유권을 보기 전에 URL 정규화·인코딩 우회를 거부한다.
+        if (!DRAFT_OBJECT_KEY.matches(objectKey)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "초안 이미지 키 형식이 올바르지 않습니다.")
+        }
         requirePrefix(listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"), objectKey, "내가 올린 업로드 이미지가 아닙니다.")
     }
 
@@ -110,6 +114,10 @@ class StoryImageAccess(
     }
 
     private fun requirePrefix(prefixes: List<String>, objectKey: String, message: String) {
+        // 등록 경로도 원문 키와 서빙 URL의 해석이 같아야 한다. 기존 정상 키와 HEAD 검증은 유지한다.
+        if (objectKey.any { it in "\\%?#" } || objectKey.split('/').any { it.isEmpty() || it == "." || it == ".." }) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지 키 경로가 올바르지 않습니다.")
+        }
         if (prefixes.none { objectKey.startsWith(it) }) throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
     }
 
@@ -176,6 +184,9 @@ class StoryImageAccess(
         throw ResponseStatusException(HttpStatus.NOT_FOUND, "인물을 찾을 수 없습니다.")
 
     companion object {
+        private const val UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        private val DRAFT_OBJECT_KEY = Regex("(?:thumbnails|characters)/uploaded/drafts/$UUID_SEGMENT/$UUID_SEGMENT\\.(?:jpg|png|webp)")
+
         fun parsePublicIdOrNull(value: String): UUID? =
             try {
                 UUID.fromString(value)

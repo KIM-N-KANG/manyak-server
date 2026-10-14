@@ -47,6 +47,35 @@ class StoryDraftControllerIntegrationTests {
     private fun get(id: UUID) = client.get().uri("$path/$id").header("Authorization", auth).exchange()
     private fun delete(id: UUID) = client.delete().uri("$path/$id").header("Authorization", auth).exchange()
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["../", "./", "%2e%2e/", "/", "\\", "?", "#", "%2f"])
+    fun `이미지 경로 변형은 표지와 중첩 payload 모두 400`(variant: String) {
+        val file = "${UUID.randomUUID()}.png"
+        val cover = "thumbnails/uploaded/drafts/${user.publicId}/$variant$file"
+        val character = "characters/uploaded/drafts/${user.publicId}/$variant$file"
+        put(UUID.randomUUID(), body("{}", ",\"thumbnailObjectKey\":${mapper.writeValueAsString(cover)}")).expectStatus().isBadRequest
+        for (key in listOf(cover, character)) {
+            val payload = mapper.writeValueAsString(mapOf("nested" to listOf(mapOf("image" to key))))
+            put(UUID.randomUUID(), body(payload)).expectStatus().isBadRequest
+        }
+        assertEquals(0, drafts.count())
+        org.mockito.Mockito.verifyNoInteractions(images)
+    }
+    @Test fun `presign이 발급한 두 종류 세 형식의 초안 키는 모두 저장 조회 가능하다`() {
+        val keys = com.knk.manyak.image.service.UploadedImageKind.entries.flatMap { kind ->
+            com.knk.manyak.image.service.UploadedImageObjectKeys.EXTENSION_BY_CONTENT_TYPE.keys.map { contentType ->
+                com.knk.manyak.image.service.UploadedImageObjectKeys.newDraftObjectKey(kind, user.publicId, contentType)
+            }
+        }
+        keys.forEach { org.mockito.Mockito.`when`(images.serveUrlOf(it)).thenReturn("https://assets.example/$it") }
+        val payload = mapper.writeValueAsString(mapOf("nested" to listOf(mapOf("keys" to keys))))
+        val id = UUID.randomUUID()
+        put(id, body(payload, ",\"thumbnailObjectKey\":${mapper.writeValueAsString(keys.first())}")).expectStatus().isOk
+        val detail = mapper.readTree(get(id).expectStatus().isOk.expectBody().returnResult().responseBody!!)
+        assertEquals(6, detail.path("imageUrls").size())
+        keys.forEach { assertEquals("https://assets.example/$it", detail.path("imageUrls").path(it).asText()) }
+        org.mockito.Mockito.verify(images, org.mockito.Mockito.never()).head(keys.first())
+    }
     @Test fun `65536 바이트는 허용하고 한 바이트 초과는 거부한다`() {
         val payload = """{"x":"${"a".repeat(65_528)}"}"""
         assertEquals(65_536, payload.toByteArray(Charsets.UTF_8).size)
@@ -55,8 +84,8 @@ class StoryDraftControllerIntegrationTests {
             .expectBody().jsonPath("$.code").isEqualTo("DRAFT_PAYLOAD_TOO_LARGE")
     }
     @Test fun `이미지 객체가 없어도 HEAD 없이 저장하고 읽기 URL을 반환한다`() {
-        val cover = "thumbnails/uploaded/drafts/${user.publicId}/missing.png"
-        val character = "characters/uploaded/drafts/${user.publicId}/missing.webp"
+        val cover = com.knk.manyak.image.service.UploadedImageObjectKeys.newDraftObjectKey(com.knk.manyak.image.service.UploadedImageKind.COVER, user.publicId, "image/png")
+        val character = com.knk.manyak.image.service.UploadedImageObjectKeys.newDraftObjectKey(com.knk.manyak.image.service.UploadedImageKind.CHARACTER, user.publicId, "image/webp")
         org.mockito.Mockito.`when`(images.serveUrlOf(cover)).thenReturn("https://assets.example/$cover")
         org.mockito.Mockito.`when`(images.serveUrlOf(character)).thenReturn("https://assets.example/$character")
         val id = UUID.randomUUID()
@@ -70,7 +99,7 @@ class StoryDraftControllerIntegrationTests {
         org.mockito.Mockito.verify(images, org.mockito.Mockito.never()).head(character)
     }
     @Test fun `설정되지 않은 이미지 저장소는 이미지 읽기에 503이고 저장에는 영향이 없다`() {
-        val key = "thumbnails/uploaded/drafts/${user.publicId}/missing.png"
+        val key = com.knk.manyak.image.service.UploadedImageObjectKeys.newDraftObjectKey(com.knk.manyak.image.service.UploadedImageKind.COVER, user.publicId, "image/png")
         val id = UUID.randomUUID()
         put(id, body("{}", ",\"thumbnailObjectKey\":\"$key\"")).expectStatus().isOk
         get(id).expectStatus().isEqualTo(503)

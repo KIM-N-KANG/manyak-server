@@ -1,12 +1,40 @@
 ### 스토리 제작 임시 저장 수동 검증
 # 준비: 실 Postgres·AI를 연결한 ./gradlew bootRun, http/auth 로그인으로 accessToken 설정.
 # 위에서부터 실행한다. 내 초안이 0개인 회원으로 시작하면 상한 검증을 그대로 실행할 수 있다.
+# 초안 이미지 키는 presign의 .../drafts/{사용자 UUID}/{파일 UUID}.{jpg|png|webp} 형태만 허용한다.
 # 다른 계정의 otherAccessToken·otherDraftId, 정지 계정의 suspendedAccessToken은 별도 로그인으로 설정한다.
 @baseUrl = http://localhost:8080
 @draftId = 16410000-0000-4000-8000-000000000001
 
 ### 서버 확인
 GET {{baseUrl}}/actuator/health
+
+### 이미지 키 경로 검증 준비 — 내 공개 UUID
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("내 공개 식별자 조회", () => client.assert(response.status === 200, `actual=${response.status}`));
+client.global.set("draftUserPublicId", response.body.id);
+%}
+
+### 내 prefix여도 경로 이동 세그먼트는 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000007
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{},"thumbnailObjectKey":"thumbnails/uploaded/drafts/{{draftUserPublicId}}/../00000000-0000-4000-8000-000000000001.png"}
+
+> {% client.test("경로 이동 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 중첩 인물 키의 인코딩 우회도 400
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000007
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{"nested":[{"image":"characters/uploaded/drafts/{{draftUserPublicId}}/%2e%2e/00000000-0000-4000-8000-000000000001.webp"}]}}
+
+> {% client.test("인코딩 우회 400", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 신규 초안 — 미완성 입력도 저장한다
 PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{draftId}}
