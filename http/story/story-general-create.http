@@ -75,12 +75,25 @@ client.test("미승인만 반환", () => {
 });
 %}
 
+### 재제출할 입력의 초안 준비 — 아래 CREATE 재제출 직전에 실행
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/{{$uuid}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{"title":"달빛 아래의 계약"}}
+
+> {%
+client.test("재제출 초안 준비", () => client.assert(response.status === 200, `actual=${response.status}`));
+client.global.set("resubmitDraftId", response.body.draftId);
+%}
+
 ### CREATE 재제출: REJECTED 또는 FAILED일 때만 실행 (같은 submissionId, 202)
 PUT {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
+  "draftId": "{{resubmitDraftId}}",
   "title": "달빛 아래의 계약",
   "oneLineIntro": "기억을 잃은 마법사의 여정",
   "genres": ["무협"],
@@ -89,7 +102,27 @@ Content-Type: application/json
   "characters": [{"name":"세린", "images":[]}]
 }
 
-> {% client.test("재제출 또는 상태 충돌", () => client.assert([202,409].includes(response.status), `actual=${response.status}`)); %}
+> {%
+client.test("재제출 또는 상태 충돌", () => client.assert([202,409].includes(response.status), `actual=${response.status}`));
+client.global.set("resubmitAccepted", response.status === 202);
+%}
+
+### 재제출 접수 시 초안 삭제 — 접수 202면 404, 상태 충돌 409면 초안 유지 200
+GET {{baseUrl}}/api/v1/users/me/story-drafts/{{resubmitDraftId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("재제출 초안 수명", () => {
+  const expected = client.global.get("resubmitAccepted") ? 404 : 200;
+  client.assert(response.status === expected, `expected=${expected}, actual=${response.status}`);
+});
+%}
+
+### 상태 충돌로 남은 검증용 초안도 정리 — 이미 접수 삭제됐다면 멱등 204
+DELETE {{baseUrl}}/api/v1/users/me/story-drafts/{{resubmitDraftId}}
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("초안 정리", () => client.assert(response.status === 204, `actual=${response.status}`)); %}
 
 ### 미승인 취소: PENDING도 삭제 가능, APPROVED는 409
 DELETE {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}

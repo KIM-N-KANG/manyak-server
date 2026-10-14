@@ -328,6 +328,7 @@ class SimpleStoryCreationService(
         // COMPLETED 마킹 트랜잭션 안에서 실행할 부수 효과(KNK-1115 완성 푸시 발행). 기록하지 않는 경로는 부르지 않는다.
         onCompleted: ((T) -> Unit)? = null,
         validateNewRequest: (() -> Unit)? = null,
+        draftId: UUID? = null,
     ): T {
         // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
         val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
@@ -346,6 +347,7 @@ class SimpleStoryCreationService(
             block,
             onCompleted,
             validateNewRequest,
+            draftId,
         )
     }
 
@@ -648,6 +650,7 @@ class SimpleStoryCreationService(
             deviceId,
             SimpleStoryCreateResponse::class.java,
             block = create,
+            draftId = request.draftId.takeIf { userId != null && userId == completionOwnerUserId },
             // 완성 푸시(KNK-1115). 요청 행이 COMPLETED로 **커밋된 뒤** 제작자에게 알린다. 발행은 COMPLETED
             // 마킹과 같은 트랜잭션이라 마킹이 롤백되면 발송도 없고, 멱등 replay는 이 지점에 오지 않아
             // 재요청으로 중복 발송되지 않는다. 값은 저장된 result_json을 다시 읽지 않고 방금 만든 응답에서 꺼낸다.

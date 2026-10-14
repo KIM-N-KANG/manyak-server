@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -62,6 +62,7 @@ erDiagram
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_personas" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.story_drafts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 
 "public.users" {
   bigint id
@@ -207,6 +208,21 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
+}
+"public.story_drafts" {
+  uuid id
+  bigint user_id FK
+  varchar_255_ mode
+  varchar_255_ stage
+  integer schema_version
+  jsonb payload
+  text title
+  text one_line_intro
+  text thumbnail_object_key
+  uuid generation_request_id FK
+  integer version
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 
