@@ -147,7 +147,8 @@ class AuthController(
     @Operation(
         summary = "refresh 토큰 회전",
         description = "유효한 refresh 토큰으로 새 access+refresh를 발급합니다. " +
-            "기존 refresh는 폐기(1회용)되며, 무효·만료·이미 회전된 토큰은 401로 응답합니다.",
+            "유예가 켜져 있고 회전 직후 유예 시간 안의 직전 토큰이면 현재 토큰이 더 회전되지 않은 경우 " +
+            "같은 refresh와 새 access를 200으로 반환합니다. 무효·만료·유예 조건 밖의 재사용은 401로 응답합니다.",
     )
     @ApiResponses(
         value = [
@@ -163,7 +164,7 @@ class AuthController(
             ),
             ApiResponse(
                 responseCode = "401",
-                description = "유효하지 않은 refresh 토큰",
+                description = "무효·만료·유예 조건 밖의 refresh 재사용 또는 사용자 부재·탈퇴",
                 content = [Content(schema = Schema(hidden = true))],
             ),
         ],

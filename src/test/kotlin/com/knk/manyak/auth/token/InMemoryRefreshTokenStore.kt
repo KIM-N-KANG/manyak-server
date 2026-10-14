@@ -61,7 +61,11 @@ class InMemoryRefreshTokenStore(
         // 과거 토큰 매핑(presentedTokenHash)은 남겨 둔다 — 이후 재사용 시 family를 찾아 탐지하기 위해.
         tokens[newTokenHash] = TokenRef(familyId = tokenRef.familyId, expiresAt = expiresAt)
         if (reuseGrace.toMillis() > 0) {
-            graceTokens[presentedTokenHash] = Grace(newTokenHash, newRefreshToken, clock.instant().plusMillis(reuseGrace.toMillis()))
+            val graceExpiresAt = clock.instant().plusMillis(reuseGrace.toMillis())
+            graceTokens[presentedTokenHash] = Grace(newTokenHash, newRefreshToken, graceExpiresAt)
+            if (tokenRef.expiresAt.isBefore(graceExpiresAt)) {
+                tokens[presentedTokenHash] = tokenRef.copy(expiresAt = graceExpiresAt)
+            }
         }
         return RotateResult.Rotated(family.userId)
     }

@@ -124,6 +124,11 @@ class RedisRefreshTokenStore(
                 redis.call('EXPIRE', 'rt:user:' .. userId, ttl)
                 if graceMillis > 0 then
                     redis.call('SET', 'rt:grace:' .. ARGV[1], ARGV[2] .. ':' .. ARGV[4], 'PX', graceMillis)
+                    local presentedKey = 'rt:tok:' .. ARGV[1]
+                    local remainingMillis = redis.call('PTTL', presentedKey)
+                    if remainingMillis >= 0 and remainingMillis < graceMillis then
+                        redis.call('PEXPIRE', presentedKey, graceMillis)
+                    end
                 end
                 return 'ROTATED:' .. userId
                 """.trimIndent(),

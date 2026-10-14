@@ -189,4 +189,25 @@ open class RefreshTokenStoreContractTest {
         assertThat(timedStore.rotate("g2", "g3", "raw-g3", ttl, Duration.ofMillis(250)))
             .isEqualTo(RotateResult.Invalid)
     }
+    @Test
+    fun `만료 직전 회전한 이전 토큰 매핑은 유예 동안 재응답할 수 있다`() {
+        val start = Instant.parse("2026-01-01T00:00:00Z")
+        var now = start
+        val clock = object : Clock() {
+            override fun instant(): Instant = now
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId?): Clock = this
+        }
+        val timedStore = InMemoryRefreshTokenStore(clock)
+        timedStore.createFamily("near-expiry", 42L, Duration.ofMillis(500))
+        now = start.plusMillis(400)
+        timedStore.rotate("near-expiry", "current", "current-raw", ttl, Duration.ofSeconds(10))
+        now = start.plusSeconds(1) // 이전 매핑의 원래 만료는 지났지만 회전 유예 안이다.
+
+        assertThat(timedStore.rotate("near-expiry", "unused", "unused-raw", ttl, Duration.ofSeconds(10)))
+            .isEqualTo(RotateResult.GraceReplayed(42L, "current-raw"))
+        assertThat(timedStore.rotate("current", "next", "next-raw", ttl, Duration.ofSeconds(10)))
+            .isEqualTo(RotateResult.Rotated(42L))
+    }
+
 }

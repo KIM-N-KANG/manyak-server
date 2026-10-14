@@ -145,6 +145,35 @@ class RedisRefreshTokenStoreIntegrationTest : RefreshTokenStoreContractTest() {
     }
 
     @Test
+    fun `Redis 회전은 짧게 남은 이전 토큰 매핑 TTL을 유예 시간까지 연장한다`() {
+        store.createFamily("near-expiry", 42L, ttl)
+        redisTemplate.expire("rt:tok:near-expiry", Duration.ofSeconds(2)) // PEXPIRE로 만료 경계 모사.
+        val grace = Duration.ofSeconds(10)
+
+        assertThat(store.rotate("near-expiry", "current", "current-raw", ttl, grace))
+            .isEqualTo(RotateResult.Rotated(42L))
+
+        val mappingTtl = redisTemplate.getExpire("rt:tok:near-expiry", TimeUnit.MILLISECONDS)
+        val graceTtl = redisTemplate.getExpire("rt:grace:near-expiry", TimeUnit.MILLISECONDS)
+        // 조회까지 경과한 시간을 허용하면서 두 키가 유예 전체 기간을 덮는지 확인한다.
+        assertThat(mappingTtl).isBetween(9_000L, grace.toMillis())
+        assertThat(mappingTtl).isGreaterThanOrEqualTo(graceTtl)
+        assertThat(store.rotate("near-expiry", "unused", "unused-raw", ttl, grace))
+            .isEqualTo(RotateResult.GraceReplayed(42L, "current-raw"))
+    }
+
+    @Test
+    fun `Redis 회전은 유예보다 긴 이전 토큰 매핑 TTL을 줄이지 않는다`() {
+        store.createFamily("long-lived", 42L, ttl)
+        val before = redisTemplate.getExpire("rt:tok:long-lived", TimeUnit.MILLISECONDS)
+
+        store.rotate("long-lived", "current", "current-raw", ttl, Duration.ofSeconds(10))
+
+        assertThat(redisTemplate.getExpire("rt:tok:long-lived", TimeUnit.MILLISECONDS))
+            .isBetween(before - 1_000L, before)
+    }
+
+    @Test
     fun `Redis 유예 0 이하이면 grace 키를 만들지 않는다`() {
         for (grace in listOf(Duration.ZERO, Duration.ofMillis(-1))) {
             store.createFamily("g1", 42L, ttl)
