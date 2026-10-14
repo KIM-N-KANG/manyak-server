@@ -54,6 +54,7 @@
 | [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
 | [public.user_personas](public.user_personas.md) | 8 |  | BASE TABLE |
 | [public.art_styles](public.art_styles.md) | 8 |  | BASE TABLE |
+| [public.story_drafts](public.story_drafts.md) | 13 |  | BASE TABLE |
 
 ## Relations
 
@@ -113,6 +114,8 @@ erDiagram
 "public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_creation_tag_aliases" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.user_personas" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.story_drafts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.story_drafts" }o--o| "public.story_creation_requests" : "FOREIGN KEY (generation_request_id) REFERENCES story_creation_requests(request_id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -629,6 +632,21 @@ erDiagram
   text preview_image_url
   integer sort_order
   boolean is_active
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.story_drafts" {
+  uuid id
+  bigint user_id FK
+  varchar_255_ mode
+  varchar_255_ stage
+  integer schema_version
+  jsonb payload
+  text title
+  text one_line_intro
+  text thumbnail_object_key
+  uuid generation_request_id FK
+  integer version
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }
