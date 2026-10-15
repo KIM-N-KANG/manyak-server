@@ -7,6 +7,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
@@ -85,6 +86,29 @@ class UserContentControllerIntegrationTests {
             .jsonPath("$[1].title").isEqualTo("old")
             .jsonPath("$[0].isOriginal").isEqualTo(false)
             .jsonPath("$[1].isOriginal").isEqualTo(false)
+    }
+
+    @Test
+    fun `내 스토리 목록은 공개와 비공개 스토리의 공개 범위를 반환한다`() {
+        val me = saveUser("me")
+        val publicStory = storyRepository.save(
+            Story(userId = me.id, title = "공개 스토리", visibility = StoryVisibility.PUBLIC, createdAt = t1),
+        )
+        val privateStory = storyRepository.save(
+            Story(userId = me.id, title = "비공개 스토리", visibility = StoryVisibility.PRIVATE, createdAt = t2),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+            .jsonPath("$[0].id").isEqualTo(privateStory.publicId.toString())
+            .jsonPath("$[0].visibility").isEqualTo("PRIVATE")
+            .jsonPath("$[1].id").isEqualTo(publicStory.publicId.toString())
+            .jsonPath("$[1].visibility").isEqualTo("PUBLIC")
     }
 
     @Test
