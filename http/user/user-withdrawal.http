@@ -7,6 +7,7 @@
 ###   - soft delete: users.status = DELETED, 닉네임 "탈퇴한 사용자" 익명화, 프로필 이미지 제거
 ###   - social_accounts 행은 **삭제하지 않고 tombstone**(deleted_at 기록, email NULL) — KNK-1053.
 ###     같은 소셜 계정 재가입은 여전히 **새 계정**이지만, tombstone 행을 재사용해 1회성 혜택을 리셋하지 않는다.
+###   - 미등록 스토리 초안은 제출본 삭제와 같은 탈퇴 트랜잭션에서 물리 삭제
 ###   - refresh 전 family 폐기
 ###   - 소유 스토리는 공개 상태 유지(작성자 표기는 익명화 닉네임이 자연 반영)
 ###   - 탈퇴 즉시 잔여 access 토큰 전면 무효 — 재탈퇴 포함 이후 요청은 전부 401
@@ -46,6 +47,24 @@ Accept: application/json
     });
 %}
 
+### 1-1. 탈퇴할 테스트 계정의 공개 UUID 보관
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("탈퇴 전 회원 조회", () => client.assert(response.status === 200, `actual=${response.status}`));
+    client.global.set("withdrawUserPublicId", response.body.id);
+%}
+
+### 1-2. 탈퇴 전 초안 준비 — 새 테스트 계정으로 실행
+PUT {{baseUrl}}/api/v1/users/me/story-drafts/16410000-0000-4000-8000-000000000008
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"mode":"GENERAL","stage":"GENERAL_DRAFT","schemaVersion":1,"payload":{"text":"탈퇴 시 삭제할 미등록 입력"}}
+
+> {% client.test("탈퇴 전 초안 저장", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
+
 ### 2. 탈퇴 (핵심 검증) — 버려도 되는 계정인지 다시 확인하세요
 DELETE {{baseUrl}}/api/v1/users/me
 Authorization: Bearer {{accessToken}}
@@ -56,6 +75,10 @@ Accept: application/json
         client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
     });
 %}
+
+# 탈퇴 이후 초안 물리 삭제는 DB에서 확인한다(탈퇴 토큰의 API 조회는 401).
+# 응답 핸들러에 저장한 withdrawUserPublicId를 넣어 다음 SQL 결과가 0행인지 확인:
+# SELECT d.id FROM story_drafts d JOIN users u ON u.id = d.user_id WHERE u.public_id = '<withdrawUserPublicId>';
 
 ### 3. 재탈퇴 → 401 (잔여 토큰 전면 무효)
 DELETE {{baseUrl}}/api/v1/users/me

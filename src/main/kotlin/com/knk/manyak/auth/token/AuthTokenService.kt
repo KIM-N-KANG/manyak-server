@@ -6,6 +6,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.security.isActiveAccessAllowed
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -21,11 +22,11 @@ import java.util.Base64
  * 토큰 모델:
  * - access: HS256 JWT(짧은 TTL). 클라이언트가 Authorization 헤더로 보내고 리소스 서버가 검증한다.
  * - refresh: 256bit 랜덤(SecureRandom) base64url 문자열(JWT 아님, 긴 TTL).
- *   저장소에는 **원문이 아니라 SHA-256 해시**만 둔다(저장소 유출 시 원문 노출 차단).
+ *   저장 키는 SHA-256 해시이며 재사용 유예 키에만 새 원문을 유예 시간 동안 보관한다.
  *
  * 세션은 로그인 시 생성되는 refresh "family" 단위로 관리한다([RefreshTokenStore]).
  * - 회전(rotate): 같은 family의 현재 토큰을 받으면 폐기하고 새 access+refresh를 발급한다.
- * - 재사용(이미 회전된 과거 토큰) 탐지 시 family 전체를 폐기한다(탈취 대응).
+ * - 유예 조건 밖의 재사용 탐지 시 family 전체를 폐기한다(탈취 대응).
  * - 로그아웃: family 전체를 폐기해 동시 회전 경합에도 세션이 살아남지 못하게 한다.
  */
 @Service
@@ -34,6 +35,7 @@ class AuthTokenService(
     private val refreshTokenStore: RefreshTokenStore,
     private val userRepository: UserRepository,
     private val properties: AuthProperties,
+    private val structuredLogger: StructuredLogger,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -53,33 +55,20 @@ class AuthTokenService(
 
     /**
      * refresh를 회전한다. 같은 family의 현재 토큰이면 old를 폐기하고 새 access+refresh를 발급한다.
-     * 무효/만료/사용자 부재는 401. 이미 회전된 과거 토큰의 재사용이면 family 전체를 폐기하고 401(탈취 정황 로깅).
+     * 유예 조건을 만족하는 과거 토큰에는 보관된 같은 refresh와 새 access를 반환한다.
+     * 무효/만료/사용자 부재와 유예 밖의 재사용은 401. 재사용이면 family 전체를 폐기하고 로깅한다.
      */
     fun rotate(rawRefresh: String): TokenResponse {
         val presentedHash = hash(rawRefresh)
         val newRaw = generateRefreshToken()
         val newHash = hash(newRaw)
-        return when (val result = refreshTokenStore.rotate(presentedHash, newHash, properties.refreshTtl)) {
-            is RotateResult.Rotated -> {
-                val user = userRepository.findById(result.userId).orElse(null)
-                if (user == null) {
-                    // 회전은 성공했으나 매핑된 사용자가 사라진 경우(계정 삭제 등): 방금 발급된 토큰을 포함해 family를 폐기한다.
-                    refreshTokenStore.revokeFamilyByToken(newHash)
-                    throw unauthorized()
-                }
-                // 계정 상태 반응형 집행: 상태 변경 트리거 이벤트가 없어 회전 시점에 확인하고,
-                // 위반이면 방금 회전된 토큰을 포함해 family를 폐기해 재발급 경로를 닫는다.
-                // 탈퇴는 401(계정 무효 — 탈퇴·로그인 경합으로 폐기 뒤 생긴 family도 여기서 닫힌다, KNK-1019),
-                // 정지는 403(스펙 §4-5 B20, KNK-499)이다.
-                if (user.status == UserStatus.DELETED) {
-                    refreshTokenStore.revokeFamilyByToken(newHash)
-                    throw unauthorized()
-                }
-                if (!isActiveAccessAllowed(user.status)) {
-                    refreshTokenStore.revokeFamilyByToken(newHash)
-                    throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
-                }
-                tokenResponse(jwtTokenProvider.issueAccessToken(user.publicId), newRaw)
+        val result = refreshTokenStore.rotate(
+            presentedHash, newHash, newRaw, properties.refreshTtl, properties.refreshReuseGrace,
+        )
+        return when (result) {
+            is RotateResult.Rotated -> responseForActiveUser(result.userId, newRaw)
+            is RotateResult.GraceReplayed -> {
+                responseForActiveUser(result.userId, result.refreshToken, graceReplayed = true)
             }
             is RotateResult.ReuseDetected -> {
                 // 이미 회전된(폐기된) 토큰의 재사용 → 탈취 가능성. family는 store가 이미 폐기했다.
@@ -88,6 +77,24 @@ class AuthTokenService(
             }
             RotateResult.Invalid -> throw unauthorized()
         }
+    }
+
+    /** 정상 회전과 유예 응답에 같은 계정 상태 검사와 family 폐기 규칙을 적용한다. */
+    private fun responseForActiveUser(userId: Long, rawRefresh: String, graceReplayed: Boolean = false): TokenResponse {
+        val user = userRepository.findById(userId).orElse(null)
+        if (user == null || user.status == UserStatus.DELETED) {
+            refreshTokenStore.revokeFamilyByToken(hash(rawRefresh))
+            throw unauthorized()
+        }
+        if (!isActiveAccessAllowed(user.status)) {
+            refreshTokenStore.revokeFamilyByToken(hash(rawRefresh))
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 계정입니다.")
+        }
+        val response = tokenResponse(jwtTokenProvider.issueAccessToken(user.publicId), rawRefresh)
+        if (graceReplayed) {
+            structuredLogger.event("refresh_reuse_grace_applied", mapOf("user_public_id" to user.publicId.toString()))
+        }
+        return response
     }
 
     /**

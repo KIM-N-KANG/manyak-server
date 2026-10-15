@@ -27,14 +27,17 @@ class StorySubmissionService(
     private val mapper: ObjectMapper,
     private val suspension: SuspensionGuard,
     private val genres: GenreInputValidator,
+    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
 ) {
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
         requireMember(userId)
         val normalized = request.copy(protagonistName = com.knk.manyak.story.service.normalizeProtagonistName(request.protagonistName), genres = genres.normalize(request.genres))
         val form = forms.create(normalized, userId)
-        return accept(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
+        val accepted = accept(submissions.save(StorySubmission(userId = userId, kind = SubmissionKind.CREATE,
             payload = mapper.writeValueAsString(normalized), inputForm = mapper.writeValueAsString(form))))
+        request.draftId?.let { drafts.deleteOwned(it, userId) }
+        return accepted
     }
 
     @Transactional
@@ -70,6 +73,7 @@ class StorySubmissionService(
         val form = forms.create(normalized, userId)
         submission.resubmit(mapper.writeValueAsString(normalized))
         submission.inputForm = mapper.writeValueAsString(form)
+        request.draftId?.let { drafts.deleteOwned(it, userId) }
         return accept(submission)
     }
 

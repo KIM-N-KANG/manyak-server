@@ -43,6 +43,21 @@ class UserWithdrawalIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+
+    @Test fun `탈퇴는 내 초안을 물리 삭제하고 타인 초안은 유지한다`() {
+        val owner = saveMember("탈퇴 작가")
+        val other = saveMember("다른 작가")
+        fun draft(user: User) = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), user.id,
+            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{\"text\":\"미등록 입력\"}"))
+        val mine = draft(owner); val theirs = draft(other)
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(owner)}")
+            .exchange().expectStatus().isNoContent
+        org.junit.jupiter.api.Assertions.assertFalse(drafts.existsById(mine.id))
+        assertTrue(drafts.existsById(theirs.id))
+        assertEquals("{\"text\":\"미등록 입력\"}", drafts.findById(theirs.id).orElseThrow().payload)
+    }
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
@@ -99,7 +114,7 @@ class UserWithdrawalIntegrationTests {
         assertNull(tombstone.email)
         assertEquals(user.id, tombstone.userId)
         // refresh family 전체 폐기 — 남은 토큰으로 회전하면 Invalid다.
-        assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", Duration.ofHours(1)) is RotateResult.Invalid)
+        assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", "new-raw", Duration.ofHours(1), Duration.ZERO) is RotateResult.Invalid)
     }
 
     @Test

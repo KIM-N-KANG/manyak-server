@@ -37,6 +37,8 @@ import java.util.UUID
 class StoryCreationRequestRecorder(
     private val repository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
+    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val users: com.knk.manyak.auth.repository.UserRepository,
     // 이 시간(초)보다 오래 PENDING인 행은 실행 중 프로세스가 죽은 것으로 보고 재실행을 허용한다(무한 409 방지).
     // 최장 생성 동작(스토리 완성 AI 120초)보다 충분히 커, 진행 중인 정상 요청을 가로채지 않는다.
     @param:Value("\${manyak.story.pending-reclaim-after-seconds:300}")
@@ -86,8 +88,9 @@ class StoryCreationRequestRecorder(
         onCompleted: ((T) -> Unit)? = null,
         // 기존 요청은 소유권·상태 분기가 우선이다. 신규 입력만 삽입과 AI 호출 전에 검사한다.
         validateNewRequest: (() -> Unit)? = null,
+        draftId: UUID? = null,
     ): T {
-        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink, validateNewRequest)
+        var claim = claimOrReplay(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink, validateNewRequest, draftId)
         while (claim is Claim.Replay) {
             try {
                 return objectMapper.readValue(claim.resultJson, responseType)
@@ -181,14 +184,15 @@ class StoryCreationRequestRecorder(
         ownerDeviceIdHash: String?,
         parentLink: ParentCreationLink?,
         validateNewRequest: (() -> Unit)?,
+        draftId: UUID?,
     ): Claim {
         if (validateNewRequest != null) {
             if (repository.findByRequestId(requestId) != null) {
-                return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
+                return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash, draftId)
             }
             validateNewRequest()
         }
-        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink)
+        val insertedId = tryInsertPending(requestId, stage, ownerUserId, ownerDeviceIdHash, parentLink, draftId)
         if (insertedId != null) {
             // 처음 기록하는 신규 요청 — 회수가 아니다(reconcile 불가). 방금 삽입한 체인이 그대로 정본이다.
             return Claim.Run(
@@ -198,7 +202,7 @@ class StoryCreationRequestRecorder(
                 parentLink = parentLink,
             )
         }
-        return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash)
+        return resolveExistingLocked(requestId, stage, ownerUserId, ownerDeviceIdHash, draftId)
     }
 
     /** PENDING 행을 삽입하고 새 id를 돌려준다. 유니크 제약 위반(동시 삽입 경합의 패자)이면 null(행이 이미 존재). */
@@ -208,10 +212,12 @@ class StoryCreationRequestRecorder(
         ownerUserId: Long?,
         ownerDeviceIdHash: String?,
         parentLink: ParentCreationLink?,
+        draftId: UUID?,
     ): Long? =
         try {
             txTemplate.execute {
-                repository.saveAndFlush(
+                if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
+                val row = repository.saveAndFlush(
                     StoryCreationRequest(
                         requestId = requestId,
                         userId = ownerUserId,
@@ -222,7 +228,9 @@ class StoryCreationRequestRecorder(
                         attemptedParentCreationId = parentLink?.attemptedParentCreationId,
                         parentLinkError = parentLink?.error,
                     ),
-                ).id
+                )
+                if (draftId != null && ownerUserId != null) drafts.deleteOwned(draftId, ownerUserId)
+                row.id
             }
         } catch (exception: DataIntegrityViolationException) {
             // 유니크 제약 위반은 삽입 트랜잭션 밖으로 전파돼 그 트랜잭션만 깔끔히 롤백된다(abort된 트랜잭션에서 재조회하지 않는다).
@@ -230,11 +238,15 @@ class StoryCreationRequestRecorder(
         }
 
     /** 기존 요청 행을 비관적 락으로 조회해 상태별로 해석한다(동시 FAILED 재실행 직렬화). */
-    private fun resolveExistingLocked(requestId: UUID, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?): Claim =
+    private fun resolveExistingLocked(requestId: UUID, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?, draftId: UUID?): Claim =
         txTemplate.execute {
+            // 재접수도 users → 생성 요청 → 초안 순서로 잠근다. replay·진행 중 충돌은 초안을 건드리지 않는다.
+            if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
             val row = repository.findByRequestIdForUpdate(requestId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
-            resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
+            val claim = resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
+            if (claim is Claim.Run && draftId != null && ownerUserId != null) drafts.deleteOwned(draftId, ownerUserId)
+            claim
         } ?: error("Story creation request claim transaction result is empty")
 
     private fun resolveExisting(row: StoryCreationRequest, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?): Claim {

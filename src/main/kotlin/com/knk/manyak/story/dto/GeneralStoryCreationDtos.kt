@@ -75,6 +75,8 @@ data class CreateGeneralStoryRequest(
     @field:Schema(description = "인물 목록(최대 6명, 선택). 이름은 스토리 안에서 유일하다.")
     val characters: List<@NotNull GeneralCharacterInput> = emptyList(),
     val protagonistName: String? = null,
+    @field:Schema(description = "접수와 같은 트랜잭션에서 삭제할 내 초안 ID", nullable = true)
+    val draftId: java.util.UUID? = null,
 ) {
     @AssertTrue(message = "각 장르는 30자 이하여야 합니다.")
     @com.fasterxml.jackson.annotation.JsonIgnore

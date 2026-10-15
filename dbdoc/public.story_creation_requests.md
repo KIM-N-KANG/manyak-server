@@ -5,7 +5,7 @@
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
 | id | bigint | nextval('story_creation_requests_id_seq'::regclass) | false |  |  |  |
-| request_id | uuid |  | false |  |  |  |
+| request_id | uuid |  | false | [public.story_drafts](public.story_drafts.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | device_id_hash | varchar(64) |  | true |  |  |  |
 | stage | varchar(32) |  | false |  |  |  |
@@ -38,6 +38,7 @@
 ```mermaid
 erDiagram
 
+"public.story_drafts" }o--o| "public.story_creation_requests" : "FOREIGN KEY (generation_request_id) REFERENCES story_creation_requests(request_id)"
 
 "public.story_creation_requests" {
   bigint id
@@ -52,6 +53,21 @@ erDiagram
   uuid parent_request_id
   uuid attempted_parent_creation_id
   varchar_32_ parent_link_error
+}
+"public.story_drafts" {
+  uuid id
+  bigint user_id FK
+  varchar_255_ mode
+  varchar_255_ stage
+  integer schema_version
+  jsonb payload
+  text title
+  text one_line_intro
+  text thumbnail_object_key
+  uuid generation_request_id FK
+  integer version
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

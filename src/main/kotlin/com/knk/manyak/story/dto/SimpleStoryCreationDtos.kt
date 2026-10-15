@@ -286,6 +286,8 @@ data class CreateSimpleStoryRequest(
         nullable = true,
     )
     val isRegenerated: Boolean? = null,
+    @field:Schema(description = "생성 요청 기록과 같은 트랜잭션에서 삭제할 내 초안 ID", nullable = true)
+    val draftId: UUID? = null,
 )
 
 @Schema(description = "간편 제작 스토리 생성 응답")

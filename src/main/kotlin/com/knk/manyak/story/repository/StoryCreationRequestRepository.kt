@@ -9,6 +9,7 @@ import java.util.UUID
 
 interface StoryCreationRequestRepository : JpaRepository<StoryCreationRequest, Long> {
     fun findByRequestId(requestId: UUID): StoryCreationRequest?
+    fun findByUserIdAndStatus(userId: Long, status: com.knk.manyak.story.entity.StoryCreationRequestStatus): List<StoryCreationRequest>
 
     /** 재요청 판정을 직렬화하려 행을 비관적 락으로 조회한다(동시 FAILED 재실행이 둘 다 통과하지 않도록). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
