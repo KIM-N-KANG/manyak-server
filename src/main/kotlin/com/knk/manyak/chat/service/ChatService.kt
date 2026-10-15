@@ -1178,14 +1178,8 @@ class ChatService(
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 val persistedOk = persisted.get()
                 // 결과 판정은 이 finally·cancelPendingWorker·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
-                val finalState = workerState.getAndSet(TurnWorkerState.FINISHED)
-                recordChatTurnResult(
-                    when {
-                        persistedOk -> OUTCOME_SUCCESS
-                        finalState == TurnWorkerState.CANCELLED -> OUTCOME_CANCELLED
-                        else -> OUTCOME_FAILURE
-                    },
-                )
+                workerState.set(TurnWorkerState.FINISHED)
+                recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
                     refundImageQuietly()
                     refundTurn()
@@ -1288,7 +1282,7 @@ class ChatService(
      * outcome은 다음 값으로 분류한다:
      *   - `success`  : 턴이 저장까지 확정된 호출(`persisted`)
      *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·스케줄 거부
-     *   - `cancelled`: 시작 전 또는 저장 진입 전에 취소가 소유권을 선점한 호출
+     *   - `cancelled`: 시작 전 취소가 PENDING 소유권을 선점한 호출
      *   - `rejected` : 스트림 개시 **이전** 4xx — 크레딧 부족(402)·게스트 한도 소진(402)·device 헤더 누락(400)
      *
      * **Timer가 아니라 Counter인 이유**: 채팅 턴은 스트리밍이라 `manyak.ai.call.duration{feature="chat_response"}`이
@@ -1296,7 +1290,7 @@ class ChatService(
      * 그쪽에 남지 않는다.
      *
      * **호출 지점은 셋이다**:
-     *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 저장·취소 상태로 success/failure/cancelled를 가른다
+     *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 `persisted`로 success/failure를 가른다
      *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우(failure)
      *   3. cancelPendingWorker — PENDING → CANCELLED CAS 성공 시 시작 전 취소 확정(cancelled)
      *

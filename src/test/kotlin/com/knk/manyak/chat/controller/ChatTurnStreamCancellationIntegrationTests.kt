@@ -120,12 +120,14 @@ class ChatTurnStreamCancellationIntegrationTests {
     private fun cancelledBeforeSave(callback: String) {
         val (member, chat, cost) = paidChat()
         val emitter = service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("진행", realtimeImage = false), member.id)
-        val before = cancelledCount()
+        val beforeCancelled = cancelledCount()
+        val beforeFailure = failureCount()
         ai.beforeCompleted = { terminate(emitter, callback) }
         worker.task.run()
         assertThat(chats.findById(chat.id).orElseThrow().currentTurn).isZero()
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
-        assertThat(cancelledCount()).isEqualTo(before + 1)
+        assertThat(failureCount()).isEqualTo(beforeFailure + 1)
+        assertThat(cancelledCount()).isEqualTo(beforeCancelled)
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
         assertThat(transactions.findAll().filter { it.reason == CreditReason.REFUND }).hasSize(1)
     }
@@ -181,9 +183,13 @@ class ChatTurnStreamCancellationIntegrationTests {
     @Test fun `PENDING 취소는 AI를 호출하지 않고 한 번 환불한다`() {
         val (member, chat, cost) = paidChat()
         val emitter = service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("진행", realtimeImage = false), member.id)
+        val beforeCancelled = cancelledCount()
+        val beforeFailure = failureCount()
         ai.beforeCompleted = { error("취소된 작업이 AI를 호출함") }
         terminate(emitter, "completionCallback")
         worker.task.run()
+        assertThat(cancelledCount()).isEqualTo(beforeCancelled + 1)
+        assertThat(failureCount()).isEqualTo(beforeFailure)
         assertThat(chats.findById(chat.id).orElseThrow().currentTurn).isZero()
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
         assertThat(transactions.findAll().filter { it.reason == CreditReason.REFUND }).hasSize(1)
@@ -239,6 +245,8 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(trials.reserveMember(member.id, GuestTrialLimitService.Counter.CHAT_IMAGE)).isTrue()
         assertThat(trials.reserveMember(member.id, GuestTrialLimitService.Counter.CHAT_IMAGE)).isFalse()
     }
+
+    private fun failureCount() = meters.find("manyak.chat.turn.result").tag("outcome", ChatService.OUTCOME_FAILURE).counter()?.count() ?: 0.0
 
     private fun cancelledCount() = meters.find("manyak.chat.turn.result").tag("outcome", ChatService.OUTCOME_CANCELLED).counter()?.count() ?: 0.0
 
