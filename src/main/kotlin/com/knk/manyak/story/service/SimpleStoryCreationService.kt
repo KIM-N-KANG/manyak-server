@@ -160,7 +160,8 @@ class SimpleStoryCreationService(
         const val STORY_TITLE_MAX_LENGTH = 100
         const val STORY_ONE_LINE_INTRO_MAX_LENGTH = 255
 
-        // 주요 사건·엔딩 이름 컬럼(VARCHAR(100)) 초과를 방어적으로 자른다.
+        // 시작 설정·주요 사건·엔딩 이름 컬럼(VARCHAR(100)) 초과를 방어적으로 자른다.
+        const val STORY_START_SETTING_NAME_MAX_LENGTH = 100
         const val STORY_MAIN_EVENT_NAME_MAX_LENGTH = 100
         const val STORY_ENDING_NAME_MAX_LENGTH = 100
 
@@ -297,7 +298,7 @@ class SimpleStoryCreationService(
         } else {
             val parent = storyCreationRequestRepository.findByRequestId(attempted)
             when {
-                parent == null -> ParentLinkError.NOT_FOUND
+                parent == null || parent.stage != StoryCreationStage.STORYLINE_GENERATION -> ParentLinkError.NOT_FOUND
                 !parent.hasSameChainOwnerAs(userId, deviceIdHash) -> ParentLinkError.OWNER_MISMATCH
                 else -> null
             }
@@ -1134,7 +1135,7 @@ class SimpleStoryCreationService(
                 val startSetting = storyStartSettingRepository.save(
                     StoryStartSetting(
                         story = story,
-                        name = aiResponse.storyStartSettings.name,
+                        name = UsernameTokenRenderer.truncateRaw(aiResponse.storyStartSettings.name, STORY_START_SETTING_NAME_MAX_LENGTH),
                         prologue = aiResponse.storyStartSettings.prologue,
                         startSituation = aiResponse.storyStartSettings.startSituation,
                     ),
