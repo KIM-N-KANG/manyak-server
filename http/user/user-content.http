@@ -54,6 +54,7 @@ Accept: application/json
 %}
 
 ### 3. (해피 패스) 내 스토리 목록 → 200, 스토리 카드 배열(생성 최신순)
+# 공개·비공개 스토리를 각각 준비하고 카드의 visibility가 설정한 PUBLIC·PRIVATE와 같은지 확인합니다.
 GET {{baseUrl}}/api/v1/users/me/stories
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -74,6 +75,12 @@ Accept: application/json
         for (const card of b) {
             client.assert(typeof card.isOriginal === "boolean" && !("original" in card),
                 `isOriginal boolean이 필요합니다. actual=${JSON.stringify(card)}`);
+        }
+    });
+    client.test("내 스토리 카드에 공개 범위가 있다", () => {
+        for (const card of b) {
+            client.assert(card.visibility === "PUBLIC" || card.visibility === "PRIVATE",
+                `visibility는 PUBLIC 또는 PRIVATE여야 합니다. actual=${JSON.stringify(card)}`);
         }
     });
     client.test("생성 최신순으로 내림차순 정렬돼 있다", () => {

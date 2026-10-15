@@ -84,6 +84,9 @@ data class StorySummaryResponse(
     @field:Schema(description = "등록 상태", example = "PUBLISHED")
     val status: StoryStatus,
 
+    @field:Schema(description = "스토리 공개 여부. 상세 응답과 같은 공개 범위입니다.", example = "PRIVATE")
+    val visibility: StoryVisibility,
+
     @field:Schema(description = "생성 시각", example = "2026-06-10T12:00:00Z")
     val createdAt: Instant,
 )

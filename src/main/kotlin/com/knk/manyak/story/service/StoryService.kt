@@ -510,6 +510,7 @@ class StoryService(
             turnCount = turnCount,
             likeCount = likeCount,
             status = this.status,
+            visibility = this.visibility,
             createdAt = createdAt,
         ).rendered(protagonistName)
 }
