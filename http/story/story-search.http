@@ -56,19 +56,25 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=20
     client.assert(typeof card.isOriginal === "boolean" && !("original" in card),
       `isOriginal boolean이 필요합니다. actual=${JSON.stringify(card)}`);
     client.global.set("searchStoryIsOriginal", card.isOriginal);
+    client.global.set("searchAuthorProfileImageUrl", card.author.profileImageUrl);
+    // KNK-1660: 프로필 이미지가 있는 회원으로 준비하면 검색에도 그 URL이 채워져야 합니다.
+    // 이미지 변경 후 재색인 없이 3번을 다시 실행해 정본 프로필 반영을 확인합니다.
     client.assert(card.title === "검색검증 마법 왕국" && card.author.id === null, `actual=${JSON.stringify(card)}`);
   });
 %}
 
-### 3-1. 검색 카드와 배치 카드의 오리지널 판정 일치(3번 실행 후)
+### 3-1. 검색 카드와 배치 카드의 오리지널 판정·작성자 프로필 일치(3번 실행 후)
 POST {{baseUrl}}/api/v1/stories/batch
 Content-Type: application/json
 
 {"storyIds":["{{searchStoryId}}"]}
 
 > {%
-  client.test("검색과 배치의 isOriginal이 같다", () => {
+  client.test("검색과 배치의 오리지널 판정과 작성자 프로필이 같다", () => {
     client.assert(response.status === 200 && response.body.length === 1, `actual=${JSON.stringify(response.body)}`);
+    client.assert(response.body[0].author.id === null &&
+      response.body[0].author.profileImageUrl === client.global.get("searchAuthorProfileImageUrl"),
+      `검색과 배치 작성자 프로필이 다릅니다. actual=${JSON.stringify(response.body[0].author)}`);
     client.assert(response.body[0].isOriginal === client.global.get("searchStoryIsOriginal"),
       `검색과 배치 판정이 다릅니다. actual=${JSON.stringify(response.body[0])}`);
   });

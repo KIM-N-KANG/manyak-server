@@ -4,6 +4,7 @@ import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.dto.StoryPageResponse
+import com.knk.manyak.story.service.StoryAuthorResolver
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import java.util.UUID
@@ -24,6 +25,7 @@ class StorySearchService(
     private val stories: StoryRepository,
     private val indexer: StorySearchIndexer,
     private val officialStoryAccount: OfficialStoryAccount,
+    private val authorResolver: StoryAuthorResolver,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -67,15 +69,17 @@ class StorySearchService(
                 // 검색에는 원 트랜잭션이 없으므로 AFTER_COMMIT 이벤트가 아닌 동기 호출로 복구한다.
                 indexer.index(story.id)
             } catch (ex: Exception) {
-                log.warn("검색 비공개 문서 재색인 실패 (storyId={}, error={})", story.id, ex.javaClass.simpleName)
+                log.warn("검색 비공개 문서 재색인 실패 (error={})", ex.javaClass.simpleName)
             }
         }
+        val authorByUserId = authorResolver.resolveAll(visibleStories.values.mapNotNull { it.userId })
         val officialId = officialStoryAccount.officialUserId()
         return StoryPageResponse(
             items = documents.mapNotNull { document ->
                 val story = visibleStories[document.publicId] ?: return@mapNotNull null
                 // 색인의 author.id는 null일 수 있다. 공개 게이트가 조회한 정본 소유자로 재색인 없이 판정한다.
                 document.toSummary(isOriginal = officialId != null && story.userId == officialId)
+                    .copy(author = story.userId?.let(authorByUserId::get))
             },
             // 필터 전 마지막 hit로 진행한다. 전부 제외돼 빈 페이지여도 다음 후보를 계속 탐색할 수 있다.
             nextCursor = if (hits.size > pageSize) StorySearchCursor.fromSort(page.last().sort()).encode(query) else null,

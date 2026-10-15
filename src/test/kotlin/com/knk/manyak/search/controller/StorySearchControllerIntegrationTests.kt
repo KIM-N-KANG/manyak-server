@@ -117,7 +117,7 @@ class StorySearchControllerIntegrationTests {
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenReturn(response(listOf(hit, hit)))
         val body = client.get().uri("/api/v1/stories/search?q=왕국&limit=1").exchange().expectStatus().isOk
             .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
-        assertEquals(document.toSummary(isOriginal = false), body.items.single())
+        assertEquals(document.toSummary(isOriginal = false).copy(author = StoryAuthorResponse(null, owner.nickname, owner.profileImageUrl)), body.items.single())
         assertNotNull(body.nextCursor)
         assertNull(body.items.single().author!!.id)
         assertEquals(Instant.ofEpochMilli(document.createdAt), body.items.single().createdAt)
@@ -128,6 +128,39 @@ class StorySearchControllerIntegrationTests {
         client.get().uri { it.path("/api/v1/stories/search").queryParam("q", "마법").queryParam("cursor", body.nextCursor!!).build() }
             .exchange().expectStatus().isBadRequest
         client.get().uri("/api/v1/stories/search?q=왕국&cursor=broken").exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `검색 작성자 프로필은 정본에서 배치 조회하고 내부 ID는 숨긴다`() {
+        val first = users.save(User(nickname = "첫 작가", profileImageUrl = "https://example.com/first.webp"))
+        val second = users.save(User(nickname = "둘째 작가", profileImageUrl = "https://example.com/second.webp"))
+        val owners = listOf(first, second, first)
+        val hits = owners.mapIndexed { index, owner ->
+            val story = stories.save(Story(userId = owner.id, title = "왕국 $index"))
+            // 색인 작성자 ID는 정본 소유자와 달라도 무시하며 이미지 정보는 색인에 없다.
+            val hit = staleHit(story)
+            hit.source()!!.author = StorySearchAuthor(id = Long.MAX_VALUE, nickname = owner.nickname)
+            hit
+        }
+        clearInvocations(users)
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(hits))
+
+        val body = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+
+        assertEquals(owners.map { it.profileImageUrl }, body.items.map { it.author?.profileImageUrl })
+        assertTrue(body.items.all { it.author != null && it.author.id == null })
+        verify(users, times(1)).findAllById(argThat { ids ->
+            ids.toList().size == 2 && ids.toSet() == setOf(first.id, second.id)
+        })
+        verify(users, never()).findById(anyLong())
+        // 프로필 변경은 재색인 없이 다음 검색부터 반영한다.
+        first.profileImageUrl = "https://example.com/updated.webp"
+        users.saveAndFlush(first)
+        val updated = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+        assertEquals(listOf(first.profileImageUrl, second.profileImageUrl, first.profileImageUrl), updated.items.map { it.author?.profileImageUrl })
     }
 
     @Test

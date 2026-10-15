@@ -93,6 +93,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -146,7 +147,7 @@ class ChatService(
      * **조립이 끝나면 즉시 커밋되고 그 뒤에 AI를 부른다** — 트랜잭션이 AI 호출·스트리밍으로 넘어가지 않는다.
      */
     private val assemblyTransactionTemplate = assemblyTransactionTemplate(transactionManager)
-    private enum class TurnWorkerState { PENDING, RUNNING, CANCELLED }
+    private enum class TurnWorkerState { PENDING, RUNNING, SAVING, CANCELLED, FINISHED }
 
     private val turnSaveTransactionTemplate = TransactionTemplate(transactionManager)
 
@@ -989,10 +990,9 @@ class ChatService(
         }
         val persisted = AtomicBoolean(false)
         // PENDING 소유권은 워커 진입과 취소 중 한쪽만 CAS로 선점한다.
-        // RUNNING 이후에는 저장 결과를 아는 워커 finally만 환불을 결정한다.
+        // RUNNING 취소와 SAVING 진입도 CAS로 선점한다. 실행된 워커의 환불은 finally만 결정한다.
         val workerState = AtomicReference(TurnWorkerState.PENDING)
         val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
-        val futureRef = AtomicReference<CompletableFuture<Void>>()
 
         // 제출부터 워커 진입까지를 스팬으로 남긴다. chatSseExecutor가 포화되면 이 구간이 길어진다(KNK-1552).
         val queueWait = Observation.createNotStarted("chat.turn.queue", observationRegistry).start()
@@ -1014,7 +1014,8 @@ class ChatService(
         }
         fun cancelWorker() {
             cancelPendingWorker()
-            futureRef.get()?.cancel(true)
+            // JDBC·저장 트랜잭션을 인터럽트하지 않는다. SAVING 이후의 취소는 저장 결과에 맡긴다.
+            workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.CANCELLED)
         }
         emitter.onTimeout {
             // 120초 안에 completed·error가 못 나간 경우다. 워커가 큐에서 못 나왔는지, 돌다가 멈췄는지를 남긴다(KNK-1552).
@@ -1034,6 +1035,7 @@ class ChatService(
             // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
             var succeededAiCallLogId: Long? = null
             try {
+                if (workerState.get() == TurnWorkerState.CANCELLED) return@runAsync
                 emitter.send(
                     SseEmitter.event()
                         .name("started")
@@ -1052,7 +1054,9 @@ class ChatService(
                         if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
                     },
                     onFailure = { aiCallLogId, throwable ->
-                        captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
+                        if (workerState.get() != TurnWorkerState.CANCELLED) {
+                            captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
+                        }
                     },
                     // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                     meta = { it.meta },
@@ -1063,22 +1067,23 @@ class ChatService(
                         // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
                         // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                         onCharacterImage = { characterImage ->
-                            if (!Thread.currentThread().isInterrupted) {
-                                emitter.send(
-                                    SseEmitter.event()
-                                        .name("character_image")
-                                        .data(
-                                            ChatStreamCharacterImageEvent(
-                                                name = characterImage.name,
-                                                imageUrl = characterImage.imageUrl,
-                                            ),
-                                        ),
-                                )
+                            if (workerState.get() == TurnWorkerState.CANCELLED) {
+                                throw CancellationException("chat turn stream cancelled")
                             }
+                            emitter.send(
+                                SseEmitter.event()
+                                    .name("character_image")
+                                    .data(
+                                        ChatStreamCharacterImageEvent(
+                                            name = characterImage.name,
+                                            imageUrl = characterImage.imageUrl,
+                                        ),
+                                    ),
+                            )
                         },
                     ) { token ->
-                        if (Thread.currentThread().isInterrupted) {
-                            return@streamTurn
+                        if (workerState.get() == TurnWorkerState.CANCELLED) {
+                            throw CancellationException("chat turn stream cancelled")
                         }
                         emitter.send(
                             SseEmitter.event()
@@ -1094,6 +1099,8 @@ class ChatService(
                 // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
                 // HEAD 검증 결과와 본문 저장은 같은 트랜잭션에서 확정한다.
                 // 검증 실패 예약은 즉시 복원한다. 이후 롤백 시 finally와 겹쳐도 Reservation CAS가 중복을 막는다.
+                // 이 CAS가 취소와 저장의 경계다. 취소가 이겼으면 늦은 completed도 저장하지 않는다.
+                if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
                 val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
                     val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
                     if (!checked.success) refundImage()
@@ -1130,6 +1137,8 @@ class ChatService(
                 )
                 emitter.complete()
             } catch (exception: ChatTurnAiException) {
+                // 자체 error 종료의 onCompletion이 실패를 취소로 다시 분류하지 않도록 종료권을 선점한다.
+                if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
                 // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
                 sendErrorQuietly(emitter, exception.code, exception.message)
                 // AI 응답 생성 실패 분석 이벤트(스펙 §6-4-2-6): 구조화 오류 code를 error_type으로 매핑한다. 저장 전이라 turn_number 미확정.
@@ -1142,6 +1151,8 @@ class ChatService(
                 )
                 emitter.complete()
             } catch (exception: Exception) {
+                // 취소는 error 이벤트·실패 분석 없이 닫는다. 환불과 취소 지표는 finally가 소유한다.
+                if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
                 // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
                 // record가 성공 반환한 뒤의 실패(예: persist DB·트랜잭션 오류·마지막 턴 변경, completed 전송 실패)는 GlobalExceptionHandler를
                 // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
@@ -1167,7 +1178,7 @@ class ChatService(
                 // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                 val persistedOk = persisted.get()
                 // 결과 판정은 이 finally·cancelPendingWorker·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
-                // 워커가 실행된 경우는 여기가 소유하므로 취소 콜백은 RUNNING 상태로 걸러진다.
+                workerState.set(TurnWorkerState.FINISHED)
                 recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
                 if (!persistedOk) {
                     refundImageQuietly()
@@ -1195,9 +1206,8 @@ class ChatService(
             )
             throw rejected
         }
-        futureRef.set(future)
 
-        // future 자체의 취소·실패도 같은 CAS를 사용한다. 정상 완료는 RUNNING이므로 복원하지 않는다.
+        // future 자체의 취소·실패도 같은 CAS를 사용한다. 실행된 워커의 종료는 FINISHED이므로 복원하지 않는다.
         future.whenComplete { _, _ -> cancelPendingWorker() }
 
         return emitter
@@ -1269,7 +1279,7 @@ class ChatService(
     /**
      * 채팅 턴 결과 분포를 `manyak.chat.turn.result`로 집계한다(KNK-811).
      *
-     * outcome은 스토리 완성·스토리라인과 같은 3값이다:
+     * outcome은 다음 값으로 분류한다:
      *   - `success`  : 턴이 저장까지 확정된 호출(`persisted`)
      *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·스케줄 거부
      *   - `cancelled`: 시작 전 취소가 PENDING 소유권을 선점한 호출
@@ -1397,7 +1407,7 @@ class ChatService(
                 ?.let { ChatTurnTargetMainEvent(name = eventNames.aiName(it.name), progressTurns = chat.targetProgressTurns) }
         }
         // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
-        val endings = eligibleEndings(chat, startSetting)
+        val endings = eligibleEndings(chat, startSetting, turnNumber)
         val endingNames = ChatJudgmentNameMapping(endings.map { it.name }, chatName)
 
         AiTurnCall(
@@ -1507,18 +1517,17 @@ class ChatService(
 
     /**
      * 이번 턴 도달 후보 엔딩만 싣는다: 이미 도달한 채팅(reached_ending_id != null)이면 빈 목록(재판정 차단),
-     * 그 외엔 이번 턴(current_turn + 1)이 최소 턴 수를 충족하는 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
+     * 그 외엔 AI 요청의 [turnNumber]가 최소 턴 수를 충족하는 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
      *
      * [startSetting]은 조립 재료(현재 값 또는 마지막 공개 버전 스냅샷)에서 온다. 스냅샷은 활성 엔딩만 담으므로
      * 라이브 조회(`enabled = true`)와 결과가 같다([StoryPublicSnapshotService.capture]).
      */
-    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?): List<EndingSnapshot> {
+    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?, turnNumber: Int): List<EndingSnapshot> {
         // 최초 1회 가드. id가 비어도(엔딩 행 교체로 id 없이 기록된 도달) 이름 스냅샷이 남으므로 둘 다 본다.
         if (chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return emptyList()
         }
-        val turnBeingGenerated = chat.currentTurn + 1
-        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnBeingGenerated }
+        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnNumber }
     }
 
     /** AI completed 결과의 판정 필드를 저장 트랜잭션용 [TurnJudgment]로 변환한다. */

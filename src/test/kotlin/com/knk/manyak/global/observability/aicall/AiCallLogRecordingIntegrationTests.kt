@@ -95,8 +95,9 @@ class AiCallLogRecordingIntegrationTests {
             assertThat(log.turnNumber).isEqualTo(1)
             assertThat(log.latencyMs).isNotNull()
             assertThat(log.completedAt).isNotNull()
-            // stub은 meta를 내려주지 않으므로, AI 응답 meta 컬럼은 비어 있어야 한다(실 AI 연동 전 회귀 가드).
-            assertThat(log.model).isNull()
+            // 스텁도 모델·공급자를 기록하고, 토큰 수 등 미제공 값은 비워 둔다.
+            assertThat(log.model).isEqualTo("stub")
+            assertThat(log.provider).isEqualTo("stub")
             assertThat(log.inputTokenCount).isNull()
             assertThat(log.outputTokenCount).isNull()
             assertThat(log.promptVersions).isNull()
