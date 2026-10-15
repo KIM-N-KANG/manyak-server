@@ -152,5 +152,9 @@ Authorization: Bearer {{accessToken}}
 client.test("이름 표시와 응답 계약", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   client.assert(Array.isArray(response.body), "이름 또는 응답 계약 확인");
+  for (const card of response.body) {
+    client.assert(card.visibility === "PUBLIC" || card.visibility === "PRIVATE",
+      `visibility는 PUBLIC 또는 PRIVATE여야 합니다. actual=${JSON.stringify(card)}`);
+  }
 });
 %}
