@@ -294,3 +294,8 @@ Content-Type: application/json
 {"turnId":{{personaTurnId}},"realtimeImage":false}
 
 # 재생성에도 하늘 및 같은 snapshot 설명이 적용되는지 본문과 AI 요청 관측으로 확인한다.
+
+### [KNK-1659] 재생성 스트림 취소 수동 확인
+# 재생성의 AI 응답 대기 중 HTTP Client 중지로 연결을 종료한 뒤 상세를 다시 조회한다.
+# 서버가 저장 진입 전에 종료를 감지했다면 늦은 completed에도 기존 활성본이 유지되고 차감·체험이 복원된다.
+# 저장 진입이 먼저 이긴 경우 성공한 교체를 유지하며 환불하지 않는다.

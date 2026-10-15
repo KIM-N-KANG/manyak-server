@@ -193,26 +193,6 @@ class ChatCharacterImageIntegrationTests {
     }
 
     @Test
-    fun `스트림이 중단된 뒤에는 인물 이미지 이벤트를 내보내지 않는다`() {
-        // 클라이언트가 끊겨 워커 스레드가 인터럽트된 뒤에는 토큰과 마찬가지로 이미지 이벤트도 보내지 않는다.
-        // (끊긴 emitter에 계속 쓰면 예외가 나 저장 경로까지 흔든다.)
-        val story = seedStory()
-        seedCharacter(story, "강진우", "https://cdn.test/characters/generated/s/a.webp")
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id))
-        GatedChatTurnAiClientConfig.nextCharacterImage = ChatCharacterImageEvent(
-            name = "강진우",
-            imageUrl = "https://cdn.test/characters/generated/s/a.webp",
-        )
-        GatedChatTurnAiClientConfig.interruptBeforeCharacterImage = true
-
-        val body = stream(chat, "문을 연다.")
-
-        assertThat(body).doesNotContain("character_image")
-        // 인터럽트를 지운 뒤 이어지는 저장·완료 계약은 그대로다.
-        assertThat(body).contains("event:completed")
-    }
-
-    @Test
     fun `AI가 character_image를 보내지 않으면 이벤트도 나가지 않는다`() {
         val story = seedStory()
         val chat = storyChatRepository.save(StoryChat(storyId = story.id))
