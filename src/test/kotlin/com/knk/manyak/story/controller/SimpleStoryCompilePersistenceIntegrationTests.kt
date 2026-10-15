@@ -81,6 +81,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         var capturedRequest: AiStoryCompileRequest? = null
         var protagonistName: String? = null
         var tokenTitle: String? = null
+        var startSettingName: String = "시작"
 
         val mainEvents = listOf(
             AiStoryMainEvent("발단", "이야기가 시작된다", "주인공이 길을 나선다"),
@@ -166,7 +167,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
                 return AiStoryCompileResponse(
                     stories = AiStoryMeta(tokenTitle ?: "생성된 스토리", "한 줄 소개", "설명"),
                     storySettings = AiStorySettings("세계관", "캐릭터", "역할", "규칙", protagonistName = protagonistName),
-                    storyStartSettings = AiStoryStartSettings("시작", "상황", "프롤로그"),
+                    storyStartSettings = AiStoryStartSettings(startSettingName, "상황", "프롤로그"),
                     storySuggestedInputs = listOf("추천1", "추천2", "추천3"),
                     storyMainEvents = mainEventsOverride ?: mainEvents,
                     storyEndings = endingsOverride ?: endings,
@@ -234,6 +235,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         capturedRequest = null
         protagonistName = null
         tokenTitle = null
+        startSettingName = "시작"
         endingsOverride = null
         mainEventsOverride = null
         flipSessionToCreatedId = null
@@ -918,4 +920,23 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isCreated
         assertThat(storyRepository.findAll().single().title).isEqualTo("가".repeat(98))
     }
+    @Test
+    fun `컴파일 시작 설정 이름은 백 자로 잘라 저장한다`() {
+        startSettingName = "가".repeat(101)
+
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isCreated
+
+        assertThat(storyStartSettingRepository.findAll().single().name).isEqualTo("가".repeat(100))
+    }
+
+    @Test
+    fun `컴파일 시작 설정 이름 절단은 경계의 이름 토큰과 조사를 제외한다`() {
+        protagonistName = "민우"
+        startSettingName = "가".repeat(98) + "{username}은(는) 출발한다"
+
+        postSimpleStory(persistStorylineWithGenre("판타지")).expectStatus().isCreated
+
+        assertThat(storyStartSettingRepository.findAll().single().name).isEqualTo("가".repeat(98))
+    }
+
 }

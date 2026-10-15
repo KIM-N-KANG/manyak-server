@@ -37,6 +37,22 @@ class StubChatTurnAiClientTests {
         assertTrue(result.choices.isNotEmpty(), "다음 행동 선택지를 포함해야 한다")
     }
 
+    @Test
+    fun `스텁 턴 결과는 모델과 공급자를 stub으로 기록한다`() {
+        val result = client.streamTurn(request(userInput = "진행한다"), onToken = {})
+
+        assertEquals("stub", result.meta?.model)
+        assertEquals("stub", result.meta?.provider)
+    }
+
+    @Test
+    fun `스텁 선택지 결과는 모델과 공급자를 stub으로 기록한다`() {
+        val result = client.generateChoices(request(userInput = "진행한다"), "응답")
+
+        assertEquals("stub", result.meta?.model)
+        assertEquals("stub", result.meta?.provider)
+    }
+
     private fun request(userInput: String) =
         ChatTurnAiRequest(
             genre = "판타지",

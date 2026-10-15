@@ -69,6 +69,7 @@ class StoryService(
     private val imageUrlResolver: ImageUrlResolver,
     private val userRepository: UserRepository,
     private val officialStoryAccount: OfficialStoryAccount,
+    private val authorResolver: StoryAuthorResolver,
 ) {
 
     @Transactional(readOnly = true)
@@ -475,8 +476,7 @@ class StoryService(
             .associate { it.storyId to it.turnCount }
         val likeCountByStoryId = storyLikeRepository.countByStoryIds(map { it.id })
             .associate { it.storyId to it.likeCount }
-        val authorByUserId = userRepository.findAllById(mapNotNull { it.userId }.distinct())
-            .associate { it.id to StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
+        val authorByUserId = authorResolver.resolveAll(mapNotNull { it.userId })
         return map {
             it.toSummaryResponse(
                 turnCount = turnCountByStoryId[it.id] ?: 0,

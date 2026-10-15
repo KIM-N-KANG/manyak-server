@@ -18,6 +18,7 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.StoryCreationRequest
+import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
@@ -243,6 +244,28 @@ class SimpleStoryCreationParentChainIntegrationTests {
         assertThat(row.parentRequestId).isEqualTo(parentId)
         assertThat(row.attemptedParentCreationId).isEqualTo(parentId)
         assertThat(row.parentLinkError).isNull()
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `완성 단계 부모는 소유자와 무관하게 NOT_FOUND로 기록하고 요청은 성공한다`(differentOwner: Boolean) {
+        val ownerId = if (differentOwner) userRepository.save(User(nickname = "부모 소유자")).id else null
+        val parentId = postStorylines(UUID.randomUUID())
+        val parent = rowOf(parentId)
+        val completionId = UUID.randomUUID()
+        creationRequestRepository.saveAndFlush(
+            StoryCreationRequest(
+                requestId = completionId,
+                stage = StoryCreationStage.STORY_COMPLETION,
+                userId = ownerId,
+                deviceIdHash = if (differentOwner) "other-device-hash" else parent.deviceIdHash,
+            ),
+        )
+        val childId = UUID.randomUUID()
+
+        postStorylines(childId, parentCreationId = completionId)
+
+        assertRejected(childId, completionId, ParentLinkError.NOT_FOUND)
     }
 
     private fun assertRejected(childId: UUID, attempted: UUID, expected: ParentLinkError) {

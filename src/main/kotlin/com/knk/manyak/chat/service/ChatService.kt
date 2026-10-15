@@ -1407,7 +1407,7 @@ class ChatService(
                 ?.let { ChatTurnTargetMainEvent(name = eventNames.aiName(it.name), progressTurns = chat.targetProgressTurns) }
         }
         // 요청에 싣는 그 목록 그대로를 저장 판정으로 넘긴다(PR #224 Codex P2).
-        val endings = eligibleEndings(chat, startSetting)
+        val endings = eligibleEndings(chat, startSetting, turnNumber)
         val endingNames = ChatJudgmentNameMapping(endings.map { it.name }, chatName)
 
         AiTurnCall(
@@ -1517,18 +1517,17 @@ class ChatService(
 
     /**
      * 이번 턴 도달 후보 엔딩만 싣는다: 이미 도달한 채팅(reached_ending_id != null)이면 빈 목록(재판정 차단),
-     * 그 외엔 이번 턴(current_turn + 1)이 최소 턴 수를 충족하는 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
+     * 그 외엔 AI 요청의 [turnNumber]가 최소 턴 수를 충족하는 엔딩만. 최소 턴 수 판정은 백엔드 결정 몫(§4-3-10).
      *
      * [startSetting]은 조립 재료(현재 값 또는 마지막 공개 버전 스냅샷)에서 온다. 스냅샷은 활성 엔딩만 담으므로
      * 라이브 조회(`enabled = true`)와 결과가 같다([StoryPublicSnapshotService.capture]).
      */
-    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?): List<EndingSnapshot> {
+    private fun eligibleEndings(chat: StoryChat, startSetting: StartSettingSnapshot?, turnNumber: Int): List<EndingSnapshot> {
         // 최초 1회 가드. id가 비어도(엔딩 행 교체로 id 없이 기록된 도달) 이름 스냅샷이 남으므로 둘 다 본다.
         if (chat.reachedEndingId != null || chat.reachedEndingNameSnapshot != null) {
             return emptyList()
         }
-        val turnBeingGenerated = chat.currentTurn + 1
-        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnBeingGenerated }
+        return startSetting?.endings.orEmpty().filter { it.minTurns <= turnNumber }
     }
 
     /** AI completed 결과의 판정 필드를 저장 트랜잭션용 [TurnJudgment]로 변환한다. */

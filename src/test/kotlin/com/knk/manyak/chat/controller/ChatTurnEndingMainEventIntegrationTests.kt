@@ -69,6 +69,7 @@ class ChatTurnEndingMainEventIntegrationTests {
 
     class JudgingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
+        val lastTraceLink = AtomicReference<AiTraceLink>()
         val lastChoicesRequest = AtomicReference<ChatTurnAiRequest>()
 
         @Volatile
@@ -76,6 +77,7 @@ class ChatTurnEndingMainEventIntegrationTests {
 
         override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult {
             lastChoicesRequest.set(request)
+            lastTraceLink.set(traceLink)
             return ChatChoicesResult(listOf("하나", "둘", "셋"))
         }
         override fun streamTurn(
@@ -85,6 +87,7 @@ class ChatTurnEndingMainEventIntegrationTests {
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
             lastRequest.set(request)
+            lastTraceLink.set(traceLink)
             onToken("응답")
             return result
         }
@@ -170,6 +173,37 @@ class ChatTurnEndingMainEventIntegrationTests {
         // 완결된 '발단'이 story_chat_main_events에 기록된다.
         val occurred = storyChatMainEventRepository.findByChatId(chat.id)
         assertThat(occurred.map { it.mainEventId }).containsExactly(eventBaldan.id)
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `재생성과 선택지는 현재 턴 엔딩만 싣고 새 턴은 다음 턴 엔딩도 싣는다`(choicesOnly: Boolean) {
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, startSettingId = startSetting.id))
+        storyEndingRepository.save(
+            StoryEnding(startSetting = startSetting, name = "다음 턴", minTurns = 2, achievementCondition = "조건", epilogue = "끝", sortOrder = 3),
+        )
+        streamGuest(chat.publicId.toString(), "첫 턴")
+        assertThat(judgingAiClient.lastTraceLink.get().turnNumber).isEqualTo(1)
+        assertThat(judgingAiClient.lastRequest.get().endings.map { it.name }).containsExactly("해피")
+        val turn = chatService.getChatDetail(chat.publicId.toString(), null).turns.single()
+
+        val captured = if (choicesOnly) {
+            chatService.generateChoices(chat.publicId.toString(), turn.id, null)
+            judgingAiClient.lastChoicesRequest.get()
+        } else {
+            restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/regenerate/stream")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+                .body("""{"turnId":${turn.id},"realtimeImage":false}""")
+                .exchange().expectStatus().isOk.expectBody(String::class.java)
+            judgingAiClient.lastRequest.get()
+        }
+        assertThat(judgingAiClient.lastTraceLink.get().turnNumber).isEqualTo(1)
+        assertThat(captured.endings.map { it.name }).containsExactly("해피")
+
+        streamGuest(chat.publicId.toString(), "다음 턴")
+        assertThat(judgingAiClient.lastTraceLink.get().turnNumber).isEqualTo(2)
+        assertThat(judgingAiClient.lastRequest.get().endings.map { it.name }).containsExactly("해피", "다음 턴")
     }
 
     @Test

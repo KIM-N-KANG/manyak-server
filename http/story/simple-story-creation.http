@@ -1010,7 +1010,7 @@ Accept: application/json
 %}
 
 ### ── [KNK-755] 스토리라인 재생성 체인 쓰기 검증 ──
-### parentCreationId는 더 이상 pass-through가 아닙니다. 서버가 ①자기참조 아님 ②존재 ③소유 연속성을 검증해
+### parentCreationId는 더 이상 pass-through가 아닙니다. 서버가 ①자기참조 아님 ②스토리라인 단계로 존재 ③소유 연속성을 검증해
 ### **통과한 값만** X-Manyak-Parent-Creation-Id 헤더로 내보내고 story_creation_requests.parent_request_id에 저장합니다.
 ### 실패해도 400이 아니라 201입니다(관측이 비즈니스를 막지 않는다). 대신 보낸 원값과 사유가 행에 남습니다.
 ###
@@ -1313,5 +1313,35 @@ Content-Type: application/json
     client.test("비활성 화풍의 완료 요청도 같은 결과를 반환한다", () => {
         client.assert(response.status === 201, `expected=201 actual=${response.status}`);
         client.assert(response.body.id === client.global.get("artReplayStoryId"), `스토리 불일치: expected=${client.global.get("artReplayStoryId")} actual=${response.body.id}`);
+    });
+%}
+
+### [KNK-1660] 시작 설정 이름 길이·토큰 경계 수동 확인
+# 2번 스토리라인 준비 후 7번 완성 요청을 실행할 때 테스트용 AI compile 응답의 story_start_settings.name을
+# '가' 101자로 설정하면 201로 성공하고 startSettings[0].name에는 '가' 100자가 저장되어야 합니다.
+# 새 진행을 준비하고 protagonist_name='민우', 이름='가' 98자 + '{username}은(는) 출발한다'로 응답하면
+# 토큰과 조사를 남기지 않고 '가' 98자만 저장되어야 합니다. 실제 AI가 이 값을 반환하도록 제어해야 재현됩니다.
+
+### [KNK-1660] 완성 단계 requestId를 부모로 보내도 201, 연결은 NOT_FOUND
+# 1번 태그 조회 후 실행합니다. completionParentRequestId에는 같은 기기에서 완료한 STORY_COMPLETION 요청 UUID를 넣습니다.
+# DB의 새 자식 행은 parent_request_id=NULL, attempted_parent_creation_id=입력 UUID, parent_link_error=NOT_FOUND여야 합니다.
+# AI 호출에는 X-Manyak-Parent-Creation-Id가 없어야 합니다. 검증용 UUID를 바꾸면 새 요청으로 재검증합니다.
+@completionParentRequestId = PUT_A_COMPLETED_STORY_COMPLETION_REQUEST_UUID_HERE
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {},
+  "isRegenerated": true,
+  "parentCreationId": "{{completionParentRequestId}}"
+}
+
+> {%
+    client.test("완성 단계 부모 연결이 실패해도 생성은 성공한다", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status} body=${JSON.stringify(response.body)}`);
     });
 %}

@@ -22,7 +22,7 @@ class StorySearchIndexListener(private val indexer: StorySearchIndexer) {
         try {
             indexer.index(event.storyId)
         } catch (ex: Exception) {
-            log.warn("스토리 색인 실패 (storyId={}, error={})", event.storyId, ex.javaClass.simpleName)
+            log.warn("스토리 색인 실패 (error={})", ex.javaClass.simpleName)
         }
     }
 }
