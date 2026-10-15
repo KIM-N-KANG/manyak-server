@@ -1,6 +1,7 @@
 package com.knk.manyak.chat.client
 
 import com.knk.manyak.global.observability.AiTraceLink
+import com.knk.manyak.global.observability.aicall.AiCallMeta
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -26,6 +27,7 @@ class StubChatTurnAiClient : ChatTurnAiClient {
         return ChatTurnAiResult(
             aiOutput = aiOutput,
             choices = buildChoices(),
+            meta = stubMeta(),
         )
     }
 
@@ -33,7 +35,9 @@ class StubChatTurnAiClient : ChatTurnAiClient {
         request: ChatTurnAiRequest,
         aiOutput: String,
         traceLink: AiTraceLink,
-    ): ChatChoicesResult = ChatChoicesResult(choices = buildChoices())
+    ): ChatChoicesResult = ChatChoicesResult(choices = buildChoices(), meta = stubMeta())
+
+    private fun stubMeta(): AiCallMeta = AiCallMeta(model = "stub", provider = "stub")
 
     private fun buildAiOutput(request: ChatTurnAiRequest): String {
         val echoed = request.userInput.trim().take(USER_INPUT_PREVIEW_LENGTH)

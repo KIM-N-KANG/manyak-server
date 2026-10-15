@@ -65,7 +65,9 @@ class StorySearchOpenSearchTests {
                         Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
                             visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
                     })
-                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java))
+                    val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
+                    `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
+                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
                     val first = service.search("왕국", 1, null)
                     assertEquals(documents[0].toSummary(isOriginal = false), first.items.single())
                     assertNotNull(first.nextCursor)
