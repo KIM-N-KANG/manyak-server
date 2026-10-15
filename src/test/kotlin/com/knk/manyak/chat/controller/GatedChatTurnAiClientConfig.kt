@@ -54,15 +54,7 @@ class GatedChatTurnAiClientConfig {
             turnFailure?.let { throw it }
             onToken("생성 ")
             // 인물 이미지 이벤트는 본문 토큰 사이에 끼어든다(스펙 §4-3-3의 이벤트 순서).
-            if (interruptBeforeCharacterImage) {
-                // 클라이언트가 끊겨 워커가 인터럽트된 상황 재현. 이벤트 발행 뒤 플래그를 지워
-                // 이후 저장·완료 경로는 정상으로 흐르게 한다(검증 대상은 이미지 이벤트 skip 하나다).
-                Thread.currentThread().interrupt()
-                nextCharacterImage?.let(onCharacterImage)
-                Thread.interrupted()
-            } else {
-                nextCharacterImage?.let(onCharacterImage)
-            }
+            nextCharacterImage?.let(onCharacterImage)
             onToken("된 본문입니다.")
             if (realtimeEnabled) {
                 val url = request.imageSlots.firstOrNull()?.publicUrl ?: "https://cdn.test/characters/parent.webp"
@@ -119,11 +111,6 @@ class GatedChatTurnAiClientConfig {
         @JvmStatic
         var nextCharacterImage: ChatCharacterImageEvent? = null
 
-        /** true면 인물 이미지 이벤트를 발행하는 순간에만 워커 스레드를 인터럽트한다(연결 끊김 재현). */
-        @Volatile
-        @JvmStatic
-        var interruptBeforeCharacterImage: Boolean = false
-
         @JvmStatic
         fun reset() {
             gatedInput = null
@@ -134,7 +121,6 @@ class GatedChatTurnAiClientConfig {
             turnFailure = null
             realtimeEnabled = false
             realtimeExists = false
-            interruptBeforeCharacterImage = false
             gate = CountDownLatch(1)
             entered = CountDownLatch(1)
         }
