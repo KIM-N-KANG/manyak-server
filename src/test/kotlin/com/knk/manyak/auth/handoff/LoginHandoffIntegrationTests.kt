@@ -52,6 +52,34 @@ class LoginHandoffIntegrationTests {
         databaseCleaner.cleanAll()
     }
 
+    @Autowired private lateinit var objectMapper: tools.jackson.databind.ObjectMapper
+
+    @Test
+    fun `이관 시간만큼 소비권이 결과보다 먼저 만료되지 않는다`() {
+        val migration = org.mockito.Mockito.mock(com.knk.manyak.migration.service.GuestDataMigrationService::class.java)
+        val ids = listOf(UUID.randomUUID().toString())
+        org.mockito.Mockito.`when`(migration.migrate(1L, com.knk.manyak.migration.dto.MigrationRequest(storyIds = ids, chatIds = emptyList())))
+            .thenAnswer {
+                Thread.sleep(250)
+                com.knk.manyak.migration.dto.MigrationResponse(stories = emptyList(), chats = emptyList())
+            }
+        val service = LoginHandoffService(redisTemplate, objectMapper, migration, Duration.ofMinutes(30), Duration.ofMillis(500))
+        val before = handoffKeys()
+        val created = service.create(LoginHandoffCreateRequest(storyIds = ids, callbackPath = "/", sourceApp = "kakaotalk"), "test-device")
+        val key = (handoffKeys() - before).single()
+        service.consume(created.handoffCode, service.find(created.handoffCode)!!, 1L)
+        // Redis 한 실행 시점에서 두 TTL을 비교하므로 스레드 스케줄링에 따른 대기 오차가 없다.
+        val delta = redisTemplate.execute(
+            org.springframework.data.redis.core.script.DefaultRedisScript<Long>(
+                "return redis.call('PTTL', KEYS[1]) - redis.call('PTTL', KEYS[2])", Long::class.javaObjectType,
+            ),
+            listOf(key, key.replace("login_handoff:", "login_handoff_claim:")),
+        )
+        assertThat(delta).isZero()
+        service.land(created.handoffCode)
+        assertThat(service.status(created.handoffCode).status).isEqualTo(LoginHandoffStatus.MIGRATED)
+    }
+
     // ---- 생성 ----
 
     @Test

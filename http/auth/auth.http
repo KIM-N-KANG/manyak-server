@@ -28,13 +28,18 @@ GET {{baseUrl}}/actuator/health
 Accept: application/json
 
 ### 1. (에러) 토큰 없이 /me → 401
-# Authorization 헤더가 없으면 리소스 서버가 Bearer 챌린지(401)로 응답합니다.
+# 인증 실패는 고정 문구와 공통 JSON(401)으로 응답합니다.
 GET {{baseUrl}}/api/v1/auth/me
 Accept: application/json
 
 > {%
     client.test("토큰 없는 /me 는 401이다", () => {
         client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+        const b = response.body;
+        client.assert(b.status === 401 && b.code === "UNAUTHORIZED", `공통 오류 코드가 아닙니다. actual=${JSON.stringify(b)}`);
+        client.assert(b.message === "유효하지 않은 인증입니다.", `인증 문구가 다릅니다. actual=${b.message}`);
+        client.assert(b.timestamp && b.path === "/api/v1/auth/me" && Array.isArray(b.details) && b.details.length === 0,
+            `공통 오류 형식이 다릅니다. actual=${JSON.stringify(b)}`);
     });
 %}
 
@@ -47,6 +52,11 @@ Accept: application/json
 > {%
     client.test("위조 토큰 /me 는 401이다", () => {
         client.assert(response.status === 401, `401이 아닙니다. actual=${response.status}`);
+        const b = response.body;
+        client.assert(b.status === 401 && b.code === "UNAUTHORIZED", `공통 오류 코드가 아닙니다. actual=${JSON.stringify(b)}`);
+        client.assert(b.message === "유효하지 않은 인증입니다.", `인증 문구가 다릅니다. actual=${b.message}`);
+        client.assert(b.timestamp && b.path === "/api/v1/auth/me" && Array.isArray(b.details) && b.details.length === 0,
+            `공통 오류 형식이 다릅니다. actual=${JSON.stringify(b)}`);
     });
 %}
 
@@ -403,3 +413,41 @@ Authorization: Bearer {{unconsentedAccess}}
 # 장르 API는 KNK-1537 구현 전에는 404일 수 있지만 CONSENT_REQUIRED는 아니어야 합니다.
 GET {{baseUrl}}/api/v1/stories/genres?q=판타지
 Authorization: Bearer {{unconsentedAccess}}
+
+### 인증 정합 1. 미지원 소셜 제공자 — 인증 헤더 없이 400
+POST {{baseUrl}}/api/v1/auth/social/apple
+Content-Type: application/json
+
+{ "idToken": "unsupported-provider-proof" }
+
+> {%
+    client.test("미지원 제공자는 인증 요구 없이 400이다", () => {
+        client.assert(response.status === 400 && response.body.code === "BAD_REQUEST",
+            `400 BAD_REQUEST가 아닙니다. actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 인증 정합 2. 미지원 소셜 제공자 — 잘못된 access 헤더도 무시하고 400
+POST {{baseUrl}}/api/v1/auth/social/unknown
+Authorization: Bearer invalid-token
+Content-Type: application/json
+
+{ "idToken": "unsupported-provider-proof" }
+
+> {%
+    client.test("공개 소셜 경로는 access 헤더를 무시한다", () => {
+        client.assert(response.status === 400 && response.body.code === "BAD_REQUEST",
+            `400 BAD_REQUEST가 아닙니다. actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 인증 정합 3. 페르소나 인증 실패 — 공통 문구
+GET {{baseUrl}}/api/v1/users/me/personas
+Authorization: Bearer invalid-token
+
+> {%
+    client.test("페르소나도 공통 인증 오류를 반환한다", () => {
+        client.assert(response.status === 401 && response.body.code === "UNAUTHORIZED" &&
+            response.body.message === "유효하지 않은 인증입니다.", `공통 401이 아닙니다. actual=${JSON.stringify(response.body)}`);
+    });
+%}

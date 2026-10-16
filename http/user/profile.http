@@ -249,3 +249,18 @@ Content-Type: application/json
         client.assert(response.status === 400, `actual=${response.status}`);
     });
 %}
+
+### KNK-1670: 사용자 행이 없는 유효 토큰은 프리셋 조회도 401
+# 격리된 로컬 DB에서만 준비: 별도 테스트 회원으로 로그인한 뒤 해당 users 행의 public_id를 다른 UUID로 변경하고,
+# 아래 토큰을 해당 회원의 아직 만료되지 않은 access token으로 교체하세요.
+# 정지 회원의 조회는 200, 탈퇴 회원의 조회는 401입니다.
+@missingUserAccessToken = REPLACE_WITH_VALID_TOKEN_FOR_MISSING_USER
+GET {{baseUrl}}/api/v1/profile-presets
+Authorization: Bearer {{missingUserAccessToken}}
+
+> {%
+    client.test("회원 부재는 공통 인증 실패다", () => {
+        client.assert(response.status === 401, `actual=${response.status}`);
+        client.assert(response.body.message === "유효하지 않은 인증입니다.", `actual=${response.body.message}`);
+    });
+%}

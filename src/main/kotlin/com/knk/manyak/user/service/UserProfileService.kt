@@ -1,9 +1,11 @@
 package com.knk.manyak.user.service
 
+import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse
+import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.service.MeResponseAssembler
 import com.knk.manyak.auth.social.ProfileImagePresetService
@@ -28,26 +30,34 @@ import org.springframework.web.server.ResponseStatusException
  * 안에서 잡으면 두 가지가 걸린다(Codex 리뷰 P2):
  * - 위반이 flush가 아니라 **커밋 시점**에 드러나면 트랜잭션 안의 try/catch는 아예 지나가지 못한다 → 500.
  * - 예외를 흡수하고 정상 종료하는 형태로 바뀌면 rollback-only로 오염된 트랜잭션이 커밋에서 터진다.
- * 경계 밖에서 잡으면 두 경우가 같은 409로 모인다.
+ * 경계 밖에서 재조회해 닉네임 충돌이 확인되면 409로 바꾼다.
  */
 @Service
 class UserProfileService(
     private val profileUpdater: ProfileUpdater,
+    private val userRepository: UserRepository,
     private val profileImagePresetService: ProfileImagePresetService,
 ) {
 
-    fun updateProfile(userId: Long, request: UpdateProfileRequest): MeResponse =
+    fun updateProfile(userId: Long, request: UpdateProfileRequest): MeResponse = SocialAuthPrivacyFilter.safely {
         try {
             profileUpdater.update(userId, request)
         } catch (exception: DataIntegrityViolationException) {
-            // 사전 조회와 커밋 사이에 다른 요청이 같은 정규화 키를 차지했다. 유니크 인덱스(V75)가 최종
-            // 방어선이고, 그 위반은 사용자에게 500이 아니라 "이미 쓰는 닉네임"으로 보여야 한다.
-            throw nicknameTaken(exception)
+            // 롤백된 트랜잭션 밖에서 실제 닉네임 충돌인지 확인한다. DB 원문은 로그에 싣지 않는다.
+            if (request.nickname != null && userRepository.existsByNicknameKeyExcludingSelf(nicknameKeyOf(request.nickname), userId)) {
+                throw nicknameTaken()
+            }
+            throw exception
         }
+    }
 
-    /** 프리셋 목록은 메모리에서만 읽는다(DB를 만지지 않아 트랜잭션이 필요 없다). */
-    fun listPresets(): List<ProfilePresetResponse> =
-        profileImagePresetService.presetKeys().mapNotNull { key ->
+    /** 프리셋 선택지는 회원 전용이다. 탈퇴·부재는 401이며 정지 회원도 조회할 수 있다. */
+    fun listPresets(userId: Long): List<ProfilePresetResponse> {
+        val user = userRepository.findById(userId).orElse(null)
+        if (user == null || user.status == UserStatus.DELETED) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        }
+        return profileImagePresetService.presetKeys().mapNotNull { key ->
             profileImagePresetService.imageUrlFor(key)?.let { url ->
                 ProfilePresetResponse(
                     key = key,
@@ -56,6 +66,7 @@ class UserProfileService(
                 )
             }
         }
+    }
 }
 
 /**
@@ -118,9 +129,8 @@ class ProfileUpdater(
 }
 
 /** 정규화 기준으로 이미 쓰는 닉네임(KNK-1147). 사전 조회와 유니크 위반 양쪽이 같은 코드로 모인다. */
-private fun nicknameTaken(cause: Throwable? = null) = CodedResponseStatusException(
+private fun nicknameTaken() = CodedResponseStatusException(
     HttpStatus.CONFLICT,
     ApiErrorCodes.NICKNAME_TAKEN,
     "이미 사용 중인 닉네임입니다.",
-    cause,
 )

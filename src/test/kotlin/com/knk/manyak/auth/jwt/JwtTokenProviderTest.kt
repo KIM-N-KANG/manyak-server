@@ -38,6 +38,24 @@ class JwtTokenProviderTest {
     ) = JwtTokenProvider(props, clock)
 
     @Test
+    fun `32바이트 미만 키는 토큰 사용 전 생성 시점에 거절한다`() {
+        for (key in listOf("", "a".repeat(31), "가".repeat(10))) {
+            assertThatThrownBy { provider(properties(key)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("JWT 대칭키는 UTF-8 기준 32바이트 이상이어야 합니다.")
+        }
+    }
+
+    @Test
+    fun `32바이트와 UTF-8 32바이트 이상 키로 발급하고 검증한다`() {
+        for (key in listOf("a".repeat(32), "가".repeat(11))) {
+            val provider = provider(properties(key))
+            val id = UUID.randomUUID()
+            assertThat(provider.jwtDecoder().decode(provider.issueAccessToken(id)).subject).isEqualTo(id.toString())
+        }
+    }
+
+    @Test
     fun `발급한 access 토큰은 같은 secret의 JwtDecoder로 검증되고 sub와 iss를 담는다`() {
         val provider = provider()
         val decoder: JwtDecoder = provider.jwtDecoder()

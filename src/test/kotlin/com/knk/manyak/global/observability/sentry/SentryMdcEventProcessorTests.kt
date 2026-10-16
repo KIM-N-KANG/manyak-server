@@ -33,32 +33,51 @@ class SentryMdcEventProcessorTests {
         assertNull(event.request!!.headers?.get("X-Manyak-Consent-Token"))
     }
 
-    @Test
-    fun `명시한 새 인증 path만 event와 transaction의 요청 필드를 제거한다`() {
-        for (path in listOf("google", "kakao", "complete")) {
-            for (url in listOf("https://api.example.com/api/v1/auth/social/$path?source=test", "/api/v1/auth/social/$path")) {
-                assertRequestPolicy(url, scrub = true)
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = [
+        "/api/v1/auth/social/google", "/api/v1/auth/social/kakao", "/api/v1/auth/social/complete",
+        "/api/v1/auth/login/google", "/api/v1/auth/login/kakao",
+        "/api/v1/auth/token/refresh", "/api/v1/auth/logout",
+        "/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status",
+        "/api/v1/auth/links/reauth", "/api/v1/auth/links/google", "/api/v1/auth/links/kakao",
+        "/api/v1/auth/social/unknown", "/api/v1/auth/links/unknown",
+        "/api/v1/auth/links/KaKaO",
+    ])
+    fun `스펙 5-4-8 인증 경로의 event와 transaction에서 요청 필드 4종을 제거한다`(path: String) {
+        for (url in listOf("https://api.example.com$path?source=test", path)) {
+            assertRequestPolicy(url, scrub = true)
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["GET", "POST"])
+    fun `핸드오프는 GET과 메서드 누락만 정제하고 POST는 event와 transaction 모두 보존한다`(method: String?) {
+        for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
+            for (url in listOf(path, "https://api.example.com$path")) {
+                assertRequestPolicy(url, scrub = method == null || method == "GET", method = method)
             }
         }
     }
 
     @Test
-    fun `일반 API 기존 로그인 및 URL 일부만 일치하는 요청의 관측 필드는 보존한다`() {
+    fun `스토리 채팅과 URL 일부만 일치하는 일반 요청의 관측 필드는 보존한다`() {
         for (url in listOf(
             "https://api.example.com/api/v1/stories",
-            "https://api.example.com/api/v1/auth/login/google",
-            "https://api.example.com/api/v1/auth/login/kakao",
+            "https://api.example.com/api/v1/chats",
+            "https://api.example.com/api/v1/auth/me",
             "https://api.example.com/api/v1/stories?next=/api/v1/auth/social/complete",
             "https://api.example.com/api/v1/auth/social/complete/extra",
-            "https://api.example.com/api/v1/auth/social/unknown",
+            "https://api.example.com/api/v1/auth/links/kakao/extra",
             "https://api.example.com/prefix/api/v1/auth/social/google",
             "not a valid URI /api/v1/auth/social/complete",
         )) assertRequestPolicy(url, scrub = false)
     }
 
-    private fun assertRequestPolicy(url: String, scrub: Boolean) {
+    private fun assertRequestPolicy(url: String, scrub: Boolean, method: String? = null) {
         fun request() = io.sentry.protocol.Request().apply {
             this.url = url
+            this.method = method
             data = "test-body"
             headers = mapOf("X-Test" to "test-header")
             cookies = "test-cookie"
@@ -85,6 +104,7 @@ class SentryMdcEventProcessorTests {
         assertEquals(mapOf("session_id" to "existing-session"), transaction.contexts["identity"])
         for (actual in listOf(event.request!!, transaction.request!!)) {
             assertEquals(url, actual.url)
+            assertEquals(method, actual.method)
             assertEquals(if (scrub) null else "test-body", actual.data)
             assertEquals(if (scrub) null else "test-cookie", actual.cookies)
             assertEquals(if (scrub) null else "test-query", actual.queryString)

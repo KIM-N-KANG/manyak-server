@@ -169,7 +169,11 @@ class LoginHandoffService(
         val json = objectMapper.writeValueAsString(consumed)
         repeat(TERMINAL_WRITE_ATTEMPTS) { attempt ->
             try {
-                redisTemplate.opsForValue().set(keyFor(code), json, consumedTtl)
+                redisTemplate.execute(
+                    PERSIST_CONSUMED_SCRIPT,
+                    listOf(keyFor(code), claimKeyFor(code)),
+                    json, consumedTtl.toMillis().toString(), CLAIMED,
+                )
                 return
             } catch (ex: DataAccessException) {
                 if (attempt == TERMINAL_WRITE_ATTEMPTS - 1) throw ex
@@ -249,6 +253,18 @@ class LoginHandoffService(
         const val CLAIMED = "1"
         const val CODE_BYTES = 32 // 256bit
         const val TERMINAL_WRITE_ATTEMPTS = 3
+
+        // 결과와 소비권을 같은 시점·같은 TTL로 저장해 종료 결과가 살아 있는 동안 착지를 차단한다.
+        val PERSIST_CONSUMED_SCRIPT = DefaultRedisScript<Long>().apply {
+            setResultType(Long::class.java)
+            setScriptText(
+                """
+                redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+                redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[2])
+                return 1
+                """.trimIndent(),
+            )
+        }
 
         // 소비권(KEYS[2])이 없을 때만 남은 PTTL을 유지하며 값을 교체한다.
         // 소비권이 이미 나갔으면 종료 상태를 되돌리게 되므로 쓰지 않고, 이미 만료(또는 무TTL)여도 쓰지 않는다.

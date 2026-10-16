@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.social
 
+import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
@@ -66,10 +67,16 @@ class SocialLoginService(
         idToken: String,
         deviceId: String? = null,
         handoffCode: String? = null,
-    ): TokenResponse {
+    ): TokenResponse = SocialAuthPrivacyFilter.safely {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
         // validation, provider 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
-        val info = verifyIdentity(provider, idToken)
+        val info = try {
+            verifyIdentity(provider, idToken)
+        } catch (e: ResponseStatusException) {
+            // 새 소셜 인증과 같이 라이브러리 원인을 제거한다. 분석 분류는 verifyIdentity에서 이미 완료됐다.
+            // 제공자별 기존 상태·문구는 유지하되 원문의 토큰·클레임이 전역 4xx 로그에 남지 않게 한다.
+            throw ResponseStatusException(e.statusCode, e.reason)
+        }
         // 인앱 브라우저에서 넘어온 로그인이면 핸드오프에 보관된 원본 디바이스 ID가 요청 헤더보다 우선한다(스펙 §4-3-5).
         // 외부 브라우저의 새 디바이스 ID로 시드하면 인앱에서 쓴 게스트 사용량이 리셋돼 파밍 우회로가 열린다.
         // 무효·만료 코드는 예외가 아니라 null이므로 헤더 폴백으로 로그인은 정상 진행한다.
@@ -77,7 +84,7 @@ class SocialLoginService(
         // 소비된 핸드오프는 디바이스 ID를 비워 보관하므로(보관 규칙), 빈 값은 "헤더 없음"이 아니라 폴백 대상이다.
         // 빈 문자열을 그대로 넘기면 시드가 우회 시도로 오인해 소진 시드를 비가역 확정한다(§4-3-7).
         val effectiveDeviceId = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
-        return try {
+        try {
             val (user, isNewUser) = findOrCreateUser(provider, info)
             finishLogin(provider, user, isNewUser, effectiveDeviceId, handoffCode, handoff)
         } catch (e: Exception) {

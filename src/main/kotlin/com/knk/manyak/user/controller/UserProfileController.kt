@@ -96,7 +96,8 @@ class UserProfileController(
         ],
     )
     @GetMapping("/profile-presets")
-    fun listPresets(): List<ProfilePresetResponse> = userProfileService.listPresets()
+    fun listPresets(@CurrentUserId userId: Long?): List<ProfilePresetResponse> =
+        userProfileService.listPresets(requireUser(userId))
 
     // /users/me/** 는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
     private fun requireUser(userId: Long?): Long =
