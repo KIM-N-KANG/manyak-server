@@ -33,24 +33,31 @@ class SentryMdcEventProcessorTests {
         assertNull(event.request!!.headers?.get("X-Manyak-Consent-Token"))
     }
 
-    @Test
-    fun `명시한 새 인증 path만 event와 transaction의 요청 필드를 제거한다`() {
-        for (path in listOf("google", "kakao", "complete")) {
-            for (url in listOf("https://api.example.com/api/v1/auth/social/$path?source=test", "/api/v1/auth/social/$path")) {
-                assertRequestPolicy(url, scrub = true)
-            }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = [
+        "/api/v1/auth/social/google", "/api/v1/auth/social/kakao", "/api/v1/auth/social/complete",
+        "/api/v1/auth/login/google", "/api/v1/auth/login/kakao",
+        "/api/v1/auth/token/refresh", "/api/v1/auth/logout",
+        "/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status",
+        "/api/v1/auth/links/reauth", "/api/v1/auth/links/google", "/api/v1/auth/links/kakao",
+        "/api/v1/auth/social/unknown", "/api/v1/auth/links/unknown",
+        "/api/v1/auth/links/KaKaO",
+    ])
+    fun `스펙 5-4-8 인증 경로의 event와 transaction에서 요청 필드 4종을 제거한다`(path: String) {
+        for (url in listOf("https://api.example.com$path?source=test", path)) {
+            assertRequestPolicy(url, scrub = true)
         }
     }
 
     @Test
-    fun `일반 API 기존 로그인 및 URL 일부만 일치하는 요청의 관측 필드는 보존한다`() {
+    fun `스토리 채팅과 URL 일부만 일치하는 일반 요청의 관측 필드는 보존한다`() {
         for (url in listOf(
             "https://api.example.com/api/v1/stories",
-            "https://api.example.com/api/v1/auth/login/google",
-            "https://api.example.com/api/v1/auth/login/kakao",
+            "https://api.example.com/api/v1/chats",
+            "https://api.example.com/api/v1/auth/me",
             "https://api.example.com/api/v1/stories?next=/api/v1/auth/social/complete",
             "https://api.example.com/api/v1/auth/social/complete/extra",
-            "https://api.example.com/api/v1/auth/social/unknown",
+            "https://api.example.com/api/v1/auth/links/kakao/extra",
             "https://api.example.com/prefix/api/v1/auth/social/google",
             "not a valid URI /api/v1/auth/social/complete",
         )) assertRequestPolicy(url, scrub = false)

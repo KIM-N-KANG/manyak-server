@@ -42,7 +42,7 @@ class AccountLinkIntegrationTests {
     @Autowired
     private lateinit var userRepository: UserRepository
 
-    @Autowired
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private lateinit var socialAccountRepository: SocialAccountRepository
 
     @Autowired
@@ -50,6 +50,57 @@ class AccountLinkIntegrationTests {
 
     @Autowired private lateinit var linkCodes: LinkCodeStore
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+
+    @Autowired private lateinit var jwtTokenProvider: com.knk.manyak.auth.jwt.JwtTokenProvider
+
+    @Test
+    fun `두 활성 회원이 같은 소셜 계정을 동시 연동하면 승자만 저장하고 코드를 소비한다`() {
+        val users = listOf("동시연동첫회원", "동시연동둘째회원").map {
+            userRepository.save(com.knk.manyak.auth.entity.User(nickname = it))
+        }
+        val tokens = users.map { jwtTokenProvider.issueAccessToken(it.publicId) }
+        val codes = users.map { linkCodes.issue(it.id).linkCode }
+        val provider = SocialProvider.KAKAO
+        val sub = "shared-concurrent-link-sub"
+        val barrier = java.util.concurrent.CyclicBarrier(2)
+        // 신원 전역 조회와 제공자 사전 조회가 두 요청 모두 빈 결과를 읽은 뒤 실제 INSERT로 진입한다.
+        // 저장·트랜잭션·유니크 제약은 실제 H2를 사용하고 예외를 주입하지 않는다.
+        val repositoryAnswer = org.mockito.Mockito.mockingDetails(socialAccountRepository)
+            .mockCreationSettings.defaultAnswer
+        for (user in users) {
+            org.mockito.Mockito.doAnswer { invocation ->
+                val result = repositoryAnswer.answer(invocation)
+                assertThat(result).isNull()
+                barrier.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                result
+            }.`when`(socialAccountRepository).findByUserIdAndProvider(user.id, provider)
+        }
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val futures = users.indices.map { index ->
+                executor.submit<Pair<Int, Map<*, *>?>> {
+                    val response = linkExchange(tokens[index], "kakao", sub, codes[index])
+                        .expectBody(Map::class.java).returnResult()
+                    response.status.value() to response.responseBody
+                }
+            }
+            val results = futures.map { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            assertThat(results.map { it.first }).containsExactlyInAnyOrder(201, 409)
+            val winner = results.indexOfFirst { it.first == 201 }
+            val loser = 1 - winner
+            assertThat(results[loser].second!!["code"]).isEqualTo("SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER")
+            assertThat(socialAccountRepository.findAll()).hasSize(1)
+            val account = socialAccountRepository.findAll().single()
+            assertThat(account.userId).isEqualTo(users[winner].id)
+            assertThat(account.provider).isEqualTo(provider)
+            assertThat(account.providerUserId).isEqualTo(sub)
+            assertThat(linkCodes.findUserId(codes[winner])).isNull()
+            assertThat(linkCodes.findUserId(codes[loser])).isEqualTo(users[loser].id)
+            // 초기 조회 2회 + 패자의 롤백 완료 후 재조회 1회: 유니크 위반 복구 분기까지 통과했다.
+            org.mockito.Mockito.verify(socialAccountRepository, org.mockito.Mockito.times(3))
+                .findByProviderAndProviderUserId(provider, sub)
+        } finally { executor.shutdownNow() }
+    }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value = UserStatus::class, names = ["DELETED", "SUSPENDED"])
