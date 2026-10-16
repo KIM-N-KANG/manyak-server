@@ -44,6 +44,8 @@ class ChatImageFailureIntegrationTests {
     @Autowired private lateinit var chats: StoryChatRepository
     @Autowired private lateinit var messages: StoryMessageRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
+    private lateinit var originalScheduler: com.knk.manyak.chat.service.ChatGenerationDeadlines
+    private lateinit var deadline: Runnable
     private lateinit var originalExecutor: Executor
     private lateinit var observedTrials: GuestTrialLimitService
     private val queued = AtomicReference<Runnable>()
@@ -120,10 +122,10 @@ class ChatImageFailureIntegrationTests {
         assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
         assertThat(refunds().map { it.idempotencyKey }.distinct()).hasSize(2)
     }
-    @Test fun `유료 큐 취소는 두 차감 행을 각각 한번 환불한다`() {
+    @Test fun `유료 큐 생성 마감은 두 차감 행을 각각 한번 환불한다`() {
         val user = paidMember()
         val emitter = paidStart(user)
-        callback(emitter, "timeoutCallback")
+        deadline.run()
         callback(emitter, "completionCallback")
         queued.get().run()
         assertThat(wallet.balanceOf(user)).isEqualTo(100)
@@ -160,7 +162,7 @@ class ChatImageFailureIntegrationTests {
         assertThat(spends()).isEmpty()
     }
 
-    @Test fun `큐 대기 중 취소하면 대기 관측을 정확히 한번 닫는다`() {
+    @Test fun `큐 대기 중 생성 마감이면 대기 관측을 정확히 한번 닫는다`() {
         val registry = io.micrometer.observation.ObservationRegistry.create()
         val stopped = mutableListOf<io.micrometer.observation.Observation.Context>()
         registry.observationConfig().observationHandler(object : io.micrometer.observation.ObservationHandler<io.micrometer.observation.Observation.Context> {
@@ -172,12 +174,12 @@ class ChatImageFailureIntegrationTests {
         try {
             val emitter = start()
             assertThat(stopped.filter { it.name == "chat.turn.queue" }).isEmpty()
-            callback(emitter, "timeoutCallback")
+            deadline.run()
             callback(emitter, "completionCallback")
             queued.get().run()
             val queues = stopped.filter { it.name == "chat.turn.queue" }
             assertThat(queues).hasSize(1)
-            assertThat(queues.single().getLowCardinalityKeyValue("outcome")?.value).isEqualTo("cancelled")
+            assertThat(queues.single().getLowCardinalityKeyValue("outcome")?.value).isEqualTo("failure")
             assertThat(GatedChatTurnAiClientConfig.lastRequest).isNull()
             assertRestored(1, false)
         } finally {
@@ -191,6 +193,13 @@ class ChatImageFailureIntegrationTests {
         GatedChatTurnAiClientConfig.reset()
         GatedChatTurnAiClientConfig.realtimeEnabled = true
         GatedChatTurnAiClientConfig.realtimeExists = true
+        originalScheduler = ReflectionTestUtils.getField(service, "chatGenerationDeadlines") as com.knk.manyak.chat.service.ChatGenerationDeadlines
+        val scheduler = mock(com.knk.manyak.chat.service.ChatGenerationDeadlines::class.java)
+        doAnswer { call ->
+            deadline = call.getArgument(0)
+            mock(java.util.concurrent.ScheduledFuture::class.java)
+        }.`when`(scheduler).schedule(any(Runnable::class.java) ?: Runnable {}, anyLong())
+        ReflectionTestUtils.setField(service, "chatGenerationDeadlines", scheduler)
         originalExecutor = ReflectionTestUtils.getField(service, "chatSseExecutor") as Executor
         ReflectionTestUtils.setField(service, "chatSseExecutor", Executor { queued.set(it) })
         observedTrials = spy(trials)
@@ -201,6 +210,7 @@ class ChatImageFailureIntegrationTests {
 
     @AfterEach fun cleanup() {
         ReflectionTestUtils.setField(service, "chatSseExecutor", originalExecutor)
+        ReflectionTestUtils.setField(service, "chatGenerationDeadlines", originalScheduler)
         ReflectionTestUtils.setField(images, "trials", trials)
         GatedChatTurnAiClientConfig.reset()
     }
@@ -219,7 +229,7 @@ class ChatImageFailureIntegrationTests {
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(if (saved) 2 else 0)
     }
 
-    @Test fun `워커 시작 직전 취소가 선점하면 이미지와 턴을 복원하고 저장하지 않는다`() {
+    @Test fun `워커 시작 직전 생성 마감이 선점하면 이미지와 턴을 복원하고 저장하지 않는다`() {
         val emitter = start()
         val beforeStart = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -234,7 +244,7 @@ class ChatImageFailureIntegrationTests {
         worker.start()
         try {
             check(beforeStart.await(5, TimeUnit.SECONDS))
-            callback(emitter, "timeoutCallback")
+            deadline.run()
             callback(emitter, "completionCallback")
         } finally {
             release.countDown()
@@ -246,14 +256,14 @@ class ChatImageFailureIntegrationTests {
         assertThat(GatedChatTurnAiClientConfig.lastRequest).isNull()
     }
 
-    @Test fun `실행 중 타임아웃은 워커 실패 종료에서 이미지 예약을 한번 복원한다`() {
+    @Test fun `실행 중 생성 마감은 워커 실패 종료에서 이미지 예약을 한번 복원한다`() {
         GatedChatTurnAiClientConfig.gatedInput = "살펴본다"
         val emitter = start()
         val worker = Thread { queued.get().run() }
         worker.start()
         try {
             check(GatedChatTurnAiClientConfig.entered.await(5, TimeUnit.SECONDS))
-            callback(emitter, "timeoutCallback")
+            deadline.run()
             callback(emitter, "completionCallback")
             verify(observedTrials, never()).restore(device, Counter.CHAT_IMAGE)
         } finally {

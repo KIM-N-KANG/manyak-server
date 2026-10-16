@@ -150,6 +150,16 @@ data class ChatDetailResponse(
     )
     val suggestedInputs: List<String>,
     val persona: ChatPersonaResponse? = null,
+    @field:Schema(description = "생성 중 상태. 키가 없으면 null")
+    val generatingTurn: GeneratingTurnResponse? = null,
+)
+
+data class GeneratingTurnResponse(
+    val type: String,
+    val userInput: String,
+    val startedAt: Instant,
+    val targetTurnId: Long?,
+    val generationId: String,
 )
 
 @Schema(description = "채팅 진행 턴")
@@ -291,7 +301,21 @@ data class ContinueChatRequest(
     val choiceOrder: Int? = null,
     @field:Schema(description = "실시간 이미지 생성 여부. 기본 true")
     val realtimeImage: Boolean = true,
-)
+) {
+    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    @get:Schema(hidden = true)
+    var hasLastTurnId: Boolean = false
+        private set
+
+    @get:Schema(description = "마지막 완료 턴 ID. 생략은 비교 생략, 명시적 null은 첫 턴만 허용", nullable = true, type = "integer")
+    @set:com.fasterxml.jackson.annotation.JsonSetter("lastTurnId")
+    var lastTurnId: Long? = null
+        set(value) {
+            field = value
+            hasLastTurnId = true
+        }
+}
+
 
 @Schema(description = "AI 응답 재생성 요청")
 data class RegenerateChatRequest(
@@ -310,6 +334,8 @@ data class RegenerateChatRequest(
 data class ChatStreamStartedEvent(
     @field:Schema(description = "채팅 ID(공개 식별자)", example = "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
     val chatId: String,
+    @field:Schema(description = "생성 ID(UUID)")
+    val generationId: String,
 )
 
 @Schema(description = "SSE 토큰 이벤트 예시")

@@ -1,3 +1,4 @@
+### [KNK-1677] 마지막 턴 변경 또는 본문 재생성 충돌 코드는 409 CHAT_TURN_STALE입니다. 선택지 생성은 생성 중 키를 획득하지 않습니다.
 ### 채팅 선택지 생성 전용 엔드포인트(POST /chats/{chatId}/turns/{turnId}/choices) 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환. 위에서부터 순서대로 실행하세요.
 ###
