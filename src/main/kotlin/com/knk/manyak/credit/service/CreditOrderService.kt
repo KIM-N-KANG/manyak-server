@@ -25,7 +25,7 @@ class CreditOrderService(
 ) {
     fun products(): CreditProductsResponse = CreditProductsResponse(
         items = properties.products.map {
-            CreditProductResponse(it.id, it.base, it.bonus, it.totalCredits, it.webPriceKrw, it.appPriceKrw)
+            CreditProductResponse(it.id, it.base, it.bonus, it.totalCredits, it.webPriceKrw)
         },
     )
 

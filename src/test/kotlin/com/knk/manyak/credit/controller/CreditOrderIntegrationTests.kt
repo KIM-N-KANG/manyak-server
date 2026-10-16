@@ -58,7 +58,11 @@ class CreditOrderIntegrationTests {
             .jsonPath("$.items[*].bonusCredits").isEqualTo(listOf(0, 200, 600, 2500, 5000, 12000))
             .jsonPath("$.items[*].totalCredits").isEqualTo(listOf(2000, 5000, 10000, 30000, 50000, 100000))
             .jsonPath("$.items[*].webPriceKrw").isEqualTo(listOf(2000, 4800, 9400, 27500, 45000, 88000))
-            .jsonPath("$.items[*].appPriceKrw").isEqualTo(listOf(2800, 6700, 13200, 38500, 63000, 123200))
+            .jsonPath("$.items[0]").value<Map<String, Any>> {
+                assertThat(it.keys).containsExactlyInAnyOrder(
+                    "productId", "baseCredits", "bonusCredits", "totalCredits", "webPriceKrw",
+                )
+            }
             .jsonPath("$.items[0].paymentUrl").doesNotExist()
     }
 
