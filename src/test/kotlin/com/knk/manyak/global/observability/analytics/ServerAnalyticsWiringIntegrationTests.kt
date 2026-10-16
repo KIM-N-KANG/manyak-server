@@ -19,6 +19,13 @@ import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.migration.dto.MigrationRequest
+import com.knk.manyak.migration.service.GuestDataMigrationService
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
+import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -92,6 +99,9 @@ class ServerAnalyticsWiringIntegrationTests {
     @Autowired private lateinit var transactions: PlatformTransactionManager
     @Autowired private lateinit var credits: CreditWalletService
     @Autowired private lateinit var policies: CreditPolicyService
+    @Autowired private lateinit var migrations: GuestDataMigrationService
+    @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var chats: StoryChatRepository
 
     @BeforeEach
     fun setUp() {
@@ -367,6 +377,99 @@ class ServerAnalyticsWiringIntegrationTests {
         assertThat(start()["status"]).isEqualTo("COMPLETED")
         assertThat(capturingPublisher.ofType("server_login_googleLogin_processed_succeeded").single().eventProperties)
             .containsEntry("is_new_user", false).containsEntry("is_rejoined", false)
+    }
+
+    @Test
+    fun `이관 부분 성공은 중복과 누락을 포함한 제출 총수를 집계하고 커밋 후 한 번 발행한다`() {
+        val user = member()
+        val other = member()
+        fun story(owner: Long? = null) = stories.save(Story(userId = owner, title = "이관 이벤트 검증"))
+        val guestStory = story()
+        val ownedStory = story(user.id)
+        val conflictStory = story(other.id)
+        val deletedStory = stories.save(Story(title = "삭제된 스토리", deletedAt = Instant.now()))
+        fun chat(owner: Long? = null) = chats.save(StoryChat(userId = owner, storyId = guestStory.id))
+        val guestChat = chat()
+        val ownedChat = chat(user.id)
+        val conflictChat = chat(other.id)
+        val request = MigrationRequest(
+            storyIds = listOf(guestStory.publicId, guestStory.publicId, ownedStory.publicId,
+                conflictStory.publicId, deletedStory.publicId, UUID.randomUUID()).map(UUID::toString),
+            chatIds = listOf(guestChat.publicId, guestChat.publicId, ownedChat.publicId,
+                conflictChat.publicId, UUID.randomUUID()).map(UUID::toString),
+        )
+
+        TransactionTemplate(transactions).executeWithoutResult {
+            val result = migrations.migrate(user.id, request)
+            assertThat(result.stories).hasSize(request.storyIds.size)
+            assertThat(result.chats).hasSize(request.chatIds.size)
+            assertThat(capturingPublisher.events).isEmpty()
+        }
+
+        val event = capturingPublisher.events.single()
+        assertThat(event.eventType).isEqualTo("server_login_migration_processed_succeeded")
+        assertThat(event.userId).isEqualTo(user.publicId.toString())
+        val counts = mapOf(
+            "migrated_story_count" to 1, "migrated_chat_count" to 1, "already_owned_count" to 4,
+            "conflict_count" to 2, "not_found_count" to 3,
+        )
+        assertThat(event.eventProperties).containsAllEntriesOf(counts)
+        assertThat(counts.keys.sumOf { (event.eventProperties.getValue(it) as Number).toInt() })
+            .isEqualTo(request.storyIds.size + request.chatIds.size)
+        assertThat(stories.findById(guestStory.id).orElseThrow().userId).isEqualTo(user.id)
+        assertThat(chats.findById(guestChat.id).orElseThrow().userId).isEqualTo(user.id)
+    }
+
+    @Test
+    fun `이관 제출 배열이 모두 비면 커밋 전후 이벤트를 발행하지 않는다`() {
+        val user = member()
+        TransactionTemplate(transactions).executeWithoutResult {
+            val result = migrations.migrate(user.id, MigrationRequest())
+            assertThat(result.stories).isEmpty()
+            assertThat(result.chats).isEmpty()
+            assertThat(capturingPublisher.events).isEmpty()
+        }
+        assertThat(capturingPublisher.events).isEmpty()
+    }
+
+    @Test
+    fun `이관 UUID 형식 오류는 validation 실패만 발행하고 앞선 클레임도 롤백한다`() {
+        val user = member()
+        val guestStory = stories.save(Story(title = "형식 오류 롤백 검증"))
+        assertThatThrownBy {
+            migrations.migrate(user.id, MigrationRequest(
+                storyIds = listOf(guestStory.publicId.toString()), chatIds = listOf("invalid-uuid"),
+            ))
+        }.isInstanceOfSatisfying(ResponseStatusException::class.java) {
+            assertThat(it.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        }
+
+        val event = capturingPublisher.events.single()
+        assertThat(event.eventType).isEqualTo("server_login_migration_processed_failed")
+        assertThat(event.userId).isEqualTo(user.publicId.toString())
+        assertThat(event.eventProperties).containsEntry("error_type", "validation")
+        assertThat(stories.findById(guestStory.id).orElseThrow().userId).isNull()
+        assertThat(users.findById(user.id).orElseThrow().migrationAttempts).isZero()
+    }
+
+    @Test
+    fun `이관 성공 결과도 트랜잭션 롤백 시 이벤트와 소유권을 남기지 않는다`() {
+        val user = member()
+        val guestStory = stories.save(Story(title = "이관 롤백 검증"))
+        val guestChat = chats.save(StoryChat(storyId = guestStory.id))
+        TransactionTemplate(transactions).executeWithoutResult {
+            migrations.migrate(user.id, MigrationRequest(
+                storyIds = listOf(guestStory.publicId.toString()), chatIds = listOf(guestChat.publicId.toString()),
+            ))
+            assertThat(capturingPublisher.events).isEmpty()
+            it.setRollbackOnly()
+        }
+        assertThat(capturingPublisher.events).isEmpty()
+        assertThat(stories.findById(guestStory.id).orElseThrow().userId).isNull()
+        assertThat(chats.findById(guestChat.id).orElseThrow().userId).isNull()
+        val unchanged = users.findById(user.id).orElseThrow()
+        assertThat(unchanged.migrationAttempts).isZero()
+        assertThat(unchanged.migratedAt).isNull()
     }
 
 }
