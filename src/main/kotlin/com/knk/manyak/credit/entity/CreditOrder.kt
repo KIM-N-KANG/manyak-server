@@ -12,7 +12,7 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
 
-enum class CreditOrderProvider { GROBLE, GOOGLE_PLAY }
+enum class CreditOrderProvider { GROBLE }
 enum class CreditOrderStatus { PENDING, COMPLETED, REFUNDED }
 
 /** 주문 생성 시 가격·총량을 고정한다. 설정이 바뀌어도 결제 대기 중인 주문의 금액은 바꾸지 않는다. */

@@ -5,6 +5,13 @@
 # accessToken은 로그인 응답에서 입력한다. 시크릿은 이 파일에 입력하지 않는다.
 # 위에서부터 실행. 합성 웹훅은 실제 돈의 이동 없이 로컬 이프를 변경하므로 전용 테스트 회원을 사용한다.
 # 503 요청은 마지막에 서버 시크릿을 비우고 재기동한 뒤 따로 실행한다.
+# 분석 확인(전송 활성화와 API 키 필요):
+# 완료 커밋: server_payment_purchase_processed_succeeded(product_id, price_krw, credit_amount).
+# 환불 커밋: server_payment_refund_processed_succeeded(product_id, reversal_shortfall).
+# 선도착 환불을 소비한 완료: 환불 이벤트만 1건, reversal_shortfall 생략.
+# 재전송·금액 불일치·부분 환불·미매칭 통지는 이벤트 없음.
+# 웹훅 이벤트 user_id는 주문 소유자 공개 UUID, is_logged_in=true, device_id/session_id 생략.
+# 소유자 식별 실패는 orderId 포함 WARN 후 이벤트 생략. 분석 전송 실패는 WARN만 남기며 재시도하지 않는다.
 @baseUrl = http://localhost:8080
 @accessToken = REPLACE_WITH_ACCESS_TOKEN
 

@@ -135,7 +135,7 @@ class RequestCorrelationFilterTests {
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {
-            for (path in listOf("/api/v1/webhooks/groble", "/api/v1/webhooks/google-play/rtdn")) {
+            for (path in listOf("/api/v1/webhooks/groble")) {
                 val (mdc, response) = runFilter(MockHttpServletRequest("POST", path))
                 assertThat(mdc["request_id"]).startsWith("req_")
                 assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo(mdc["request_id"])

@@ -30,6 +30,7 @@ import javax.crypto.spec.SecretKeySpec
 
 private const val SECRET = "test-only-groble-secret"
 
+@org.springframework.context.annotation.Import(PaymentAnalyticsTestConfig::class)
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -47,7 +48,12 @@ class GrobleWebhookIntegrationTests {
     @Autowired private lateinit var meters: MeterRegistry
     @Autowired private lateinit var jdbc: JdbcTemplate
 
-    @BeforeEach fun clean() = cleaner.cleanAll()
+    @Autowired private lateinit var analytics: PaymentAnalyticsCapture
+
+    @Autowired private lateinit var paymentEvents: com.knk.manyak.credit.service.GroblePaymentEventService
+    @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+
+    @BeforeEach fun clean() { cleaner.cleanAll(); analytics.events.clear() }
 
     @Test fun `raw UTF8 서명 완료 재전송은 한 번만 적립하고 5년 로트를 만든다`() {
         val order = order()
@@ -70,6 +76,14 @@ class GrobleWebhookIntegrationTests {
         val lot = lots.findAll().single()
         assertThat(lot.expiresAt).isEqualTo(lot.createdAt.atZone(ZoneOffset.UTC).plusYears(5).toInstant())
         assertThat(count("completed") - before).isEqualTo(1.0)
+        val event = analytics.ofType("payment_purchase").single()
+        assertThat(event.userId).isEqualTo(users.findById(order.userId).orElseThrow().publicId.toString())
+        assertThat(event.deviceId).isNull()
+        assertThat(event.sessionId).isNull()
+        assertThat(event.eventProperties).containsEntry("is_logged_in", true)
+            .containsEntry("product_id", "if_5000").containsEntry("price_krw", 4800L).containsEntry("credit_amount", 5000L)
+            .doesNotContainKey("device_id_hash")
+        assertThat(event.insertId).isEqualTo("${event.eventProperties["request_id"]}:${event.eventType}")
     }
 
     @Test fun `동시 완료 재전송도 주문 락으로 한 번만 적립한다`() {
@@ -81,6 +95,7 @@ class GrobleWebhookIntegrationTests {
         } finally { pool.shutdownNow() }
         assertThat(transactions.findAll()).hasSize(1)
         assertThat(lots.findAll()).hasSize(1)
+        assertThat(analytics.ofType("payment_purchase")).hasSize(1)
     }
 
     @Test fun `Previous 서명은 현재 서명 불일치와 함께 와도 통과한다`() {
@@ -119,6 +134,7 @@ class GrobleWebhookIntegrationTests {
             completed(order).replace("payment.completed", "subscription.created"),
         )) send(body)
         assertThat(transactions.count()).isZero()
+        assertThat(analytics.events).isEmpty()
         assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.PENDING)
     }
 
@@ -149,6 +165,7 @@ class GrobleWebhookIntegrationTests {
         assertThat(reversal.refType).isEqualTo("CREDIT_ORDER")
         assertThat(reversal.refId).isEqualTo(order.id)
         assertThat(count("refunded") - before).isEqualTo(1.0)
+        assertThat(analytics.ofType("payment_refund").single().eventProperties).containsEntry("reversal_shortfall", 0L)
     }
 
     @Test fun `일부 소진한 구매는 잔여만 회수하고 다른 로트는 보존한다`() {
@@ -217,6 +234,7 @@ class GrobleWebhookIntegrationTests {
         assertThat(orders.findById(second.id).orElseThrow().status).isEqualTo(CreditOrderStatus.PENDING)
         assertThat(transactions.count()).isEqualTo(1)
         assertThat(lots.count()).isEqualTo(1)
+        assertThat(analytics.ofType("payment_purchase")).hasSize(1)
         assertThat(wallets.findByUserId(second.userId)!!.balance).isZero()
     }
 
@@ -230,6 +248,7 @@ class GrobleWebhookIntegrationTests {
         } finally { pool.shutdownNow() }
         assertThat(transactions.count()).isEqualTo(2)
         assertThat(wallets.findByUserId(order.userId)!!.balance).isZero()
+        assertThat(analytics.ofType("payment_refund")).hasSize(1)
     }
 
     @Test fun `환불 여부 필드가 없는 이벤트는 회수하지 않는다`() {
@@ -263,6 +282,11 @@ class GrobleWebhookIntegrationTests {
         assertThat(saved.status).isEqualTo(CreditOrderStatus.REFUNDED)
         assertThat(saved.completedAt).isNotNull().isEqualTo(saved.refundedAt)
         assertThat(saved.creditTransactionId).isNull()
+        send(completed(order))
+        send(refunded(order))
+        assertThat(analytics.ofType("payment_purchase")).isEmpty()
+        assertThat(analytics.ofType("payment_refund").single().eventProperties)
+            .containsEntry("product_id", "if_5000").doesNotContainKey("reversal_shortfall")
         assertThat(saved.providerRef).isEqualTo("merchant-${order.id}")
         assertThat(transactions.count()).isZero()
         assertThat(lots.count()).isZero()
@@ -285,6 +309,7 @@ class GrobleWebhookIntegrationTests {
             send(refunded(order))
             assertThat(jdbc.queryForObject("SELECT reversal_shortfall FROM credit_orders WHERE id = ?", Long::class.java, order.id))
                 .isEqualTo(spent)
+            assertThat(analytics.ofType("payment_refund").last().eventProperties).containsEntry("reversal_shortfall", spent)
         }
     }
 
@@ -314,6 +339,57 @@ class GrobleWebhookIntegrationTests {
         } finally { pool.shutdownNow() }
     }
 
+    @Test fun `구매 환불 이벤트는 바깥 트랜잭션 커밋까지 기다리고 롤백하면 사라진다`() {
+        val order = order()
+        val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
+        tx.executeWithoutResult { status ->
+            paymentEvents.process(ObjectMapper().readTree(completed(order)), null)
+            assertThat(analytics.events).isEmpty()
+            status.setRollbackOnly()
+        }
+        assertThat(analytics.events).isEmpty()
+        assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.PENDING)
+        tx.executeWithoutResult {
+            paymentEvents.process(ObjectMapper().readTree(completed(order)), null)
+            assertThat(analytics.events).isEmpty()
+        }
+        assertThat(analytics.ofType("payment_purchase")).hasSize(1)
+        analytics.events.clear()
+        tx.executeWithoutResult { status ->
+            paymentEvents.process(ObjectMapper().readTree(refunded(order)), null)
+            assertThat(analytics.events).isEmpty()
+            status.setRollbackOnly()
+        }
+        assertThat(analytics.events).isEmpty()
+        assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.COMPLETED)
+        tx.executeWithoutResult {
+            paymentEvents.process(ObjectMapper().readTree(refunded(order)), null)
+            assertThat(analytics.events).isEmpty()
+        }
+        assertThat(analytics.ofType("payment_refund")).hasSize(1)
+    }
+
+    @Test fun `소유자를 찾지 못하면 주문 ID를 WARN으로 기록하고 이벤트만 생략한다`() {
+        val order = orders.save(CreditOrder(userId = Long.MAX_VALUE, productId = "if_5000",
+            provider = CreditOrderProvider.GROBLE, priceKrw = 4800, creditAmount = 5000))
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
+            as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            send(refunded(order))
+            send(completed(order))
+            assertThat(orders.findById(order.id).orElseThrow().status).isEqualTo(CreditOrderStatus.REFUNDED)
+            assertThat(analytics.events).isEmpty()
+            assertThat(appender.list.filter { it.level == ch.qos.logback.classic.Level.WARN }.map { it.formattedMessage })
+                .anyMatch { it.contains("주문 소유자 식별 실패") && it.contains("orderId=${order.id}") }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
     private fun count(result: String) = meters.find("manyak.payment.groble.webhook").tag("result", result).counter()?.count() ?: 0.0
     private fun order(): CreditOrder {
         val user = users.save(User(nickname = "웹훅 회원"))
@@ -327,6 +403,8 @@ class GrobleWebhookIntegrationTests {
             .header("Authorization", "Bearer ignored-webhook-token")
             .header("X-Groble-Timestamp", ts).header("X-Groble-Signature", signature)
             .header("X-Groble-Idempotency-Key", "delivery-key")
+            .header("X-Manyak-Device-Id", "webhook-device")
+            .header("X-Manyak-Session-Id", "123456")
         if (previous != null) request.header("X-Groble-Signature-Previous", previous)
         request.contentType(MediaType.APPLICATION_JSON).body(body.toByteArray()).exchange().expectStatus().isEqualTo(status)
     }
