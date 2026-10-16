@@ -702,6 +702,7 @@ class ChatService(
         // 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용하며 차감이 없다(회원은 이관 후 접근, KNK-480).
         requireChatOwner(chat, userId)
         val generation = acquireGeneration(chat, "CONTINUE", request.userInput, requestedAt, null)
+        var streamingOwnsGeneration = false
         try {
             val prepared = requireNotNull(assemblyTransactionTemplate.execute {
                 val freshChat = resolveChat(chatId)
@@ -715,6 +716,7 @@ class ChatService(
             val aiCall = prepared.third
             val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
 
+            streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
             return@streamEntry streamTurnInternal(
                 chatId = chatId,
                 chat = prepared.first,
@@ -761,7 +763,7 @@ class ChatService(
                 },
             )
         } catch (ex: Throwable) {
-            releaseGeneration(chat, generation)
+            if (!streamingOwnsGeneration) releaseGeneration(chat, generation)
             throw ex
         }
     }
@@ -791,6 +793,7 @@ class ChatService(
         }
         val initialTarget = resolveRegenerateTarget(chat.id, request.turnId)
         val generation = acquireGeneration(chat, "REGENERATE", initialTarget.userInput, requestedAt, request.turnId)
+        var streamingOwnsGeneration = false
         try {
             val prepared = requireNotNull(assemblyTransactionTemplate.execute {
                 val freshChat = resolveChat(chatId)
@@ -807,6 +810,7 @@ class ChatService(
             val aiCall = prepared.third
             val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
 
+            streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
             return@streamEntry streamTurnInternal(
                 chatId = chatId,
                 chat = prepared.first,
@@ -841,7 +845,7 @@ class ChatService(
                 },
             )
         } catch (ex: Throwable) {
-            releaseGeneration(chat, generation)
+            if (!streamingOwnsGeneration) releaseGeneration(chat, generation)
             throw ex
         }
     }
@@ -1055,9 +1059,12 @@ class ChatService(
             }
             chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
         } catch (throwable: Throwable) {
-            releaseGeneration(chat, generation)
-            refundImageQuietly()
-            refundTurn()
+            try {
+                refundImageQuietly()
+                refundTurn()
+            } finally {
+                releaseGeneration(chat, generation)
+            }
             throw throwable
         }
         val persisted = AtomicBoolean(false)
@@ -1266,28 +1273,39 @@ class ChatService(
                     val persistedOk = persisted.get()
                     // 결과 판정은 이 finally·큐 대기 중 마감·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
                     deadline?.cancel(false)
-                    // 성공 시 turnSaveTransactionTemplate.execute의 턴 커밋 뒤에만 키를 해제한다.
-                    // 상세는 Redis를 첫 SQL보다 먼저 읽으므로 이 순서가 키 부재와 저장된 턴의 정합성을 보장한다.
-                    releaseGeneration(chat, generation)
-                    workerState.set(TurnWorkerState.FINISHED)
-                    recordResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
-                    if (!persistedOk) {
-                        refundImageQuietly()
-                        refundTurn()
+                    if (persistedOk) {
+                        // 성공 시 turnSaveTransactionTemplate.execute의 턴 커밋 뒤에만 키를 해제한다.
+                        // 상세는 Redis를 첫 SQL보다 먼저 읽으므로 이 순서가 키 부재와 저장된 턴의 정합성을 보장한다.
+                        releaseGeneration(chat, generation)
+                        workerState.set(TurnWorkerState.FINISHED)
+                        recordResult(OUTCOME_SUCCESS)
+                    } else {
+                        try {
+                            workerState.set(TurnWorkerState.FINISHED)
+                            recordResult(OUTCOME_FAILURE)
+                            refundImageQuietly()
+                            refundTurn()
+                        } finally {
+                            // 즉시 재요청해도 복원 전 잔액·체험 한도를 보지 않도록 정산 시도 뒤 해제한다.
+                            releaseGeneration(chat, generation)
+                        }
                     }
                 }
             }, chatSseExecutor)
         } catch (rejected: Throwable) {
             deadline?.cancel(false)
-            releaseGeneration(chat, generation)
             finishQueueWait(error = rejected)
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
             // 워커가 생성되지 않은 경우 여기서 정산한다. 결과 집계는 streamEntry의 요청 단위 게이트를 공유한다.
             if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.FINISHED)) {
-                refundImageQuietly()
-                refundTurn()
+                try {
+                    refundImageQuietly()
+                    refundTurn()
+                } finally {
+                    releaseGeneration(chat, generation)
+                }
             }
             runCatching { emitter.completeWithError(rejected) }
             structuredLogger.event(

@@ -347,6 +347,79 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(chats.findById(chat.id).orElseThrow().currentTurn).isEqualTo(1)
     }
 
+    // 해제 시점의 실제 원장을 읽어, 키가 사라진 직후 재요청해도 환불 전 잔액을 보지 않게 한다.
+    private fun observeBalanceAtRelease(member: User): MutableList<Long> {
+        val balances = mutableListOf<Long>()
+        Mockito.doAnswer { call ->
+            balances.add(wallet.balanceOf(member.id))
+            call.callRealMethod()
+        }.`when`(store).release(Mockito.anyString(), Mockito.anyString())
+        return balances
+    }
+
+    @Test fun `AI 실패는 환불을 반영한 뒤 생성 키를 한번 해제한다`() {
+        val (member, chat, cost) = paidChat()
+        val balances = observeBalanceAtRelease(member)
+        val before = failureCount()
+        ai.beforeCompleted = { throw ChatTurnAiException("AI_TIMEOUT", "timeout") }
+        start(member, chat)
+        worker.task.run()
+        assertThat(balances).containsExactly(cost)
+        assertThat(refunds()).hasSize(1)
+        assertThat(failureCount()).isEqualTo(before + 1)
+        assertThat(state(chat, member)).isNull()
+    }
+
+    @Test fun `실행기 거부는 환불을 반영한 뒤 생성 키를 한번 해제한다`() {
+        val (member, chat, cost) = paidChat()
+        val balances = observeBalanceAtRelease(member)
+        val before = failureCount()
+        Mockito.doThrow(java.util.concurrent.RejectedExecutionException("full"))
+            .`when`(executor).execute(Mockito.any(Runnable::class.java))
+        org.assertj.core.api.Assertions.assertThatThrownBy { start(member, chat) }
+            .isInstanceOf(java.util.concurrent.RejectedExecutionException::class.java)
+        assertThat(balances).containsExactly(cost)
+        assertThat(refunds()).hasSize(1)
+        assertThat(failureCount()).isEqualTo(before + 1)
+        assertThat(state(chat, member)).isNull()
+    }
+
+    @Test fun `선차감 뒤 이미지 발급 예외는 환불을 반영한 뒤 생성 키를 한번 해제한다`() {
+        val (member, chat, cost) = paidChat()
+        wallet.reward(member.id, 7, CreditReason.SIGNUP_REWARD, "image-seed:${member.id}")
+        Mockito.doReturn(ChatRealtimeImageService.Reservation(null, userId = member.id, cost = 7))
+            .`when`(images).prepare(true, member.id, null)
+        val balances = observeBalanceAtRelease(member)
+        val before = failureCount()
+        Mockito.doThrow(IllegalStateException("issue failed")).`when`(images).issue(
+            Mockito.any(ChatRealtimeImageService.Reservation::class.java) ?: ChatRealtimeImageService.Reservation(null),
+            Mockito.eq(chat.publicId) ?: chat.publicId, Mockito.anyInt(),
+        )
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("진행"), member.id)
+        }.isInstanceOf(IllegalStateException::class.java)
+        assertThat(balances).containsExactly(cost + 7)
+        assertThat(refunds()).hasSize(2)
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(failureCount()).isEqualTo(before + 1)
+        assertThat(state(chat, member)).isNull()
+    }
+
+    @Test fun `이미지 복원 실패를 기록해도 턴 환불 뒤 생성 키를 한번 해제한다`() {
+        val (member, chat, cost) = paidChat()
+        val balances = observeBalanceAtRelease(member)
+        ai.beforeCompleted = { throw ChatTurnAiException("AI_TIMEOUT", "timeout") }
+        Mockito.doThrow(IllegalStateException("restore failed")).`when`(images).restore(
+            Mockito.any(ChatRealtimeImageService.Reservation::class.java) ?: ChatRealtimeImageService.Reservation(null),
+        )
+        start(member, chat)
+        worker.task.run()
+        assertThat(balances).containsExactly(cost)
+        assertThat(refunds()).hasSize(1)
+        Mockito.verify(logger).event("chat_image_refund_failed", "chat_pk" to chat.id, "error" to "IllegalStateException")
+        assertThat(state(chat, member)).isNull()
+    }
+
     @Test fun `잔액 부족과 실행기 거부는 생성 키를 해제하고 거부 차감은 환불한다`() {
         val (member, chat, cost) = paidChat()
         wallet.deduct(member.id, cost, CreditReason.CHAT_TURN, "empty:${member.id}")
@@ -544,6 +617,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(failureCount()).isEqualTo(before + 1)
         assertThat(refunds()).hasSize(1)
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
+        Mockito.verify(store, Mockito.times(1)).release(Mockito.eq(chat.publicId.toString()) ?: "", Mockito.anyString())
         assertThat(state(chat, member)).isNull()
     }
 
