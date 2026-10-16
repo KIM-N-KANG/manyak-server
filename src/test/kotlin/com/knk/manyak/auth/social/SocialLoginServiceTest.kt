@@ -360,14 +360,16 @@ class SocialLoginServiceTest {
     }
 
     @Test
-    fun `create가 유니크 위반인데 재조회로도 못 찾으면 원 예외를 던진다`() {
-        // 둘 다 못 찾고, create는 계속 실패하는 비정상 상태(데이터 정합성 문제). 삼키지 않고 드러낸다.
+    fun `create가 유니크 위반인데 재조회로도 못 찾으면 원인 없는 500이다`() {
+        // 재시도까지 실패한 DB 원문은 개인정보 보호를 위해 안전한 500으로 바꾼다.
         `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(null)
         `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant()))
             .thenThrow(DataIntegrityViolationException("boom"))
 
         assertThatThrownBy { serviceWith(fakeVerifier("sub")).login(SocialProvider.GOOGLE, "dummy") }
-            .isInstanceOf(DataIntegrityViolationException::class.java)
+            .isInstanceOf(ResponseStatusException::class.java)
+            .hasMessageContaining("서버 오류가 발생했습니다.")
+            .hasNoCause()
 
         verifyNoInteractions(authTokenService)
     }

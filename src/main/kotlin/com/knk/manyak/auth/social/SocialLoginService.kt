@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.social
 
+import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
@@ -66,7 +67,7 @@ class SocialLoginService(
         idToken: String,
         deviceId: String? = null,
         handoffCode: String? = null,
-    ): TokenResponse {
+    ): TokenResponse = SocialAuthPrivacyFilter.safely {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
         // validation, provider 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
         val info = try {
@@ -83,7 +84,7 @@ class SocialLoginService(
         // 소비된 핸드오프는 디바이스 ID를 비워 보관하므로(보관 규칙), 빈 값은 "헤더 없음"이 아니라 폴백 대상이다.
         // 빈 문자열을 그대로 넘기면 시드가 우회 시도로 오인해 소진 시드를 비가역 확정한다(§4-3-7).
         val effectiveDeviceId = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
-        return try {
+        try {
             val (user, isNewUser) = findOrCreateUser(provider, info)
             finishLogin(provider, user, isNewUser, effectiveDeviceId, handoffCode, handoff)
         } catch (e: Exception) {

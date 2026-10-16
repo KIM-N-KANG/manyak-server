@@ -11,7 +11,6 @@ import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.user.consent.UserConsentRequest
 import com.knk.manyak.user.consent.UserConsentService
-import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -79,10 +78,5 @@ class SocialConsentService(
         throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.")
     }
 
-    private fun <T> safely(block: () -> T): T = SocialAuthPrivacyFilter.protecting {
-        try { block() } catch (_: DataAccessException) {
-            // 원인 체인도 연결하지 않는다. GlobalExceptionHandler와 Sentry에는 안전한 예외만 전달한다.
-            throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.")
-        }
-    }
+    private fun <T> safely(block: () -> T): T = SocialAuthPrivacyFilter.safely(block)
 }

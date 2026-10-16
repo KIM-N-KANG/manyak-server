@@ -7,6 +7,7 @@ import com.knk.manyak.support.DatabaseCleaner
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.doThrow
+import org.mockito.Mockito.doReturn
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
@@ -46,6 +47,8 @@ class NicknameRaceConflictIntegrationTests {
     @Test
     fun `저장 시점에 닉네임 유니크가 깨지면 500이 아니라 409다`() {
         val user = userRepository.save(User(nickname = "몽환적인 이야기꾼"))
+        doReturn(false, true).`when`(userRepository)
+            .existsByNicknameKeyExcludingSelf("먼저차지당한닉네임", user.id)
         // 사전 조회는 통과했는데 커밋 직전에 상대가 같은 키를 차지한 상황.
         doThrow(DataIntegrityViolationException("uq_users_nickname_key")).`when`(userRepository).flush()
 
