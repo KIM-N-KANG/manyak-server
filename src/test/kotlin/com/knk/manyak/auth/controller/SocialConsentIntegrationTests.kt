@@ -348,6 +348,8 @@ class SocialConsentIntegrationTests {
             .`when`(codes).consume(code)
         complete(code).expectStatus().is5xxServerError
         assertThat(org.mockito.Mockito.mockingDetails(analytics).invocations.count { it.method.name == "socialLoginSucceeded" }).isZero()
+        org.mockito.Mockito.verify(analytics).socialLoginFailed(SocialProvider.GOOGLE,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
         val before = jdbc.queryForList("SELECT * FROM user_consents ORDER BY doc_type")
         doCallRealMethod().`when`(codes).consume(code)
         complete(code).expectStatus().isOk

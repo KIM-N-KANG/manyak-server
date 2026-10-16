@@ -221,4 +221,33 @@ class ServerAnalyticsTest {
         // 예외가 던져지면 테스트가 실패한다(관측이 비즈니스를 깨지 않아야 함).
         safe.feedbackSubmissionSucceeded(userId = null)
     }
+    @Test
+    fun `회원 공개 ID 조회 실패와 부재는 게스트 이벤트로 바꾸지 않는다`() {
+        `when`(userRepository.findById(7L)).thenThrow(IllegalStateException("lookup failed"))
+        `when`(userRepository.findById(8L)).thenReturn(Optional.empty())
+
+        analytics.socialLinkSucceeded(7L, "google")
+        analytics.socialLinkFailed(8L, "kakao", AnalyticsErrorType.SERVER)
+
+        assertThat(publisher.events).isEmpty()
+    }
+
+    @Test
+    fun `재가입과 탈퇴 초대 이벤트는 스펙 프로퍼티를 싣는다`() {
+        val id = memberPublicId.toString()
+        analytics.socialLoginSucceeded(SocialProvider.GOOGLE, id, true, true)
+        analytics.withdrawalSucceeded(id, 12L, true)
+        analytics.inviteRedeemSucceeded(id, true)
+        analytics.inviteRedeemFailed(id, InviteRedeemFailureReason.SELF_CODE)
+        assertThat(publisher.events.map { it.eventType }).containsExactly(
+            "server_login_googleLogin_processed_succeeded", "server_account_withdrawal_processed_succeeded",
+            "server_invite_redeem_processed_succeeded", "server_invite_redeem_processed_failed",
+        )
+        assertThat(publisher.events[0].eventProperties).containsEntry("is_rejoined", true)
+        assertThat(publisher.events[1].eventProperties).containsEntry("account_age_days", 12L).containsEntry("was_suspended", true)
+        assertThat(publisher.events[2].eventProperties).containsEntry("inviter_capped", true)
+        assertThat(publisher.events[3].eventProperties).containsEntry("reason", "self_code").containsEntry("error_type", "validation")
+        assertThat(publisher.events.map { it.userId }).containsOnly(id)
+    }
+
 }

@@ -152,6 +152,19 @@ class SocialLoginServiceTest {
     }
 
     @Test
+    fun `호환 로그인 재가입 성공에서만 is_rejoined를 true로 발행한다`() {
+        val user = User(id = 9L, nickname = "재가입", rejoinedAt = Instant.now())
+        `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
+        val service = serviceWith(fakeVerifier("sub"))
+        service.login(SocialProvider.GOOGLE, "token")
+        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), true, true)
+        `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
+        service.login(SocialProvider.GOOGLE, "token")
+        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), false, false)
+    }
+
+    @Test
     fun `검증 실패 이벤트도 해당 provider로 발행한다`() {
         val verifier = SocialIdTokenVerifier {
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 Kakao ID 토큰입니다.")

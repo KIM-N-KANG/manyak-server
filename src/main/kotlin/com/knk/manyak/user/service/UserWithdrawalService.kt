@@ -4,12 +4,14 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * 회원 탈퇴(KNK-1019, 스펙 §4-3-5). 앱 심사 요건.
@@ -35,6 +37,7 @@ class UserWithdrawalService(
     private val refreshTokenStore: RefreshTokenStore,
     private val devicePushTokenRepository: DevicePushTokenRepository,
     private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val analytics: ServerAnalytics,
 ) {
 
     @Transactional
@@ -79,6 +82,10 @@ class UserWithdrawalService(
         drafts.deleteForUser(id)
         devicePushTokenRepository.deleteByUserId(id)
         refreshTokenStore.revokeAllForUser(id)
+        analytics.withdrawalSucceeded(
+            user.publicId.toString(), ChronoUnit.DAYS.between(user.createdAt, now),
+            user.withdrawnFromStatus == UserStatus.SUSPENDED,
+        )
     }
 
     companion object {

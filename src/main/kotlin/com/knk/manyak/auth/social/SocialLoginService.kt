@@ -133,7 +133,7 @@ class SocialLoginService(
         val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
         // 완료 경로는 코드 소비까지 성공해야 성공 요청으로 집계한다. 기존 로그인은 추가 작업이 없다.
         beforeSuccess()
-        serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser)
+        serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser, isNewUser && user.rejoinedAt != null)
         return tokens
     }
 

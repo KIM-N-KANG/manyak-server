@@ -22,8 +22,8 @@ import kotlin.math.min
 data class CreditDeduction(val amount: Long, val reason: CreditReason, val refType: String? = null, val refId: Long? = null)
 data class CreditDeductionOutcome(val balance: Long, val transactions: List<CreditTransaction>)
 
-/** 보상 적립 결과. [rewarded]가 false면 멱등 키 중복 또는 월 상한 초과로 이번 요청은 적립하지 않았다(잔액 불변). */
-data class RewardOutcome(val rewarded: Boolean, val balance: Long)
+/** 보상 적립 결과. [monthlyCapped]는 멱등 중복과 구별해 실제 월 상한으로 적립을 건너뛴 경우만 true다. */
+data class RewardOutcome(val rewarded: Boolean, val balance: Long, val monthlyCapped: Boolean = false)
 
 /**
  * 사유별 월 상한(스펙 §4-3-7 초대 보상 월 한도). [cap]회 미만일 때만 적립하고, 집계 구간은 KST 월 등 호출부가 정한 [windowStart, windowEnd)다.
@@ -156,7 +156,7 @@ class CreditWalletService(
                 monthlyCap.idempotencyKeySuffix,
             )
             if (countInWindow >= monthlyCap.cap) {
-                return RewardOutcome(rewarded = false, balance = wallet.balance)
+                return RewardOutcome(rewarded = false, balance = wallet.balance, monthlyCapped = true)
             }
         }
         val transaction = transactionRepository.save(

@@ -93,6 +93,7 @@ class AccountLinkService(
      * 응답하려는 순간 커밋이 터진다. OSIV도 꺼져 있어 저장소 호출마다 독립 트랜잭션·영속성 컨텍스트다.
      */
     fun link(userId: Long, provider: SocialProvider, linkCode: String?, request: AccountLinkRequest) {
+        var identityFailure: AnalyticsErrorType? = null
         try {
             val verifier = verifierOrBadRequest(provider)
             requireLinkCode(userId, linkCode)
@@ -101,6 +102,11 @@ class AccountLinkService(
             val target = try {
                 verifier.verify(request.idToken)
             } catch (ex: Exception) {
+                identityFailure = if (AnalyticsErrorType.fromThrowable(ex) == AnalyticsErrorType.NETWORK) {
+                    AnalyticsErrorType.NETWORK
+                } else {
+                    AnalyticsErrorType.VALIDATION
+                }
                 throw CodedResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     ApiErrorCodes.SOCIAL_TOKEN_INVALID,
@@ -130,7 +136,7 @@ class AccountLinkService(
             linkCodeStore.consume(linkCode!!)
             serverAnalytics.socialLinkSucceeded(userId, provider.wireValue)
         } catch (ex: Exception) {
-            serverAnalytics.socialLinkFailed(userId, provider.wireValue, classifyLinkError(ex))
+            serverAnalytics.socialLinkFailed(userId, provider.wireValue, identityFailure ?: classifyLinkError(ex))
             throw ex
         }
     }
@@ -223,7 +229,7 @@ class AccountLinkService(
      * provider·JWK 네트워크 실패는 network, ID 토큰 검증 실패·403·409 같은 요청 측 실패는 validation, 나머지(DB·Redis)는 server다.
      */
     private fun classifyLinkError(ex: Exception): AnalyticsErrorType {
-        if (AnalyticsErrorType.fromThrowable(ex) == AnalyticsErrorType.NETWORK) return AnalyticsErrorType.NETWORK
+        // 검증기 밖의 DB·Redis 연결 실패는 내부 처리 실패다.
         return if (ex is ResponseStatusException && ex.statusCode.is4xxClientError) {
             AnalyticsErrorType.VALIDATION
         } else {

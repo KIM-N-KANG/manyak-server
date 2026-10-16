@@ -1,5 +1,18 @@
 package com.knk.manyak.global.observability.analytics
 
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.user.service.UserWithdrawalService
+import com.knk.manyak.invite.service.InviteService
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
+import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.credit.service.CreditPolicyService
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.entity.CreditReason
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.social.SocialIdTokenVerifier
 import com.knk.manyak.auth.social.SocialUserInfo
@@ -71,6 +84,14 @@ class ServerAnalyticsWiringIntegrationTests {
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var capturingPublisher: CapturingPublisher
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var withdrawals: UserWithdrawalService
+    @Autowired private lateinit var invites: InviteService
+    @Autowired private lateinit var jwt: JwtTokenProvider
+    @Autowired private lateinit var transactions: PlatformTransactionManager
+    @Autowired private lateinit var credits: CreditWalletService
+    @Autowired private lateinit var policies: CreditPolicyService
 
     @BeforeEach
     fun setUp() {
@@ -219,4 +240,133 @@ class ServerAnalyticsWiringIntegrationTests {
         assertThat(event.userId).isNull()
         assertThat(event.eventProperties["error_type"]).isEqualTo("validation")
     }
+    private fun member(status: UserStatus = UserStatus.ACTIVE,
+                       code: String? = null) = users.save(User(
+        nickname = "회원${java.util.UUID.randomUUID()}", status = status, inviteCode = code,
+        createdAt = Instant.now().minusSeconds(3 * 86400 + 3600),
+    ))
+
+    @Test
+    fun `탈퇴 성공은 활성 정지 모두 커밋 후 발행하고 롤백에서는 발행하지 않는다`() {
+        for (status in listOf(UserStatus.ACTIVE, UserStatus.SUSPENDED)) {
+            val user = member(status)
+            capturingPublisher.events.clear()
+            TransactionTemplate(transactions).executeWithoutResult {
+                withdrawals.withdraw(user.id)
+                assertThat(capturingPublisher.events).isEmpty()
+            }
+            val event = capturingPublisher.ofType("server_account_withdrawal_processed_succeeded").single()
+            assertThat(event.userId).isEqualTo(user.publicId.toString())
+            assertThat(event.eventProperties).containsEntry("account_age_days", 3L)
+                .containsEntry("was_suspended", status == UserStatus.SUSPENDED)
+        }
+        val user = member()
+        capturingPublisher.events.clear()
+        TransactionTemplate(transactions).executeWithoutResult {
+            withdrawals.withdraw(user.id)
+            it.setRollbackOnly()
+        }
+        assertThat(capturingPublisher.events).isEmpty()
+        assertThat(users.findById(user.id).orElseThrow().status).isEqualTo(UserStatus.ACTIVE)
+    }
+
+    @Test
+    fun `초대 성공과 월 상한은 커밋 후 기록하고 롤백 성공은 기록하지 않는다`() {
+        val inviter = member(code = "ABCD2345")
+        val redeemer = member()
+        TransactionTemplate(transactions).executeWithoutResult {
+            invites.redeem(redeemer.id, "ABCD2345")
+            assertThat(capturingPublisher.events).isEmpty()
+        }
+        assertThat(capturingPublisher.ofType("server_invite_redeem_processed_succeeded").single().eventProperties)
+            .containsEntry("inviter_capped", false)
+
+        capturingPublisher.events.clear()
+        val rollbackMember = member()
+        TransactionTemplate(transactions).executeWithoutResult {
+            invites.redeem(rollbackMember.id, "ABCD2345")
+            it.setRollbackOnly()
+        }
+        assertThat(capturingPublisher.events).isEmpty()
+        assertThat(users.findById(rollbackMember.id).orElseThrow().inviterUserId).isNull()
+
+        val cap = policies.amountOf(CreditPolicyKey.INVITE_MONTHLY_CAP).toInt()
+        repeat(cap) { index ->
+            credits.reward(inviter.id, 1L, CreditReason.INVITE_REWARD,
+                "invite:${inviter.id}:synthetic$index:${inviter.id}")
+        }
+        val cappedMember = member()
+        invites.redeem(cappedMember.id, "ABCD2345")
+        val event = capturingPublisher.ofType("server_invite_redeem_processed_succeeded").single()
+        assertThat(event.userId).isEqualTo(cappedMember.publicId.toString())
+        assertThat(event.eventProperties).containsEntry("inviter_capped", true)
+        assertThat(credits.balanceOf(cappedMember.id)).isPositive()
+    }
+
+    @Test
+    fun `초대 거절 사유 7종은 자격 판정 시 발행한다`() {
+        val older = member(code = "ABCD2345")
+        val target = member(code = "BCDE2345")
+        val withdrawn = member(UserStatus.DELETED, "CDEF2345")
+        val suspended = member(UserStatus.SUSPENDED, "DEFG2345")
+        val newer = member(code = "EFGH2345")
+        val cases = listOf("bad" to "invalid_format", "ZZZZ9999" to "not_found", "BCDE2345" to "self_code",
+            withdrawn.inviteCode!! to "inviter_withdrawn", suspended.inviteCode!! to "inviter_unavailable",
+            newer.inviteCode!! to "inviter_newer")
+        for ((code, reason) in cases) {
+            capturingPublisher.events.clear()
+            assertThatThrownBy { invites.redeem(target.id, code) }
+                .isInstanceOf(ResponseStatusException::class.java)
+            val event = capturingPublisher.ofType("server_invite_redeem_processed_failed").single()
+            assertThat(event.userId).isEqualTo(target.publicId.toString())
+            assertThat(event.eventProperties).containsEntry("error_type", "validation").containsEntry("reason", reason)
+        }
+        invites.redeem(target.id, older.inviteCode!!)
+        capturingPublisher.events.clear()
+        assertThatThrownBy { invites.redeem(target.id, older.inviteCode!!) }
+            .isInstanceOf(ResponseStatusException::class.java)
+        assertThat(capturingPublisher.ofType("server_invite_redeem_processed_failed").single().eventProperties)
+            .containsEntry("reason", "already_redeemed")
+    }
+
+    @Test
+    fun `요청 형식 검증과 인증 거절은 초대 이벤트 집계에서 제외한다`() {
+        val user = member()
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer ${jwt.issueAccessToken(user.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"code":""}""")
+            .exchange().expectStatus().isBadRequest
+        restTestClient.post().uri("/api/v1/users/me/invite/redeem")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"code":"ABCD2345"}""")
+            .exchange().expectStatus().isUnauthorized
+        assertThat(capturingPublisher.events).isEmpty()
+    }
+
+    @Test
+    fun `동의 완료 재가입에서만 is_rejoined가 true이고 후속 로그인은 false다`() {
+        fun start() = restTestClient.post().uri("/api/v1/auth/social/google")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"idToken":"rejoin-analytics"}""")
+            .exchange().expectStatus().isOk.expectBody(Map::class.java).returnResult().responseBody!!
+        fun complete(code: String) = restTestClient.post().uri("/api/v1/auth/social/complete")
+            .header("X-Manyak-Consent-Token", code).contentType(MediaType.APPLICATION_JSON)
+            .body("""{"terms":"v1.4","privacy":"v1.7","age14":"1"}""")
+            .exchange().expectStatus().isOk
+        val initial = start()
+        assertThat(capturingPublisher.events).isEmpty()
+        complete(initial["consentToken"] as String)
+        val first = capturingPublisher.ofType("server_login_googleLogin_processed_succeeded").single()
+        assertThat(first.eventProperties).containsEntry("is_rejoined", false)
+        withdrawals.withdraw(users.findByPublicId(java.util.UUID.fromString(first.userId))!!.id)
+        capturingPublisher.events.clear()
+        val pending = start()
+        assertThat(capturingPublisher.events).isEmpty()
+        complete(pending["consentToken"] as String)
+        assertThat(capturingPublisher.ofType("server_login_googleLogin_processed_succeeded").single().eventProperties)
+            .containsEntry("is_new_user", true).containsEntry("is_rejoined", true)
+        capturingPublisher.events.clear()
+        assertThat(start()["status"]).isEqualTo("COMPLETED")
+        assertThat(capturingPublisher.ofType("server_login_googleLogin_processed_succeeded").single().eventProperties)
+            .containsEntry("is_new_user", false).containsEntry("is_rejoined", false)
+    }
+
 }

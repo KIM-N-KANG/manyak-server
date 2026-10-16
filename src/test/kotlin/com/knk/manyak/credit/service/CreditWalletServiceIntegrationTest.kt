@@ -197,6 +197,7 @@ class CreditWalletServiceIntegrationTest {
         // 4번째는 구간 count가 이미 3(=상한)이라 적립하지 않는다(오류 아님, rewarded=false·잔액 불변).
         val capped = service.reward(userId, 500, CreditReason.INVITE_REWARD, "invite:x:3:$userId", monthlyCap = window)
         assertThat(capped.rewarded).isFalse()
+        assertThat(capped.monthlyCapped).isTrue()
         assertThat(capped.balance).isEqualTo(1500)
 
         val inviteRows = transactionRepository.findAll().filter { it.reason == CreditReason.INVITE_REWARD }

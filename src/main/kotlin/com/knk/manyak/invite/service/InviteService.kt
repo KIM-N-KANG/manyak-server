@@ -9,6 +9,8 @@ import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.MonthlyRewardCap
 import com.knk.manyak.credit.service.RewardOutcome
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.global.observability.analytics.InviteRedeemFailureReason
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.security.requireActiveStatus
@@ -38,6 +40,7 @@ class InviteService(
     private val userRepository: UserRepository,
     private val creditWalletService: CreditWalletService,
     private val creditPolicyService: CreditPolicyService,
+    private val analytics: ServerAnalytics,
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
@@ -97,6 +100,7 @@ class InviteService(
         // 사람이 카카오톡 본문을 보고 타이핑하는 값이라 trim·대문자 정규화 후 비교한다(발급 코드는 대문자+숫자).
         val code = rawCode.trim().uppercase()
         if (!CODE_FORMAT.matches(code)) {
+            analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.INVALID_FORMAT)
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "초대 코드 형식이 올바르지 않습니다.")
         }
         // 평생 1회 소진 판정을 inviter_user_id non-null로 한다. 이 컬럼은 초대자 자기참조 FK가 ON DELETE SET NULL(V27)
@@ -105,6 +109,7 @@ class InviteService(
         // 하드 삭제해 같은 소셜 신원의 재가입이 새 users 행을 받으면 이 컬럼이 NULL로 초기화됐다. 이제 탈퇴는 소셜 행을
         // tombstone으로 남기고 재가입이 이전 소유자의 inviter_user_id를 승계하므로, 그 우회로는 닫혀 있다.
         if (redeemer.inviterUserId != null) {
+            analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.ALREADY_REDEEMED)
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
                 ApiErrorCodes.INVITE_ALREADY_REDEEMED,
@@ -112,8 +117,12 @@ class InviteService(
             )
         }
         val inviter = userRepository.findByInviteCode(code)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "일치하는 초대 코드가 없습니다.")
+            ?: run {
+                analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.NOT_FOUND)
+                throw ResponseStatusException(HttpStatus.NOT_FOUND, "일치하는 초대 코드가 없습니다.")
+            }
         if (inviter.id == redeemer.id) {
+            analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.SELF_CODE)
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
                 ApiErrorCodes.INVITE_SELF_CODE,
@@ -127,16 +136,22 @@ class InviteService(
         // 겹치면 in-flight 1건이 통과할 수 있다. 초대자 락을 추가하면 지갑 락과의 획득 순서를 다시 설계해야 하고
         // (KNK-587 데드락 방지), 막는 것은 경합 1건뿐이라 파밍 경로가 아니어서 비용이 이득을 넘는다.
         when (inviter.status) {
-            UserStatus.DELETED -> throw CodedResponseStatusException(
-                HttpStatus.CONFLICT,
-                ApiErrorCodes.INVITE_INVITER_WITHDRAWN,
-                "탈퇴한 회원의 초대 코드입니다.",
-            )
-            UserStatus.SUSPENDED -> throw CodedResponseStatusException(
-                HttpStatus.CONFLICT,
-                ApiErrorCodes.INVITE_INVITER_UNAVAILABLE,
-                "현재 사용할 수 없는 초대 코드입니다.",
-            )
+            UserStatus.DELETED -> {
+                analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.INVITER_WITHDRAWN)
+                throw CodedResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCodes.INVITE_INVITER_WITHDRAWN,
+                    "탈퇴한 회원의 초대 코드입니다.",
+                )
+            }
+            UserStatus.SUSPENDED -> {
+                analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.INVITER_UNAVAILABLE)
+                throw CodedResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCodes.INVITE_INVITER_UNAVAILABLE,
+                    "현재 사용할 수 없는 초대 코드입니다.",
+                )
+            }
             UserStatus.ACTIVE -> Unit
         }
         // 가입 순서 게이트(KNK-1404). 초대자는 제출자보다 먼저 가입한 회원이어야 한다. 보상 신원 id로 비교하므로
@@ -144,6 +159,7 @@ class InviteService(
         val inviterIdentity = inviter.rewardIdentity()
         val redeemerIdentity = redeemer.rewardIdentity()
         if (inviterIdentity > redeemerIdentity) {
+            analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.INVITER_NEWER)
             throw CodedResponseStatusException(
                 HttpStatus.CONFLICT,
                 ApiErrorCodes.INVITE_INVITER_NEWER,
@@ -171,6 +187,7 @@ class InviteService(
         // 키는 user_id가 아니라 **보상 신원**으로 만든다(KNK-1053). 재가입은 user_id를 갈아치우므로 user_id 키면
         // 초대자가 상한을 채운 뒤 탈퇴·재가입하는 것만으로 월 상한이 0으로 리셋된다(크레딧을 미리 쓰고 나가면 지갑
         // 소멸도 페널티가 아니다). 기존 회원·신규 가입은 신원 = 자기 자신이라 키 문자열이 종전과 같아 원장과 호환된다.
+        var inviterCapped = false
         val rewardInviter = {
             creditWalletService.reward(
                 userId = inviter.id,
@@ -185,7 +202,7 @@ class InviteService(
                     idempotencyKeyPrefix = inviterRoleKeyPrefix(inviterIdentity),
                     idempotencyKeySuffix = inviterRoleKeySuffix(inviterIdentity),
                 ),
-            )
+            ).also { inviterCapped = it.monthlyCapped }
         }
         // 제출자 몫: 월 상한 없이 적립한다(KNK-581 — 평생 1회 자격이 유일한 제한).
         val rewardRedeemer = {
@@ -205,6 +222,7 @@ class InviteService(
         } else {
             rewardRedeemer().also { rewardInviter() }
         }
+        analytics.inviteRedeemSucceeded(redeemer.publicId.toString(), inviterCapped)
         return InviteRedeemResponse(
             amount = if (outcome.rewarded) inviteReward else 0,
             balance = outcome.balance,

@@ -435,6 +435,40 @@ class AccountLinkServiceTest {
         assertThat(serviceWith().linkedProviders(USER_ID)).isEmpty()
     }
 
+
+    @Test
+    fun `링크 코드 저장소 연결 장애는 network 대신 server다`() {
+        givenActiveUserWithGoogle()
+        `when`(linkCodeStore.findUserId(LINK_CODE))
+            .thenThrow(org.springframework.data.redis.RedisConnectionFailureException("unavailable"))
+        assertThatThrownBy { serviceWith().link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOf(org.springframework.data.redis.RedisConnectionFailureException::class.java)
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.SERVER)
+    }
+
+    @Test
+    fun `DB 연결 장애도 server다`() {
+        givenActiveUserWithGoogle()
+        givenValidLinkCode()
+        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, KAKAO_SUB))
+            .thenThrow(org.springframework.dao.DataAccessResourceFailureException("unavailable", java.net.ConnectException()))
+        assertThatThrownBy { serviceWith().link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOf(org.springframework.dao.DataAccessResourceFailureException::class.java)
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.SERVER)
+    }
+
+    @Test
+    fun `공개 키 조회 연결 장애는 network다`() {
+        givenActiveUserWithGoogle()
+        givenValidLinkCode()
+        val verifier = SocialIdTokenVerifier {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid", java.net.ConnectException())
+        }
+        assertThatThrownBy { serviceWith(kakao = verifier).link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOf(CodedResponseStatusException::class.java)
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.NETWORK)
+    }
+
     private companion object {
         const val USER_ID = 1L
         const val OTHER_USER_ID = 2L
