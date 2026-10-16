@@ -49,6 +49,17 @@ class SentryMdcEventProcessorTests {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["GET", "POST"])
+    fun `핸드오프는 GET과 메서드 누락만 정제하고 POST는 event와 transaction 모두 보존한다`(method: String?) {
+        for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
+            for (url in listOf(path, "https://api.example.com$path")) {
+                assertRequestPolicy(url, scrub = method == null || method == "GET", method = method)
+            }
+        }
+    }
+
     @Test
     fun `스토리 채팅과 URL 일부만 일치하는 일반 요청의 관측 필드는 보존한다`() {
         for (url in listOf(
@@ -63,9 +74,10 @@ class SentryMdcEventProcessorTests {
         )) assertRequestPolicy(url, scrub = false)
     }
 
-    private fun assertRequestPolicy(url: String, scrub: Boolean) {
+    private fun assertRequestPolicy(url: String, scrub: Boolean, method: String? = null) {
         fun request() = io.sentry.protocol.Request().apply {
             this.url = url
+            this.method = method
             data = "test-body"
             headers = mapOf("X-Test" to "test-header")
             cookies = "test-cookie"
@@ -92,6 +104,7 @@ class SentryMdcEventProcessorTests {
         assertEquals(mapOf("session_id" to "existing-session"), transaction.contexts["identity"])
         for (actual in listOf(event.request!!, transaction.request!!)) {
             assertEquals(url, actual.url)
+            assertEquals(method, actual.method)
             assertEquals(if (scrub) null else "test-body", actual.data)
             assertEquals(if (scrub) null else "test-cookie", actual.cookies)
             assertEquals(if (scrub) null else "test-query", actual.queryString)
