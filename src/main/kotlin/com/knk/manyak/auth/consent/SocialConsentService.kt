@@ -7,11 +7,12 @@ import com.knk.manyak.auth.handoff.LoginHandoffService
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.user.consent.UserConsentRequest
 import com.knk.manyak.user.consent.UserConsentService
-import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -25,6 +26,7 @@ class SocialConsentService(
     private val consents: UserConsentService,
     private val codes: ConsentTokenStore,
     private val handoffs: LoginHandoffService,
+    private val analytics: ServerAnalytics,
 ) {
     fun start(provider: SocialProvider, idToken: String, deviceId: String?, handoffCode: String?): SocialAuthResponse = safely {
         val info = try {
@@ -33,36 +35,51 @@ class SocialConsentService(
             // JWT 라이브러리의 cause 메시지에 토큰 또는 클레임이 들어갈 수 있다.
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 ID 토큰입니다.")
         }
-        val user = registrar.findForAuthentication(provider, info)
-        val status = consents.authenticationStatus(user?.id)
-        val handoff = handoffCode?.let(handoffs::find)
-        val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
-        if (user != null && !status.terms.needsConsent && !status.privacy.needsConsent && !status.age14.needsConsent) {
-            val confirmed = registrar.completeExistingAuthentication(provider, info, UserConsentRequest())
-            if (confirmed != null) {
-                return@safely SocialAuthResponse("COMPLETED", token = login.finishLogin(provider, confirmed, false, sourceDevice, handoffCode, handoff))
+        afterVerification(provider) {
+            val user = registrar.findForAuthentication(provider, info)
+            val status = consents.authenticationStatus(user?.id)
+            val handoff = handoffCode?.let(handoffs::find)
+            val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
+            if (user != null && !status.terms.needsConsent && !status.privacy.needsConsent && !status.age14.needsConsent) {
+                val confirmed = registrar.completeExistingAuthentication(provider, info, UserConsentRequest())
+                if (confirmed != null) {
+                    return@afterVerification SocialAuthResponse("COMPLETED", token = login.finishLogin(provider, confirmed, false, sourceDevice, handoffCode, handoff))
+                }
             }
+            // 조회 후 탈퇴한 경우에도 신규 계약으로 다시 동의를 받는다.
+            val current = registrar.findForAuthentication(provider, info)
+            val pending = PendingSocialConsent(provider, info.providerUserId, info.email, current?.id, sourceDevice, handoffCode)
+            val issued = codes.issue(pending)
+            SocialAuthResponse("CONSENT_REQUIRED", consentToken = issued.code, expiresAt = issued.expiresAt,
+                isNewUser = current == null, consents = consents.authenticationStatus(current?.id))
         }
-        // 조회 후 탈퇴한 경우에도 신규 계약으로 다시 동의를 받는다.
-        val current = registrar.findForAuthentication(provider, info)
-        val pending = PendingSocialConsent(provider, info.providerUserId, info.email, current?.id, sourceDevice, handoffCode)
-        val issued = codes.issue(pending)
-        SocialAuthResponse("CONSENT_REQUIRED", consentToken = issued.code, expiresAt = issued.expiresAt,
-            isNewUser = current == null, consents = consents.authenticationStatus(current?.id))
     }
 
     fun complete(code: String?, request: UserConsentRequest, deviceId: String?): TokenResponse = safely {
         val pending = code?.takeIf { it.isNotBlank() }?.let(codes::find)
             ?: throw CodedResponseStatusException(HttpStatus.UNAUTHORIZED, ApiErrorCodes.CONSENT_TOKEN_INVALID,
                 "소셜 로그인을 다시 시작해 주세요.")
-        consents.validateVersions(request)
-        val info = SocialUserInfo(pending.providerUserId, pending.email, null, null)
-        val (user, created) = resolve(pending.provider, info, request)
-        val handoff = pending.handoffCode?.let(handoffs::find)
-        val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: pending.deviceId ?: deviceId
-        login.finishLogin(pending.provider, user, created, sourceDevice, pending.handoffCode, handoff) {
-            codes.consume(requireNotNull(code))
+        afterVerification(pending.provider) {
+            consents.validateVersions(request)
+            val info = SocialUserInfo(pending.providerUserId, pending.email, null, null)
+            val (user, created) = resolve(pending.provider, info, request)
+            val handoff = pending.handoffCode?.let(handoffs::find)
+            val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: pending.deviceId ?: deviceId
+            login.finishLogin(pending.provider, user, created, sourceDevice, pending.handoffCode, handoff) {
+                codes.consume(requireNotNull(code))
+            }
         }
+    }
+
+    private fun <T> afterVerification(provider: SocialProvider, block: () -> T): T = try {
+        block()
+    } catch (ex: Exception) {
+        // 현행 버전·필수 동의 판정은 서비스 검증 실패다. 저장소·후속 처리 장애와 구별한다(ACCOUNT §5-4-9).
+        val errorType = if (ex is CodedResponseStatusException && ex.statusCode == HttpStatus.BAD_REQUEST &&
+            (ex.errorCode == ApiErrorCodes.CONSENT_VERSION_MISMATCH || ex.errorCode == ApiErrorCodes.CONSENT_REQUIRED_MISSING)
+        ) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.SERVER
+        analytics.socialLoginFailed(provider, errorType)
+        throw ex
     }
 
     private fun resolve(provider: SocialProvider, info: SocialUserInfo, request: UserConsentRequest): Pair<User, Boolean> {
@@ -79,10 +96,5 @@ class SocialConsentService(
         throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.")
     }
 
-    private fun <T> safely(block: () -> T): T = SocialAuthPrivacyFilter.protecting {
-        try { block() } catch (_: DataAccessException) {
-            // 원인 체인도 연결하지 않는다. GlobalExceptionHandler와 Sentry에는 안전한 예외만 전달한다.
-            throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.")
-        }
-    }
+    private fun <T> safely(block: () -> T): T = SocialAuthPrivacyFilter.safely(block)
 }

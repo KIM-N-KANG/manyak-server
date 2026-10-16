@@ -6,6 +6,8 @@ import com.knk.manyak.global.observability.MdcKeys
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.stereotype.Component
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /**
  * 서버 분석 이벤트(스펙 §6-4 `server_*`)를 의미 단위로 발행하는 도메인 파사드(B1, KNK-514).
@@ -88,12 +90,12 @@ class ServerAnalytics(
     // --- 로그인(googleLogin·kakaoLogin) ---
 
     /** 성공 시엔 이미 해석된 회원 public_id가 있으므로 조회 없이 회원 식별로 발행한다. */
-    fun socialLoginSucceeded(provider: SocialProvider, userPublicId: String, isNewUser: Boolean) =
+    fun socialLoginSucceeded(provider: SocialProvider, userPublicId: String, isNewUser: Boolean, isRejoined: Boolean = false) =
         loginEvents(provider)?.let { (succeeded, _) ->
-            publishSafely(succeeded, userPublicId, mapOf("is_new_user" to isNewUser))
+            publishSafely(succeeded, userPublicId, mapOf("is_new_user" to isNewUser, "is_rejoined" to isRejoined))
         }
 
-    /** 실패는 토큰 검증 단계라 아직 회원이 없다 — 게스트(device_id_hash)로 발행한다. */
+    /** 로그인 실패는 처리 단계와 무관하게 게스트(device_id_hash)로 발행한다. */
     fun socialLoginFailed(provider: SocialProvider, errorType: AnalyticsErrorType) =
         loginEvents(provider)?.let { (_, failed) ->
             publishSafely(failed, userPublicId = null, mapOf("error_type" to errorType.wireValue))
@@ -151,20 +153,50 @@ class ServerAnalytics(
     fun migrationFailed(userId: Long?, errorType: AnalyticsErrorType) =
         emitForUser(EVENT_MIGRATION_FAILED, userId, mapOf("error_type" to errorType.wireValue))
 
+    // --- 계정 탈퇴·초대(ACCOUNT §5-4-9) ---
+
+    fun withdrawalSucceeded(userPublicId: String, accountAgeDays: Long, wasSuspended: Boolean) =
+        publishAfterCommit(
+            EVENT_WITHDRAWAL_SUCCEEDED, userPublicId,
+            mapOf("account_age_days" to accountAgeDays, "was_suspended" to wasSuspended),
+        )
+
+    fun inviteRedeemSucceeded(userPublicId: String, inviterCapped: Boolean) =
+        publishAfterCommit(EVENT_INVITE_SUCCEEDED, userPublicId, mapOf("inviter_capped" to inviterCapped))
+
+    // 자격 거절은 롤백될 요청에서도 판정 시점에 기록한다. 코드 원문과 초대자 식별자는 싣지 않는다.
+    fun inviteRedeemFailed(userPublicId: String, reason: InviteRedeemFailureReason) =
+        publishSafely(
+            EVENT_INVITE_FAILED, userPublicId,
+            mapOf("error_type" to AnalyticsErrorType.VALIDATION.wireValue, "reason" to reason.wireValue),
+        )
+
+    private fun publishAfterCommit(eventType: String, userPublicId: String, properties: Map<String, Any?>) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCommit() = publishSafely(eventType, userPublicId, properties)
+            })
+        } else {
+            publishSafely(eventType, userPublicId, properties)
+        }
+    }
+
     // --- 내부 ---
 
     /** 내부 [userId](Long)를 public_id로 해석해 발행한다. userId가 null이면 게스트. */
     private fun emitForUser(eventType: String, userId: Long?, properties: Map<String, Any?>) {
-        val publicId = userId?.let { resolvePublicId(it) }
+        val publicId = if (userId == null) null else resolvePublicId(userId) ?: return
         publishSafely(eventType, publicId, properties)
     }
 
     private fun resolvePublicId(userId: Long): String? =
         try {
-            userRepository.findById(userId).map { it.publicId.toString() }.orElse(null)
+            userRepository.findById(userId).map { it.publicId.toString() }.orElse(null).also {
+                if (it == null) log.warn("분석 이벤트 회원 부재로 발행 생략: userId={}", userId)
+            }
         } catch (e: Exception) {
-            // public_id 해석 실패로 이벤트 전체를 잃지 않는다 — user_id 없이 발행하도록 null 반환.
-            log.warn("분석 이벤트 user_id 해석 실패: userId={} ({})", userId, e.toString())
+            // 회원 이벤트를 게스트 퍼널에 섞지 않는다. 원인 메시지는 개인정보를 포함할 수 있다.
+            log.warn("분석 이벤트 user_id 해석 실패로 발행 생략: userId={} exception={}", userId, e.javaClass.simpleName)
             null
         }
 
@@ -218,6 +250,9 @@ class ServerAnalytics(
         const val EVENT_KAKAO_LOGIN_FAILED = "server_login_kakaoLogin_processed_failed"
         const val EVENT_LINK_SUCCEEDED = "server_link_socialLink_processed_succeeded"
         const val EVENT_LINK_FAILED = "server_link_socialLink_processed_failed"
+        const val EVENT_WITHDRAWAL_SUCCEEDED = "server_account_withdrawal_processed_succeeded"
+        const val EVENT_INVITE_SUCCEEDED = "server_invite_redeem_processed_succeeded"
+        const val EVENT_INVITE_FAILED = "server_invite_redeem_processed_failed"
         const val EVENT_MIGRATION_SUCCEEDED = "server_login_migration_processed_succeeded"
         const val EVENT_MIGRATION_FAILED = "server_login_migration_processed_failed"
     }

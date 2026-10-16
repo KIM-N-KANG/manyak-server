@@ -221,3 +221,9 @@ Accept: application/json
             `code 가 다릅니다(살아 있는 계정이면 SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER). actual=${response.body.code}`);
     });
 %}
+
+# KNK-1670 동시성 수동 검증(격리된 로컬 DB 전용)
+# 재인증 코드 발급 뒤 별도 DB 트랜잭션에서 해당 users 행을 SELECT ... FOR UPDATE로 잠급니다.
+# 연동 요청을 보내고, 잠근 트랜잭션에서 status를 SUSPENDED 또는 DELETED로 바꿔 커밋합니다.
+# 요청은 잠금 해제까지 대기한 뒤 각각 403 또는 401이며, 새 소셜 연동은 없어야 합니다.
+# DB 장애는 500 고정 문구이며 로그와 Sentry에 provider_user_id·email을 남기지 않습니다.

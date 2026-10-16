@@ -1,5 +1,15 @@
 package com.knk.manyak.auth.social
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import com.knk.manyak.global.error.GlobalExceptionHandler
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import org.junit.jupiter.api.assertThrows
+import org.slf4j.LoggerFactory
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.security.oauth2.jwt.JwtException
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
@@ -149,6 +159,19 @@ class SocialLoginServiceTest {
         val emitted = mockingDetails(serverAnalytics).invocations.single { it.method.name == "socialLoginSucceeded" }
         assertThat(emitted.getArgument<SocialProvider>(0)).isEqualTo(SocialProvider.KAKAO)
         assertThat(emitted.getArgument<Boolean>(2)).isTrue()
+    }
+
+    @Test
+    fun `호환 로그인 재가입 성공에서만 is_rejoined를 true로 발행한다`() {
+        val user = User(id = 9L, nickname = "재가입", rejoinedAt = Instant.now())
+        `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(null)
+        `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
+        val service = serviceWith(fakeVerifier("sub"))
+        service.login(SocialProvider.GOOGLE, "token")
+        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), true, true)
+        `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
+        service.login(SocialProvider.GOOGLE, "token")
+        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), false, false)
     }
 
     @Test
@@ -350,14 +373,16 @@ class SocialLoginServiceTest {
     }
 
     @Test
-    fun `create가 유니크 위반인데 재조회로도 못 찾으면 원 예외를 던진다`() {
-        // 둘 다 못 찾고, create는 계속 실패하는 비정상 상태(데이터 정합성 문제). 삼키지 않고 드러낸다.
+    fun `create가 유니크 위반인데 재조회로도 못 찾으면 원인 없는 500이다`() {
+        // 재시도까지 실패한 DB 원문은 개인정보 보호를 위해 안전한 500으로 바꾼다.
         `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(null)
         `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant()))
             .thenThrow(DataIntegrityViolationException("boom"))
 
         assertThatThrownBy { serviceWith(fakeVerifier("sub")).login(SocialProvider.GOOGLE, "dummy") }
-            .isInstanceOf(DataIntegrityViolationException::class.java)
+            .isInstanceOf(ResponseStatusException::class.java)
+            .hasMessageContaining("서버 오류가 발생했습니다.")
+            .hasNoCause()
 
         verifyNoInteractions(authTokenService)
     }
@@ -375,6 +400,66 @@ class SocialLoginServiceTest {
 
         verifyNoInteractions(registrar, authTokenService)
     }
+    @Test
+    fun `호환 로그인 검증 실패 원문은 WARN에 남지 않고 validation 분류와 401 응답을 유지한다`() {
+        assertSafeCompatibilityFailure(JwtException("synthetic-token synthetic-claim@example.invalid"), AnalyticsErrorType.VALIDATION)
+    }
+
+    @Test
+    fun `호환 로그인 JWK 네트워크 실패 원문은 WARN에 남지 않고 network 분류와 401 응답을 유지한다`() {
+        assertSafeCompatibilityFailure(
+            JwtException("synthetic-token synthetic-claim@example.invalid", java.net.SocketTimeoutException("synthetic-token")),
+            AnalyticsErrorType.NETWORK,
+        )
+    }
+
+    private fun assertSafeCompatibilityFailure(libraryException: JwtException, expectedType: AnalyticsErrorType) {
+        val logger = LoggerFactory.getLogger(GlobalExceptionHandler::class.java) as Logger
+        val originalLevel = logger.level
+        val appender = ListAppender<ILoggingEvent>()
+        appender.start()
+        logger.level = Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            for (provider in listOf(SocialProvider.GOOGLE, SocialProvider.KAKAO)) {
+                appender.list.clear()
+                val label = provider.name.lowercase().replaceFirstChar(Char::uppercase)
+                val reason = "유효하지 않은 $label ID 토큰입니다."
+                // 운영 NimbusSocialIdTokenVerifier와 동일한 예외 구조: 고정 문구 401의 cause에 라이브러리 예외.
+                val verifier = SocialIdTokenVerifier {
+                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, reason, libraryException)
+                }
+                val failure = assertThrows<ResponseStatusException> {
+                    serviceWith(verifier).login(provider, "synthetic-token")
+                }
+                val path = "/api/v1/auth/login/${provider.name.lowercase()}"
+                val response = GlobalExceptionHandler().handleResponseStatusException(
+                    failure, MockHttpServletRequest("POST", path),
+                )
+
+                assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+                assertThat(response.body!!.code).isEqualTo("UNAUTHORIZED")
+                assertThat(response.body!!.message).isEqualTo(reason)
+                assertThat(response.body!!.path).isEqualTo(path)
+                assertThat(response.body!!.details).isEmpty()
+                verify(serverAnalytics).socialLoginFailed(provider, expectedType)
+                verifyNoInteractions(registrar, authTokenService)
+                assertThat(appender.list).hasSize(1)
+                for (event in appender.list) {
+                    assertThat(event.formattedMessage).doesNotContain("synthetic-token", "synthetic-claim")
+                    assertThat(event.throwableProxy).isNull()
+                }
+                // 새 소셜 인증과 같은 원인 제거 방식이므로 전역 핸들러가 WARN 대신 DEBUG로 기록한다.
+                assertThat(appender.list.single().level).isEqualTo(Level.DEBUG)
+                assertThat(failure.cause).isNull()
+            }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+            logger.level = originalLevel
+        }
+    }
+
     private companion object {
         const val IN_APP_DEVICE = "device-in-app"
         const val EXTERNAL_DEVICE = "device-external-browser"

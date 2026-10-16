@@ -17,5 +17,5 @@ class UserPersonaController(private val service: UserPersonaService) {
     fun update(@CurrentUserId userId: Long?, @PathVariable personaId: String, @RequestBody request: UpdateUserPersonaRequest) = service.update(member(userId), personaId, request)
     @DeleteMapping("/{personaId}") @ResponseStatus(HttpStatus.NO_CONTENT)
     fun delete(@CurrentUserId userId: Long?, @PathVariable personaId: String) = service.delete(member(userId), personaId)
-    private fun member(id: Long?) = id ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
+    private fun member(id: Long?) = id ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 }

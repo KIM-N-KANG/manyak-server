@@ -62,6 +62,9 @@ class AccountLinkServiceTest {
         linkCodeStore,
         serverAnalytics,
         REAUTH_MAX_AGE,
+        mock(org.springframework.transaction.PlatformTransactionManager::class.java) { invocation ->
+            if (invocation.method.name == "getTransaction") org.springframework.transaction.support.SimpleTransactionStatus() else null
+        },
     )
 
     private fun freshInfo(sub: String) = SocialUserInfo(providerUserId = sub, issuedAt = Instant.now())
@@ -73,6 +76,7 @@ class AccountLinkServiceTest {
 
     /** 요청자(userId=1)는 활성 회원이고 GOOGLE이 이미 연동돼 있다. */
     private fun givenActiveUserWithGoogle() {
+        `when`(userRepository.findByIdForUpdate(USER_ID)).thenReturn(User(id = USER_ID, nickname = "연동회원"))
         `when`(userRepository.findById(USER_ID)).thenReturn(Optional.of(User(id = USER_ID, nickname = "연동회원")))
         `when`(socialAccountRepository.findByUserIdAndProvider(USER_ID, SocialProvider.GOOGLE))
             .thenReturn(SocialAccount(userId = USER_ID, provider = SocialProvider.GOOGLE, providerUserId = GOOGLE_SUB))
@@ -412,6 +416,29 @@ class AccountLinkServiceTest {
         assertThat(failedEventErrorType()).isEqualTo(AnalyticsErrorType.SERVER)
     }
 
+    @Test
+    fun `연동 DB 오류는 개인정보 원인 체인을 제거한다`() {
+        givenActiveUserWithGoogle()
+        givenValidLinkCode()
+        `when`(socialAccountRepository.saveAndFlush(anySocialAccount()))
+            .thenThrow(DataIntegrityViolationException("private-sub private-email"))
+        assertThatThrownBy { serviceWith().link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .hasMessageContaining("서버 오류가 발생했습니다.")
+            .hasNoCause()
+        assertThat(codeConsumed()).isFalse()
+        assertThat(failedEventErrorType()).isEqualTo(AnalyticsErrorType.SERVER)
+    }
+
+    @Test
+    fun `재인증 DB 조회 오류도 원인 없는 500이다`() {
+        `when`(userRepository.findById(USER_ID)).thenThrow(DataIntegrityViolationException("private-sub"))
+        assertThatThrownBy { serviceWith().reauthenticate(USER_ID, reauthRequest()) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .hasMessageContaining("서버 오류가 발생했습니다.")
+            .hasNoCause()
+    }
+
     // ---- 연동 상태(/auth/me) ----
 
     @Test
@@ -433,6 +460,48 @@ class AccountLinkServiceTest {
         `when`(socialAccountRepository.findByUserId(USER_ID)).thenReturn(emptyList())
 
         assertThat(serviceWith().linkedProviders(USER_ID)).isEmpty()
+    }
+
+
+    @Test
+    fun `링크 코드 저장소 연결 장애는 network 대신 server다`() {
+        givenActiveUserWithGoogle()
+        `when`(linkCodeStore.findUserId(LINK_CODE))
+            .thenThrow(org.springframework.data.redis.RedisConnectionFailureException("unavailable"))
+        assertThatThrownBy { serviceWith().link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOfSatisfying(ResponseStatusException::class.java) {
+                assertThat(it.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
+                assertThat(it.reason).isEqualTo("서버 오류가 발생했습니다.")
+                assertThat(it).hasNoCause()
+            }
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.SERVER)
+    }
+
+    @Test
+    fun `DB 연결 장애도 server다`() {
+        givenActiveUserWithGoogle()
+        givenValidLinkCode()
+        `when`(socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, KAKAO_SUB))
+            .thenThrow(org.springframework.dao.DataAccessResourceFailureException("unavailable", java.net.ConnectException()))
+        assertThatThrownBy { serviceWith().link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOfSatisfying(ResponseStatusException::class.java) {
+                assertThat(it.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
+                assertThat(it.reason).isEqualTo("서버 오류가 발생했습니다.")
+                assertThat(it).hasNoCause()
+            }
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.SERVER)
+    }
+
+    @Test
+    fun `공개 키 조회 연결 장애는 network다`() {
+        givenActiveUserWithGoogle()
+        givenValidLinkCode()
+        val verifier = SocialIdTokenVerifier {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid", java.net.ConnectException())
+        }
+        assertThatThrownBy { serviceWith(kakao = verifier).link(USER_ID, SocialProvider.KAKAO, LINK_CODE, linkRequest()) }
+            .isInstanceOf(CodedResponseStatusException::class.java)
+        verify(serverAnalytics).socialLinkFailed(USER_ID, "kakao", AnalyticsErrorType.NETWORK)
     }
 
     private companion object {

@@ -76,6 +76,14 @@ class UserProfileControllerIntegrationTests {
     private fun reload(user: User): User = userRepository.findById(user.id).orElseThrow()
 
     @Test
+    fun `사용자 없는 유효 토큰으로 프리셋을 조회하면 401이다`() {
+        val token = jwtTokenProvider.issueAccessToken(java.util.UUID.randomUUID())
+        restTestClient.get().uri(PRESETS_PATH)
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
     fun `토큰 없이 수정하거나 프리셋을 조회하면 401이다`() {
         restTestClient.patch()
             .uri(PATH)

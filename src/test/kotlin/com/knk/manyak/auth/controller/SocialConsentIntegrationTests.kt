@@ -112,7 +112,15 @@ class SocialConsentIntegrationTests {
     @Test fun `버전 검증이 누락 검사보다 먼저이며 오류는 코드를 소비하지 않는다`() {
         val code = start()["consentToken"].asText()
         complete(code, """{"terms":"old"}""").expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("CONSENT_VERSION_MISMATCH")
+        org.mockito.Mockito.verify(analytics).socialLoginFailed(SocialProvider.GOOGLE,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
+        assertThat(codes.find(code)).isNotNull()
         complete(code, """{"terms":"v1.4"}""").expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("CONSENT_REQUIRED_MISSING")
+        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.times(2)).socialLoginFailed(SocialProvider.GOOGLE,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
+        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.never()).socialLoginFailed(SocialProvider.GOOGLE,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
+        assertThat(codes.find(code)).isNotNull()
         assertThat(count("users")).isZero()
         complete(code).expectStatus().isOk
     }
@@ -348,6 +356,8 @@ class SocialConsentIntegrationTests {
             .`when`(codes).consume(code)
         complete(code).expectStatus().is5xxServerError
         assertThat(org.mockito.Mockito.mockingDetails(analytics).invocations.count { it.method.name == "socialLoginSucceeded" }).isZero()
+        org.mockito.Mockito.verify(analytics).socialLoginFailed(SocialProvider.GOOGLE,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
         val before = jdbc.queryForList("SELECT * FROM user_consents ORDER BY doc_type")
         doCallRealMethod().`when`(codes).consume(code)
         complete(code).expectStatus().isOk
