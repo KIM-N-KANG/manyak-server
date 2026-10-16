@@ -35,8 +35,10 @@ class JwtTokenProvider(
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
-    private val secretKey: SecretKey =
-        SecretKeySpec(properties.secret.toByteArray(Charsets.UTF_8), MAC_ALGORITHM.name)
+    private val secretKey: SecretKey = properties.secret.toByteArray(Charsets.UTF_8).let { bytes ->
+        require(bytes.size >= 32) { "JWT 대칭키는 UTF-8 기준 32바이트 이상이어야 합니다." }
+        SecretKeySpec(bytes, MAC_ALGORITHM.name)
+    }
 
     private val encoder: JwtEncoder = NimbusJwtEncoder(ImmutableSecret(secretKey))
 
