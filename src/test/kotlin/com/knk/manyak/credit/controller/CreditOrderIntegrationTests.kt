@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
+@org.springframework.context.annotation.Import(PaymentAnalyticsTestConfig::class)
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @ContextConfiguration(initializers = [CreditOrderPaymentTestInitializer::class])
@@ -42,8 +43,10 @@ class CreditOrderIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var mapper: ObjectMapper
 
+    @Autowired private lateinit var analytics: PaymentAnalyticsCapture
+
     @BeforeEach
-    fun setUp() = cleaner.cleanAll()
+    fun setUp() { cleaner.cleanAll(); analytics.events.clear() }
 
     @Test
     fun `공개 상품 목록은 설정 순서대로 6종의 가격과 총량을 반환한다`() {
@@ -100,6 +103,9 @@ class CreditOrderIntegrationTests {
         assertThat(row["refunded_at"]).isNull()
         assertThat(row["created_at"]).isNotNull()
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_transactions", Long::class.java)).isZero()
+        val event = analytics.ofType("payment_order").single()
+        assertThat(event.userId).isEqualTo(user.publicId.toString())
+        assertThat(event.eventProperties).containsEntry("product_id", "if_2000").containsEntry("is_logged_in", true)
     }
 
     @Test
@@ -118,6 +124,7 @@ class CreditOrderIntegrationTests {
                 .exchange().expectStatus().isBadRequest
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isZero()
+        assertThat(analytics.events).isEmpty()
     }
 
     @Test
@@ -126,6 +133,7 @@ class CreditOrderIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to "if_50000"))
             .exchange().expectStatus().isEqualTo(503)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isZero()
+        assertThat(analytics.events).isEmpty()
     }
 
     @Test
@@ -164,7 +172,9 @@ class CreditOrderIntegrationTests {
             client.post().uri("/api/v1/users/me/credits/orders").header("Authorization", bearer(user))
                 .contentType(MediaType.APPLICATION_JSON).body(mapOf("productId" to "if_2000"))
                 .exchange().expectStatus().isEqualTo(expected)
+                .expectBody().jsonPath("$.code").isEqualTo(if (expected == 403) "FORBIDDEN" else "UNAUTHORIZED")
         }
+        assertThat(analytics.events).isEmpty()
     }
 
     @Test
@@ -180,6 +190,27 @@ class CreditOrderIntegrationTests {
             assertThat(create.path("responses").path(code).path("content").path("application/json")
                 .path("schema").path("\$ref").asText()).isEqualTo("#/components/schemas/ApiErrorResponse")
         }
+    }
+
+    @Autowired private lateinit var orderService: com.knk.manyak.credit.service.CreditOrderService
+    @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+
+    @Test
+    fun `주문 이벤트는 커밋 뒤에만 발행하고 롤백 주문에는 발행하지 않는다`() {
+        val owner = user()
+        val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
+        tx.executeWithoutResult { status ->
+            orderService.create(owner.id, "if_2000")
+            assertThat(analytics.events).isEmpty()
+            status.setRollbackOnly()
+        }
+        assertThat(analytics.events).isEmpty()
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_orders", Long::class.java)).isZero()
+        tx.executeWithoutResult {
+            orderService.create(owner.id, "if_2000")
+            assertThat(analytics.events).isEmpty()
+        }
+        assertThat(analytics.ofType("payment_order")).hasSize(1)
     }
 
     private fun user() = users.save(User(nickname = "충전 회원"))

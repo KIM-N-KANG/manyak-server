@@ -6,6 +6,8 @@ import com.knk.manyak.credit.dto.CreditTransactionPageResponse
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditTransactionHistoryService
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
@@ -29,6 +31,8 @@ import org.springframework.web.server.ResponseStatusException
 class CreditController(
     private val creditWalletService: CreditWalletService,
     private val attendanceRewardService: AttendanceRewardService,
+    private val suspensionGuard: SuspensionGuard,
+    private val analytics: ServerAnalytics,
     private val creditTransactionHistoryService: CreditTransactionHistoryService,
 ) {
 
@@ -75,6 +79,11 @@ class CreditController(
                 description = "인증 실패(토큰 없음·만료·위조) 또는 사용자 없음",
                 content = [Content(schema = Schema(hidden = true))],
             ),
+            ApiResponse(
+                responseCode = "403",
+                description = "정지 계정",
+                content = [Content(schema = Schema(hidden = true))],
+            ),
         ],
     )
     @PostMapping("/credits/attendance")
@@ -83,7 +92,9 @@ class CreditController(
     ): CreditAttendanceResponse {
         val ownerId = userId
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        suspensionGuard.requireActive(ownerId)
         val outcome = attendanceRewardService.claimDailyAttendance(ownerId)
+        analytics.creditAttendanceSucceeded(ownerId, outcome.rewarded, outcome.amount)
         return CreditAttendanceResponse(
             rewarded = outcome.rewarded,
             amount = outcome.amount,

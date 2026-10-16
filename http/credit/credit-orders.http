@@ -5,11 +5,14 @@
 # 6종 모두 최종 가격의 결제창 링크가 설정돼 있다. 시크릿 설정 후 주문 생성이 가능하다.
 # accessToken은 로그인 응답, otherAccessToken은 다른 회원의 로그인 응답에서 직접 입력한다.
 # 위에서부터 실행한다. 주문 생성 응답에서 creditOrderId를 저장하므로 조회 전에 생성 요청이 필요하다.
+# 분석 전송 활성화와 API 키가 있는 환경: 생성 커밋마다 server_payment_order_processed_succeeded 1건, product_id 확인.
+# 400·401·403·503 거절은 주문 이벤트 없음.
 # 이 파일은 결제창을 열거나 결제·적립하지 않는다. 주문은 PENDING으로 남는다.
 @baseUrl = http://localhost:8080
 @accessToken = REPLACE_WITH_ACCESS_TOKEN
 @otherAccessToken = REPLACE_WITH_OTHER_ACCESS_TOKEN
 @suspendedAccessToken = REPLACE_WITH_SUSPENDED_ACCESS_TOKEN
+@deletedAccessToken = REPLACE_WITH_DELETED_ACCESS_TOKEN
 
 ### 1. 서버 헬스
 GET {{baseUrl}}/actuator/health
@@ -197,5 +200,19 @@ Content-Type: application/json
 > {%
     client.test("정지 계정 차단", () => {
         client.assert(response.status === 403, `expected=403 actual=${response.status}`);
+    });
+%}
+
+### 탈퇴 회원 주문 생성 → 401 (탈퇴 전 발급한 유효 토큰 필요)
+POST {{baseUrl}}/api/v1/users/me/credits/orders
+Authorization: Bearer {{deletedAccessToken}}
+Content-Type: application/json
+
+{"productId":"if_2000"}
+
+> {%
+    client.test("탈퇴 회원 주문 거절", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
+        client.assert(response.body.code === "UNAUTHORIZED", `expected=UNAUTHORIZED actual=${response.body.code}`);
     });
 %}

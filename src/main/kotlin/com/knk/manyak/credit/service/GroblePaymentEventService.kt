@@ -7,6 +7,7 @@ import com.knk.manyak.credit.entity.GrobleRefundMark
 import com.knk.manyak.credit.repository.GrobleRefundMarkRepository
 import com.knk.manyak.credit.repository.CreditOrderRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -20,6 +21,7 @@ class GroblePaymentEventService(
     private val transactions: CreditTransactionRepository,
     private val wallets: CreditWalletService,
     private val refundMarks: GrobleRefundMarkRepository,
+    private val analytics: ServerAnalytics,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     /** 모든 결제 경로에서 표식(merchantUid) → 주문 → 지갑 → 로트 순으로 잠근다. 주문 전이와 원장·잔액 갱신은 함께 커밋한다. */
@@ -66,6 +68,7 @@ class GroblePaymentEventService(
                 order.completedAt = now
                 order.refundedAt = now
                 order.providerRef = merchantUid
+                analytics.paymentRefundSucceeded(order.id, order.userId, order.productId, null)
                 return "refunded"
             }
             if (mark.refundAmount != null) logger.warn("역순 환불 금액 불일치: orderId={}", order.id)
@@ -80,6 +83,7 @@ class GroblePaymentEventService(
             order.completedAt = clock.instant()
             order.providerRef = merchantUid
             order.creditTransactionId = transaction.id
+            analytics.paymentPurchaseSucceeded(order.id, order.userId, order.productId, order.priceKrw, order.creditAmount)
             return "completed"
         } finally {
             if (consumed) refundMarks.delete(mark)
@@ -107,6 +111,7 @@ class GroblePaymentEventService(
             order.reversalShortfall = order.creditAmount - reversed
             order.status = CreditOrderStatus.REFUNDED
             order.refundedAt = clock.instant()
+            analytics.paymentRefundSucceeded(order.id, order.userId, order.productId, order.reversalShortfall)
             return "refunded"
         } finally {
             refundMarks.delete(mark)
