@@ -7,6 +7,7 @@ import com.knk.manyak.user.service.UserPersonaService
 import com.knk.manyak.chat.client.ChatHistoryMessage
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatCharacterImage
+import com.knk.manyak.chat.client.ChatTurnGenerationDeadlineException
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -1070,8 +1071,9 @@ class ChatService(
         }
 
         val expirationGate = AtomicBoolean(false)
-        fun expireGeneration() {
-            if (!expirationGate.compareAndSet(false, true)) return
+        fun expireGeneration() = synchronized(expirationGate) {
+            // 클라이언트와 스케줄러가 겹치면 마감 이벤트 발행까지 끝난 뒤 워커가 정산한다.
+            if (!expirationGate.compareAndSet(false, true)) return@synchronized
             val before = workerState.get()
             structuredLogger.event("chat_turn_timeout", "chat_id" to chatId, "worker_state" to before.name)
             val pending = workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)
@@ -1089,12 +1091,13 @@ class ChatService(
                 }
             }
         }
-        fun deadlineReached() = Duration.between(generation.startedAt, Instant.now()).toMillis() >= GENERATION_TIMEOUT_MILLIS
+        val generationDeadline = generation.startedAt.plusMillis(GENERATION_TIMEOUT_MILLIS)
+        fun deadlineReached() = !Instant.now().isBefore(generationDeadline)
         var deadline: java.util.concurrent.ScheduledFuture<*>? = null
         try {
             deadline = chatGenerationDeadlines.schedule(
                 { expireGeneration() },
-                (GENERATION_TIMEOUT_MILLIS - Duration.between(generation.startedAt, Instant.now()).toMillis()).coerceAtLeast(0),
+                Duration.between(Instant.now(), generationDeadline).toMillis().coerceAtLeast(0),
             )
             // 연결 종료는 생성 상태와 정산을 바꾸지 않는다.
             emitter.onTimeout { runCatching { emitter.complete() } }
@@ -1126,7 +1129,7 @@ class ChatService(
                             if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
                         },
                         onFailure = { aiCallLogId, throwable ->
-                            if (workerState.get() != TurnWorkerState.CANCELLED) {
+                            if (throwable !is ChatTurnGenerationDeadlineException && workerState.get() != TurnWorkerState.CANCELLED) {
                                 captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
                             }
                         },
@@ -1136,6 +1139,7 @@ class ChatService(
                         chatTurnAiClient.streamTurn(
                             aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
                             aiCall.traceLink,
+                            deadline = generationDeadline,
                             // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
                             // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                             onCharacterImage = { characterImage ->
@@ -1209,6 +1213,9 @@ class ChatService(
                             ),
                     )
                     runCatching { emitter.complete() }
+                } catch (exception: ChatTurnGenerationDeadlineException) {
+                    // 스케줄러가 늦어도 같은 CAS·로그·오류 이벤트 경로를 거쳐 finally에서 한 번 정산한다.
+                    expireGeneration()
                 } catch (exception: ChatTurnAiException) {
                     // 생성 마감과 실패 종료 중 하나만 종료권을 선점한다.
                     if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync

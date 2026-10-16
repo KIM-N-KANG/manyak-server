@@ -55,6 +55,7 @@ class ChatStreamErrorRelayIntegrationTests {
                 override fun streamTurn(
                     request: ChatTurnAiRequest,
                     traceLink: AiTraceLink,
+                    deadline: java.time.Instant?,
                     onCharacterImage: (ChatCharacterImageEvent) -> Unit,
                     onToken: (String) -> Unit,
                 ): ChatTurnAiResult {

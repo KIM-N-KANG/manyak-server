@@ -18,12 +18,16 @@ class StubChatTurnAiClient : ChatTurnAiClient {
     override fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink,
+        deadline: java.time.Instant?,
         // 스텁은 인물 태그를 만들지 않아 이벤트를 발행하지 않는다(구버전 AI와 같은 모습).
         onCharacterImage: (ChatCharacterImageEvent) -> Unit,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         val aiOutput = buildAiOutput(request)
-        aiOutput.chunked(TOKEN_CHUNK_SIZE).forEach(onToken)
+        aiOutput.chunked(TOKEN_CHUNK_SIZE).forEach { token ->
+            if (deadline != null && !java.time.Instant.now().isBefore(deadline)) throw ChatTurnGenerationDeadlineException()
+            onToken(token)
+        }
         return ChatTurnAiResult(
             aiOutput = aiOutput,
             choices = buildChoices(),

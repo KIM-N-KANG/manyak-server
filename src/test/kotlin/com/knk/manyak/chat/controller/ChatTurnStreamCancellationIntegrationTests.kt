@@ -51,14 +51,17 @@ class ChatTurnStreamCancellationIntegrationTests {
     }
 
     class ControlledAi : ChatTurnAiClient {
+        var delegate: ChatTurnAiClient? = null
         var beforeCompleted: () -> Unit = {}
         var tokenAfterClosure = false
         var characterImageAfterCancellation = false
         var returnedCompleted = false
         override fun streamTurn(
             request: ChatTurnAiRequest, traceLink: AiTraceLink,
+            deadline: java.time.Instant?,
             onCharacterImage: (ChatCharacterImageEvent) -> Unit, onToken: (String) -> Unit,
         ): ChatTurnAiResult {
+            delegate?.let { return it.streamTurn(request, traceLink, deadline, onCharacterImage, onToken) }
             beforeCompleted()
             if (characterImageAfterCancellation) onCharacterImage(ChatCharacterImageEvent("인물", "https://cdn.test/character.webp"))
             if (tokenAfterClosure) onToken("진행 토큰")
@@ -100,6 +103,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         }.`when`(chatGenerationDeadlines).schedule(Mockito.any(Runnable::class.java) ?: Runnable {}, Mockito.anyLong())
         cleaner.cleanAll()
         policy.refresh()
+        ai.delegate = null
         ai.beforeCompleted = {}
         ai.tokenAfterClosure = false
         ai.characterImageAfterCancellation = false
@@ -558,6 +562,55 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
         assertThat(refunds()).hasSize(1)
         assertThat(state(chat, member)).isNull()
+    }
+
+    @Test fun `ping 전용 AI 스트림은 스케줄러 마감 선점 뒤에도 워커를 반환하고 한번 정산한다`() {
+        assertPingDeadline(schedulerFirst = true)
+    }
+
+    @Test fun `ping 전용 AI 스트림이 먼저 마감돼도 늦은 스케줄러와 한번만 정산한다`() {
+        assertPingDeadline(schedulerFirst = false)
+    }
+
+    private fun assertPingDeadline(schedulerFirst: Boolean) {
+        val (member, chat, cost) = paidChat()
+        val ping = "event: ping\ndata: {}\n\n"
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.start()
+        server.enqueue(okhttp3.mockwebserver.MockResponse().setHeader("Content-Type", "text/event-stream")
+            .setBody(ping.repeat(50000)).throttleBody(8192, 20, java.util.concurrent.TimeUnit.MILLISECONDS))
+        ai.delegate = RestChatTurnAiClient(
+            org.springframework.web.reactive.function.client.WebClient.builder().baseUrl(server.url("/").toString()).build(),
+            mapper, java.time.Duration.ofSeconds(5), java.time.Duration.ofSeconds(5),
+        )
+        Mockito.doAnswer { call ->
+            (call.callRealMethod() as com.knk.manyak.chat.dto.GeneratingTurnResponse)
+                .copy(startedAt = java.time.Instant.now().minusMillis(ChatService.SSE_TIMEOUT_MILLIS - 2000))
+        }.`when`(store).acquire(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.now(), Mockito.isNull())
+        val before = failureCount()
+        val emitter = start(member, chat)
+        val thread = Thread { worker.task.run() }
+        try {
+            thread.start()
+            assertThat(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS)).isNotNull()
+            if (schedulerFirst) deadline()
+            thread.join(4000)
+            assertThat(thread.isAlive).describedAs("ping만 보내는 AI를 기다리지 않고 마감 직후 워커 종료").isFalse()
+            deadline(); deadline()
+            assertThat(failureCount()).isEqualTo(before + 1)
+            assertThat(refunds()).hasSize(1)
+            assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
+            assertThat(state(chat, member)).isNull()
+            assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
+            Mockito.verify(store, Mockito.times(1)).release(Mockito.eq(chat.publicId.toString()) ?: "", Mockito.anyString())
+            Mockito.verify(logger, Mockito.times(1)).event("chat_turn_timeout", "chat_id" to chat.publicId.toString(), "worker_state" to "RUNNING")
+            val attempts = ReflectionTestUtils.getField(emitter, "earlySendAttempts") as Set<*>
+            assertThat(attempts.count { ReflectionTestUtils.getField(it!!, "data").toString().contains("AI_STREAM_FAILED") }).isEqualTo(1)
+        } finally {
+            thread.interrupt()
+            thread.join(1000)
+            server.shutdown()
+        }
     }
 
     private fun failureCount() = meters.find("manyak.chat.turn.result").tag("outcome", ChatService.OUTCOME_FAILURE).counter()?.count() ?: 0.0
