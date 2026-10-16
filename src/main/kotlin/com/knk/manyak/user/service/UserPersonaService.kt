@@ -51,7 +51,7 @@ class UserPersonaService(private val personas: UserPersonaRepository, private va
 
     // 회원 상태를 재검사하며 잠금 순서는 users → user_personas로 통일한다.
     private fun requireActiveUser(userId: Long) {
-        val user = users.findByIdForUpdate(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        val user = users.findByIdForUpdate(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         requireActiveStatus(user.status)
     }
 

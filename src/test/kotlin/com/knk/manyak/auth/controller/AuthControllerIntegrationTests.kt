@@ -13,6 +13,13 @@ import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
+import com.nimbusds.jose.jwk.source.ImmutableSecret
+import com.nimbusds.jose.proc.SecurityContext
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm
+import org.springframework.security.oauth2.jwt.JwsHeader
+import org.springframework.security.oauth2.jwt.JwtClaimsSet
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -81,6 +88,100 @@ class AuthControllerIntegrationTests {
                 status = UserStatus.ACTIVE,
             ),
         )
+
+    @Test
+    fun `필수 경로의 토큰 누락 만료 위조 형식 오류는 같은 공통 JSON이다`() {
+        val expired = JwtTokenProvider(properties, Clock.fixed(Instant.now().minusSeconds(7200), ZoneOffset.UTC))
+            .issueAccessToken(UUID.randomUUID())
+        val forged = JwtTokenProvider(properties.copy(secret = "different-key-for-conformance-test-32-bytes"))
+            .issueAccessToken(UUID.randomUUID())
+        for (path in listOf("/api/v1/auth/me", "/api/v1/users/me/personas", "/api/v1/stories/submissions", "/api/v1/users/me/chats")) {
+            for (token in listOf(null, expired, forged, "invalid-token")) {
+                val request = restTestClient.get().uri(path)
+                if (token != null) request.header("Authorization", "Bearer $token")
+                request.exchange().expectStatus().isUnauthorized.expectBody()
+                    .jsonPath("$.timestamp").exists()
+                    .jsonPath("$.status").isEqualTo(401)
+                    .jsonPath("$.code").isEqualTo("UNAUTHORIZED")
+                    .jsonPath("$.message").isEqualTo("유효하지 않은 인증입니다.")
+                    .jsonPath("$.path").isEqualTo(path)
+                    .jsonPath("$.details").isEmpty()
+            }
+        }
+    }
+
+    @Test
+    fun `세션의 주체 누락 형식 오류 없는 회원 탈퇴 회원은 같은 401이다`() {
+        val deleted = userRepository.save(User(nickname = "탈퇴회원", status = UserStatus.DELETED))
+        for (subject in listOf(null, "bad-subject", UUID.randomUUID().toString(), deleted.publicId.toString())) {
+            restTestClient.get().uri("/api/v1/auth/me")
+                .header("Authorization", "Bearer ${signedToken(subject)}")
+                .exchange().expectStatus().isUnauthorized.expectBody()
+                .jsonPath("$.code").isEqualTo("UNAUTHORIZED")
+                .jsonPath("$.message").isEqualTo("유효하지 않은 인증입니다.")
+                .jsonPath("$.details").isEmpty()
+        }
+    }
+
+    @Test
+    fun `없는 회원 토큰의 페르소나 목록 생성 수정 삭제는 같은 401이다`() {
+        val auth = "Bearer ${jwtTokenProvider.issueAccessToken(UUID.randomUUID())}"
+        val path = "/api/v1/users/me/personas"
+        val id = UUID.randomUUID()
+        val responses = listOf(
+            restTestClient.get().uri(path).header("Authorization", auth).exchange(),
+            restTestClient.post().uri(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                .body("""{"name":"주인공","description":"설명"}""").exchange(),
+            restTestClient.patch().uri("$path/$id").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                .body("""{"name":"주인공"}""").exchange(),
+            restTestClient.delete().uri("$path/$id").header("Authorization", auth).exchange(),
+        )
+        for (response in responses) {
+            response.expectStatus().isUnauthorized.expectBody()
+                .jsonPath("$.code").isEqualTo("UNAUTHORIZED")
+                .jsonPath("$.message").isEqualTo("유효하지 않은 인증입니다.")
+        }
+    }
+
+    @Test
+    fun `핸드오프 필수 코드 헤더 누락은 400 공통 JSON이다`() {
+        for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
+            restTestClient.get().uri(path).exchange().expectStatus().isBadRequest.expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+                .jsonPath("$.path").isEqualTo(path)
+                .jsonPath("$.details").isEmpty()
+        }
+    }
+
+    @Test
+    fun `미지원 소셜 제공자는 인증 없이 또는 잘못된 Bearer 헤더로도 400이다`() {
+        for (provider in listOf("apple", "naver", "unknown")) {
+            for (token in listOf(null, "invalid-token")) {
+                val request = restTestClient.post().uri("/api/v1/auth/social/$provider")
+                    .contentType(MediaType.APPLICATION_JSON).body("""{"idToken":"test-proof"}""")
+                if (token != null) request.header("Authorization", "Bearer $token")
+                request.exchange().expectStatus().isBadRequest.expectBody()
+                    .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+                    .jsonPath("$.details").isEmpty()
+            }
+        }
+    }
+
+    private fun signedToken(subject: String?): String {
+        val claims = JwtClaimsSet.builder()
+            .issuer(properties.issuer).issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(1800))
+        if (subject != null) claims.subject(subject)
+        val encoder = NimbusJwtEncoder(
+            ImmutableSecret<SecurityContext>(
+                properties.secret.toByteArray(Charsets.UTF_8),
+            ),
+        )
+        return encoder.encode(JwtEncoderParameters.from(
+            JwsHeader.with(MacAlgorithm.HS256).build(),
+            claims.build(),
+        )).tokenValue
+    }
 
     // ---- GET /me ----
 

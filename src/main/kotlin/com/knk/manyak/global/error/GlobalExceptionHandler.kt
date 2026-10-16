@@ -15,6 +15,7 @@ import org.springframework.validation.BindException
 import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -133,6 +134,15 @@ class GlobalExceptionHandler {
             request = request,
             details = listOf(ApiErrorDetail(field = exception.name, message = "값의 형식이 올바르지 않습니다.")),
         )
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException::class)
+    fun handleMissingRequestHeaderException(
+        exception: MissingRequestHeaderException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("Missing request header: path={}, name={}", request.requestURI, exception.headerName)
+        return badRequest(request = request, details = emptyList())
     }
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
