@@ -67,4 +67,31 @@ class SocialConsentServiceTest {
         verifyNoInteractions(analytics)
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = [
+        com.knk.manyak.global.error.ApiErrorCodes.CONSENT_VERSION_MISMATCH,
+        com.knk.manyak.global.error.ApiErrorCodes.CONSENT_REQUIRED_MISSING,
+    ])
+    fun `동의 서비스 검증 400은 validation으로 한 번 발행하고 원래 오류를 유지한다`(errorCode: String) {
+        val pending = PendingSocialConsent(SocialProvider.KAKAO, "sub", null, null, null, null)
+        val info = SocialUserInfo("sub", null, null, null)
+        val request = UserConsentRequest(terms = "v1.4")
+        val expected = com.knk.manyak.global.error.CodedResponseStatusException(
+            HttpStatus.BAD_REQUEST, errorCode, "동의 검증 실패",
+        )
+        `when`(codes.find("code")).thenReturn(pending)
+        if (errorCode == com.knk.manyak.global.error.ApiErrorCodes.CONSENT_VERSION_MISMATCH) {
+            doThrow(expected).`when`(consents).validateVersions(request)
+        } else {
+            `when`(registrar.createWithConsents(SocialProvider.KAKAO, info, request)).thenThrow(expected)
+        }
+
+        assertThat(catchThrowable { service.complete("code", request, null) }).isSameAs(expected)
+        verify(analytics).socialLoginFailed(SocialProvider.KAKAO,
+            com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
+        verifyNoMoreInteractions(analytics)
+        verify(codes, never()).consume("code")
+        verifyNoInteractions(login)
+    }
+
 }

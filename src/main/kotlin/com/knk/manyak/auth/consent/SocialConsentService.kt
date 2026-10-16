@@ -75,7 +75,11 @@ class SocialConsentService(
     private fun <T> afterVerification(provider: SocialProvider, block: () -> T): T = try {
         block()
     } catch (ex: Exception) {
-        analytics.socialLoginFailed(provider, AnalyticsErrorType.SERVER)
+        // 현행 버전·필수 동의 판정은 서비스 검증 실패다. 저장소·후속 처리 장애와 구별한다(ACCOUNT §5-4-9).
+        val errorType = if (ex is CodedResponseStatusException && ex.statusCode == HttpStatus.BAD_REQUEST &&
+            (ex.errorCode == ApiErrorCodes.CONSENT_VERSION_MISMATCH || ex.errorCode == ApiErrorCodes.CONSENT_REQUIRED_MISSING)
+        ) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.SERVER
+        analytics.socialLoginFailed(provider, errorType)
         throw ex
     }
 
