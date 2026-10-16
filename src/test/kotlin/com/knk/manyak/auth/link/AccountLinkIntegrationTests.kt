@@ -48,6 +48,49 @@ class AccountLinkIntegrationTests {
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var linkCodes: LinkCodeStore
+    @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = UserStatus::class, names = ["DELETED", "SUSPENDED"])
+    fun `계정 상태 변경과 연동 저장을 직렬화한다`(status: UserStatus) {
+        val user = userRepository.save(com.knk.manyak.auth.entity.User(nickname = "잠금테스트"))
+        val code = linkCodes.issue(user.id).linkCode
+        val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
+        val started = java.util.concurrent.CountDownLatch(1)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val verifier = com.knk.manyak.auth.social.SocialIdTokenVerifier {
+            started.countDown()
+            com.knk.manyak.auth.social.SocialUserInfo(providerUserId = "serialized-target")
+        }
+        val service = AccountLinkService(
+            mapOf(SocialProvider.KAKAO to verifier), socialAccountRepository, userRepository,
+            linkCodes, org.mockito.Mockito.mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java),
+            java.time.Duration.ofMinutes(10), transactionManager,
+        )
+        try {
+            lateinit var future: java.util.concurrent.Future<Throwable?>
+            tx.executeWithoutResult {
+                val locked = userRepository.findByIdForUpdate(user.id)!!
+                future = executor.submit<Throwable?> {
+                    try { service.link(user.id, SocialProvider.KAKAO, code, AccountLinkRequest("target")); null }
+                    catch (ex: Throwable) { ex }
+                }
+                assertThat(started.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue()
+                // 상태 변경 트랜잭션이 사용자 행을 보유하는 동안 삽입까지 완료되면 직렬화가 빠진 것이다.
+                org.assertj.core.api.Assertions.assertThatThrownBy { future.get(200, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                    .isInstanceOf(java.util.concurrent.TimeoutException::class.java)
+                locked.status = status
+            }
+            val error = future.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertThat(error).isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+            assertThat((error as org.springframework.web.server.ResponseStatusException).statusCode.value())
+                .isEqualTo(if (status == UserStatus.DELETED) 401 else 403)
+            assertThat(socialAccountRepository.findByUserId(user.id)).isEmpty()
+            assertThat(linkCodes.findUserId(code)).isEqualTo(user.id)
+        } finally { executor.shutdownNow() }
+    }
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()

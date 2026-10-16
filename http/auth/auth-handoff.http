@@ -257,3 +257,7 @@ X-Manyak-Device-Id: {{externalDeviceId}}
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
 %}
+
+# KNK-1670 소비 결과 보존 검증
+# 로그인 소비가 끝난 코드로 확인 요청과 상태 조회를 반복해도 MIGRATED/MIGRATION_CLOSED를 유지해야 합니다.
+# 로컬에서 짧은 consumed-ttl을 설정한 경우에도 결과가 살아 있는 동안 LANDED로 돌아가면 안 됩니다.

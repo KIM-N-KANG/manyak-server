@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.link
 
+import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.UserStatus
@@ -7,6 +8,7 @@ import com.knk.manyak.auth.entity.wireValue
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.SocialIdTokenVerifier
+import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
@@ -15,6 +17,8 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import java.time.Duration
 import java.time.Instant
@@ -55,14 +59,16 @@ class AccountLinkService(
     // 재인증 ID 토큰의 발급 시각(iat) 허용 범위. 소셜 팝업 왕복·사용자 조작 시간을 감안한 기본값이다.
     @param:Value("\${manyak.auth.link.reauth-max-age:PT10M}")
     private val reauthMaxAge: Duration,
+    transactionManager: PlatformTransactionManager,
 ) {
+    private val linkTransaction = TransactionTemplate(transactionManager)
 
     /**
      * 1단계. 이미 연동된 provider로 소유를 재확인하고 일회용 링크 코드를 발급한다.
      * 실패 사유(토큰 무효·미연동 provider·sub 불일치·오래된 토큰)는 구분하지 않는다 — 어떤 소셜 계정이 이 회원에게
      * 붙어 있는지 노출하지 않기 위해서다.
      */
-    fun reauthenticate(userId: Long, request: SocialReauthRequest): LinkCodeResponse {
+    fun reauthenticate(userId: Long, request: SocialReauthRequest): LinkCodeResponse = SocialAuthPrivacyFilter.safely {
         requireLinkableAccount(userId)
         val verifier = verifierOrBadRequest(request.provider)
 
@@ -81,18 +87,16 @@ class AccountLinkService(
         if (linked.providerUserId != info.providerUserId) {
             throw reauthFailed(null)
         }
-        return linkCodeStore.issue(userId)
+        linkCodeStore.issue(userId)
     }
 
     /**
      * 2단계. 연동할 provider의 ID 토큰과 링크 코드를 받아 연동 행을 추가한다.
      *
-     * **의도적으로 트랜잭션을 열지 않는다.** 쓰기는 단일 행 삽입이고 정합성은 DB 유니크 두 개
-     * (`(provider, provider_user_id)`, V52 `(user_id, provider)`)가 보장한다. 바깥 트랜잭션을 열면 삽입 실패
-     * ([DataIntegrityViolationException])를 잡는 순간 그 트랜잭션이 rollback-only로 오염돼, 경합을 흡수해
-     * 응답하려는 순간 커밋이 터진다. OSIV도 꺼져 있어 저장소 호출마다 독립 트랜잭션·영속성 컨텍스트다.
+     * 사용자 행 잠금부터 연동 삽입까지 한 트랜잭션으로 직렬화한다. 유니크 위반은 롤백이
+     * 끝난 바깥에서 재조회하므로 rollback-only 트랜잭션을 재사용하지 않는다.
      */
-    fun link(userId: Long, provider: SocialProvider, linkCode: String?, request: AccountLinkRequest) {
+    fun link(userId: Long, provider: SocialProvider, linkCode: String?, request: AccountLinkRequest) = SocialAuthPrivacyFilter.safely {
         try {
             val verifier = verifierOrBadRequest(provider)
             requireLinkCode(userId, linkCode)
@@ -109,18 +113,23 @@ class AccountLinkService(
                 )
             }
 
-            requireNoConflict(userId, provider, target.providerUserId)
             try {
-                socialAccountRepository.saveAndFlush(
-                    SocialAccount(
-                        userId = userId,
-                        provider = provider,
-                        providerUserId = target.providerUserId,
-                        email = target.email,
-                        connectedAt = Instant.now(),
-                        // 연동은 로그인이 아니다 — 그 provider로 실제 로그인할 때 로그인 경로가 채운다.
-                    ),
-                )
+                linkTransaction.executeWithoutResult {
+                    val user = userRepository.findByIdForUpdate(userId)
+                        ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+                    requireActiveStatus(user.status)
+                    requireNoConflict(userId, provider, target.providerUserId)
+                    socialAccountRepository.saveAndFlush(
+                        SocialAccount(
+                            userId = userId,
+                            provider = provider,
+                            providerUserId = target.providerUserId,
+                            email = target.email,
+                            connectedAt = Instant.now(),
+                            // 연동은 로그인이 아니다 — 그 provider로 실제 로그인할 때 로그인 경로가 채운다.
+                        ),
+                    )
+                }
             } catch (ex: DataIntegrityViolationException) {
                 // 사전 검사 통과 뒤 상대 요청이 먼저 커밋한 경합. 유니크 위반을 500으로 흘리지 않고 같은 규칙으로 사유를 확정한다.
                 requireNoConflict(userId, provider, target.providerUserId)
