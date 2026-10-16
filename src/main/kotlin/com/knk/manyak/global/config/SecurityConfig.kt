@@ -3,6 +3,7 @@ package com.knk.manyak.global.config
 import com.knk.manyak.user.consent.UserConsentService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.ApiAuthenticationEntryPoint
 import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
 import com.knk.manyak.global.security.DeletedAccountRejectionFilter
 import com.knk.manyak.global.security.OptionalJwtAuthenticationFilter
@@ -41,8 +42,9 @@ class SecurityConfig {
         consentService: UserConsentService,
         @Value("\${manyak.auth.consent-gate.enabled:false}") consentGateEnabled: Boolean,
         @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
-    ): SecurityFilterChain =
-        http
+    ): SecurityFilterChain {
+        val authenticationEntryPoint = ApiAuthenticationEntryPoint(objectMapper)
+        return http
             .cors { }
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
@@ -143,13 +145,16 @@ class SecurityConfig {
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.
-            // 토큰 없음·만료·위조는 BearerTokenAuthenticationEntryPoint가 401로 응답한다.
+            // 토큰 없음·만료·위조는 공통 JSON과 고정 문구로 401 응답한다.
             // 공개 인증 경로(BEARER_SKIP_MATCHERS)에서는 토큰을 resolve하지 않아(아래 resolver) 자동 첨부된 만료/위조 access 헤더로 막히지 않는다.
+            .exceptionHandling { it.authenticationEntryPoint(authenticationEntryPoint) }
             .oauth2ResourceServer {
+                it.authenticationEntryPoint(authenticationEntryPoint)
                 it.bearerTokenResolver(bearerSkipAwareResolver())
                 it.jwt { }
             }
             .build()
+    }
 
     /**
      * 공개 인증 경로(Google·Kakao 로그인, refresh 회전)에서는 Bearer 토큰을 resolve하지 않는다.
@@ -191,9 +196,8 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/google"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/kakao"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/complete"),
+            // 미지원 제공자도 컨트롤러가 400으로 판정하며 완료 경로도 포함한다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/{provider}"),
             // 게스트 동의는 회원 토큰과 상태를 사용하지 않고 디바이스 헤더로만 식별한다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/guests/consents"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/guests/consents"),

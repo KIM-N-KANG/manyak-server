@@ -203,10 +203,12 @@ class AuthController(
     }
 
     /** sub(공개 식별자)를 UUID로 파싱한다. 형식이 깨졌으면(토큰은 유효했어도) 401로 본다. */
-    private fun parsePublicId(subject: String?): UUID =
-        try {
+    private fun parsePublicId(subject: String?): UUID {
+        if (subject == null) throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        return try {
             UUID.fromString(subject)
         } catch (_: IllegalArgumentException) {
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         }
+    }
 }
