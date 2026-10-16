@@ -80,7 +80,7 @@ class ChatTurnStreamCancellationIntegrationTests {
     @MockitoBean(name = "chatSseExecutor") lateinit var executor: Executor
     @Autowired lateinit var ai: ControlledAi
     @Autowired lateinit var stories: StoryRepository
-    @Autowired lateinit var chats: StoryChatRepository
+    @MockitoSpyBean lateinit var chats: StoryChatRepository
     @Autowired lateinit var messages: StoryMessageRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var wallet: CreditWalletService
@@ -424,6 +424,30 @@ class ChatTurnStreamCancellationIntegrationTests {
         Mockito.doReturn(values).`when`(redis).opsForValue()
 
         assertDetailReadFailure(chat, "RedisConnectionFailureException")
+    }
+
+    @Test fun `상세는 첫 DB 조회 전에 Redis 생성 상태를 읽는다`() {
+        val chat = chats.save(StoryChat(storyId = stories.save(Story(title = "조회 순서", genre = "판타지")).id))
+        seedTurn(chat)
+        Mockito.clearInvocations(store, chats)
+
+        val detail = service.getChatDetail(chat.publicId.toString(), null)
+
+        assertThat(detail.turns).hasSize(1)
+        val order = Mockito.inOrder(store, chats)
+        order.verify(store).get(chat.publicId.toString())
+        order.verify(chats).findByPublicIdAndDeletedAtIsNull(chat.publicId)
+    }
+
+    @Test fun `상세는 잘못된 UUID를 Redis 조회 없이 404로 거절한다`() {
+        Mockito.clearInvocations(store, chats)
+
+        val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .get("/api/v1/chats/not-a-uuid")).andReturn().response
+
+        assertThat(response.status).isEqualTo(404)
+        Mockito.verify(store, Mockito.never()).get(Mockito.anyString())
+        Mockito.verifyNoInteractions(chats)
     }
 
     @Test fun `상세는 생성 상태 JSON 해석 실패에도 200과 대화 기록을 반환하고 생성 상태만 null로 내리며 로그를 남긴다`() {

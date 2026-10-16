@@ -399,6 +399,17 @@ class ChatService(
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
+        // PostgreSQL REPEATABLE_READ의 스냅샷은 트랜잭션 시작이 아니라 첫 SQL에서 잡힌다.
+        // 커밋 후 해제되는 생성 중 키를 먼저 읽어야 키가 없을 때 DB에서 커밋된 턴이 보인다.
+        // 형식 오류는 Redis를 조회하지 않고 아래 resolveChat의 기존 404 경로로 보낸다.
+        val generatingTurn = parsePublicIdOrNull(chatId)?.toString()?.let { publicId ->
+            try {
+                chatGenerationStore.get(publicId)
+            } catch (ex: Exception) {
+                structuredLogger.event("chat_generation_read_failed", "chat_id" to publicId, "error" to ex.javaClass.simpleName)
+                null
+            }
+        }
         val chat = resolveChat(chatId)
         // 소유권 게이트(§4-5, KNK-480): 소유 채팅은 소유자만, 게스트 채팅은 게스트만 조회한다.
         // 존재 판정(resolveChat의 404) 뒤에 적용해, 회원의 게스트 채팅 열람·타인 소유 채팅 열람을 403으로 막는다.
@@ -449,12 +460,7 @@ class ChatService(
         }
 
         return ChatDetailResponse(
-            generatingTurn = try {
-                chatGenerationStore.get(chat.publicId.toString())
-            } catch (ex: Exception) {
-                structuredLogger.event("chat_generation_read_failed", "chat_id" to chat.publicId.toString(), "error" to ex.javaClass.simpleName)
-                null
-            },
+            generatingTurn = generatingTurn,
             persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
@@ -1260,6 +1266,8 @@ class ChatService(
                     val persistedOk = persisted.get()
                     // 결과 판정은 이 finally·큐 대기 중 마감·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
                     deadline?.cancel(false)
+                    // 성공 시 turnSaveTransactionTemplate.execute의 턴 커밋 뒤에만 키를 해제한다.
+                    // 상세는 Redis를 첫 SQL보다 먼저 읽으므로 이 순서가 키 부재와 저장된 턴의 정합성을 보장한다.
                     releaseGeneration(chat, generation)
                     workerState.set(TurnWorkerState.FINISHED)
                     recordResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
