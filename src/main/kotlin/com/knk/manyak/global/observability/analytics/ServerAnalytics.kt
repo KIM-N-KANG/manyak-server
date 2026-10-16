@@ -171,13 +171,52 @@ class ServerAnalytics(
             mapOf("error_type" to AnalyticsErrorType.VALIDATION.wireValue, "reason" to reason.wireValue),
         )
 
-    private fun publishAfterCommit(eventType: String, userPublicId: String, properties: Map<String, Any?>) {
+    // --- 출석·결제(PAYMENT §5-4-9) ---
+
+    fun creditAttendanceSucceeded(userId: Long, rewarded: Boolean, amount: Long) =
+        emitForUser("server_credit_attendance_processed_succeeded", userId, mapOf("rewarded" to rewarded, "amount" to amount))
+
+    fun paymentOrderSucceeded(userId: Long, productId: String) {
+        val publicId = resolvePublicId(userId) ?: return
+        publishAfterCommit("server_payment_order_processed_succeeded", publicId, mapOf("product_id" to productId))
+    }
+
+    fun paymentPurchaseSucceeded(orderId: Long, userId: Long, productId: String, priceKrw: Long, creditAmount: Long) =
+        publishPaymentAfterCommit(
+            "server_payment_purchase_processed_succeeded", orderId, userId,
+            mapOf("product_id" to productId, "price_krw" to priceKrw, "credit_amount" to creditAmount),
+        )
+
+    fun paymentRefundSucceeded(orderId: Long, userId: Long, productId: String, reversalShortfall: Long?) =
+        publishPaymentAfterCommit(
+            "server_payment_refund_processed_succeeded", orderId, userId,
+            buildMap {
+                put("product_id", productId)
+                reversalShortfall?.let { put("reversal_shortfall", it) }
+            },
+        )
+
+    private fun publishPaymentAfterCommit(eventType: String, orderId: Long, userId: Long, properties: Map<String, Any?>) {
+        afterCommit {
+            val publicId = resolvePublicId(userId)
+            if (publicId == null) {
+                log.warn("분석 이벤트 주문 소유자 식별 실패로 발행 생략: orderId={}", orderId)
+            } else {
+                publishSafely(eventType, publicId, properties, webhook = true)
+            }
+        }
+    }
+
+    private fun publishAfterCommit(eventType: String, userPublicId: String, properties: Map<String, Any?>) =
+        afterCommit { publishSafely(eventType, userPublicId, properties) }
+
+    private fun afterCommit(publish: () -> Unit) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
-                override fun afterCommit() = publishSafely(eventType, userPublicId, properties)
+                override fun afterCommit() = publish()
             })
         } else {
-            publishSafely(eventType, userPublicId, properties)
+            publish()
         }
     }
 
@@ -200,12 +239,12 @@ class ServerAnalytics(
             null
         }
 
-    private fun publishSafely(eventType: String, userPublicId: String?, properties: Map<String, Any?>) {
+    private fun publishSafely(eventType: String, userPublicId: String?, properties: Map<String, Any?>, webhook: Boolean = false) {
         try {
-            val rawDeviceHash = MDC.get(MdcKeys.DEVICE_ID_HASH)
+            val rawDeviceHash = if (webhook) null else MDC.get(MdcKeys.DEVICE_ID_HASH)
             val realDeviceHash = rawDeviceHash?.takeIf { it.isNotBlank() && it != UNKNOWN }
             val requestId = MDC.get(MdcKeys.REQUEST_ID)
-            val sessionId = MDC.get(MdcKeys.SESSION_ID)?.toLongOrNull()
+            val sessionId = if (webhook) null else MDC.get(MdcKeys.SESSION_ID)?.toLongOrNull()
             // 회원은 user_id로 귀속하므로 device_id는 실제 해시가 있을 때만(없으면 null). 게스트는 항상 device_id가 있어야
             // Amplitude가 귀속할 수 있으므로 unknown이라도 채운다.
             val deviceId = if (userPublicId != null) {

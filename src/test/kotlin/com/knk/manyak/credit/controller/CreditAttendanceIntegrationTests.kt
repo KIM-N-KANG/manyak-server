@@ -21,6 +21,7 @@ import java.util.UUID
  * - 인증 필수: 토큰 없음·사용자 없음 → 401.
  * - 첫 출석은 지급(rewarded=true), 같은 날 재출석은 멱등(rewarded=false·미증가).
  */
+@org.springframework.context.annotation.Import(PaymentAnalyticsTestConfig::class)
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -33,9 +34,12 @@ class CreditAttendanceIntegrationTests {
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var analytics: PaymentAnalyticsCapture
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        analytics.events.clear()
     }
 
     private fun saveUser(): User =
@@ -55,6 +59,46 @@ class CreditAttendanceIntegrationTests {
     @Test
     fun `유효한 토큰이지만 사용자가 없으면 401이다`() {
         attendance(jwtTokenProvider.issueAccessToken(UUID.randomUUID())).expectStatus().isUnauthorized
+        assertThat(analytics.events).isEmpty()
+    }
+
+    @Test
+    fun `정지와 탈퇴 출석은 공통 오류로 거절하고 적립과 이벤트가 없다`() {
+        for ((status, expected, code) in listOf(
+            Triple(UserStatus.SUSPENDED, 403, "FORBIDDEN"),
+            Triple(UserStatus.DELETED, 401, "UNAUTHORIZED"),
+        )) {
+            val user = userRepository.save(User(nickname = "출석 제한", status = status))
+            attendance(jwtTokenProvider.issueAccessToken(user.publicId)).expectStatus().isEqualTo(expected)
+                .expectBody().jsonPath("$.code").isEqualTo(code)
+                .jsonPath("$.details.length()").isEqualTo(0)
+            assertThat(creditWalletService.balanceOf(user.id)).isZero()
+        }
+        assertThat(analytics.events).isEmpty()
+    }
+
+    @Test
+    fun `출석 이벤트는 요청 문맥을 쓰고 세션 조회는 정지 회원도 읽기만 한다`() {
+        val user = saveUser()
+        restTestClient.post().uri("/api/v1/users/me/credits/attendance")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
+            .header("X-Manyak-Request-Id", "attendance-test-request")
+            .header("X-Manyak-Device-Id", "attendance-device")
+            .header("X-Manyak-Session-Id", "123456")
+            .exchange().expectStatus().isOk
+        val event = analytics.ofType("credit_attendance").single()
+        assertThat(event.userId).isEqualTo(user.publicId.toString())
+        assertThat(event.sessionId).isEqualTo(123456L)
+        assertThat(event.deviceId).startsWith("device_hash_")
+        assertThat(event.insertId).isEqualTo("attendance-test-request:${event.eventType}")
+        assertThat(event.eventProperties).containsEntry("request_id", "attendance-test-request")
+            .containsEntry("is_logged_in", true)
+        user.status = UserStatus.SUSPENDED
+        userRepository.saveAndFlush(user)
+        restTestClient.get().uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.attendedToday").isEqualTo(true)
+        assertThat(analytics.ofType("credit_attendance")).hasSize(1)
     }
 
     @Test
@@ -87,5 +131,10 @@ class CreditAttendanceIntegrationTests {
             .jsonPath("$.balance").isEqualTo(afterFirst.toInt())
 
         assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(afterFirst)
+        val events = analytics.ofType("credit_attendance")
+        assertThat(events).hasSize(2)
+        assertThat(events.map { it.userId }).containsOnly(user.publicId.toString())
+        assertThat(events.map { it.eventProperties["rewarded"] }).containsExactly(true, false)
+        assertThat(events.map { it.eventProperties["amount"] }).containsExactly(afterFirst, 0L)
     }
 }

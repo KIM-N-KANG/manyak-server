@@ -8,6 +8,7 @@ import com.knk.manyak.credit.dto.CreditProductsResponse
 import com.knk.manyak.credit.entity.CreditOrder
 import com.knk.manyak.credit.entity.CreditOrderProvider
 import com.knk.manyak.credit.repository.CreditOrderRepository
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -20,6 +21,7 @@ class CreditOrderService(
     private val properties: GroblePaymentProperties,
     private val orders: CreditOrderRepository,
     private val suspensionGuard: SuspensionGuard,
+    private val analytics: ServerAnalytics,
 ) {
     fun products(): CreditProductsResponse = CreditProductsResponse(
         items = properties.products.map {
@@ -45,6 +47,7 @@ class CreditOrderService(
                 creditAmount = product.totalCredits,
             ),
         )
+        analytics.paymentOrderSucceeded(userId, order.productId)
         val separator = if ('?' in product.paymentUrl) '&' else '?'
         return CreateCreditOrderResponse(order.publicId, "${product.paymentUrl}${separator}ref=${order.publicId}")
     }
