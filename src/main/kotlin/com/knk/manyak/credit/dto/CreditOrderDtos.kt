@@ -15,7 +15,6 @@ data class CreditProductResponse(
     val bonusCredits: Long,
     val totalCredits: Long,
     val webPriceKrw: Long,
-    val appPriceKrw: Long,
 )
 
 data class CreateCreditOrderRequest(

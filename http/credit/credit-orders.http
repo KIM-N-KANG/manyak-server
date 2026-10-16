@@ -21,6 +21,10 @@ GET {{baseUrl}}/api/v1/credits/products
     client.test("상품 6종과 보너스 총량", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
         client.assert(response.body.items.length === 6, `expected=6 actual=${response.body.items.length}`);
+        const expectedFields = ["productId", "baseCredits", "bonusCredits", "totalCredits", "webPriceKrw"].sort();
+        response.body.items.forEach(item => client.assert(
+            JSON.stringify(Object.keys(item).sort()) === JSON.stringify(expectedFields),
+            `expected=${expectedFields} actual=${Object.keys(item)}`));
         client.assert(response.body.items[1].totalCredits === 5000, `expected=5000 actual=${response.body.items[1].totalCredits}`);
         const expectedIds = ["if_2000", "if_5000", "if_10000", "if_30000", "if_50000", "if_100000"];
         client.assert(JSON.stringify(response.body.items.map(item => item.productId)) === JSON.stringify(expectedIds), `expected=${expectedIds} actual=${response.body.items.map(item => item.productId)}`);

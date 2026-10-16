@@ -21,12 +21,11 @@ data class CreditProduct(
     val base: Long,
     val bonus: Long,
     val webPriceKrw: Long,
-    val appPriceKrw: Long,
     val paymentUrl: String = "",
 ) {
     init {
         require(id.isNotBlank() && id.length <= 32) { "상품 ID는 1~32자여야 합니다." }
-        require(base > 0 && bonus >= 0 && webPriceKrw > 0 && appPriceKrw > 0) {
+        require(base > 0 && bonus >= 0 && webPriceKrw > 0) {
             "기본 이프·가격은 양수, 보너스는 0 이상이어야 합니다."
         }
         require(base <= Long.MAX_VALUE - bonus) { "상품 총량이 저장 범위를 초과합니다." }

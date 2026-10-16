@@ -23,7 +23,7 @@
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
-| ck_credit_orders_provider | CHECK | CHECK (((provider)::text = ANY ((ARRAY['GROBLE'::character varying, 'GOOGLE_PLAY'::character varying])::text[]))) |
+| ck_credit_orders_provider | CHECK | CHECK (((provider)::text = 'GROBLE'::text)) |
 | ck_credit_orders_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'COMPLETED'::character varying, 'REFUNDED'::character varying])::text[]))) |
 | credit_orders_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) |
 | credit_orders_credit_transaction_id_fkey | FOREIGN KEY | FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id) |

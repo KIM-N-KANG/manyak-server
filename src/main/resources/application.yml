@@ -188,56 +188,42 @@ manyak:
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   payment:
-    google-play:
-      service-account-json: ${MANYAK_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:}
-      package-name: ${MANYAK_GOOGLE_PLAY_PACKAGE_NAME:}
-      allow-test-purchases: false
-      voided-reconcile:
-        enabled: true
-        fixed-delay: 1h
-        lookback: 48h
     groble:
       # 미설정 기동은 허용하되 주문 생성은 링크·시크릿 중 하나라도 비어 있으면 503이다.
       webhook-secret: ${MANYAK_GROBLE_WEBHOOK_SECRET:}
       # 상품별 그로블 결제창(단일 판매자 계정이라 환경 공통). 주문 생성은 웹훅 시크릿 설정도 필요하다.
-      # 표기는 크랙 방식(기본 수량 = 가격, 보너스는 덤), 앱 가격은 웹 × 1.4를 100원 단위 반올림.
+      # 표기는 크랙 방식(기본 수량 = 가격, 보너스는 덤).
       # 2026-09-11 최종안(KNK-1270). 결제창은 그로블 MCP로 관리한다(가격은 판매 이력 없을 때만 제자리 수정 가능).
       products:
         - id: if_2000
           base: 2000
           bonus: 0
           web-price-krw: 2000
-          app-price-krw: 2800
           payment-url: "https://www.groble.im/payment/iwhU85"
         - id: if_5000
           base: 4800
           bonus: 200
           web-price-krw: 4800
-          app-price-krw: 6700
           payment-url: "https://www.groble.im/payment/nSGNPJ"
         - id: if_10000
           base: 9400
           bonus: 600
           web-price-krw: 9400
-          app-price-krw: 13200
           payment-url: "https://www.groble.im/payment/pt2z39"
         - id: if_30000
           base: 27500
           bonus: 2500
           web-price-krw: 27500
-          app-price-krw: 38500
           payment-url: "https://www.groble.im/payment/AvtY6y"
         - id: if_50000
           base: 45000
           bonus: 5000
           web-price-krw: 45000
-          app-price-krw: 63000
           payment-url: "https://www.groble.im/payment/dRw9sY"
         - id: if_100000
           base: 88000
           bonus: 12000
           web-price-krw: 88000
-          app-price-krw: 123200
           payment-url: "https://www.groble.im/payment/mBWhrA"
   credit:
     # 적립·소모 정책값의 **기본값**(스펙 §4-3-7, 2026-09-11 재확정 · KNK-1270). 여기 값은 CreditPolicyService가

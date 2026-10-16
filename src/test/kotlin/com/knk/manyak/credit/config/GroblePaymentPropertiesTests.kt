@@ -11,7 +11,6 @@ class GroblePaymentPropertiesTests {
             "manyak.payment.groble.products[$i].base=$value",
             "manyak.payment.groble.products[$i].bonus=0",
             "manyak.payment.groble.products[$i].web-price-krw=$value",
-            "manyak.payment.groble.products[$i].app-price-krw=${value * 14 / 10}",
         )
     }
     private fun runner(properties: List<String> = values) = ApplicationContextRunner()
@@ -48,7 +47,7 @@ class GroblePaymentPropertiesTests {
 
     @Test
     fun `기본량과 가격은 양수이고 보너스는 음수가 아니어야 한다`() {
-        for ((field, value) in listOf("base" to "0", "web-price-krw" to "0", "app-price-krw" to "-1", "bonus" to "-1")) {
+        for ((field, value) in listOf("base" to "0", "web-price-krw" to "0", "bonus" to "-1")) {
             runner().withPropertyValues("manyak.payment.groble.products[0].$field=$value").run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasStackTraceContaining("기본 이프·가격은 양수, 보너스는 0 이상이어야 합니다.")
