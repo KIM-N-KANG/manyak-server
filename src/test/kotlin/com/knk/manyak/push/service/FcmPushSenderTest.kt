@@ -24,6 +24,9 @@ import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.dao.DataIntegrityViolationException
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Optional
 import java.util.UUID
 
@@ -131,6 +134,37 @@ class FcmPushSenderTest {
         val android = fieldOf(captor.value, "androidConfig")!!
         assertThat(fieldOf(android, "priority")).isEqualTo("normal")
         assertThat(fieldOf(android, "ttl")).isEqualTo("0.500000000s")
+    }
+
+    @Test
+    fun `기기마다 남은 TTL을 다시 계산하고 자정부터 나머지 기기를 중단한다`() {
+        val midnight = Instant.parse("2026-10-17T15:00:00Z")
+        val clock = mock(Clock::class.java)
+        `when`(clock.instant()).thenReturn(midnight.minusSeconds(2), midnight.minusMillis(500), midnight)
+        val sender = FcmPushSender(messaging, repository, userRepository, registry, clock = clock)
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(
+            listOf(token(1, "a"), token(2, "b"), token(3, "c"), token(4, "d")),
+        )
+
+        sender.sendToUser(7L, mapOf("type" to "ATTENDANCE_REMINDER"), AndroidConfig.Priority.NORMAL, expiresAt = midnight)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging, times(2)).send(captor.capture())
+        assertThat(captor.allValues.map { fieldOf(fieldOf(it, "androidConfig")!!, "ttl") })
+            .containsExactly("2s", "0.500000000s")
+    }
+
+    @Test
+    fun `이미 만료된 WEB 기기에는 발송하지 않는다`() {
+        val expiry = Instant.parse("2026-10-17T15:00:00Z")
+        val sender = FcmPushSender(messaging, repository, userRepository, registry, clock = Clock.fixed(expiry, ZoneOffset.UTC))
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(
+            listOf(token(1, "web").apply { platform = PushPlatform.WEB }),
+        )
+
+        sender.sendToUser(7L, mapOf("type" to "ATTENDANCE_REMINDER"), expiresAt = expiry)
+
+        verify(messaging, never()).send(any())
     }
 
     @Test

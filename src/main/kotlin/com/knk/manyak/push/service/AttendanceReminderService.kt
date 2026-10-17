@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.time.Clock
-import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -65,7 +64,7 @@ class AttendanceReminderService(
             if (!now.isBefore(expiry)) break
             runCatching {
                 fcmPushSender.sendToUser(
-                    userId, data, AndroidConfig.Priority.NORMAL, Duration.between(now, expiry).toMillis().coerceAtLeast(0),
+                    userId, data, AndroidConfig.Priority.NORMAL, expiresAt = expiry,
                 )
             }
                 .onSuccess { sent++ }
