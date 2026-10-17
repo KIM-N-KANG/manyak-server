@@ -24,7 +24,7 @@ import java.net.URISyntaxException
 class SentryMdcEventProcessor : EventProcessor {
 
     override fun process(event: SentryEvent, hint: Hint): SentryEvent {
-        scrubAuthentication(event.request)
+        scrubRequest(event.request)
         mdc(MdcKeys.REQUEST_ID)?.let { event.setTag(MdcKeys.REQUEST_ID, it) }
 
         val identity = buildMap {
@@ -38,13 +38,16 @@ class SentryMdcEventProcessor : EventProcessor {
     }
 
     override fun process(transaction: SentryTransaction, hint: Hint): SentryTransaction {
-        scrubAuthentication(transaction.request)
+        scrubRequest(transaction.request)
         return transaction
     }
 
-    private fun scrubAuthentication(request: Request?) {
-        val url = request?.url ?: return
-        val path = try { URI(url).path } catch (_: URISyntaxException) { return }
+    private fun scrubRequest(request: Request?) {
+        if (request == null) return
+        // 경로·URL 유효성과 무관하게 비밀값을 먼저 제거한다. SDK 기본 PII 목록에 의존하지 않는다.
+        request.headers = request.headers?.filterKeys { !it.equals("X-Manyak-Internal-Secret", ignoreCase = true) }
+        val url = request.url ?: return
+        val path = try { URI(url).path } catch (_: URISyntaxException) { return } ?: return
         // 핸드오프 생성 POST는 기본 수집한다. 메서드가 누락된 SDK 요청은 안전하게 정제한다.
         val isHandoffRead = path in HANDOFF_READ_PATHS && (request.method == null || request.method == "GET")
         if (!isHandoffRead && path !in AUTH_REQUEST_PATHS && !PROVIDER_AUTH_PATH.matches(path)) return
