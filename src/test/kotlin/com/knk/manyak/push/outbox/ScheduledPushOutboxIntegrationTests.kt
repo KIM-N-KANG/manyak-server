@@ -1,0 +1,119 @@
+package com.knk.manyak.push.outbox
+
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.entity.*
+import com.knk.manyak.push.repository.*
+import com.knk.manyak.push.service.*
+import com.knk.manyak.support.DatabaseCleaner
+import org.assertj.core.api.Assertions.*
+import org.junit.jupiter.api.*
+import org.mockito.Mockito.*
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.transaction.support.TransactionSynchronizationManager
+import java.time.Clock
+import java.time.ZoneOffset
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+
+@ActiveProfiles("test")
+@SpringBootTest(properties = ["manyak.push.mode=remote"])
+class ScheduledPushOutboxIntegrationTests {
+    @MockitoBean private lateinit var store: PushOutboxStore
+    @MockitoBean private lateinit var relay: PushOutboxRelay
+    @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var attendance: AttendanceReminderService
+    @Autowired private lateinit var writer: ScheduledPushOutboxWriter
+    @Autowired private lateinit var promotion: PromotionPushService
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var tokens: DevicePushTokenRepository
+    @Autowired private lateinit var campaigns: PushCampaignRepository
+    @Autowired private lateinit var cleaner: DatabaseCleaner
+    private val messages = mutableListOf<PushMessage>()
+
+    @BeforeEach fun setup() {
+        cleaner.cleanAll()
+        reset(store, sender)
+        messages.clear()
+        doAnswer { invocation ->
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
+            messages += invocation.getArgument<PushMessage>(0)
+            1
+        }.`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)
+        repeat(3) {
+            val user = users.save(User(nickname = "수신자", status = UserStatus.ACTIVE,
+                marketingPushAgreedAt = Instant.EPOCH))
+            tokens.save(DevicePushToken(userId = user.id, token = "token-${user.id}", platform = PushPlatform.ANDROID))
+        }
+    }
+
+    @Test fun `원격 출석은 회원별 요청만 기록하고 KST 자정에 만료된다`() {
+        val result = attendance.sendReminders()
+        assertThat(result.sent).isEqualTo(3)
+        assertThat(messages).hasSize(3)
+        messages.forEach {
+            assertThat(it.messageId).isEqualTo("attendance:${it.recipientId}:${it.data["date"]}")
+            assertThat(it.expiresAt).isEqualTo(LocalDate.parse(it.data.getValue("date"))
+                .plusDays(1).atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant())
+            assertThat(it.kind).isEqualTo("MARKETING")
+            assertThat(it.type).isEqualTo("ATTENDANCE_REMINDER")
+            assertThat(it.requestId).isEqualTo("unknown")
+            assertThat(it.sessionId).isEqualTo("unknown")
+        }
+        verifyNoInteractions(sender)
+    }
+
+    @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
+        val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
+        val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
+        val service = PromotionPushService(campaigns, users, sender, Clock.fixed(night, ZoneOffset.UTC), writer)
+        val result = service.sendDue(night).single()
+        assertThat(result.sent).isEqualTo(3)
+        assertThat(messages).hasSize(3)
+        messages.forEach {
+            assertThat(it.messageId).isEqualTo("promotion:${campaign.publicId}:${it.recipientId}")
+            assertThat(it.kind).isEqualTo("MARKETING")
+            assertThat(it.type).isEqualTo("PROMOTION")
+            assertThat(it.data).doesNotContainKey("deepLink")
+        }
+        assertThat(campaigns.findById(campaign.id).orElseThrow().skippedCount).isNull()
+        verifyNoInteractions(sender)
+    }
+
+    @Test fun `원격 기록 실패는 캠페인을 실패로 두고 같은 행의 재예약을 허용한다`() {
+        val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인", scheduledAt = Instant.EPOCH))
+        var attempts = 0
+        doAnswer {
+            if (++attempts == 2) error("outbox failed")
+            1
+        }.`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)
+        val failed = promotion.sendDue(Instant.now()).single()
+        assertThat(failed.failed).isTrue()
+        assertThat(failed.sent).isZero()
+        val saved = campaigns.findById(campaign.id).orElseThrow()
+        assertThat(saved.status).isEqualTo(PushCampaignStatus.FAILED)
+        assertThat(saved.targetCount).isEqualTo(3)
+        assertThat(saved.sentCount).isZero()
+        assertThat(promotion.sendDue(Instant.now())).isEmpty()
+
+        saved.status = PushCampaignStatus.SCHEDULED
+        campaigns.saveAndFlush(saved)
+        assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
+        assertThat(campaigns.findById(campaign.id).orElseThrow().status).isEqualTo(PushCampaignStatus.SENT)
+        verifyNoInteractions(sender)
+    }
+
+    @Test fun `원격 출석 기록 실패는 성공 결과를 반환하지 않는다`() {
+        doThrow(IllegalStateException("outbox failed")).`when`(store)
+            .insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)
+        assertThatThrownBy { attendance.sendReminders() }.isInstanceOf(IllegalStateException::class.java)
+        verifyNoInteractions(sender)
+    }
+
+    private fun placeholder() = PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")
+}

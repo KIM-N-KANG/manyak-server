@@ -65,7 +65,8 @@ class PushCampaign(
     @Column(name = "sent_count")
     var sentCount: Int? = null,
 
-    @Column(name = "skipped_count")
+    /** 구버전 호환을 위해 보존하며 신규 회차에서는 읽거나 쓰지 않는다. */
+    @Column(name = "skipped_count", insertable = false, updatable = false)
     var skippedCount: Int? = null,
 
     @Column(name = "started_at")

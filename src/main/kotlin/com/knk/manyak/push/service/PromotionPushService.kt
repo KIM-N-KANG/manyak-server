@@ -6,50 +6,29 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
-/**
- * 캠페인 한 건의 회차 결과. [targets]는 조회된 대상 수, [sent]는 실제로 발송기를 부른 수, [skipped]는 조회
- * 이후 자격을 잃어(동의 철회·정지·탈퇴·야간 미동의) 건너뛴 수다. [failed]는 회차가 예외로 끝났다는 뜻이다.
- */
+/** 원격 모드의 sent는 기록한 요청 수, 로컬 모드는 발송기 호출 수다. */
 data class PromotionPushResult(
     val campaignId: UUID,
     val targets: Int,
     val sent: Int,
-    val skipped: Int,
     val failed: Boolean = false,
 )
 
-/**
- * 프로모션 푸시 발송(KNK-1117, 스펙 §4-3-5). **광고성 알림**이라 사전 동의가 필수다(정책 KNK-1129).
- *
- * 트리거는 운영자 SQL이다 — `push_campaigns`에 `SCHEDULED` 행을 넣으면 예약이고, 이 서비스가 도래한 행을
- * 집어 보낸다. 관리자 API는 두지 않는다.
- *
- * **선점은 DB 행이 한다**([PushCampaignRepository.claim]). 배포 교체로 태스크가 둘일 때 같은 캠페인이 두 번
- * 나가는 것을 조건부 UPDATE 하나가 막으므로, 출석 리마인드가 쓰는 Redis `SET NX`가 여기서는 필요 없다.
- *
- * **동의는 발송 직전에 다시 읽는다**([AttendanceReminderService]와 같은 이유). 대상 조회 결과는 스냅샷이라
- * 회차가 도는 동안의 철회·정지·탈퇴가 반영되지 않는다. 야간(21~08시 KST) 판정도 여기서 한다 — 야간에 예약된
- * 캠페인을 거부·연기하는 게 아니라 **야간 동의자에게만** 보내고 나머지는 `skipped`로 남긴다.
- *
- * 트랜잭션을 열지 않는다. 발송은 외부 IO(FCM)라 트랜잭션 안에 두면 회차 내내 커넥션을 쥔 채 네트워크를
- * 기다린다. 리포지토리 호출 각각이 자기 트랜잭션으로 돈다.
- *
- * ponytail: 회차 중간에 태스크가 죽으면 행이 `SENDING`으로 남고 재개 로직은 없다. 운영자가 새 행을 넣는다
- * (남은 회원만 골라 보낼 수 없어 일부 중복 가능 — 캠페인 빈도가 낮아 수용). 재개가 필요해지면 그때 회원별
- * 발송 기록을 둔다.
- */
+/** 캠페인을 독립 선점하고, 원격 모드는 회차의 요청을 한 트랜잭션에 기록한다. */
 @Service
 class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
     private val clock: Clock = Clock.systemUTC(),
+    private val outbox: ScheduledPushOutboxWriter? = null,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -64,7 +43,6 @@ class PromotionPushService(
         campaign.startedAt = now
         var targets = 0
         var sent = 0
-        var skipped = 0
         return try {
             val targetIds = userRepository.findMarketingPushTargetIds()
             targets = targetIds.size
@@ -75,15 +53,13 @@ class PromotionPushService(
                 "title" to withAdPrefix(campaign.title),
                 "body" to campaign.body,
             )
-            targetIds.forEach { userId ->
-                // 발송 직전 재조회. 스냅샷을 믿으면 회차 도중의 철회·정지·탈퇴가 반영되지 않는다.
-                // 야간 판정도 회차 시작 시각이 아니라 **그 회원을 보내는 시점**의 시각으로 한다(Codex 리뷰 P1):
-                // 20:59에 시작한 회차가 대상이 많거나 FCM이 느려 21:00을 넘기면, 그 뒤 회원은 야간 동의 없이
-                // 광고를 받는다(정보통신망법 제50조). 회차 시작 now는 도래 판정과 started_at에만 쓴다.
+            if (outbox != null) {
+                sent = outbox.record(targetIds, data, "promotion", campaign.publicId.toString())
+            } else targetIds.forEach { userId ->
+                // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
                 val user = userRepository.findById(userId).orElse(null)
                 if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(at)) {
-                    skipped++
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
@@ -91,24 +67,22 @@ class PromotionPushService(
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
             }
-            finish(campaign, PushCampaignStatus.SENT, targets, sent, skipped)
-            PromotionPushResult(campaign.publicId, targets, sent, skipped)
+            finish(campaign, PushCampaignStatus.SENT, targets, sent)
+            PromotionPushResult(campaign.publicId, targets, sent)
         } catch (exception: Exception) {
-            // 회차 자체가 끝나지 못한 경우(예: 대상 조회 실패). 행을 SCHEDULED로 되돌리지 않는다 — 그러면
-            // 다음 회차가 같은 실패를 무한히 반복한다. 운영자가 원인을 보고 새 행을 넣는 편이 낫다.
+            // 자동 재시도하지 않는다. 운영자가 같은 행을 SCHEDULED로 되돌리면 멱등하게 재실행한다.
             logger.warn("프로모션 푸시 회차가 실패했습니다. (campaignId={})", campaign.publicId, exception)
-            finish(campaign, PushCampaignStatus.FAILED, targets, sent, skipped)
-            PromotionPushResult(campaign.publicId, targets, sent, skipped, failed = true)
+            finish(campaign, PushCampaignStatus.FAILED, targets, sent)
+            PromotionPushResult(campaign.publicId, targets, sent, failed = true)
         }
     }
 
-    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int, skipped: Int) {
+    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int) {
         campaign.status = status
         campaign.targetCount = targets
         campaign.sentCount = sent
-        campaign.skippedCount = skipped
         // 회차 길이를 보려면 끝난 시각은 논리 시각(now)이 아니라 실제 시각이어야 한다.
-        campaign.finishedAt = Instant.now()
+        campaign.finishedAt = clock.instant()
         pushCampaignRepository.save(campaign)
     }
 
