@@ -142,6 +142,28 @@ class SubmissionRetryIntegrationTests {
         org.mockito.Mockito.verify(notifier, org.mockito.Mockito.times(1)).onHeld(SubmissionHeld(row.publicId, row.kind, "MODERATION_UNAVAILABLE", 3))
     }
 
+    @Autowired lateinit var images: SubmissionImages
+
+    @Test fun `형식 오류에 위반 항목이 보이면 실행기는 실패로 확정하고 재시도하지 않는다`() {
+        val row = submit()
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("""{"issues":[{"path":"title","type":"TEXT","rule":"DRUGS","reason":"사유"}]}"""))
+            val client = RestStoryModerationClient(server.url("/").toString(), Duration.ofSeconds(180))
+            SubmissionExecutor(transactions, client, images).run(SubmissionRequested(row.id, row.attempt))
+        }
+        val saved = rows.findById(row.id).orElseThrow()
+        assertEquals(SubmissionStatus.FAILED, saved.status)
+        assertEquals("MODERATION_UNAVAILABLE", saved.errorCode)
+        assertEquals(0, saved.retryCount)
+        assertNull(saved.nextAttemptAt)
+        assertNotNull(saved.decidedAt)
+        assertTrue(saved.issues.isEmpty())
+        assertTrue(saved.imageErrors.isEmpty())
+        assertEquals("원본", stories.findById(row.storyId!!).orElseThrow().title)
+        assertEquals(1, events.stream(StoryModerationCompleted::class.java).count())
+    }
+
     @Test fun `재시도 간격은 두 양수만 허용하며 설정값을 사용한다`() {
         assertEquals(listOf(Duration.ofSeconds(2), Duration.ofSeconds(7)), SubmissionRetryPolicy("2s,7s").delays)
         listOf("1m", "1m,5m,10m", "0s,1m", "-1s,1m").forEach { value ->

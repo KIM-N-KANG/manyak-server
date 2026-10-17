@@ -121,7 +121,7 @@ class SubmissionFormAssembler(
     }
 
     fun aiInput(form: JsonNode): JsonNode {
-        val excluded = setOf("id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder", "submissionId", "storyId")
+        val excluded = setOf("draftId", "id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder", "submissionId", "storyId")
         fun strip(node: JsonNode): JsonNode = when {
             node.isObject -> mapper.createObjectNode().also { obj -> node.properties().forEach { (key, value) -> if (key !in excluded) obj.set(key, strip(value)) } }
             node.isArray -> mapper.createArrayNode().also { array -> node.forEach { array.add(strip(it)) } }
@@ -154,7 +154,7 @@ class SubmissionFormAssembler(
                 after = after.path(formKey)
                 if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return null
                 if (path.isNotEmpty()) path.append('.')
-                path.append(key)
+                path.append(formKey)
             } else {
                 val index = segment.groups[2]!!.value.toInt()
                 val item = before.path(index)
