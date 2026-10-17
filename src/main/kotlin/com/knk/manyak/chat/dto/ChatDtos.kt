@@ -307,7 +307,7 @@ data class ContinueChatRequest(
     var hasLastTurnId: Boolean = false
         private set
 
-    @get:Schema(description = "마지막 완료 턴 ID. 생략은 비교 생략, 명시적 null은 첫 턴만 허용", nullable = true, type = "integer")
+    @get:Schema(description = "마지막 완료 턴 ID. 생략은 비교 생략, 명시적 null은 첫 턴만 허용", nullable = true)
     @set:com.fasterxml.jackson.annotation.JsonSetter("lastTurnId")
     var lastTurnId: Long? = null
         set(value) {
