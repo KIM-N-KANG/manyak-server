@@ -327,6 +327,7 @@ class ChatController(
         ApiResponse(responseCode = "200", description = "처음부터 SSE 재생", content = [Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE)]),
         ApiResponse(responseCode = "403", description = "채팅 상세 조회 권한 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
         ApiResponse(responseCode = "404", description = "채팅 없음·삭제·형식 오류 또는 스트림과 해당 생성 중 키 모두 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+        ApiResponse(responseCode = "503", description = "SERVICE_UNAVAILABLE: 수신 연결 상한 초과 또는 Redis 조회 오류", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
     ])
     @GetMapping("/chats/{chatId}/generations/{generationId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun resumeGeneration(

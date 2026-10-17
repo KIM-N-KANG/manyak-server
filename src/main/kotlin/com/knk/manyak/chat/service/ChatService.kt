@@ -1001,10 +1001,19 @@ class ChatService(
         val id = parsePublicIdOrNull(generationId)?.toString()
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.")
         val publicChatId = chat.publicId.toString()
-        if (!chatGenerationEvents.exists(publicChatId, id) && chatGenerationStore.get(publicChatId)?.generationId != id) {
+        val available = try {
+            chatGenerationEvents.exists(publicChatId, id) || chatGenerationStore.get(publicChatId)?.generationId == id
+        } catch (ex: Exception) {
+            throw CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", "생성 상태를 확인할 수 없습니다.", ex)
+        }
+        if (!available) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.")
         }
-        return chatGenerationReceivers.open(publicChatId, id)
+        return try {
+            chatGenerationReceivers.open(publicChatId, id)
+        } catch (ex: java.util.concurrent.RejectedExecutionException) {
+            throw CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", "생성 이벤트 수신 연결을 열 수 없습니다.", ex)
+        }
     }
 
     /**

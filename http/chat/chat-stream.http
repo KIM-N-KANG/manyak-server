@@ -736,8 +736,9 @@ Accept: application/json
 # started부터 token/character_image가 원래 순서로 재생됩니다. completed/error 뒤 연결이 닫힙니다.
 # 완료 뒤 5분 안에 다시 호출해도 같은 이벤트입니다. AI 호출과 과금이 추가되지 않습니다.
 # 종료 이벤트 없이 닫히면 상세 재조회로 저장 결과와 생성 중 상태를 확인합니다.
+# 수신 연결 상한 초과 또는 스트림 존재·생성 중 키 조회의 Redis 오류는 503 SERVICE_UNAVAILABLE JSON입니다.
 GET {{baseUrl}}/api/v1/chats/{{chatId}}/generations/{{generationId}}/stream
-Accept: text/event-stream
+Accept: text/event-stream, application/json
 
 ### 27. 존재하지 않거나 만료된 생성 — 404 NOT_FOUND
 GET {{baseUrl}}/api/v1/chats/{{chatId}}/generations/00000000-0000-0000-0000-000000000000/stream
