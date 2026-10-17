@@ -825,26 +825,23 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(response.status).isEqualTo(404)
     }
 
-    @Test fun `SAVING 중 스트림과 생성 키가 만료돼도 턴 저장과 과금은 유지하고 이벤트를 되살리지 않는다`() {
+    @Test fun `SAVING 중 스트림과 생성 키가 사라져도 턴 저장과 과금은 유지하고 재연결은 404다`() {
         val (member, chat, _) = paidChat()
-        lateinit var creationDeadline: java.time.Instant
-        Mockito.doAnswer { call ->
-            val generation = call.callRealMethod() as com.knk.manyak.chat.dto.GeneratingTurnResponse
-            // 워커가 120초 마감 전에 SAVING에 들어갈 여유 10초를 남기고 나이를 진행한다.
-            val startedAt = java.time.Instant.now().minusSeconds(110)
-            creationDeadline = startedAt.plusSeconds(com.knk.manyak.chat.service.ChatGenerationEvents.INITIAL_TTL_SECONDS)
-            generation.copy(startedAt = startedAt)
-        }.`when`(store).acquire(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.now(), Mockito.isNull())
         val first = start(member, chat)
         val id = state(chat, member)!!.generationId
         val key = "chat:${chat.publicId}:gen:$id"
         Mockito.doAnswer { call ->
-            // SAVING에 들어온 뒤 Redis TIME이 실제 신규 생성 기한을 지나도록 기다린다.
-            val remaining = java.time.Duration.between(java.time.Instant.now(), creationDeadline).toMillis()
-            if (remaining >= 0) Thread.sleep(remaining + 20)
             deadline()
             redis.expire(key, java.time.Duration.ZERO)
             redis.expire("chat:${chat.publicId}:generating", java.time.Duration.ZERO)
+            assertThat(redis.hasKey(key)).isFalse()
+            assertThat(state(chat, member)).isNull()
+            // 기한 뒤 없는 스트림에 APPEND가 0을 반환하는 경계만 대체한다.
+            // 실제 Redis TIME/Lua의 재생성 방지는 ChatGenerationEventsTests에서 검증한다.
+            Mockito.doReturn(0L).`when`(redis).execute(
+                Mockito.any(org.springframework.data.redis.core.script.RedisScript::class.java),
+                Mockito.eq(listOf(key)), *arrayOf(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()),
+            )
             call.callRealMethod()
         }.`when`(images).validate(
             Mockito.any(ChatRealtimeImageService.Reservation::class.java) ?: ChatRealtimeImageService.Reservation(null),

@@ -106,6 +106,41 @@ class ChatGenerationEventsTests {
         reading.get(8, TimeUnit.SECONDS)
     }
 
+    @Test fun `빈 XREAD 뒤 키 확인 사이에 기록된 여러 배치와 completed를 모두 전달한다`() = withRedis { redis, store, _ ->
+        val chat = UUID.randomUUID().toString()
+        val generation = store.acquire(chat, "CONTINUE", "입력", Instant.now(), null)
+        val spy = Mockito.spy(redis)
+        val values = Mockito.spy(redis.opsForValue())
+        val events = ChatGenerationEvents(spy, jacksonObjectMapper(), StructuredLogger())
+        try {
+            val writer = events.writer(chat, generation.generationId, generation.startedAt)
+            writer.write("started", mapOf("generationId" to generation.generationId))
+            var injected = false
+            Mockito.doAnswer { call ->
+                // GET은 빈 XREAD 뒤에만 호출된다. 키를 읽기 직전에 정상 종료 순서를 강제한다.
+                if (!injected) {
+                    injected = true
+                    repeat(205) { writer.write("token", mapOf("text" to "토큰 $it")) }
+                    writer.write("character_image", mapOf("name" to "인물", "imageUrl" to "https://test/image"))
+                    writer.write("completed", mapOf("aiOutput" to "저장됨"))
+                    writer.finish()
+                    store.release(chat, generation.generationId)
+                }
+                call.callRealMethod()
+            }.`when`(values).get("chat:$chat:generating")
+            Mockito.doReturn(values).`when`(spy).opsForValue()
+            val received = mutableListOf<Pair<String, String>>()
+            events.receive(chat, generation.generationId, { true }) { name, data -> received.add(name to data) }
+            assertThat(injected).isTrue()
+            assertThat(received.map { it.first }).containsExactlyElementsOf(
+                listOf("started") + List(205) { "token" } + listOf("character_image", "completed"),
+            )
+            assertThat(received.filter { it.first == "token" }.map { it.second }).containsExactlyElementsOf(
+                List(205) { """{"text":"토큰 $it"}""" },
+            )
+        } finally { events.destroy() }
+    }
+
     @Test fun `미종료 스트림은 최초 TTL을 연장하지 않고 만료 뒤 저장 완료 이벤트로 되살리지 않는다`() = withRedis { redis, _, events ->
         val chat = UUID.randomUUID().toString()
         val id = UUID.randomUUID().toString()

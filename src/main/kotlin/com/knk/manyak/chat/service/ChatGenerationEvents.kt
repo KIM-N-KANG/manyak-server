@@ -82,10 +82,12 @@ class ChatGenerationEvents(
     fun receive(chatId: String, generationId: String, connected: () -> Boolean, deliver: (String, String) -> Unit) {
         val streamKey = key(chatId, generationId).toByteArray(Charsets.UTF_8)
         var offset = "0-0"
+        var draining = false
         readFactory.value.connection.use { connection ->
             while (connected()) {
+                val options = StreamReadOptions.empty().count(100)
                 val records = connection.streamCommands().xRead(
-                    StreamReadOptions.empty().count(100).block(Duration.ofSeconds(READ_WAIT_SECONDS)),
+                    if (draining) options else options.block(Duration.ofSeconds(READ_WAIT_SECONDS)),
                     StreamOffset.create(streamKey, ReadOffset.from(offset)),
                 ).orEmpty()
                 for (record in records) {
@@ -96,10 +98,12 @@ class ChatGenerationEvents(
                     offset = record.id.value
                     if (name == "completed" || name == "error") return
                 }
-                // 남은 이벤트를 먼저 다 읽는다. 빈 XREAD 뒤에만 생성 중 키를 확인한다.
                 if (records.isEmpty()) {
+                    if (draining) return
                     val value = redis.opsForValue().get("chat:$chatId:generating")
-                    if (value == null || mapper.readTree(value)["generationId"].asString() != generationId) return
+                    // 종료 이벤트 기록 → 키 해제 사이에 빈 XREAD가 반환됐을 수 있다.
+                    // 키 불일치 뒤에는 마지막 offset부터 비블로킹으로 모든 배치를 비운다.
+                    draining = value == null || mapper.readTree(value)["generationId"].asString() != generationId
                 }
             }
         }
