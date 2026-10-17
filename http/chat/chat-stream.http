@@ -1,3 +1,6 @@
+### [KNK-1677] Redis 필요. 생성 키 TTL 150초, 생성 마감은 접수부터 큐 대기 포함 120초.
+### 연결 종료는 생성을 취소하지 않습니다. started.generationId는 UUID이며 상세 generatingTurn에도 같은 값이 나옵니다.
+### 1단계 복구: 생성 중이면 2초 간격 상세 재조회. 재연결 API는 KNK-1678 범위입니다.
 ### [KNK-1291] realtimeImage는 생략 시 true. false면 이미지 체험을 예약하지 않습니다.
 ### 실시간 이미지 검증에는 KNK-1293 S3 권한·KNK-1294 AI 허용 호스트가 필요합니다.
 ### 이미지 무료 체험은 채팅과 별개 5회. 소진 후 회원은 양수 이미지 비용과 턴 비용을 합산 판정해 각각 차감합니다. 0원 이미지는 원장 없이 발급합니다.
@@ -28,7 +31,7 @@
 ###   - 회원(유효 access 토큰)만 이어쓰기 1회당 채팅 턴 크레딧을 선차감합니다(기본 20, manyak.credit.chat-turn-cost).
 ###     [KNK-1056] 이 수치는 릴리스 없이 credit_policies 의 chat_turn_cost 오버라이드로 바꿉니다(절차는 credit/credits.http).
 ###   - 잔액이 부족하면 SSE를 열기 전에 동기 402(JSON)로 응답합니다(스트림 안 error 이벤트가 아님). 아래 11번 참고.
-###   - 턴이 completed 없이 끝나면(AI error·연결 끊김·스케줄 거부) 선차감분을 전액 환불합니다(정상 완료 턴은 환불 없음).
+###   - 턴이 completed 없이 끝나면(AI error·생성 마감·스케줄 거부) 선차감분을 전액 환불합니다(정상 완료 턴은 환불 없음).
 ###   - 소유권: 회원 소유 채팅(생성 시 토큰을 실어 만든 채팅)은 소유자만 이어쓸 수 있습니다. 토큰을 빼거나
 ###     다른 회원 토큰으로 이어쓰면 403입니다(무료 턴으로 차감을 우회할 수 없음). 아래 12·13번 참고.
 ###   - [KNK-480] 게스트 채팅(NULL 소유)은 게스트(토큰 없음)만 이어쓸 수 있고, 인증 회원이 이어쓰면 403입니다(이관 후 접근).
@@ -630,11 +633,86 @@ if (completed) client.global.set("personaTurnId", completed.turnId);
 client.test("턴 완료", () => client.assert(!!completed, "completed 확인"));
 %}
 
-### [KNK-1659] 연결 종료·타임아웃 환불 수동 확인
+### [KNK-1677] 연결 종료와 생성 마감 수동 확인
 # 실제 AI 응답을 기다리는 동안 HTTP Client의 중지 버튼으로 스트림을 종료한다.
-# 서버가 연결 종료를 감지한 뒤 AI가 completed를 반환해도 아래 상세 조회에 새 턴이 없어야 한다.
-# 차감했던 턴·이미지는 환불되고 예약한 체험은 한 번만 복원된다. 120초 타임아웃도 같은 기준이다.
-# 저장 진입 뒤 종료한 경우는 저장 결과를 기준으로 정산하므로, 저장 성공한 턴은 조회되며 환불하지 않는다.
+# 연결 종료 뒤에도 생성 중 상태가 유지되고 정상 완료하면 상세에 새 턴이 저장되며 과금이 유지된다.
+# 접수부터 120초 전에 저장에 진입하지 못하면 생성 마감으로 늦은 완료를 폐기하고 환불한다.
+# 실패 후 아래 상세에서 generatingTurn=null이 되면 턴·이미지 환불 및 체험 복원 시도가 끝난 상태다.
+# AI 오류를 유도한 회원 채팅은 이때 잔액 복원을 확인하고 즉시 재전송해 환불 전 잔액으로 402가 나지 않는지 확인한다.
+# 환불 자체가 실패하면 로그(chat_turn_refund_failed/chat_image_refund_failed)를 남기고 키는 해제한다.
+# 저장 진입이 마감보다 먼저면 저장을 끝까지 마치고 저장 결과로 정산한다.
 # 아래 요청은 앞서 생성한 chatId를 사용한다. 회원 채팅은 해당 회원의 Authorization 헤더를 추가한다.
 GET {{baseUrl}}/api/v1/chats/{{chatId}}
 Accept: application/json
+
+### KNK-1677. 마지막 완료 턴 ID와 생성 상태 확인 (앞의 채팅·턴 생성 후 실행)
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("상세에 generatingTurn 필드가 있다", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(Object.prototype.hasOwnProperty.call(response.body, "generatingTurn"), "generatingTurn 누락");
+    });
+    const turns = response.body.turns;
+    client.global.set("expectedLastTurnId", turns.length ? turns[turns.length - 1].id : null);
+    const g = response.body.generatingTurn;
+    if (g) {
+        client.test("생성 상태 계약", () => {
+            client.assert(g.type === "CONTINUE" || g.type === "REGENERATE", `actual=${g.type}`);
+            client.assert(/^[0-9a-f-]{36}$/i.test(g.generationId), `actual=${g.generationId}`);
+            client.assert(g.startedAt.endsWith("Z"), `actual=${g.startedAt}`);
+            client.assert(Object.prototype.hasOwnProperty.call(g, "targetTurnId"), "targetTurnId 누락");
+        });
+    }
+%}
+
+### KNK-1677. 완료 턴이 있는 채팅에 명시적 null — 409 CHAT_TURN_STALE, 과금 없음
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"userInput":"낡은 화면의 입력", "lastTurnId":null, "realtimeImage":false}
+
+> {%
+    client.test("마지막 턴 불일치", () => {
+        client.assert(response.status === 409, `actual=${response.status}`);
+        client.assert(response.body.code === "CHAT_TURN_STALE", `actual=${response.body.code}`);
+    });
+%}
+
+### KNK-1677. 마지막 턴 일치 — started의 generationId 확인, 실행 중 아래 요청을 별도 탭에서 실행
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"userInput":"계속 진행한다.", "lastTurnId":{{expectedLastTurnId}}, "realtimeImage":false}
+
+### KNK-1677. 생성 중 재전송 (위 생성이 진행 중일 때만 실행) — 추가 과금 없음
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"userInput":"계속 진행한다.", "realtimeImage":false}
+
+> {%
+    client.test("중복 생성 거절", () => {
+        client.assert(response.status === 409, `actual=${response.status}`);
+        client.assert(response.body.code === "CHAT_TURN_IN_PROGRESS", `actual=${response.body.code}`);
+    });
+%}
+
+### KNK-1677. Redis 획득 장애 (Redis가 중단된 검증 환경에서만 실행) — 과금 없음
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"userInput":"상태 확인", "realtimeImage":false}
+
+> {%
+    client.test("생성 상태 서비스 장애", () => {
+        client.assert(response.status === 503, `actual=${response.status}`);
+        client.assert(response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.body.code}`);
+    });
+%}

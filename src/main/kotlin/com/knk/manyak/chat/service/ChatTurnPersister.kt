@@ -1,6 +1,9 @@
 package com.knk.manyak.chat.service
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
+
+import tools.jackson.databind.ObjectMapper
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
@@ -69,12 +72,14 @@ class ChatTurnPersister(
         // AI에게 **실제로 보낸** 엔딩·주요 사건 목록(KNK-1065, PR #224 Codex P2). 기본값을 두지 않아 호출부가
         // 매번 명시하게 한다 — 빠뜨리면 후보가 비어 도달·사건 판정이 조용히 전부 누락된다.
         judgmentSource: TurnJudgmentSource,
+        expectedState: GenerationStartState,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
         // 행을 못 봐(READ COMMITTED) 낡은 마지막 턴을 교체·과금하고 append가 뒤이어 커밋될 수 있다(Codex P2).
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+        verifyStartState(chat, expectedState)
 
         // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
         val reachedEnding = resolveReachedEnding(chat, judgment.endingName, judgmentSource)
@@ -340,12 +345,14 @@ class ChatTurnPersister(
         expectedAssistantId: Long,
         aiOutput: String,
         choices: List<String>,
+        expectedState: GenerationStartState,
     ): PersistedTurn {
         // 채팅 행을 비관적 쓰기 락으로 잡아 같은 채팅의 재생성을 직렬화한다(제자리 교체라 message_order 유니크로
         // 자연 직렬화되지 않음). 이 락이 없으면 동시 재생성 둘이 같은 마지막 턴 검사를 통과해 중복 과금하고
         // regenerated_count 증가가 lost update로 유실돼 대사에서 초과 환불이 재발한다(Codex P2).
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
+        verifyStartState(chat, expectedState)
 
         // 재확인: 여전히 이 ASSISTANT가 마지막 턴인가. 그 사이 새 턴이 쌓였으면(마지막 id 불일치) 폐기한다.
         val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chatId)
@@ -353,7 +360,7 @@ class ChatTurnPersister(
             lastAssistant.role != MessageRole.ASSISTANT ||
             lastAssistant.id != expectedAssistantId
         ) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 변경되어 재생성을 취소했습니다.")
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 변경되어 재생성을 취소했습니다.")
         }
 
         // 덮어쓰기 직전에 직전 활성 출력·선택지를 버전 이력으로 보관한다(B11). append-only라 다음 순번 = 기존 개수 + 1.
@@ -422,11 +429,11 @@ class ChatTurnPersister(
             lastAssistant.role != MessageRole.ASSISTANT ||
             lastAssistant.id != expectedAssistantId
         ) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 변경되어 선택지 생성을 취소했습니다.")
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 변경되어 선택지 생성을 취소했습니다.")
         }
         // 재생성 경합 방어: 선택지를 만든 본문과 현재 본문이 다르면(id 유지·제자리 교체) 낡은 선택지를 붙이지 않는다(Codex P1).
         if (lastAssistant.content != expectedAiOutput) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "본문이 재생성되어 선택지 생성을 취소했습니다.")
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "본문이 재생성되어 선택지 생성을 취소했습니다.")
         }
 
         // 멱등: 이미 채워졌으면(동시 호출·재진입) 저장된 값을 그대로 반환한다.
@@ -464,6 +471,14 @@ class ChatTurnPersister(
      * 이름까지 바꾼 스토리에서는 이름만 남는다(FK를 만족시킬 id가 없다).
      */
     data class ReachedEnding(val id: Long?, val name: String)
+
+    private fun verifyStartState(chat: StoryChat, expected: GenerationStartState) {
+        val lastId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            .lastOrNull { it.role == MessageRole.ASSISTANT }?.id
+        if (lastId != expected.lastTurnId || chat.regeneratedCount != expected.regeneratedCount) {
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "생성 시작 후 마지막 턴이 변경되었습니다.")
+        }
+    }
 
     companion object {
         /**
@@ -523,3 +538,6 @@ data class TurnJudgmentSource(
     val endingNames: ChatJudgmentNameMapping = ChatJudgmentNameMapping(endings.map { it.name }, null),
     val eventNames: ChatJudgmentNameMapping = ChatJudgmentNameMapping(mainEvents.map { it.name }, null),
 )
+
+/** Redis 키의 만료와 무관하게 잠금 안에서 검증할 생성 시작 상태. */
+data class GenerationStartState(val lastTurnId: Long?, val regeneratedCount: Int)

@@ -20,12 +20,15 @@ interface ChatTurnAiClient {
      * [traceLink]는 Langfuse trace를 스토리 여정으로 묶는 도메인 연결 식별자다(KNK-751).
      * MDC 상관관계 헤더와 달리 도메인 값이라 호출부가 인자로 넘긴다.
      *
+     * [deadline]은 요청 접수부터 큐 대기를 포함한 생성 마감이다. 도달하면 upstream을 취소한다.
+     *
      * [onCharacterImage]는 AI가 스트리밍 도중 인물 태그를 감지해 보내는 `character_image` 이벤트를 받는다(KNK-943).
      * 기본값이 no-op이라, 이 이벤트를 보내지 않는 AI 구버전·스텁에서도 계약이 그대로 성립한다.
      */
     fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink = AiTraceLink(),
+        deadline: java.time.Instant? = null,
         onCharacterImage: (ChatCharacterImageEvent) -> Unit = {},
         onToken: (String) -> Unit,
     ): ChatTurnAiResult
@@ -193,3 +196,6 @@ data class ChatTurnTargetMainEventResult(
     val name: String,
     val progressTurns: Int,
 )
+
+/** 생성 마감으로 AI 스트림의 upstream 구독을 취소했음을 호출부에 알린다. */
+class ChatTurnGenerationDeadlineException : RuntimeException("chat turn generation deadline exceeded")

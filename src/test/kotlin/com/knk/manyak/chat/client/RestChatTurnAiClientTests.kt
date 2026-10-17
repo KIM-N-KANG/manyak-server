@@ -441,6 +441,35 @@ class RestChatTurnAiClientTests {
         assertTrue(body.contains(""""protagonist_name":"민우""""))
     }
 
+    @Test
+    fun `ping이 계속 와도 생성 마감에 upstream을 취소하고 워커를 반환한다`() {
+        val ping = "event: ping\ndata: {}\n\n"
+        server.enqueue(sseResponse(ping.repeat(50000)).throttleBody(8192, 20, java.util.concurrent.TimeUnit.MILLISECONDS))
+        val cancelled = java.util.concurrent.CountDownLatch(1)
+        val received = java.util.concurrent.CountDownLatch(1)
+        val webClient = WebClient.builder().baseUrl(server.url("/").toString())
+            .filter { request, next ->
+                next.exchange(request).map { response ->
+                    response.mutate().body { body -> body.doOnNext { received.countDown() }.doOnCancel { cancelled.countDown() } }.build()
+                }
+            }.build()
+        val ai = RestChatTurnAiClient(webClient, JsonMapper.builder().build(), Duration.ofSeconds(5), Duration.ofSeconds(5))
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit<Throwable?> {
+                runCatching {
+                    ai.streamTurn(sampleRequest(), deadline = java.time.Instant.now().plusMillis(700), onToken = {})
+                }.exceptionOrNull()
+            }
+            assertTrue(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS) != null)
+            assertTrue(received.await(1, java.util.concurrent.TimeUnit.SECONDS), "마감 전에 ping 응답 body를 수신해야 한다")
+            assertTrue(future.get(2, java.util.concurrent.TimeUnit.SECONDS) is ChatTurnGenerationDeadlineException)
+            assertTrue(cancelled.await(1, java.util.concurrent.TimeUnit.SECONDS), "마감은 HTTP 응답 body 구독을 취소해야 한다")
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
     private fun client() = RestChatTurnAiClient(
         webClient = WebClient.builder().baseUrl(server.url("/").toString()).build(),
         objectMapper = JsonMapper.builder().build(),

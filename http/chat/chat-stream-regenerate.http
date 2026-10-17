@@ -1,3 +1,7 @@
+### [KNK-1677] 이어쓰기와 재생성은 생성 키를 공유합니다. 생성 중 409 CHAT_TURN_IN_PROGRESS, 낡은 대상 409 CHAT_TURN_STALE, 엔딩 도달 409 CHAT_ENDED.
+### Redis 획득 장애는 과금 없이 503 SERVICE_UNAVAILABLE. started에는 UUID generationId가 포함됩니다.
+### 생성 도중 요청을 취소해도 생성과 저장은 계속됩니다. 상세 generatingTurn으로 상태를 확인합니다.
+### 1단계는 이탈 뒤 재생성의 성공·실패를 상세만으로 구분하지 못합니다. 이벤트 재연결은 2단계입니다.
 ### [KNK-1291] realtimeImage는 생략 시 true. false면 이미지 체험을 예약하지 않습니다.
 ### 실시간 이미지 검증에는 KNK-1293 S3 권한·KNK-1294 AI 허용 호스트가 필요합니다.
 ### 이미지 무료 체험은 채팅과 별개 5회. 소진 후 회원은 양수 이미지 비용과 턴 비용을 합산 판정해 각각 차감합니다. 0원 이미지는 원장 없이 발급합니다.
@@ -300,7 +304,22 @@ Content-Type: application/json
 
 # 재생성에도 하늘 및 같은 snapshot 설명이 적용되는지 본문과 AI 요청 관측으로 확인한다.
 
-### [KNK-1659] 재생성 스트림 취소 수동 확인
+### [KNK-1677] 재생성 스트림 연결 종료 수동 확인
 # 재생성의 AI 응답 대기 중 HTTP Client 중지로 연결을 종료한 뒤 상세를 다시 조회한다.
-# 서버가 저장 진입 전에 종료를 감지했다면 늦은 completed에도 기존 활성본이 유지되고 차감·체험이 복원된다.
-# 저장 진입이 먼저 이긴 경우 성공한 교체를 유지하며 환불하지 않는다.
+# 연결 종료 뒤에도 생성은 계속되고 성공한 교체는 과금한다.
+# 저장 전 생성 마감이나 AI 실패면 기존 활성본이 유지되고 환불한다.
+# 1단계에서는 이탈한 재생성의 성공·실패를 상세만으로 구분할 수 없다.
+
+### KNK-1677. 재생성 중 이어쓰기와 같은 입력 재전송 — 앞의 재생성 실행 중 별도 탭에서 실행
+POST {{baseUrl}}/api/v1/chats/{{chatId}}/turns/regenerate/stream
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{"turnId":{{lastTurnId}},"realtimeImage":false}
+
+> {%
+    client.test("재생성 선점 공유", () => {
+        client.assert(response.status === 409, `actual=${response.status}`);
+        client.assert(response.body.code === "CHAT_TURN_IN_PROGRESS", `actual=${response.body.code}`);
+    });
+%}

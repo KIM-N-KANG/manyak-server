@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonUnwrapped
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.CorrelationHeaders
 import com.knk.manyak.global.observability.aicall.AiCallMeta
+import reactor.core.publisher.Mono
 import java.time.Duration
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -48,10 +49,12 @@ class RestChatTurnAiClient(
     override fun streamTurn(
         request: ChatTurnAiRequest,
         traceLink: AiTraceLink,
+        deadline: java.time.Instant?,
         onCharacterImage: (ChatCharacterImageEvent) -> Unit,
         onToken: (String) -> Unit,
     ): ChatTurnAiResult {
         var result: ChatTurnAiResult? = null
+        val deadlineExpired = java.util.concurrent.atomic.AtomicBoolean(false)
 
         // 리액티브 체인이 다른 스레드로 넘어가기 전에 호출 스레드의 MDC에서 상관관계 헤더를 캡처한다.
         // (구독 시점 스레드에는 MDC가 전파되지 않으므로 여기서 미리 읽어 둔다.)
@@ -67,6 +70,13 @@ class RestChatTurnAiClient(
             .bodyToFlux(SSE_TYPE)
             // 이벤트 간 idle 타임아웃. AI가 멈추면 무한 대기 대신 자체 오류로 끊는다.
             .timeout(streamTimeout)
+            // ping도 idle 한도를 갱신하므로 별도로 요청 접수 기준의 마감에 HTTP 구독을 취소한다.
+            .takeUntilOther(Mono.defer {
+                deadline?.let {
+                    Mono.delay(Duration.between(java.time.Instant.now(), it).coerceAtLeast(Duration.ZERO))
+                        .doOnNext { deadlineExpired.set(true) }
+                } ?: Mono.never<Long>()
+            })
             .toStream()
             .use { stream ->
                 val events = stream.iterator()
@@ -99,6 +109,8 @@ class RestChatTurnAiClient(
                     }
                 }
             }
+
+        if (deadlineExpired.get()) throw ChatTurnGenerationDeadlineException()
 
         // completed 없이 스트림이 끝난 경우는 AI relay가 아닌 백엔드 자체 오류로 본다.
         return result ?: error("completed 이벤트 없이 AI 스트림이 종료되었습니다.")
