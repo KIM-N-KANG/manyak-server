@@ -716,3 +716,53 @@ Content-Type: application/json
         client.assert(response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.body.code}`);
     });
 %}
+
+### 25. 생성 중 상세에서 재연결 ID 보관
+# 1~3번으로 채팅을 준비한 뒤, 다른 탭에서 4번 이어쓰기를 시작하고 생성 중 실행합니다.
+# 재생성도 동일합니다. 이미 완료했다면 started.generationId를 아래 자유 조회에 직접 넣습니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}
+Accept: application/json
+
+> {%
+    client.test("채팅 상세 조회", () => client.assert(response.status === 200, "expected 200, got " + response.status));
+    if (response.body.generatingTurn) {
+        client.global.set("generationId", response.body.generatingTurn.generationId);
+    } else {
+        client.log("생성 종료: SSE started에서 받은 generationId를 자유 조회에 넣으세요.");
+    }
+%}
+
+### 26. 생성 이벤트 재연결 — 25번을 생성 중 실행한 뒤 호출
+# started부터 token/character_image가 원래 순서로 재생됩니다. completed/error 뒤 연결이 닫힙니다.
+# 완료 뒤 5분 안에 다시 호출해도 같은 이벤트입니다. AI 호출과 과금이 추가되지 않습니다.
+# 종료 이벤트 없이 닫히면 상세 재조회로 저장 결과와 생성 중 상태를 확인합니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}/generations/{{generationId}}/stream
+Accept: text/event-stream
+
+### 27. 존재하지 않거나 만료된 생성 — 404 NOT_FOUND
+GET {{baseUrl}}/api/v1/chats/{{chatId}}/generations/00000000-0000-0000-0000-000000000000/stream
+Accept: text/event-stream
+
+> {%
+    client.test("없는 생성은 404", () => {
+        client.assert(response.status === 404, "expected 404, got " + response.status);
+        client.assert(response.body.code === "NOT_FOUND", "expected NOT_FOUND, got " + response.body.code);
+    });
+%}
+
+### 28. 회원이 게스트 채팅 재연결 — 403 FORBIDDEN
+# auth 로그인 검증 파일로 accessToken을 준비합니다. chatId는 3번에서 만든 게스트 채팅입니다.
+GET {{baseUrl}}/api/v1/chats/{{chatId}}/generations/{{generationId}}/stream
+Authorization: Bearer {{accessToken}}
+Accept: text/event-stream
+
+> {%
+    client.test("회원의 게스트 채팅 접근은 403", () => {
+        client.assert(response.status === 403, "expected 403, got " + response.status);
+        client.assert(response.body.code === "FORBIDDEN", "expected FORBIDDEN, got " + response.body.code);
+    });
+%}
+
+### 29. 자유 조회 — 실제 채팅/생성 공개 UUID와 소유자 토큰을 직접 입력
+GET {{baseUrl}}/api/v1/chats/PUT_CHAT_UUID_HERE/generations/PUT_GENERATION_UUID_HERE/stream
+Accept: text/event-stream
