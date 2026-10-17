@@ -49,6 +49,8 @@ class FcmPushSender(
     private val meterRegistry: MeterRegistry,
     @Value("\${manyak.push.web.icon-url:https://manyak.app/icons/icon-192.png}")
     private val webIconUrl: String = "https://manyak.app/icons/icon-192.png",
+    @Value("\${manyak.push.web-base-url:https://manyak.app}")
+    private val webBaseUrl: String = "https://manyak.app",
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -91,19 +93,19 @@ class FcmPushSender(
             when (deviceToken.platform) {
                 PushPlatform.ANDROID -> builder.setAndroidConfig(
                     AndroidConfig.builder().setPriority(priority)
-                        .apply { ttlMillis?.let { setTtl(it) } }
+                        .apply { ttlMillis?.let { setTtl(it.coerceAtMost(MAX_TTL_MILLIS)) } }
                         .build(),
                 )
                 PushPlatform.WEB -> builder.setWebpushConfig(
                     WebpushConfig.builder()
                         .setNotification(
                             WebpushNotification.builder()
-                                .setTitle(data["title"])
-                                .setBody(data["body"])
+                                .setTitle(if (data["type"] == "STORY_COMPLETED") STORY_COMPLETED_TITLE else data["title"])
+                                .setBody(if (data["type"] == "STORY_COMPLETED") data["title"] else data["body"])
                                 .setIcon(webIconUrl)
                                 .build(),
                         )
-                        .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: "https://manyak.app"))
+                        .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: webBaseUrl))
                         .build(),
                 )
             }
@@ -160,6 +162,9 @@ class FcmPushSender(
         const val OUTCOME_UNREGISTERED = "unregistered"
         const val OUTCOME_FAILURE = "failure"
         val OUTCOMES = listOf(OUTCOME_SUCCESS, OUTCOME_UNREGISTERED, OUTCOME_FAILURE)
+        // 알림 서비스와 같은 FCM Android TTL 상한(스펙 5-3-5).
+        private const val MAX_TTL_MILLIS = 28L * 24 * 60 * 60 * 1000
+        private const val STORY_COMPLETED_TITLE = "스토리가 완성됐어요"
         private const val TOKEN_LOG_PREFIX = 12
     }
 }
