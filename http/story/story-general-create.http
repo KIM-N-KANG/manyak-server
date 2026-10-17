@@ -38,6 +38,9 @@ Authorization: Bearer {{accessToken}}
 > {%
 client.test("제출본 복원", () => {
   client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  client.assert(response.body.issues.every(i => ["EXPLICIT_SEXUAL_CONTENT", "DRUGS", "EXTREME_GORE",
+    "SELF_HARM_PROMOTION", "HATE_VIOLENCE_INCITEMENT", "GAMBLING_PROMOTION"].includes(i.rule)), "위반 기준은 계약의 6개 코드");
+  client.assert(response.body.issues.every(i => i.path !== "protagonist_name"), "주인공 위반 위치는 폼 경로 protagonistName");
   client.assert(Array.isArray(response.body.imageErrors), "imageErrors 배열 필수");
   client.assert(response.body.imageErrors.every(e => typeof e.path === "string" &&
     ["IMAGE_DOWNLOAD_FAILED", "IMAGE_INVALID", "IMAGE_UNREADABLE"].includes(e.errorCode) && !("error_code" in e)), "이미지 오류는 path/errorCode");

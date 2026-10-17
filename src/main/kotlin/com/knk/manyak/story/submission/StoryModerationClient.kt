@@ -10,6 +10,9 @@ import org.springframework.http.client.JdkClientHttpRequestFactory
 import io.micrometer.observation.ObservationRegistry
 import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.core.JacksonException
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.net.http.HttpClient
 import java.time.Duration
 
@@ -27,9 +30,7 @@ data class ModerationResult(
         validate(input)
     } catch (_: IllegalArgumentException) {
         // 응답 자체는 채택하지 않더라도 사용자 수정 사유를 일시 장애로 바꾸어 반복하지 않는다.
-        val permanentImageCodes = setOf("IMAGE_INVALID", "IMAGE_UNREADABLE")
-        throw InvalidModerationResponse(issues.isEmpty() && errorCode !in permanentImageCodes &&
-            imageErrors.none { it.errorCode in permanentImageCodes })
+        throw InvalidModerationResponse(retryAllowed(issues.isNotEmpty(), errorCode, imageErrors.map { it.errorCode }))
     }
 
     private fun validate(input: JsonNode): ModerationResult {
@@ -61,10 +62,21 @@ data class ModerationResult(
     companion object {
         private val IMAGE_ERROR_PRIORITY = listOf("IMAGE_INVALID", "IMAGE_UNREADABLE", "IMAGE_DOWNLOAD_FAILED")
         private val CHARACTER_IMAGE_PATH = Regex("""characters\[\d+]\.images\[\d+]\.imageUrl""")
-        // AI Spec §5-3-6의 응답 코드 계약. 내용 판정 정책은 AI가 소유한다.
-        private val RULES = setOf("MINOR_SEXUAL_EXPLOITATION", "EXPLICIT_SEXUAL_CONTENT",
-            "NONCONSENSUAL_SEXUAL_EXPLOITATION", "DRUGS", "EXTREME_GORE",
-            "SELF_HARM_PROMOTION", "HATE_VIOLENCE_INCITEMENT")
+        // MODERATION BACKEND 4-2 계약의 응답 코드. 내용 판정 정책은 AI가 소유한다.
+        private val RULES = setOf("EXPLICIT_SEXUAL_CONTENT", "DRUGS", "EXTREME_GORE",
+            "SELF_HARM_PROMOTION", "HATE_VIOLENCE_INCITEMENT", "GAMBLING_PROMOTION")
+        private val PERMANENT_IMAGE_CODES = setOf("IMAGE_INVALID", "IMAGE_UNREADABLE")
+
+        private fun retryAllowed(hasIssues: Boolean, errorCode: String?, imageErrorCodes: Iterable<String?>): Boolean =
+            !hasIssues && errorCode !in PERMANENT_IMAGE_CODES && imageErrorCodes.none { it in PERMANENT_IMAGE_CODES }
+
+        fun invalidResponse(response: JsonNode): InvalidModerationResponse {
+            val issues = response.path("issues")
+            val imageErrors = response.path("image_errors")
+            return InvalidModerationResponse(retryAllowed(issues.isArray && !issues.isEmpty,
+                response.path("error_code").asString(),
+                if (imageErrors.isArray) imageErrors.toList().map { it.path("error_code").asString() } else emptyList()))
+        }
     }
 }
 class InvalidModerationResponse(val retryAllowed: Boolean) : IllegalArgumentException("Invalid moderation response")
@@ -84,11 +96,20 @@ class RestStoryModerationClient(
     @Value("\${manyak.ai.moderation.timeout:180s}") timeout: Duration,
     // 관측 레지스트리를 달아야 호출이 스팬이 되고 traceparent가 AI로 전파된다(KNK-1552). 테스트는 기본값(NOOP)으로 만든다.
     observationRegistry: ObservationRegistry = ObservationRegistry.NOOP,
+    private val mapper: ObjectMapper = jacksonObjectMapper(),
 ) : StoryModerationClient {
     init { require(timeout > Duration.ofSeconds(150)) { "Moderation timeout must exceed 150 seconds" } }
     private val client = RestClient.builder().observationRegistry(observationRegistry).baseUrl(baseUrl)
         .requestFactory(JdkClientHttpRequestFactory(HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build()).apply { setReadTimeout(timeout) }).build()
-    override fun moderate(input: JsonNode): ModerationResult = client.post().uri("/api/v1/moderation/story")
-        .headers { headers -> CorrelationHeaders.forwardingHeadersFromMdc().forEach { (name, value) -> headers.set(name, value) } }
-        .body(input).retrieve().body(ModerationResult::class.java)?.validated(input) ?: error("Empty moderation response")
+    override fun moderate(input: JsonNode): ModerationResult {
+        val response = client.post().uri("/api/v1/moderation/story")
+            .headers { headers -> CorrelationHeaders.forwardingHeadersFromMdc().forEach { (name, value) -> headers.set(name, value) } }
+            .body(input).retrieve().body(JsonNode::class.java) ?: error("Empty moderation response")
+        val result = try {
+            mapper.treeToValue(response, ModerationResult::class.java)
+        } catch (_: JacksonException) {
+            throw ModerationResult.invalidResponse(response)
+        }
+        return result.validated(input)
+    }
 }

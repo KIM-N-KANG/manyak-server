@@ -108,6 +108,50 @@ class StorySubmissionIntegrationTests {
         assertEquals(other.id, drafts.findById(draft.id).orElseThrow().userId)
     }
 
+    @Autowired private lateinit var submissionImages: SubmissionImages
+
+    @Test fun `검수 입력은 초안과 폼 메타데이터를 제외하고 AI 경로로 검증한다`() {
+        val user = users.save(User(nickname = "작가"))
+        val accepted = service.create(request().copy(draftId = java.util.UUID.randomUUID(), protagonistName = "서린"), user.id)
+        val row = submissions.findByPublicId(java.util.UUID.fromString(accepted.submissionId))!!
+        val form = mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode
+        form.set("characters", mapper.readTree("""[{"id":"character-id","name":"인물","images":[{"id":"image-id","imageUrl":"url","moderationStatus":"APPROVED"}]}]"""))
+        form.put("thumbnailModerationStatus", "APPROVED")
+        (form["characters"][0]["images"][0] as tools.jackson.databind.node.ObjectNode).put("objectKey", "test")
+        assertFalse(assembler.aiInput(form)["characters"][0]["images"][0].has("objectKey"))
+        (form["characters"][0]["images"][0] as tools.jackson.databind.node.ObjectNode).remove("objectKey")
+        form.put("thumbnailObjectKey", "test")
+        assertFalse(assembler.aiInput(form).has("thumbnailObjectKey"))
+        form.remove("thumbnailObjectKey")
+        val input = submissionImages.prepare(SubmissionWork(form, emptyMap(), row.publicId)) { _, _ -> fail("복사 매핑 재사용") }!!
+        val excluded = setOf("draftId", "id", "objectKey", "thumbnailObjectKey", "visibility", "moderationStatus", "thumbnailModerationStatus", "submission")
+        fun assertExcluded(node: tools.jackson.databind.JsonNode) {
+            if (node.isObject) node.properties().forEach { (key, value) -> assertFalse(key in excluded, key); assertExcluded(value) }
+            else if (node.isArray) node.forEach(::assertExcluded)
+        }
+        assertExcluded(input)
+        assertEquals(row.publicId.toString(), input["submissionId"].asText())
+        assertEquals("서린", input["protagonist_name"].asText())
+        assertFalse(input.has("protagonistName"))
+        val result = ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null)
+        assertEquals(result, result.validated(input))
+        assertThrows(InvalidModerationResponse::class.java) { result.copy(issues = listOf(result.issues.single().copy(path = "draftId"))).validated(input) }
+    }
+
+    @Test fun `제출본 상세는 AI 주인공 경로를 폼 경로로 반환한다`() {
+        val user = users.save(User(nickname = "작가"))
+        val accepted = service.create(request().copy(protagonistName = "서린"), user.id)
+        val row = submissions.findByPublicId(java.util.UUID.fromString(accepted.submissionId))!!
+        val result = ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null)
+        worker.finish(row.id, row.attempt, result.validated(moderationInput(row)))
+        assertEquals("protagonist_name", submissions.findById(row.id).orElseThrow().issues.single().path)
+        client.get().uri("/api/v1/stories/submissions/${row.publicId}")
+            .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.issues[0].path").isEqualTo("protagonistName")
+            .jsonPath("$.payload.protagonistName").isEqualTo("서린")
+    }
+
     private fun request() = mapper.readValue("""{
         "title":"제목", "oneLineIntro":"소개", "genres":["판타지"],
         "storySettings":{"worldSetting":"세계", "characterSetting":"인물", "userRoleSetting":"역할", "ruleSetting":"규칙"},
