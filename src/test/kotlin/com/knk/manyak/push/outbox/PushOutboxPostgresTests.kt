@@ -61,7 +61,7 @@ class PushOutboxPostgresTests {
         context.registerBean(UserRepository::class.java, Supplier {
             mock(UserRepository::class.java).also { `when`(it.findById(7)).thenReturn(Optional.of(user)) }
         })
-        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java)
+        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java)
         context.refresh()
         store = context.getBean(PushOutboxStore::class.java)
     }
@@ -71,6 +71,33 @@ class PushOutboxPostgresTests {
     private fun record() { tx.executeWithoutResult { context.publishEvent(event) } }
     private fun count() = jdbc.queryForObject("SELECT count(*) FROM push_outbox", Int::class.java)
     private fun message() = mapper.readValue(jdbc.queryForObject("SELECT payload::text FROM push_outbox", String::class.java), PushMessage::class.java)
+
+    @Test fun `출석 회차는 실제 PG에서 원자적으로 기록하며 재실행한 요청은 세지 않는다`() {
+        val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
+        val expiry = Instant.parse("2026-09-25T15:00:00Z")
+        val data = mapOf("type" to "ATTENDANCE_REMINDER", "date" to "2026-09-25")
+        assertThat(writer.record(listOf(7), data, "attendance", "2026-09-25", expiry)).isEqualTo(1)
+        assertThat(writer.record(listOf(7), data, "attendance", "2026-09-25", expiry)).isZero()
+        assertThat(count()).isEqualTo(1)
+        val row = store.claim(now, Duration.ofSeconds(60), 100).single()
+        assertThat(row.message.expiresAt).isEqualTo(expiry)
+        assertThat(row.message.messageId).isEqualTo("attendance:${user.publicId}:2026-09-25")
+    }
+
+    @Test fun `회차 중간 실패는 앞서 기록한 요청도 실제 PG에서 롤백한다`() {
+        val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
+        val data = mapOf("type" to "PROMOTION")
+        val campaignId = UUID.randomUUID().toString()
+        // 첫 회원 요청은 삽입되지만 두 번째 회원 조회가 실패한다.
+        assertThatThrownBy { writer.record(listOf(7, 999), data, "promotion", campaignId) }
+            .isInstanceOf(NoSuchElementException::class.java)
+        assertThat(count()).isZero()
+        assertThat(writer.record(listOf(7), data, "promotion", campaignId)).isEqualTo(1)
+        assertThat(writer.record(listOf(7), data, "promotion", campaignId)).isZero()
+        assertThat(message().expiresAt).isNull()
+        val payload = mapper.readTree(jdbc.queryForObject("SELECT payload::text FROM push_outbox", String::class.java))
+        assertThat(payload.has("expiresAt")).isFalse()
+    }
 
     @Test fun `remote 기록은 동의 설정과 무관하며 스키마와 도메인 멱등키를 보존한다`() {
         MDC.put("request_id", "trace-request"); MDC.put("session_id", "trace-session")

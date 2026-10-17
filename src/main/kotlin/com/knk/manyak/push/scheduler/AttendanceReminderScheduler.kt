@@ -21,9 +21,7 @@ import java.time.ZoneId
  * 새 태스크가 cron 시각에 걸치면 두 인스턴스가 같은 회차를 돌아 회원이 알림을 두 번 받는다. 날짜 키를 먼저
  * 선점한 인스턴스만 발송한다.
  *
- * ponytail: 회원별 발송 기록 테이블은 두지 않는다. 회차 중간에 인스턴스가 죽으면 그날 남은 회원은 알림을
- * 놓친다(다음 날 회차로 자연 복구). 광고성 알림이라 중복 발송이 누락보다 나쁘고, 그 한 가지를 막는 데
- * 날짜 키 하나면 충분하다. 재개가 필요해지면 그때 회원별 기록을 둔다.
+ * 원격 모드는 회차 전체 요청을 커밋한다. 커밋 전 종료되면 그날 요청은 남지 않고 날짜 키는 유지된다.
  *
  * Redis 장애로 선점 여부를 알 수 없으면 **발송을 건너뛴다** — 같은 이유(중복보다 누락)다.
  */
@@ -56,9 +54,6 @@ class AttendanceReminderScheduler(
                 "attendance_reminder_sent",
                 "targets" to result.targets,
                 "sent" to result.sent,
-                // 조회 이후 자격을 잃어 건너뛴 수(동의 철회·정지·탈퇴·야간). 0이 아닌 값이 계속 보이면
-                // 회차가 길어져 재확인에 걸리는 회원이 많다는 신호다.
-                "skipped" to result.skipped,
             )
         } catch (exception: Exception) {
             structuredLogger.event(

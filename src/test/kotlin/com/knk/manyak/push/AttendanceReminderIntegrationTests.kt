@@ -152,26 +152,27 @@ class AttendanceReminderIntegrationTests {
     }
 
     @Test
-    fun `회차가 자정을 넘겨도 전날 날짜를 유지하고 TTL은 0이다`() {
-        val instants = listOf(Instant.parse("2026-09-08T14:59:59Z"), Instant.parse("2026-09-08T15:00:00Z"))
-        clock = SteppingClock(instants)
-        val member = eligibleMember()
+    fun `회차가 KST 자정에 도달하면 발송하지 않는다`() {
+        clock = SteppingClock(listOf(Instant.parse("2026-09-08T14:59:59Z"), Instant.parse("2026-09-08T15:00:00Z")))
+        eligibleMember()
+
+        assertThat(attendanceReminderService.sendReminders().sent).isZero()
+        org.mockito.Mockito.verifyNoInteractions(fcmPushSender)
+    }
+
+    @Test
+    fun `첫 회원 발송 뒤 자정을 넘기면 남은 회원 발송을 중단한다`() {
+        val before = Instant.parse("2026-09-08T14:59:59Z")
+        clock = SteppingClock(List(4) { before } + Instant.parse("2026-09-08T15:00:00Z"))
+        val first = eligibleMember()
+        val second = eligibleMember()
 
         val result = attendanceReminderService.sendReminders()
 
+        assertThat(result.targets).isEqualTo(2)
         assertThat(result.sent).isEqualTo(1)
-        verify(fcmPushSender).sendToUser(
-            member.id,
-            mapOf(
-                "type" to "ATTENDANCE_REMINDER",
-                "date" to "2026-09-08",
-                "title" to "(광고) 이프 250이 도착했어요 🍃",
-                "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?",
-                "deepLink" to "https://manyak.app/my/credits?tab=free",
-            ),
-            NORMAL,
-            0L,
-        )
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, eq(1000L))
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }
 
     @Test
@@ -264,7 +265,6 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(result.targets).isEqualTo(1)
         assertThat(result.sent).isEqualTo(if (hour == 15) 1 else 0)
-        assertThat(result.skipped).isEqualTo(if (hour == 15) 0 else 1)
         if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
         else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
     }

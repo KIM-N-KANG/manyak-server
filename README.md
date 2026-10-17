@@ -73,6 +73,12 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 
 `MANYAK_PUSH_MODE=remote`는 스토리 완성의 `COMPLETED` 마킹과 같은 트랜잭션에 `push_outbox`를 기록합니다. 기본 `local`은 기존 서버 FCM 발송을 유지하고 아웃박스를 만들지 않습니다. remote의 동의·토큰 확인은 알림 서비스가 발송 직전에 수행합니다. 기존 HTTP 발송 클라이언트와 `manyak.push.notification.*` 설정은 제거했습니다.
 
+원격 모드의 출석 리마인드·프로모션도 회원마다 같은 아웃박스에 요청을 기록합니다. 회차의 요청은 한 트랜잭션으로 커밋하며, 출석은 `attendance:{회원 공개 식별자}:{KST 날짜}`, 프로모션은 `promotion:{캠페인 공개 식별자}:{회원 공개 식별자}`로 중복 기록을 막습니다. 출석 요청의 `expiresAt`은 당일 KST 자정이고 그 외 알림은 이 필드를 생략합니다. 자격 재확인과 야간 판정은 소비자가 발송 직전에 수행합니다. 로컬 모드는 서버 발송기를 사용하고 출석 회차가 자정에 도달하면 남은 회원 발송을 중단합니다.
+
+회차 로그의 `targets`는 조회 대상 수이며, `sent`는 원격 모드의 신규 요청 수(로컬 모드는 발송기 호출 수)입니다. `skipped`는 기록하지 않고 캠페인의 `skipped_count`도 사용하지 않습니다. 실패한 캠페인은 원인 해결 후 같은 행을 `SCHEDULED`로 되돌려 재실행할 수 있습니다. 기존 요청은 추가되지 않으며 마지막 회차의 대상 수와 신규 요청 수를 남깁니다. 이 경우 `finished_at` 등 이전 회차 결과는 종료 시 갱신됩니다.
+
+배포 전 알림 서비스의 큐 메시지가 `expiresAt`, `ATTENDANCE_REMINDER`, `PROMOTION`을 지원하는지 확인하고 소비자를 먼저 배포합니다. 서버 안 발송기와 FCM 자격 증명은 로컬 모드 롤백에 사용합니다.
+
 remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
 
 - **local 프로파일은 Kafka**를 사용합니다. `SPRING_KAFKA_BOOTSTRAP_SERVERS`(호스트 실행 기본 `localhost:9092`)를 주입하며 compose에서는 서버가 접근할 수 있는 브로커 listener 주소를 사용합니다. 토픽은 `push.requested`, 키는 회원 `publicId`입니다.

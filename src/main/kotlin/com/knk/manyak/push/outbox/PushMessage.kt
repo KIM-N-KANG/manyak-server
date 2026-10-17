@@ -1,5 +1,7 @@
 package com.knk.manyak.push.outbox
 
+import com.fasterxml.jackson.annotation.JsonInclude
+import java.time.Instant
 import java.util.concurrent.CompletableFuture
 
 data class PushMessage(
@@ -11,6 +13,8 @@ data class PushMessage(
     val requestId: String,
     val sessionId: String,
     val schemaVersion: Int = 1,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val expiresAt: Instant? = null,
 )
 
 /** 브로커의 확인까지 비동기로 완료한다. */
