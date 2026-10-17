@@ -50,7 +50,7 @@ class ConsentGateFilterTest {
         allowed.forEach { (method, path) -> assertThat(request(method, "/api/v1$path").second).describedAs("$method $path").isTrue() }
         verifyNoInteractions(consents)
         `when`(consents.authenticationStatus(user.id)).thenReturn(missing)
-        for ((method, path) in listOf("POST" to "/stories/genres", "GET" to "/stories/genres/private", "PUT" to "/users/me/push-tokens", "GET" to "/stories", "GET" to "/users/me/trials")) {
+        for ((method, path) in listOf("POST" to "/stories/genres", "GET" to "/stories/genres/private", "PUT" to "/users/me/push-tokens", "GET" to "/stories", "GET" to "/users/me/trials", "GET" to "/chats/chat/generations/generation/stream")) {
             val (response, passed) = request(method, "/api/v1$path")
             assertThat(passed).isFalse()
             assertThat(response.status).isEqualTo(403)

@@ -284,8 +284,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(generation.startedAt.toString()).endsWith("Z")
         worker.task.run()
         assertThat(state(chat, member)).isNull()
-        val attempts = ReflectionTestUtils.getField(emitter, "earlySendAttempts") as Set<*>
-        assertThat(attempts.map { ReflectionTestUtils.getField(it!!, "data").toString() }.joinToString()).contains(generation.generationId)
+        assertThat(streamRecords(chat, generation.generationId)).contains(generation.generationId)
     }
 
     @Test fun `재생성 상태와 연결 이탈 뒤 활성본 교체를 확인한다`() {
@@ -450,7 +449,8 @@ class ChatTurnStreamCancellationIntegrationTests {
         start(member, chat)
         val first = worker.task
         redis.delete("chat:${chat.publicId}:generating")
-        val secondEmitter = start(member, chat)
+        start(member, chat)
+        val secondId = state(chat, member)!!.generationId
         first.run()
         assertThat(state(chat, member)).isNotNull() // 이전 작업이 새 키를 지우지 않음
         worker.task.run()
@@ -458,8 +458,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
         assertThat(refunds()).hasSize(1)
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost)
-        val attempts = ReflectionTestUtils.getField(secondEmitter, "earlySendAttempts") as Set<*>
-        assertThat(attempts.map { ReflectionTestUtils.getField(it!!, "data").toString() }.joinToString()).contains("CHAT_TURN_STALE")
+        assertThat(streamRecords(chat, secondId)).contains("CHAT_TURN_STALE")
     }
 
     @Test fun `같은 턴 ID 재생성 교체도 시작 상태 불일치로 폐기한다`() {
@@ -602,7 +601,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         terminate(emitter, "timeoutCallback")
         val delay = org.mockito.ArgumentCaptor.forClass(Long::class.javaObjectType)
         Mockito.verify(chatGenerationDeadlines, Mockito.times(1)).schedule(Mockito.any(Runnable::class.java) ?: Runnable {}, delay.capture())
-        assertThat(delay.value).isBetween(1, ChatService.SSE_TIMEOUT_MILLIS)
+        assertThat(delay.value).isBetween(1, ChatService.GENERATION_TIMEOUT_MILLIS)
         deadline()
         worker.task.run()
         Mockito.verify(logger).event("chat_turn_timeout", "chat_id" to chat.publicId.toString(), "worker_state" to "PENDING")
@@ -683,10 +682,11 @@ class ChatTurnStreamCancellationIntegrationTests {
         )
         Mockito.doAnswer { call ->
             (call.callRealMethod() as com.knk.manyak.chat.dto.GeneratingTurnResponse)
-                .copy(startedAt = java.time.Instant.now().minusMillis(ChatService.SSE_TIMEOUT_MILLIS - 2000))
+                .copy(startedAt = java.time.Instant.now().minusMillis(ChatService.GENERATION_TIMEOUT_MILLIS - 2000))
         }.`when`(store).acquire(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.now(), Mockito.isNull())
         val before = failureCount()
         val emitter = start(member, chat)
+        val generationId = state(chat, member)!!.generationId
         val thread = Thread { worker.task.run() }
         try {
             thread.start()
@@ -702,14 +702,166 @@ class ChatTurnStreamCancellationIntegrationTests {
             assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
             Mockito.verify(store, Mockito.times(1)).release(Mockito.eq(chat.publicId.toString()) ?: "", Mockito.anyString())
             Mockito.verify(logger, Mockito.times(1)).event("chat_turn_timeout", "chat_id" to chat.publicId.toString(), "worker_state" to "RUNNING")
-            val attempts = ReflectionTestUtils.getField(emitter, "earlySendAttempts") as Set<*>
-            assertThat(attempts.count { ReflectionTestUtils.getField(it!!, "data").toString().contains("AI_STREAM_FAILED") }).isEqualTo(1)
+            assertThat(streamRecords(chat, generationId).split("AI_STREAM_FAILED")).hasSize(2)
         } finally {
             thread.interrupt()
             thread.join(1000)
             server.shutdown()
         }
     }
+
+    @Autowired lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
+
+    @Test fun `재연결 GET은 채팅 접근을 먼저 판정하고 만료 또는 잘못된 생성에는 NOT_FOUND를 반환한다`() {
+        val (_, chat, _) = paidChat()
+        val id = java.util.UUID.randomUUID().toString()
+        org.assertj.core.api.Assertions.assertThatThrownBy { service.resumeGeneration(chat.publicId.toString(), id, null) }
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException::class.java) { assertThat(it.statusCode.value()).isEqualTo(403) }
+        org.assertj.core.api.Assertions.assertThatThrownBy { service.resumeGeneration(chat.publicId.toString(), id, chat.userId) }
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException::class.java) { assertThat(it.statusCode.value()).isEqualTo(404) }
+        org.assertj.core.api.Assertions.assertThatThrownBy { service.resumeGeneration(chat.publicId.toString(), id, requireNotNull(chat.userId) + 100) }
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException::class.java) { assertThat(it.statusCode.value()).isEqualTo(403) }
+        val forbidden = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}/generations/$id/stream")).andReturn().response
+        assertThat(forbidden.status).isEqualTo(403)
+        val guest = chats.save(StoryChat(storyId = chat.storyId))
+        org.assertj.core.api.Assertions.assertThatThrownBy { service.resumeGeneration(guest.publicId.toString(), id, chat.userId) }
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException::class.java) { assertThat(it.statusCode.value()).isEqualTo(403) }
+        val missing = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${guest.publicId}/generations/$id/stream")).andReturn()
+        assertThat(missing.response.status).isEqualTo(404)
+        assertThat(mapper.readTree(missing.response.contentAsString)["code"].asString()).isEqualTo("NOT_FOUND")
+    }
+
+    @Test fun `큐 대기 첫 POST와 상세 직후 GET은 같은 생성의 처음부터 읽고 재연결은 추가 차감하지 않는다`() {
+        val story = stories.save(Story(title = "재연결", genre = "판타지"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        val post = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/chats/${chat.publicId.toString().uppercase()}/turns/stream")
+            .header("X-Manyak-Device-Id", "resume-device").contentType("application/json").content("""{"userInput":"진행","realtimeImage":false}""")).andReturn()
+        assertThat(post.request.isAsyncStarted).isTrue()
+        val generation = service.getChatDetail(chat.publicId.toString(), null).generatingTurn!!
+        assertThat(redis.hasKey("chat:${chat.publicId}:gen:${generation.generationId}")).isFalse()
+        val get = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}/generations/${generation.generationId}/stream")).andReturn()
+        assertThat(get.request.isAsyncStarted).isTrue()
+        val before = transactions.count()
+        worker.task.run()
+        post.getAsyncResult(8000)
+        get.getAsyncResult(8000)
+        val first = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(post)).andReturn().response.contentAsString
+        val replay = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(get)).andReturn().response.contentAsString
+        assertThat(first).contains("event:started", generation.generationId, "event:completed")
+        assertThat(replay).isEqualTo(first)
+        val done = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}/generations/${generation.generationId}/stream")).andReturn()
+        done.getAsyncResult(8000)
+        assertThat(mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(done)).andReturn().response.contentAsString).isEqualTo(first)
+        assertThat(transactions.count()).isEqualTo(before)
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+    }
+
+    @Test fun `이벤트 기록 오류가 계속되어도 유료 턴 저장과 과금을 유지하고 생성당 한번만 로그를 남긴다`() {
+        val (member, chat, _) = paidChat()
+        val emitter = start(member, chat)
+        val scriptError = org.springframework.data.redis.RedisSystemException("event write failed", IllegalStateException())
+        Mockito.doThrow(scriptError).`when`(redis).execute(Mockito.any(org.springframework.data.redis.core.script.RedisScript::class.java), Mockito.anyList<String>(), *arrayOf(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+        ai.tokenAfterClosure = true
+        worker.task.run()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+        assertThat(wallet.balanceOf(member.id)).isZero()
+        assertThat(refunds()).isEmpty()
+        Mockito.verify(logger).event("chat_generation_event_write_failed", mapOf("chat_id" to chat.publicId.toString(), "error" to "RedisSystemException"))
+        terminate(emitter, "completionCallback")
+    }
+
+    @Test fun `재생성 첫 연결도 큐에서 기다리며 완료와 실패는 보관된 스트림으로 구분하고 재수신은 무료다`() {
+        for (fail in listOf(false, true)) {
+            cleaner.cleanAll()
+            val (member, chat, _) = paidChat()
+            val turn = messages.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "기존 응답", messageOrder = 2))
+            messages.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "기존 입력", messageOrder = 1))
+            chat.currentTurn = 1
+            chats.save(chat)
+            val first = service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(turn.id, realtimeImage = false), member.id)
+            val id = state(chat, member)!!.generationId
+            assertThat(redis.hasKey("chat:${chat.publicId}:gen:$id")).isFalse()
+            val reading = service.resumeGeneration(chat.publicId.toString(), id, member.id)
+            if (fail) ai.beforeCompleted = { throw ChatTurnAiException("AI_TEST", "실패") }
+            worker.task.run()
+            val before = transactions.count()
+            val balance = wallet.balanceOf(member.id)
+            val replay = mutableListOf<String>()
+            generationEvents.receive(chat.publicId.toString(), id, { true }) { name, _ -> replay.add(name) }
+            assertThat(replay).containsExactly("started", if (fail) "error" else "completed")
+            service.resumeGeneration(chat.publicId.toString(), id, member.id)
+            assertThat(transactions.count()).isEqualTo(before)
+            assertThat(wallet.balanceOf(member.id)).isEqualTo(balance)
+            assertThat(state(chat, member)).isNull()
+            assertThat(chats.findById(chat.id).orElseThrow().currentTurn).isEqualTo(1)
+            assertThat(messages.findById(turn.id).orElseThrow().content).isEqualTo(if (fail) "기존 응답" else "늦게 도착한 완료 결과")
+            terminate(first, "completionCallback")
+            terminate(reading, "completionCallback")
+            ai.beforeCompleted = {}
+        }
+    }
+
+    @Test fun `완료 스트림 TTL 만료와 잘못된 UUID 및 삭제된 채팅의 재연결은 HTTP 404다`() {
+        val story = stories.save(Story(title = "만료 재연결", genre = "판타지"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        service.streamChatTurn(chat.publicId.toString(), input(), deviceId = "expiry-device")
+        val id = service.getChatDetail(chat.publicId.toString(), null).generatingTurn!!.generationId
+        worker.task.run()
+        val key = "chat:${chat.publicId}:gen:$id"
+        assertThat(redis.getExpire(key)).isBetween(298, 300)
+        redis.expire(key, java.time.Duration.ZERO)
+        for (path in listOf(
+            "/api/v1/chats/${chat.publicId}/generations/$id/stream",
+            "/api/v1/chats/${chat.publicId}/generations/invalid/stream",
+            "/api/v1/chats/invalid/generations/$id/stream",
+            "/api/v1/chats/${java.util.UUID.randomUUID()}/generations/$id/stream",
+        )) {
+            val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path)).andReturn().response
+            assertThat(response.status).isEqualTo(404)
+            assertThat(mapper.readTree(response.contentAsString)["code"].asString()).isEqualTo("NOT_FOUND")
+        }
+        service.deleteChat(chat.publicId.toString(), null)
+        val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}/generations/$id/stream")).andReturn().response
+        assertThat(response.status).isEqualTo(404)
+    }
+
+    @Test fun `SAVING 중 스트림과 생성 키가 만료돼도 턴 저장과 과금은 유지하고 이벤트를 되살리지 않는다`() {
+        val (member, chat, _) = paidChat()
+        lateinit var creationDeadline: java.time.Instant
+        Mockito.doAnswer { call ->
+            val generation = call.callRealMethod() as com.knk.manyak.chat.dto.GeneratingTurnResponse
+            // 워커가 120초 마감 전에 SAVING에 들어갈 여유 10초를 남기고 나이를 진행한다.
+            val startedAt = java.time.Instant.now().minusSeconds(110)
+            creationDeadline = startedAt.plusSeconds(com.knk.manyak.chat.service.ChatGenerationEvents.INITIAL_TTL_SECONDS)
+            generation.copy(startedAt = startedAt)
+        }.`when`(store).acquire(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.now(), Mockito.isNull())
+        val first = start(member, chat)
+        val id = state(chat, member)!!.generationId
+        val key = "chat:${chat.publicId}:gen:$id"
+        Mockito.doAnswer { call ->
+            // SAVING에 들어온 뒤 Redis TIME이 실제 신규 생성 기한을 지나도록 기다린다.
+            val remaining = java.time.Duration.between(java.time.Instant.now(), creationDeadline).toMillis()
+            if (remaining >= 0) Thread.sleep(remaining + 20)
+            deadline()
+            redis.expire(key, java.time.Duration.ZERO)
+            redis.expire("chat:${chat.publicId}:generating", java.time.Duration.ZERO)
+            call.callRealMethod()
+        }.`when`(images).validate(
+            Mockito.any(ChatRealtimeImageService.Reservation::class.java) ?: ChatRealtimeImageService.Reservation(null),
+            Mockito.any(ChatTurnAiResult::class.java) ?: ChatTurnAiResult("", emptyList()),
+        )
+        worker.task.run()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+        assertThat(wallet.balanceOf(member.id)).isZero()
+        assertThat(refunds()).isEmpty()
+        assertThat(redis.hasKey(key)).isFalse()
+        org.assertj.core.api.Assertions.assertThatThrownBy { service.resumeGeneration(chat.publicId.toString(), id, member.id) }
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException::class.java) { assertThat(it.statusCode.value()).isEqualTo(404) }
+        terminate(first, "completionCallback")
+    }
+
+    private fun streamRecords(chat: StoryChat, generationId: String) =
+        redis.opsForStream<String, String>().range("chat:${chat.publicId}:gen:$generationId", org.springframework.data.domain.Range.unbounded()).orEmpty().joinToString { it.value.toString() }
 
     private fun failureCount() = meters.find("manyak.chat.turn.result").tag("outcome", ChatService.OUTCOME_FAILURE).counter()?.count() ?: 0.0
 

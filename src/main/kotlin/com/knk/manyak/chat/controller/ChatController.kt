@@ -319,6 +319,27 @@ class ChatController(
     }
 
     @Operation(
+        summary = "채팅 생성 스트림 재연결",
+        description = "보관 중인 생성 이벤트를 처음부터 재생하고 새 이벤트를 이어서 받습니다. 생성과 과금을 반복하지 않습니다. " +
+            "큐 대기 중 스트림이 없어도 생성 중 키가 해당 ID이면 기다립니다. completed 또는 error 수신 시 종료합니다.",
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "처음부터 SSE 재생", content = [Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE)]),
+        ApiResponse(responseCode = "403", description = "채팅 상세 조회 권한 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+        ApiResponse(responseCode = "404", description = "채팅 없음·삭제·형식 오류 또는 스트림과 해당 생성 중 키 모두 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+    ])
+    @GetMapping("/chats/{chatId}/generations/{generationId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun resumeGeneration(
+        @Parameter(description = "채팅 공개 UUID") @PathVariable chatId: String,
+        @Parameter(description = "started 또는 generatingTurn에서 받은 생성 UUID") @PathVariable generationId: String,
+        @CurrentUserId userId: Long?,
+        response: HttpServletResponse,
+    ): SseEmitter {
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return chatService.resumeGeneration(chatId, generationId, userId)
+    }
+
+    @Operation(
         summary = "채팅 선택지 생성",
         description = "마지막 턴의 다음 행동 선택지 3개를 생성해 저장합니다(스펙 §4-3-3, 선택지 분리). 이어쓰기와 달리 동기 JSON이며 " +
             "선택지 생성은 무료입니다(크레딧·게스트 채팅 한도 미소모). 프론트엔드는 응답 본문이 아니라 채팅 상세 재조회의 " +
