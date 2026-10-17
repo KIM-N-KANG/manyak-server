@@ -68,6 +68,38 @@ class InternalPushEligibilityControllerIntegrationTests {
     }
 
     @Test
+    fun `실제 내부 인증 체인에서 기기 해시를 요청 로그에 보존하고 시크릿 누락은 계속 거절한다`() {
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.observability.StructuredLogger::class.java)
+            as ch.qos.logback.classic.Logger
+        val snapshots = java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>()
+        val requestId = "req-internal-hash-integration"
+        val appender = object : ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent>() {
+            override fun append(event: ch.qos.logback.classic.spi.ILoggingEvent) {
+                val mdc = event.mdcPropertyMap
+                if (mdc["request_id"] == requestId) snapshots.add(mdc.toMap())
+            }
+        }.apply { start() }
+        logger.addAppender(appender)
+        try {
+            for (authenticated in listOf(true, false)) {
+                val request = client.get().uri("/internal/users/${UUID.randomUUID()}/push-eligibility?kind=SERVICE&at=$DAY")
+                    .header("X-Manyak-Request-Id", requestId)
+                    .header("X-Manyak-Device-Id-Hash", "device_hash_0123456789abcdef")
+                if (authenticated) request.header(HEADER, SECRET)
+                val response = request.exchange()
+                if (authenticated) response.expectStatus().isOk else response.expectStatus().isUnauthorized
+                response.expectHeader().valueEquals("X-Manyak-Request-Id", requestId)
+            }
+            org.assertj.core.api.Assertions.assertThat(snapshots).hasSize(2)
+            org.assertj.core.api.Assertions.assertThat(snapshots.map { it["device_id_hash"] })
+                .containsOnly("device_hash_0123456789abcdef")
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    @Test
     fun `시크릿 헤더가 없으면 401이다`() {
         get(UUID.randomUUID(), secret = null).expectStatus().isUnauthorized
     }

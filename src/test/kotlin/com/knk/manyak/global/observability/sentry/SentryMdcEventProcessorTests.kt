@@ -74,6 +74,36 @@ class SentryMdcEventProcessorTests {
         )) assertRequestPolicy(url, scrub = false)
     }
 
+    @Test
+    fun `모든 event와 transaction은 URL과 무관하게 대소문자별 내부 시크릿 헤더만 제거한다`() {
+        for (url in listOf(null, "/internal/users/test/push-eligibility", "/api/v1/stories", "not a valid URI", "mailto:test@example.com")) {
+            fun request() = io.sentry.protocol.Request().apply {
+                this.url = url
+                headers = mapOf(
+                    "X-Manyak-Internal-Secret" to "test-secret",
+                    "x-manyak-internal-secret" to "test-secret",
+                    "X-MaNyAk-InTeRnAl-SeCrEt" to "test-secret",
+                    "X-Test" to "keep",
+                )
+                data = "keep-body"
+                cookies = "keep-cookie"
+                queryString = "keep-query"
+            }
+            val event = SentryEvent().apply { this.request = request() }
+            val transaction = io.sentry.protocol.SentryTransaction(
+                "test", 1.0, 2.0, emptyList(), emptyMap(), io.sentry.protocol.TransactionInfo("url"),
+            ).apply { this.request = request() }
+            processor.process(event, Hint())
+            processor.process(transaction, Hint())
+            for (actual in listOf(event.request!!, transaction.request!!)) {
+                assertEquals(mapOf("X-Test" to "keep"), actual.headers)
+                assertEquals("keep-body", actual.data)
+                assertEquals("keep-cookie", actual.cookies)
+                assertEquals("keep-query", actual.queryString)
+            }
+        }
+    }
+
     private fun assertRequestPolicy(url: String, scrub: Boolean, method: String? = null) {
         fun request() = io.sentry.protocol.Request().apply {
             this.url = url

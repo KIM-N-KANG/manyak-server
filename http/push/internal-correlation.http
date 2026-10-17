@@ -1,0 +1,57 @@
+### 내부 API 상관관계 수동 검증
+### 준비: 로컬 Postgres 기동 후 MANYAK_INTERNAL_SHARED_SECRET을 설정해 ./gradlew bootRun 실행.
+### internalSecret은 IntelliJ 비공개 환경 변수로 주입한다. 실제 값을 이 파일에 저장하지 않는다.
+### 0 → 1 → 2 → 3 → 4 순서로 실행한다. recipientId는 없는 회원의 가상 UUID다.
+### jsonlog 프로파일 로그에서 각 request_id의 device_id_hash를 대조한다.
+### Sentry 시크릿 제거는 단위 테스트로 검증한다. 수동 검증을 위해 운영 오류를 발생시키지 않는다.
+
+@baseUrl = http://localhost:8080
+@recipientId = 00000000-0000-0000-0000-000000000001
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 1. 내부 해시 전달 — 로그의 device_id_hash = device_hash_0123456789abcdef (재해시 없음)
+GET {{baseUrl}}/internal/users/{{recipientId}}/push-eligibility?kind=SERVICE&at=2026-10-17T03:00:00Z
+X-Manyak-Internal-Secret: {{internalSecret}}
+X-Manyak-Request-Id: req_internal_hash_manual
+X-Manyak-Device-Id-Hash: device_hash_0123456789abcdef
+X-Manyak-Device-Id: manual-raw-device
+
+> {%
+    client.test("내부 조회 성공", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    client.test("요청 ID 유지", () => client.assert(response.headers.valueOf("X-Manyak-Request-Id") === "req_internal_hash_manual", "request ID mismatch"));
+%}
+
+### 2. 잘못된 해시 — 요청은 정상 진행, 로그의 device_id_hash = unknown
+GET {{baseUrl}}/internal/users/{{recipientId}}/push-eligibility?kind=SERVICE&at=2026-10-17T03:00:00Z
+X-Manyak-Internal-Secret: {{internalSecret}}
+X-Manyak-Request-Id: req_internal_invalid_hash_manual
+X-Manyak-Device-Id-Hash: invalid-hash
+
+> {%
+    client.test("관측 헤더 오류로 요청을 막지 않음", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 3. 시크릿 누락 — 유효한 기기 해시로도 내부 인증을 대체할 수 없음
+GET {{baseUrl}}/internal/users/{{recipientId}}/push-eligibility?kind=SERVICE&at=2026-10-17T03:00:00Z
+X-Manyak-Request-Id: req_internal_no_secret_manual
+X-Manyak-Device-Id-Hash: device_hash_0123456789abcdef
+
+> {%
+    client.test("시크릿 누락 거절", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 4. 공개 요청 — 로그의 device_id_hash = unknown (해시 헤더 무시)
+GET {{baseUrl}}/api/v1/stories/simple/tags
+X-Manyak-Request-Id: req_public_hash_manual
+X-Manyak-Session-Id: session_manual
+X-Manyak-Device-Id-Hash: device_hash_0123456789abcdef
+
+> {%
+    client.test("공개 조회 성공", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}

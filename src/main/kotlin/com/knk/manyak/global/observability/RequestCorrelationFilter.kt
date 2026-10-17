@@ -8,6 +8,7 @@ import org.slf4j.MDC
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
 import org.springframework.web.filter.OncePerRequestFilter
 import java.util.UUID
 
@@ -36,12 +37,20 @@ class RequestCorrelationFilter(
         val rawSessionId = request.headerOrNull(HEADER_SESSION_ID)
         val rawDeviceId = request.headerOrNull(HEADER_DEVICE_ID)
 
+        // 내부 인증 대상 경로만 전달된 해시를 받는다. 공개 요청은 기존 원문 해시 경로를 유지한다.
+        // 상관관계 필터는 인증보다 먼저 실행되므로 거절된 내부 요청도 같은 방식으로 추적한다.
+        val forwardedDeviceHash = if (INTERNAL_API_MATCHER.matches(request)) {
+            request.headerOrNull(CorrelationHeaders.HEADER_DEVICE_ID_HASH)?.takeIf { DEVICE_HASH_PATTERN.matches(it) }
+        } else {
+            null
+        }
+
         warnIfRequiredHeadersMissing(request, rawSessionId, rawDeviceId)
 
         response.setHeader(HEADER_REQUEST_ID, requestId)
         MDC.put(MdcKeys.REQUEST_ID, requestId)
         MDC.put(MdcKeys.SESSION_ID, rawSessionId ?: UNKNOWN)
-        MDC.put(MdcKeys.DEVICE_ID_HASH, rawDeviceId?.let(deviceIdHasher::hash) ?: UNKNOWN)
+        MDC.put(MdcKeys.DEVICE_ID_HASH, forwardedDeviceHash ?: rawDeviceId?.let(deviceIdHasher::hash) ?: UNKNOWN)
         try {
             filterChain.doFilter(request, response)
         } finally {
@@ -87,6 +96,8 @@ class RequestCorrelationFilter(
         const val HEADER_SESSION_ID = "X-Manyak-Session-Id"
         const val HEADER_REQUEST_ID = "X-Manyak-Request-Id"
         const val UNKNOWN = "unknown"
+        private val INTERNAL_API_MATCHER = PathPatternRequestMatcher.withDefaults().matcher("/internal/**")
+        private val DEVICE_HASH_PATTERN = Regex("device_hash_[0-9a-f]{16}")
         private val log = LoggerFactory.getLogger(RequestCorrelationFilter::class.java)
     }
 }
