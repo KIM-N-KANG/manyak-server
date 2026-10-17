@@ -710,7 +710,66 @@ class ChatTurnStreamCancellationIntegrationTests {
         }
     }
 
-    @Autowired lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
+    @MockitoSpyBean lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
+
+    @MockitoSpyBean lateinit var receivers: com.knk.manyak.chat.service.ChatGenerationReceivers
+
+    private fun assertResumeResponse(chatId: String, generationId: String, status: Int, code: String) {
+        val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .get("/api/v1/chats/$chatId/generations/$generationId/stream")
+            .accept("text/event-stream", "application/json")).andReturn().response
+        assertThat(response.status).isEqualTo(status)
+        assertThat(response.getHeader("Content-Type")).startsWith("application/json")
+        assertThat(mapper.readTree(response.contentAsString)["code"].asString()).isEqualTo(code)
+    }
+
+    @Test fun `재연결 GET 수신 상한 초과는 SERVICE_UNAVAILABLE JSON 503이다`() {
+        val story = stories.save(Story(title = "수신 상한", genre = "판타지"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        val id = java.util.UUID.randomUUID().toString()
+        Mockito.doReturn(true).`when`(generationEvents).exists(chat.publicId.toString(), id)
+        Mockito.doThrow(org.springframework.core.task.TaskRejectedException("receiver limit"))
+            .`when`(receivers).open(chat.publicId.toString(), id)
+        assertResumeResponse(chat.publicId.toString(), id, 503, "SERVICE_UNAVAILABLE")
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
+        Mockito.verifyNoInteractions(executor)
+    }
+
+    @Test fun `재연결 GET 스트림 존재 확인 Redis 오류는 SERVICE_UNAVAILABLE JSON 503이다`() {
+        val story = stories.save(Story(title = "스트림 장애", genre = "판타지"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        val id = java.util.UUID.randomUUID().toString()
+        Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("Redis down"))
+            .`when`(generationEvents).exists(chat.publicId.toString(), id)
+        assertResumeResponse(chat.publicId.toString(), id, 503, "SERVICE_UNAVAILABLE")
+        Mockito.verifyNoInteractions(receivers, executor)
+    }
+
+    @Test fun `재연결 GET 생성 중 키 조회 Redis 오류는 SERVICE_UNAVAILABLE JSON 503이다`() {
+        val story = stories.save(Story(title = "생성 키 장애", genre = "판타지"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        val id = java.util.UUID.randomUUID().toString()
+        Mockito.doReturn(false).`when`(generationEvents).exists(chat.publicId.toString(), id)
+        Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("Redis down"))
+            .`when`(store).get(chat.publicId.toString())
+        assertResumeResponse(chat.publicId.toString(), id, 503, "SERVICE_UNAVAILABLE")
+        Mockito.verifyNoInteractions(receivers, executor)
+    }
+
+    @Test fun `재연결 GET의 채팅 없음 404와 소유권 403은 수신 및 Redis 장애보다 먼저다`() {
+        val (_, chat, _) = paidChat()
+        val id = java.util.UUID.randomUUID().toString()
+        Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("Redis down"))
+            .`when`(generationEvents).exists(Mockito.anyString(), Mockito.anyString())
+        Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("Redis down"))
+            .`when`(store).get(Mockito.anyString())
+        Mockito.doThrow(org.springframework.core.task.TaskRejectedException("receiver limit"))
+            .`when`(receivers).open(Mockito.anyString(), Mockito.anyString())
+        Mockito.clearInvocations(generationEvents, store, receivers)
+        assertResumeResponse(java.util.UUID.randomUUID().toString(), id, 404, "NOT_FOUND")
+        assertResumeResponse(chat.publicId.toString(), id, 403, "FORBIDDEN")
+        Mockito.verifyNoInteractions(generationEvents, store, receivers, executor)
+    }
 
     @Test fun `재연결 GET은 채팅 접근을 먼저 판정하고 만료 또는 잘못된 생성에는 NOT_FOUND를 반환한다`() {
         val (_, chat, _) = paidChat()
