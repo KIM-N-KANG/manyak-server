@@ -241,7 +241,7 @@ class ChatController(
 
     @Operation(
         summary = "채팅 이어쓰기 스트리밍",
-        description = "사용자 입력을 바탕으로 앞선 채팅 맥락에 이어지는 이야기를 생성하고 SSE로 스트리밍합니다. 사용자 입력은 캐릭터 프로필 설정, 다음 행동, 대사, 분위기, 감정, 연출 방향 등을 모두 포함할 수 있습니다. 스트리밍은 started, token, completed 순서로 전달되며 completed 이벤트에는 최종 저장된 aiOutput 전체가 포함됩니다. 실패 시 error 이벤트를 전달할 수 있습니다.",
+        description = "사용자 입력을 바탕으로 앞선 채팅 맥락에 이어지는 이야기를 생성하고 SSE로 스트리밍합니다. 사용자 입력은 캐릭터 프로필 설정, 다음 행동, 대사, 분위기, 감정, 연출 방향 등을 모두 포함할 수 있습니다. 연결이 끊겨도 생성과 저장은 계속됩니다. 생성 마감은 요청 접수부터 큐 대기 포함 120초입니다. started에는 UUID generationId가 포함됩니다. lastTurnId 생략은 비교 생략, 명시적 null은 첫 턴에만 일치합니다. 스트리밍은 started, token, completed 순서로 전달되며 completed 이벤트에는 최종 저장된 aiOutput 전체가 포함됩니다. 실패 시 error 이벤트를 전달할 수 있습니다.",
     )
     @ApiResponses(
         value = [
@@ -253,7 +253,7 @@ class ChatController(
                         mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
                         schema = Schema(
                             type = "string",
-                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: token\ndata: {\"text\":\"사\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\"}\n\nevent: error\ndata: {\"code\":\"AI_STREAM_FAILED\",\"message\":\"AI 응답 생성 중 오류가 발생했습니다.\"}\n\n",
+                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"generationId\":\"8cbb9623-bc5e-478b-85a4-614c73f18e75\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: token\ndata: {\"text\":\"사\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\"}\n\nevent: error\ndata: {\"code\":\"AI_STREAM_FAILED\",\"message\":\"AI 응답 생성 중 오류가 발생했습니다.\"}\n\n",
                         ),
                     ),
                 ],
@@ -279,6 +279,8 @@ class ChatController(
                 description = "채팅을 찾을 수 없음",
                 content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
+            ApiResponse(responseCode = "409", description = "CHAT_TURN_IN_PROGRESS: 생성 중, CHAT_TURN_STALE: lastTurnId 불일치", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+            ApiResponse(responseCode = "503", description = "SERVICE_UNAVAILABLE: 생성 상태 Redis 획득 오류. 과금 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
         ],
     )
     @PostMapping(
@@ -317,6 +319,28 @@ class ChatController(
     }
 
     @Operation(
+        summary = "채팅 생성 스트림 재연결",
+        description = "보관 중인 생성 이벤트를 처음부터 재생하고 새 이벤트를 이어서 받습니다. 생성과 과금을 반복하지 않습니다. " +
+            "큐 대기 중 스트림이 없어도 생성 중 키가 해당 ID이면 기다립니다. completed 또는 error 수신 시 종료합니다.",
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "처음부터 SSE 재생", content = [Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE)]),
+        ApiResponse(responseCode = "403", description = "채팅 상세 조회 권한 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+        ApiResponse(responseCode = "404", description = "채팅 없음·삭제·형식 오류 또는 스트림과 해당 생성 중 키 모두 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+        ApiResponse(responseCode = "503", description = "SERVICE_UNAVAILABLE: 수신 연결 상한 초과 또는 Redis 조회 오류", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
+    ])
+    @GetMapping("/chats/{chatId}/generations/{generationId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun resumeGeneration(
+        @Parameter(description = "채팅 공개 UUID") @PathVariable chatId: String,
+        @Parameter(description = "started 또는 generatingTurn에서 받은 생성 UUID") @PathVariable generationId: String,
+        @CurrentUserId userId: Long?,
+        response: HttpServletResponse,
+    ): SseEmitter {
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return chatService.resumeGeneration(chatId, generationId, userId)
+    }
+
+    @Operation(
         summary = "채팅 선택지 생성",
         description = "마지막 턴의 다음 행동 선택지 3개를 생성해 저장합니다(스펙 §4-3-3, 선택지 분리). 이어쓰기와 달리 동기 JSON이며 " +
             "선택지 생성은 무료입니다(크레딧·게스트 채팅 한도 미소모). 프론트엔드는 응답 본문이 아니라 채팅 상세 재조회의 " +
@@ -341,7 +365,7 @@ class ChatController(
             ),
             ApiResponse(
                 responseCode = "409",
-                description = "turnId가 서버의 마지막 턴이 아니거나 이미 변경됨",
+                description = "CHAT_TURN_STALE: turnId가 서버의 마지막 턴이 아니거나 본문이 재생성됨",
                 content = [Content(schema = Schema(implementation = ApiErrorResponse::class))],
             ),
             ApiResponse(
@@ -364,7 +388,7 @@ class ChatController(
     @Operation(
         summary = "AI 응답 재생성 스트리밍",
         description = "마지막 턴의 AI 출력을 같은 사용자 입력으로 다시 생성해 교체하고 SSE로 스트리밍합니다(스펙 §4-3-9, 리롤이 아니라 재생성). " +
-            "이어쓰기와 동일하게 started, token, completed 순서로 전달되며, completed에는 교체된 aiOutput 전체와 선택지가 포함됩니다. " +
+            "연결이 끊겨도 생성은 계속되며 started에는 UUID generationId가 포함됩니다. 이어쓰기와 동일하게 started, token, completed 순서로 전달되며, completed에는 교체된 aiOutput 전체와 선택지가 포함됩니다. " +
             "새 턴을 추가하지 않고 마지막 턴의 본문·선택지만 교체하므로 사용자 입력과 턴 수(turnCount)는 변하지 않습니다. " +
             "이전 출력·선택지는 덮어쓰기 직전 버전 이력(story_message_versions, V37)에 보존되며, 상세 조회·completed에는 활성본만 실립니다. " +
             "요청 turnId가 서버의 마지막 턴과 다르면 409로 거절합니다.",
@@ -379,7 +403,7 @@ class ChatController(
                         mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
                         schema = Schema(
                             type = "string",
-                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\",\"choices\":[\"주변을 살핀다.\"]}\n\n",
+                            example = "event: started\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"generationId\":\"8cbb9623-bc5e-478b-85a4-614c73f18e75\"}\n\nevent: token\ndata: {\"text\":\"검\"}\n\nevent: completed\ndata: {\"chatId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"turnId\":3,\"aiOutput\":\"검사장은 한순간 숨소리조차 사라진 듯 조용해졌다.\",\"choices\":[\"주변을 살핀다.\"]}\n\n",
                         ),
                     ),
                 ],
@@ -407,9 +431,10 @@ class ChatController(
             ),
             ApiResponse(
                 responseCode = "409",
-                description = "요청 turnId가 서버의 마지막 턴과 다르거나(진행됨), 엔딩에 도달한 채팅",
+                description = "CHAT_TURN_IN_PROGRESS: 생성 중, CHAT_TURN_STALE: 마지막 턴 불일치, CHAT_ENDED: 엔딩 도달 채팅",
                 content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))],
             ),
+            ApiResponse(responseCode = "503", description = "SERVICE_UNAVAILABLE: 생성 상태 Redis 획득 오류. 과금 없음", content = [Content(mediaType = MediaType.APPLICATION_JSON_VALUE, schema = Schema(implementation = ApiErrorResponse::class))]),
         ],
     )
     @PostMapping(

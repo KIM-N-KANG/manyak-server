@@ -38,8 +38,6 @@ class PromotionPushScheduler(
                     "campaignId" to result.campaignId.toString(),
                     "targets" to result.targets,
                     "sent" to result.sent,
-                    // 조회 이후 자격을 잃어 건너뛴 수. 야간 캠페인에서는 야간 미동의자가 여기 잡힌다.
-                    "skipped" to result.skipped,
                 )
             }
         } catch (exception: Exception) {

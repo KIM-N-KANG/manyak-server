@@ -74,6 +74,7 @@ class SecurityConfig {
                     // 채팅 ID는 추측 불가능한 공개 식별자(UUID)다. 형식을 제약하지 않고 모든 값을 통과시켜,
                     // 존재 여부 판단(404)은 서비스가 일관되게 처리한다. 순차 정수·임의 값 모두 404로 통일된다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}/generations/{generationId}/stream")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}")).permitAll()
                     // 채팅 공유(§4-3-11). 발급은 인증 선택(소유권 게이트는 서비스가 403), 열람은 인증 불필요 —
                     // 추측 불가 공유 토큰(UUID) 보유가 접근 수단이다. 열람은 요청자 신원을 쓰지 않는다.
@@ -221,6 +222,7 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/batch"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/chats/{chatId}/generations/{generationId}/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.DELETE, "/api/v1/chats/{chatId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/shares"),
             // 공유 열람은 신원을 쓰지 않지만(무인증), 클라이언트가 자동 첨부한 만료·위조 access 헤더가

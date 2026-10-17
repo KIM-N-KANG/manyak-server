@@ -50,6 +50,9 @@ import java.util.concurrent.TimeUnit
 class ChatTurnChoiceSelectionRaceIntegrationTests {
 
     @Autowired
+    private lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+
+    @Autowired
     private lateinit var restTestClient: RestTestClient
 
     @Autowired
@@ -87,7 +90,7 @@ class ChatTurnChoiceSelectionRaceIntegrationTests {
     }
 
     @Test
-    fun `이어쓰기 진행 중 재생성으로 갈아끼워진 선택지는 선택 처리되지 않는다`() {
+    fun `키 만료 뒤 재생성으로 교체된 선택지에 낡은 이어쓰기 결과를 저장하지 않는다`() {
         GatedChatTurnAiClientConfig.gatedInput = PICKED_TEXT
         GatedChatTurnAiClientConfig.nextChoices = O1
 
@@ -129,6 +132,9 @@ class ChatTurnChoiceSelectionRaceIntegrationTests {
             .describedAs("이어쓰기가 AI 호출 구간에 진입해야 한다")
             .isTrue()
 
+        // TTL 만료 또는 구버전 태스크 혼재로 키가 없는 예외 상황에서도 저장 재검증은 필수다.
+        redis.delete("chat:${chat.publicId}:generating")
+
         // 2. 그 사이 같은 턴을 재생성한다. 메시지 id는 유지되고 O0는 삭제된다.
         //    재생성은 직전 USER 입력("첫 입력")을 재전송하므로 페이크 AI에 붙잡히지 않는다.
         restTestClient.post()
@@ -154,10 +160,10 @@ class ChatTurnChoiceSelectionRaceIntegrationTests {
 
         // 4. 이제 이어쓰기의 AI 호출을 풀어 persistTurn이 돌게 한다.
         GatedChatTurnAiClientConfig.gate.countDown()
-        append.get(AWAIT_SECONDS, TimeUnit.SECONDS)
+        assertThat(append.get(AWAIT_SECONDS, TimeUnit.SECONDS)).contains("CHAT_TURN_STALE")
 
-        // 이어쓰기 턴 자체는 정상 저장된다(거절 금지 계약).
-        assertThat(storyChatRepository.findById(chat.id).orElseThrow().currentTurn).isEqualTo(2)
+        // 재생성으로 시작 상태가 달라졌으므로 이어쓰기 결과를 저장하지 않는다.
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().currentTurn).isEqualTo(1)
 
         // 핵심: 사용자가 본 적 없는 O1 행은 어느 것도 선택 처리되지 않아야 한다.
         // 가드가 없으면 choiceOrder=2가 여전히 일치해 O1[2]("옆 사람의 팔을 붙잡는다.")가 선택되고,

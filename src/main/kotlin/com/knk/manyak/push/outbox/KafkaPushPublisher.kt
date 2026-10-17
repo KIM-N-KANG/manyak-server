@@ -1,5 +1,8 @@
 package com.knk.manyak.push.outbox
 
+import org.apache.kafka.clients.producer.ProducerRecord
+import org.apache.kafka.common.header.internals.RecordHeaders
+import org.springframework.beans.factory.ObjectProvider
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringSerializer
 import org.springframework.beans.factory.annotation.Value
@@ -14,11 +17,20 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
 /** send()의 메타데이터 대기도 배치 제출을 직렬로 막지 않도록 별도 가상 스레드에서 실행한다. */
-class KafkaPushPublisher(private val kafka: KafkaTemplate<String, String>, private val mapper: ObjectMapper) : PushPublisher, AutoCloseable {
+class KafkaPushPublisher(
+    private val kafka: KafkaTemplate<String, String>,
+    private val mapper: ObjectMapper,
+    private val traceHeaders: TraceHeaders = TraceHeaders.NONE,
+) : PushPublisher, AutoCloseable {
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
-    override fun publish(message: PushMessage): CompletableFuture<Unit> =
-        CompletableFuture.supplyAsync({ kafka.send("push.requested", message.recipientId, mapper.writeValueAsString(message)) }, executor)
-            .thenCompose { it }.thenApply { Unit }
+    override fun publish(message: PushMessage): CompletableFuture<Unit> {
+        // 가상 스레드로 넘어가기 전에 릴레이의 현재 스팬에서 헤더를 캡처한다.
+        val headers = RecordHeaders()
+        traceHeaders.inject { name, value -> headers.add(name, value.toByteArray(Charsets.UTF_8)) }
+        return CompletableFuture.supplyAsync({
+            kafka.send(ProducerRecord("push.requested", null, null, message.recipientId, mapper.writeValueAsString(message), headers))
+        }, executor).thenCompose { it }.thenApply { Unit }
+    }
     override fun close() { executor.close() }
 }
 
@@ -47,5 +59,6 @@ class KafkaPushConfig {
     @Bean
     fun pushKafkaTemplate(factory: DefaultKafkaProducerFactory<String, String>) = KafkaTemplate(factory)
     @Bean
-    fun pushPublisher(kafka: KafkaTemplate<String, String>, mapper: ObjectMapper) = KafkaPushPublisher(kafka, mapper)
+    fun pushPublisher(kafka: KafkaTemplate<String, String>, mapper: ObjectMapper, traceHeaders: ObjectProvider<TraceHeaders>) =
+        KafkaPushPublisher(kafka, mapper, traceHeaders.getIfAvailable { TraceHeaders.NONE })
 }

@@ -1,3 +1,9 @@
+### [KNK-1677] 상세는 generatingTurn을 항상 포함합니다. 키가 없으면 null입니다.
+### 생성 중에는 type(CONTINUE/REGENERATE), userInput, startedAt(UTC), targetTurnId(이어쓰기 null), generationId(UUID)를 확인합니다.
+### 생성 중 요청 취소 후에도 상태가 유지되고 완료 후 generatingTurn=null과 저장된 턴이 보이는지 확인합니다.
+### Redis 읽기 오류나 생성 상태 값 해석 실패 시에도 상세는 200이며 대화 기록을 유지하고 generatingTurn만 null로 반환합니다(chat_generation_read_failed 로그).
+### 상세는 Redis 생성 상태를 DB보다 먼저 읽습니다. 완료 직후 키가 해제된 상세에는 저장된 새 턴이 보여야 합니다.
+### 2단계 전에는 생성 중일 때 2초 간격으로 상세를 다시 조회합니다.
 # 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
 ### 채팅 상세 조회(Chat Detail) API 수동 검증
 ### IntelliJ HTTP Client / VS Code REST Client 호환.

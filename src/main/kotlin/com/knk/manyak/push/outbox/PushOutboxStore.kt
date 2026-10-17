@@ -18,13 +18,12 @@ data class PushOutboxRow(val id: Long, val message: PushMessage, val attempts: I
 class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: ObjectMapper) {
     /** 기록만 별도로 커밋하면 완료 상태와 알림이 어긋나므로 트랜잭션 없는 호출은 거부한다. */
     @Transactional(propagation = Propagation.MANDATORY)
-    fun insert(message: PushMessage, now: Instant) {
+    fun insert(message: PushMessage, now: Instant): Int =
         jdbc.update("""
             INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at)
             VALUES (?, CAST(? AS jsonb), 'PENDING', 0, ?, ?)
             ON CONFLICT (message_id) DO NOTHING
         """.trimIndent(), message.messageId, mapper.writeValueAsString(message), Timestamp.from(now), Timestamp.from(now))
-    }
 
     /**
      * DB 잠금을 잡은 채 브로커를 기다리지 않도록 임대 시각을 먼저 커밋한다.

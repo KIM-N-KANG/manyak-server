@@ -46,6 +46,54 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
+    fun `내부 요청의 유효한 기기 해시는 재해시 없이 원문 헤더보다 우선한다`() {
+        val hash = "device_hash_0123456789abcdef"
+        for (raw in listOf(null, "raw-device")) {
+            val request = MockHttpServletRequest("GET", "/internal/users/test/push-eligibility").apply {
+                addHeader(CorrelationHeaders.HEADER_DEVICE_ID_HASH, hash)
+                raw?.let { addHeader(RequestCorrelationFilter.HEADER_DEVICE_ID, it) }
+            }
+            val (mdc, _) = runFilter(request)
+            assertThat(mdc[MdcKeys.DEVICE_ID_HASH]).isEqualTo(hash)
+            MDC.setContextMap(mdc)
+            assertThat(CorrelationHeaders.forwardingHeadersFromMdc()[CorrelationHeaders.HEADER_DEVICE_ID_HASH]).isEqualTo(hash)
+            MDC.clear()
+        }
+    }
+
+    @Test
+    fun `공개 경로와 비슷한 접두 경로는 기기 해시 헤더를 신뢰하지 않는다`() {
+        for (path in listOf("/api/v1/stories", "/actuator/health", "/internal-other/users", "/api/v1/internal/users")) {
+            for (raw in listOf(null, "raw-device")) {
+                val request = MockHttpServletRequest("GET", path).apply {
+                    addHeader(CorrelationHeaders.HEADER_DEVICE_ID_HASH, "device_hash_0123456789abcdef")
+                    raw?.let { addHeader(RequestCorrelationFilter.HEADER_DEVICE_ID, it) }
+                }
+                val (mdc, _) = runFilter(request)
+                assertThat(mdc[MdcKeys.DEVICE_ID_HASH]).isEqualTo(raw?.let(DeviceIdHasher("")::hash) ?: "unknown")
+            }
+        }
+    }
+
+    @Test
+    fun `내부 요청의 누락 공백 비정상 해시는 기존 원문 해시 또는 unknown으로 대체한다`() {
+        for (hash in listOf(null, "", " ", "unknown", "device_hash_0123456789abcde", "device_hash_0123456789abcdef0",
+            "device_hash_0123456789abcdeG", "device_hash_0123456789ABCDEf", "device_hash_0123456789abcdef\r\nforged=1",
+            " device_hash_0123456789abcdef", "x".repeat(1000))) {
+            for (raw in listOf(null, "raw-device")) {
+                val request = MockHttpServletRequest("GET", "/internal/users/test/push-eligibility").apply {
+                    hash?.let { addHeader(CorrelationHeaders.HEADER_DEVICE_ID_HASH, it) }
+                    raw?.let { addHeader(RequestCorrelationFilter.HEADER_DEVICE_ID, it) }
+                }
+                val (mdc, response) = runFilter(request)
+                assertThat(mdc[MdcKeys.DEVICE_ID_HASH]).isEqualTo(raw?.let(DeviceIdHasher("")::hash) ?: "unknown")
+                assertThat(response.status).isEqualTo(200)
+                assertThat(MDC.getCopyOfContextMap().orEmpty()).isEmpty()
+            }
+        }
+    }
+
+    @Test
     fun `헤더가 있으면 request_id·session_id·device_id_hash를 MDC에 넣는다`() {
         val (mdc, _) = runFilter(request(deviceId = "anon-raw-1", sessionId = "sess-1", requestId = "req_given"))
 

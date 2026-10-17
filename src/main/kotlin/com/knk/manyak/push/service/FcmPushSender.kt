@@ -18,6 +18,9 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 
 /**
  * FCM 발송기(KNK-1130). 시나리오별 발송(스토리 완성 등)은 전부 이 클래스를 부른다.
@@ -37,9 +40,9 @@ import org.springframework.stereotype.Component
  */
 @Component
 @Deprecated(
-    // 경고가 붙는 호출부가 곧 KNK-1385에서 옮길 목록이다. 새 호출부를 늘리지 않으려고 지금 표시한다.
-    "발송 실행은 알림 서비스로 옮긴다(KNK-1375). 이 빈은 manyak.push.mode=local 경로와 아직 옮기지 않은 " +
-        "스케줄러(출석·프로모션)를 위해 남아 있고, KNK-1385에서 삭제한다.",
+    // 로컬 모드 롤백 경로로 보존한다(KNK-1385). 삭제하지 않고 새 호출부를 늘리지 않는다.
+    "발송 실행은 알림 서비스가 맡는다. 이 빈은 manyak.push.mode=local 롤백 경로 전용으로 보존하며 " +
+        "삭제하지 않는다. 새 호출부를 늘리지 않는다(KNK-1385).",
 )
 class FcmPushSender(
     // Kotlin nullable 생성자 인자 = 선택 주입. FcmConfig가 null을 돌려주면 여기도 null이다.
@@ -49,15 +52,19 @@ class FcmPushSender(
     private val meterRegistry: MeterRegistry,
     @Value("\${manyak.push.web.icon-url:https://manyak.app/icons/icon-192.png}")
     private val webIconUrl: String = "https://manyak.app/icons/icon-192.png",
+    @Value("\${manyak.push.web-base-url:https://manyak.app}")
+    private val webBaseUrl: String = "https://manyak.app",
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    /** 회원의 등록 기기 전부에 [data]를 보낸다. 발송기가 비활성이거나 토큰이 없으면 아무 일도 하지 않는다. */
+    /** 회원의 등록 기기마다 보낸다. [expiresAt]이 있으면 기기별 남은 TTL을 적용하고 만료 시 중단한다. */
     fun sendToUser(
         userId: Long,
         data: Map<String, String>,
         priority: AndroidConfig.Priority = AndroidConfig.Priority.HIGH,
         ttlMillis: Long? = null,
+        expiresAt: Instant? = null,
     ) {
         val messaging = this.messaging
         if (messaging == null) {
@@ -74,8 +81,10 @@ class FcmPushSender(
         // 수신자 식별(KNK-1220). 푸시는 회원이 아니라 기기로 도착하므로, 앱이 이 값을 현재 로그인 회원과 비교해
         // 남의 알림(로그아웃 뒤 남은 토큰·늦게 도착한 메시지)을 거른다. 호출자가 같은 키를 넘겨도 여기 값이 이긴다.
         val payload = data + (KEY_RECIPIENT_ID to user.publicId.toString())
-        devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId).forEach { deviceToken ->
-            sendTo(messaging, deviceToken, payload, priority, ttlMillis)
+        for (deviceToken in devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId)) {
+            val remaining = expiresAt?.let { Duration.between(clock.instant(), it).toMillis() }
+            if (remaining != null && remaining <= 0) break
+            sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis)
         }
     }
 
@@ -91,19 +100,19 @@ class FcmPushSender(
             when (deviceToken.platform) {
                 PushPlatform.ANDROID -> builder.setAndroidConfig(
                     AndroidConfig.builder().setPriority(priority)
-                        .apply { ttlMillis?.let { setTtl(it) } }
+                        .apply { ttlMillis?.let { setTtl(it.coerceAtMost(MAX_TTL_MILLIS)) } }
                         .build(),
                 )
                 PushPlatform.WEB -> builder.setWebpushConfig(
                     WebpushConfig.builder()
                         .setNotification(
                             WebpushNotification.builder()
-                                .setTitle(data["title"])
-                                .setBody(data["body"])
+                                .setTitle(if (data["type"] == "STORY_COMPLETED") STORY_COMPLETED_TITLE else data["title"])
+                                .setBody(if (data["type"] == "STORY_COMPLETED") data["title"] else data["body"])
                                 .setIcon(webIconUrl)
                                 .build(),
                         )
-                        .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: "https://manyak.app"))
+                        .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: webBaseUrl))
                         .build(),
                 )
             }
@@ -160,6 +169,9 @@ class FcmPushSender(
         const val OUTCOME_UNREGISTERED = "unregistered"
         const val OUTCOME_FAILURE = "failure"
         val OUTCOMES = listOf(OUTCOME_SUCCESS, OUTCOME_UNREGISTERED, OUTCOME_FAILURE)
+        // 알림 서비스와 같은 FCM Android TTL 상한(스펙 5-3-5).
+        private const val MAX_TTL_MILLIS = 28L * 24 * 60 * 60 * 1000
+        private const val STORY_COMPLETED_TITLE = "스토리가 완성됐어요"
         private const val TOKEN_LOG_PREFIX = 12
     }
 }

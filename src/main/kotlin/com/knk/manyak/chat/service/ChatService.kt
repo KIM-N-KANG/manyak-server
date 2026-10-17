@@ -7,6 +7,7 @@ import com.knk.manyak.user.service.UserPersonaService
 import com.knk.manyak.chat.client.ChatHistoryMessage
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatCharacterImage
+import com.knk.manyak.chat.client.ChatTurnGenerationDeadlineException
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException
 import com.knk.manyak.chat.client.ChatTurnAiRequest
@@ -91,6 +92,10 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.http.HttpStatus
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import com.knk.manyak.chat.dto.GeneratingTurnResponse
+import com.knk.manyak.global.error.ApiErrorCodes
+import com.knk.manyak.global.error.CodedResponseStatusException
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CancellationException
@@ -103,6 +108,10 @@ import java.util.concurrent.atomic.AtomicReference
 class ChatService(
     @Qualifier("chatSseExecutor")
     private val chatSseExecutor: Executor,
+    private val chatGenerationStore: ChatGenerationStore,
+    private val chatGenerationDeadlines: ChatGenerationDeadlines,
+    private val chatGenerationEvents: ChatGenerationEvents,
+    private val chatGenerationReceivers: ChatGenerationReceivers,
     private val storyRepository: StoryRepository,
     // 조립 재료를 현재 값·스냅샷 어느 쪽에서 오든 같은 모양으로 뜨는 몫(KNK-1065).
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
@@ -392,6 +401,17 @@ class ChatService(
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getChatDetail(chatId: String, userId: Long?): ChatDetailResponse {
+        // PostgreSQL REPEATABLE_READ의 스냅샷은 트랜잭션 시작이 아니라 첫 SQL에서 잡힌다.
+        // 커밋 후 해제되는 생성 중 키를 먼저 읽어야 키가 없을 때 DB에서 커밋된 턴이 보인다.
+        // 형식 오류는 Redis를 조회하지 않고 아래 resolveChat의 기존 404 경로로 보낸다.
+        val generatingTurn = parsePublicIdOrNull(chatId)?.toString()?.let { publicId ->
+            try {
+                chatGenerationStore.get(publicId)
+            } catch (ex: Exception) {
+                structuredLogger.event("chat_generation_read_failed", "chat_id" to publicId, "error" to ex.javaClass.simpleName)
+                null
+            }
+        }
         val chat = resolveChat(chatId)
         // 소유권 게이트(§4-5, KNK-480): 소유 채팅은 소유자만, 게스트 채팅은 게스트만 조회한다.
         // 존재 판정(resolveChat의 404) 뒤에 적용해, 회원의 게스트 채팅 열람·타인 소유 채팅 열람을 403으로 막는다.
@@ -442,6 +462,7 @@ class ChatService(
         }
 
         return ChatDetailResponse(
+            generatingTurn = generatingTurn,
             persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
             id = chat.publicId.toString(),
             storyId = story?.publicId?.toString().orEmpty(),
@@ -662,14 +683,14 @@ class ChatService(
      * 잔액이 부족하면 [com.knk.manyak.credit.InsufficientCreditException]이 여기서 동기로 던져져
      * 컨트롤러가 스트림을 열기 전에 402로 변환한다(스트림 안 error 이벤트가 아님). 게스트는 크레딧 대신
      * 디바이스 ID별 chat_turn 체험 한도를 예약하며(KNK-477), 한도 소진·device 헤더 누락은 동기 402/400이다.
-     * 턴이 completed 없이 끝나면(error·연결 끊김·미완료) 선차감분·예약분을 전액 환불·복원한다(정확히 1회, 멱등 키로 이중 방어).
+     * 턴이 completed 없이 끝나면(error·생성 마감·미완료) 선차감분·예약분을 전액 환불·복원한다(정확히 1회, 멱등 키로 이중 방어).
      */
     fun streamChatTurn(
         chatId: String,
         request: ContinueChatRequest,
         userId: Long? = null,
         deviceId: String? = null,
-    ): SseEmitter {
+    ): SseEmitter = streamEntry { recordResult ->
         // 선택 기록의 세대 가드 기준 시각(KNK-819). **AI 호출 전인 요청 진입 시점**에 잡아야 한다 — 사용자는
         // 요청을 보내기 전에 선택지를 봤으므로, 이 시각 이후에 만들어진 선택지 행은 재생성이 갈아끼운 세대다.
         val requestedAt = Instant.now()
@@ -682,59 +703,71 @@ class ChatService(
         // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
         // 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용하며 차감이 없다(회원은 이관 후 접근, KNK-480).
         requireChatOwner(chat, userId)
-        // 스토리는 프롬프트 조립(장르)과 로그·Sentry의 공개 식별자에 함께 쓰므로 한 번만 조회한다.
-        val story = storyRepository.findById(chat.storyId).orElse(null)
-        val storyPublicId = story?.publicId?.toString().orEmpty()
-        // 이어쓰기가 만들 턴 번호의 예측치는 current_turn + 1이다(권위값은 저장이 확정하는 ai_call_logs.turn_number).
-        val aiCall = assembleAiRequest(
-            chat = chat,
-            userInput = request.userInput,
-            turnNumber = chat.currentTurn + 1,
-            userSource = request.userSource,
-        )
+        val generation = acquireGeneration(chat, "CONTINUE", request.userInput, requestedAt, null)
+        var streamingOwnsGeneration = false
+        try {
+            val prepared = requireNotNull(assemblyTransactionTemplate.execute {
+                val freshChat = resolveChat(chatId)
+                val state = generationStartState(freshChat)
+                if (request.hasLastTurnId && request.lastTurnId != state.lastTurnId) {
+                    throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 변경되었습니다.")
+                }
+                Triple(freshChat, state, assembleAiRequest(freshChat, request.userInput, freshChat.currentTurn + 1, request.userSource))
+            })
+            val startState = prepared.second
+            val aiCall = prepared.third
+            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
 
-        return streamTurnInternal(
-            chatId = chatId,
-            chat = chat,
-            storyPublicId = storyPublicId,
-            aiCall = aiCall,
-            userId = userId,
-            deviceId = deviceId,
-            isRegenerated = false,
-            realtimeImage = request.realtimeImage,
-            persist = { result ->
-                chatTurnPersister.persistTurn(
-                    chatId = chat.id,
-                    userInput = request.userInput,
-                    aiOutput = result.aiOutput,
-                    choices = result.choices,
-                    judgment = result.toTurnJudgment(),
-                    // 선택 기록(KNK-819)은 프론트가 보낸 값을 그대로 넘긴다 — 유효성 판정은 저장 트랜잭션 안에서 한다.
-                    // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(최대 180초) 동안 마지막 턴이 바뀐 경우를 놓친다.
-                    // requestedAt은 그 판정의 세대 기준이다(위 진입 시점에 확정).
-                    selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder, requestedAt),
-                    // 조립이 AI에게 보낸 그 목록. 저장 판정이 같은 출처를 봐야 비공개 전환 후 교체된
-                    // 스토리에서도 도달·사건이 누락되지 않는다(PR #224 Codex P2).
-                    judgmentSource = aiCall.judgmentSource,
-                )
-            },
-            onPersisted = { persistedTurn, aiCallLogId ->
-                structuredLogger.event(
-                    "user_message_saved",
-                    "chat_id" to chatId,
-                    "story_id" to storyPublicId,
-                    "turn_number" to persistedTurn.turnNumber,
-                    "message_length_bucket" to LengthBuckets.of(request.userInput.length),
-                )
-                structuredLogger.event(
-                    "ai_response_saved",
-                    "chat_id" to chatId,
-                    "story_id" to storyPublicId,
-                    "turn_number" to persistedTurn.turnNumber,
-                    "ai_call_log_id" to aiCallLogId,
-                )
-            },
-        )
+            streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
+            return@streamEntry streamTurnInternal(
+                chatId = chatId,
+                chat = prepared.first,
+                generation = generation,
+                recordResult = recordResult,
+                storyPublicId = storyPublicId,
+                aiCall = aiCall,
+                userId = userId,
+                deviceId = deviceId,
+                isRegenerated = false,
+                realtimeImage = request.realtimeImage,
+                persist = { result ->
+                    chatTurnPersister.persistTurn(
+                        chatId = chat.id,
+                        expectedState = startState,
+                        userInput = request.userInput,
+                        aiOutput = result.aiOutput,
+                        choices = result.choices,
+                        judgment = result.toTurnJudgment(),
+                        // 선택 기록(KNK-819)은 프론트가 보낸 값을 그대로 넘긴다 — 유효성 판정은 저장 트랜잭션 안에서 한다.
+                        // 여기서 미리 거르면 락 밖 검사가 되어, AI 호출(생성 마감까지) 동안 마지막 턴이 바뀐 경우를 놓친다.
+                        // requestedAt은 그 판정의 세대 기준이다(위 진입 시점에 확정).
+                        selection = ChoiceSelection(request.sourceTurnId, request.choiceOrder, requestedAt),
+                        // 조립이 AI에게 보낸 그 목록. 저장 판정이 같은 출처를 봐야 비공개 전환 후 교체된
+                        // 스토리에서도 도달·사건이 누락되지 않는다(PR #224 Codex P2).
+                        judgmentSource = aiCall.judgmentSource,
+                    )
+                },
+                onPersisted = { persistedTurn, aiCallLogId ->
+                    structuredLogger.event(
+                        "user_message_saved",
+                        "chat_id" to chatId,
+                        "story_id" to storyPublicId,
+                        "turn_number" to persistedTurn.turnNumber,
+                        "message_length_bucket" to LengthBuckets.of(request.userInput.length),
+                    )
+                    structuredLogger.event(
+                        "ai_response_saved",
+                        "chat_id" to chatId,
+                        "story_id" to storyPublicId,
+                        "turn_number" to persistedTurn.turnNumber,
+                        "ai_call_log_id" to aiCallLogId,
+                    )
+                },
+            )
+        } catch (ex: Throwable) {
+            if (!streamingOwnsGeneration) releaseGeneration(chat, generation)
+            throw ex
+        }
     }
 
     /**
@@ -751,58 +784,72 @@ class ChatService(
         request: RegenerateChatRequest,
         userId: Long? = null,
         deviceId: String? = null,
-    ): SseEmitter {
+    ): SseEmitter = streamEntry { recordResult ->
+        val requestedAt = Instant.now()
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
         val chat = resolveChat(chatId)
         requireChatOwner(chat, userId)
         // 엔딩 도달 턴은 재생성 대상이 아니다(§4-3-10 도달 기록 확정 후). 도달 기록이 채팅을 ENDED로 굳히므로 여기서 막는다.
         if (chat.status == ChatStatus.ENDED) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_ENDED, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
         }
-        val story = storyRepository.findById(chat.storyId).orElse(null)
-        val storyPublicId = story?.publicId?.toString().orEmpty()
-        // 마지막 턴 검증(0개면 404, 낡은 turnId면 409)과 재생성용 history(마지막 턴 제외)·재전송 입력을 함께 확정한다.
-        val target = resolveRegenerateTarget(chat.id, request.turnId)
-        // 재생성 요청은 현재 채팅 상태(목표·거쳐온 사건·엔딩 후보)를 그대로 싣고, 판정 메타는 재적용하지 않는다
-        // (regenerateLastTurn은 judgment를 받지 않음). 스펙 §4-3-9/§4-3-10의 "직전 턴까지 상태로 재구성 후 새 메타로
-        // 재기록"은 턴별 메타 델타 이력이 있어야 정확한데 현 스키마엔 없어 Phase 1 범위 밖으로 둔다. 엔딩 도달 턴은 위에서
-        // 409로 막으므로 도달 불변식(채팅당 최초 1회)은 유지된다.
-        // 재생성은 새 턴을 만들지 않고 마지막 턴을 교체하므로, 대상 턴 번호는 current_turn 그대로다(+1 아님).
-        val aiCall = buildAiRequest(
-            chat = chat,
-            history = target.history,
-            userInput = target.userInput,
-            turnNumber = chat.currentTurn,
-            isRegenerated = true,
-        )
+        val initialTarget = resolveRegenerateTarget(chat.id, request.turnId)
+        val generation = acquireGeneration(chat, "REGENERATE", initialTarget.userInput, requestedAt, request.turnId)
+        var streamingOwnsGeneration = false
+        try {
+            val prepared = requireNotNull(assemblyTransactionTemplate.execute {
+                val freshChat = resolveChat(chatId)
+                if (freshChat.status == ChatStatus.ENDED) {
+                    throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_ENDED, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
+                }
+                // 마지막 턴 검증과 재생성용 history(마지막 턴 제외)·재전송 입력을 같은 스냅샷에서 확정한다.
+                val target = resolveRegenerateTarget(chat.id, request.turnId)
+                val state = generationStartState(freshChat)
+                // 재생성은 마지막 턴을 교체하므로 대상 턴 번호는 current_turn 그대로다(+1 아님).
+                Triple(freshChat, state, buildAiRequest(freshChat, target.history, target.userInput, freshChat.currentTurn, isRegenerated = true))
+            })
+            val startState = prepared.second
+            val aiCall = prepared.third
+            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
 
-        return streamTurnInternal(
-            chatId = chatId,
-            chat = chat,
-            storyPublicId = storyPublicId,
-            aiCall = aiCall,
-            userId = userId,
-            deviceId = deviceId,
-            isRegenerated = true,
-            realtimeImage = request.realtimeImage,
-            persist = { result ->
-                chatTurnPersister.regenerateLastTurn(
-                    chatId = chat.id,
-                    expectedAssistantId = target.assistantId,
-                    aiOutput = result.aiOutput,
-                    choices = result.choices,
-                )
-            },
-            onPersisted = { persistedTurn, aiCallLogId ->
-                structuredLogger.event(
-                    "ai_response_regenerated",
-                    "chat_id" to chatId,
-                    "story_id" to storyPublicId,
-                    "turn_number" to persistedTurn.turnNumber,
-                    "ai_call_log_id" to aiCallLogId,
-                )
-            },
-        )
+            streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
+            return@streamEntry streamTurnInternal(
+                chatId = chatId,
+                chat = prepared.first,
+                generation = generation,
+                recordResult = recordResult,
+                storyPublicId = storyPublicId,
+                aiCall = aiCall,
+                userId = userId,
+                deviceId = deviceId,
+                isRegenerated = true,
+                realtimeImage = request.realtimeImage,
+                persist = { result ->
+                    // 현재 채팅 상태로 요청하고 판정 메타는 재적용하지 않는다. 직전 턴 상태를 복원해 새 판정을
+                    // 반영하려면 턴별 메타 델타 이력이 필요하지만 현 스키마에는 없다. 엔딩 도달 턴은 위에서
+                    // 거절하므로 최초 도달 불변식은 유지된다(regenerateLastTurn은 judgment를 받지 않음).
+                    chatTurnPersister.regenerateLastTurn(
+                        chatId = chat.id,
+                        expectedAssistantId = request.turnId,
+                        expectedState = startState,
+                        aiOutput = result.aiOutput,
+                        choices = result.choices,
+                    )
+                },
+                onPersisted = { persistedTurn, aiCallLogId ->
+                    structuredLogger.event(
+                        "ai_response_regenerated",
+                        "chat_id" to chatId,
+                        "story_id" to storyPublicId,
+                        "turn_number" to persistedTurn.turnNumber,
+                        "ai_call_log_id" to aiCallLogId,
+                    )
+                },
+            )
+        } catch (ex: Throwable) {
+            if (!streamingOwnsGeneration) releaseGeneration(chat, generation)
+            throw ex
+        }
     }
 
     /**
@@ -885,7 +932,7 @@ class ChatService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "재생성할 턴이 없습니다.")
         // 낙관적 동시성: 클라이언트가 본 마지막 턴과 서버의 마지막 턴이 다르면(그새 이어쓰기로 진행됨 등) 409.
         if (lastAssistant.id != requestedTurnId) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "마지막 턴이 아니거나 이미 변경되었습니다.")
+            throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 아니거나 이미 변경되었습니다.")
         }
         // 마지막 턴의 USER 입력(마지막 ASSISTANT 직전 USER). 그대로 재전송한다(AI 서버는 무상태).
         val pairedUser = all.lastOrNull { it.role == MessageRole.USER && it.messageOrder < lastAssistant.messageOrder }
@@ -916,12 +963,65 @@ class ChatService(
         val history: List<ChatHistoryMessage>,
     )
 
+    private fun generationStartState(chat: StoryChat) = GenerationStartState(
+        storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id).lastOrNull { it.role == MessageRole.ASSISTANT }?.id,
+        chat.regeneratedCount,
+    )
+
+    private fun streamEntry(block: ((String) -> Unit) -> SseEmitter): SseEmitter {
+        val resultRecorded = AtomicBoolean(false)
+        val recordResult: (String) -> Unit = { outcome ->
+            if (resultRecorded.compareAndSet(false, true)) recordChatTurnResult(outcome)
+        }
+        return try {
+            block(recordResult)
+        } catch (ex: Throwable) {
+            recordResult(if (isChatTurnClientRejection(ex)) OUTCOME_REJECTED else OUTCOME_FAILURE)
+            throw ex
+        }
+    }
+
+    private fun acquireGeneration(chat: StoryChat, type: String, input: String, startedAt: Instant, target: Long?): GeneratingTurnResponse =
+        chatGenerationStore.acquire(chat.publicId.toString(), type, input, startedAt, target)
+
+    private fun releaseGeneration(chat: StoryChat, generation: GeneratingTurnResponse) {
+        try {
+            chatGenerationStore.release(chat.publicId.toString(), generation.generationId)
+        } catch (ex: Exception) {
+            structuredLogger.event("chat_generation_release_failed", "chat_id" to chat.publicId.toString(), "error" to ex.javaClass.simpleName)
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun resumeGeneration(chatId: String, generationId: String, userId: Long?): SseEmitter {
+        val chat = resolveChat(chatId)
+        if (!isOwnerAccessAllowed(chat.userId, userId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 조회할 권한이 없습니다.")
+        }
+        val id = parsePublicIdOrNull(generationId)?.toString()
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.")
+        val publicChatId = chat.publicId.toString()
+        val available = try {
+            chatGenerationEvents.exists(publicChatId, id) || chatGenerationStore.get(publicChatId)?.generationId == id
+        } catch (ex: Exception) {
+            throw CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", "생성 상태를 확인할 수 없습니다.", ex)
+        }
+        if (!available) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.")
+        }
+        return try {
+            chatGenerationReceivers.open(publicChatId, id)
+        } catch (ex: java.util.concurrent.RejectedExecutionException) {
+            throw CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", "생성 이벤트 수신 연결을 열 수 없습니다.", ex)
+        }
+    }
+
     /**
      * 채팅 턴/재생성 공통 SSE 스트리밍. 검증(404/403/409)과 AI 요청 조립은 호출부에서 동기로 끝낸 뒤 여기로 넘긴다.
      *
      * 회원([userId] != null)이면 SseEmitter를 만들기 **전에** 동기로 1턴분을 선차감한다(잔액 부족 시 여기서
      * InsufficientCreditException이 던져져 컨트롤러가 402로 변환, 스트림 미개시). 실제 토큰 스트리밍과 저장은
-     * [chatSseExecutor] 위에서 비동기로 처리한다. 저장([persist])이 completed 없이 끝나면(error·연결 끊김·미완료·
+     * [chatSseExecutor] 위에서 비동기로 처리한다. 저장([persist])이 completed 없이 끝나면(error·생성 마감·미완료·
      * 마지막 턴 변경) 선차감분을 전액 환불한다(정확히 1회, 멱등 키로 이중 방어).
      *
      * @param persist AI 결과를 원자적으로 저장(이어쓰기: 새 턴 추가 / 재생성: 마지막 턴 교체)하고 저장된 턴을 돌려준다.
@@ -930,6 +1030,8 @@ class ChatService(
     private fun streamTurnInternal(
         chatId: String,
         chat: StoryChat,
+        generation: GeneratingTurnResponse,
+        recordResult: (String) -> Unit,
         storyPublicId: String,
         aiCall: AiTurnCall,
         userId: Long?,
@@ -940,7 +1042,6 @@ class ChatService(
         onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
-        val chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
         var memberTrialCovered = false
         var guestDeviceId: String? = null
         var imageReservation = ChatRealtimeImageService.Reservation(null)
@@ -971,6 +1072,7 @@ class ChatService(
             }
         }
         try {
+            val chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
             memberTrialCovered = userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
             guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
             imageReservation = chatRealtimeImageService.prepare(realtimeImage, userId, guestDeviceId)
@@ -983,221 +1085,237 @@ class ChatService(
             }
             chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
         } catch (throwable: Throwable) {
-            refundImageQuietly()
-            refundTurn()
-            recordChatTurnResult(if (isChatTurnClientRejection(throwable)) OUTCOME_REJECTED else OUTCOME_FAILURE)
+            try {
+                refundImageQuietly()
+                refundTurn()
+            } finally {
+                releaseGeneration(chat, generation)
+            }
             throw throwable
         }
         val persisted = AtomicBoolean(false)
-        // PENDING 소유권은 워커 진입과 취소 중 한쪽만 CAS로 선점한다.
-        // RUNNING 취소와 SAVING 진입도 CAS로 선점한다. 실행된 워커의 환불은 finally만 결정한다.
+        // PENDING 소유권은 워커 진입과 생성 마감 중 한쪽만 CAS로 선점한다.
+        // RUNNING 마감과 SAVING 진입도 CAS로 선점한다. 실행된 워커의 환불은 finally만 결정한다.
         val workerState = AtomicReference(TurnWorkerState.PENDING)
-        val emitter = SseEmitter(SSE_TIMEOUT_MILLIS)
+        val events = chatGenerationEvents.writer(chat.publicId.toString(), generation.generationId, generation.startedAt)
+        var emitter: SseEmitter? = null
 
         // 제출부터 워커 진입까지를 스팬으로 남긴다. chatSseExecutor가 포화되면 이 구간이 길어진다(KNK-1552).
         val queueWait = Observation.createNotStarted("chat.turn.queue", observationRegistry).start()
         val queueWaitFinished = AtomicBoolean(false)
-        fun finishQueueWait(error: Throwable? = null, cancelled: Boolean = false) {
+        fun finishQueueWait(error: Throwable? = null) {
             if (!queueWaitFinished.compareAndSet(false, true)) return
-            if (cancelled) queueWait.lowCardinalityKeyValue("outcome", "cancelled")
+            if (error != null) queueWait.lowCardinalityKeyValue("outcome", OUTCOME_FAILURE)
             if (error != null) queueWait.error(error)
             queueWait.stop()
         }
 
-        fun cancelPendingWorker() {
-            if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
-                finishQueueWait(cancelled = true)
-                recordChatTurnResult(OUTCOME_CANCELLED)
-                refundImageQuietly()
-                refundTurn()
+        val expirationGate = AtomicBoolean(false)
+        fun expireGeneration() = synchronized(expirationGate) {
+            // 클라이언트와 스케줄러가 겹치면 마감 이벤트 발행까지 끝난 뒤 워커가 정산한다.
+            if (!expirationGate.compareAndSet(false, true)) return@synchronized
+            val before = workerState.get()
+            structuredLogger.event("chat_turn_timeout", "chat_id" to chatId, "worker_state" to before.name)
+            val pending = workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)
+            val cancelled = pending || workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.CANCELLED)
+            if (cancelled) {
+                serverAnalytics.chatAiMessageFailed(userId, chatId, null, "AI_STREAM_FAILED", isRegenerated)
+                events.write("error", ChatStreamErrorEvent("AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다."))
+                if (pending) {
+                    finishQueueWait(error = java.util.concurrent.TimeoutException("generation deadline exceeded"))
+                    recordResult(OUTCOME_FAILURE)
+                    refundImageQuietly()
+                    refundTurn()
+                    events.finish()
+                    releaseGeneration(chat, generation)
+                }
             }
         }
-        fun cancelWorker() {
-            cancelPendingWorker()
-            // JDBC·저장 트랜잭션을 인터럽트하지 않는다. SAVING 이후의 취소는 저장 결과에 맡긴다.
-            workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.CANCELLED)
-        }
-        emitter.onTimeout {
-            // 120초 안에 completed·error가 못 나간 경우다. 워커가 큐에서 못 나왔는지, 돌다가 멈췄는지를 남긴다(KNK-1552).
-            structuredLogger.event("chat_turn_timeout", "chat_id" to chatId, "worker_state" to workerState.get().name)
-            cancelWorker()
-            // 아무것도 쓰지 못한 응답은 Tomcat이 이미 정리해 complete()가 NPE를 낸다. 타임아웃 자체는 위 이벤트로 남겼다.
-            runCatching { emitter.complete() }
-        }
-        emitter.onCompletion { cancelWorker() }
-        emitter.onError { cancelWorker() }
+        val generationDeadline = generation.startedAt.plusMillis(GENERATION_TIMEOUT_MILLIS)
+        fun deadlineReached() = !Instant.now().isBefore(generationDeadline)
+        var deadline: java.util.concurrent.ScheduledFuture<*>? = null
+        try {
+            deadline = chatGenerationDeadlines.schedule(
+                { expireGeneration() },
+                Duration.between(Instant.now(), generationDeadline).toMillis().coerceAtLeast(0),
+            )
+            // 연결 종료는 생성 상태와 정산을 바꾸지 않는다.
+            emitter = chatGenerationReceivers.open(chat.publicId.toString(), generation.generationId)
 
-        val future = try {
             CompletableFuture.runAsync({
-            finishQueueWait()
-            // CompletableFuture가 실행권을 얻은 뒤 취소가 끼어도 CANCELLED면 AI 호출·저장 없이 끝낸다.
-            if (!workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.RUNNING)) return@runAsync
-            // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
-            var succeededAiCallLogId: Long? = null
-            try {
-                if (workerState.get() == TurnWorkerState.CANCELLED) return@runAsync
-                emitter.send(
-                    SseEmitter.event()
-                        .name("started")
-                        .data(ChatStreamStartedEvent(chatId)),
-                )
-                // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
-                // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
-                // turn_number는 persist가 DB에서 확정한 뒤 attachTurnNumber로 채운다(동시 요청 정합성).
-                val recorded = aiCallRecorder.record(
-                    AiCallContext(
-                        feature = AiCallFeature.CHAT_RESPONSE,
-                        storyId = chat.storyId,
-                        chatId = chat.publicId,
-                    ),
-                    errorCode = { throwable ->
-                        if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
-                    },
-                    onFailure = { aiCallLogId, throwable ->
-                        if (workerState.get() != TurnWorkerState.CANCELLED) {
-                            captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
-                        }
-                    },
-                    // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
-                    meta = { it.meta },
-                ) {
-                    chatTurnAiClient.streamTurn(
-                        aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
-                        aiCall.traceLink,
-                        // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
-                        // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
-                        onCharacterImage = { characterImage ->
+                if (deadlineReached()) expireGeneration()
+                finishQueueWait()
+                // CompletableFuture가 실행권을 얻은 뒤 취소가 끼어도 CANCELLED면 AI 호출·저장 없이 끝낸다.
+                if (!workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.RUNNING)) return@runAsync
+                // AI 호출이 성공 반환하면 채운다. AI 호출 자체 실패는 record의 onFailure에서 캡처하므로 null로 남는다.
+                var succeededAiCallLogId: Long? = null
+                try {
+                    if (workerState.get() == TurnWorkerState.CANCELLED) return@runAsync
+                    events.write("started", ChatStreamStartedEvent(chatId, generation.generationId))
+                    // AI 호출을 ai_call_logs에 적재한다. chatSseExecutor 워커에서 실행되지만
+                    // MdcTaskDecorator가 request_id 등 MDC를 전파하므로 Recorder가 식별자를 그대로 읽는다.
+                    // turn_number는 persist가 DB에서 확정한 뒤 attachTurnNumber로 채운다(동시 요청 정합성).
+                    val recorded = aiCallRecorder.record(
+                        AiCallContext(
+                            feature = AiCallFeature.CHAT_RESPONSE,
+                            storyId = chat.storyId,
+                            chatId = chat.publicId,
+                        ),
+                        errorCode = { throwable ->
+                            if (throwable is ChatTurnAiException) throwable.code else "AI_STREAM_FAILED"
+                        },
+                        onFailure = { aiCallLogId, throwable ->
+                            if (throwable !is ChatTurnGenerationDeadlineException && workerState.get() != TurnWorkerState.CANCELLED) {
+                                captureChatFailure(aiCallLogId, throwable, storyPublicId, chatId)
+                            }
+                        },
+                        // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
+                        meta = { it.meta },
+                    ) {
+                        chatTurnAiClient.streamTurn(
+                            aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
+                            aiCall.traceLink,
+                            deadline = generationDeadline,
+                            // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
+                            // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
+                            onCharacterImage = { characterImage ->
+                                if (workerState.get() == TurnWorkerState.CANCELLED) {
+                                    throw CancellationException("chat turn stream cancelled")
+                                }
+                                events.write(
+                                    "character_image",
+                                    ChatStreamCharacterImageEvent(characterImage.name, characterImage.imageUrl),
+                                )
+                            },
+                        ) { token ->
                             if (workerState.get() == TurnWorkerState.CANCELLED) {
                                 throw CancellationException("chat turn stream cancelled")
                             }
-                            emitter.send(
-                                SseEmitter.event()
-                                    .name("character_image")
-                                    .data(
-                                        ChatStreamCharacterImageEvent(
-                                            name = characterImage.name,
-                                            imageUrl = characterImage.imageUrl,
-                                        ),
-                                    ),
-                            )
-                        },
-                    ) { token ->
-                        if (workerState.get() == TurnWorkerState.CANCELLED) {
-                            throw CancellationException("chat turn stream cancelled")
+                            events.write("token", ChatStreamTokenEvent(token))
                         }
-                        emitter.send(
-                            SseEmitter.event()
-                                .name("token")
-                                .data(ChatStreamTokenEvent(token)),
-                        )
                     }
-                }
-                succeededAiCallLogId = recorded.aiCallLogId
-                // 선택지는 턴 스트림에서 채우지 않는다(스펙 §4-3-3, B23): completed.choices는 항상 빈 배열이고 저장도 빈 상태로 시작한다.
-                // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
-                // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
-                // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
-                // HEAD 검증 결과와 본문 저장은 같은 트랜잭션에서 확정한다.
-                // 검증 실패 예약은 즉시 복원한다. 이후 롤백 시 finally와 겹쳐도 Reservation CAS가 중복을 막는다.
-                // 이 CAS가 취소와 저장의 경계다. 취소가 이겼으면 늦은 completed도 저장하지 않는다.
-                if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
-                val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
-                    val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
-                    if (!checked.success) refundImage()
-                    checked to persist(checked.result)
-                })
-                val result = validated.result
-                // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
-                // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
-                persisted.set(true)
-                Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
-                // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
-                aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
-                onPersisted(persistedTurn, recorded.aiCallLogId)
-                // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 턴이면 도달 엔딩 id를 함께 싣는다(B5).
-                serverAnalytics.chatAiMessageSucceeded(
-                    userId = userId,
-                    chatId = chatId,
-                    turnNumber = persistedTurn.turnNumber,
-                    isRegenerated = isRegenerated,
-                    endingId = persistedTurn.reachedEnding?.id?.toString(),
-                )
-                emitter.send(
-                    SseEmitter.event()
-                        .name("completed")
-                        .data(
-                            ChatStreamCompletedEvent(
-                                chatId = chatId,
-                                turnId = persistedTurn.turnId,
-                                aiOutput = result.aiOutput,
-                                choices = result.choices,
-                                reachedEnding = persistedTurn.reachedEnding?.name?.let { render(it, aiCall.protagonistName) },
-                            ),
+                    succeededAiCallLogId = recorded.aiCallLogId
+                    // 선택지는 턴 스트림에서 채우지 않는다(스펙 §4-3-3, B23): completed.choices는 항상 빈 배열이고 저장도 빈 상태로 시작한다.
+                    // 프론트가 전용 트리거 엔드포인트(/turns/{turnId}/choices)로 선택지를 생성·저장한다(KNK-625 분리). 이로써 completed가
+                    // 선택지 생성(90초)을 기다리지 않아 지연 이득을 회복한다. AI 계약상 turn 결과의 choices는 빈 배열이나, 계약을 확정적으로
+                    // 유지하려 여기서 명시적으로 비운다(stub 등 잔여 값 방지).
+                    // HEAD 검증 결과와 본문 저장은 같은 트랜잭션에서 확정한다.
+                    // 검증 실패 예약은 즉시 복원한다. 이후 롤백 시 finally와 겹쳐도 Reservation CAS가 중복을 막는다.
+                    // 이 CAS가 취소와 저장의 경계다. 취소가 이겼으면 늦은 completed도 저장하지 않는다.
+                    if (deadlineReached()) expireGeneration()
+                    if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
+                    val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
+                        val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
+                        if (!checked.success) refundImage()
+                        checked to persist(checked.result)
+                    })
+                    val result = validated.result
+                    // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
+                    // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
+                    persisted.set(true)
+                    Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
+                    // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
+                    aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
+                    onPersisted(persistedTurn, recorded.aiCallLogId)
+                    // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 턴이면 도달 엔딩 id를 함께 싣는다(B5).
+                    serverAnalytics.chatAiMessageSucceeded(
+                        userId = userId,
+                        chatId = chatId,
+                        turnNumber = persistedTurn.turnNumber,
+                        isRegenerated = isRegenerated,
+                        endingId = persistedTurn.reachedEnding?.id?.toString(),
+                    )
+                    events.write(
+                        "completed",
+                        ChatStreamCompletedEvent(
+                            chatId = chatId,
+                            turnId = persistedTurn.turnId,
+                            aiOutput = result.aiOutput,
+                            choices = result.choices,
+                            reachedEnding = persistedTurn.reachedEnding?.name?.let { render(it, aiCall.protagonistName) },
                         ),
-                )
-                emitter.complete()
-            } catch (exception: ChatTurnAiException) {
-                // 자체 error 종료의 onCompletion이 실패를 취소로 다시 분류하지 않도록 종료권을 선점한다.
-                if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
-                // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
-                sendErrorQuietly(emitter, exception.code, exception.message)
-                // AI 응답 생성 실패 분석 이벤트(스펙 §6-4-2-6): 구조화 오류 code를 error_type으로 매핑한다. 저장 전이라 turn_number 미확정.
-                serverAnalytics.chatAiMessageFailed(
-                    userId = userId,
-                    chatId = chatId,
-                    turnNumber = null,
-                    errorCode = exception.code,
-                    isRegenerated = isRegenerated,
-                )
-                emitter.complete()
-            } catch (exception: Exception) {
-                // 취소는 error 이벤트·실패 분석 없이 닫는다. 환불과 취소 지표는 finally가 소유한다.
-                if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
-                // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
-                // record가 성공 반환한 뒤의 실패(예: persist DB·트랜잭션 오류·마지막 턴 변경, completed 전송 실패)는 GlobalExceptionHandler를
-                // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
-                succeededAiCallLogId?.let {
-                    captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
-                }
-                sendErrorQuietly(emitter, "AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다.")
-                // 저장 성공 후 실패(completed 전송 실패 등)는 이미 성공 이벤트를 발행했으므로 중복 실패를 내지 않는다.
-                // 저장 전 실패(AI 호출 실패·persist 실패)만 실패 이벤트로 발행한다(스펙 §6-4-2-6).
-                if (!persisted.get()) {
+                    )
+                } catch (exception: ChatTurnGenerationDeadlineException) {
+                    // 스케줄러가 늦어도 같은 CAS·로그·오류 이벤트 경로를 거쳐 finally에서 한 번 정산한다.
+                    expireGeneration()
+                } catch (exception: ChatTurnAiException) {
+                    // 생성 마감과 실패 종료 중 하나만 종료권을 선점한다.
+                    if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
+                    // AI가 내려준 구조화 오류는 code·message를 그대로 relay한다. 환불 판정은 아래 finally에 일원화한다.
+                    events.write("error", ChatStreamErrorEvent(exception.code, exception.message))
+                    // AI 응답 생성 실패 분석 이벤트(스펙 §6-4-2-6): 구조화 오류 code를 error_type으로 매핑한다. 저장 전이라 turn_number 미확정.
                     serverAnalytics.chatAiMessageFailed(
                         userId = userId,
                         chatId = chatId,
                         turnNumber = null,
-                        errorCode = "AI_STREAM_FAILED",
+                        errorCode = exception.code,
                         isRegenerated = isRegenerated,
                     )
+                } catch (exception: Exception) {
+                    // 마감 오류 이벤트·실패 분석은 타이머가 이미 발행했다. 정산은 finally가 소유한다.
+                    if (workerState.compareAndExchange(TurnWorkerState.RUNNING, TurnWorkerState.FINISHED) == TurnWorkerState.CANCELLED) return@runAsync
+                    // AI 호출 자체 실패는 record의 onFailure(captureChatFailure)에서 이미 캡처했다(succeededAiCallLogId == null).
+                    // record가 성공 반환한 뒤의 실패(예: persist DB·트랜잭션 오류·마지막 턴 변경, completed 전송 실패)는 GlobalExceptionHandler를
+                    // 거치지 않고 여기서 삼켜지므로, 그 호출 id를 참조해 직접 캡처한다.
+                    succeededAiCallLogId?.let {
+                        captureChatFailure(it, exception, storyPublicId, chatId, attachToAiCallLog = false)
+                    }
+                    val errorCode = (exception as? CodedResponseStatusException)?.errorCode ?: "AI_STREAM_FAILED"
+                    events.write("error", ChatStreamErrorEvent(errorCode, exception.reasonOrMessage()))
+                    // 저장 성공 후 실패(completed 전송 실패 등)는 이미 성공 이벤트를 발행했으므로 중복 실패를 내지 않는다.
+                    // 저장 전 실패(AI 호출 실패·persist 실패)만 실패 이벤트로 발행한다(스펙 §6-4-2-6).
+                    if (!persisted.get()) {
+                        serverAnalytics.chatAiMessageFailed(
+                            userId = userId,
+                            chatId = chatId,
+                            turnNumber = null,
+                            errorCode = errorCode,
+                            isRegenerated = isRegenerated,
+                        )
+                    }
+                } finally {
+                    // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,
+                    // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
+                    // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
+                    val persistedOk = persisted.get()
+                    // 결과 판정은 이 finally·큐 대기 중 마감·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
+                    deadline?.cancel(false)
+                    events.finish()
+                    if (persistedOk) {
+                        // 성공 시 turnSaveTransactionTemplate.execute의 턴 커밋 뒤에만 키를 해제한다.
+                        // 상세는 Redis를 첫 SQL보다 먼저 읽으므로 이 순서가 키 부재와 저장된 턴의 정합성을 보장한다.
+                        releaseGeneration(chat, generation)
+                        workerState.set(TurnWorkerState.FINISHED)
+                        recordResult(OUTCOME_SUCCESS)
+                    } else {
+                        try {
+                            workerState.set(TurnWorkerState.FINISHED)
+                            recordResult(OUTCOME_FAILURE)
+                            refundImageQuietly()
+                            refundTurn()
+                        } finally {
+                            // 즉시 재요청해도 복원 전 잔액·체험 한도를 보지 않도록 정산 시도 뒤 해제한다.
+                            releaseGeneration(chat, generation)
+                        }
+                    }
                 }
-                emitter.complete()
-            } finally {
-                // in-flight 환불 단일 판정: 워커가 저장 없이 빠져나가면(AI 오류·AI 호출 타임아웃·저장 전/저장 실패,
-                // 나아가 Error 등 어떤 종료든) 선차감분을 환불한다. 저장에 성공했으면(persisted) 과금을 유지한다.
-                // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
-                val persistedOk = persisted.get()
-                // 결과 판정은 이 finally·cancelPendingWorker·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
-                workerState.set(TurnWorkerState.FINISHED)
-                recordChatTurnResult(if (persistedOk) OUTCOME_SUCCESS else OUTCOME_FAILURE)
-                if (!persistedOk) {
-                    refundImageQuietly()
-                    refundTurn()
-                }
-            }
-        }, chatSseExecutor)
+            }, chatSseExecutor)
         } catch (rejected: Throwable) {
+            deadline?.cancel(false)
             finishQueueWait(error = rejected)
             // 스케줄 거부(chatSseExecutor 포화 시 RejectedExecutionException 등)는 위 async 블록이 실행되지 않아
             // 그 catch·onCompletion 환불이 돌지 않는다. 이미 선차감했으므로 여기서 환불한 뒤(gate로 1회) 예외를
             // 그대로 올려 호출자에게 실패로 드러낸다. 스트림은 열리지 않았으니 emitter를 오류로 닫아 반쯤 열린 상태를 막는다(Codex P1).
-            // future가 만들어지지 않아 워커 finally도 아래 whenComplete도 돌지 않는다. 여기서만 센다(KNK-811).
-            if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)) {
-                recordChatTurnResult(OUTCOME_FAILURE)
-                refundImageQuietly()
-                refundTurn()
+            // 워커가 생성되지 않은 경우 여기서 정산한다. 결과 집계는 streamEntry의 요청 단위 게이트를 공유한다.
+            if (workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.FINISHED)) {
+                try {
+                    refundImageQuietly()
+                    refundTurn()
+                } finally {
+                    releaseGeneration(chat, generation)
+                }
             }
-            runCatching { emitter.completeWithError(rejected) }
+            runCatching { emitter?.completeWithError(rejected) }
             structuredLogger.event(
                 "chat_turn_schedule_rejected",
                 "chat_id" to chatId,
@@ -1207,10 +1325,7 @@ class ChatService(
             throw rejected
         }
 
-        // future 자체의 취소·실패도 같은 CAS를 사용한다. 실행된 워커의 종료는 FINISHED이므로 복원하지 않는다.
-        future.whenComplete { _, _ -> cancelPendingWorker() }
-
-        return emitter
+        return requireNotNull(emitter)
     }
 
     /**
@@ -1282,20 +1397,15 @@ class ChatService(
      * outcome은 다음 값으로 분류한다:
      *   - `success`  : 턴이 저장까지 확정된 호출(`persisted`)
      *   - `failure`  : 저장에 도달하지 못하고 끝난 호출 — AI 실패·타임아웃·저장 오류·스케줄 거부
-     *   - `cancelled`: 시작 전 취소가 PENDING 소유권을 선점한 호출
+     *   - `cancelled`: 과거 조회용 값이며 더 이상 기록하지 않는다
      *   - `rejected` : 스트림 개시 **이전** 4xx — 크레딧 부족(402)·게스트 한도 소진(402)·device 헤더 누락(400)
      *
      * **Timer가 아니라 Counter인 이유**: 채팅 턴은 스트리밍이라 `manyak.ai.call.duration{feature="chat_response"}`이
      * 이미 스트림 전체를 재고 있어 유스케이스 타이머가 사실상 겹친다. 반면 `rejected`는 AI를 부르기 전에 끊겨
      * 그쪽에 남지 않는다.
      *
-     * **호출 지점은 셋이다**:
-     *   1. 워커 finally — 워커가 실행된 모든 경우를 소유하며 `persisted`로 success/failure를 가른다
-     *   2. 스케줄 거부 catch — future 자체가 만들어지지 않아 워커가 확실히 없는 경우(failure)
-     *   3. cancelPendingWorker — PENDING → CANCELLED CAS 성공 시 시작 전 취소 확정(cancelled)
-     *
-     * 워커 진입도 PENDING → RUNNING CAS를 사용하므로 취소와 실행은 배타적이다.
-     * 취소가 선점하면 워커는 AI 호출·저장 없이 종료하며, RUNNING이면 finally가 결과를 소유한다.
+     * 요청 단위 결과 게이트를 공유한다. 동기 거부·큐 마감·워커 finally가 겹쳐도 한 번만 집계한다.
+     * 실행 중 마감은 CANCELLED로 표시하고 워커 종료 시 failure, 저장 진입이 먼저면 저장 결과로 판정한다.
      */
     private fun recordChatTurnResult(outcome: String) {
         // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
@@ -1629,7 +1739,7 @@ class ChatService(
         chatId: String,
         attachToAiCallLog: Boolean = true,
     ) {
-        if (throwable is ChatTurnAiException) {
+        if (throwable is ChatTurnAiException || isChatTurnClientRejection(throwable)) {
             return
         }
         var sentryId = SentryId.EMPTY_ID
@@ -1658,17 +1768,8 @@ class ChatService(
         )
     }
 
-    private fun sendErrorQuietly(emitter: SseEmitter, code: String, message: String) {
-        try {
-            emitter.send(
-                SseEmitter.event()
-                    .name("error")
-                    .data(ChatStreamErrorEvent(code, message)),
-            )
-        } catch (ignored: Exception) {
-            // 이미 끊긴 연결로의 추가 전송 실패는 무시한다.
-        }
-    }
+    private fun Exception.reasonOrMessage(): String =
+        (this as? ResponseStatusException)?.reason ?: "AI 응답 생성 중 오류가 발생했습니다."
 
     // [ChatTurnRefundMeters]가 메트릭 이름·outcome 값을 공유해야 해서 private이 아니다.
     // 사전 등록과 increment가 같은 상수를 봐야 미터 신원이 갈리지 않는다.
@@ -1686,13 +1787,8 @@ class ChatService(
             isolationLevel = TransactionDefinition.ISOLATION_REPEATABLE_READ
         }
 
-        // SseEmitter 전체(MVC async) 상한. 턴 스트림은 본문 스트리밍 뒤 곧바로 completed를 보낸다(선택지는 전용 엔드포인트로
-        // 분리 — B23). stopgap 동안 본문+내부 선택지 호출까지 덮으려 160s로 상향했던 값을 낮추되, AI 스트림의 이벤트 간 idle
-        // 타임아웃(manyak.ai.chat.stream-timeout, 기본 60s)과 같게 두지 않는다: idle은 토큰 간격 상한이라 토큰이 계속 오면
-        // 총 스트리밍이 60s를 넘길 수 있고, 전체 상한이 그와 같으면 정상적인 긴 턴이 completed 전에 잘려 클라이언트가 turnId를
-        // 잃고 과금될 수 있다(Codex P2). idle 예산 위로 여유(2배)를 둬 헬시한 긴 스트림을 끊지 않는다.
-        // (정상 턴은 완료 즉시 emitter.complete()로 조기 종료하므로, 이 값은 지연·행 상황의 비상 상한일 뿐이다.)
-        const val SSE_TIMEOUT_MILLIS = 120_000L
+        // 생성 마감은 연결과 독립적으로 접수부터 계산한다.
+        const val GENERATION_TIMEOUT_MILLIS = 120_000L
 
         // [ChatTurnRefundMeters]가 기동 시 이 이름으로 시계열을 0에 만들어 둔다. 사전 등록과 여기의
         // increment가 같은 미터를 가리켜야 하므로(이름·태그가 미터 신원이다) 리터럴을 쓰지 않는다.
@@ -1704,8 +1800,7 @@ class ChatService(
         const val OUTCOME_FAILURE = "failure"
         const val OUTCOME_REJECTED = "rejected"
 
-        // 큐드-취소 전용. success/failure와 섞지 않는 이유는 whenComplete의 판정이 잠정적이기 때문이다
-        // (recordChatTurnResult KDoc 참고). 알림은 failure만 보므로 이 값이 늘어도 오발화하지 않는다.
+        // 연결 종료 취소가 있던 과거 조회용. 새 요청에는 기록하지 않는다.
         const val OUTCOME_CANCELLED = "cancelled"
     }
 }
