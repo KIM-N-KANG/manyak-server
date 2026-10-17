@@ -166,7 +166,7 @@ class FcmPushSenderTest {
     }
 
     @Test
-    fun `WEB 스토리 완성은 본문과 딥링크 없이도 홈 링크로 보낸다`() {
+    fun `WEB 스토리 완성은 고정 제목과 스토리 본문을 표시하고 원본 데이터를 유지한다`() {
         val web = token(1, "web").apply { platform = PushPlatform.valueOf("WEB") }
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
         sender.sendToUser(7L, mapOf("type" to "STORY_COMPLETED", "title" to "스토리"))
@@ -174,7 +174,79 @@ class FcmPushSenderTest {
         verify(messaging).send(captor.capture())
         val webpush = fieldOf(captor.value, "webpushConfig")!!
         assertThat(fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")).isEqualTo("https://manyak.app")
-        assertThat((fieldOf(webpush, "notification") as Map<*, *>)["title"]).isEqualTo("스토리")
+        val notification = fieldOf(webpush, "notification") as Map<*, *>
+        assertThat(notification["title"]).isEqualTo("스토리가 완성됐어요")
+        assertThat(notification["body"]).isEqualTo("스토리")
+        assertThat(dataOf(captor.value)).containsEntry("type", "STORY_COMPLETED").containsEntry("title", "스토리")
+        assertThat(dataOf(captor.value)).doesNotContainKey("body")
+    }
+
+    @Test
+    fun `WEB 검수 완료는 데이터의 제목과 본문을 그대로 표시한다`() {
+        val web = token(1, "web").apply { platform = PushPlatform.WEB }
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
+        val data = mapOf(
+            "type" to "STORY_MODERATION_COMPLETED", "title" to "검수를 통과했어요",
+            "body" to "「스토리」의 등록이 완료됐어요. 지금 확인해 보세요.", "deepLink" to "https://manyak.app/studio",
+        )
+
+        sender.sendToUser(7L, data)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        val webpush = fieldOf(captor.value, "webpushConfig")!!
+        val notification = fieldOf(webpush, "notification") as Map<*, *>
+        assertThat(notification["title"]).isEqualTo(data["title"])
+        assertThat(notification["body"]).isEqualTo(data["body"])
+        assertThat(fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")).isEqualTo(data["deepLink"])
+        assertThat(dataOf(captor.value)).containsAllEntriesOf(data)
+    }
+
+    @Test
+    fun `ANDROID의 4주 초과 TTL은 4주로 제한한다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
+
+        sender.sendToUser(7L, mapOf("type" to "PROMOTION"), AndroidConfig.Priority.NORMAL, Long.MAX_VALUE)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "ttl")).isEqualTo("2419200s")
+    }
+
+    @Test
+    fun `ANDROID 출석의 KST 자정까지 TTL을 유지한다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
+        val now = java.time.ZonedDateTime.parse("2026-10-17T09:00:00+09:00[Asia/Seoul]")
+        val midnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
+        val ttlMillis = java.time.Duration.between(now, midnight).toMillis()
+
+        sender.sendToUser(7L, mapOf("type" to "ATTENDANCE_REMINDER"), AndroidConfig.Priority.NORMAL, ttlMillis)
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "ttl")).isEqualTo("54000s")
+    }
+
+    @Test
+    fun `WEB은 설정한 기본 주소와 아이콘을 사용하고 딥링크가 있으면 우선한다`() {
+        val configuredSender = FcmPushSender(
+            messaging, repository, userRepository, registry,
+            webIconUrl = "https://web.example/icon.png", webBaseUrl = "https://web.example",
+        )
+        val web = token(1, "web").apply { platform = PushPlatform.WEB }
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
+
+        configuredSender.sendToUser(7L, mapOf("type" to "PROMOTION", "title" to "(광고) 선물", "body" to "내용"))
+        configuredSender.sendToUser(7L, mapOf("type" to "STORY_COMPLETED", "title" to "스토리", "deepLink" to "https://web.example/stories/abc"))
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging, times(2)).send(captor.capture())
+        val links = captor.allValues.map { message ->
+            val webpush = fieldOf(message, "webpushConfig")!!
+            assertThat((fieldOf(webpush, "notification") as Map<*, *>)["icon"]).isEqualTo("https://web.example/icon.png")
+            fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")
+        }
+        assertThat(links).containsExactly("https://web.example", "https://web.example/stories/abc")
     }
 
     @Test
