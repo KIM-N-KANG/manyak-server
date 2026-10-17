@@ -22,6 +22,8 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyMap
 import org.mockito.ArgumentMatchers.eq
+import org.mockito.ArgumentMatchers.isNull
+import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
@@ -137,18 +139,19 @@ class AttendanceReminderIntegrationTests {
                 "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?",
             ),
             NORMAL,
-            (24 - hour) * 60 * 60 * 1000L,
+            null,
+            today().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant(),
         )
     }
 
     @Test
-    fun `출석 TTL은 KST 자정 직전의 남은 밀리초다`() {
+    fun `출석 발송기에 당일 KST 자정의 절대 만료 시각을 넘긴다`() {
         clock = Clock.fixed(Instant.parse("2026-09-08T14:59:59.500Z"), ZoneOffset.UTC)
         val member = eligibleMember()
 
         attendanceReminderService.sendReminders()
 
-        verify(fcmPushSender).sendToUser(eq(member.id), anyMap(), eq(NORMAL) ?: NORMAL, eq(500L))
+        verify(fcmPushSender).sendToUser(eq(member.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")))
     }
 
     @Test
@@ -171,8 +174,8 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(result.targets).isEqualTo(2)
         assertThat(result.sent).isEqualTo(1)
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, eq(1000L))
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")))
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @Test
@@ -181,7 +184,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = member.id, userId = member.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @Test
@@ -189,7 +192,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(marketingAgreed = false).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @Test
@@ -197,7 +200,7 @@ class AttendanceReminderIntegrationTests {
         saveMember()
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @Test
@@ -205,7 +208,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(status = UserStatus.SUSPENDED).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @Test
@@ -217,7 +220,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = original.id, userId = rejoined.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @ParameterizedTest
@@ -233,12 +236,12 @@ class AttendanceReminderIntegrationTests {
         doAnswer {
             withdrawMarketingConsent(second.id)
             null
-        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
 
         val result = attendanceReminderService.sendReminders()
 
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
         assertThat(result.sent).isEqualTo(1)
     }
 
@@ -252,7 +255,7 @@ class AttendanceReminderIntegrationTests {
         attendanceReminderScheduler.run()
 
         // 두 번째 실행은 Redis SET NX 실패로 서비스에 진입하지 않는다.
-        verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     @ParameterizedTest
@@ -265,8 +268,8 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(result.targets).isEqualTo(1)
         assertThat(result.sent).isEqualTo(if (hour == 15) 1 else 0)
-        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
-        else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, anyLong())
+        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
     }
 
     private fun atHour(hour: Int): Clock = Clock.fixed(

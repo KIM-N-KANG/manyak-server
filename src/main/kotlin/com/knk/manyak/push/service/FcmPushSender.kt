@@ -18,6 +18,9 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 
 /**
  * FCM 발송기(KNK-1130). 시나리오별 발송(스토리 완성 등)은 전부 이 클래스를 부른다.
@@ -51,15 +54,17 @@ class FcmPushSender(
     private val webIconUrl: String = "https://manyak.app/icons/icon-192.png",
     @Value("\${manyak.push.web-base-url:https://manyak.app}")
     private val webBaseUrl: String = "https://manyak.app",
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    /** 회원의 등록 기기 전부에 [data]를 보낸다. 발송기가 비활성이거나 토큰이 없으면 아무 일도 하지 않는다. */
+    /** 회원의 등록 기기마다 보낸다. [expiresAt]이 있으면 기기별 남은 TTL을 적용하고 만료 시 중단한다. */
     fun sendToUser(
         userId: Long,
         data: Map<String, String>,
         priority: AndroidConfig.Priority = AndroidConfig.Priority.HIGH,
         ttlMillis: Long? = null,
+        expiresAt: Instant? = null,
     ) {
         val messaging = this.messaging
         if (messaging == null) {
@@ -76,8 +81,10 @@ class FcmPushSender(
         // 수신자 식별(KNK-1220). 푸시는 회원이 아니라 기기로 도착하므로, 앱이 이 값을 현재 로그인 회원과 비교해
         // 남의 알림(로그아웃 뒤 남은 토큰·늦게 도착한 메시지)을 거른다. 호출자가 같은 키를 넘겨도 여기 값이 이긴다.
         val payload = data + (KEY_RECIPIENT_ID to user.publicId.toString())
-        devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId).forEach { deviceToken ->
-            sendTo(messaging, deviceToken, payload, priority, ttlMillis)
+        for (deviceToken in devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId)) {
+            val remaining = expiresAt?.let { Duration.between(clock.instant(), it).toMillis() }
+            if (remaining != null && remaining <= 0) break
+            sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis)
         }
     }
 
