@@ -121,15 +121,13 @@ class SubmissionFormAssembler(
     }
 
     fun aiInput(form: JsonNode): JsonNode {
-        val excluded = setOf("id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder", "submissionId", "storyId")
+        val excluded = setOf("draftId", "id", "objectKey", "thumbnailObjectKey", "visibility", "minTurns", "moderationStatus", "thumbnailModerationStatus", "submission", "sortOrder", "submissionId", "storyId")
         fun strip(node: JsonNode): JsonNode = when {
             node.isObject -> mapper.createObjectNode().also { obj -> node.properties().forEach { (key, value) -> if (key !in excluded) obj.set(key, strip(value)) } }
             node.isArray -> mapper.createArrayNode().also { array -> node.forEach { array.add(strip(it)) } }
             else -> node
         }
-        return (strip(form) as ObjectNode).apply {
-            remove("protagonistName")?.let { set("protagonist_name", it) }
-        }
+        return strip(form)
     }
 
     /** 원본 검수 폼의 identity를 따라 현재 폼의 배열 인덱스로 옮긴다. 삭제된 대상은 제외한다. */
@@ -149,9 +147,8 @@ class SubmissionFormAssembler(
         for (segment in segments) {
             val key = segment.groups[1]?.value
             if (key != null) {
-                val formKey = if (key == "protagonist_name") "protagonistName" else key
-                before = before.path(formKey)
-                after = after.path(formKey)
+                before = before.path(key)
+                after = after.path(key)
                 if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return null
                 if (path.isNotEmpty()) path.append('.')
                 path.append(key)

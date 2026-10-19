@@ -6,6 +6,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.junit.jupiter.api.Test
+import org.assertj.core.api.Assertions.assertThat
 
 /**
  * OpenAPI 문서(/v3/api-docs)에 Bearer 인증 스킴과 인증 요구가 반영되는지 검증(KNK-450).
@@ -20,6 +21,18 @@ class OpenApiDocIntegrationTests {
 
 
     @Autowired private lateinit var restTestClient: RestTestClient
+
+    @Test
+    fun `이어쓰기 lastTurnId는 nullable int64로 문서화하고 입력 여부 플래그는 숨긴다`() {
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.ContinueChatRequest.properties.lastTurnId.type").value<List<String>> {
+                assertThat(it).contains("integer", "null").doesNotContain("string")
+            }
+            .jsonPath("$.components.schemas.ContinueChatRequest.properties.lastTurnId.format").isEqualTo("int64")
+            .jsonPath("$.components.schemas.ContinueChatRequest.properties.hasLastTurnId").doesNotExist()
+    }
 
     @Test
     fun `OpenAPI 문서에 Bearer 보안 스킴이 등록된다`() {
