@@ -192,7 +192,7 @@ class SimpleStoryCreationParentChainIntegrationTests {
     @Test
     fun `게스트로 만든 부모는 같은 기기에서 로그인한 회원이 이어받는다`() {
         // 회원 요청에도 device_id_hash가 저장되므로, 게스트→회원 전환 중에도 같은 기기면 연속으로 인정한다.
-        val sharedDevice = "handoff-device"
+        val sharedDevice = "shared-device"
         val parentId = postStorylines(UUID.randomUUID(), deviceId = sharedDevice)
         val childId = UUID.randomUUID()
 

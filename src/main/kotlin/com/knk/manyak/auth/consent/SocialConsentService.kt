@@ -3,7 +3,6 @@ package com.knk.manyak.auth.consent
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.handoff.LoginHandoffService
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo
@@ -25,10 +24,9 @@ class SocialConsentService(
     private val registrar: SocialAccountRegistrar,
     private val consents: UserConsentService,
     private val codes: ConsentTokenStore,
-    private val handoffs: LoginHandoffService,
     private val analytics: ServerAnalytics,
 ) {
-    fun start(provider: SocialProvider, idToken: String, deviceId: String?, handoffCode: String?): SocialAuthResponse = safely {
+    fun start(provider: SocialProvider, idToken: String, deviceId: String?): SocialAuthResponse = safely {
         val info = try {
             login.verifyIdentity(provider, idToken)
         } catch (_: ResponseStatusException) {
@@ -38,17 +36,15 @@ class SocialConsentService(
         afterVerification(provider) {
             val user = registrar.findForAuthentication(provider, info)
             val status = consents.authenticationStatus(user?.id)
-            val handoff = handoffCode?.let(handoffs::find)
-            val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
             if (user != null && !status.terms.needsConsent && !status.privacy.needsConsent && !status.age14.needsConsent) {
                 val confirmed = registrar.completeExistingAuthentication(provider, info, UserConsentRequest())
                 if (confirmed != null) {
-                    return@afterVerification SocialAuthResponse("COMPLETED", token = login.finishLogin(provider, confirmed, false, sourceDevice, handoffCode, handoff))
+                    return@afterVerification SocialAuthResponse("COMPLETED", token = login.finishLogin(provider, confirmed, false, deviceId))
                 }
             }
             // 조회 후 탈퇴한 경우에도 신규 계약으로 다시 동의를 받는다.
             val current = registrar.findForAuthentication(provider, info)
-            val pending = PendingSocialConsent(provider, info.providerUserId, info.email, current?.id, sourceDevice, handoffCode)
+            val pending = PendingSocialConsent(provider, info.providerUserId, info.email, current?.id, deviceId)
             val issued = codes.issue(pending)
             SocialAuthResponse("CONSENT_REQUIRED", consentToken = issued.code, expiresAt = issued.expiresAt,
                 isNewUser = current == null, consents = consents.authenticationStatus(current?.id))
@@ -63,9 +59,8 @@ class SocialConsentService(
             consents.validateVersions(request)
             val info = SocialUserInfo(pending.providerUserId, pending.email, null, null)
             val (user, created) = resolve(pending.provider, info, request)
-            val handoff = pending.handoffCode?.let(handoffs::find)
-            val sourceDevice = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: pending.deviceId ?: deviceId
-            login.finishLogin(pending.provider, user, created, sourceDevice, pending.handoffCode, handoff) {
+            val sourceDevice = pending.deviceId ?: deviceId
+            login.finishLogin(pending.provider, user, created, sourceDevice) {
                 codes.consume(requireNotNull(code))
             }
         }

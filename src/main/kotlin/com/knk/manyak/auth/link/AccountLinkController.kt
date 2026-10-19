@@ -129,7 +129,7 @@ class AccountLinkController(
         userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     companion object {
-        /** 링크 코드 전송 헤더. 핸드오프 코드와 같은 규칙으로 URL이 아니라 헤더로만 받는다. */
+        /** 링크 코드 전송 헤더. URL이 아니라 헤더로만 받는다. */
         const val HEADER_LINK_CODE = "X-Manyak-Link-Code"
     }
 }

@@ -26,7 +26,7 @@ class SocialConsentController(private val service: SocialConsentService) {
     @Operation(summary = "소셜 인증과 필수 동의 확인", description = "Google 또는 Kakao ID 토큰을 검증합니다. 동의가 필요하면 계정과 정식 토큰을 만들지 않고 대기 코드를 발급합니다.",
         requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json",
             schema = Schema(implementation = SocialLoginRequest::class),
-            examples = [ExampleObject(value = """{"idToken":"<provider-id-token>","handoffCode":"<optional-handoff-code>"}""")],
+            examples = [ExampleObject(value = """{"idToken":"<provider-id-token>"}""")],
         )]))
     @ApiResponses(value = [
         ApiResponse(responseCode = "200", description = "로그인 완료 또는 필수 동의 대기", content = [Content(mediaType = "application/json",
@@ -43,7 +43,7 @@ class SocialConsentController(private val service: SocialConsentService) {
         @Parameter(schema = Schema(allowableValues = ["google", "kakao"])) @PathVariable provider: String,
         @Valid @RequestBody request: SocialLoginRequest,
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
-    ): SocialAuthResponse = service.start(providerOf(provider), request.idToken, deviceId, request.handoffCode)
+    ): SocialAuthResponse = service.start(providerOf(provider), request.idToken, deviceId)
 
     @Operation(summary = "필수 동의와 소셜 가입 완료", description = "현행 필수 항목을 모두 제출합니다. 계정과 동의를 함께 저장한 뒤 토큰을 발급하며 성공 시에만 대기 코드를 소비합니다. 정지 회원도 이 경로로 로그인할 수 있습니다.",
         requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(content = [Content(mediaType = "application/json",
