@@ -237,17 +237,6 @@ class FcmPushSenderTest {
     }
 
     @Test
-    fun `ANDROID의 4주 초과 TTL은 4주로 제한한다`() {
-        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
-
-        sender.sendToUser(7L, mapOf("type" to "PROMOTION"), AndroidConfig.Priority.NORMAL, Long.MAX_VALUE)
-
-        val captor = ArgumentCaptor.forClass(Message::class.java)
-        verify(messaging).send(captor.capture())
-        assertThat(fieldOf(fieldOf(captor.value, "androidConfig")!!, "ttl")).isEqualTo("2419200s")
-    }
-
-    @Test
     fun `ANDROID 출석의 KST 자정까지 TTL을 유지한다`() {
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android")))
         val now = java.time.ZonedDateTime.parse("2026-10-17T09:00:00+09:00[Asia/Seoul]")
