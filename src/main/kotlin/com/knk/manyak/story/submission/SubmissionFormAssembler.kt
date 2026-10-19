@@ -127,9 +127,7 @@ class SubmissionFormAssembler(
             node.isArray -> mapper.createArrayNode().also { array -> node.forEach { array.add(strip(it)) } }
             else -> node
         }
-        return (strip(form) as ObjectNode).apply {
-            remove("protagonistName")?.let { set("protagonist_name", it) }
-        }
+        return strip(form)
     }
 
     /** 원본 검수 폼의 identity를 따라 현재 폼의 배열 인덱스로 옮긴다. 삭제된 대상은 제외한다. */
@@ -149,12 +147,11 @@ class SubmissionFormAssembler(
         for (segment in segments) {
             val key = segment.groups[1]?.value
             if (key != null) {
-                val formKey = if (key == "protagonist_name") "protagonistName" else key
-                before = before.path(formKey)
-                after = after.path(formKey)
+                before = before.path(key)
+                after = after.path(key)
                 if (after.isMissingNode || (key == "thumbnailUrl" && before != after)) return null
                 if (path.isNotEmpty()) path.append('.')
-                path.append(formKey)
+                path.append(key)
             } else {
                 val index = segment.groups[2]!!.value.toInt()
                 val item = before.path(index)

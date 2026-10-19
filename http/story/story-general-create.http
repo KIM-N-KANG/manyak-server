@@ -14,6 +14,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
+  "protagonistName": "서린",
   "title": "달빛 아래의 계약",
   "oneLineIntro": "기억을 잃은 마법사의 여정",
   "genres": ["무협", " b l ", "BL"],
@@ -342,3 +343,27 @@ GET {{baseUrl}}/api/v1/stories/{{personaStoryId}}/edit
 Authorization: Bearer {{accessToken}}
 
 > {% client.test("기본 이름 원문 폼", () => client.assert(response.status === 200 && response.body.protagonistName === "민우", `actual=${response.status}`)); %}
+
+
+### 이름과 소개 위반 위치 확인 (KNK-1706, 별도 반려 시나리오)
+# 즉시 승인 스텁을 끄고 AI 대역을 아래 응답으로 설정한 뒤 파일 상단의 일반 제작 접수를 다시 실행한다.
+# 요청 본문에 protagonistName이 있고 protagonist_name은 없으며 characters[0].description이 있는지도 AI 대역에서 확인한다.
+# AI 대역 응답: {"decision":"REJECTED","issues":[
+# {"path":"protagonistName","type":"TEXT","rule":"DRUGS","reason":"이름 수정 필요"},
+# {"path":"characters[0].description","type":"TEXT","rule":"DRUGS","reason":"소개 수정 필요"}],"error_code":null}
+# 판정 완료 후 조회한다. 다른 승인·재제출 시나리오와는 따로 실행한다.
+GET {{baseUrl}}/api/v1/stories/submissions/{{submissionId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+client.test("이름과 소개 위반은 반려로 보존", () => {
+  client.assert(response.status === 200, `200 기대, actual=${response.status}`);
+  const body = response.body;
+  client.assert(body.status === "REJECTED" && body.errorCode === null, `반려 기대, actual=${body.status}/${body.errorCode}`);
+  client.assert(body.issues.length === 2, `위반 2개 기대, actual=${body.issues.length}`);
+  ["protagonistName", "characters[0].description"].forEach(path =>
+    client.assert(body.issues.some(issue => issue.path === path && issue.type === "TEXT"), `위치 보존 실패: ${path}`));
+  client.assert(body.payload.protagonistName === "서린", "기본 이름 원문 보존");
+  client.assert(body.payload.characters[0].description === "왕국을 지키는 기사", "소개 원문 보존");
+});
+%}

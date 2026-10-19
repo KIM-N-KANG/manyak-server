@@ -20,6 +20,25 @@ class StoryModerationClientTests {
             assertTrue(request.body.readUtf8().contains("thumbnailUrl"))
         }
     }
+    @Test fun `이름과 소개의 TEXT 위반 응답은 camelCase 위치를 보존한다`() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("""{"decision":"REJECTED","issues":[
+                    {"path":"protagonistName","type":"TEXT","rule":"DRUGS","reason":"이름 수정 필요"},
+                    {"path":"characters[0].description","type":"TEXT","rule":"DRUGS","reason":"소개 수정 필요"}
+                ],"error_code":null}"""))
+            val mapper = JsonMapper()
+            val input = mapper.readTree("""{"protagonistName":"서린","characters":[{"name":"도윤","description":"기록을 지키는 사서"}]}""")
+            val client = RestStoryModerationClient(server.url("/").toString(), Duration.ofSeconds(180))
+            val result = client.moderate(input)
+            assertEquals("REJECTED", result.decision)
+            assertEquals(listOf("protagonistName", "characters[0].description"), result.issues.map { it.path })
+            assertTrue(result.issues.all { it.type == "TEXT" })
+            val sent = mapper.readTree(server.takeRequest().body.readUtf8())
+            assertEquals("서린", sent.path("protagonistName").asText())
+            assertFalse(sent.has("protagonist_name"))
+        }
+    }
     @Test fun `평문 HTTP 검수 요청은 h2c 업그레이드 헤더를 보내지 않는다`() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "application/json")

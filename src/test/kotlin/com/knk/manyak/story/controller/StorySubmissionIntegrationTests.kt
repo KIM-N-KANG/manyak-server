@@ -131,24 +131,39 @@ class StorySubmissionIntegrationTests {
         }
         assertExcluded(input)
         assertEquals(row.publicId.toString(), input["submissionId"].asText())
-        assertEquals("서린", input["protagonist_name"].asText())
-        assertFalse(input.has("protagonistName"))
-        val result = ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null)
+        assertEquals("서린", input.path("protagonistName").asText())
+        assertFalse(input.has("protagonist_name"))
+        val result = ModerationResult("REJECTED", listOf(ModerationIssue("protagonistName", "TEXT", "DRUGS", "사유")), null)
         assertEquals(result, result.validated(input))
         assertThrows(InvalidModerationResponse::class.java) { result.copy(issues = listOf(result.issues.single().copy(path = "draftId"))).validated(input) }
     }
 
-    @Test fun `제출본 상세는 AI 주인공 경로를 폼 경로로 반환한다`() {
+    @Test fun `이름과 소개 위반은 반려로 저장하고 상세에 폼 경로 그대로 반환한다`() {
         val user = users.save(User(nickname = "작가"))
-        val accepted = service.create(request().copy(protagonistName = "서린"), user.id)
+        val accepted = service.create(request().copy(protagonistName = "서린",
+            characters = listOf(com.knk.manyak.story.dto.GeneralCharacterInput(name = "도윤", description = "기록을 지키는 사서"))), user.id)
         val row = submissions.findByPublicId(java.util.UUID.fromString(accepted.submissionId))!!
-        val result = ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null)
+        val issues = listOf(
+            ModerationIssue("protagonistName", "TEXT", "DRUGS", "이름 수정 필요"),
+            ModerationIssue("characters[0].description", "TEXT", "DRUGS", "소개 수정 필요"),
+        )
+        val result = ModerationResult("REJECTED", issues, null)
         worker.finish(row.id, row.attempt, result.validated(moderationInput(row)))
-        assertEquals("protagonist_name", submissions.findById(row.id).orElseThrow().issues.single().path)
+        val rejected = submissions.findById(row.id).orElseThrow()
+        assertEquals(SubmissionStatus.REJECTED, rejected.status)
+        assertEquals(issues, rejected.issues)
+        assertNull(rejected.errorCode)
+        assertEquals(0, stories.count())
+        val original = mapper.readTree(row.inputForm)
+        val current = (original.deepCopy() as tools.jackson.databind.node.ObjectNode).put("title", "현재 폼")
+        assertEquals(issues, assembler.remap(rejected.issues, original, current))
         client.get().uri("/api/v1/stories/submissions/${row.publicId}")
             .header("Authorization", "Bearer ${tokens.issueAccessToken(user.publicId)}")
             .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.status").isEqualTo("REJECTED")
+            .jsonPath("$.issues.length()").isEqualTo(2)
             .jsonPath("$.issues[0].path").isEqualTo("protagonistName")
+            .jsonPath("$.issues[1].path").isEqualTo("characters[0].description")
             .jsonPath("$.payload.protagonistName").isEqualTo("서린")
     }
 
@@ -786,9 +801,9 @@ class StorySubmissionIntegrationTests {
         assertEquals("민우", mapper.readTree(row.inputForm).path("protagonistName").asText())
         assertEquals("민우", mapper.readTree(row.payload).path("protagonistName").asText())
         val input = moderationInput(row)
-        assertEquals("민우", input.path("protagonist_name").asText())
+        assertEquals("민우", input.path("protagonistName").asText())
         assertEquals("{username}의 귀환", input.path("title").asText())
-        ModerationResult("REJECTED", listOf(ModerationIssue("protagonist_name", "TEXT", "DRUGS", "사유")), null).validated(input)
+        ModerationResult("REJECTED", listOf(ModerationIssue("protagonistName", "TEXT", "DRUGS", "사유")), null).validated(input)
         worker.finish(row.id, 1, ModerationResult("APPROVED", emptyList(), null))
         val story = stories.findAll().single()
         assertEquals("민우", story.protagonistName)
