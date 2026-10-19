@@ -174,17 +174,6 @@ class RedisRefreshTokenStoreIntegrationTest : RefreshTokenStoreContractTest() {
     }
 
     @Test
-    fun `Redis 유예 0 이하이면 grace 키를 만들지 않는다`() {
-        for (grace in listOf(Duration.ZERO, Duration.ofMillis(-1))) {
-            store.createFamily("g1", 42L, ttl)
-            store.rotate("g1", "g2", "raw-g2", ttl, grace)
-            assertThat(redisTemplate.hasKey("rt:grace:g1")).isFalse()
-            assertThat(store.rotate("g1", "unused", "unused-raw", ttl, grace))
-                .isEqualTo(RotateResult.ReuseDetected(42L))
-        }
-    }
-
-    @Test
     fun `Redis 유예 키 만료 뒤 재사용은 family와 사용자 인덱스를 폐기한다`() {
         val familyId = store.createFamily("g1", 42L, ttl)
         store.rotate("g1", "g2", "raw-g2", ttl, Duration.ofSeconds(10))

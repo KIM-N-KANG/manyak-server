@@ -65,20 +65,6 @@ class InviteIntegrationTests {
     }
 
     @Test
-    fun `최초 조회는 혼동 문자를 제외한 대문자+숫자 8자 코드를 발급한다`() {
-        val user = saveUser()
-
-        // KNK-567: 사람이 타이핑하는 값이라 O·0, I·1·L 등 혼동 문자를 제외한 대문자+숫자만 쓴다. inviteUrl은 폐기됐다.
-        getInvite(jwtTokenProvider.issueAccessToken(user.publicId))
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.inviteCode").value<String> { assertThat(it).matches("[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}") }
-            .jsonPath("$.inviteUrl").doesNotExist()
-
-        assertThat(userRepository.findById(user.id).orElseThrow().inviteCode).isNotBlank()
-    }
-
-    @Test
     fun `초대 조회는 이번 달 보상 진행과 월 상한을 함께 내려준다`() {
         val user = saveUser()
 

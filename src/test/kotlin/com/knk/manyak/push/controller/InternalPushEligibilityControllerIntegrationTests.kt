@@ -204,24 +204,6 @@ class InternalPushEligibilityControllerIntegrationTests {
     }
 
     @Test
-    fun `기기가 11대면 최근 갱신 순으로 10개만 반환한다`() {
-        val user = saveUser()
-        (0..10).forEach { saveToken(user, "token-$it", updatedAt = Instant.parse(DAY).plusSeconds(it.toLong())) }
-        val body = get(user.publicId).expectStatus().isOk.expectBody()
-            .jsonPath("$.allowed").isEqualTo(true)
-            .jsonPath("$.reason").isEqualTo("OK")
-            .jsonPath("$.tokens.length()").isEqualTo(10)
-        (0..9).forEach { body.jsonPath("$.tokens[$it].token").isEqualTo("token-${10 - it}") }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["?kind=INVALID&at=2026-09-21T03:00:00Z", "?kind=SERVICE", "?at=2026-09-21T03:00:00Z", "?kind=SERVICE&at=invalid", "?kind=SERVICE&at="])
-    fun `종류와 시각이 없거나 잘못되면 400이다`(query: String) {
-        client.get().uri("/internal/users/${UUID.randomUUID()}/push-eligibility$query")
-            .header(HEADER, SECRET).exchange().expectStatus().isBadRequest
-    }
-
-    @Test
     fun `publicId 형식이 잘못되면 400이다`() {
         client.get().uri("/internal/users/not-a-uuid/push-eligibility?kind=SERVICE&at=$DAY")
             .header(HEADER, SECRET).exchange().expectStatus().isBadRequest

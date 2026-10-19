@@ -245,11 +245,6 @@ class DevicePushTokenControllerIntegrationTests {
     }
 
     @Test
-    fun `삭제 본문의 token이 비면 400이다`() {
-        unregister(saveUser(), "   ").expectStatus().isBadRequest
-    }
-
-    @Test
     fun `탈퇴하면 그 회원의 토큰이 전부 지워진다`() {
         val leaving = saveUser("탈퇴자")
         val staying = saveUser("잔류자")

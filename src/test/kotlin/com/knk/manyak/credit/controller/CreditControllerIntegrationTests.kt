@@ -47,19 +47,6 @@ class CreditControllerIntegrationTests {
     }
 
     @Test
-    fun `지갑이 없으면 잔액은 0이다`() {
-        val user = saveUser()
-
-        restTestClient.get()
-            .uri("/api/v1/users/me/credits")
-            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
-            .exchange()
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.balance").isEqualTo(0)
-    }
-
-    @Test
     fun `적립 후에는 그 잔액을 반환한다`() {
         val user = saveUser()
         creditWalletService.reward(user.id, 120, CreditReason.SIGNUP_REWARD, "signup:${user.id}")

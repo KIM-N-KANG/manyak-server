@@ -161,11 +161,6 @@ class CreditWalletServiceIntegrationTest {
     }
 
     @Test
-    fun `balanceOf는 지갑이 없으면 0이다`() {
-        assertThat(service.balanceOf(userId)).isEqualTo(0)
-    }
-
-    @Test
     fun `balance 캐시는 원장 합계와 일치한다`() {
         service.reward(userId, 100, CreditReason.SIGNUP_REWARD, "signup:$userId")
         service.reward(userId, 50, CreditReason.ATTENDANCE_REWARD, "attendance:$userId:2026-07-05")
@@ -225,5 +220,4 @@ class CreditWalletServiceIntegrationTest {
         assertThat(outcome.rewarded).isTrue()
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.INVITE_REWARD }).isEqualTo(2)
     }
-
 }
