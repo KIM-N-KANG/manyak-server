@@ -1,5 +1,5 @@
 export const endpoints = [
-  ['detail', 'GET /stories/{id}', 29.5], ['originals', 'GET /stories/originals', 8.6],
+  ['detail', 'GET /stories/{id}', 29.5], ['originals', 'GET /stories?filter=original', 8.6],
   ['chatDetail', 'GET /chats/{id}', 8.5], ['stories', 'GET /stories', 8.3],
   ['trials', 'GET /users/me/trials', 8], ['guestConsents', 'GET /guests/consents', 6.8],
   ['policies', 'GET /credits/policies', 3.7], ['turn', 'POST /chats/{id}/turns/stream', 3.2],

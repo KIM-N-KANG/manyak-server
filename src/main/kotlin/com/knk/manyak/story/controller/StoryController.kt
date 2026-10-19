@@ -160,27 +160,6 @@ class StoryController(
     ): List<LorebookListItemResponse> = storyService.getLorebooks(genre)
 
     @Operation(
-        summary = "오리지널 스토리 목록 조회(폐기 예정)",
-        description = "마냑 공식 계정 소유의 공개 스토리 카드를 등록순으로 반환합니다. 인증은 필요 없고 공식 계정 " +
-            "미설정 환경은 빈 목록입니다. **폐기 예정**: GET /stories?filter=original이 대체하며, 클라이언트 " +
-            "전환 후 KNK-1400에서 제거합니다.",
-        deprecated = true,
-    )
-    @ApiResponses(
-        value = [
-            ApiResponse(
-                responseCode = "200",
-                description = "조회 성공",
-                content = [Content(array = ArraySchema(schema = Schema(implementation = StorySummaryResponse::class)))],
-            ),
-        ],
-    )
-    @Deprecated("GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.")
-    @GetMapping("/originals")
-    @Suppress("DEPRECATION")
-    fun getOriginalStories(): List<StorySummaryResponse> = storyService.getOriginalStories()
-
-    @Operation(
         summary = "공개 스토리 목록 조회",
         description = "발행·공개 상태의 회원 스토리 카드를 커서 페이지네이션으로 반환합니다(KNK-149). 인증은 필요 " +
             "없고 요청자 신원도 쓰지 않습니다. 정렬은 popular(기본, 인기순)·latest(등록 최신순)·likes(좋아요 많은 순)·" +
