@@ -1,8 +1,6 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
 import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
@@ -52,13 +50,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
     fun findAllByPublicIdIn(publicIds: Collection<UUID>): List<Story>
 
     fun findAllByPublicIdInAndDeletedAtIsNull(publicIds: Collection<UUID>): List<Story>
-
-    // KNK-975: 마냑 오리지널 스토리 목록. 공식 계정 소유의 공개(PUBLISHED∧PUBLIC)·미삭제 스토리를 등록순으로 조회한다.
-    fun findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
-        userId: Long,
-        status: StoryStatus,
-        visibility: StoryVisibility,
-    ): List<Story>
 
     /**
      * 공개 스토리 목록(KNK-149) 최신순 첫 페이지. 노출 조건은 네 가지를 모두 만족해야 한다 —

@@ -106,7 +106,7 @@ function choices(ctx) {
   return send('choices', 'POST', `/chats/${ctx.choiceChat}/turns/${ctx.choiceTurn}/choices`, ctx.user).valid;
 }
 function action(key, ctx) {
-  const paths = {detail: `/stories/${ctx.story}`, originals: '/stories/originals', stories: '/stories',
+  const paths = {detail: `/stories/${ctx.story}`, originals: '/stories?filter=original', stories: '/stories',
     guestConsents: '/guests/consents', policies: '/credits/policies', tags: '/stories/simple/tags',
     genres: '/stories/genres', chatDetail: `/chats/${ctx.chat}`, trials: '/users/me/trials', me: '/auth/me',
     consents: '/users/me/consents', myChats: '/users/me/chats', myStories: '/users/me/stories',

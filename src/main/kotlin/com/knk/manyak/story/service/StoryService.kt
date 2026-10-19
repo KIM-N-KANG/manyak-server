@@ -119,7 +119,7 @@ class StoryService(
      * 페이지네이션은 offset이 아니라 keyset이다 — 새 스토리가 앞에 끼어들어도 다음 페이지에 중복·누락이 없다.
      * [limit] + 1건을 읽어 다음 페이지 유무를 판정하고, 마지막 페이지면 `nextCursor`는 null이다.
      *
-     * [filter]가 `ORIGINAL`이면 공식 계정 소유로 좁힌다(KNK-1398, 폐기 예정인 [getOriginalStories] 대체).
+     * [filter]가 `ORIGINAL`이면 공식 계정 소유로 좁힌다(KNK-1398).
      * 소유자 조건은 커서에 싣지 않으므로 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
      *
      * 격리 수준이 REPEATABLE_READ인 이유는 **정렬 집계와 커서값의 출처를 같은 스냅샷으로 묶기** 위해서다.
@@ -199,26 +199,6 @@ class StoryService(
 
     private fun instantOfEpochNanos(nanos: Long): Instant =
         Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L).toLong())
-
-    /**
-     * 마냑 오리지널 스토리 목록(KNK-975). 공식 계정 소유의 공개(PUBLISHED∧PUBLIC) 스토리를 등록순으로 반환한다.
-     * 공식 계정 미설정 환경은 빈 목록이다.
-     */
-    @Deprecated(
-        "GET /stories?filter=original로 대체됐다. 클라이언트 전환 후 KNK-1400에서 제거한다.",
-        ReplaceWith("getPublicStories(StoryListFilter.ORIGINAL, StoryListSort.LATEST, limit, null)"),
-    )
-    @Transactional(readOnly = true)
-    fun getOriginalStories(): List<StorySummaryResponse> {
-        val officialId = officialStoryAccount.officialUserId() ?: return emptyList()
-        return storyRepository
-            .findByUserIdAndStatusAndVisibilityAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(
-                officialId,
-                StoryStatus.PUBLISHED,
-                StoryVisibility.PUBLIC,
-            )
-            .toSummaryResponses(officialId)
-    }
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {
