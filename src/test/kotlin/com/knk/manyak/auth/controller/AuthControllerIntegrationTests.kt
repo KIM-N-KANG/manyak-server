@@ -144,13 +144,19 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
-    fun `핸드오프 필수 코드 헤더 누락은 400 공통 JSON이다`() {
-        for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
-            restTestClient.get().uri(path).exchange().expectStatus().isBadRequest.expectBody()
-                .jsonPath("$.status").isEqualTo(400)
-                .jsonPath("$.code").isEqualTo("BAD_REQUEST")
-                .jsonPath("$.path").isEqualTo(path)
-                .jsonPath("$.details").isEmpty()
+    fun `삭제된 핸드오프 세 경로는 인증 없으면 401이고 유효 인증이면 404다`() {
+        val access = jwtTokenProvider.issueAccessToken(saveUser().publicId)
+        for ((method, path) in listOf(
+            org.springframework.http.HttpMethod.POST to "/api/v1/auth/handoffs",
+            org.springframework.http.HttpMethod.GET to "/api/v1/auth/handoffs",
+            org.springframework.http.HttpMethod.GET to "/api/v1/auth/handoffs/status",
+        )) {
+            for (token in listOf(null, "invalid-token", access)) {
+                val request = restTestClient.method(method).uri(path)
+                if (token != null) request.header("Authorization", "Bearer $token")
+                request.contentType(MediaType.APPLICATION_JSON).body("""{"callbackPath":"/","sourceApp":"kakaotalk"}""")
+                    .exchange().expectStatus().isEqualTo(if (token == access) 404 else 401)
+            }
         }
     }
 

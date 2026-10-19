@@ -38,7 +38,6 @@ class SentryMdcEventProcessorTests {
         "/api/v1/auth/social/google", "/api/v1/auth/social/kakao", "/api/v1/auth/social/complete",
         "/api/v1/auth/login/google", "/api/v1/auth/login/kakao",
         "/api/v1/auth/token/refresh", "/api/v1/auth/logout",
-        "/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status",
         "/api/v1/auth/links/reauth", "/api/v1/auth/links/google", "/api/v1/auth/links/kakao",
         "/api/v1/auth/social/unknown", "/api/v1/auth/links/unknown",
         "/api/v1/auth/links/KaKaO",
@@ -52,10 +51,10 @@ class SentryMdcEventProcessorTests {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.NullSource
     @org.junit.jupiter.params.provider.ValueSource(strings = ["GET", "POST"])
-    fun `핸드오프는 GET과 메서드 누락만 정제하고 POST는 event와 transaction 모두 보존한다`(method: String?) {
+    fun `삭제된 핸드오프 경로는 메서드와 무관하게 기본 수집한다`(method: String?) {
         for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
             for (url in listOf(path, "https://api.example.com$path")) {
-                assertRequestPolicy(url, scrub = method == null || method == "GET", method = method)
+                assertRequestPolicy(url, scrub = false, method = method)
             }
         }
     }

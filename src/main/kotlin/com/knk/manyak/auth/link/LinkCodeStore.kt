@@ -13,8 +13,8 @@ import java.util.Base64
  * 계정 연동용 일회용 링크 코드 저장소(KNK-739).
  *
  * 재인증([AccountLinkService.reauthenticate])이 발급하고 연동이 소비한다. 저장은 Redis `link_auth:{codeHash}`
- * 한 키이며 값은 소유자 `userId`다. [LoginHandoffService][com.knk.manyak.auth.handoff.LoginHandoffService]의
- * 보관 패턴을 그대로 따른다 — TTL 만료가 곧 소멸이라 청소 배치가 없고, **키는 코드 원문이 아니라 SHA-256 해시**라
+ * 한 키이며 값은 소유자 `userId`다. TTL 만료가 곧 소멸이라 청소 배치가 없고,
+ * **키는 코드 원문이 아니라 SHA-256 해시**라
  * 저장소가 유출돼도 코드 원문은 드러나지 않는다.
  *
  * TTL은 짧다(기본 5분). 재인증 직후 소셜 팝업 한 번을 더 도는 시간만 살아 있으면 되고, 길수록 탈취된 코드의
@@ -45,13 +45,13 @@ class LinkCodeStore(
 
     /**
      * 코드를 소비한다(1회용). **연동에 성공했을 때만 호출한다** — 403·409로 실패한 시도까지 소비하면
-     * 사용자가 실수 한 번에 재인증을 처음부터 다시 해야 한다(핸드오프의 "실패 시 미소비 유지"와 같은 결).
+     * 사용자가 실수 한 번에 재인증을 처음부터 다시 해야 한다.
      */
     fun consume(code: String) {
         redisTemplate.delete(keyFor(code))
     }
 
-    /** 256bit 무작위 코드를 base64url로 만든다(핸드오프 코드와 동일 규격). */
+    /** 256bit 무작위 코드를 base64url로 만든다. */
     private fun generateCode(): String {
         val bytes = ByteArray(CODE_BYTES)
         secureRandom.nextBytes(bytes)

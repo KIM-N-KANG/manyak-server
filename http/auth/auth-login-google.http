@@ -147,3 +147,17 @@ Content-Type: application/json
 Accept: application/json
 
 { "idToken": "PASTE_A_GOOGLE_ID_TOKEN_TO_TRY" }
+
+### 호환성: handoffCode는 타입과 무관하게 무시한다(ACCOUNT 4-2-1)
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+X-Manyak-Device-Id: login-device
+
+{"idToken":"{{googleIdToken}}","handoffCode":{"ignored":true}}
+
+> {%
+    client.test("핸드오프 필드가 있어도 로그인 성공", () => {
+        client.assert(response.status === 200, `기대=200 실제=${response.status}`);
+        client.assert(!!response.body.accessToken, "접근 토큰 누락");
+    });
+%}

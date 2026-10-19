@@ -325,7 +325,7 @@ class AccountLinkIntegrationTests {
 
     @Test
     fun `실패한 연동의 링크 코드는 남아 있어 재시도할 수 있다`() {
-        // 재인증을 다시 요구하지 않는다(핸드오프의 "실패 시 미소비 유지"와 같은 결).
+        // 재인증을 다시 요구하지 않는다.
         val access = login("google", GOOGLE_SUB)
         val code = issueLinkCode(access, idToken = GOOGLE_SUB)
 

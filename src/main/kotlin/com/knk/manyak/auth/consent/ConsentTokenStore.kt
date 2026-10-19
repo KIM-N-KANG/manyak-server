@@ -18,7 +18,6 @@ data class PendingSocialConsent(
     val email: String?,
     val userId: Long?,
     val deviceId: String?,
-    val handoffCode: String?,
 )
 
 data class IssuedConsentToken(val code: String, val expiresAt: Instant)

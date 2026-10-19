@@ -4,8 +4,6 @@ import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.handoff.LoginHandoff
-import com.knk.manyak.auth.handoff.LoginHandoffService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
@@ -15,7 +13,6 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -53,20 +50,16 @@ class SocialLoginService(
     private val authTokenService: AuthTokenService,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
-    private val loginHandoffService: LoginHandoffService,
     private val userRepository: UserRepository,
     private val serverAnalytics: ServerAnalytics,
     // 가입 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
 ) {
 
-    private val logger = LoggerFactory.getLogger(javaClass)
-
     fun login(
         provider: SocialProvider,
         idToken: String,
         deviceId: String? = null,
-        handoffCode: String? = null,
     ): TokenResponse = SocialAuthPrivacyFilter.safely {
         // 토큰 검증 실패는 로그인 처리 실패로 분석 이벤트를 남긴다(스펙 §6-4-2-8·§6-6-7): 서명·만료·audience 실패는
         // validation, provider 연결·timeout은 network. 아직 회원이 없어 게스트 식별로 발행된다.
@@ -77,16 +70,9 @@ class SocialLoginService(
             // 제공자별 기존 상태·문구는 유지하되 원문의 토큰·클레임이 전역 4xx 로그에 남지 않게 한다.
             throw ResponseStatusException(e.statusCode, e.reason)
         }
-        // 인앱 브라우저에서 넘어온 로그인이면 핸드오프에 보관된 원본 디바이스 ID가 요청 헤더보다 우선한다(스펙 §4-3-5).
-        // 외부 브라우저의 새 디바이스 ID로 시드하면 인앱에서 쓴 게스트 사용량이 리셋돼 파밍 우회로가 열린다.
-        // 무효·만료 코드는 예외가 아니라 null이므로 헤더 폴백으로 로그인은 정상 진행한다.
-        val handoff = handoffCode?.let { loginHandoffService.find(it) }
-        // 소비된 핸드오프는 디바이스 ID를 비워 보관하므로(보관 규칙), 빈 값은 "헤더 없음"이 아니라 폴백 대상이다.
-        // 빈 문자열을 그대로 넘기면 시드가 우회 시도로 오인해 소진 시드를 비가역 확정한다(§4-3-7).
-        val effectiveDeviceId = handoff?.deviceId?.takeIf { it.isNotBlank() } ?: deviceId
         try {
             val (user, isNewUser) = findOrCreateUser(provider, info)
-            finishLogin(provider, user, isNewUser, effectiveDeviceId, handoffCode, handoff)
+            finishLogin(provider, user, isNewUser, deviceId)
         } catch (e: Exception) {
             // 검증 통과 후 사용자 저장·보상·토큰 발급 중 실패는 서버 내부 처리 실패로 분류한다(스펙 §6-6-7).
             serverAnalytics.socialLoginFailed(provider, AnalyticsErrorType.SERVER)
@@ -109,8 +95,6 @@ class SocialLoginService(
         user: User,
         isNewUser: Boolean,
         effectiveDeviceId: String?,
-        handoffCode: String?,
-        handoff: LoginHandoff?,
         beforeSuccess: () -> Unit = {},
     ): TokenResponse {
         // 게스트 시절 디바이스 체험 사용량을 회원 계정으로 1회 스냅샷한다(스펙 §4-3-7 B13 — 게스트로 소진 후 가입해
@@ -121,21 +105,11 @@ class SocialLoginService(
         // 이전 계정이 회원 체험을 이미 썼는지 알 방법이 없고, 안 쓴 경우까지 부여하면 탈퇴·재가입 반복으로
         // 무료 스토리 1편 + 채팅 5턴을 무한히 얻는다. 과소 부여가 파밍 허용보다 안전하다.
         val snapshotDeviceId = effectiveDeviceId.takeIf { user.rejoinedAt == null }
-        val seeded = user.memberTrialSeededAt != null ||
-            guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId).also { snapshotted ->
-                if (snapshotted) userRepository.markMemberTrialSeeded(user.id, Instant.now())
-            }
+        if (user.memberTrialSeededAt == null && guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId)) {
+            userRepository.markMemberTrialSeeded(user.id, Instant.now())
+        }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
         rewardSignup(user)
-        // 핸드오프 소비(= 게스트 데이터 이관)는 이 호출이 겸한다. 별도 호출로 미루면 "로그인 → 이관 → 복귀"
-        // 순서 경쟁이 생기고, 시드는 이미 확정된 뒤라 되돌릴 수 없다(스펙 §4-3-5). 이미 소비된 코드는 멱등 no-op.
-        //
-        // 단, 시드가 실패했으면(Redis 장애 → 미시드로 남아 다음 로그인이 재시도) 소비하지 않는다.
-        // 소비는 보관 규칙상 원본 디바이스 ID를 지우므로, 여기서 소비해 버리면 재시도가 인앱 디바이스를
-        // 잃고 외부 브라우저 디바이스로 시드해 게스트 사용량이 리셋되거나 소진으로 잘못 확정된다.
-        if (handoff != null && handoffCode != null && seeded) {
-            consumeHandoffQuietly(handoffCode, handoff, user.id)
-        }
         // 신규 가입 여부를 응답에 실어 프론트엔드 온보딩(초대 코드 입력 스텝, KNK-567)이 판정하게 한다.
         val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
         // 완료 경로는 코드 소비까지 성공해야 성공 요청으로 집계한다. 기존 로그인은 추가 작업이 없다.
@@ -185,24 +159,6 @@ class SocialLoginService(
             // 등록은 독립 트랜잭션이라 실패분이 이미 롤백됐고, 발급기가 새 닉네임을 뽑으므로 재시도가 같은
             // 값으로 다시 깨지지 않는다. 한 번만 더 시도하고, 그래도 실패하면 원 예외가 그대로 드러난다.
             registrar.createUserAndAccount(provider, info, Instant.now()) to true
-        }
-    }
-
-    /**
-     * 핸드오프를 소비하되 **실패가 로그인을 막지 않게** 한다(스펙 §4-3-5 — 예외로 실패하면 코드는 미소비로 남아
-     * 만료 전까지 재시도할 수 있다).
-     *
-     * 이관은 로그인의 부가 작업이지 전제가 아니다. 정지 계정의 이관은 403인데(§4-5 B20) 로그인 자체는 허용되므로,
-     * 소비 예외를 그대로 전파하면 정지 안내 화면에 도달할 로그인마저 실패한다. 이관 트랜잭션은
-     * [com.knk.manyak.migration.service.GuestDataMigrationService] 안에서 닫히므로, 여기서 삼켜도 시도 횟수는
-     * 롤백돼 소모되지 않는다.
-     */
-    private fun consumeHandoffQuietly(handoffCode: String, handoff: LoginHandoff, userId: Long) {
-        try {
-            loginHandoffService.consume(handoffCode, handoff, userId)
-        } catch (ex: Exception) {
-            // 코드 원문은 남기지 않는다(로그 금지 규칙) — 상관관계는 분석용 handoffId로 잇는다.
-            logger.warn("핸드오프 소비 실패 — 로그인은 계속, 코드는 미소비로 유지: handoffId={}", handoff.handoffId, ex)
         }
     }
 

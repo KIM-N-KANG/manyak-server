@@ -78,7 +78,7 @@ class AuthController(
         @Valid @RequestBody request: SocialLoginRequest,
         // 신규 가입 시 디바이스 체험 사용량을 계정으로 스냅샷하는 데 쓴다(스펙 §4-3-7 B13). 게스트 요청과 같은 헤더이며, 없으면 스냅샷 생략.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
-    ): TokenResponse = socialLoginService.login(SocialProvider.GOOGLE, request.idToken, deviceId, request.handoffCode)
+    ): TokenResponse = socialLoginService.login(SocialProvider.GOOGLE, request.idToken, deviceId)
 
     @Operation(
         summary = "Kakao 로그인",
@@ -110,7 +110,7 @@ class AuthController(
     fun loginWithKakao(
         @Valid @RequestBody request: SocialLoginRequest,
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
-    ): TokenResponse = socialLoginService.login(SocialProvider.KAKAO, request.idToken, deviceId, request.handoffCode)
+    ): TokenResponse = socialLoginService.login(SocialProvider.KAKAO, request.idToken, deviceId)
 
     @Operation(
         summary = "현재 로그인 사용자 조회",
