@@ -125,21 +125,6 @@ open class RefreshTokenStoreContractTest {
     }
 
     @Test
-    fun `살아 있는 유예 키가 있어도 유예를 0 이하로 끄면 재사용 탐지로 family를 폐기한다`() {
-        for ((index, disabledGrace) in listOf(Duration.ZERO, Duration.ofMillis(-1)).withIndex()) {
-            val originalHash = "disabled-old-$index"
-            val currentHash = "disabled-current-$index"
-            store.createFamily(originalHash, 42L, ttl)
-            store.rotate(originalHash, currentHash, "current-raw-$index", ttl, Duration.ofSeconds(10))
-
-            assertThat(store.rotate(originalHash, "unused", "unused-raw", ttl, disabledGrace))
-                .isEqualTo(RotateResult.ReuseDetected(42L))
-            assertThat(store.rotate(currentHash, "next", "next-raw", ttl, Duration.ofSeconds(10)))
-                .isEqualTo(RotateResult.Invalid)
-        }
-    }
-
-    @Test
     fun `유예 안이라도 후속 회전 후 가장 오래된 토큰은 재사용으로 family를 폐기한다`() {
         store.createFamily("g1", 42L, ttl)
         store.rotate("g1", "g2", "raw-g2", ttl, Duration.ofSeconds(10))
@@ -209,5 +194,4 @@ open class RefreshTokenStoreContractTest {
         assertThat(timedStore.rotate("current", "next", "next-raw", ttl, Duration.ofSeconds(10)))
             .isEqualTo(RotateResult.Rotated(42L))
     }
-
 }

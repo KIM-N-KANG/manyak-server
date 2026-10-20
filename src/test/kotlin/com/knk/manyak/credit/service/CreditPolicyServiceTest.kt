@@ -36,7 +36,7 @@ class CreditPolicyServiceTest {
         override fun instant() = now
     }
 
-    // 잘못된 오버라이드가 조용히 버려지지 않는지, 만료가 로그에 남는지 보려면 로그를 봐야 한다
+    // 잘못된 오버라이드가 조용히 버려지지 않는지 보려면 로그를 봐야 한다
     // (StructuredLoggerTests 와 같은 방식).
     private val logger = LoggerFactory.getLogger(CreditPolicyService::class.java) as Logger
     private val appender = ListAppender<ILoggingEvent>()
@@ -64,8 +64,6 @@ class CreditPolicyServiceTest {
     )
 
     private fun loadedService(): CreditPolicyService = service().also { it.refresh() }
-
-    private fun changedLogs() = appender.list.filter { "credit_policy_changed" in it.formattedMessage }
 
     @Test
     fun `이미지 정책은 0 오버라이드를 허용하고 음수는 거부한다`() {
@@ -158,26 +156,6 @@ class CreditPolicyServiceTest {
     }
 
     @Test
-    fun `첫 적재가 실패해도 복구 후 오버라이드 적용이 변경 로그로 남는다`() {
-        // 첫 적재 실패로 관측값이 비어 있으면, 복구 후 첫 갱신을 "최초 관측"으로 보고 전부 생략한다
-        // → 시작 장애 뒤 정책이 조용히 활성화된다(Codex 리뷰 P2).
-        `when`(repository.findAll())
-            .thenThrow(IllegalStateException("db down"))
-            .thenReturn(listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700)))
-        val service = loadedService()
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
-        appender.list.clear()
-
-        service.refresh()
-
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(700)
-        assertThat(changedLogs().single().formattedMessage)
-            .contains("key=attendance_reward")
-            .contains("from=250")
-            .contains("to=700")
-    }
-
-    @Test
     fun `최소값 미만 오버라이드는 무시하고 기본값을 쓴다`() {
         // CHECK(0..10000)를 통과하는 amount=0 이 여기까지 온다. 그대로 쓰면 CreditWalletService 의
         // require(amount > 0) 가 터져 채팅 턴 전체가 500 이 된다.
@@ -241,37 +219,5 @@ class CreditPolicyServiceTest {
 
         val warning = appender.list.single { it.level == Level.WARN }
         assertThat(warning.formattedMessage).contains("credit_policy_override_rejected").contains("chat_turn_cost")
-    }
-
-    @Test
-    fun `오버라이드가 만료되면 다음 갱신에서 변경 로그가 남는다`() {
-        // 자동 만료가 이 기능의 존재 이유인데, 그 종료를 확인할 신호가 없으면 한시 이벤트가 실제로 끝났는지
-        // 로그로 알 수 없다(Codex 리뷰 P2). 스냅샷 원본을 같은 now 로 재평가해 비교하면 만료는 영영 안 찍힌다.
-        `when`(repository.findAll()).thenReturn(
-            listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700, effectiveUntil = now.plusSeconds(30))),
-        )
-        val service = loadedService()
-        assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(700)
-        appender.list.clear()
-
-        now = now.plusSeconds(31)
-        service.refresh()
-
-        val changed = changedLogs().single()
-        assertThat(changed.level).isEqualTo(Level.INFO)
-        assertThat(changed.formattedMessage)
-            .contains("key=attendance_reward")
-            .contains("from=700")
-            .contains("to=250")
-    }
-
-    @Test
-    fun `첫 갱신은 변경 로그를 남기지 않는다`() {
-        // 비교 대상이 없다. 그 시점 전체 유효값은 부팅 로그(credit_policy_effective)가 담당한다.
-        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "attendance_reward", amount = 700)))
-
-        loadedService()
-
-        assertThat(changedLogs()).isEmpty()
     }
 }

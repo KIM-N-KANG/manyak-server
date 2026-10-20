@@ -21,7 +21,7 @@ data class UserConsentResponse(
 data class UserConsentRequest(
     @field:Schema(description = "수락한 이용약관 버전", example = "v1.4")
     val terms: String? = null,
-    @field:Schema(description = "수락한 개인정보 처리방침 버전", example = "v1.7")
+    @field:Schema(description = "수락한 개인정보 처리방침 버전", example = "v1.8")
     val privacy: String? = null,
     @field:Schema(description = "만 14세 이상 확인 버전(1 고정)", example = "1")
     val age14: String? = null,

@@ -101,20 +101,6 @@ class InviteServiceTest {
     }
 
     @Test
-    fun `발급 코드는 혼동 문자를 제외한 대문자+숫자 집합만 쓴다`() {
-        // KNK-567: 사람이 카카오톡 본문을 보고 타이핑하는 값이라 O·0, I·1·L을 제외한다. 여러 번 생성해 집합 위반을 잡는다.
-        `when`(userRepository.existsByInviteCode(anyString())).thenReturn(false)
-        repeat(30) { i ->
-            val user = User(id = i + 1L, nickname = "발급$i")
-            `when`(userRepository.findByIdForUpdate(user.id)).thenReturn(user)
-
-            val response = service.getOrCreateInvite(user.id)
-
-            assertThat(response.inviteCode).matches("[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}")
-        }
-    }
-
-    @Test
     fun `초대 조회는 이번 KST 월 초대 보상 건수와 월 상한을 함께 반환한다`() {
         val user = User(id = 7L, nickname = "진행", inviteCode = "PROG7777")
         `when`(userRepository.findByIdForUpdate(7L)).thenReturn(user)

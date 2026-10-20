@@ -86,8 +86,6 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/{turnId:\\d+}/choices")).permitAll()
                     // 로어북 카탈로그는 인증 없이 조회하는 공개 목록이다(일반 제작 참조용). {storyId} 매처보다 앞에 둬 명시적으로 허용한다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks")).permitAll()
-                    // 오리지널 스토리 목록도 인증 없는 공개 목록이다(KNK-975). {storyId} 매처에 기대지 않고 명시적으로 허용한다.
-                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/originals")).permitAll()
                     // 공개 스토리 목록(KNK-149)도 인증 없는 공개 목록이다. 요청자 신원을 쓰지 않으며,
                     // 정확 경로라 하위 {storyId} 매처와 겹치지 않는다.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories")).permitAll()
@@ -208,11 +206,6 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/login/kakao"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/token/refresh"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/logout"),
-            // 로그인 핸드오프(§4-3-5)는 셋 다 인증이 없다 — 생성은 게스트(인앱), 확인·상태 조회는 아직 로그인 전인
-            // 외부 브라우저·인앱이다. 코드는 URL이 아니라 X-Manyak-Handoff-Code 헤더로만 받는다.
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/handoffs"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs"),
-            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/auth/handoffs/status"),
         )
 
         // optional 인증 도메인 경로. authorizeHttpRequests의 permitAll 매처와 동일한 method·path로 맞춘다.

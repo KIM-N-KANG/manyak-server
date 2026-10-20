@@ -474,7 +474,7 @@ class PublicStoryListControllerIntegrationTests {
 
 /**
  * 공식 계정이 설정된 환경의 `filter=original` 검증(KNK-1398).
- * 폐기 예정인 `GET /stories/originals`를 대체하는 경로라 소유자 필터가 정확해야 한다.
+ * `filter=original`은 공식 계정 소유의 공개 스토리만 반환해야 한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -513,6 +513,10 @@ class PublicStoryListOriginalFilterIntegrationTests {
         val newer = saveStory(official, "오리지널 나중", Instant.parse("2026-08-02T00:00:00Z"))
         saveStory(other, "남의 공개 스토리", Instant.parse("2026-08-03T00:00:00Z"))
 
+        storyRepository.save(Story(userId = official.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
+        storyRepository.save(Story(userId = official.id, title = "초안", status = StoryStatus.DRAFT))
+        storyRepository.save(Story(userId = official.id, title = "삭제됨", deletedAt = Instant.now()))
+
         clearInvocations(userRepository)
         restTestClient.get().uri("/api/v1/stories?filter=original&sort=latest").exchange()
             .expectStatus().isOk
@@ -520,6 +524,7 @@ class PublicStoryListOriginalFilterIntegrationTests {
             .jsonPath("$.items.length()").isEqualTo(2)
             .jsonPath("$.items[0].id").isEqualTo(newer.publicId.toString())
             .jsonPath("$.items[1].id").isEqualTo(older.publicId.toString())
+            .jsonPath("$.items[0].author.nickname").isEqualTo("마냑")
             .jsonPath("$.items[0].isOriginal").isEqualTo(true)
             .jsonPath("$.items[1].isOriginal").isEqualTo(true)
         verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
@@ -567,6 +572,19 @@ class PublicStoryListOriginalFilterIntegrationTests {
             .jsonPath("$.items[0].original").doesNotExist()
             .jsonPath("$.items[1].original").doesNotExist()
         verify(userRepository).findByPublicId(OFFICIAL_PUBLIC_ID)
+    }
+
+    @Test
+    fun `공식 계정 스토리가 없으면 빈 페이지를 반환한다`() {
+        saveOfficialUser()
+        val other = userRepository.save(User(nickname = "다른유저"))
+        saveStory(other, "남의 공개 스토리", Instant.now())
+
+        restTestClient.get().uri("/api/v1/stories?filter=original").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+            .jsonPath("$.nextCursor").doesNotExist()
     }
 
     @Test

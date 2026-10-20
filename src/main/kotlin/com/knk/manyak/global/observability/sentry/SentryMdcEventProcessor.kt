@@ -48,9 +48,7 @@ class SentryMdcEventProcessor : EventProcessor {
         request.headers = request.headers?.filterKeys { !it.equals("X-Manyak-Internal-Secret", ignoreCase = true) }
         val url = request.url ?: return
         val path = try { URI(url).path } catch (_: URISyntaxException) { return } ?: return
-        // 핸드오프 생성 POST는 기본 수집한다. 메서드가 누락된 SDK 요청은 안전하게 정제한다.
-        val isHandoffRead = path in HANDOFF_READ_PATHS && (request.method == null || request.method == "GET")
-        if (!isHandoffRead && path !in AUTH_REQUEST_PATHS && !PROVIDER_AUTH_PATH.matches(path)) return
+        if (path !in AUTH_REQUEST_PATHS && !PROVIDER_AUTH_PATH.matches(path)) return
         // custom 헤더는 SDK의 기본 PII 제거 목록에 의존하지 않는다.
         request.data = null
         request.queryString = null
@@ -71,10 +69,6 @@ class SentryMdcEventProcessor : EventProcessor {
             "/api/v1/auth/login/kakao",
             "/api/v1/auth/token/refresh",
             "/api/v1/auth/logout",
-        )
-        val HANDOFF_READ_PATHS = setOf(
-            "/api/v1/auth/handoffs",
-            "/api/v1/auth/handoffs/status",
         )
     }
 }

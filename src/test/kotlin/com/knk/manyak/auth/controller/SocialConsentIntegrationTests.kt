@@ -2,8 +2,6 @@ package com.knk.manyak.auth.controller
 
 import com.knk.manyak.auth.consent.ConsentTokenStore
 import com.knk.manyak.auth.consent.SocialConsentService
-import com.knk.manyak.auth.handoff.LoginHandoffService
-import com.knk.manyak.auth.handoff.LoginHandoffCreateRequest
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.user.consent.UserConsentRequest
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
@@ -48,7 +46,6 @@ class SocialConsentIntegrationTests {
     @MockitoSpyBean private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
     @MockitoSpyBean private lateinit var codes: ConsentTokenStore
     @Autowired private lateinit var service: SocialConsentService
-    @Autowired private lateinit var handoffs: LoginHandoffService
     @Autowired private lateinit var consentService: com.knk.manyak.user.consent.UserConsentService
     @Autowired private lateinit var trials: GuestTrialLimitService
     private val mapper = ObjectMapper()
@@ -201,7 +198,7 @@ class SocialConsentIntegrationTests {
         val user = users.findAll().single().apply { status = UserStatus.DELETED }
         users.saveAndFlush(user)
         val error = org.assertj.core.api.Assertions.catchThrowable {
-            consentService.recordForAuthentication(user.id, UserConsentRequest("v1.4", "v1.7", "1"))
+            consentService.recordForAuthentication(user.id, UserConsentRequest("v1.4", "v1.8", "1"))
         }
         assertThat(error).isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThat((error as org.springframework.web.server.ResponseStatusException).statusCode.value()).isEqualTo(401)
@@ -377,7 +374,7 @@ class SocialConsentIntegrationTests {
         val pool = Executors.newFixedThreadPool(2)
         try {
             val futures = (1..2).map { pool.submit<com.knk.manyak.auth.dto.TokenResponse> {
-                service.complete(code, UserConsentRequest("v1.4", "v1.7", "1"), null)
+                service.complete(code, UserConsentRequest("v1.4", "v1.8", "1"), null)
             } }
             val results = futures.map { it.get(20, TimeUnit.SECONDS) }
             assertThat(results.count { it.isNewUser }).isEqualTo(1)
@@ -394,20 +391,46 @@ class SocialConsentIntegrationTests {
         complete(code).expectStatus().isUnauthorized
     }
 
-    @Test fun `핸드오프 원본 디바이스는 대기 중 만료해도 새 헤더보다 우선한다`() {
-        trials.reserve("original-device", GuestTrialLimitService.Counter.CHAT_TURN)
-        val handoff = handoffs.create(LoginHandoffCreateRequest(callbackPath = "/", sourceApp = "kakaotalk"), "original-device")
-        val pending = json(client.post().uri("/api/v1/auth/social/google").header("X-Manyak-Device-Id", "external-device")
-            .contentType(MediaType.APPLICATION_JSON).body("""{"idToken":"handoff-user","handoffCode":"${handoff.handoffCode}"}""")
-            .exchange().expectStatus().isOk)
-        val code = pending["consentToken"].asText()
-        assertThat(codes.find(code)!!.deviceId).isEqualTo("original-device")
-        assertThat(handoffs.find(handoff.handoffCode)!!.deviceId).isEqualTo("original-device")
-        redis.keys("login_handoff:*").forEach { redis.expire(it, java.time.Duration.ZERO) }
-        client.post().uri("/api/v1/auth/social/complete").header("X-Manyak-Consent-Token", code)
-            .header("X-Manyak-Device-Id", "completion-device").contentType(MediaType.APPLICATION_JSON).body(ALL)
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["google", "kakao"])
+    fun `소셜 인증과 호환 로그인은 handoffCode의 값과 타입을 무시한다`(provider: String) {
+        for ((index, value) in listOf("null", "\"\"", "\"expired-code\"", "{}", "[]", "123", "true").withIndex()) {
+            val sub = "ignored-$provider-$index"
+            val body = """{"idToken":"$sub","handoffCode":$value}"""
+            val pending = json(client.post().uri("/api/v1/auth/social/$provider")
+                .header("X-Manyak-Device-Id", "start-$sub")
+                .contentType(MediaType.APPLICATION_JSON).body(body).exchange().expectStatus().isOk)
+            val code = pending["consentToken"].asText()
+            assertThat(codes.find(code)!!.deviceId).isEqualTo("start-$sub")
+            val stored = redis.keys("social_consent:*").map { redis.opsForValue().get(it) }.joinToString()
+            assertThat(stored).doesNotContain("handoffCode")
+            complete(code, ALL.dropLast(1) + """, "handoffCode":$value}""").expectStatus().isOk
+            client.post().uri("/api/v1/auth/social/$provider")
+                .contentType(MediaType.APPLICATION_JSON).body(body).exchange().expectStatus().isOk
+                .expectBody().jsonPath("$.status").isEqualTo("COMPLETED")
+            client.post().uri("/api/v1/auth/login/$provider")
+                .contentType(MediaType.APPLICATION_JSON).body(body).exchange().expectStatus().isOk
+                .expectBody().jsonPath("$.accessToken").isNotEmpty()
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `동의 완료는 대기 기기 식별자를 우선하고 없으면 완료 헤더를 쓴다`(storedDevice: Boolean) {
+        val original = "original-${java.util.UUID.randomUUID()}"
+        val completion = "completion-${java.util.UUID.randomUUID()}"
+        trials.reserve(original, GuestTrialLimitService.Counter.CHAT_TURN)
+        repeat(2) { trials.reserve(completion, GuestTrialLimitService.Counter.CHAT_TURN) }
+        val request = client.post().uri("/api/v1/auth/social/google")
+        if (storedDevice) request.header("X-Manyak-Device-Id", original)
+        val pending = json(request.contentType(MediaType.APPLICATION_JSON)
+            .body("""{"idToken":"device-user"}""").exchange().expectStatus().isOk)
+        client.post().uri("/api/v1/auth/social/complete")
+            .header("X-Manyak-Consent-Token", pending["consentToken"].asText())
+            .header("X-Manyak-Device-Id", completion).contentType(MediaType.APPLICATION_JSON).body(ALL)
             .exchange().expectStatus().isOk
-        assertThat(trials.usage(users.findAll().single().id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
+        assertThat(trials.usage(users.findAll().single().id, null, GuestTrialLimitService.Counter.CHAT_TURN).used)
+            .isEqualTo(if (storedDevice) 1 else 2)
     }
 
     @Test fun `Redis 대기 코드는 해시 키와 TTL만 남기고 ID 토큰 원문은 저장하지 않는다`() {
@@ -429,5 +452,5 @@ class SocialConsentIntegrationTests {
         assertThat(complete["requestBody"].toString()).contains("v1.4", "age14")
     }
 
-    companion object { private const val ALL = """{"terms":"v1.4","privacy":"v1.7","age14":"1"}""" }
+    companion object { private const val ALL = """{"terms":"v1.4","privacy":"v1.8","age14":"1"}""" }
 }

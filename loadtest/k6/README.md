@@ -12,12 +12,12 @@ cd loadtest/k6
 # 실제 loadtest RDS endpoint를 두 변수에 지정합니다. PGUSER/PGPASSWORD는 안전한 환경 주입을 사용합니다.
 export PGHOST=YOUR_LOADTEST_RDS_ENDPOINT
 export EXPECTED_LOADTEST_HOST="$PGHOST" PGDATABASE=manyak LOADTEST_SEED_CONFIRM=yes
-sh seed-db.sh -v user_count=500 -v credits=1000000 -v terms_version=v1.4 -v privacy_version=v1.7
+sh seed-db.sh -v user_count=500 -v credits=1000000 -v terms_version=v1.4 -v privacy_version=v1.8
 ```
 
 `seed-db.sh`는 host 완전 일치와 `manyak-loadtest-pg.*.rds.amazonaws.com` 패턴, 명시 확인을 검사합니다. SQL은 정리 SQL과 같은 `manyak.loadtest_guard=manyak-loadtest-pg` 세션 가드를 검사합니다. 세션 가드는 단독으로 실제 DB 신원을 증명하지 않으므로 wrapper의 endpoint 검사도 함께 사용합니다. 로컬 DB에서 시드를 검증하려면 격리된 로컬 DB에만 세션 가드를 직접 지정하고 `psql -X -f seed.sql`을 사용합니다.
 
-회원 UUID는 `15960000-0000-4000-8000-`와 12자리 번호, 닉네임은 `k6loadtest`와 6자리 번호입니다. ACTIVE 회원과 현행 TERMS·PRIVACY·AGE14 동의를 생성합니다. 시드 변수의 문서 버전을 서버의 MANYAK_LEGAL_TERMS_VERSION·MANYAK_LEGAL_PRIVACY_VERSION과 맞춥니다. 기본은 application.yml의 v1.4·v1.7, AGE14는 코드의 `1`입니다.
+회원 UUID는 `15960000-0000-4000-8000-`와 12자리 번호, 닉네임은 `k6loadtest`와 6자리 번호입니다. ACTIVE 회원과 현행 TERMS·PRIVACY·AGE14 동의를 생성합니다. 시드 변수의 문서 버전을 서버의 MANYAK_LEGAL_TERMS_VERSION·MANYAK_LEGAL_PRIVACY_VERSION과 맞춥니다. 기본은 application.yml의 v1.4·v1.8, AGE14는 코드의 `1`입니다.
 
 V16(users), V24(wallet/transactions), V39(lots), V40(member_trial_seeded_at), V84(consents)를 기준으로 만들었습니다. access 인증은 users의 상태·동의를 확인하며 social_accounts나 refresh family를 필요로 하지 않습니다. 회원 체험 로트의 추가 자동 적립을 피하도록 member_trial_seeded_at을 채웁니다. 적립은 무기한 PURCHASE 원장과 같은 금액의 로트, 지갑 증가를 하나의 트랜잭션에서 수행합니다. 재실행은 멱등 키·ON CONFLICT로 중복을 막으며 소비한 잔액을 복구하지 않습니다. 크레딧이 부족해지면 새 복원본 또는 새 시드 설계를 사용합니다. 테스트 회원이 생성한 채팅은 실행 간 남습니다.
 

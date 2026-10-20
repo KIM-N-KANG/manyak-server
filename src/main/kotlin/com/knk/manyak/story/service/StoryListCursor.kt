@@ -32,7 +32,7 @@ enum class StoryListSort(val parameter: String, val prefix: String) {
 /**
  * 공개 스토리 목록 필터(KNK-1398). [ORIGINAL]은 마냑 공식 계정(`manyak.official-user-public-id`) 소유만 싣는다.
  *
- * 폐기 예정인 `GET /stories/originals`를 대체하는 경로다. 소유자 조건은 커서에 싣지 않는다 —
+ * 소유자 조건은 커서에 싣지 않는다 —
  * 커서는 정렬 위치만 담고, 클라이언트가 다음 페이지에 같은 `filter`를 다시 보낸다.
  */
 enum class StoryListFilter(val parameter: String) {

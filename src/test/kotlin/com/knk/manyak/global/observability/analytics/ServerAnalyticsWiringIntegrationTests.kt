@@ -359,7 +359,7 @@ class ServerAnalyticsWiringIntegrationTests {
             .exchange().expectStatus().isOk.expectBody(Map::class.java).returnResult().responseBody!!
         fun complete(code: String) = restTestClient.post().uri("/api/v1/auth/social/complete")
             .header("X-Manyak-Consent-Token", code).contentType(MediaType.APPLICATION_JSON)
-            .body("""{"terms":"v1.4","privacy":"v1.7","age14":"1"}""")
+            .body("""{"terms":"v1.4","privacy":"v1.8","age14":"1"}""")
             .exchange().expectStatus().isOk
         val initial = start()
         assertThat(capturingPublisher.events).isEmpty()

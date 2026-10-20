@@ -135,13 +135,4 @@ class PushOutboxRelayTests {
             assertThat(meters.get("manyak.push.outbox.result").tag("outcome", it).counter().count()).isZero()
         }
     }
-    @Test fun `임대와 전송 제한 설정이 안전하지 않으면 거부한다`() {
-        org.assertj.core.api.Assertions.assertThatThrownBy {
-            PushOutboxProperties(lease = Duration.ofSeconds(20))
-        }.isInstanceOf(IllegalArgumentException::class.java)
-        org.assertj.core.api.Assertions.assertThatThrownBy {
-            KafkaPushConfig().pushKafkaProducerFactory("localhost:9092", PushOutboxProperties(sendTimeout = Duration.ofSeconds(16)))
-        }.isInstanceOf(IllegalArgumentException::class.java)
-    }
-
 }

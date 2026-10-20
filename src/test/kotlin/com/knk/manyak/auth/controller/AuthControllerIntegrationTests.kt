@@ -9,9 +9,6 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
-import com.knk.manyak.credit.entity.CreditReason
-import com.knk.manyak.credit.service.AttendanceRewardService
-import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
 import com.nimbusds.jose.jwk.source.ImmutableSecret
 import com.nimbusds.jose.proc.SecurityContext
@@ -64,12 +61,6 @@ class AuthControllerIntegrationTests {
 
     @Autowired
     private lateinit var properties: AuthProperties
-
-    @Autowired
-    private lateinit var creditWalletService: CreditWalletService
-
-    @Autowired
-    private lateinit var attendanceRewardService: AttendanceRewardService
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -144,13 +135,19 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
-    fun `핸드오프 필수 코드 헤더 누락은 400 공통 JSON이다`() {
-        for (path in listOf("/api/v1/auth/handoffs", "/api/v1/auth/handoffs/status")) {
-            restTestClient.get().uri(path).exchange().expectStatus().isBadRequest.expectBody()
-                .jsonPath("$.status").isEqualTo(400)
-                .jsonPath("$.code").isEqualTo("BAD_REQUEST")
-                .jsonPath("$.path").isEqualTo(path)
-                .jsonPath("$.details").isEmpty()
+    fun `삭제된 핸드오프 세 경로는 인증 없으면 401이고 유효 인증이면 404다`() {
+        val access = jwtTokenProvider.issueAccessToken(saveUser().publicId)
+        for ((method, path) in listOf(
+            org.springframework.http.HttpMethod.POST to "/api/v1/auth/handoffs",
+            org.springframework.http.HttpMethod.GET to "/api/v1/auth/handoffs",
+            org.springframework.http.HttpMethod.GET to "/api/v1/auth/handoffs/status",
+        )) {
+            for (token in listOf(null, "invalid-token", access)) {
+                val request = restTestClient.method(method).uri(path)
+                if (token != null) request.header("Authorization", "Bearer $token")
+                request.contentType(MediaType.APPLICATION_JSON).body("""{"callbackPath":"/","sourceApp":"kakaotalk"}""")
+                    .exchange().expectStatus().isEqualTo(if (token == access) 404 else 401)
+            }
         }
     }
 
@@ -243,39 +240,6 @@ class AuthControllerIntegrationTests {
             // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17).
             .jsonPath("$.profileThumbnailBase64").isEqualTo("dGh1bWJuYWls")
             .jsonPath("$.status").isEqualTo("ACTIVE")
-    }
-
-    @Test
-    fun `활동이 없는 사용자의 me 응답은 creditBalance 0, attendedToday false다`() {
-        val user = saveUser()
-        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
-
-        restTestClient.get()
-            .uri("/api/v1/auth/me")
-            .header("Authorization", "Bearer $accessToken")
-            .exchange()
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.creditBalance").isEqualTo(0)
-            .jsonPath("$.attendedToday").isEqualTo(false)
-    }
-
-    @Test
-    fun `크레딧 적립과 출석 후 me 응답에 잔액과 출석 여부가 반영된다`() {
-        val user = saveUser()
-        val accessToken = jwtTokenProvider.issueAccessToken(user.publicId)
-        creditWalletService.reward(user.id, 500, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
-        attendanceRewardService.claimDailyAttendance(user.id)
-        val expectedBalance = creditWalletService.balanceOf(user.id)
-
-        restTestClient.get()
-            .uri("/api/v1/auth/me")
-            .header("Authorization", "Bearer $accessToken")
-            .exchange()
-            .expectStatus().isOk
-            .expectBody()
-            .jsonPath("$.creditBalance").isEqualTo(expectedBalance)
-            .jsonPath("$.attendedToday").isEqualTo(true)
     }
 
     @Test

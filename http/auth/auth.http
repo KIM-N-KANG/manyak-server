@@ -451,3 +451,81 @@ Authorization: Bearer invalid-token
             response.body.message === "유효하지 않은 인증입니다.", `공통 401이 아닙니다. actual=${JSON.stringify(response.body)}`);
     });
 %}
+
+### 삭제된 핸드오프 경로: POST /api/v1/auth/handoffs, 무인증 → 401
+POST {{baseUrl}}/api/v1/auth/handoffs
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 401, `기대=401 실제=${response.status}`));
+%}
+
+### 삭제된 핸드오프 경로: POST /api/v1/auth/handoffs, 유효 인증 → 404
+POST {{baseUrl}}/api/v1/auth/handoffs
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 404, `기대=404 실제=${response.status}`));
+%}
+
+### 삭제된 핸드오프 경로: GET /api/v1/auth/handoffs, 무인증 → 401
+GET {{baseUrl}}/api/v1/auth/handoffs
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 401, `기대=401 실제=${response.status}`));
+%}
+
+### 삭제된 핸드오프 경로: GET /api/v1/auth/handoffs, 유효 인증 → 404
+GET {{baseUrl}}/api/v1/auth/handoffs
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 404, `기대=404 실제=${response.status}`));
+%}
+
+### 삭제된 핸드오프 경로: GET /api/v1/auth/handoffs/status, 무인증 → 401
+GET {{baseUrl}}/api/v1/auth/handoffs/status
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 401, `기대=401 실제=${response.status}`));
+%}
+
+### 삭제된 핸드오프 경로: GET /api/v1/auth/handoffs/status, 유효 인증 → 404
+GET {{baseUrl}}/api/v1/auth/handoffs/status
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("삭제된 경로 응답", () => client.assert(response.status === 404, `기대=404 실제=${response.status}`));
+%}
+
+### 소셜 인증 호환성: 실제 Google ID 토큰을 입력하고 현행 문서를 확인한 테스트 계정으로 실행
+# 동의 대기면 다음 완료 요청을 실행한다. 완료 상태면 토큰을 바로 반환한다.
+POST {{baseUrl}}/api/v1/auth/social/google
+Content-Type: application/json
+X-Manyak-Device-Id: login-start-device
+
+{"idToken":"PUT_A_VALID_GOOGLE_ID_TOKEN_HERE","handoffCode":[]}
+
+> {%
+    client.test("핸드오프 필드 무시", () => client.assert(response.status === 200, `기대=200 실제=${response.status}`));
+    if (response.body.status === "CONSENT_REQUIRED") {
+        client.global.set("pendingConsentToken", response.body.consentToken);
+        for (const key of ["terms", "privacy", "age14"]) {
+            client.global.set("pendingVersion_" + key, response.body.consents[key].requiredVersion);
+        }
+    }
+%}
+
+### 동의 완료: 위 대기 응답이 선행 조건, 기기는 대기 보관값을 우선한다
+POST {{baseUrl}}/api/v1/auth/social/complete
+Content-Type: application/json
+X-Manyak-Consent-Token: {{pendingConsentToken}}
+X-Manyak-Device-Id: login-completion-device
+
+{"terms":"{{pendingVersion_terms}}","privacy":"{{pendingVersion_privacy}}","age14":"{{pendingVersion_age14}}","handoffCode":{}}
+
+> {%
+    client.test("핸드오프 필드가 있어도 동의 완료", () => {
+        client.assert(response.status === 200, `기대=200 실제=${response.status}`);
+        client.assert(!!response.body.accessToken, "접근 토큰 누락");
+    });
+%}

@@ -46,7 +46,7 @@ class UserConsentControllerIntegrationTests {
     fun `최초 조회는 현행 버전 세 항목 모두 미동의다`() {
         get(saveUser()).expectStatus().isOk.expectBody()
             .jsonPath("$.terms.requiredVersion").isEqualTo("v1.4")
-            .jsonPath("$.privacy.requiredVersion").isEqualTo("v1.7")
+            .jsonPath("$.privacy.requiredVersion").isEqualTo("v1.8")
             .jsonPath("$.age14.requiredVersion").isEqualTo("1")
             .jsonPath("$.terms.needsConsent").isEqualTo(true)
             .jsonPath("$.privacy.needsConsent").isEqualTo(true)
@@ -80,7 +80,7 @@ class UserConsentControllerIntegrationTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["""{"terms":"old"}""", """{"terms":"v1.4","privacy":"old"}""", """{"terms":"v1.4","privacy":"v1.7","age14":"2"}"""])
+    @ValueSource(strings = ["""{"terms":"old"}""", """{"terms":"v1.4","privacy":"old"}""", """{"terms":"v1.4","privacy":"v1.8","age14":"2"}"""])
     fun `한 항목이라도 현행 버전과 다르면 전부 거부한다`(body: String) {
         val user = saveUser()
         post(user, body).expectStatus().isBadRequest.expectBody()
@@ -158,6 +158,6 @@ class UserConsentControllerIntegrationTests {
 
     companion object {
         private const val PATH = "/api/v1/users/me/consents"
-        private const val ALL = """{"terms":"v1.4","privacy":"v1.7","age14":"1"}"""
+        private const val ALL = """{"terms":"v1.4","privacy":"v1.8","age14":"1"}"""
     }
 }
