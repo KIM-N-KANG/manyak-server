@@ -198,7 +198,7 @@ class SocialConsentIntegrationTests {
         val user = users.findAll().single().apply { status = UserStatus.DELETED }
         users.saveAndFlush(user)
         val error = org.assertj.core.api.Assertions.catchThrowable {
-            consentService.recordForAuthentication(user.id, UserConsentRequest("v1.4", "v1.7", "1"))
+            consentService.recordForAuthentication(user.id, UserConsentRequest("v1.4", "v1.8", "1"))
         }
         assertThat(error).isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThat((error as org.springframework.web.server.ResponseStatusException).statusCode.value()).isEqualTo(401)
@@ -374,7 +374,7 @@ class SocialConsentIntegrationTests {
         val pool = Executors.newFixedThreadPool(2)
         try {
             val futures = (1..2).map { pool.submit<com.knk.manyak.auth.dto.TokenResponse> {
-                service.complete(code, UserConsentRequest("v1.4", "v1.7", "1"), null)
+                service.complete(code, UserConsentRequest("v1.4", "v1.8", "1"), null)
             } }
             val results = futures.map { it.get(20, TimeUnit.SECONDS) }
             assertThat(results.count { it.isNewUser }).isEqualTo(1)
@@ -452,5 +452,5 @@ class SocialConsentIntegrationTests {
         assertThat(complete["requestBody"].toString()).contains("v1.4", "age14")
     }
 
-    companion object { private const val ALL = """{"terms":"v1.4","privacy":"v1.7","age14":"1"}""" }
+    companion object { private const val ALL = """{"terms":"v1.4","privacy":"v1.8","age14":"1"}""" }
 }

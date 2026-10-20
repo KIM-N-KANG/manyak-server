@@ -25,7 +25,7 @@ class SocialConsentServiceTest {
     @Test fun `경합 재조회 실패의 DB detail과 cause를 외부 예외에 연결하지 않는다`() {
         val pending = PendingSocialConsent(SocialProvider.GOOGLE, "private-sub", "private@example.com", null, null)
         val info = SocialUserInfo(pending.providerUserId, pending.email, null, null)
-        val request = UserConsentRequest("v1.4", "v1.7", "1")
+        val request = UserConsentRequest("v1.4", "v1.8", "1")
         `when`(codes.find("code")).thenReturn(pending)
         `when`(registrar.completeExistingAuthentication(SocialProvider.GOOGLE, info, request))
             .thenThrow(DataIntegrityViolationException("(provider, provider_user_id)=(GOOGLE, private-sub)", IllegalStateException("private@example.com")))
