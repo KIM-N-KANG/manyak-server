@@ -13,7 +13,7 @@
 \endif
 \if :{?privacy_version}
 \else
-\set privacy_version v1.7
+\set privacy_version v1.8
 \endif
 BEGIN;
 DO $$ BEGIN
