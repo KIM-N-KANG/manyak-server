@@ -19,7 +19,7 @@ class ConsentGateFilterTest {
     private val users = mock(UserRepository::class.java)
     private val consents = mock(UserConsentService::class.java)
     private val user = User(id = 7, nickname = "회원")
-    private val missing = UserConsentResponse(ConsentStatusResponse("v1.4", true), ConsentStatusResponse("v1.7", false), ConsentStatusResponse("1", false))
+    private val missing = UserConsentResponse(ConsentStatusResponse("v1.4", true), ConsentStatusResponse("v1.8", false), ConsentStatusResponse("1", false))
 
     @AfterEach fun clear() = SecurityContextHolder.clearContext()
 
