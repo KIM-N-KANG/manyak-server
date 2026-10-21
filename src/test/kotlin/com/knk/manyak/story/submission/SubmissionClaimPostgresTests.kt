@@ -104,4 +104,33 @@ class SubmissionClaimPostgresTests {
         assertEquals(listOf(held), store.claim(now.plusSeconds(61), lease, 10).map { it.id })
     }
 
+    @Test fun `관리자 해제 SQL은 실제 제약 아래 한 번만 갱신하고 다시 선점된다`() {
+        val id = insert()
+        val publicId = jdbc.queryForObject("SELECT public_id FROM story_submissions WHERE id = ?", UUID::class.java, id)!!
+        jdbc.update("UPDATE story_submissions SET held_at = ?, hold_reason = 'MODEL_CALL_FAILED', retry_count = 2, dispatched_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(now), java.sql.Timestamp.from(now), id)
+        val adminStore = AdminModerationStore(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc))
+        val ready = CountDownLatch(2)
+        val go = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val futures = (1..2).map {
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(go.await(10, TimeUnit.SECONDS))
+                    tx.execute {
+                        assertEquals(1, adminStore.lock(publicId)!!.attempt)
+                        adminStore.release(publicId, now)
+                    }!!
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            go.countDown()
+            assertEquals(listOf(0, 1), futures.map { it.get(15, TimeUnit.SECONDS) }.sorted())
+        } finally { executor.shutdownNow() }
+        val row = jdbc.queryForMap("SELECT held_at, hold_reason, next_attempt_at, dispatched_at, retry_count FROM story_submissions WHERE id = ?", id)
+        assertTrue(listOf("held_at", "hold_reason", "next_attempt_at", "dispatched_at").all { row[it] == null })
+        assertEquals(0, (row["retry_count"] as Number).toInt())
+        assertEquals(2, store.claim(now, lease, 1).single().attempt)
+    }
 }
