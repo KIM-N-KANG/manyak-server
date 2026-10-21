@@ -303,18 +303,21 @@ class SocialConsentIntegrationTests {
         logger.addAppender(appender)
         try {
             val secret = "ReviewSyntheticSecretToken"
-            for (path in listOf("social/google", "social/kakao", "social/complete", "login/google", "login/kakao")) {
+            val uris = listOf("social/google", "social/kakao", "social/complete", "login/google", "login/kakao")
+                .map { "/api/v1/auth/$it" } + "/api/v1/admin/auth/login/google"
+            for (uri in uris) {
                 appender.list.clear()
-                val uri = "/api/v1/auth/$path"
                 client.post().uri(uri).header("X-Manyak-Request-Id", "req-parse-test")
                     .contentType(MediaType.APPLICATION_JSON).body("""{"idToken":$secret}""")
-                    .exchange().expectStatus().isBadRequest
+                    .exchange().expectStatus().isBadRequest.expectBody().jsonPath("$.details").isEmpty()
                 val event = appender.list.single()
                 assertThat(event.level).isEqualTo(ch.qos.logback.classic.Level.DEBUG)
                 assertThat(event.formattedMessage).isEqualTo(
                     "Malformed request body: path=$uri, error_type=HttpMessageNotReadableException, request_id=req-parse-test",
                 )
+                assertThat(event.message).doesNotContain(secret)
                 assertThat(event.formattedMessage).doesNotContain(secret)
+                assertThat(event.argumentArray.orEmpty().toList()).noneMatch { it is Throwable }
                 assertThat(event.argumentArray.map { it.toString() }.joinToString()).doesNotContain(secret)
                 assertThat(event.throwableProxy).isNull()
             }

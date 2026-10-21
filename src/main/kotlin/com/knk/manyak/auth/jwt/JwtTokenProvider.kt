@@ -1,8 +1,14 @@
 package com.knk.manyak.auth.jwt
 
+import com.knk.manyak.admin.config.AdminTokenProperties
 import com.knk.manyak.auth.config.AuthProperties
 import com.nimbusds.jose.jwk.source.ImmutableSecret
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator
+import org.springframework.security.oauth2.core.OAuth2Error
+import org.springframework.security.oauth2.core.OAuth2TokenValidator
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult
+import org.springframework.security.oauth2.jwt.Jwt
+import org.springframework.security.oauth2.jwt.JwtValidators
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
 import org.springframework.security.oauth2.jwt.JwsHeader
 import org.springframework.security.oauth2.jwt.JwtClaimsSet
@@ -10,11 +16,11 @@ import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtEncoder
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters
 import org.springframework.security.oauth2.jwt.JwtIssuerValidator
-import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -33,6 +39,7 @@ import javax.crypto.spec.SecretKeySpec
 class JwtTokenProvider(
     private val properties: AuthProperties,
     private val clock: Clock = Clock.systemUTC(),
+    private val adminProperties: AdminTokenProperties = AdminTokenProperties(),
 ) {
 
     private val secretKey: SecretKey = properties.secret.toByteArray(Charsets.UTF_8).let { bytes ->
@@ -64,15 +71,49 @@ class JwtTokenProvider(
      * HS256 MAC 알고리즘으로 고정해 alg 혼동(예: none/RS256 다운그레이드)을 차단한다.
      * 기본 검증(서명·exp/nbf 타임스탬프)에 더해 issuer(iss)도 설정값과 일치해야 통과시킨다.
      */
-    fun jwtDecoder(): JwtDecoder {
+    fun jwtDecoder(): JwtDecoder = decoder(admin = false)
+
+    fun adminJwtDecoder(): JwtDecoder = decoder(admin = true)
+
+    fun issueAdminToken(publicId: UUID): String {
+        val now = clock.instant()
+        val claims = JwtClaimsSet.builder().issuer(properties.issuer).subject(publicId.toString())
+            .audience(listOf(adminProperties.audience)).issuedAt(now).expiresAt(now.plus(adminProperties.ttl)).build()
+        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MAC_ALGORITHM).build(), claims)).tokenValue
+    }
+
+    fun adminTtlSeconds(): Long = adminProperties.ttl.seconds
+
+    private fun decoder(admin: Boolean): JwtDecoder {
         val decoder = NimbusJwtDecoder.withSecretKey(secretKey)
             .macAlgorithm(MAC_ALGORITHM)
             .build()
+        val claimConverter = org.springframework.security.oauth2.jwt.MappedJwtClaimSetConverter.withDefaults(emptyMap())
+        decoder.setClaimSetConverter { claims ->
+            // 기본 변환기가 aud:null을 지워도 앱 토큰으로 승격되지 않게 원본의 존재부터 검사한다.
+            if (!admin && claims.containsKey("aud")) {
+                throw org.springframework.security.oauth2.jwt.BadJwtException("유효하지 않은 인증입니다.")
+            }
+            claimConverter.convert(claims)
+        }
+        val timestamps = JwtTimestampValidator(Duration.ofSeconds(60)).apply { setClock(clock) }
+        val tokenKind = OAuth2TokenValidator<Jwt> { jwt ->
+            val valid = jwt.expiresAt != null && if (admin) {
+                adminProperties.audience in jwt.audience.orEmpty() && runCatching { UUID.fromString(jwt.subject).toString().equals(jwt.subject, ignoreCase = true) }.getOrDefault(false)
+            } else {
+                !jwt.hasClaim("aud")
+            }
+            if (valid) OAuth2TokenValidatorResult.success()
+            else OAuth2TokenValidatorResult.failure(
+                OAuth2Error("invalid_token", "유효하지 않은 인증입니다.", null),
+            )
+        }
         decoder.setJwtValidator(
-            DelegatingOAuth2TokenValidator(
-                JwtValidators.createDefault(),
+            JwtValidators.createDefaultWithValidators(listOf(
+                timestamps,
+                tokenKind,
                 JwtIssuerValidator(properties.issuer),
-            ),
+            )),
         )
         return decoder
     }

@@ -150,7 +150,7 @@ class GlobalExceptionHandler {
         exception: HttpMessageNotReadableException,
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
-        if (request.servletPath.startsWith("/api/v1/auth/")) {
+        if (request.servletPath.startsWith("/api/v1/auth/") || request.servletPath == "/api/v1/admin/auth/login/google") {
             // DTO 파싱은 인증 서비스의 보호 구간보다 먼저 실행된다. 파서 메시지에는 토큰 원문이 포함될 수 있다.
             log.debug(
                 "Malformed request body: path={}, error_type={}, request_id={}",
