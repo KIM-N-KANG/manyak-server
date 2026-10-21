@@ -43,6 +43,7 @@
 | uq_users_public_id | CREATE UNIQUE INDEX uq_users_public_id ON public.users USING btree (public_id) |
 | uq_users_invite_code | CREATE UNIQUE INDEX uq_users_invite_code ON public.users USING btree (invite_code) |
 | uq_users_nickname_key | CREATE UNIQUE INDEX uq_users_nickname_key ON public.users USING btree (replace(lower((nickname)::text), ' '::text, ''::text)) WHERE (deleted_at IS NULL) |
+| idx_users_admin_created_public | CREATE INDEX idx_users_admin_created_public ON public.users USING btree (created_at DESC NULLS LAST, public_id) |
 
 ## Relations
 

@@ -40,6 +40,7 @@
 | idx_admin_audit_logs_created | CREATE INDEX idx_admin_audit_logs_created ON public.admin_audit_logs USING btree (created_at DESC, id DESC) |
 | idx_admin_audit_logs_admin | CREATE INDEX idx_admin_audit_logs_admin ON public.admin_audit_logs USING btree (admin_user_id, created_at DESC) |
 | idx_admin_audit_logs_target | CREATE INDEX idx_admin_audit_logs_target ON public.admin_audit_logs USING btree (target_type, target_id, created_at DESC) |
+| idx_admin_audit_logs_created_public | CREATE INDEX idx_admin_audit_logs_created_public ON public.admin_audit_logs USING btree (created_at DESC NULLS LAST, public_id) |
 
 ## Relations
 

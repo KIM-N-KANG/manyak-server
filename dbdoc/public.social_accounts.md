@@ -33,6 +33,7 @@
 | uq_social_accounts_provider_user | CREATE UNIQUE INDEX uq_social_accounts_provider_user ON public.social_accounts USING btree (provider, provider_user_id) |
 | idx_social_accounts_user | CREATE INDEX idx_social_accounts_user ON public.social_accounts USING btree (user_id) |
 | uq_social_accounts_user_provider | CREATE UNIQUE INDEX uq_social_accounts_user_provider ON public.social_accounts USING btree (user_id, provider) |
+| idx_social_accounts_active_email_user | CREATE INDEX idx_social_accounts_active_email_user ON public.social_accounts USING btree (email, user_id) WHERE ((deleted_at IS NULL) AND (email IS NOT NULL)) |
 
 ## Relations
 
