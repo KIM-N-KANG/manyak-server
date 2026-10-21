@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) [public.credit_orders](public.credit_orders.md) |  |  |
+| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) [public.credit_orders](public.credit_orders.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | amount | bigint |  | false |  |  |  |
 | reason | varchar(30) |  | false |  |  |  |
@@ -18,7 +18,7 @@
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_credit_transactions_amount | CHECK | CHECK ((amount <> 0)) |
-| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'CHAT_IMAGE'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying, 'PURCHASE_REVERSAL'::character varying])::text[]))) |
+| ck_credit_transactions_reason | CHECK | CHECK (((reason)::text = ANY ((ARRAY['SIGNUP_REWARD'::character varying, 'INVITE_REWARD'::character varying, 'ATTENDANCE_REWARD'::character varying, 'STORY_CREATION'::character varying, 'CHAT_TURN'::character varying, 'CHAT_IMAGE'::character varying, 'REFUND'::character varying, 'PURCHASE'::character varying, 'EXPIRE'::character varying, 'PURCHASE_REVERSAL'::character varying, 'ADMIN_GRANT'::character varying, 'ADMIN_REVOKE'::character varying])::text[]))) |
 | credit_transactions_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | credit_transactions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_credit_transactions_idempotency | UNIQUE | UNIQUE (idempotency_key) |
@@ -40,6 +40,7 @@ erDiagram
 
 "public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
+"public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.credit_transactions" {
@@ -76,6 +77,21 @@ erDiagram
   timestamp_with_time_zone completed_at
   timestamp_with_time_zone refunded_at
   bigint reversal_shortfall
+}
+"public.credit_admin_adjustments" {
+  bigint id
+  varchar_64_ idempotency_key
+  bigint admin_user_id FK
+  bigint user_id FK
+  varchar_10_ type
+  bigint requested_amount
+  bigint applied_amount
+  bigint shortfall
+  bigint balance_after
+  integer expires_in_days
+  timestamp_with_time_zone expires_at
+  bigint transaction_id FK
+  timestamp_with_time_zone created_at
 }
 "public.users" {
   bigint id

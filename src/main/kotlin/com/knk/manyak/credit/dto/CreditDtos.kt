@@ -50,8 +50,9 @@ enum class CreditTransactionType {
             CreditReason.INVITE_REWARD,
             CreditReason.REFUND,
             CreditReason.PURCHASE,
+            CreditReason.ADMIN_GRANT,
             -> EARN
-            CreditReason.EXPIRE, CreditReason.PURCHASE_REVERSAL -> EXPIRE
+            CreditReason.EXPIRE, CreditReason.PURCHASE_REVERSAL, CreditReason.ADMIN_REVOKE -> EXPIRE
         }
 
         /** 이용내역에 노출하는 사유 전체(= `type=ALL`). */

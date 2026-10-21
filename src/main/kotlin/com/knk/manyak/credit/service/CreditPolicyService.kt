@@ -102,6 +102,8 @@ class CreditPolicyService(
         }
     }
 
+    fun defaultAmountOf(key: CreditPolicyKey): Long = defaults.getValue(key)
+
     private val knownKeys = CreditPolicyKey.entries.joinToString(", ") { it.storageKey }
 
     // 갱신끼리만 직렬화한다(부팅 선적재 · 스케줄러). 읽기 경로는 이 락을 잡지 않는다.
@@ -189,7 +191,7 @@ class CreditPolicyService(
                 )
                 return@filter false
             }
-            val valid = override.amount >= key.minimumAmount
+            val valid = override.amount in key.minimumAmount..10000
             if (!valid) {
                 logger.warn(
                     "credit_policy_override_rejected key={} amount={} minimum={} — 기본값 {}을 쓴다",

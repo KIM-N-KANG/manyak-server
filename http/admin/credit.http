@@ -1,0 +1,186 @@
+# 관리자 이프 조정·정책 오버라이드 검증 (IntelliJ HTTP Client)
+# 준비: 의존성 기동 후 ./gradlew bootRun. auth.http에서 관리자 로그인 후 adminToken 저장.
+# memberId는 별도 테스트 회원의 공개 UUID로 교체. 실제 회원에게 실행하지 않는다.
+# 위에서부터 실행. 정책 변경은 다음 스냅샷 갱신 뒤 공개 조회에 반영된다.
+@baseUrl = http://localhost:8080
+@memberId = 00000000-0000-4000-8000-000000000001
+
+### 1. 헬스 체크
+GET {{baseUrl}}/actuator/health
+
+### 2. 정책 목록 (저장 키 오름차순, 7종)
+GET {{baseUrl}}/api/v1/admin/credits/policies
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("정책 7종", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.length === 7, `expected=7 actual=${response.body.items.length}`);
+    });
+    client.global.set("creditGrantKey", Date.now().toString(16) + "-" + Math.random().toString(16).slice(2));
+    client.global.set("creditRevokeKey", Date.now().toString(16) + "-" + Math.random().toString(16).slice(2));
+%}
+
+### 3. 90일 지급 (2번에서 새 멱등 키 준비)
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "memberId": "{{memberId}}",
+  "type": "GRANT",
+  "amount": 5000,
+  "expiresInDays": 90,
+  "idempotencyKey": "{{creditGrantKey}}",
+  "reason": "테스트 회원 장애 보상 검증"
+}
+
+> {%
+    client.test("지급 결과", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.appliedAmount === 5000, `expected=5000 actual=${response.body.appliedAmount}`);
+        client.assert(response.body.expiresAt !== null, "지급 만료 시각 필요");
+    });
+    client.global.set("creditFirstBalance", response.body.balance);
+    client.global.set("creditFirstExpiry", response.body.expiresAt);
+%}
+
+### 4. 같은 지급 재시도 — 처음 잔액·만료 시각 그대로
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "memberId": "{{memberId}}",
+  "type": "GRANT",
+  "amount": 5000,
+  "expiresInDays": 90,
+  "idempotencyKey": "{{creditGrantKey}}",
+  "reason": "테스트 회원 장애 보상 검증"
+}
+
+> {%
+    client.test("멱등 결과", () => {
+        client.assert(response.status === 200 && response.body.duplicated === true, `expected=200/true actual=${response.status}/${response.body.duplicated}`);
+        client.assert(response.body.balance === Number(client.global.get("creditFirstBalance")), "처음 잔액 불일치");
+        client.assert(response.body.expiresAt === client.global.get("creditFirstExpiry"), "처음 만료 시각 불일치");
+    });
+%}
+
+### 5. 잔액 초과 회수 — 부족분과 음수 없는 잔액 (테스트 회원 잔액 100,000 미만 전제)
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "memberId": "{{memberId}}",
+  "type": "REVOKE",
+  "amount": 100000,
+  "expiresInDays": 10,
+  "idempotencyKey": "{{creditRevokeKey}}",
+  "reason": "테스트 지급분 회수 검증"
+}
+
+> {%
+    client.test("회수 결과", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.balance >= 0, `expected>=0 actual=${response.body.balance}`);
+        client.assert(response.body.appliedAmount + response.body.shortfall === 100000, "회수 합계 불일치");
+        client.assert(response.body.expiresAt === null, "회수 expiresAt은 null");
+    });
+%}
+
+### 6. 409 — 같은 키의 금액 변경
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"memberId":"{{memberId}}","type":"GRANT","amount":1,"expiresInDays":90,"idempotencyKey":"{{creditGrantKey}}","reason":"충돌 검증"}
+
+> {%
+    client.test("키 충돌", () => client.assert(response.status === 409 && response.body.code === "IDEMPOTENCY_KEY_CONFLICT", `expected=409/IDEMPOTENCY_KEY_CONFLICT actual=${response.status}/${response.body.code}`));
+%}
+
+### 7. 400 — 지급 유효기간 366일
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"memberId":"{{memberId}}","type":"GRANT","amount":1,"expiresInDays":366,"idempotencyKey":"{{$uuid}}","reason":"범위 검증"}
+
+> {%
+    client.test("유효기간 범위", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 8. 404 — 없는 회원 (존재하지 않는 UUID 전제)
+POST {{baseUrl}}/api/v1/admin/credits/adjustments
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"memberId":"00000000-0000-4000-8000-000000000099","type":"GRANT","amount":1,"idempotencyKey":"{{$uuid}}","reason":"없는 회원 검증"}
+
+> {%
+    client.test("회원 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 9. 출석 오버라이드 기록 (기존 행이 없는 테스트 환경 전제)
+PUT {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"amount":500,"reason":"테스트 이벤트"}
+
+> {%
+    client.test("정책 저장", () => client.assert(response.status === 200 && response.body.override.amount === 500, `expected=200/500 actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 10. 갱신 주기 뒤 공개 정책 확인
+GET {{baseUrl}}/api/v1/credits/policies
+
+> {%
+    client.test("정책 반영", () => client.assert(response.body.attendanceReward === 500, `expected=500 actual=${response.body.attendanceReward}`));
+%}
+
+### 11. 400 — 출석 하한 위반
+PUT {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"amount":0,"reason":"하한 검증"}
+
+> {%
+    client.test("정책 하한", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 12. 정책 삭제 — 다음 갱신 뒤 기본값 복귀
+DELETE {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"테스트 이벤트 종료"}
+
+> {%
+    client.test("정책 삭제", () => client.assert(response.status === 200 && response.body.override === null, `expected=200/null actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 13. 404 — 삭제 재시도
+DELETE {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"없는 행 검증"}
+
+> {%
+    client.test("오버라이드 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 14. 401 — 토큰 없음
+GET {{baseUrl}}/api/v1/admin/credits/policies
+
+> {%
+    client.test("인증 필수", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 자유 조회 — 준비·변경 없이 실제 오버라이드와 스냅샷 비교
+GET {{baseUrl}}/api/v1/admin/credits/policies
+Authorization: Bearer {{adminToken}}

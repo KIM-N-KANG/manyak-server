@@ -57,6 +57,7 @@
 | [public.story_drafts](public.story_drafts.md) | 13 |  | BASE TABLE |
 | [public.admin_accounts](public.admin_accounts.md) | 2 | 관리자 역할. 운영자가 직접 부여·회수한다 | BASE TABLE |
 | [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
+| [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 
 ## Relations
 
@@ -120,6 +121,9 @@ erDiagram
 "public.story_drafts" }o--o| "public.story_creation_requests" : "FOREIGN KEY (generation_request_id) REFERENCES story_creation_requests(request_id)"
 "public.admin_accounts" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.admin_audit_logs" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -670,6 +674,21 @@ erDiagram
   jsonb before_state
   jsonb after_state
   varchar_64_ request_id
+  timestamp_with_time_zone created_at
+}
+"public.credit_admin_adjustments" {
+  bigint id
+  varchar_64_ idempotency_key
+  bigint admin_user_id FK
+  bigint user_id FK
+  varchar_10_ type
+  bigint requested_amount
+  bigint applied_amount
+  bigint shortfall
+  bigint balance_after
+  integer expires_in_days
+  timestamp_with_time_zone expires_at
+  bigint transaction_id FK
   timestamp_with_time_zone created_at
 }
 ```
