@@ -23,6 +23,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
+@org.springframework.context.annotation.Import(com.knk.manyak.credit.support.H2CreditAdminLocksConfig::class)
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class AdminCreditIntegrationTests {

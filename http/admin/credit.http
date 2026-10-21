@@ -184,3 +184,23 @@ GET {{baseUrl}}/api/v1/admin/credits/policies
 ### 자유 조회 — 준비·변경 없이 실제 오버라이드와 스냅샷 비교
 GET {{baseUrl}}/api/v1/admin/credits/policies
 Authorization: Bearer {{adminToken}}
+
+### 동시성 검증 A — 아래 B와 별도 클라이언트에서 함께 실행 (테스트 환경 전용)
+# 키가 없는 경우도 포함해 실행한다. 두 요청 모두 200이며 키당 행은 하나여야 한다.
+# 감사 before는 실제 적용 순서대로 연결되어야 한다. 삭제와 기록을 겹쳐도 삭제 before는 실제 삭제 값이다.
+PUT {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"amount":300,"reason":"동시 정책 변경 A"}
+
+### 동시성 검증 B
+PUT {{baseUrl}}/api/v1/admin/credits/policies/attendance_reward
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"amount":500,"reason":"동시 정책 변경 B"}
+
+# 탈퇴 경쟁은 회원의 실제 탈퇴와 신규 조정을 겹친다. 탈퇴가 먼저 사용자 행 잠금을 획득해 커밋하면
+# 신규 조정은 409여야 한다. 이미 저장된 같은 멱등 키는 탈퇴 뒤에도 처음 결과를 200으로 돌려준다.
+# 첫 지급 대상에 지갑이 없어도 요청이 DB 잠금 타임아웃 없이 완료되어야 한다.

@@ -7,6 +7,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.entity.CreditAdminAdjustment
 import com.knk.manyak.credit.repository.CreditAdminAdjustmentRepository
+import com.knk.manyak.credit.repository.CreditAdminLocks
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import org.springframework.dao.DataIntegrityViolationException
@@ -24,6 +25,7 @@ class AdminCreditAdjustmentService(
     private val wallet: CreditWalletService,
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
+    private val locks: CreditAdminLocks,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transaction = TransactionTemplate(transactionManager)
@@ -34,8 +36,10 @@ class AdminCreditAdjustmentService(
         try {
             return transaction.execute {
                 adjustments.findByIdempotencyKey(request.idempotencyKey)?.let { return@execute replay(it, request) }
-                val user = users.findByPublicId(request.memberId)
+                val user = locks.target(request.memberId)
                     ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다.")
+                // 잠금 대기 중 같은 요청이 끝났다면 상태 판정 전에 저장된 결과를 돌려준다.
+                adjustments.findByIdempotencyKey(request.idempotencyKey)?.let { return@execute replay(it, request) }
                 if (user.status == UserStatus.DELETED) throw ResponseStatusException(HttpStatus.CONFLICT, "탈퇴한 회원입니다.")
                 // 유니크 삽입이 끝난 요청만 지갑을 변경한다. 아직 완성 전인 행은 같은 트랜잭션 밖에 노출되지 않는다.
                 val row = try {
