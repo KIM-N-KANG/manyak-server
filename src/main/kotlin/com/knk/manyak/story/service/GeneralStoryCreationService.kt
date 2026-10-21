@@ -134,6 +134,15 @@ class GeneralStoryCreationService(
         ).rendered(story.protagonistName)
     }
 
+    /** 관리자 오리지널 초안의 기본 행. 자식 적용은 StoryEditService의 동일한 동기화 경로를 쓴다. */
+    @Transactional
+    fun createOriginalDraft(title: String, userId: Long): Story {
+        suspensionGuard.requireActive(userId)
+        return storyRepository.save(Story(userId = userId, title = title,
+            status = com.knk.manyak.story.entity.StoryStatus.DRAFT,
+            visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+    }
+
     /** 시작 설정 하나와 그 스코프의 추천 입력·엔딩을 저장하고 응답 객체로 만든다(KNK-515 복수화). */
     private fun persistStartSetting(story: Story, input: GeneralStartSettingInput): StoryStartSettingResponse {
         val startSetting = storyStartSettingRepository.save(
