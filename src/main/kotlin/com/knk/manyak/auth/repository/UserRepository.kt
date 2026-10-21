@@ -15,6 +15,10 @@ interface UserRepository : JpaRepository<User, Long> {
     // API 외부 식별자(public_id) 기준 조회. 순차 PK 열거(IDOR) 차단.
     fun findByPublicId(publicId: UUID): User?
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.publicId = :publicId")
+    fun findByPublicIdForUpdate(@Param("publicId") publicId: UUID): User?
+
     // 초대 코드로 초대자를 역해석한다(POST /auth/login/google의 inviteCode → 초대자 User). 없으면 null(무시).
     fun findByInviteCode(inviteCode: String): User?
 

@@ -1,0 +1,154 @@
+# 계정 정지·해제와 검수 보류 운영 API. 로컬 PostgreSQL·Redis 및 ./gradlew bootRun 필요.
+# 관리자 Google client ID 허용 목록과 관리자 역할을 준비한다. 위에서부터 실행한다.
+# googleIdToken과 memberId(관리자 역할 없는 로컬 검증용 회원), heldSubmissionId(보류 중 로컬 제출본)를 바꾼다.
+# 정지·보류 해제는 실제 상태를 바꾸므로 로컬 검증용 데이터에만 실행한다. 보류는 기존 검수 실행 흐름으로 준비한다.
+@baseUrl = http://localhost:8080
+@googleIdToken = replace-with-local-google-id-token
+@memberId = 00000000-0000-4000-8000-000000000001
+@heldSubmissionId = 00000000-0000-4000-8000-000000000002
+
+### 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 관리자 로그인 — 이후 요청에 전용 토큰 전달
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"{{googleIdToken}}"}
+
+> {%
+    client.test("관리자 로그인", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    if (response.status === 200) {
+        client.global.set("adminToken", response.body.accessToken);
+        client.global.set("adminSelfId", response.body.admin.memberId);
+    }
+%}
+
+### 활성 회원 정지 — 사유는 감사에만 저장
+POST {{baseUrl}}/api/v1/admin/members/{{memberId}}/suspension
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Manyak-Request-Id: account_suspend_manual
+
+{"reason":"로컬 정지 집행 검증"}
+
+> {%
+    client.test("정지 성공", () => {
+        client.assert(response.status === 200 && response.body.status === "SUSPENDED", `expected=200/SUSPENDED actual=${JSON.stringify(response.body)}`);
+        client.assert(typeof response.body.updatedAt === "string" && !("reason" in response.body), "전환 시각만 반환하고 사유는 노출하지 않아야 합니다");
+    });
+%}
+
+### 같은 상태 재요청 409
+POST {{baseUrl}}/api/v1/admin/members/{{memberId}}/suspension
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"중복 요청 확인"}
+
+> {%
+    client.test("중복 정지 거절", () => client.assert(response.status === 409 && response.body.code === "CONFLICT", `expected=409/CONFLICT actual=${JSON.stringify(response.body)}`));
+%}
+
+### 정지 해제 — DELETE에도 JSON 사유 본문 필수
+DELETE {{baseUrl}}/api/v1/admin/members/{{memberId}}/suspension
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"로컬 검증 종료"}
+
+> {%
+    client.test("해제 성공", () => client.assert(response.status === 200 && response.body.status === "ACTIVE", `expected=200/ACTIVE actual=${JSON.stringify(response.body)}`));
+%}
+
+### 자기 자신 정지 거절 — 관리자 역할 보유자 공통 규칙
+POST {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}/suspension
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"관리자 보호 검증"}
+
+> {%
+    client.test("관리자 보호", () => client.assert(response.status === 409 && response.body.code === "ADMIN_ACCOUNT_PROTECTED", `expected=409/ADMIN_ACCOUNT_PROTECTED actual=${JSON.stringify(response.body)}`));
+%}
+
+### 보류 목록 — 기본 heldAt asc, 공개 UUID 동률 asc, page=1 size=20
+GET {{baseUrl}}/api/v1/admin/moderation/holds
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("안전한 보류 페이지", () => {
+        client.assert(response.status === 200 && response.body.page === 1 && response.body.size === 20, `expected=200/page1/size20 actual=${JSON.stringify(response.body)}`);
+        client.assert(typeof response.body.totalElements === "number" && typeof response.body.totalPages === "number", "페이지 총계가 필요합니다");
+        const allowed = ["submissionId", "kind", "storyId", "ownerId", "holdReason", "attempt", "heldAt", "createdAt"];
+        client.assert(response.body.items.every(i => Object.keys(i).every(k => allowed.includes(k))), "원문·폼·이미지 URL·내부 PK는 응답에 없어야 합니다");
+    });
+%}
+
+### 접수 시각 역순 정렬과 두 번째 페이지
+GET {{baseUrl}}/api/v1/admin/moderation/holds?page=2&size=10&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("페이지 정렬", () => client.assert(response.status === 200 && response.body.page === 2, `expected=200/page2 actual=${JSON.stringify(response.body)}`));
+%}
+
+### 보류 해제 — 원인 조치 확인 후 실행, 다음 폴링에서 새 회차로 실행
+POST {{baseUrl}}/api/v1/admin/moderation/holds/{{heldSubmissionId}}/release
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Manyak-Request-Id: hold_release_manual
+
+{"reason":"로컬 AI 의존성 복구 확인"}
+
+> {%
+    client.test("보류 해제", () => {
+        client.assert(response.status === 200 && response.body.status === "PENDING", `expected=200/PENDING actual=${JSON.stringify(response.body)}`);
+        client.assert(typeof response.body.attempt === "number" && typeof response.body.releasedAt === "string", "회차와 해제 시각이 필요합니다");
+    });
+%}
+
+### 사유 누락 400
+POST {{baseUrl}}/api/v1/admin/members/{{memberId}}/suspension
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("사유 필수", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400/BAD_REQUEST actual=${JSON.stringify(response.body)}`));
+%}
+
+### 범위 밖 크기 400 — limit 보정 방식 폐기
+GET {{baseUrl}}/api/v1/admin/moderation/holds?size=101
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("크기 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 없는 제출본 404 — 해당 UUID가 없는 로컬 DB에서 실행
+POST {{baseUrl}}/api/v1/admin/moderation/holds/00000000-0000-4000-8000-000000000000/release
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"미존재 검증"}
+
+> {%
+    client.test("제출본 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 무토큰 401
+GET {{baseUrl}}/api/v1/admin/moderation/holds
+
+> {%
+    client.test("인증 필수", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 자유 조회 — 로컬 데이터 기준으로 페이지·정렬을 바꿔 확인
+GET {{baseUrl}}/api/v1/admin/moderation/holds?page=1&size=100&sort=heldAt&order=asc
+Authorization: Bearer {{adminToken}}
