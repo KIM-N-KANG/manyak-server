@@ -14,6 +14,7 @@ import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import org.springframework.beans.factory.annotation.Value
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -38,6 +39,7 @@ class PromotionPushService(
     private val outbox: ScheduledPushOutboxWriter? = null,
     private val properties: PushCampaignProperties = PushCampaignProperties(),
     private val structuredLogger: StructuredLogger = StructuredLogger(),
+    @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String = "https://manyak.app",
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -79,28 +81,33 @@ class PromotionPushService(
             val targetIds = if (campaign.kind == PushKind.SERVICE) userRepository.findServicePushTargetIds() else userRepository.findMarketingPushTargetIds()
             targets = targetIds.size
             // 문구는 회차 시작에 한 번만 조립한다. (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
-            val data = mapOf(
+            val data = mutableMapOf(
                 "type" to if (campaign.kind == PushKind.SERVICE) "NOTICE" else TYPE_PROMOTION,
                 "campaignId" to campaign.publicId.toString(),
                 "title" to if (campaign.kind == PushKind.SERVICE) campaign.title else withAdPrefix(campaign.title),
                 "body" to campaign.body,
             )
+            campaign.noticeId?.let { id ->
+                val publicId = requireNotNull(pushCampaignRepository.findNoticePublicId(id)) { "공지 참조가 없습니다." }
+                data["noticeId"] = publicId.toString()
+                data["deepLink"] = "${webBaseUrl.trimEnd('/')}/notices/$publicId"
+            }
             if (outbox != null) {
-                sent = outbox.record(targetIds, data, "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
+                sent = outbox.record(targetIds, data, if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
             } else targetIds.forEach { userId ->
+                val messagePrefix = if (campaign.kind == PushKind.SERVICE) "notice" else "promotion"
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
                 val user = userRepository.findById(userId).orElse(null)
                 if (user == null || user.status != UserStatus.ACTIVE || (if (campaign.kind == PushKind.SERVICE) !user.servicePushEnabled else !user.canReceiveMarketingPush(at))) {
-                    fcmPushSender.recordDiscarded(userId, data, "promotion:${campaign.publicId}:${user?.publicId}",
+                    fcmPushSender.recordDiscarded(userId, data, "$messagePrefix:${campaign.publicId}:${user?.publicId}",
                         if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE"
                         else if (campaign.kind == PushKind.SERVICE) "SERVICE_PUSH_DISABLED" else "MARKETING_NOT_AGREED")
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, data,
-                    if (campaign.kind == PushKind.SERVICE) AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL,
-                    messageId = "promotion:${campaign.publicId}:${user.publicId}") }
+                runCatching { fcmPushSender.sendToUser(userId, data, AndroidConfig.Priority.NORMAL,
+                    messageId = "$messagePrefix:${campaign.publicId}:${user.publicId}") }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
             }

@@ -1,0 +1,177 @@
+# 공지 관리자 API. 로컬 Postgres·Redis 및 서버를 기동하고 관리자 Google 증명으로 로그인한다.
+# 위에서부터 실행한다. UUID는 응답 핸들러가 저장한다. 공지 화면과 알림 서비스 NOTICE 배포 전에는 notify=false만 사용한다.
+@baseUrl = http://localhost:8080
+@googleIdToken = replace-with-local-google-id-token
+
+### 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 관리자 로그인
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"{{googleIdToken}}"}
+
+> {%
+    client.test("관리자 로그인", () => client.assert(response.status === 200, `actual=${response.status}`));
+    if (response.status === 200) client.global.set("noticeAdminToken", response.body.accessToken);
+%}
+
+### 초안 작성
+POST {{baseUrl}}/api/v1/admin/notices
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"title":"로컬 검증용 점검 공지","body":"점검 시간을 안내합니다.\n이 공지는 로컬 검증용입니다.","reason":"공지 API 검증"}
+
+> {%
+    client.test("초안 생성", () => client.assert(response.status === 201 && response.body.status === "DRAFT", `actual=${JSON.stringify(response.body)}`));
+    if (response.status === 201) client.global.set("noticeId", response.body.noticeId);
+%}
+
+### 초안 공개 조회는 404
+GET {{baseUrl}}/api/v1/notices/{{noticeId}}
+
+> {%
+    client.test("초안 비공개", () => client.assert(response.status === 404, `actual=${response.status}`));
+%}
+
+### 관리자 목록 — 본문 없음, 번호 페이지, 검색·NULL 후순위
+GET {{baseUrl}}/api/v1/admin/notices?q=로컬&sort=notifiedAt&order=desc&page=1&size=20
+Authorization: Bearer {{noticeAdminToken}}
+
+> {%
+    client.test("목록 계약", () => {
+        client.assert(response.status === 200 && response.body.page === 1, `actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.items.every(n => !("body" in n)), "목록에는 본문이 없어야 합니다");
+    });
+%}
+
+### 부분 수정 — 생략한 본문 유지
+PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"title":"수정한 로컬 점검 공지","reason":"제목 수정 검증"}
+
+> {%
+    client.test("수정", () => client.assert(response.status === 200 && response.body.body.includes("로컬 검증용"), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 알림 없이 게시
+POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/publish
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"notify":false,"reason":"게시 검증"}
+
+> {%
+    client.test("게시", () => client.assert(response.status === 200 && response.body.status === "PUBLISHED" && response.body.notified === false, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 공개 상세 — 토큰 없이 읽기
+GET {{baseUrl}}/api/v1/notices/{{noticeId}}
+
+> {%
+    client.test("공개 상세", () => {
+        client.assert(response.status === 200 && typeof response.body.body === "string", `actual=${JSON.stringify(response.body)}`);
+        client.assert(!("createdBy" in response.body) && !("id" in response.body), "작성자와 내부 PK는 공개하지 않습니다");
+    });
+%}
+
+### 중복 게시 409
+POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/publish
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"notify":false,"reason":"중복 게시 검증"}
+
+> {%
+    client.test("중복 게시 거절", () => client.assert(response.status === 409, `actual=${response.status}`));
+%}
+
+### 게시 해제 — publishedAt 유지
+POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/unpublish
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"reason":"검증 공지 내림"}
+
+> {%
+    client.test("게시 해제", () => client.assert(response.status === 200 && response.body.status === "DRAFT" && response.body.publishedAt !== null, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 알림 이력 없는 초안 삭제
+DELETE {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"reason":"로컬 검증 정리"}
+
+> {%
+    client.test("삭제", () => client.assert(response.status === 204, `actual=${response.status}`));
+%}
+
+### 없는 관리자 상세 404
+GET {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
+Authorization: Bearer {{noticeAdminToken}}
+
+> {%
+    client.test("삭제 확인", () => client.assert(response.status === 404, `actual=${response.status}`));
+%}
+
+### 형식 오류 400
+GET {{baseUrl}}/api/v1/admin/notices/not-a-uuid
+Authorization: Bearer {{noticeAdminToken}}
+
+> {%
+    client.test("UUID 형식", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 알림 유형 누락 400
+POST {{baseUrl}}/api/v1/admin/notices/00000000-0000-4000-8000-000000000000/publish
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"notify":true,"reason":"입력 검증"}
+
+> {%
+    client.test("유형 필수", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 무토큰 401
+GET {{baseUrl}}/api/v1/admin/notices
+
+> {%
+    client.test("관리자 인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+### 자유 조회 — SERVICE 알림 검증은 아래 별도 초안으로만 진행한다
+GET {{baseUrl}}/api/v1/admin/notices?status=PUBLISHED&sort=publishedAt&order=desc
+Authorization: Bearer {{noticeAdminToken}}
+
+### 알림 검증용 별도 초안 — 실제 발송 가능 환경에서만 아래 두 요청 실행
+POST {{baseUrl}}/api/v1/admin/notices
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"title":"로컬 공지 알림 검증","body":"서비스 알림 동의 조건과 공지 딥링크를 확인합니다.","reason":"알림 경로 검증"}
+
+> {%
+    if (response.status === 201) client.global.set("notifyNoticeId", response.body.noticeId);
+%}
+
+### 정보성 알림과 게시 — MARKETING으로 바꾸면 기존 광고 경로를 사용
+POST {{baseUrl}}/api/v1/admin/notices/{{notifyNoticeId}}/publish
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"notify":true,"notificationKind":"SERVICE","reason":"공지 알림 검증"}
+
+> {%
+    client.test("첫 알림 요청", () => client.assert(response.status === 200 && response.body.notified === true && response.body.notifiedAt !== null, `actual=${JSON.stringify(response.body)}`));
+%}

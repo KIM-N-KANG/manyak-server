@@ -80,6 +80,9 @@ class PushCampaign(
     @Column(nullable = false, length = 16)
     val kind: PushKind = PushKind.MARKETING,
 
+    @Column(name = "notice_id", unique = true)
+    val noticeId: Long? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )
