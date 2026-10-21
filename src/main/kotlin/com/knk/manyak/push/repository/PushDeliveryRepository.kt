@@ -29,17 +29,19 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
         FROM push_delivery_results WHERE campaign_id = ?
     """.trimIndent(), { rs, _ -> CampaignDeliveryStats(rs.getLong("members"), rs.getLong("delivered"), rs.getLong("failed")) }, campaignId)!!
 
-    fun dailyStats(from: LocalDate, to: LocalDate, type: PushDeliveryType?): List<PushDeliveryStatsItem> {
+    fun dailyStats(from: LocalDate, to: LocalDate, type: PushDeliveryType?, kind: PushKind? = null): List<PushDeliveryStatsItem> {
         val zone = ZoneId.of("Asia/Seoul")
         val args = mutableListOf<Any>(Timestamp.from(from.atStartOfDay(zone).toInstant()),
             Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()))
         if (type != null) args.add(type.name)
+        if (kind != null) args.add(kind.name)
         return jdbc.query("""
             SELECT CAST(completed_at AT TIME ZONE 'Asia/Seoul' AS DATE) AS date, type, kind,
                    COUNT(*) AS requested, COUNT(CASE WHEN delivered_devices > 0 THEN 1 END) AS members,
                    SUM(delivered_devices) AS delivered, SUM(failed_devices) AS failed
             FROM push_delivery_results WHERE completed_at >= ? AND completed_at < ?
             ${if (type != null) "AND type = ?" else ""}
+            ${if (kind != null) "AND kind = ?" else ""}
             GROUP BY CAST(completed_at AT TIME ZONE 'Asia/Seoul' AS DATE), type, kind
             ORDER BY date DESC, type ASC
         """.trimIndent(), { rs, _ -> PushDeliveryStatsItem(rs.getDate("date").toLocalDate(),

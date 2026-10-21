@@ -47,4 +47,17 @@ class PushDeliveryPostgresTests {
         assertThat(repository.campaignStats(1)).isEqualTo(CampaignDeliveryStats(1, 2, 0))
         assertThat(repository.campaignStats(99)).isEqualTo(CampaignDeliveryStats(0, 0, 0))
     }
+    @Test fun `실제 PG 종류 필터는 단독과 type AND 조합 및 생략을 지원한다`() {
+        repository.insert(report("service"), null, null)
+        repository.insert(report("marketing").copy(type = PushDeliveryType.PROMOTION, kind = PushKind.MARKETING), null, null)
+        val day = LocalDate.parse("2026-10-21")
+        assertThat(repository.dailyStats(day, day, null)).hasSize(2)
+        assertThat(repository.dailyStats(day, day, null, PushKind.SERVICE).map { it.type })
+            .containsExactly(PushDeliveryType.NOTICE)
+        assertThat(repository.dailyStats(day, day, null, PushKind.MARKETING).map { it.type })
+            .containsExactly(PushDeliveryType.PROMOTION)
+        assertThat(repository.dailyStats(day, day, PushDeliveryType.PROMOTION, PushKind.MARKETING)).hasSize(1)
+        assertThat(repository.dailyStats(day, day, PushDeliveryType.PROMOTION, PushKind.SERVICE)).isEmpty()
+    }
+
 }

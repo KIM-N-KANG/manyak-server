@@ -116,6 +116,29 @@ class PushDeliveryIntegrationTests {
         stats("from=2020-01-01&to=2020-12-31").expectStatus().isOk
     }
 
+    @Test fun `통계 kind는 단독 또는 type과 AND로 필터하고 생략하면 전체를 반환한다`() {
+        report(body("kind-service")).expectStatus().isNoContent
+        report(body("kind-marketing", type = "PROMOTION")).expectStatus().isNoContent
+        val period = "from=2026-10-21&to=2026-10-21"
+        stats(period).expectStatus().isOk.expectBody().jsonPath("$.items.length()").isEqualTo(2)
+        stats("$period&kind=SERVICE").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1).jsonPath("$.items[0].type").isEqualTo("STORY_COMPLETED")
+            .jsonPath("$.items[0].kind").isEqualTo("SERVICE").jsonPath("$.items[0].requested").isEqualTo(1)
+        stats("$period&kind=MARKETING").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1).jsonPath("$.items[0].type").isEqualTo("PROMOTION")
+            .jsonPath("$.items[0].kind").isEqualTo("MARKETING")
+        stats("$period&type=PROMOTION&kind=MARKETING").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1).jsonPath("$.items[0].type").isEqualTo("PROMOTION")
+        stats("$period&type=PROMOTION&kind=SERVICE").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(0)
+    }
+
+    @Test fun `통계는 지원하지 않는 kind를 400으로 거절한다`() {
+        for (kind in listOf("UNKNOWN", "service", "MARKET")) {
+            stats("kind=$kind").expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("BAD_REQUEST")
+        }
+    }
+
     @Test fun `통계는 역전 기간 367일 날짜 오류 지원하지 않는 종류를 거절한다`() {
         for (q in listOf("from=2026-10-22&to=2026-10-21", "from=2020-01-01&to=2021-01-01",
             "from=bad", "from=2026/10/21", "type=UNKNOWN")) stats(q).expectStatus().isBadRequest

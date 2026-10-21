@@ -1,6 +1,7 @@
 package com.knk.manyak.push.controller
 
 import com.knk.manyak.push.dto.PushDeliveryType
+import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.service.PushDeliveryService
 import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.web.bind.annotation.*
@@ -14,5 +15,6 @@ class AdminPushDeliveryController(private val service: PushDeliveryService) {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) from: LocalDate?,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) to: LocalDate?,
         @RequestParam(required = false) type: PushDeliveryType?,
-    ) = service.stats(from, to, type)
+        @RequestParam(required = false) kind: PushKind?,
+    ) = service.stats(from, to, type, kind)
 }

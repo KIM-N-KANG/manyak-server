@@ -36,11 +36,11 @@ class PushDeliveryService(
     fun campaignStats(campaignId: Long): CampaignDeliveryStats = repository.campaignStats(campaignId)
 
     @Transactional(readOnly = true)
-    fun stats(from: LocalDate?, to: LocalDate?, type: PushDeliveryType?): PushDeliveryStatsResponse {
+    fun stats(from: LocalDate?, to: LocalDate?, type: PushDeliveryType?, kind: PushKind? = null): PushDeliveryStatsResponse {
         val end = to ?: LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))
         val start = from ?: end.minusDays(6)
         val days = ChronoUnit.DAYS.between(start, end) + 1
         if (days !in 1..366) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "통계 기간은 1~366일이어야 합니다.")
-        return PushDeliveryStatsResponse(start, end, repository.dailyStats(start, end, type))
+        return PushDeliveryStatsResponse(start, end, repository.dailyStats(start, end, type, kind))
     }
 }

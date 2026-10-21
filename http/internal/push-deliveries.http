@@ -30,6 +30,24 @@ Authorization: Bearer {{adminToken}}
 
 > {% client.test("통계 조회", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0, "결과 행이 없습니다."); }); %}
 
+### 종류 단독 필터 — 서비스 알림만
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2026-10-21&to=2026-10-21&kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("SERVICE 종류 필터", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0 && response.body.items.every(i => i.kind === "SERVICE"), "SERVICE 결과만 있어야 합니다."); }); %}
+
+### 시나리오와 종류 AND 필터
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2026-10-21&to=2026-10-21&type=STORY_COMPLETED&kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("type과 kind AND 필터", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0 && response.body.items.every(i => i.type === "STORY_COMPLETED" && i.kind === "SERVICE"), "type과 kind를 모두 만족해야 합니다."); }); %}
+
+### 지원하지 않는 종류
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?kind=UNKNOWN
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("종류 검증", () => { client.assert(response.status === 400, `expected=400 actual=${response.status}`); client.assert(response.body.code === "BAD_REQUEST", `expected=BAD_REQUEST actual=${response.body.code}`); }); %}
+
 ### 필수 필드 오류
 POST {{baseUrl}}/internal/push-deliveries
 X-Manyak-Internal-Secret: {{internalSecret}}
