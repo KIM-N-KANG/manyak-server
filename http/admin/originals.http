@@ -1,0 +1,153 @@
+# 관리자 오리지널 등록·수정. IntelliJ HTTP Client에서 위에서부터 실행한다.
+# 준비: 로컬 Postgres·Redis 기동 후 ./gradlew bootRun.
+# MANYAK_OFFICIAL_USER_PUBLIC_ID에 존재하는 공식 회원 UUID를 설정하고,
+# 관리자 로그인 응답의 accessToken을 adminToken에 넣는다. 회원 앱 토큰은 사용할 수 없다.
+# 이미지 업로드는 presign 응답의 uploadUrl로 Content-Type·Content-Length 그대로 PUT한 뒤 objectKey를 저장 요청에 넣는다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@rolelessAdminToken = replace-with-admin-token-without-role
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 제목만으로 비공개 초안 등록
+POST {{baseUrl}}/api/v1/admin/originals
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"오리지널 검증 초안","reason":"관리자 등록 검증"}
+
+> {%
+client.test("초안이 즉시 등록된다", () => {
+  client.assert(response.status === 201, `actual=${response.status}`);
+  client.assert(response.body.status === "DRAFT" && response.body.visibility === "PRIVATE", "초안은 비공개여야 합니다");
+  client.assert(!Object.prototype.hasOwnProperty.call(response.body, "submission"), "제출본이 없어야 합니다");
+});
+client.global.set("originalStoryId", response.body.storyId);
+%}
+
+### 목록·검색·필터·정렬
+GET {{baseUrl}}/api/v1/admin/originals?page=1&size=20&status=DRAFT&visibility=PRIVATE&sort=updatedAt&order=desc&q=오리지널
+Authorization: Bearer {{adminToken}}
+
+### 현재 저장된 편집 폼
+GET {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}
+Authorization: Bearer {{adminToken}}
+
+### 즉시 수정·발행 (장르는 현재 활성 제공 장르 정식 이름을 사용)
+PATCH {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title":"오리지널 공개 검증", "oneLineIntro":"공개 검증용 스토리",
+  "genres":["판타지"], "status":"PUBLISHED", "visibility":"PUBLIC",
+  "storySettings":{"worldSetting":"세계관", "characterSetting":"등장인물", "userRoleSetting":"주인공", "ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작", "prologue":"프롤로그", "startSituation":"시작 상황", "suggestedInputs":["주변을 살핀다","인사를 한다","앞으로 간다"]}],
+  "reason":"공개 검증"
+}
+
+> {%
+client.test("검수 접수 없이 발행된다", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.status === "PUBLISHED" && response.body.visibility === "PUBLIC", "발행 결과 확인");
+});
+%}
+
+### 공개 읽기
+GET {{baseUrl}}/api/v1/stories/{{originalStoryId}}
+
+### 등록 전 이미지 presign (발급 자체는 감사 대상 아님)
+POST {{baseUrl}}/api/v1/admin/originals/images/presign
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"kind":"COVER","contentType":"image/png","contentLength":100}
+
+> {%
+if (response.status === 201) {
+  client.global.set("originalDraftImageKey", response.body.objectKey);
+  client.global.set("originalDraftUploadUrl", response.body.uploadUrl);
+}
+%}
+
+### 등록 뒤 이미지 presign
+POST {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}/images/presign
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"kind":"CHARACTER","contentType":"image/webp","contentLength":100}
+
+> {%
+if (response.status === 201) client.global.set("originalCharacterKey", response.body.objectKey);
+%}
+
+### 표지 삭제 (반복해도 200)
+DELETE {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}/thumbnail
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"표지 삭제 검증"}
+
+> {%
+client.test("표지가 삭제된다", () => {
+  client.assert(response.status === 200 && response.body.thumbnailUrl === null, `actual=${response.status}`);
+});
+%}
+
+### 400: 발행에서 초안으로 되돌릴 수 없음
+PATCH {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"status":"DRAFT","reason":"오류 검증"}
+
+> {% client.test("초안 복귀 거부", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400: 등록에 draftId는 null로도 보낼 수 없음
+POST {{baseUrl}}/api/v1/admin/originals
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"잘못된 등록","draftId":null,"reason":"오류 검증"}
+
+> {% client.test("draftId 거부", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 404: 없는 대상 (다른 회원 소유 스토리도 같은 응답)
+GET {{baseUrl}}/api/v1/admin/originals/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("대상 범위 확인", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 401: 관리자 인증 필요
+GET {{baseUrl}}/api/v1/admin/originals
+
+> {% client.test("인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 409: 같은 인물의 이미지 이름 중복 (위 CHARACTER presign이 성공한 뒤 실행)
+PATCH {{baseUrl}}/api/v1/admin/originals/{{originalStoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"characters":[{"name":"세린","images":[{"objectKey":"{{originalCharacterKey}}","imageName":"세린_웃음"},{"objectKey":"{{originalCharacterKey}}","imageName":"세린_웃음"}]}],"reason":"중복 검증"}
+
+> {% client.test("중복 거부", () => client.assert(response.status === 409, `actual=${response.status}`)); %}
+
+### 403: 역할이 회수된 관리자 토큰 (별도 토큰 준비 후 선택 실행)
+GET {{baseUrl}}/api/v1/admin/originals
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("관리자 역할 필요", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 503: 이미지 저장소가 미설정인 환경에서만 선택 실행
+POST {{baseUrl}}/api/v1/admin/originals/images/presign
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"kind":"COVER","contentType":"image/png","contentLength":100}
+
+> {% client.test("미설정 업로드 거부", () => client.assert(response.status === 503, `actual=${response.status}`)); %}
+
+### 자유 조회: 실제 오리지널의 UUID를 넣는다
+GET {{baseUrl}}/api/v1/admin/originals/replace-with-story-uuid
+Authorization: Bearer {{adminToken}}

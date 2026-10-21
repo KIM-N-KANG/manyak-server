@@ -81,6 +81,17 @@ class StoryImageService(
         if (submissions.existsByStoryIdAndStatus(story.id, com.knk.manyak.story.submission.SubmissionStatus.PENDING)) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "검수 중에는 이미지를 삭제할 수 없습니다.")
         }
+        clearThumbnail(story)
+    }
+
+    /** 관리자 오리지널은 제출본 상태를 거치지 않고 같은 이미지·공개 스냅샷 적용을 직접 실행한다. */
+    @Transactional
+    fun deleteOriginalThumbnail(storyId: String, userId: Long) {
+        suspensionGuard.requireActive(userId)
+        clearThumbnail(storyImageAccess.resolveOwnedStoryForUpdate(storyId, userId))
+    }
+
+    private fun clearThumbnail(story: com.knk.manyak.story.entity.Story) {
         // S3 객체는 지우지 않는다 — 지난 채팅 카드·스냅샷이 그 URL을 가리킬 수 있다(스펙 결정 기록).
         story.thumbnailImageUrl = null
         story.thumbnailImageKey = null
