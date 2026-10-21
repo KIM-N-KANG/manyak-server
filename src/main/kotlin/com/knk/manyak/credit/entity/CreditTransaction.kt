@@ -22,6 +22,8 @@ enum class CreditReason {
     REFUND,
     PURCHASE,
     PURCHASE_REVERSAL,
+    ADMIN_GRANT,
+    ADMIN_REVOKE,
 
     // 보상·환불 로트가 30일 유효기간을 넘겨 만료된 잔여를 회수하는 음수 행(스펙 §4-3-7 만료, B12).
     EXPIRE,
