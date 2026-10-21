@@ -472,6 +472,57 @@ class AdminReadApiIntegrationTests {
         assertThat(periodMember["items"][0]["periodChatCount"].asInt()).isEqualTo(3)
     }
 
+    @Test fun `삭제된 스토리의 채팅도 분포에 포함하고 모든 개수 막대는 링크 목록 총계와 일치한다`() {
+        val live = story(genre = "유지 장르")
+        val removed = story(genre = "삭제 장르")
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        val turns = listOf(0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50)
+        val included = mutableListOf<com.knk.manyak.chat.entity.StoryChat>()
+        for ((index, count) in listOf(1, 2, 3, 5, 10).withIndex()) {
+            val owner = member("채팅 수 $count")
+            repeat(count) { included += chat(removed, owner, turns[included.size % turns.size]) }
+            if (index == 0) chat(removed, owner, 50, midnight.minusSeconds(10 * 86400))
+        }
+        included += chat(removed, turns = 0)
+        included += chat(live, turns = 30)
+        val deletedChat = chat(removed, turns = 50)
+        jdbc.update("UPDATE story_chats SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), deletedChat.id)
+        message(included.first(), 60)
+        message(included.last(), 30)
+
+        val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
+        val distributions = body["distributions"].associateBy { it["chartId"].asText() }
+        fun linkedTotal(point: JsonNode): Long {
+            val link = point["link"]
+            val query = link["params"].properties().joinToString("&") { (key, value) ->
+                key + "=" + java.net.URLEncoder.encode(value.asText(), Charsets.UTF_8)
+            }
+            return json(get("/${link["list"].asText()}?$query").expectStatus().isOk)["totalElements"].asLong()
+        }
+        for ((id, size) in listOf("turns" to 11, "member-chats" to 5)) {
+            val points = distributions.getValue(id)["points"]
+            assertThat(points.size()).isEqualTo(size)
+            for (point in points) {
+                assertThat(point["value"].asDouble()).describedAs("%s %s", id, point["label"].asText())
+                    .isEqualTo(linkedTotal(point).toDouble())
+            }
+        }
+        assertThat(distributions.getValue("turns")["points"].sumOf { it["value"].asLong() }).isEqualTo(included.size.toLong())
+        assertThat(distributions.getValue("member-chats")["points"].toList().map { it["value"].asLong() }).containsExactly(1L, 1L, 1L, 1L, 1L)
+        val ratios = distributions.getValue("started-as")["points"]
+        for (point in ratios) {
+            val expected = java.math.BigDecimal.valueOf(100.0 * linkedTotal(point) / included.size)
+                .setScale(2, java.math.RoundingMode.HALF_UP).toDouble()
+            assertThat(point["value"].asDouble()).isEqualTo(expected)
+        }
+        val genres = distributions.getValue("genre-depth")["points"].associateBy { it["label"].asText() }
+        assertThat(genres.getValue("삭제 장르")["value"].asDouble()).isEqualTo(included.filter { it.storyId == removed.id }.map { it.currentTurn }.average())
+        assertThat(genres.getValue("유지 장르")["value"].asDouble()).isEqualTo(30.0)
+        val waits = distributions.getValue("first-message")
+        assertThat(waits["points"].toList().map { it["value"].asDouble() }).containsExactly(45.0, 45.0, 52.5, 57.0)
+        assertThat(waits["description"].asText()).contains("900초 초과 0", "입력 없음 ${included.size - 2}건")
+    }
+
     @Test fun `채팅 필터와 소모는 원문을 읽지 않고 첫 입력과 턴 날짜 및 AI 기록을 따른다`() {
         val owner = member("활동")
         val story = story(owner)

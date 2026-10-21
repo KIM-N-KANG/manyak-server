@@ -33,9 +33,9 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
     }
     fun distributions(from: Instant, now: Instant, excluded: List<Long>, officialId: Long?): List<List<Map<String, Any?>>> {
         val p = params(from, now, excluded)
-        // 분포는 현재 삭제되지 않은 채팅만 읽는다. 일별 시작/턴 추이에는 삭제 행도 포함된다.
+        // 분포는 현재 삭제되지 않은 채팅을 읽으며 연결된 스토리의 삭제 여부는 목록처럼 무시한다. 일별 추이에는 삭제 채팅도 포함된다.
         val chats = """FROM story_chats c JOIN stories s ON s.id=c.story_id
-            WHERE c.deleted_at IS NULL AND s.deleted_at IS NULL AND ${during("c.created_at")} AND ${owner("c.user_id", excluded)}"""
+            WHERE c.deleted_at IS NULL AND ${during("c.created_at")} AND ${owner("c.user_id", excluded)}"""
         fun query(sql: String) = jdbc.queryForList(sql, p)
         val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats GROUP BY s.genre ORDER BY s.genre")
         val bucket = "CASE " + AdminQuery.turnBounds.mapIndexed { i, r -> "WHEN c.current_turn BETWEEN ${r.first} AND ${r.last} THEN $i" }.joinToString(" ") + " END"
