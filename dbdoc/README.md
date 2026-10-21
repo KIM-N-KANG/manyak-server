@@ -5,7 +5,7 @@
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
 | [public.story_creation_tags](public.story_creation_tags.md) | 10 |  | BASE TABLE |
-| [public.story_creation_sessions](public.story_creation_sessions.md) | 8 |  | BASE TABLE |
+| [public.story_creation_sessions](public.story_creation_sessions.md) | 9 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
@@ -65,6 +65,7 @@
 ```mermaid
 erDiagram
 
+"public.story_creation_sessions" }o--o| "public.ai_call_logs" : "FOREIGN KEY (storyline_ai_call_log_id) REFERENCES ai_call_logs(id) ON DELETE SET NULL"
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_session_tags" }o--o| "public.story_creation_characters" : "FOREIGN KEY (character_id) REFERENCES story_creation_characters(id) ON DELETE CASCADE"
@@ -149,6 +150,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   uuid creation_request_id
   uuid storyline_request_id
+  bigint storyline_ai_call_log_id FK
 }
 "public.story_creation_session_tags" {
   bigint id

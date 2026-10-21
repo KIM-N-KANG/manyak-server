@@ -650,6 +650,43 @@ class AdminReadApiIntegrationTests {
         assertThat(body.daily.last().chats).isEqualTo(1)
     }
 
+    @Test fun `인물 수 분포의 모든 막대는 완성된 미삭제 스토리의 최신 세션 목록 총계와 같다`() {
+        fun session(target: com.knk.manyak.story.entity.Story?, count: Int, complete: Boolean = true, created: Instant = midnight) {
+            val row = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = target?.id,
+                status = if (complete) com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED else com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED,
+                createdAt = created))
+            repeat(count) { creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(creationSession = row,
+                role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = (it + 1).toShort())) }
+        }
+        for (count in 0..5) {
+            val target = story()
+            if (count == 3) session(target, 0) // 목록은 같은 스토리의 최신 완료 세션만 읽는다.
+            session(target, count)
+        }
+        session(null, 0, complete = false)
+        session(null, 0)
+        val removed = story()
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        session(removed, 0)
+        val outside = story()
+        session(outside, 0)
+        session(outside, 0, created = midnight.minusSeconds(10 * 86400))
+        val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
+        val points = body["distributions"].first { it["chartId"].asText() == "characters" }["points"]
+        assertThat(points.size()).isEqualTo(6)
+        for (point in points) {
+            val link = point["link"]
+            val response = client.get().uri { uri ->
+                uri.path("/api/v1/admin/stories")
+                link["params"].properties().forEach { (key, value) -> uri.queryParam(key, value.asText()) }
+                uri.build()
+            }.header("Authorization", "Bearer $token").exchange()
+            val page = json(response.expectStatus().isOk)
+            assertThat(page["totalElements"].asLong()).isEqualTo(1)
+            assertThat(point["value"].asDouble()).isEqualTo(page["totalElements"].asDouble())
+        }
+    }
+
     @Test fun `제작 세션은 공식 계정을 포함하고 태그 인물 수와 기간 및 보류를 스토리에 연결한다`() {
         val team = member("공식"); val excluded = member("제외 팀")
         org.mockito.Mockito.doReturn(team.id).`when`(official).officialUserId()

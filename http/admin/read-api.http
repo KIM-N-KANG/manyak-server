@@ -192,7 +192,7 @@ Authorization: Bearer {{adminToken}}
         client.assert(link.list === "chats" && link.params.turnBucket === "1", `actual=${JSON.stringify(link)}`);
     });
     if (response.status === 200) {
-        for (const [chartId, prefix] of [["turns", "adminTurnDrill"], ["member-chats", "adminMemberDrill"]]) {
+        for (const [chartId, prefix] of [["turns", "adminTurnDrill"], ["member-chats", "adminMemberDrill"], ["characters", "adminCharactersDrill"]]) {
             const points = response.body.distributions.find(d => d.chartId === chartId).points;
             const point = points.find(p => p.value > 0) || points[0];
             const query = Object.entries(point.link.params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
@@ -227,6 +227,17 @@ Authorization: Bearer {{adminToken}}
     client.test("회원 수 막대와 목록 총계 일치", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
         client.assert(response.body.totalElements === Number(client.global.get("adminMemberDrillCount")), `actual=${response.body.totalElements}`);
+    });
+%}
+
+### 인물 수 막대의 링크 목록 — 미삭제 스토리의 최신 완료 세션만 집계
+GET {{baseUrl}}/api/v1/admin/{{adminCharactersDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("인물 수 막대와 스토리 목록 총계 일치", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements === Number(client.global.get("adminCharactersDrillCount")), `actual=${response.body.totalElements}`);
     });
 %}
 
@@ -338,3 +349,21 @@ Authorization: Bearer {{adminToken}}
 ### 자유 조회 — 회원 활동과 출석 필터를 필요에 맞게 조합
 GET {{baseUrl}}/api/v1/admin/members?creditDirection=spent&creditDate=2026-10-21&sort=creditsSpent
 Authorization: Bearer {{adminToken}}
+
+
+### 새로 완성한 스토리의 제작 AI 필터 — http/story/simple-story-creation.http로 먼저 생성
+# 과거 로그는 백필하지 않으므로 이번 변경 이후 생성·완성한 스토리로 확인한다.
+GET {{baseUrl}}/api/v1/admin/stories?aiFeature=story_completion&aiStatus=SUCCEEDED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("완성 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+%}
+
+### 같은 제작 흐름의 스토리라인 생성 호출도 완성된 스토리로 조회
+GET {{baseUrl}}/api/v1/admin/stories?aiFeature=storyline_generation&aiStatus=SUCCEEDED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리라인 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+%}

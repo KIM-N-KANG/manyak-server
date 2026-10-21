@@ -48,7 +48,7 @@ class AiCallLog(
     val sessionId: String? = null,
 
     @Column(name = "story_id")
-    val storyId: Long? = null,
+    var storyId: Long? = null,
 
     @Column(name = "chat_id")
     val chatId: UUID? = null,

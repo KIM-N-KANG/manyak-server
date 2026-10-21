@@ -432,13 +432,13 @@ class SimpleStoryCreationService(
 
         // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
         onAiCallStarted()
-        val aiResponse = try {
+        val recorded = try {
             aiCallRecorder.record(
                 AiCallContext(feature = AiCallFeature.STORYLINE_GENERATION),
                 meta = { it.meta?.toAiCallMeta() },
             ) {
                 storyAiClient.createStorylines(aiRequest, storylineTraceLink(request, parentLink))
-            }.result
+            }
         } catch (exception: Exception) {
             // 스토리라인 생성 실패 분석 이벤트(스펙 §6-4-2-3). 세션 생성 전이라 creation_id는 아직 없다.
             serverAnalytics.storylineGenerationFailed(
@@ -449,6 +449,8 @@ class SimpleStoryCreationService(
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리라인 생성 요청에 실패했습니다.", exception)
         }
 
+        val aiResponse = recorded.result
+
         val response = try {
             transactionTemplate.execute {
             val customTagsByKey = resolveCustomTags(customTagDrafts).associateBy { it.category to it.normalizedName }
@@ -458,6 +460,7 @@ class SimpleStoryCreationService(
                     status = StoryCreationSessionStatus.STORYLINES_GENERATED,
                     // 이 세션을 만든 스토리라인 요청의 request_id(KNK-751). 이후 컴파일·채팅이 같은 creation_id를 이어 쓴다.
                     storylineRequestId = request.requestId,
+                    storylineAiCallLogId = recorded.aiCallLogId,
                 ),
             )
             val characters = storyCreationCharacterRepository.saveAll(
@@ -1223,6 +1226,9 @@ class SimpleStoryCreationService(
                 // 회수 재실행 검증용 바인딩(KNK-644): 이 세션을 만든 요청의 request_id를 STORY_CREATED와 원자적으로 커밋한다.
                 lockedSession.creationRequestId = requestId
                 storyCreationSessionRepository.save(lockedSession)
+                // 스토리·세션과 같은 트랜잭션으로 연결한다. 저장 실패 시 두 호출의 story_id도 NULL로 남는다.
+                aiCallRecorder.attachStoryId(recorded.aiCallLogId, story.id)
+                lockedSession.storylineAiCallLogId?.let { aiCallRecorder.attachStoryId(it, story.id) }
 
                 StoryCreationOutcome(
                     response = SimpleStoryCreateResponse(

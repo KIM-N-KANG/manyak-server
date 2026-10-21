@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('ai_call_logs_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('ai_call_logs_id_seq'::regclass) | false | [public.story_creation_sessions](public.story_creation_sessions.md) |  |  |
 | request_id | varchar(128) |  | false |  |  |  |
 | caller_service | varchar(50) |  | false |  |  |  |
 | feature | varchar(40) |  | false |  |  |  |
@@ -54,6 +54,7 @@
 ```mermaid
 erDiagram
 
+"public.story_creation_sessions" }o--o| "public.ai_call_logs" : "FOREIGN KEY (storyline_ai_call_log_id) REFERENCES ai_call_logs(id) ON DELETE SET NULL"
 
 "public.ai_call_logs" {
   bigint id
@@ -78,6 +79,17 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone completed_at
   jsonb prompt_versions
+}
+"public.story_creation_sessions" {
+  bigint id
+  bigint user_id
+  bigint story_id
+  varchar_30_ status
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  uuid creation_request_id
+  uuid storyline_request_id
+  bigint storyline_ai_call_log_id FK
 }
 ```
 
