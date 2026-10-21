@@ -5,8 +5,9 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.dto.PushKind
-import org.springframework.beans.factory.annotation.Value
-import java.time.Duration
+import com.knk.manyak.push.config.PushCampaignProperties
+import com.knk.manyak.global.observability.StructuredLogger
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import java.time.temporal.ChronoUnit
 import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
@@ -28,33 +29,46 @@ data class PromotionPushResult(
 
 /** 캠페인을 독립 선점하고, 원격 모드는 회차의 요청을 한 트랜잭션에 기록한다. */
 @Service
+@EnableConfigurationProperties(PushCampaignProperties::class)
 class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
     private val clock: Clock = Clock.systemUTC(),
     private val outbox: ScheduledPushOutboxWriter? = null,
-    @param:Value("\${manyak.push.campaign.sending-ttl:PT30M}") private val sendingTtl: Duration = Duration.ofMinutes(30),
+    private val properties: PushCampaignProperties = PushCampaignProperties(),
+    private val structuredLogger: StructuredLogger = StructuredLogger(),
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** [now] 기준으로 도래한 예약을 예약 순으로 발송한다. 선점에 실패한 캠페인은 결과에 담기지 않는다. */
     fun sendDue(now: Instant): List<PromotionPushResult> {
-        require(!sendingTtl.isNegative && !sendingTtl.isZero) { "캠페인 전송 시간 한도는 양수여야 합니다." }
         val startedAt = now.truncatedTo(ChronoUnit.MICROS)
+        // 정리 실패가 같은 틱의 예약 선점·발송을 막지 않도록 경계를 분리한다.
+        try {
+            failTimedOut(startedAt)
+        } catch (exception: Exception) {
+            structuredLogger.event(
+                "promotion_push_failed",
+                "error" to (exception.message ?: exception::class.simpleName ?: "unknown"),
+            )
+        }
+        return pushCampaignRepository.findDueScheduled(startedAt).mapNotNull { campaign ->
+            // 앞 캠페인 처리가 길어져도 다음 캠페인의 TTL은 실제 선점부터 센다.
+            val claimedAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
+            if (pushCampaignRepository.claim(campaign.id, claimedAt) == 1) send(campaign, claimedAt) else null
+        }
+    }
+
+    private fun failTimedOut(startedAt: Instant) {
         // 타임아웃을 예약 조회보다 먼저 처리하며 자동으로 재실행하지 않는다.
-        pushCampaignRepository.findByStatusAndStartedAtLessThanEqual(PushCampaignStatus.SENDING, startedAt.minus(sendingTtl))
+        pushCampaignRepository.findByStatusAndStartedAtLessThanEqual(PushCampaignStatus.SENDING, startedAt.minus(properties.sendingTtl))
             .forEach { campaign ->
                 if (pushCampaignRepository.finishIfOwned(campaign.id, campaign.startedAt!!, PushCampaignStatus.FAILED,
                         campaign.targetCount, campaign.sentCount, startedAt) == 1) {
                     logger.warn("promotion_push_timed_out campaignId={} startedAt={}", campaign.publicId, campaign.startedAt)
                 }
             }
-        return pushCampaignRepository.findDueScheduled(startedAt).mapNotNull { campaign ->
-            // 앞 캠페인 처리가 길어져도 다음 캠페인의 TTL은 실제 선점부터 센다.
-            val claimedAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
-            if (pushCampaignRepository.claim(campaign.id, claimedAt) == 1) send(campaign, claimedAt) else null
-        }
     }
 
     private fun send(campaign: PushCampaign, now: Instant): PromotionPushResult? {
