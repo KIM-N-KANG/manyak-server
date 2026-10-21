@@ -40,6 +40,7 @@
 | credit_orders_provider_ref_key | CREATE UNIQUE INDEX credit_orders_provider_ref_key ON public.credit_orders USING btree (provider_ref) |
 | idx_credit_orders_user_created_at | CREATE INDEX idx_credit_orders_user_created_at ON public.credit_orders USING btree (user_id, created_at DESC) |
 | idx_credit_orders_admin_completed_public | CREATE INDEX idx_credit_orders_admin_completed_public ON public.credit_orders USING btree (completed_at DESC NULLS LAST, public_id) WHERE (completed_at IS NOT NULL) |
+| idx_credit_orders_admin_user_completed | CREATE INDEX idx_credit_orders_admin_user_completed ON public.credit_orders USING btree (user_id, completed_at) INCLUDE (status, price_krw) |
 
 ## Relations
 

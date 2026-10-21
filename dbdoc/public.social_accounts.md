@@ -34,6 +34,7 @@
 | idx_social_accounts_user | CREATE INDEX idx_social_accounts_user ON public.social_accounts USING btree (user_id) |
 | uq_social_accounts_user_provider | CREATE UNIQUE INDEX uq_social_accounts_user_provider ON public.social_accounts USING btree (user_id, provider) |
 | idx_social_accounts_active_email_user | CREATE INDEX idx_social_accounts_active_email_user ON public.social_accounts USING btree (email, user_id) WHERE ((deleted_at IS NULL) AND (email IS NOT NULL)) |
+| idx_social_accounts_admin_lower_email | CREATE INDEX idx_social_accounts_admin_lower_email ON public.social_accounts USING btree (lower((email)::text), user_id) WHERE ((deleted_at IS NULL) AND (email IS NOT NULL)) |
 
 ## Relations
 

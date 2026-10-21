@@ -46,6 +46,8 @@
 | idx_ai_call_logs_request_id | CREATE INDEX idx_ai_call_logs_request_id ON public.ai_call_logs USING btree (request_id) |
 | idx_ai_call_logs_created_at | CREATE INDEX idx_ai_call_logs_created_at ON public.ai_call_logs USING btree (created_at DESC) |
 | idx_ai_call_logs_story | CREATE INDEX idx_ai_call_logs_story ON public.ai_call_logs USING btree (story_id) |
+| idx_ai_call_logs_admin_chat_created | CREATE INDEX idx_ai_call_logs_admin_chat_created ON public.ai_call_logs USING btree (chat_id, created_at) INCLUDE (feature, status, latency_ms) |
+| idx_ai_call_logs_admin_story_created | CREATE INDEX idx_ai_call_logs_admin_story_created ON public.ai_call_logs USING btree (story_id, created_at) INCLUDE (feature, status, latency_ms) |
 
 ## Relations
 
