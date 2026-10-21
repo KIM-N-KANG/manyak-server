@@ -1,0 +1,176 @@
+# 관리자 조회 API. 준비: 로컬 PostgreSQL·Redis, ./gradlew bootRun, Google client ID 허용 목록과 관리자 역할.
+# googleIdToken만 로컬의 실제 Google ID 토큰으로 바꾼다. 비밀값을 커밋하지 않는다.
+# 위에서부터 실행한다. 로그인 응답이 adminToken·adminSelfId를 저장하고 회원 상세 뒤 감사 로그를 조회한다.
+# 팀 계정 제외는 MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS(기본 1,2,3,4,5,10,11,206,207), 빈 값이면 제외 없음.
+@baseUrl = http://localhost:8080
+@googleIdToken = replace-with-local-google-id-token
+
+### 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 관리자 로그인
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"{{googleIdToken}}"}
+
+> {%
+    client.test("관리자 로그인", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+    if (response.status === 200) {
+        client.global.set("adminToken", response.body.accessToken);
+        client.global.set("adminSelfId", response.body.admin.memberId);
+    }
+%}
+
+### 대시보드 — 현재 수치와 KST 오늘, 제거된 카드 없음
+GET {{baseUrl}}/api/v1/admin/dashboard/summary
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("대시보드 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(typeof response.body.members.total === "number", `actual=${JSON.stringify(response.body.members)}`);
+        client.assert(!("withdrawnTotal" in response.body.members) && !("withdrawnToday" in response.body.members), "탈퇴 카드가 없어야 합니다");
+        client.assert(!("refundedTotal" in response.body.payments) && !("refundedToday" in response.body.payments), "환불 카드가 없어야 합니다");
+        client.assert(!("moderation" in response.body), "검수 보류 카드가 없어야 합니다");
+    });
+%}
+
+### 회원 전체 목록 — ACCESS 대상 ALL, 기본 size 20
+GET {{baseUrl}}/api/v1/admin/members?page=1&size=20&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+X-Manyak-Request-Id: admin_members_manual
+
+> {%
+    client.test("회원 페이지", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(Array.isArray(response.body.items) && response.body.items.length <= 20, `actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.page === 1 && response.body.size === 20, `actual=${JSON.stringify(response.body)}`);
+        client.assert(typeof response.body.totalElements === "number" && typeof response.body.totalPages === "number", "전체 페이지 정보가 필요합니다");
+        client.assert(response.body.items.every(m => !("email" in m) && !("userId" in m)), "이메일·내부 ID가 없어야 합니다");
+    });
+%}
+
+### 공개 UUID 검색 — 닉네임 부분 일치와 정확 일치 이메일도 query 사용, 상태 필터 선택
+GET {{baseUrl}}/api/v1/admin/members?query={{adminSelfId}}&status=ACTIVE
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("UUID 검색", () => client.assert(response.status === 200 && response.body.items.length === 1, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 회원 상세 — 로트 기준 미만료 잔액과 삭제되지 않은 콘텐츠 수, 조회마다 ACCESS 기록
+GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}
+Authorization: Bearer {{adminToken}}
+X-Manyak-Request-Id: admin_member_detail_manual
+
+> {%
+    client.test("회원 상세", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        for (const key of ["creditBalance", "storyCount", "chatCount"]) client.assert(typeof response.body[key] === "number", `field=${key} actual=${response.body[key]}`);
+        client.assert(!("email" in response.body) && !("id" in response.body), "개인 식별 필드가 없어야 합니다");
+    });
+%}
+
+### 결제 목록 — from·to는 완료 시각의 KST 날짜, 양끝 포함(다음 날 자정 제외)
+GET {{baseUrl}}/api/v1/admin/payments/orders?from=2026-10-01&to=2026-10-31&sort=priceKrw&order=desc&page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("결제 페이지", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.every(o => ["COMPLETED", "REFUNDED"].includes(o.status)), "대기 주문은 제외해야 합니다");
+        client.assert(response.body.items.every(o => !("userId" in o) && !("email" in o.member)), "내부 식별자·이메일이 없어야 합니다");
+    });
+%}
+
+### 환불만 조회 — refundedAt NULL은 asc·desc 모두 후순위, 동률 공개 UUID 오름차순
+GET {{baseUrl}}/api/v1/admin/payments/orders?status=REFUNDED&sort=refundedAt&order=asc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("환불 필터", () => client.assert(response.status === 200 && response.body.items.every(o => o.status === "REFUNDED"), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 앞서 기록한 회원 상세 ACCESS 조회 — 감사 조회 자체는 ACCESS를 추가하지 않는다
+GET {{baseUrl}}/api/v1/admin/audit-logs?adminId={{adminSelfId}}&action=MEMBER_VIEWED&targetType=MEMBER&targetId={{adminSelfId}}&page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("접속 기록", () => {
+        client.assert(response.status === 200 && response.body.items.length >= 1, `actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.items.some(l => l.requestId === "admin_member_detail_manual" && l.category === "ACCESS"), "앞선 상세 요청의 감사 기록이 필요합니다");
+        client.assert(response.body.items.every(l => l.reason === null && l.before === null && l.after === null), "ACCESS의 사유·전후 값은 null입니다");
+    });
+%}
+
+### 잘못된 페이지 400
+GET {{baseUrl}}/api/v1/admin/members?page=0
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("페이지 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 범위 밖 페이지 — 빈 목록과 총계 유지
+GET {{baseUrl}}/api/v1/admin/payments/orders?page=2147483647&size=100
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("빈 페이지", () => client.assert(response.status === 200 && response.body.items.length === 0, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 허용 외 정렬 400
+GET {{baseUrl}}/api/v1/admin/payments/orders?sort=invalid
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("정렬 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 거꾸로 된 날짜 400
+GET {{baseUrl}}/api/v1/admin/payments/orders?from=2026-10-31&to=2026-10-01
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("기간 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 감사 대상 종류 누락 400
+GET {{baseUrl}}/api/v1/admin/audit-logs?targetId={{adminSelfId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("감사 필터 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### UUID 형식 오류 400
+GET {{baseUrl}}/api/v1/admin/members/not-a-uuid
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("UUID 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 없는 회원 404 — 로컬 DB에 해당 공개 UUID가 없는지 확인
+GET {{baseUrl}}/api/v1/admin/members/00000000-0000-4000-8000-000000000000
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("회원 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 무토큰 401
+GET {{baseUrl}}/api/v1/admin/dashboard/summary
+
+> {%
+    client.test("인증 필수", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 자유 조회 — 실제 DB의 검색어·페이지·필터를 직접 바꿔 실행
+GET {{baseUrl}}/api/v1/admin/members?query=등대&page=1&size=20
+Authorization: Bearer {{adminToken}}

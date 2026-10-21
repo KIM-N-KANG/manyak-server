@@ -101,6 +101,8 @@ springdoc:
 
 manyak:
   admin:
+    dashboard:
+      excluded-user-ids: ${MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS:1,2,3,4,5,10,11,206,207}
     token:
       audience: manyak-admin
       ttl: PT2H
