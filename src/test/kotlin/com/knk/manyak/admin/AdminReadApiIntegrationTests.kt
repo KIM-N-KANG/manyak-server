@@ -516,11 +516,48 @@ class AdminReadApiIntegrationTests {
             assertThat(point["value"].asDouble()).isEqualTo(expected)
         }
         val genres = distributions.getValue("genre-depth")["points"].associateBy { it["label"].asText() }
-        assertThat(genres.getValue("삭제 장르")["value"].asDouble()).isEqualTo(included.filter { it.storyId == removed.id }.map { it.currentTurn }.average())
+        assertThat(genres).doesNotContainKey("삭제 장르")
         assertThat(genres.getValue("유지 장르")["value"].asDouble()).isEqualTo(30.0)
         val waits = distributions.getValue("first-message")
         assertThat(waits["points"].toList().map { it["value"].asDouble() }).containsExactly(45.0, 45.0, 52.5, 57.0)
         assertThat(waits["description"].asText()).contains("900초 초과 0", "입력 없음 ${included.size - 2}건")
+    }
+
+    @Test fun `장르 깊이는 삭제 스토리를 빼고 링크 스토리 목록의 턴 합과 채팅 수로 가중 평균한다`() {
+        val first = story(genre = "판타지, 미스터리")
+        val second = story(genre = "판타지")
+        val third = story(genre = "미스터리")
+        val removed = story(genre = "판타지, 삭제 전용")
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        chat(first, turns = 2); chat(first, turns = 4)
+        chat(second, turns = 12); chat(third, turns = 8)
+        chat(removed, turns = 100)
+        story(genre = "판타지") // 기간에 채팅이 없는 스토리는 링크 목록에서도 제외한다.
+        chat(first, turns = 999, created = midnight.minusSeconds(10 * 86400))
+        val deletedChat = chat(first, turns = 999)
+        jdbc.update("UPDATE story_chats SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), deletedChat.id)
+
+        val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
+        val points = body["distributions"].first { it["chartId"].asText() == "genre-depth" }["points"].toList()
+        assertThat(points.map { it["label"].asText() }).containsExactlyInAnyOrder("판타지", "미스터리")
+        for (point in points) {
+            val link = point["link"]
+            assertThat(link["list"].asText()).isEqualTo("stories")
+            val response = client.get().uri { uri ->
+                uri.path("/api/v1/admin/stories")
+                link["params"].properties().forEach { (key, value) -> uri.queryParam(key, value.asText()) }
+                uri.build()
+            }.header("Authorization", "Bearer $token").exchange()
+            val page = json(response.expectStatus().isOk)
+            assertThat(page["totalElements"].asLong()).isEqualTo(2)
+            assertThat(page["items"].size()).isEqualTo(2)
+            assertThat(page["items"].toList().map { it["storyId"].asText() }).doesNotContain(removed.publicId.toString())
+            val totalTurns = page["items"].sumOf { it["totalTurns"].asLong() }
+            val chatCount = page["items"].sumOf { it["chatCount"].asLong() }
+            assertThat(chatCount).isEqualTo(3)
+            assertThat(totalTurns).isEqualTo(if (point["label"].asText() == "판타지") 18 else 14)
+            assertThat(point["value"].asDouble()).isEqualTo(totalTurns.toDouble() / chatCount)
+        }
     }
 
     @Test fun `채팅 필터와 소모는 원문을 읽지 않고 첫 입력과 턴 날짜 및 AI 기록을 따른다`() {

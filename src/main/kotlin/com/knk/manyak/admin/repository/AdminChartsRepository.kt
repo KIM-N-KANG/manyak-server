@@ -33,11 +33,12 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
     }
     fun distributions(from: Instant, now: Instant, excluded: List<Long>, officialId: Long?): List<List<Map<String, Any?>>> {
         val p = params(from, now, excluded)
-        // 분포는 현재 삭제되지 않은 채팅을 읽으며 연결된 스토리의 삭제 여부는 목록처럼 무시한다. 일별 추이에는 삭제 채팅도 포함된다.
+        // 공통 분포는 스토리 삭제 여부와 무관한 미삭제 채팅을 읽는다. 일별 추이에는 삭제 채팅도 포함된다.
+        // 장르 깊이만 링크 대상인 스토리 목록에 맞춰 삭제 스토리를 제외한다.
         val chats = """FROM story_chats c JOIN stories s ON s.id=c.story_id
             WHERE c.deleted_at IS NULL AND ${during("c.created_at")} AND ${owner("c.user_id", excluded)}"""
         fun query(sql: String) = jdbc.queryForList(sql, p)
-        val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats GROUP BY s.genre ORDER BY s.genre")
+        val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
         val bucket = "CASE " + AdminQuery.turnBounds.mapIndexed { i, r -> "WHEN c.current_turn BETWEEN ${r.first} AND ${r.last} THEN $i" }.joinToString(" ") + " END"
         val turns = query("SELECT $bucket AS bucket, COUNT(*) AS n $chats GROUP BY $bucket")
         val started = query("SELECT CASE WHEN c.user_id IS NULL THEN 'GUEST' ELSE 'MEMBER' END AS label, COUNT(*) AS n $chats GROUP BY CASE WHEN c.user_id IS NULL THEN 'GUEST' ELSE 'MEMBER' END")
