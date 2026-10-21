@@ -37,6 +37,7 @@ class SentryMdcEventProcessorTests {
     @org.junit.jupiter.params.provider.ValueSource(strings = [
         "/api/v1/auth/social/google", "/api/v1/auth/social/kakao", "/api/v1/auth/social/complete",
         "/api/v1/auth/login/google", "/api/v1/auth/login/kakao",
+        "/api/v1/admin/auth/login/google",
         "/api/v1/auth/token/refresh", "/api/v1/auth/logout",
         "/api/v1/auth/links/reauth", "/api/v1/auth/links/google", "/api/v1/auth/links/kakao",
         "/api/v1/auth/social/unknown", "/api/v1/auth/links/unknown",

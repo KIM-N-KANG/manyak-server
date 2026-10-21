@@ -33,6 +33,31 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
+    @org.springframework.core.annotation.Order(1)
+    fun adminSecurityFilterChain(
+        http: HttpSecurity,
+        tokens: com.knk.manyak.auth.jwt.JwtTokenProvider,
+        users: UserRepository,
+        eligibility: com.knk.manyak.admin.service.AdminEligibilityService,
+        mapper: ObjectMapper,
+        errors: com.knk.manyak.global.error.GlobalExceptionHandler,
+    ): SecurityFilterChain = http
+        .securityMatcher("/api/v1/admin/**")
+        .cors { }
+        .csrf { it.disable() }
+        .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+        .authorizeHttpRequests {
+            it.requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,
+                com.knk.manyak.admin.security.AdminAuthenticationFilter.LOGIN_PATH)).permitAll()
+                .anyRequest().authenticated()
+        }
+        .exceptionHandling { it.authenticationEntryPoint(ApiAuthenticationEntryPoint(mapper)) }
+        .addFilterBefore(com.knk.manyak.admin.security.AdminAuthenticationFilter(
+            tokens.adminJwtDecoder(), users, eligibility, mapper, errors,
+        ), BearerTokenAuthenticationFilter::class.java)
+        .build()
+
+    @Bean
     fun securityFilterChain(
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,

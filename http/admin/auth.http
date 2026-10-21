@@ -1,0 +1,101 @@
+# 관리자 로그인·앱 토큰 격리 수동 검증.
+# 준비: 로컬 Postgres·Redis 실행 후 ./gradlew bootRun. Google client ID 허용 목록을 설정한다.
+# 같은 Google 신원으로 앱에 먼저 가입하고 운영 절차에 따라 admin_accounts 역할 행을 준비한다.
+# idToken은 실제 Google OIDC ID 토큰으로 로컬에서만 바꾼다. 토큰·비밀값을 커밋하지 않는다.
+# 위에서부터 실행한다. adminToken은 성공 응답 핸들러가 저장한다.
+@baseUrl = http://localhost:8080
+@googleIdToken = replace-with-local-google-id-token
+@nonAdminGoogleIdToken = replace-with-local-non-admin-google-id-token
+
+### 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 관리자 로그인 — 만료·무효 Bearer 헤더는 무시한다
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Authorization: Bearer deliberately-invalid
+Content-Type: application/json
+X-Manyak-Request-Id: admin_login_manual
+
+{"idToken":"{{googleIdToken}}"}
+
+> {%
+    client.test("관리자 토큰 발급", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.expiresIn === 7200, `expected=7200 actual=${response.body.expiresIn}`);
+        client.assert(response.body.tokenType === "Bearer", `expected=Bearer actual=${response.body.tokenType}`);
+        client.assert(response.body.admin.isAdmin === true, `expected=true actual=${response.body.admin.isAdmin}`);
+        client.assert(!("refreshToken" in response.body), "refreshToken이 없어야 합니다");
+    });
+    if (response.status === 200) client.global.set("adminToken", response.body.accessToken);
+%}
+
+### 앱 필수 경로에서는 관리자 토큰 401
+GET {{baseUrl}}/api/v1/auth/me
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("앱 경로 거절", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 앱 선택 인증 경로에서는 익명 처리 200
+GET {{baseUrl}}/api/v1/credits/policies
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("익명 정책 조회", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 필수 입력 누락 400
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("입력 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 잘못된 신원 증명 401
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"invalid"}
+
+> {%
+    client.test("신원 거절", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 관리자 역할이 없는 활성 계정 403 — 유효한 다른 계정의 Google 증명이 필요하다
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"{{nonAdminGoogleIdToken}}"}
+
+> {%
+    client.test("자격 거절", () => {
+        client.assert(response.status === 403, `expected=403 actual=${response.status}`);
+        client.assert(response.body.message === "관리자 권한이 없습니다.", `actual=${response.body.message}`);
+    });
+%}
+
+### 등록되지 않은 관리자 경로도 무토큰 401 — 이후 추가되는 핸들러도 같은 체인 적용
+GET {{baseUrl}}/api/v1/admin/future-endpoint
+X-Manyak-Request-Id: invalid request id
+
+> {%
+    client.test("관리자 접두 보호와 요청 ID 재발급", () => {
+        client.assert(response.status === 401, `expected=401 actual=${response.status}`);
+        const id = response.headers.valueOf("X-Manyak-Request-Id");
+        client.assert(/^req_[a-f0-9]{32}$/.test(id), `expected=generated request id actual=${id}`);
+    });
+%}
+
+### 자유 확인 — 현재 Google 증명으로 로그인 결과 확인
+POST {{baseUrl}}/api/v1/admin/auth/login/google
+Content-Type: application/json
+
+{"idToken":"{{googleIdToken}}"}

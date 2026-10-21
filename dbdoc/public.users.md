@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -63,6 +63,8 @@ erDiagram
 "public.story_submissions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.user_personas" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.story_drafts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.admin_accounts" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.admin_audit_logs" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
 
 "public.users" {
   bigint id
@@ -223,6 +225,24 @@ erDiagram
   integer version
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.admin_accounts" {
+  bigint user_id FK
+  timestamp_with_time_zone granted_at
+}
+"public.admin_audit_logs" {
+  bigint id
+  uuid public_id
+  bigint admin_user_id FK
+  varchar_10_ category
+  varchar_50_ action
+  varchar_30_ target_type
+  varchar_255_ target_id
+  varchar_500_ reason
+  jsonb before_state
+  jsonb after_state
+  varchar_64_ request_id
+  timestamp_with_time_zone created_at
 }
 ```
 

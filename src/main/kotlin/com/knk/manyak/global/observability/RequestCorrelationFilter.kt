@@ -33,7 +33,7 @@ class RequestCorrelationFilter(
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        val requestId = request.headerOrNull(HEADER_REQUEST_ID) ?: generateRequestId()
+        val requestId = request.getHeader(HEADER_REQUEST_ID)?.takeIf { REQUEST_ID_PATTERN.matches(it) } ?: generateRequestId()
         val rawSessionId = request.headerOrNull(HEADER_SESSION_ID)
         val rawDeviceId = request.headerOrNull(HEADER_DEVICE_ID)
 
@@ -92,6 +92,7 @@ class RequestCorrelationFilter(
         getHeader(name)?.takeIf { it.isNotBlank() }
 
     companion object {
+        private val REQUEST_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,64}")
         const val HEADER_DEVICE_ID = "X-Manyak-Device-Id"
         const val HEADER_SESSION_ID = "X-Manyak-Session-Id"
         const val HEADER_REQUEST_ID = "X-Manyak-Request-Id"
