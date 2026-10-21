@@ -58,6 +58,43 @@ class AdminFoundationIntegrationTests {
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
 
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private lateinit var eligibility: com.knk.manyak.admin.service.AdminEligibilityService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["withdraw", "suspend", "revoke"])
+    fun `필터 통과 뒤 처리자 자격을 잃으면 변경과 감사가 롤백되고 같은 403이다`(change: String) {
+        val user = member("actor-race")
+        val token = adminToken(user)
+        val passedFilter = java.util.concurrent.atomic.AtomicBoolean()
+        org.mockito.Mockito.doAnswer { invocation ->
+            val result = invocation.callRealMethod()
+            val checked = invocation.arguments[0] as? User
+            if (checked?.id == user.id && result == null && passedFilter.compareAndSet(false, true)) {
+                // 필터는 이미 ACTIVE+역할을 확인했다. 핸들러 실행 전에 별도 커밋으로 자격을 바꾼다.
+                when (change) {
+                    "withdraw" -> withdrawal.withdraw(user.id)
+                    "suspend" -> jdbc.update("UPDATE users SET status = 'SUSPENDED' WHERE id = ?", user.id)
+                    "revoke" -> jdbc.update("DELETE FROM admin_accounts WHERE user_id = ?", user.id)
+                }
+            }
+            result
+        }.`when`(eligibility).rejectionReason(org.mockito.ArgumentMatchers.any())
+
+        client.put().uri("/api/v1/admin/foundation-probe").header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isForbidden.expectBody()
+            .jsonPath("$.code").isEqualTo("FORBIDDEN")
+            .jsonPath("$.message").isEqualTo("관리자 권한이 없습니다.")
+        assertThat(passedFilter).isTrue()
+        // probe가 감사 직전에 쓴 nickname은 롤백되고, 자격 회수 트랜잭션의 값은 보존된다.
+        assertThat(jdbc.queryForObject("SELECT nickname FROM users WHERE id = ?", String::class.java, user.id))
+            .isEqualTo(if (change == "withdraw") com.knk.manyak.user.service.UserWithdrawalService.ANONYMIZED_NICKNAME else "actor-race")
+        assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, user.id))
+            .isEqualTo(when (change) { "withdraw" -> "DELETED"; "suspend" -> "SUSPENDED"; else -> "ACTIVE" })
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
+    }
+
     @Test fun `변경 기록은 처리자 대상 전후 값과 응답과 같은 요청 ID를 보존한다`() {
         val user = member("admin")
         val token = adminToken(user)

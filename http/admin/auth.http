@@ -3,6 +3,14 @@
 # 같은 Google 신원으로 앱에 먼저 가입하고 운영 절차에 따라 admin_accounts 역할 행을 준비한다.
 # idToken은 실제 Google OIDC ID 토큰으로 로컬에서만 바꾼다. 토큰·비밀값을 커밋하지 않는다.
 # 위에서부터 실행한다. adminToken은 성공 응답 핸들러가 저장한다.
+# 관리자 변경 처리자 재검증 수동 재현(변경 API가 포함된 통합 브랜치, 로컬 DB에서만):
+# 1. 각 도메인의 변경 요청 파일을 사용하고, 핸들러 진입 직후 첫 대상 잠금 전에 Thread breakpoint를 둔다.
+# 2. 필터가 통과한 상태에서 별도 DB 연결로 처리자 status를 SUSPENDED로 바꾸거나 관리자 역할을 회수하고 COMMIT한다.
+#    탈퇴 케이스는 다른 요청의 실제 탈퇴 API로 재현한다. 모든 JVM 스레드를 멈추는 breakpoint는 사용하지 않는다.
+# 3. 요청을 재개하면 403 FORBIDDEN, message="관리자 권한이 없습니다."이며 변경 값과 감사 행이 남지 않아야 한다.
+# 4. 정상 처리자는 변경과 감사 행이 함께 커밋되어야 한다. 사용한 로컬 테스트 계정 상태는 검증 후 복원한다.
+# 처리자/역할 행이 다른 트랜잭션에 잠겨 자격을 확정할 수 없어도 같은 403이다(NOWAIT).
+# S1 단독에는 실제 변경 API가 없어 위 경합은 AdminFoundationIntegrationTests의 테스트 핸들러로 자동 검증한다.
 @baseUrl = http://localhost:8080
 @googleIdToken = replace-with-local-google-id-token
 @nonAdminGoogleIdToken = replace-with-local-non-admin-google-id-token
