@@ -4,6 +4,10 @@ import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
+import com.knk.manyak.push.dto.PushKind
+import org.springframework.beans.factory.annotation.Value
+import java.time.Duration
+import java.time.temporal.ChronoUnit
 import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
@@ -19,6 +23,7 @@ data class PromotionPushResult(
     val targets: Int,
     val sent: Int,
     val failed: Boolean = false,
+    val kind: PushKind = PushKind.MARKETING,
 )
 
 /** 캠페인을 독립 선점하고, 원격 모드는 회차의 요청을 한 트랜잭션에 기록한다. */
@@ -29,61 +34,71 @@ class PromotionPushService(
     private val fcmPushSender: FcmPushSender,
     private val clock: Clock = Clock.systemUTC(),
     private val outbox: ScheduledPushOutboxWriter? = null,
+    @param:Value("\${manyak.push.campaign.sending-ttl:PT30M}") private val sendingTtl: Duration = Duration.ofMinutes(30),
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** [now] 기준으로 도래한 예약을 예약 순으로 발송한다. 선점에 실패한 캠페인은 결과에 담기지 않는다. */
-    fun sendDue(now: Instant): List<PromotionPushResult> =
-        pushCampaignRepository.findDueScheduled(now).mapNotNull { campaign ->
-            // 갱신 0건이면 다른 인스턴스가 이미 집었거나 그 사이 운영자가 취소한 것이다.
-            if (pushCampaignRepository.claim(campaign.id, now) == 1) send(campaign, now) else null
+    fun sendDue(now: Instant): List<PromotionPushResult> {
+        require(!sendingTtl.isNegative && !sendingTtl.isZero) { "캠페인 전송 시간 한도는 양수여야 합니다." }
+        val startedAt = now.truncatedTo(ChronoUnit.MICROS)
+        // 타임아웃을 예약 조회보다 먼저 처리하며 자동으로 재실행하지 않는다.
+        pushCampaignRepository.findByStatusAndStartedAtLessThanEqual(PushCampaignStatus.SENDING, startedAt.minus(sendingTtl))
+            .forEach { campaign ->
+                if (pushCampaignRepository.finishIfOwned(campaign.id, campaign.startedAt!!, PushCampaignStatus.FAILED,
+                        campaign.targetCount, campaign.sentCount, startedAt) == 1) {
+                    logger.warn("promotion_push_timed_out campaignId={} startedAt={}", campaign.publicId, campaign.startedAt)
+                }
+            }
+        return pushCampaignRepository.findDueScheduled(startedAt).mapNotNull { campaign ->
+            // 앞 캠페인 처리가 길어져도 다음 캠페인의 TTL은 실제 선점부터 센다.
+            val claimedAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
+            if (pushCampaignRepository.claim(campaign.id, claimedAt) == 1) send(campaign, claimedAt) else null
         }
+    }
 
-    private fun send(campaign: PushCampaign, now: Instant): PromotionPushResult {
+    private fun send(campaign: PushCampaign, now: Instant): PromotionPushResult? {
         campaign.startedAt = now
         var targets = 0
         var sent = 0
         return try {
-            val targetIds = userRepository.findMarketingPushTargetIds()
+            val targetIds = if (campaign.kind == PushKind.SERVICE) userRepository.findServicePushTargetIds() else userRepository.findMarketingPushTargetIds()
             targets = targetIds.size
             // 문구는 회차 시작에 한 번만 조립한다. (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
             val data = mapOf(
-                "type" to TYPE_PROMOTION,
+                "type" to if (campaign.kind == PushKind.SERVICE) "NOTICE" else TYPE_PROMOTION,
                 "campaignId" to campaign.publicId.toString(),
-                "title" to withAdPrefix(campaign.title),
+                "title" to if (campaign.kind == PushKind.SERVICE) campaign.title else withAdPrefix(campaign.title),
                 "body" to campaign.body,
             )
             if (outbox != null) {
-                sent = outbox.record(targetIds, data, "promotion", campaign.publicId.toString())
+                sent = outbox.record(targetIds, data, "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
             } else targetIds.forEach { userId ->
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
                 val user = userRepository.findById(userId).orElse(null)
-                if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(at)) {
+                if (user == null || user.status != UserStatus.ACTIVE || (if (campaign.kind == PushKind.SERVICE) !user.servicePushEnabled else !user.canReceiveMarketingPush(at))) {
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, data, AndroidConfig.Priority.NORMAL) }
+                runCatching { fcmPushSender.sendToUser(userId, data, if (campaign.kind == PushKind.SERVICE) AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL) }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
             }
-            finish(campaign, PushCampaignStatus.SENT, targets, sent)
-            PromotionPushResult(campaign.publicId, targets, sent)
+            if (finish(campaign, PushCampaignStatus.SENT, targets, sent))
+                PromotionPushResult(campaign.publicId, targets, sent, kind = campaign.kind) else null
         } catch (exception: Exception) {
             // 자동 재시도하지 않는다. 운영자가 같은 행을 SCHEDULED로 되돌리면 멱등하게 재실행한다.
             logger.warn("프로모션 푸시 회차가 실패했습니다. (campaignId={})", campaign.publicId, exception)
-            finish(campaign, PushCampaignStatus.FAILED, targets, sent)
-            PromotionPushResult(campaign.publicId, targets, sent, failed = true)
+            if (finish(campaign, PushCampaignStatus.FAILED, targets, sent))
+                PromotionPushResult(campaign.publicId, targets, sent, failed = true, kind = campaign.kind) else null
         }
     }
 
-    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int) {
-        campaign.status = status
-        campaign.targetCount = targets
-        campaign.sentCount = sent
-        // 회차 길이를 보려면 끝난 시각은 논리 시각(now)이 아니라 실제 시각이어야 한다.
-        campaign.finishedAt = clock.instant()
-        pushCampaignRepository.save(campaign)
+    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int): Boolean {
+        val updated = pushCampaignRepository.finishIfOwned(campaign.id, campaign.startedAt!!, status, targets, sent, clock.instant())
+        if (updated == 0) logger.warn("promotion_push_result_discarded campaignId={} startedAt={}", campaign.publicId, campaign.startedAt)
+        return updated == 1
     }
 
     private companion object {

@@ -40,7 +40,7 @@ class PushMessageTemplate(
 
     /** NULL이면 상시 적용. 값이 있으면 그 시각부터 yml 기본 문구로 되돌아간다(이벤트 종료 장치). */
     @Column(name = "effective_until")
-    val effectiveUntil: Instant? = null,
+    var effectiveUntil: Instant? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

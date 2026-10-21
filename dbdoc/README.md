@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 13 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -546,6 +546,7 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+  varchar_16_ kind
 }
 "public.credit_orders" {
   bigint id

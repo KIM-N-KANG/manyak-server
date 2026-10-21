@@ -273,7 +273,7 @@ class PromotionPushIntegrationTests {
         val beforeNight = eligibleMember()
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
-        val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
+        val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
         val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, crossing)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()

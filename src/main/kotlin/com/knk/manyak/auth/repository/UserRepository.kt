@@ -119,6 +119,19 @@ interface UserRepository : JpaRepository<User, Long> {
     )
     fun findMarketingPushTargetIds(): List<Long>
 
+    @Query("""SELECT u.id FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+        AND u.servicePushEnabled = true
+        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
+        ORDER BY u.id""")
+    fun findServicePushTargetIds(): List<Long>
+
+    @Query("""SELECT COUNT(u) FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
+        AND ((:marketing = false AND u.servicePushEnabled = true)
+          OR (:marketing = true AND u.marketingPushAgreedAt IS NOT NULL))
+        AND (:nightOnly = false OR u.marketingPushNightAgreedAt IS NOT NULL)""")
+    fun countPushTargets(marketing: Boolean, nightOnly: Boolean): Long
+
     /**
      * [id] 회원의 **보상 신원**(`coalesce(reward_identity_user_id, id)`)을 돌려준다(KNK-1053).
      * 1회성 보상의 멱등 키를 user_id가 아니라 이 값으로 만들어야, 재가입이 user_id를 갈아치워도 키가 리셋되지 않는다.

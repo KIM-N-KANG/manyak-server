@@ -22,6 +22,7 @@ class ScheduledPushOutboxWriter(
         scenario: String,
         occurrence: String,
         expiresAt: Instant? = null,
+        kind: String = "MARKETING",
     ): Int {
         val now = clock.instant()
         return targetIds.sumOf { userId ->
@@ -35,7 +36,7 @@ class ScheduledPushOutboxWriter(
             store.insert(PushMessage(
                 messageId = messageId,
                 recipientId = recipientId,
-                kind = "MARKETING",
+                kind = kind,
                 type = data.getValue("type"),
                 data = data,
                 expiresAt = expiresAt,
