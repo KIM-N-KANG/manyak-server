@@ -333,6 +333,10 @@ manyak:
       enabled: ${MANYAK_ANALYTICS_AMPLITUDE_ENABLED:false}
       # Amplitude 프로젝트 API 키. 운영은 env/secret(MANYAK_AMPLITUDE_API_KEY)로 주입한다. 빈 값이면 발행하지 않는다.
       api-key: ${MANYAK_AMPLITUDE_API_KEY:}
+      # 관리자 Dashboard REST API 조회. 이벤트 발행용 enabled/base-url과 독립적이다.
+      secret-key: ${MANYAK_AMPLITUDE_SECRET_KEY:}
+      team-cohort-id: ${MANYAK_AMPLITUDE_TEAM_COHORT_ID:}
+      dashboard-base-url: ${MANYAK_AMPLITUDE_DASHBOARD_BASE_URL:https://amplitude.com}
       # HTTP V2 API 베이스 URL. 리전에 따라 api2.amplitude.com(US) 또는 api.eu.amplitude.com(EU).
       base-url: ${MANYAK_AMPLITUDE_BASE_URL:https://api2.amplitude.com}
 

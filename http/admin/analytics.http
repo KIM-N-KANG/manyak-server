@@ -1,0 +1,72 @@
+# 관리자 Amplitude 분석 지표. IntelliJ HTTP Client에서 위에서부터 실행한다.
+# 준비: Postgres·Redis 기동 후 ./gradlew bootRun. 관리자 로그인 응답의 accessToken을 넣는다.
+# MANYAK_AMPLITUDE_API_KEY / MANYAK_AMPLITUDE_SECRET_KEY가 필요하다.
+# 실제 Amplitude 호출은 이 수동 요청을 실행할 때만 한다. 자동 테스트는 HTTP 목 서버를 사용한다.
+# 모든 기간은 KST, 매번 90일을 두 번 조회하고 프로세스 캐시를 10분 공유한다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@rolelessAdminToken = replace-with-admin-token-without-role
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 기본 30일
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("기본 기간은 30일", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.daily.length === 30, `actual=${response.body.daily.length}`);
+  client.assert(response.body.todayActiveUsers === response.body.daily[29].activeUsers, "마지막 날 활성 사용자와 같아야 합니다");
+});
+client.global.set("analyticsAsOf", response.body.asOf);
+%}
+
+### 같은 캐시의 최근 7일 (10분 안에 실행)
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("기간을 잘라도 캐시 시각은 같다", () => {
+  client.assert(response.status === 200 && response.body.daily.length === 7, `actual=${response.status}`);
+  client.assert(response.body.asOf === client.global.get("analyticsAsOf"), "자정 경계·캐시 만료를 확인하세요");
+});
+%}
+
+### 90일 전체
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일", () => client.assert(response.status === 200 && response.body.daily.length === 90, `actual=${response.status}`)); %}
+
+### 400: 허용하지 않는 기간
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics?days=10
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 401: 관리자 토큰 필요 (앱 토큰도 401)
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics
+
+> {% client.test("인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 403: 관리자 역할이 회수된 토큰을 별도로 준비한 뒤 선택 실행
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("역할 필요", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 503: 키를 비워 새로 기동한 환경에서만 선택 실행. 서버 기동·다른 API는 정상이다.
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("분석 지표만 사용 불가", () => {
+  client.assert(response.status === 503 && response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.status}`);
+});
+%}
+
+### 자유 조회: 키 주입·코호트 설정 뒤 값을 확인한다
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics?days=30
+Authorization: Bearer {{adminToken}}
