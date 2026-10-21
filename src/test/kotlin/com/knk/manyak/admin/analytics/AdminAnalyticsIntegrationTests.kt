@@ -56,5 +56,12 @@ class AdminAnalyticsIntegrationTests {
             .jsonPath("$.daily.length()").isEqualTo(30).jsonPath("$.to").isEqualTo(end.toString()).jsonPath("$.todayActiveUsers").isEqualTo(12)
         client.get().uri("$path?days=7").header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody().jsonPath("$.daily.length()").isEqualTo(7)
         assertThat(server.requestCount).isEqualTo(2)
+        for (metric in listOf("active", "new")) {
+            val request = server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)!!
+            assertThat(request.requestUrl!!.encodedPath).isEqualTo("/api/2/users")
+            assertThat(request.requestUrl!!.queryParameter("m")).isEqualTo(metric)
+            assertThat(request.requestUrl!!.queryParameter("i")).isEqualTo("1")
+            assertThat(request.requestUrl!!.queryParameter("e")).isNull()
+        }
     }
 }

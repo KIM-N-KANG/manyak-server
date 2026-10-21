@@ -2,7 +2,10 @@
 # 준비: Postgres·Redis 기동 후 ./gradlew bootRun. 관리자 로그인 응답의 accessToken을 넣는다.
 # MANYAK_AMPLITUDE_API_KEY / MANYAK_AMPLITUDE_SECRET_KEY가 필요하다.
 # 실제 Amplitude 호출은 이 수동 요청을 실행할 때만 한다. 자동 테스트는 HTTP 목 서버를 사용한다.
-# 모든 기간은 KST, 매번 90일을 두 번 조회하고 프로세스 캐시를 10분 공유한다.
+# 모든 기간은 KST. 갱신할 때 /api/2/users를 m=active, m=new로 각 1회, i=1, 최근 90일 조회한다.
+# 프로세스 캐시를 10분 공유하며, 갱신 중에는 다른 요청이 기다리지 않고 기존 캐시 또는 503을 받는다.
+# 실패 완료 뒤 60초 동안은 재호출하지 않고 기존 캐시(asOf 유지) 또는 503을 반환한다.
+# MANYAK_AMPLITUDE_TEAM_COHORT_ID가 있으면 userdata_cohort is not 조건으로 제외한다.
 @baseUrl = http://localhost:8080
 @adminToken = replace-with-admin-token
 @rolelessAdminToken = replace-with-admin-token-without-role
@@ -64,6 +67,20 @@ Authorization: Bearer {{adminToken}}
 > {%
 client.test("분석 지표만 사용 불가", () => {
   client.assert(response.status === 503 && response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.status}`);
+});
+%}
+
+### 장애 쿨다운 — 외부 대역을 500/429로 설정한 로컬 환경에서 첫 실패 직후 60초 안에 선택 실행
+# 캐시가 있으면 200과 기존 asOf, 없으면 표준 503. 대역 요청 수는 늘지 않아야 한다.
+# 동시 갱신은 대역 응답을 지연시킨 뒤 별도 탭에서 호출해 즉시 캐시 또는 503인지 확인한다.
+GET {{baseUrl}}/api/v1/admin/dashboard/analytics?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("쿨다운은 캐시 또는 사용 불가", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.asOf === client.global.get("analyticsAsOf"), "캐시 시각 유지");
+  if (response.status === 503) client.assert(response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.body.code}`);
 });
 %}
 

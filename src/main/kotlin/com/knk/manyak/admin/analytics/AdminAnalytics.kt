@@ -37,17 +37,16 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
     fun fetch(from: LocalDate, to: LocalDate): AmplitudeSeries {
         if (properties.apiKey.isBlank() || properties.secretKey.isBlank()) throw AmplitudeFetchFailure(AnalyticsFailureReason.no_credentials)
         val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
-        val active = query("_active", from, to, deadline)
-        val new = query("_new", from, to, deadline)
+        val active = query("active", from, to, deadline)
+        val new = query("new", from, to, deadline)
         return AmplitudeSeries(active, new)
     }
 
-    private fun query(event: String, from: LocalDate, to: LocalDate, deadline: Long): List<Long> {
+    private fun query(metric: String, from: LocalDate, to: LocalDate, deadline: Long): List<Long> {
         var pending: java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<String>>? = null
         var status: Int? = null
         try {
-            val params = linkedMapOf("e" to mapper.writeValueAsString(mapOf("event_type" to event)),
-                "m" to "uniques", "i" to "1", "start" to from.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
+            val params = linkedMapOf("m" to metric, "i" to "1", "start" to from.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
                 "end" to to.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
             properties.teamCohortId.takeIf { it.isNotBlank() }?.let { cohort ->
                 params["s"] = mapper.writeValueAsString(listOf(mapOf("prop" to "userdata_cohort", "op" to "is not", "values" to listOf(cohort))))
@@ -57,7 +56,7 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0) throw AmplitudeFetchFailure(AnalyticsFailureReason.timeout)
             val basic = java.util.Base64.getEncoder().encodeToString((properties.apiKey + ":" + properties.secretKey).toByteArray(Charsets.UTF_8))
-            val request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("$base/api/2/events/segmentation?$query"))
+            val request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("$base/api/2/users?$query"))
                 .timeout(java.time.Duration.ofNanos(remaining)).header("Authorization", "Basic $basic").header("Accept", "application/json").GET().build()
             pending = http.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.ofString())
             val response = pending.get((deadline - System.nanoTime()).coerceAtLeast(1), java.util.concurrent.TimeUnit.NANOSECONDS)
@@ -70,7 +69,7 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
             require(dates.isArray && dates.size() == expected && groups.isArray && groups.size() == 1)
             val values = groups[0]
             require(values.isArray && values.size() == expected)
-            // 각 값은 xValues의 같은 인덱스 날짜에 대응한다. 기간 고유 사용자 수인 seriesCollapsed는 쓰지 않는다.
+            // 각 값은 xValues의 같은 인덱스 날짜에 대응한다. seriesMeta는 그룹 이름이며 사용자 수로 해석하지 않는다.
             val byDate = linkedMapOf<LocalDate, Long>()
             dates.forEachIndexed { index, node ->
                 require(node.isString)
@@ -101,26 +100,41 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
 @Service
 class AdminAnalyticsService(private val client: AmplitudeDashboardClient, private val clock: Clock = Clock.systemUTC()) {
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
-    private var cached: AdminAnalyticsResponse? = null
+    @Volatile private var cached: AdminAnalyticsResponse? = null
+    @Volatile private var retryAfter: Instant = Instant.MIN
+    private val refreshing = java.util.concurrent.atomic.AtomicBoolean()
 
-    /** 태스크마다 하나의 90일 캐시를 사용하며 동시 갱신 요청도 두 번의 외부 조회만 수행한다. */
-    @Synchronized
+    /** 태스크별 90일 캐시. 갱신 중인 요청을 기다리지 않고 이전 캐시 또는 503을 반환한다. */
     fun dashboard(days: Int): AdminAnalyticsResponse {
         if (days !in setOf(7, 30, 90)) throw org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "days는 7, 30, 90 중 하나여야 합니다.")
-        val today = LocalDate.ofInstant(clock.instant(), java.time.ZoneId.of("Asia/Seoul"))
         val previous = cached
-        if (previous != null && previous.to == today && clock.instant().isBefore(previous.asOf.plusSeconds(600))) return slice(previous, days)
-        val full = try {
+        if (isFresh(previous)) return slice(previous!!, days)
+        if (clock.instant().isBefore(retryAfter) || !refreshing.compareAndSet(false, true)) return fallback(days)
+        try {
+            // 앞선 갱신이 첫 상태 확인과 표식 획득 사이에 끝났을 수 있다.
+            val latest = cached
+            if (isFresh(latest) || clock.instant().isBefore(retryAfter)) return fallback(days)
+            val today = LocalDate.ofInstant(clock.instant(), java.time.ZoneId.of("Asia/Seoul"))
             val from = today.minusDays(89)
             val data = client.fetch(from, today)
             val daily = data.active.indices.map { i -> AnalyticsDay(from.plusDays(i.toLong()), data.active[i], data.new[i]) }
-            AdminAnalyticsResponse(clock.instant(), from, today, daily.last().activeUsers, daily).also { cached = it }
+            val full = AdminAnalyticsResponse(clock.instant(), from, today, daily.last().activeUsers, daily)
+            cached = full
+            retryAfter = Instant.MIN
+            return slice(full, days)
         } catch (failure: AmplitudeFetchFailure) {
+            retryAfter = clock.instant().plusSeconds(60)
             log.warn("admin_analytics_fetch_failed reason={} status={}", failure.reason.name, failure.status)
-            previous ?: throw AdminAnalyticsUnavailable()
+            return fallback(days)
+        } finally {
+            refreshing.set(false)
         }
-        return slice(full, days)
     }
+    private fun isFresh(value: AdminAnalyticsResponse?): Boolean {
+        val now = clock.instant()
+        return value != null && value.to == LocalDate.ofInstant(now, java.time.ZoneId.of("Asia/Seoul")) && now.isBefore(value.asOf.plusSeconds(600))
+    }
+    private fun fallback(days: Int) = slice(cached ?: throw AdminAnalyticsUnavailable(), days)
     private fun slice(full: AdminAnalyticsResponse, days: Int): AdminAnalyticsResponse {
         val daily = full.daily.takeLast(days)
         return full.copy(from = daily.first().date, daily = daily)

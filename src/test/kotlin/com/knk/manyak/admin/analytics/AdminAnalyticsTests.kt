@@ -34,7 +34,7 @@ class AdminAnalyticsTests {
         AmplitudeDashboardClient(AmplitudeDashboardProperties(key, secret, cohort, server.url("/").toString()), mapper), clock)
     private fun body(start: LocalDate = today.minusDays(89), base: Long = 0): String = mapper.writeValueAsString(mapOf("data" to mapOf(
         "xValues" to (0L..89).map { start.plusDays(it).toString() }, "series" to listOf((0L..89).map { base + it }),
-        "seriesCollapsed" to listOf(listOf(mapOf("value" to 999999))), "seriesLabels" to listOf("Any"))))
+        "seriesMeta" to listOf("All Users"))))
     private fun enqueuePair(start: LocalDate = today.minusDays(89), base: Long = 0) {
         server.enqueue(MockResponse().setBody(body(start, base)))
         server.enqueue(MockResponse().setBody(body(start, base + 100)))
@@ -47,7 +47,7 @@ class AdminAnalyticsTests {
         assertThat(appender.list.single().formattedMessage).doesNotContain("test-api", "test-secret", "sensitive response")
     }
 
-    @Test fun `90일 세분화 두 요청과 기본 인증 코호트 및 KST 날짜를 검증하고 days는 공유 캐시를 자른다`() {
+    @Test fun `90일 사용자 수 두 요청과 기본 인증 코호트 및 KST 날짜를 검증하고 days는 공유 캐시를 자른다`() {
         enqueuePair()
         val service = service("team-cohort")
         val response = service.dashboard(7)
@@ -58,12 +58,13 @@ class AdminAnalyticsTests {
         assertThat(service.dashboard(90).daily).hasSize(90)
         assertThat(service.dashboard(30).daily).hasSize(30)
         assertThat(server.requestCount).isEqualTo(2)
-        for (event in listOf("_active", "_new")) {
+        for (metric in listOf("active", "new")) {
             val request = server.takeRequest(1, TimeUnit.SECONDS)!!
             val url = request.requestUrl!!
-            assertThat(url.encodedPath).isEqualTo("/api/2/events/segmentation")
-            assertThat(mapper.readTree(url.queryParameter("e")!!)["event_type"].asText()).isEqualTo(event)
-            assertThat(url.queryParameter("m")).isEqualTo("uniques"); assertThat(url.queryParameter("i")).isEqualTo("1")
+            assertThat(request.method).isEqualTo("GET")
+            assertThat(url.encodedPath).isEqualTo("/api/2/users")
+            assertThat(url.queryParameter("e")).isNull()
+            assertThat(url.queryParameter("m")).isEqualTo(metric); assertThat(url.queryParameter("i")).isEqualTo("1")
             assertThat(url.queryParameter("start")).isEqualTo("20260725"); assertThat(url.queryParameter("end")).isEqualTo("20261022")
             assertThat(request.getHeader("Authorization")).isEqualTo("Basic " + Base64.getEncoder().encodeToString("test-api:test-secret".toByteArray()))
             assertThat(mapper.readTree(url.queryParameter("s")!!)).isEqualTo(mapper.readTree("""[{"prop":"userdata_cohort","op":"is not","values":["team-cohort"]}]"""))
@@ -82,13 +83,20 @@ class AdminAnalyticsTests {
         clock.at = now.plusSeconds(600)
         server.enqueue(MockResponse().setBody(body(base = 2000))); server.enqueue(MockResponse().setResponseCode(500).setBody("sensitive response"))
         assertThat(service.dashboard(7)).isEqualTo(cached); failure("http_error", 500)
+        assertThat(service.dashboard(7)).isEqualTo(cached)
+        assertThat(server.requestCount).isEqualTo(4)
+        clock.at = now.plusSeconds(661)
         enqueuePair(base = 3000)
         assertThat(service.dashboard(7).todayActiveUsers).isEqualTo(3089)
     }
     @ParameterizedTest @ValueSource(ints = [302, 400, 401, 403, 429, 500, 503])
     fun `외부 HTTP 오류는 고정 실패로 변환하고 응답 본문과 키를 기록하지 않는다`(status: Int) {
         server.enqueue(MockResponse().setResponseCode(status).setBody("sensitive response test-api test-secret"))
-        assertThatThrownBy { service().dashboard(30) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        val service = service()
+        assertThatThrownBy { service.dashboard(30) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        clock.at = now.plusSeconds(30)
+        assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
         failure(if (status == 429) "rate_limited" else "http_error", status)
     }
     @ParameterizedTest @ValueSource(strings = ["{}", "not-json", "{\"data\":{\"xValues\":[],\"series\":[]}}"])
@@ -115,15 +123,81 @@ class AdminAnalyticsTests {
         assertThat(response.daily.map { it.date }).isSorted()
         assertThat(response.todayActiveUsers).isEqualTo(89)
     }
-    @Test fun `동시 캐시 미스는 한 번만 갱신한다`() {
-        val service = service(); enqueuePair()
+    @ParameterizedTest @ValueSource(booleans = [false, true])
+    fun `갱신 중 다른 요청은 외부 조회를 기다리지 않고 캐시 또는 사용 불가를 받는다`(hasCache: Boolean) {
+        val service = service()
+        val previous = if (hasCache) { enqueuePair(); service.dashboard(7) } else null
+        clock.at = now.plusSeconds(600)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                if (requests.incrementAndGet() == 1) {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                return MockResponse().setBody(body(base = 1000))
+            }
+        }
         val pool = Executors.newFixedThreadPool(4)
         try {
-            val futures = (1..4).map { pool.submit<AdminAnalyticsResponse> { service.dashboard(7) } }
-            val responses = futures.map { it.get(3, TimeUnit.SECONDS) }
-            assertThat(responses).allSatisfy { assertThat(it).isEqualTo(responses.first()) }
-            assertThat(server.requestCount).isEqualTo(2)
-        } finally { pool.shutdownNow() }
+            val refreshing = pool.submit<AdminAnalyticsResponse> { service.dashboard(7) }
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue()
+            val others = (1..3).map { pool.submit<AdminAnalyticsResponse?> {
+                if (previous == null) {
+                    assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+                    null
+                } else service.dashboard(7)
+            } }
+            others.forEach { assertThat(it.get(1, TimeUnit.SECONDS)).isEqualTo(previous) }
+            assertThat(requests.get()).isEqualTo(1)
+            release.countDown()
+            val updated = refreshing.get(3, TimeUnit.SECONDS)
+            assertThat(updated.todayActiveUsers).isEqualTo(1089)
+            assertThat(service.dashboard(90).asOf).isEqualTo(updated.asOf)
+            assertThat(requests.get()).isEqualTo(2)
+        } finally { release.countDown(); pool.shutdownNow() }
+    }
+    @ParameterizedTest @ValueSource(booleans = [false, true])
+    fun `실패 완료부터 60초 동안 동시 요청도 재호출하지 않고 쿨다운 경계부터 복구한다`(hasCache: Boolean) {
+        val service = service()
+        val previous = if (hasCache) { enqueuePair(); service.dashboard(7) } else null
+        clock.at = now.plusSeconds(600)
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                return MockResponse().setResponseCode(500)
+            }
+        }
+        fun fallback(): AdminAnalyticsResponse? = if (previous == null) {
+            assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+            null
+        } else service.dashboard(7)
+        val pool = Executors.newFixedThreadPool(4)
+        try {
+            val first = pool.submit<AdminAnalyticsResponse?> { fallback() }
+            assertThat(started.await(2, TimeUnit.SECONDS)).isTrue()
+            clock.at = now.plusSeconds(603) // 실패 시각은 호출 시작보다 3초 뒤다.
+            release.countDown()
+            assertThat(first.get(3, TimeUnit.SECONDS)).isEqualTo(previous)
+            val calls = server.requestCount
+            for (seconds in listOf(603L, 633L, 662L)) {
+                clock.at = now.plusSeconds(seconds)
+                val others = (1..3).map { pool.submit<AdminAnalyticsResponse?> { fallback() } }
+                others.forEach { assertThat(it.get(1, TimeUnit.SECONDS)).isEqualTo(previous) }
+                assertThat(server.requestCount).isEqualTo(calls)
+            }
+            assertThat(appender.list).hasSize(1) // 쿨다운 요청마다 실패 로그를 쌓지 않는다.
+            server.dispatcher = okhttp3.mockwebserver.QueueDispatcher()
+            enqueuePair(base = 2000)
+            clock.at = now.plusSeconds(663)
+            assertThat(service.dashboard(7).todayActiveUsers).isEqualTo(2089)
+            assertThat(server.requestCount).isEqualTo(calls + 2)
+        } finally { release.countDown(); pool.shutdownNow() }
     }
     @Test fun `키 둘 중 하나라도 비면 HTTP 호출 없이 고정 503 대상이다`() {
         for ((key, secret) in listOf("" to "test-secret", "test-api" to "", " " to " ")) {
@@ -135,17 +209,21 @@ class AdminAnalyticsTests {
     }
     @Test fun `응답 헤더 뒤 본문이 멈춰도 전체 호출은 5초로 제한된다`() {
         server.enqueue(MockResponse().setBody(body()).setBodyDelay(6, TimeUnit.SECONDS))
+        val service = service()
         val started = System.nanoTime()
-        assertThatThrownBy { service().dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isBetween(Duration.ofMillis(4800), Duration.ofSeconds(7))
+        assertThatThrownBy { service.dashboard(30) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         failure("timeout")
     }
     @Test fun `활성 조회 뒤 신규 조회도 남은 시간 안에서 끝나야 한다`() {
         server.enqueue(MockResponse().setBody(body()).setBodyDelay(3, TimeUnit.SECONDS))
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val service = service()
         val started = System.nanoTime()
-        assertThatThrownBy { service().dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(7))
+        assertThatThrownBy { service.dashboard(30) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         failure("timeout")
     }
     @Test fun `KST 날짜가 바뀌면 10분 이내라도 오늘까지 다시 조회한다`() {
@@ -161,7 +239,7 @@ class AdminAnalyticsTests {
     }
 }
 
-class MutableAnalyticsClock(var at: Instant) : Clock() {
+class MutableAnalyticsClock(@Volatile var at: Instant) : Clock() {
     override fun instant() = at
     override fun getZone(): ZoneId = ZoneOffset.UTC
     override fun withZone(zone: ZoneId): Clock = this
