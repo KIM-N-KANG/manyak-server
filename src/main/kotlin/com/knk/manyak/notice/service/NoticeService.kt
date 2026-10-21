@@ -66,7 +66,7 @@ class NoticeService(
         if (request.notify && request.notificationKind == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "알림 유형을 지정하세요.")
         val row = lock(id)
         if (row.status != NoticeStatus.DRAFT) conflict("이미 게시된 공지입니다.")
-        val before = state(row); val now = now()
+        val before = publicationState(row); val now = now()
         row.status = NoticeStatus.PUBLISHED; row.publishedAt = now; row.updatedAt = now
         val notified = request.notify && row.notifiedAt == null
         if (notified) {
@@ -76,7 +76,7 @@ class NoticeService(
         notices.flush()
         val result = detail(id).copy(notified = notified)
         // 대상 변경·잠금이 모두 끝난 뒤 처리자를 재검증하고 같은 트랜잭션의 감사를 기록한다.
-        audits.recordChange(actor, AdminAuditAction.NOTICE_PUBLISHED, id.toString(), request.reason, before, state(row))
+        audits.recordChange(actor, AdminAuditAction.NOTICE_PUBLISHED, id.toString(), request.reason, before, publicationState(row))
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
             override fun afterCommit() {
                 val fields = mutableMapOf<String, Any?>("notice_id" to id.toString(), "notified" to notified)
@@ -90,11 +90,11 @@ class NoticeService(
     fun unpublish(actor: Long, id: UUID, reason: String): AdminNoticeResponse {
         val row = lock(id)
         if (row.status != NoticeStatus.PUBLISHED) conflict("게시되지 않은 공지입니다.")
-        val before = state(row)
+        val before = publicationState(row)
         row.status = NoticeStatus.DRAFT; row.updatedAt = now()
         notices.flush()
         val result = detail(id)
-        audits.recordChange(actor, AdminAuditAction.NOTICE_UNPUBLISHED, id.toString(), reason, before, state(row))
+        audits.recordChange(actor, AdminAuditAction.NOTICE_UNPUBLISHED, id.toString(), reason, before, publicationState(row))
         return result
     }
     @Transactional
@@ -106,6 +106,9 @@ class NoticeService(
         audits.recordChange(actor, AdminAuditAction.NOTICE_DELETED, id.toString(), reason, before = before)
     }
     private fun state(row: Notice) = mapper.createObjectNode().put("title", row.title).put("status", row.status.name)
+    private fun publicationState(row: Notice): tools.jackson.databind.JsonNode = mapper.valueToTree(mapOf(
+        "status" to row.status.name, "publishedAt" to row.publishedAt, "notifiedAt" to row.notifiedAt,
+    ))
     private fun now() = clock.instant().truncatedTo(ChronoUnit.MICROS)
     private fun lock(id: UUID) = notices.lockByPublicId(id) ?: missing()
     private fun missing(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "공지를 찾을 수 없습니다.")

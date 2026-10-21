@@ -40,6 +40,7 @@ GET {{baseUrl}}/api/v1/notices/{{noticeId}}
     client.test("초안 비공개", () => client.assert(response.status === 404, `actual=${response.status}`));
 %}
 
+# q가 UUID 형식이어도 공개 식별자 일치 또는 제목 부분 일치로 검색하며 status 조건과 함께 적용한다.
 ### 관리자 목록 — 본문 없음, 번호 페이지, 검색·NULL 후순위
 GET {{baseUrl}}/api/v1/admin/notices?q=로컬&sort=notifiedAt&order=desc&page=1&size=20
 Authorization: Bearer {{noticeAdminToken}}
@@ -62,6 +63,7 @@ Content-Type: application/json
     client.test("수정", () => client.assert(response.status === 200 && response.body.body.includes("로컬 검증용"), `actual=${JSON.stringify(response.body)}`));
 %}
 
+# 게시 감사 before/after는 status·publishedAt·notifiedAt만 기록한다. 없는 시각은 null이다.
 ### 알림 없이 게시
 POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/publish
 Authorization: Bearer {{noticeAdminToken}}
@@ -94,6 +96,7 @@ Content-Type: application/json
     client.test("중복 게시 거절", () => client.assert(response.status === 409, `actual=${response.status}`));
 %}
 
+# 게시 해제 감사에서도 상태와 두 시각을 기록하며, publishedAt·notifiedAt은 유지한다.
 ### 게시 해제 — publishedAt 유지
 POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/unpublish
 Authorization: Bearer {{noticeAdminToken}}

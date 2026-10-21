@@ -62,3 +62,24 @@ GET {{baseUrl}}/api/v1/notices/not-a-uuid
 
 ### 자유 조회 — 실제 게시된 UUID를 변수에 입력
 GET {{baseUrl}}/api/v1/notices/{{publicNoticeId}}
+
+### limit 0은 1로 보정
+GET {{baseUrl}}/api/v1/notices?limit=0
+
+> {%
+    client.test("0 보정", () => client.assert(response.status === 200 && response.body.items.length <= 1, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### limit 음수도 1로 보정
+GET {{baseUrl}}/api/v1/notices?limit=-1
+
+> {%
+    client.test("음수 보정", () => client.assert(response.status === 200 && response.body.items.length <= 1, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### limit 상한은 50
+GET {{baseUrl}}/api/v1/notices?limit=999
+
+> {%
+    client.test("상한 보정", () => client.assert(response.status === 200 && response.body.items.length <= 50, `actual=${JSON.stringify(response.body)}`));
+%}

@@ -77,8 +77,67 @@ class NoticeIntegrationTests {
         for (row in rows) {
             for (name in listOf("before_state", "after_state")) row[name]?.let {
                 val node = mapper.readTree(if (it is ByteArray) String(it, Charsets.UTF_8) else it.toString())
-                assertThat(node.properties().map { it.key }).allMatch { it in setOf("title", "status") }
+                val fields = if (row["action"] in setOf("NOTICE_PUBLISHED", "NOTICE_UNPUBLISHED"))
+                    setOf("status", "publishedAt", "notifiedAt") else setOf("title", "status")
+                assertThat(node.properties().map { it.key }.toSet()).isEqualTo(fields)
                 assertThat(node.has("body")).isFalse()
+            }
+        }
+    }
+    @Test fun `게시 알림 유무와 게시 해제 감사는 상태 및 시각의 전후 값만 기록한다`() {
+        fun state(row: JsonNode) = mapper.createObjectNode().apply {
+            put("status", row["status"].asText())
+            set("publishedAt", row["publishedAt"])
+            set("notifiedAt", row["notifiedAt"])
+        }
+        fun audit(id: String, action: String, column: String): JsonNode {
+            val value = jdbc.queryForMap("SELECT before_state,after_state FROM admin_audit_logs WHERE target_id=? AND action=?", id, action)[column]!!
+            return mapper.readTree(if (value is ByteArray) String(value, Charsets.UTF_8) else value.toString())
+        }
+        for (notify in listOf(false, true)) {
+            val draft = create("감사 시각 $notify")
+            val id = draft["noticeId"].asText()
+            val published = publish(id, notify)
+            assertThat(audit(id, "NOTICE_PUBLISHED", "before_state")).isEqualTo(state(draft))
+            assertThat(audit(id, "NOTICE_PUBLISHED", "after_state")).isEqualTo(state(published))
+            assertThat(published["publishedAt"].isString).isTrue()
+            assertThat(published["notifiedAt"].isNull).isEqualTo(!notify)
+            if (notify) assertThat(java.time.Instant.parse(published["notifiedAt"].asText()))
+                .isEqualTo(java.time.Instant.parse(published["publishedAt"].asText()))
+            val unpublished = unpublish(id)
+            assertThat(audit(id, "NOTICE_UNPUBLISHED", "before_state")).isEqualTo(state(published))
+            assertThat(audit(id, "NOTICE_UNPUBLISHED", "after_state")).isEqualTo(state(unpublished))
+            assertThat(unpublished["publishedAt"]).isEqualTo(published["publishedAt"])
+            assertThat(unpublished["notifiedAt"]).isEqualTo(published["notifiedAt"])
+        }
+    }
+    @Test fun `UUID 검색은 공개 식별자와 제목 부분 일치를 OR로 결합하고 상태 필터를 유지한다`() {
+        val id = create("식별자 검색 대상")["noticeId"].asText()
+        val titleId = create("참조 ${id.uppercase()} 공지")["noticeId"].asText()
+        create("무관한 공지")
+        val all = json(call(HttpMethod.GET, "?q=${id.uppercase()}").expectStatus().isOk)
+        assertThat(all["totalElements"].asLong()).isEqualTo(2)
+        assertThat(all["items"].toList().map { it["noticeId"].asText() }).containsExactlyInAnyOrder(id, titleId)
+        publish(id)
+        val drafts = json(call(HttpMethod.GET, "?q=$id&status=DRAFT").expectStatus().isOk)
+        assertThat(drafts["totalElements"].asLong()).isEqualTo(1)
+        assertThat(drafts["items"][0]["noticeId"].asText()).isEqualTo(titleId)
+    }
+    @Test fun `공개 목록 limit 0과 음수는 1로 큰 값은 50으로 보정하며 다음 페이지를 유지한다`() {
+        repeat(51) { index ->
+            jdbc.update("""INSERT INTO notices(public_id,title,body,status,published_at,created_by_user_id,created_at,updated_at)
+                VALUES (?,?,'본문','PUBLISHED',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)""",
+                UUID.randomUUID(), "공개 보정 $index", java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(index.toLong())), admin.id)
+        }
+        create("목록에서 제외할 초안")
+        for (limit in listOf(0, -1, 999)) {
+            val page = json(public("?limit=$limit").expectStatus().isOk)
+            assertThat(page["items"].size()).isEqualTo(if (limit == 999) 50 else 1)
+            assertThat(page["nextCursor"].isString).isTrue()
+            if (limit == 999) {
+                val next = json(public("?limit=999&cursor=${page["nextCursor"].asText()}").expectStatus().isOk)
+                assertThat(next["items"].size()).isEqualTo(1)
+                assertThat(next["nextCursor"].isNull).isTrue()
             }
         }
     }
@@ -120,7 +179,6 @@ class NoticeIntegrationTests {
         public("/not-a-uuid").expectStatus().isNotFound
         public("/${UUID.randomUUID()}").expectStatus().isNotFound
         public("?cursor=bad").expectStatus().isBadRequest
-        assertThat(json(public("?limit=0").expectStatus().isOk)["items"].size()).isEqualTo(1)
     }
     @Test fun `관리자 목록은 검색 상태 정렬 NULL 후순위와 번호 페이지를 지원한다`() {
         val one = create("동일 검색")["noticeId"].asText(); val two = create("동일 검색")["noticeId"].asText()

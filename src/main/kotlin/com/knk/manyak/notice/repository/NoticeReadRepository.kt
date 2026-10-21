@@ -34,8 +34,10 @@ class NoticeReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
             val q = it.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
             if (q.isEmpty() || it.length > 50) badRequest()
             val uuid = runCatching { UUID.fromString(q) }.getOrNull()?.takeIf { it.toString() == q }
-            if (uuid != null) { params["id"] = uuid; conditions += "n.public_id=:id" }
-            else { params["q"] = q; conditions += "POSITION(:q IN LOWER(TRIM(REGEXP_REPLACE(n.title, '\\s+', ' ', 'g'))))>0" }
+            params["q"] = q
+            val titleMatch = "POSITION(:q IN LOWER(TRIM(REGEXP_REPLACE(n.title, '\\s+', ' ', 'g'))))>0"
+            if (uuid != null) { params["id"] = uuid; conditions += "(n.public_id=:id OR $titleMatch)" }
+            else conditions += titleMatch
         }
         val where = conditions.joinToString(" AND ")
         val count = jdbc.queryForObject("SELECT COUNT(*) $from WHERE $where", params, Long::class.java)!!
