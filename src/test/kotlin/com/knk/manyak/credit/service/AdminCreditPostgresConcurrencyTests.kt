@@ -1,6 +1,7 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.admin.repository.AdminChangeActorRepository
 import com.knk.manyak.admin.service.AdminAuditService
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
@@ -80,7 +81,7 @@ class AdminCreditPostgresConcurrencyTests {
         context.registerBean(CreditPolicyService::class.java, Supplier {
             CreditPolicyService(context.getBean(CreditPolicyRepository::class.java), 1000, 2000, 10, 250, 250, 20)
         })
-        context.register(PostgresCreditAdminLocks::class.java, AdminAuditService::class.java, AdminCreditPolicyService::class.java,
+        context.register(PostgresCreditAdminLocks::class.java, AdminChangeActorRepository::class.java, AdminAuditService::class.java, AdminCreditPolicyService::class.java,
             AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java)
         context.refresh()
         tx = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
@@ -90,10 +91,11 @@ class AdminCreditPostgresConcurrencyTests {
     }
     @AfterAll fun stop() { if (::context.isInitialized) context.close(); pg.stop() }
     @BeforeEach fun clean() {
-        jdbc.execute("TRUNCATE admin_audit_logs, credit_admin_adjustments, credit_lots, credit_transactions, credit_wallets, credit_policies, users RESTART IDENTITY CASCADE")
+        jdbc.execute("TRUNCATE admin_accounts, admin_audit_logs, credit_admin_adjustments, credit_lots, credit_transactions, credit_wallets, credit_policies, users RESTART IDENTITY CASCADE")
         val users = context.getBean(UserRepository::class.java)
         admin = users.save(User(nickname = "PG 관리자"))
         member = users.save(User(nickname = "PG 대상"))
+        jdbc.update("INSERT INTO admin_accounts (user_id) VALUES (?)", admin.id)
     }
     private fun <T> request(block: () -> T): T {
         MDC.put("request_id", "pg_credit_concurrency")
