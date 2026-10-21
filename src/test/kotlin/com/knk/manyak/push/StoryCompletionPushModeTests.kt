@@ -68,7 +68,7 @@ class StoryCompletionPushModeTests {
 
         listener("local").onStoryCompleted(event)
 
-        verify(fcmPushSender).sendToUser(USER_ID, expectedData, HIGH, null)
+        verify(fcmPushSender).sendToUser(USER_ID, expectedData, HIGH, null, messageId = "story-completed:${event.requestId}")
     }
 
     @Test

@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('push_campaigns_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('push_campaigns_id_seq'::regclass) | false | [public.push_delivery_results](public.push_delivery_results.md) |  |  |
 | public_id | uuid |  | false |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | body | varchar(300) |  | false |  |  |  |
@@ -40,6 +40,7 @@
 ```mermaid
 erDiagram
 
+"public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 
 "public.push_campaigns" {
   bigint id
@@ -55,6 +56,19 @@ erDiagram
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
   varchar_16_ kind
+}
+"public.push_delivery_results" {
+  bigint id
+  varchar_255_ message_id
+  varchar_40_ type
+  varchar_16_ kind
+  bigint campaign_id FK
+  bigint user_id FK
+  varchar_16_ outcome
+  varchar_40_ reason
+  integer delivered_devices
+  integer failed_devices
+  timestamp_with_time_zone completed_at
 }
 ```
 

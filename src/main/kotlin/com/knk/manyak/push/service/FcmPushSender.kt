@@ -10,6 +10,8 @@ import com.google.firebase.messaging.WebpushFcmOptions
 import com.google.firebase.messaging.MessagingErrorCode
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.dto.*
+import java.util.UUID
 import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.repository.DevicePushTokenRepository
@@ -55,6 +57,7 @@ class FcmPushSender(
     @Value("\${manyak.push.web-base-url:https://manyak.app}")
     private val webBaseUrl: String = "https://manyak.app",
     private val clock: Clock = Clock.systemUTC(),
+    private val deliveries: PushDeliveryService? = null,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -65,27 +68,76 @@ class FcmPushSender(
         priority: AndroidConfig.Priority = AndroidConfig.Priority.HIGH,
         ttlMillis: Long? = null,
         expiresAt: Instant? = null,
+        messageId: String? = null,
     ) {
+        send(userId, data, priority, ttlMillis, expiresAt, messageId)
+    }
+
+    /** 자격 거절도 같은 메시지 ID로 기록한다. 기록 실패는 발송 결과에 전파하지 않는다. */
+    fun recordDiscarded(userId: Long, data: Map<String, String>, messageId: String, reason: String) {
+        record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, reason, 0, 0)
+    }
+
+    private fun record(userId: Long, data: Map<String, String>, messageId: String?,
+        outcome: PushDeliveryOutcome, reason: String, delivered: Int, failed: Int) {
+        if (messageId == null || deliveries == null) return
+        try {
+            val user = userRepository.findById(userId).orElse(null) ?: return
+            val type = PushDeliveryType.valueOf(data.getValue("type"))
+            deliveries.record(PushDeliveryReportRequest(messageId, type,
+                if (type in setOf(PushDeliveryType.PROMOTION, PushDeliveryType.ATTENDANCE_REMINDER)) PushKind.MARKETING else PushKind.SERVICE,
+                user.publicId, data["campaignId"]?.let(UUID::fromString), outcome, reason, delivered, failed, clock.instant()))
+        } catch (ex: RuntimeException) {
+            log.warn("push_delivery_report_failed message_id={} error={}", messageId, ex.javaClass.simpleName)
+        }
+    }
+
+    private fun send(userId: Long, data: Map<String, String>, priority: AndroidConfig.Priority,
+        ttlMillis: Long?, expiresAt: Instant?, messageId: String?) {
+        if (messageId != null && expiresAt != null && !clock.instant().isBefore(expiresAt)) {
+            record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "EXPIRED", 0, 0)
+            return
+        }
         val messaging = this.messaging
         if (messaging == null) {
-            log.debug("FCM 발송기가 비활성이라 푸시를 건너뜁니다. (userId={})", userId)
+            record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "FCM_DISABLED", 0, 0)
             return
         }
-        // 정지·탈퇴 회원의 남은 토큰으로는 보내지 않는다(Codex 3차 리뷰 P2). isActiveAccessAllowed는 DELETED를
-        // 통과시키므로 여기서는 쓰지 않는다 — 탈퇴 정리와 발송이 엇갈리는 창에서도 막아야 한다.
         val user = userRepository.findById(userId).orElse(null)
         if (user?.status != UserStatus.ACTIVE) {
-            log.debug("활성 회원이 아니라 푸시를 건너뜁니다. (userId={}, status={})", userId, user?.status)
+            record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "NOT_ACTIVE", 0, 0)
             return
         }
-        // 수신자 식별(KNK-1220). 푸시는 회원이 아니라 기기로 도착하므로, 앱이 이 값을 현재 로그인 회원과 비교해
-        // 남의 알림(로그아웃 뒤 남은 토큰·늦게 도착한 메시지)을 거른다. 호출자가 같은 키를 넘겨도 여기 값이 이긴다.
         val payload = data + (KEY_RECIPIENT_ID to user.publicId.toString())
-        for (deviceToken in devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId)) {
+        val tokens = devicePushTokenRepository.findTop10ByUserIdOrderByUpdatedAtDesc(userId)
+        if (tokens.isEmpty()) {
+            record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "NO_TOKENS", 0, 0)
+            return
+        }
+        var delivered = 0
+        var failed = 0
+        var attempted = 0
+        for (deviceToken in tokens) {
             val remaining = expiresAt?.let { Duration.between(clock.instant(), it).toMillis() }
             if (remaining != null && remaining <= 0) break
-            sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis)
+            attempted++
+            when (sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis)) {
+                OUTCOME_SUCCESS -> delivered++
+                OUTCOME_FAILURE -> failed++
+            }
         }
+        val outcome = when {
+            delivered > 0 -> PushDeliveryOutcome.DELIVERED
+            attempted > 0 -> PushDeliveryOutcome.UNDELIVERED
+            else -> PushDeliveryOutcome.DISCARDED
+        }
+        val reason = when {
+            attempted == 0 -> "EXPIRED"
+            delivered == attempted -> "OK"
+            delivered > 0 -> "PARTIAL_FAILURE"
+            else -> "NO_DELIVERIES"
+        }
+        record(userId, data, messageId, outcome, reason, delivered, failed)
     }
 
     private fun sendTo(
@@ -94,7 +146,7 @@ class FcmPushSender(
         data: Map<String, String>,
         priority: AndroidConfig.Priority,
         ttlMillis: Long?,
-    ) {
+    ): String {
         try {
             val builder = Message.builder().setToken(deviceToken.token).putAllData(data)
             when (deviceToken.platform) {
@@ -119,6 +171,7 @@ class FcmPushSender(
             val message = builder.build()
             messaging.send(message)
             count(OUTCOME_SUCCESS)
+            return OUTCOME_SUCCESS
         } catch (ex: FirebaseMessagingException) {
             // UNREGISTERED만 지운다. INVALID_ARGUMENT는 토큰 형식 오류뿐 아니라 **우리 페이로드 오류**에도 오므로,
             // 그걸 삭제 신호로 쓰면 서버 버그 하나가 회원 전체의 토큰을 지운다. 형식이 깨진 토큰은 앱이 FCM SDK에서
@@ -137,6 +190,7 @@ class FcmPushSender(
                         deviceToken.userId, mask(deviceToken.token), cleanupEx.javaClass.simpleName,
                     )
                 }
+                return OUTCOME_UNREGISTERED
             } else {
                 count(OUTCOME_FAILURE)
                 log.warn(
@@ -152,6 +206,7 @@ class FcmPushSender(
                 deviceToken.userId, mask(deviceToken.token), ex.javaClass.simpleName,
             )
         }
+        return OUTCOME_FAILURE
     }
 
     private fun count(outcome: String) {

@@ -141,6 +141,7 @@ class AttendanceReminderIntegrationTests {
             NORMAL,
             null,
             today().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant(),
+            messageId = "attendance:${member.publicId}:${today()}",
         )
     }
 
@@ -151,7 +152,7 @@ class AttendanceReminderIntegrationTests {
 
         attendanceReminderService.sendReminders()
 
-        verify(fcmPushSender).sendToUser(eq(member.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")))
+        verify(fcmPushSender).sendToUser(eq(member.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -174,8 +175,8 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(result.targets).isEqualTo(2)
         assertThat(result.sent).isEqualTo(1)
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")))
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), eq(Instant.parse("2026-09-08T15:00:00Z")), org.mockito.ArgumentMatchers.any<String>())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -184,7 +185,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = member.id, userId = member.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -192,7 +193,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(marketingAgreed = false).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -200,7 +201,7 @@ class AttendanceReminderIntegrationTests {
         saveMember()
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -208,7 +209,7 @@ class AttendanceReminderIntegrationTests {
         saveMember(status = UserStatus.SUSPENDED).also { saveToken(it) }
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -220,7 +221,7 @@ class AttendanceReminderIntegrationTests {
         markAttended(rewardIdentityId = original.id, userId = rejoined.id)
 
         assertThat(attendanceReminderService.sendReminders().targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @ParameterizedTest
@@ -236,12 +237,12 @@ class AttendanceReminderIntegrationTests {
         doAnswer {
             withdrawMarketingConsent(second.id)
             null
-        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
 
         val result = attendanceReminderService.sendReminders()
 
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(result.sent).isEqualTo(1)
     }
 
@@ -255,7 +256,7 @@ class AttendanceReminderIntegrationTests {
         attendanceReminderScheduler.run()
 
         // 두 번째 실행은 Redis SET NX 실패로 서비스에 진입하지 않는다.
-        verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @ParameterizedTest
@@ -268,8 +269,8 @@ class AttendanceReminderIntegrationTests {
 
         assertThat(result.targets).isEqualTo(1)
         assertThat(result.sent).isEqualTo(if (hour == 15) 1 else 0)
-        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
-        else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any())
+        if (hour == 23) verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
+        else verify(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), any(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     private fun atHour(hour: Int): Clock = Clock.fixed(

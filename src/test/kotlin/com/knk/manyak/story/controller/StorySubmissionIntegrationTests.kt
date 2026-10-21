@@ -347,7 +347,11 @@ class StorySubmissionIntegrationTests {
         users.save(user)
         service.resubmit(row.publicId.toString(), request(), user.id)
         worker.fail(row.id, 2, "APPLY_FAILED")
-        org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.size)
+        val invocations = org.mockito.Mockito.mockingDetails(pushSender).invocations
+        org.junit.jupiter.api.Assertions.assertEquals(1, invocations.count { it.method.name == "sendToUser" })
+        val discarded = invocations.single { it.method.name == "recordDiscarded" }
+        org.junit.jupiter.api.Assertions.assertEquals("story-moderation:${row.publicId}:2", discarded.arguments[2])
+        org.junit.jupiter.api.Assertions.assertEquals("SERVICE_PUSH_DISABLED", discarded.arguments[3])
     }
 
     @Test fun `동시 CREATE 승인은 스토리를 한 번만 만든다`() {

@@ -20,6 +20,9 @@ class InternalPushEligibilityDisabledIntegrationTests {
 
     @org.junit.jupiter.api.Test
     fun `시크릿 미설정이면 토큰 삭제도 404다`() {
+        client.post().uri("/internal/push-deliveries").exchange().expectStatus().isNotFound
+        client.post().uri("/internal/push-deliveries").header("X-Manyak-Internal-Secret", "arbitrary-secret")
+            .exchange().expectStatus().isNotFound
         client.delete().uri("/internal/push-tokens").exchange().expectStatus().isNotFound
         client.delete().uri("/internal/push-tokens").header("X-Manyak-Internal-Secret", "arbitrary-secret")
             .exchange().expectStatus().isNotFound

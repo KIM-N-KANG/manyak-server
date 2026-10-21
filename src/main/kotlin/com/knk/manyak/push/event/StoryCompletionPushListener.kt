@@ -53,6 +53,8 @@ class StoryCompletionPushListener(
                     "서비스 알림 수신을 끈 회원이라 스토리 완성 푸시를 건너뜁니다. (userId={}, storyId={})",
                     event.userId, event.storyPublicId,
                 )
+                fcmPushSender.recordDiscarded(event.userId, mapOf("type" to STORY_COMPLETED_TYPE),
+                    "story-completed:${event.requestId}", "SERVICE_PUSH_DISABLED")
                 return
             }
             val data = mapOf(
@@ -61,7 +63,7 @@ class StoryCompletionPushListener(
                 "title" to event.title,
                 "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${event.storyPublicId}",
             )
-            fcmPushSender.sendToUser(event.userId, data)
+            fcmPushSender.sendToUser(event.userId, data, messageId = "story-completed:${event.requestId}")
         } catch (ex: RuntimeException) {
             // 푸시는 부가 기능이고 진실의 원천은 복귀 조회(KNK-631)다. 워커 스레드라 요청에 전파되지는
             // 않지만, 삼키지 않으면 스택트레이스만 남고 어느 회원의 발송이 깨졌는지 알 수 없다.
