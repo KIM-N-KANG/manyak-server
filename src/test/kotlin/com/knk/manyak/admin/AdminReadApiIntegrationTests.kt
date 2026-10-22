@@ -650,13 +650,71 @@ class AdminReadApiIntegrationTests {
         assertThat(body.daily.last().chats).isEqualTo(1)
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.knk.manyak.story.entity.StoryCreationTagSource::class)
+    fun `입력 인물은 이름 성별 특징 중 하나라도 있고 빈 칸은 0명으로 집계한다`(source: com.knk.manyak.story.entity.StoryCreationTagSource) {
+        fun session(target: com.knk.manyak.story.entity.Story) = creationSessions.save(
+            com.knk.manyak.story.entity.StoryCreationSession(storyId = target.id,
+                status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+        val orders = mutableMapOf<Pair<Long, com.knk.manyak.story.entity.StoryCreationCharacterRole>, Int>()
+        fun character(session: com.knk.manyak.story.entity.StoryCreationSession, name: String? = null,
+                      gender: com.knk.manyak.story.dto.SimpleStoryCharacterGender? = null,
+                      role: com.knk.manyak.story.entity.StoryCreationCharacterRole = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER) =
+            creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(
+                creationSession = session, role = role, name = name, gender = gender,
+                sortOrder = orders.merge(session.id to role, 1, Int::plus)!!.toShort()))
+        val mixedStory = story(title = "직접 입력 3명")
+        val mixed = session(mixedStory)
+        character(mixed)
+        character(mixed, name = " \t\n　")
+        character(mixed, name = "이름만")
+        character(mixed, gender = com.knk.manyak.story.dto.SimpleStoryCharacterGender.FEMALE)
+        val tagged = character(mixed)
+        character(mixed, name = "주인공", role = com.knk.manyak.story.entity.StoryCreationCharacterRole.PROTAGONIST)
+        repeat(2) { index ->
+            val tag = creationTags.save(com.knk.manyak.story.entity.StoryCreationTag(
+                category = com.knk.manyak.story.dto.SimpleStoryTagCategory.SUPPORTING_CHARACTER,
+                name = "특징$index", tagSource = source))
+            jdbc.update("INSERT INTO story_creation_session_tags(creation_session_id, character_id, tag_id, created_at) VALUES (?, ?, ?, ?)",
+                mixed.id, tagged.id, tag.id, java.sql.Timestamp.from(now))
+        }
+        val emptyStory = story(title = "빈 칸만")
+        val empty = session(emptyStory)
+        repeat(2) { character(empty, name = " \t\n　") }
+        val genre = creationTags.save(com.knk.manyak.story.entity.StoryCreationTag(
+            category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, name = "장르", tagSource = source))
+        jdbc.update("INSERT INTO story_creation_session_tags(creation_session_id, tag_id, created_at) VALUES (?, ?, ?)",
+            empty.id, genre.id, java.sql.Timestamp.from(now))
+        val withoutSession = story(title = "세션 없음")
+        for ((target, count) in listOf(mixedStory to 3, emptyStory to 0, withoutSession to null)) {
+            val detailCount = json(get("/stories/${target.publicId}").expectStatus().isOk)["supportingCharacterCount"]
+            val listCount = json(get("/stories?q=${target.publicId}").expectStatus().isOk)["items"][0]["supportingCharacterCount"]
+            if (count == null) {
+                assertThat(detailCount.isNull).isTrue()
+                assertThat(listCount.isNull).isTrue()
+            } else {
+                assertThat(detailCount.asInt()).isEqualTo(count)
+                assertThat(listCount.asInt()).isEqualTo(count)
+            }
+        }
+        val points = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
+            .first { it["chartId"].asText() == "characters" }["points"]
+        assertThat(points.size()).isEqualTo(6)
+        for ((count, point) in points.withIndex()) {
+            val expected = if (count == 0 || count == 3) 1L else 0L
+            val page = json(get("/stories?supportingCharacterCount=$count&creationFrom=2026-10-21&creationTo=2026-10-21").expectStatus().isOk)
+            assertThat(page["totalElements"].asLong()).isEqualTo(expected)
+            assertThat(point["value"].asDouble()).isEqualTo(expected.toDouble())
+        }
+    }
+
     @Test fun `인물 수 분포의 모든 막대는 완성된 미삭제 스토리의 최신 세션 목록 총계와 같다`() {
         fun session(target: com.knk.manyak.story.entity.Story?, count: Int, complete: Boolean = true, created: Instant = midnight) {
             val row = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = target?.id,
                 status = if (complete) com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED else com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED,
                 createdAt = created))
             repeat(count) { creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(creationSession = row,
-                role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = (it + 1).toShort())) }
+                role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
         }
         for (count in 0..5) {
             val target = story()
@@ -694,7 +752,7 @@ class AdminReadApiIntegrationTests {
         val session = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(userId = team.id, storyId = story.id,
             status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
         repeat(2) { creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(creationSession = session,
-            role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = (it + 1).toShort())) }
+            role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
         creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(userId = excluded.id,
             status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
         val tag = creationTags.save(com.knk.manyak.story.entity.StoryCreationTag(category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,

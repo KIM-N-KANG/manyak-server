@@ -53,6 +53,16 @@ internal class AdminQuery {
         val KST_OFFSET_SECONDS: Int = java.time.ZoneId.of("Asia/Seoul").rules.getOffset(Instant.EPOCH).totalSeconds
         const val SPENT = "amount < 0 AND CAST(reason AS VARCHAR) IN ('STORY_CREATION','CHAT_TURN','CHAT_IMAGE')"
         const val GRANTED = "amount > 0 AND CAST(reason AS VARCHAR) IN ('SIGNUP_REWARD','INVITE_REWARD','ATTENDANCE_REWARD','PURCHASE','ADMIN_GRANT')"
+        /** 웹의 빈 인물 칸은 제외한다. 인물 태그는 EXISTS로 판정해 태그가 여러 개여도 한 명이다. */
+        fun inputSupportingCharacter(alias: String): String {
+            // 입력 DTO의 Unicode 공백 처리와 맞추며 PostgreSQL·H2 양쪽에서 같은 문자를 제거한다.
+            val whitespace = "[\\s\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+"
+            return """($alias.role='SUPPORTING_CHARACTER' AND (
+                REGEXP_REPLACE(COALESCE($alias.name, ''), '$whitespace', '', 'g') <> ''
+                OR $alias.gender IS NOT NULL
+                OR EXISTS (SELECT 1 FROM story_creation_session_tags ct
+                    WHERE ct.character_id=$alias.id AND ct.creation_session_id=$alias.creation_session_id)))"""
+        }
         fun normalized(column: String) = "LOWER(TRIM(REGEXP_REPLACE($column, '\\s+', ' ', 'g')))"
         val turnBounds = listOf(0..0, 1..1, 2..2, 3..4, 5..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
         val memberBounds = listOf(1..1, 2..2, 3..4, 5..9, 10..Int.MAX_VALUE)

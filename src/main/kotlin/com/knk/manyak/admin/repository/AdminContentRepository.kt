@@ -10,7 +10,7 @@ import java.util.UUID
 @Repository
 class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
     private val session = "LEFT JOIN story_creation_sessions cs ON cs.id=(SELECT MAX(x.id) FROM story_creation_sessions x WHERE x.story_id=s.id AND x.status='STORY_CREATED')"
-    private val supporting = "(SELECT COUNT(*) FROM story_creation_characters ch WHERE ch.creation_session_id=cs.id AND ch.role='SUPPORTING_CHARACTER')"
+    private val supporting = "(SELECT COUNT(*) FROM story_creation_characters ch WHERE ch.creation_session_id=cs.id AND ${AdminQuery.inputSupportingCharacter("ch")})"
     private val held = "EXISTS (SELECT 1 FROM story_submissions sub WHERE sub.story_id=s.id AND sub.status='PENDING' AND sub.held_at IS NOT NULL)"
 
     fun stories(request: AdminStoriesRequest, page: AdminPagination, officialId: Long?, storyId: UUID? = null): AdminPageResponse<AdminStoryListResponse> {
