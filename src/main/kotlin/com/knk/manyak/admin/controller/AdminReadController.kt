@@ -29,7 +29,7 @@ class AdminReadController(private val service: AdminReadService, private val cha
     fun member(@PathVariable memberId: UUID, request: HttpServletRequest) = service.member(AdminRequester.userId(request), memberId)
 
     @GetMapping("/dashboard/charts")
-    fun charts(@Valid @ModelAttribute request: AdminChartsRequest) = charts.charts(request.days)
+    fun charts(@Valid @ModelAttribute request: AdminChartsRequest) = charts.charts(request)
 
     @GetMapping("/stories")
     fun stories(@Valid @ModelAttribute request: AdminStoriesRequest) = service.stories(request)

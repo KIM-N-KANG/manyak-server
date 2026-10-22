@@ -370,3 +370,27 @@ Authorization: Bearer {{adminToken}}
 > {%
     client.test("스토리라인 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
 %}
+
+
+### 차트 직접 기간 — KST 양끝 포함, 최대 366일
+# days와 함께 지정할 수 없으며 from·to는 모두 필수, to는 오늘 이하여야 한다.
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from=2026-10-01&to=2026-10-20
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("직접 기간 응답", () => {
+  client.assert(response.status === 200 && response.body.from === "2026-10-01" && response.body.to === "2026-10-20" && response.body.daily.length === 20, `actual=${JSON.stringify(response.body)}`);
+});
+%}
+
+### 기간과 days 중복 400
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7&from=2026-10-01&to=2026-10-20
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("중복 기간 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 날짜 한쪽만 지정 400
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from=2026-10-01
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("날짜 쌍 필수", () => client.assert(response.status === 400, `actual=${response.status}`)); %}

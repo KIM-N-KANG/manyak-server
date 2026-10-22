@@ -708,6 +708,29 @@ class AdminReadApiIntegrationTests {
         }
     }
 
+    @Test fun `직접 기간은 KST 양끝을 포함하고 링크와 빈 날짜를 같은 범위로 만든다`() {
+        for (at in listOf(midnight.minusSeconds(86400), midnight.minusSeconds(1), midnight)) users.save(User(nickname = "경계", createdAt = at))
+        val body = json(get("/dashboard/charts?from=2026-10-20&to=2026-10-20").expectStatus().isOk)
+        assertThat(body["from"].asText()).isEqualTo("2026-10-20")
+        assertThat(body["to"].asText()).isEqualTo("2026-10-20")
+        assertThat(body["daily"].size()).isEqualTo(1)
+        assertThat(body["daily"][0]["joined"].asLong()).isEqualTo(2)
+        val links = body["distributions"][1]["points"][0]["link"]["params"]
+        assertThat(links["from"].asText()).isEqualTo("2026-10-20")
+        assertThat(links["to"].asText()).isEqualTo("2026-10-20")
+        val full = json(get("/dashboard/charts?from=2025-10-21&to=2026-10-21").expectStatus().isOk)
+        assertThat(full["daily"].size()).isEqualTo(366)
+        assertThat(full["distributions"][7]["points"][0]["link"]["params"]["creationFrom"].asText()).isEqualTo("2025-10-21")
+    }
+
+    @Test fun `두 대시보드 기간은 양쪽 날짜 필수이고 366일 이내 과거 또는 오늘만 허용한다`() {
+        for (path in listOf("/dashboard/charts", "/dashboard/analytics")) {
+            for (query in listOf("from=2026-10-20", "to=2026-10-20", "days=7&from=2026-10-20&to=2026-10-21",
+                "from=2026-10-21&to=2026-10-20", "from=2026-10-21&to=2026-10-22", "from=2025-10-20&to=2026-10-21",
+                "from=2026-02-30&to=2026-10-21", "from=2026-1-01&to=2026-10-21", "from=&to=", "days=")) get("$path?$query").expectStatus().isBadRequest
+        }
+    }
+
     @Test fun `인물 수 분포의 모든 막대는 완성된 미삭제 스토리의 최신 세션 목록 총계와 같다`() {
         fun session(target: com.knk.manyak.story.entity.Story?, count: Int, complete: Boolean = true, created: Instant = midnight) {
             val row = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = target?.id,
