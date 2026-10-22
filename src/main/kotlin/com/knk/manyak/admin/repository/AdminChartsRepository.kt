@@ -13,10 +13,10 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val p = params(from, now, excluded)
         val result = mutableMapOf<LocalDate, MutableMap<String, Long>>()
         fun read(table: String, column: String, owner: String, metrics: Map<String, String>, extra: String = "1=1") {
-            val day = "CAST($column AT TIME ZONE 'Asia/Seoul' AS DATE)"
+            val day = "FLOOR((EXTRACT(EPOCH FROM $column) + ${AdminQuery.KST_OFFSET_SECONDS}) / 86400)"
             val select = metrics.entries.joinToString(",") { "${it.value} AS ${it.key}" }
             jdbc.query("SELECT $day AS metric_date, $select FROM $table WHERE ${during(column)} AND ${owner(owner, excluded)} AND $extra GROUP BY $day", p) { rs ->
-                val values = result.getOrPut(rs.getDate("metric_date").toLocalDate()) { mutableMapOf() }
+                val values = result.getOrPut(LocalDate.ofEpochDay(rs.getLong("metric_date"))) { mutableMapOf() }
                 metrics.keys.forEach { values[it] = rs.getLong(it) }
             }
         }

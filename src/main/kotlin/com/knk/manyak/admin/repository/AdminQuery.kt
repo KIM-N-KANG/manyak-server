@@ -49,6 +49,8 @@ internal class AdminQuery {
     }
     fun where() = conditions.joinToString(" AND ").ifEmpty { "1=1" }
     companion object {
+        /** KST는 DST가 없어 고정 오프셋 에포크 일수로 날짜를 묶는다. AT TIME ZONE 뒤 DATE 캐스트는 DB 세션 시간대에 좌우된다(H2·UTC 세션). */
+        val KST_OFFSET_SECONDS: Int = java.time.ZoneId.of("Asia/Seoul").rules.getOffset(Instant.EPOCH).totalSeconds
         const val SPENT = "amount < 0 AND CAST(reason AS VARCHAR) IN ('STORY_CREATION','CHAT_TURN','CHAT_IMAGE')"
         const val GRANTED = "amount > 0 AND CAST(reason AS VARCHAR) IN ('SIGNUP_REWARD','INVITE_REWARD','ATTENDANCE_REWARD','PURCHASE','ADMIN_GRANT')"
         fun normalized(column: String) = "LOWER(TRIM(REGEXP_REPLACE($column, '\\s+', ' ', 'g')))"

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository
 import tools.jackson.databind.ObjectMapper
 import java.sql.ResultSet
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -123,10 +124,10 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
     }
     fun attendance(userId: Long, page: AdminPagination): AdminPageResponse<AdminAttendanceResponse> {
         val q = AdminQuery().apply { params["user"] = userId }
-        val date = "CAST(created_at AT TIME ZONE 'Asia/Seoul' AS DATE)"
+        val date = "FLOOR((EXTRACT(EPOCH FROM created_at) + ${AdminQuery.KST_OFFSET_SECONDS}) / 86400)"
         return jdbc.adminPage("attendance_date, credit_amount", """FROM (SELECT $date AS attendance_date, SUM(amount) AS credit_amount
             FROM credit_transactions WHERE user_id=:user AND CAST(reason AS VARCHAR)='ATTENDANCE_REWARD' GROUP BY $date) t""",
-            q, page, "attendance_date", RowMapper { rs, _ -> AdminAttendanceResponse(rs.getDate("attendance_date").toLocalDate(), rs.getLong("credit_amount")) })
+            q, page, "attendance_date", RowMapper { rs, _ -> AdminAttendanceResponse(LocalDate.ofEpochDay(rs.getLong("attendance_date")), rs.getLong("credit_amount")) })
     }
 
     fun auditLogs(request: AdminAuditLogsRequest, page: AdminPagination): AdminPageResponse<AdminAuditLogResponse> {
