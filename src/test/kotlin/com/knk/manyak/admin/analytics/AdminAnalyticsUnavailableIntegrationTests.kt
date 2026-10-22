@@ -18,7 +18,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
 
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = [
-    "manyak.analytics.amplitude.api-key=", "manyak.analytics.amplitude.secret-key=",
+    "manyak.analytics.amplitude.api-key=", "manyak.analytics.amplitude.secret-key=", "manyak.admin.play-stats.service-account-key-base64=",
 ])
 class AdminAnalyticsUnavailableIntegrationTests {
     @Autowired private lateinit var client: RestTestClient
@@ -30,6 +30,10 @@ class AdminAnalyticsUnavailableIntegrationTests {
         cleaner.cleanAll()
         val admin = users.save(User(nickname = "관리자"))
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", admin.id)
+        client.get().uri("/api/v1/admin/dashboard/play-installs").header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}")
+            .exchange().expectStatus().isEqualTo(503).expectBody().jsonPath("$.code").isEqualTo("SERVICE_UNAVAILABLE")
+        client.get().uri("/api/v1/admin/dashboard/summary").header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}")
+            .exchange().expectStatus().isOk
         val logger = LoggerFactory.getLogger(com.knk.manyak.global.error.GlobalExceptionHandler::class.java) as Logger
         val events = ListAppender<ILoggingEvent>().apply { start() }; logger.addAppender(events)
         try {
