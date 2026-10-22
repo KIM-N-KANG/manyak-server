@@ -239,7 +239,6 @@ manyak:
     invite-monthly-cap: ${MANYAK_CREDIT_INVITE_MONTHLY_CAP:10}
     attendance-reward: ${MANYAK_CREDIT_ATTENDANCE_REWARD:250}
     story-creation-cost: ${MANYAK_CREDIT_STORY_CREATION_COST:250}
-    chat-turn-cost: ${MANYAK_CREDIT_CHAT_TURN_COST:20}
     # dev 실측 기본값은 0. 양수이면 체험 소진 후 이미지 비용을 별도로 차감한다.
     chat-image-cost: ${MANYAK_CREDIT_CHAT_IMAGE_COST:0}
     policy-refresh:

@@ -109,6 +109,7 @@ Accept: application/json
         client.assert(typeof b.id === "string" && uuidRe.test(b.id), `id가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.id)}`);
         client.assert(typeof b.storyId === "string" && uuidRe.test(b.storyId), `storyId가 UUID 문자열이 아닙니다. actual=${JSON.stringify(b.storyId)}`);
     });
+    client.assert(typeof b.model === "string", `model 누락: actual=${b.model}`);
     client.global.set("chatId", b.id);
 %}
 

@@ -22,6 +22,11 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
     @Query("SELECT c FROM StoryChat c WHERE c.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): StoryChat?
 
+    // 컬럼 단위 갱신: 턴 진행 시각을 유지하고 이관과 경합해도 소유권 조건을 재검사한다.
+    @Modifying
+    @Query("UPDATE StoryChat c SET c.modelCode = :model WHERE c.id = :id AND c.deletedAt IS NULL AND ((:userId IS NULL AND c.userId IS NULL) OR c.userId = :userId)")
+    fun updateModel(id: Long, model: String, userId: Long?): Int
+
     // KNK-447: 회원 서재(내 채팅 목록). 요청자 소유·미삭제만 최근 활동순(updatedAt)으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId: Long, pageable: Pageable): List<StoryChat>
     // 소프트 삭제된(deleted_at IS NOT NULL) 채팅은 조회에서 제외한다.

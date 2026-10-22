@@ -59,11 +59,18 @@ class CreditPolicyServiceTest {
         inviteMonthlyCap = 10,
         attendanceReward = 250,
         storyCreationCost = 250,
-        chatTurnCost = 20,
         clock = clock,
     )
 
     private fun loadedService(): CreditPolicyService = service().also { it.refresh() }
+
+    @Test
+    fun `폐기된 chat_turn_cost 오버라이드는 모르는 키 경고로 제외한다`() {
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_turn_cost", amount = 33)))
+        val service = loadedService()
+        assertThat(service.effectiveAmounts()).hasSize(6)
+        assertThat(appender.list.any { "credit_policy_override_unknown_key" in it.formattedMessage && "chat_turn_cost" in it.formattedMessage }).isTrue()
+    }
 
     @Test
     fun `이미지 정책은 0 오버라이드를 허용하고 음수는 거부한다`() {
@@ -91,7 +98,6 @@ class CreditPolicyServiceTest {
                     CreditPolicyKey.INVITE_MONTHLY_CAP to 10L,
                     CreditPolicyKey.ATTENDANCE_REWARD to 250L,
                     CreditPolicyKey.STORY_CREATION_COST to 250L,
-                    CreditPolicyKey.CHAT_TURN_COST to 20L,
                     CreditPolicyKey.CHAT_IMAGE_COST to 0L,
                 ),
             )
@@ -138,30 +144,30 @@ class CreditPolicyServiceTest {
     @Test
     fun `적재가 실패해도 요청을 막지 않고 직전 스냅샷을 유지한다`() {
         `when`(repository.findAll())
-            .thenReturn(listOf(CreditPolicy(policyKey = "chat_turn_cost", amount = 5)))
+            .thenReturn(listOf(CreditPolicy(policyKey = "story_creation_cost", amount = 5)))
             .thenThrow(IllegalStateException("db down"))
         val service = loadedService()
-        assertThat(service.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(5)
+        assertThat(service.amountOf(CreditPolicyKey.STORY_CREATION_COST)).isEqualTo(5)
 
         service.refresh()
 
-        assertThat(service.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(5)
+        assertThat(service.amountOf(CreditPolicyKey.STORY_CREATION_COST)).isEqualTo(5)
     }
 
     @Test
     fun `스냅샷 없이 첫 적재부터 실패하면 기본값으로 떨어진다`() {
         `when`(repository.findAll()).thenThrow(IllegalStateException("db down"))
 
-        assertThat(loadedService().amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(20)
+        assertThat(loadedService().amountOf(CreditPolicyKey.STORY_CREATION_COST)).isEqualTo(250)
     }
 
     @Test
     fun `최소값 미만 오버라이드는 무시하고 기본값을 쓴다`() {
         // CHECK(0..10000)를 통과하는 amount=0 이 여기까지 온다. 그대로 쓰면 CreditWalletService 의
         // require(amount > 0) 가 터져 채팅 턴 전체가 500 이 된다.
-        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_turn_cost", amount = 0)))
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "story_creation_cost", amount = 0)))
 
-        assertThat(loadedService().amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(20)
+        assertThat(loadedService().amountOf(CreditPolicyKey.STORY_CREATION_COST)).isEqualTo(250)
     }
 
     @Test
@@ -175,7 +181,7 @@ class CreditPolicyServiceTest {
     @Test
     fun `기본값이 최소값 미만이면 부팅에 실패한다`() {
         // 오버라이드와 달리 기본값에는 물러설 곳이 없다. env 로 0 을 넣는 사고는 배포 시점에 드러나야 한다.
-        assertThatThrownBy { CreditPolicyService(repository, 0, 2000, 10, 250, 250, 20, clock) }
+        assertThatThrownBy { CreditPolicyService(repository, 0, 2000, 10, 250, 250, clock) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("signup_reward")
     }
@@ -186,14 +192,14 @@ class CreditPolicyServiceTest {
             listOf(
                 // 운영 SQL 오타. DB CHECK 는 이걸 통과시킨다.
                 CreditPolicy(policyKey = "attendence_reward", amount = 700),
-                CreditPolicy(policyKey = "chat_turn_cost", amount = 33),
+                CreditPolicy(policyKey = "story_creation_cost", amount = 33),
             ),
         )
         val service = loadedService()
 
         assertThat(service.amountOf(CreditPolicyKey.ATTENDANCE_REWARD)).isEqualTo(250)
         // 모르는 키 하나가 전체 적재를 망치지 않는다.
-        assertThat(service.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(33)
+        assertThat(service.amountOf(CreditPolicyKey.STORY_CREATION_COST)).isEqualTo(33)
     }
 
     @Test
@@ -213,11 +219,11 @@ class CreditPolicyServiceTest {
 
     @Test
     fun `최소값 미만 오버라이드도 같은 레벨의 warn 으로 드러난다`() {
-        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "chat_turn_cost", amount = 0)))
+        `when`(repository.findAll()).thenReturn(listOf(CreditPolicy(policyKey = "story_creation_cost", amount = 0)))
 
         loadedService()
 
         val warning = appender.list.single { it.level == Level.WARN }
-        assertThat(warning.formattedMessage).contains("credit_policy_override_rejected").contains("chat_turn_cost")
+        assertThat(warning.formattedMessage).contains("credit_policy_override_rejected").contains("story_creation_cost")
     }
 }

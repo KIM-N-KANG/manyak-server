@@ -77,7 +77,7 @@ class ChatImageFailureIntegrationTests {
         val user = paidMember()
         paidStart(user)
         assertThat(wallet.balanceOf(user)).isEqualTo(50)
-        assertThat(spends().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(spends().map { it.refType }).containsExactlyInAnyOrder("CHAT_TURN", "CHAT_IMAGE")
         queued.get().run()
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.imageSlots).hasSize(1)
         assertThat(refunds()).isEmpty()
@@ -119,7 +119,7 @@ class ChatImageFailureIntegrationTests {
         queued.get().run()
         callback(emitter, "completionCallback")
         assertThat(wallet.balanceOf(user)).isEqualTo(100)
-        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT_TURN", "CHAT_IMAGE")
         assertThat(refunds().map { it.idempotencyKey }.distinct()).hasSize(2)
     }
     @Test fun `유료 큐 생성 마감은 두 차감 행을 각각 한번 환불한다`() {
@@ -143,7 +143,7 @@ class ChatImageFailureIntegrationTests {
         paidStart(user)
         queued.get().run()
         assertThat(wallet.balanceOf(user)).isEqualTo(100)
-        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT_TURN", "CHAT_IMAGE")
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
     }
     @Test fun `이미지 비용 부족이면 예약한 턴 체험을 복원한다`() {

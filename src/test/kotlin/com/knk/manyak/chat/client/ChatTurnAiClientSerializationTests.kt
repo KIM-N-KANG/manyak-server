@@ -11,6 +11,19 @@ class ChatTurnAiClientSerializationTests {
     private val objectMapper = JsonMapper.builder().build()
 
     @Test
+    fun `회원 공개 식별자와 청구 모델은 snake case로 직렬화하고 게스트 user_id는 null이다`() {
+        val user = "00000000-0000-4000-8000-000000000001"
+        val member = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest().copy(userId = user, modelTier = "AURORA")))
+        assertEquals(user, member["user_id"].asText())
+        assertEquals("AURORA", member["model_tier"].asText())
+        assertFalse(member.has("userId"))
+        assertFalse(member.has("modelTier"))
+        val guest = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest()))
+        assertTrue(guest["user_id"].isNull)
+        assertEquals("LITE", guest["model_tier"].asText())
+    }
+
+    @Test
     fun `슬롯은 snake case로 보내고 호환 플래그는 보내지 않는다`() {
         val json = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest().copy(
             imageSlots = listOf(ChatImageSlot("chat-images/id/1-test.webp", "https://s3.test/signed", "https://cdn.test/chat-images/id/1-test.webp")),

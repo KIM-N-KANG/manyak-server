@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.credit_lots](public.credit_lots.md) [public.credit_orders](public.credit_orders.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) |  |  |
+| id | bigint | nextval('credit_transactions_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_message_versions](public.story_message_versions.md) [public.credit_lots](public.credit_lots.md) [public.credit_orders](public.credit_orders.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) |  |  |
 | user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | amount | bigint |  | false |  |  |  |
 | reason | varchar(30) |  | false |  |  |  |
@@ -34,12 +34,15 @@
 | idx_credit_transactions_user_history | CREATE INDEX idx_credit_transactions_user_history ON public.credit_transactions USING btree (user_id, created_at DESC, id DESC) |
 | idx_credit_transactions_admin_created | CREATE INDEX idx_credit_transactions_admin_created ON public.credit_transactions USING btree (created_at, user_id) INCLUDE (amount, reason) |
 | idx_credit_transactions_admin_chat_ref | CREATE INDEX idx_credit_transactions_admin_chat_ref ON public.credit_transactions USING btree (ref_id, ref_type) INCLUDE (amount) WHERE ((amount < 0) AND ((reason)::text = ANY ((ARRAY['CHAT_TURN'::character varying, 'CHAT_IMAGE'::character varying])::text[]))) |
+| idx_credit_transactions_chat_turn_created | CREATE INDEX idx_credit_transactions_chat_turn_created ON public.credit_transactions USING btree (id) WHERE ((ref_type)::text = 'CHAT_TURN'::text) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
+"public.story_messages" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
+"public.story_message_versions" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
@@ -54,6 +57,26 @@ erDiagram
   bigint ref_id
   varchar_255_ idempotency_key
   timestamp_with_time_zone created_at
+}
+"public.story_messages" {
+  bigint id
+  bigint chat_id FK
+  varchar_16_ role
+  text content
+  integer message_order
+  timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
+}
+"public.story_message_versions" {
+  bigint id
+  bigint message_id FK
+  integer version_number
+  text content
+  text choices
+  timestamp_with_time_zone created_at
+  bigint credit_transaction_id FK
 }
 "public.credit_lots" {
   bigint id

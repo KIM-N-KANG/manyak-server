@@ -43,7 +43,7 @@ class AdminReadPostgresTests {
         val cid = jdbc.queryForObject("INSERT INTO story_chats(public_id,user_id,story_id,current_turn,created_at) VALUES (?,?,?,4,'2026-10-21T00:00:00Z') RETURNING id", Long::class.java, chatId, userId, sid)!!
         jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order,created_at) VALUES (?,'USER','fixture',1,'2026-10-21T00:00:30Z'),(?,'ASSISTANT','fixture',2,'2026-10-21T00:01:00Z')", cid, cid)
         jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,created_at) VALUES (?,250,'ATTENDANCE_REWARD','2026-10-21T00:00:01Z')", userId)
-        jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,ref_type,ref_id,created_at) VALUES (?,-20,'CHAT_TURN','CHAT',?,'2026-10-21T00:02:00Z')", userId, cid)
+        jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,ref_type,ref_id,created_at) VALUES (?,-20,'CHAT_TURN','CHAT_TURN',?,'2026-10-21T00:02:00Z')", userId, cid)
         jdbc.update("INSERT INTO credit_orders(public_id,user_id,product_id,provider,status,price_krw,credit_amount,completed_at) VALUES (?,?,'if_5000','GROBLE','COMPLETED',4800,5000,'2026-10-21T00:01:00Z')", orderId, userId)
         jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,status,latency_ms,chat_id,story_id,created_at) VALUES ('pg','test','chat_response','SUCCEEDED',1000,?,?,'2026-10-21T00:01:00Z')", chatId, sid)
         jdbc.update("INSERT INTO admin_audit_logs(public_id,admin_user_id,category,action,target_type,target_id,request_id,created_at) VALUES (gen_random_uuid(),?,'ACCESS','MEMBER_VIEWED','MEMBER',?,'pg','2026-10-21T00:01:00Z')", userId, memberId.toString())

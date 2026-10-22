@@ -1,6 +1,8 @@
 package com.knk.manyak.chat.service
 
 import com.knk.manyak.story.service.UsernameTokenRenderer.render
+import com.knk.manyak.chat.dto.ChangeChatModelResponse
+import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.ChatPersonaResponse
 import com.knk.manyak.user.service.UserPersonaService
 
@@ -48,8 +50,6 @@ import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.service.CreditDeduction
 import com.knk.manyak.credit.entity.CreditReason
-import com.knk.manyak.credit.service.CreditPolicyKey
-import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.AiTraceLink
@@ -140,8 +140,9 @@ class ChatService(
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
     private val serverAnalytics: ServerAnalytics,
-    // 채팅 턴 1회 소모량(재생성도 동일 값·사유를 공유). 운영 중 조정 가능한 정책값이라 턴마다 해석한다(KNK-1056).
-    private val creditPolicyService: CreditPolicyService,
+    // 채팅 모델과 가격은 요청 조립 시 한 번 읽어 AI 호출과 차감에서 함께 사용한다.
+    private val chatModelService: ChatModelService,
+    private val userRepository: UserRepository,
     private val meterRegistry: MeterRegistry,
     private val observationRegistry: ObservationRegistry,
     transactionManager: PlatformTransactionManager,
@@ -159,6 +160,20 @@ class ChatService(
     private enum class TurnWorkerState { PENDING, RUNNING, SAVING, CANCELLED, FINISHED }
 
     private val turnSaveTransactionTemplate = TransactionTemplate(transactionManager)
+
+    fun getModels() = chatModelService.list()
+
+    @Transactional
+    fun changeModel(chatId: String, model: String, userId: Long?): ChangeChatModelResponse {
+        suspensionGuard.requireActive(userId)
+        val chat = resolveChat(chatId)
+        requireChatOwner(chat, userId)
+        val code = chatModelService.requireSelectable(model)
+        if (storyChatRepository.updateModel(chat.id, code, userId) != 1) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 변경할 권한이 없습니다.")
+        }
+        return ChangeChatModelResponse(chat.publicId.toString(), code)
+    }
 
     @Transactional
     fun createChat(request: CreateChatRequest, userId: Long? = null): CreateChatResponse {
@@ -188,6 +203,7 @@ class ChatService(
         val chat = storyChatRepository.save(
             StoryChat(
                 userId = userId,
+                modelCode = chatModelService.defaultModel().code,
                 storyId = story.id,
                 personaNameSnapshot = persona?.name,
                 personaDescriptionSnapshot = persona?.description,
@@ -212,6 +228,7 @@ class ChatService(
         val suggestedInputs = loadSuggestedInputs(startSetting?.id)
 
         return CreateChatResponse(
+            model = chat.modelCode,
             id = chat.publicId.toString(),
             storyId = story.publicId.toString(),
             persona = persona?.let { ChatPersonaResponse(it.name) },
@@ -462,6 +479,7 @@ class ChatService(
         }
 
         return ChatDetailResponse(
+            model = chatModelService.effective(chat.modelCode).code,
             generatingTurn = generatingTurn,
             persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
             id = chat.publicId.toString(),
@@ -730,10 +748,11 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = false,
                 realtimeImage = request.realtimeImage,
-                persist = { result ->
+                persist = { result, chargeId ->
                     chatTurnPersister.persistTurn(
                         chatId = chat.id,
                         expectedState = startState,
+                        creditTransactionId = chargeId,
                         userInput = request.userInput,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
@@ -747,7 +766,7 @@ class ChatService(
                         judgmentSource = aiCall.judgmentSource,
                     )
                 },
-                onPersisted = { persistedTurn, aiCallLogId ->
+                onPersisted = { persistedTurn, aiCallLogId, modelCode, turnCost ->
                     structuredLogger.event(
                         "user_message_saved",
                         "chat_id" to chatId,
@@ -761,6 +780,8 @@ class ChatService(
                         "story_id" to storyPublicId,
                         "turn_number" to persistedTurn.turnNumber,
                         "ai_call_log_id" to aiCallLogId,
+                        "model_code" to modelCode,
+                        "turn_cost" to turnCost,
                     )
                 },
             )
@@ -824,7 +845,7 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = true,
                 realtimeImage = request.realtimeImage,
-                persist = { result ->
+                persist = { result, chargeId ->
                     // 현재 채팅 상태로 요청하고 판정 메타는 재적용하지 않는다. 직전 턴 상태를 복원해 새 판정을
                     // 반영하려면 턴별 메타 델타 이력이 필요하지만 현 스키마에는 없다. 엔딩 도달 턴은 위에서
                     // 거절하므로 최초 도달 불변식은 유지된다(regenerateLastTurn은 judgment를 받지 않음).
@@ -832,17 +853,20 @@ class ChatService(
                         chatId = chat.id,
                         expectedAssistantId = request.turnId,
                         expectedState = startState,
+                        creditTransactionId = chargeId,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
                     )
                 },
-                onPersisted = { persistedTurn, aiCallLogId ->
+                onPersisted = { persistedTurn, aiCallLogId, modelCode, turnCost ->
                     structuredLogger.event(
                         "ai_response_regenerated",
                         "chat_id" to chatId,
                         "story_id" to storyPublicId,
                         "turn_number" to persistedTurn.turnNumber,
                         "ai_call_log_id" to aiCallLogId,
+                        "model_code" to modelCode,
+                        "turn_cost" to turnCost,
                     )
                 },
             )
@@ -968,17 +992,23 @@ class ChatService(
         chat.regeneratedCount,
     )
 
-    private fun streamEntry(block: ((String) -> Unit) -> SseEmitter): SseEmitter {
+    private fun streamEntry(block: (TurnResultRecorder) -> SseEmitter): SseEmitter {
         val resultRecorded = AtomicBoolean(false)
-        val recordResult: (String) -> Unit = { outcome ->
-            if (resultRecorded.compareAndSet(false, true)) recordChatTurnResult(outcome)
+        val recordResult = TurnResultRecorder { outcome, model ->
+            if (resultRecorded.compareAndSet(false, true)) recordChatTurnResult(outcome, model)
         }
         return try {
             block(recordResult)
         } catch (ex: Throwable) {
+            if (isChatTurnClientRejection(ex)) recordResult.modelCode = "none"
             recordResult(if (isChatTurnClientRejection(ex)) OUTCOME_REJECTED else OUTCOME_FAILURE)
             throw ex
         }
+    }
+
+    private class TurnResultRecorder(private val record: (String, String) -> Unit) {
+        @Volatile var modelCode: String = "none"
+        operator fun invoke(outcome: String) = record(outcome, modelCode)
     }
 
     private fun acquireGeneration(chat: StoryChat, type: String, input: String, startedAt: Instant, target: Long?): GeneratingTurnResponse =
@@ -1031,17 +1061,18 @@ class ChatService(
         chatId: String,
         chat: StoryChat,
         generation: GeneratingTurnResponse,
-        recordResult: (String) -> Unit,
+        recordResult: TurnResultRecorder,
         storyPublicId: String,
         aiCall: AiTurnCall,
         userId: Long?,
         deviceId: String?,
         isRegenerated: Boolean,
         realtimeImage: Boolean,
-        persist: (ChatTurnAiResult) -> ChatTurnPersister.PersistedTurn,
-        onPersisted: (ChatTurnPersister.PersistedTurn, Long) -> Unit,
+        persist: (ChatTurnAiResult, Long?) -> ChatTurnPersister.PersistedTurn,
+        onPersisted: (ChatTurnPersister.PersistedTurn, Long, String, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
+        var billingModel = aiCall.billingModel
         var memberTrialCovered = false
         var guestDeviceId: String? = null
         var imageReservation = ChatRealtimeImageService.Reservation(null)
@@ -1072,13 +1103,14 @@ class ChatService(
             }
         }
         try {
-            val chatTurnCost = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
             memberTrialCovered = userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
             guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
+            if (userId == null || memberTrialCovered) billingModel = BillingModel("LITE", 0)
+            recordResult.modelCode = billingModel.code
             imageReservation = chatRealtimeImageService.prepare(realtimeImage, userId, guestDeviceId)
             if (userId != null) {
                 val items = buildList {
-                    if (!memberTrialCovered) add(CreditDeduction(chatTurnCost, CreditReason.CHAT_TURN, "CHAT", chatPk))
+                    if (!memberTrialCovered) add(CreditDeduction(billingModel.turnCost, CreditReason.CHAT_TURN, "CHAT_TURN", chatPk))
                     if (imageReservation.cost > 0) add(CreditDeduction(imageReservation.cost, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chatPk))
                 }
                 if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
@@ -1119,7 +1151,7 @@ class ChatService(
             val pending = workerState.compareAndSet(TurnWorkerState.PENDING, TurnWorkerState.CANCELLED)
             val cancelled = pending || workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.CANCELLED)
             if (cancelled) {
-                serverAnalytics.chatAiMessageFailed(userId, chatId, null, "AI_STREAM_FAILED", isRegenerated)
+                serverAnalytics.chatAiMessageFailed(userId, chatId, null, "AI_STREAM_FAILED", isRegenerated, billingModel.code)
                 events.write("error", ChatStreamErrorEvent("AI_STREAM_FAILED", "AI 응답 생성 중 오류가 발생했습니다."))
                 if (pending) {
                     finishQueueWait(error = java.util.concurrent.TimeoutException("generation deadline exceeded"))
@@ -1173,7 +1205,7 @@ class ChatService(
                         meta = { it.meta },
                     ) {
                         chatTurnAiClient.streamTurn(
-                            aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot)),
+                            aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot), modelTier = billingModel.code),
                             aiCall.traceLink,
                             deadline = generationDeadline,
                             // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
@@ -1206,8 +1238,9 @@ class ChatService(
                     if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
                     val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
                         val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
+                        val saved = persist(checked.result, turnCharge()?.id)
                         if (!checked.success) refundImage()
-                        checked to persist(checked.result)
+                        checked to saved
                     })
                     val result = validated.result
                     // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
@@ -1216,7 +1249,7 @@ class ChatService(
                     Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                     // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                     aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)
-                    onPersisted(persistedTurn, recorded.aiCallLogId)
+                    onPersisted(persistedTurn, recorded.aiCallLogId, billingModel.code, turnCharge()?.amount?.unaryMinus() ?: 0)
                     // AI 응답 생성 성공 분석 이벤트(스펙 §6-4-2-6). 엔딩 도달 턴이면 도달 엔딩 id를 함께 싣는다(B5).
                     serverAnalytics.chatAiMessageSucceeded(
                         userId = userId,
@@ -1224,6 +1257,8 @@ class ChatService(
                         turnNumber = persistedTurn.turnNumber,
                         isRegenerated = isRegenerated,
                         endingId = persistedTurn.reachedEnding?.id?.toString(),
+                        modelCode = billingModel.code,
+                        turnCost = turnCharge()?.amount?.unaryMinus() ?: 0,
                     )
                     events.write(
                         "completed",
@@ -1250,6 +1285,7 @@ class ChatService(
                         turnNumber = null,
                         errorCode = exception.code,
                         isRegenerated = isRegenerated,
+                        modelCode = billingModel.code,
                     )
                 } catch (exception: Exception) {
                     // 마감 오류 이벤트·실패 분석은 타이머가 이미 발행했다. 정산은 finally가 소유한다.
@@ -1271,6 +1307,7 @@ class ChatService(
                             turnNumber = null,
                             errorCode = errorCode,
                             isRegenerated = isRegenerated,
+                            modelCode = billingModel.code,
                         )
                     }
                 } finally {
@@ -1360,7 +1397,7 @@ class ChatService(
                     amount = amount,
                     reason = CreditReason.REFUND,
                     idempotencyKey = refundKey,
-                    refType = "CHAT",
+                    refType = "CHAT_TURN",
                     refId = chatPk,
                 )
                 true
@@ -1407,12 +1444,13 @@ class ChatService(
      * 요청 단위 결과 게이트를 공유한다. 동기 거부·큐 마감·워커 finally가 겹쳐도 한 번만 집계한다.
      * 실행 중 마감은 CANCELLED로 표시하고 워커 종료 시 failure, 저장 진입이 먼저면 저장 결과로 판정한다.
      */
-    private fun recordChatTurnResult(outcome: String) {
+    private fun recordChatTurnResult(outcome: String, modelCode: String) {
         // 관측 실패가 SSE 종료나 환불을 막지 않도록 격리한다.
         runCatching {
             Counter.builder("manyak.chat.turn.result")
                 .description("채팅 턴 결과 분포")
                 .tag("outcome", outcome)
+                .tag("model_code", modelCode)
                 .register(meterRegistry)
                 .increment()
         }
@@ -1521,7 +1559,9 @@ class ChatService(
         val endingNames = ChatJudgmentNameMapping(endings.map { it.name }, chatName)
 
         AiTurnCall(
+            billingModel = chatModelService.effective(chat.modelCode),
             request = ChatTurnAiRequest(
+                userId = chat.userId?.let { userRepository.findById(it).orElseThrow().publicId.toString() },
                 genre = material?.genre.orEmpty(),
                 storySettings = ChatTurnStorySettings(
                     protagonistName = chatName.orEmpty(),
@@ -1576,6 +1616,7 @@ class ChatService(
 
     /** AI 채팅 턴 호출 한 번에 필요한 요청 본문과 연결 식별자 헤더 재료(KNK-751). */
     private data class AiTurnCall(
+        val billingModel: BillingModel,
         val request: ChatTurnAiRequest,
         val traceLink: AiTraceLink,
         /**

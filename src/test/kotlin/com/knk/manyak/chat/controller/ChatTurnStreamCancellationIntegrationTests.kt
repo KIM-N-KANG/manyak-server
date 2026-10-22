@@ -45,6 +45,9 @@ import java.util.function.Consumer
     "spring.datasource.url=jdbc:h2:mem:manyak-stream-cancel;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
 ])
 class ChatTurnStreamCancellationIntegrationTests {
+    @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
+    @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
+
     class ControlledWorker : Executor {
         lateinit var task: Runnable
         override fun execute(command: Runnable) { task = command }
@@ -252,7 +255,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         worker.task.run()
         assertThat(wallet.balanceOf(member.id)).isEqualTo(cost + 7)
         assertThat(refunds()).hasSize(2)
-        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT_TURN", "CHAT_IMAGE")
     }
 
     @Test fun `마감 뒤 이미지 콜백 중단과 복원은 한 번만 수행한다`() {
@@ -399,7 +402,7 @@ class ChatTurnStreamCancellationIntegrationTests {
         }.isInstanceOf(IllegalStateException::class.java)
         assertThat(balances).containsExactly(cost + 7)
         assertThat(refunds()).hasSize(2)
-        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT", "CHAT_IMAGE")
+        assertThat(refunds().map { it.refType }).containsExactlyInAnyOrder("CHAT_TURN", "CHAT_IMAGE")
         assertThat(failureCount()).isEqualTo(before + 1)
         assertThat(state(chat, member)).isNull()
     }
@@ -926,7 +929,7 @@ class ChatTurnStreamCancellationIntegrationTests {
     private fun paidChat(): Triple<User, StoryChat, Long> {
         val member = users.save(User(nickname = "취소회원", status = UserStatus.ACTIVE))
         while (trials.reserveMember(member.id, GuestTrialLimitService.Counter.CHAT_TURN)) { /* drain */ }
-        val cost = policy.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+        val cost = chatModelService.litePrice()
         wallet.reward(member.id, cost, CreditReason.SIGNUP_REWARD, "seed:${member.id}")
         return Triple(member, newChat(member.id), cost)
     }

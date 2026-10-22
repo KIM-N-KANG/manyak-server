@@ -75,6 +75,7 @@ erDiagram
   jsonb occurred_main_event_names_snapshot
   text persona_name_snapshot
   text persona_description_snapshot
+  varchar_20_ model_code FK
 }
 "public.story_messages" {
   bigint id
@@ -85,6 +86,7 @@ erDiagram
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
 }
 ```
 

@@ -9,6 +9,36 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM CreditTransaction t WHERE t.id = :id")
+    fun findByIdForUpdate(id: Long): CreditTransaction?
+
+    @Query("""
+        SELECT t FROM CreditTransaction t
+        WHERE t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+          AND t.refType = 'CHAT_TURN' AND t.createdAt < :cutoff AND t.id > :afterId
+          AND NOT EXISTS (SELECT m.id FROM StoryMessage m WHERE m.creditTransactionId = t.id)
+          AND NOT EXISTS (SELECT v.id FROM StoryMessageVersion v WHERE v.creditTransactionId = t.id)
+          AND NOT EXISTS (SELECT r.id FROM CreditTransaction r WHERE r.idempotencyKey = CONCAT('refund:charge:', CAST(t.id AS string)))
+        ORDER BY t.id
+    """)
+    fun findChatTurnCharges(cutoff: Instant, afterId: Long, pageable: Pageable): List<CreditTransaction>
+
+    // 전체 완료와 CHAT_TURN 연결을 한 SQL 스냅샷에서 계산해 새 턴 저장 사이에 집합이 섞이지 않게 한다.
+    @Query("""
+        SELECT CAST(c.currentTurn AS long) + c.regeneratedCount
+          - (SELECT COUNT(m) FROM StoryMessage m, CreditTransaction t
+             WHERE m.creditTransactionId = t.id AND m.chatId = c.id AND t.userId = :userId
+               AND t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+               AND t.refType = 'CHAT_TURN')
+          - (SELECT COUNT(v) FROM StoryMessageVersion v, StoryMessage m, CreditTransaction t
+             WHERE v.messageId = m.id AND v.creditTransactionId = t.id AND m.chatId = c.id AND t.userId = :userId
+               AND t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+               AND t.refType = 'CHAT_TURN')
+        FROM StoryChat c WHERE c.id = :chatId
+    """)
+    fun findLegacyChatCompletedCount(userId: Long, chatId: Long): Long?
+
     fun findByIdempotencyKey(idempotencyKey: String): CreditTransaction?
 
 
@@ -77,6 +107,7 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
             t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)), MAX(ABS(t.amount)))
         FROM CreditTransaction t
         WHERE t.reason IN :reasons AND t.refType IS NOT NULL AND t.refId IS NOT NULL
+          AND (t.reason <> com.knk.manyak.credit.entity.CreditReason.CHAT_TURN OR t.refType = 'CHAT')
         GROUP BY t.userId, t.refType, t.refId
         HAVING MAX(t.createdAt) < :cutoff
         """,

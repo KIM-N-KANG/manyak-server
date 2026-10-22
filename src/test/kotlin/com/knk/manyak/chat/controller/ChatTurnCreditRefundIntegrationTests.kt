@@ -56,6 +56,9 @@ import java.time.Duration
     ],
 )
 class ChatTurnCreditRefundIntegrationTests {
+    @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
+    @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
+
 
     @TestConfiguration
     class ThrowingAiClientConfig {
@@ -112,7 +115,7 @@ class ChatTurnCreditRefundIntegrationTests {
     @Autowired private lateinit var creditPolicyRepository: CreditPolicyRepository
 
     // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
-    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+    private val chatTurnCost: Long get() = chatModelService.litePrice()
 
     // 여러 턴을 견디는 충분한 잔액.
     private val seedBalance: Long get() = chatTurnCost * 10
@@ -220,17 +223,14 @@ class ChatTurnCreditRefundIntegrationTests {
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
         assertThat(refund.first().amount).isEqualTo(chatTurnCost)
-        assertThat(refund.first().refType).isEqualTo("CHAT")
+        assertThat(refund.first().refType).isEqualTo("CHAT_TURN")
         assertThat(refund.first().refId).isEqualTo(chat.id)
     }
 
     @Test
-    fun `차감 후 정책이 바뀌어도 환불액은 원 차감액과 같다`() {
-        // KNK-1056 의 핵심 불변식. 차감액과 환불액은 반드시 같아야 한다 — 어긋나면 사용자가 손해를 보거나
-        // 이득을 본다. 소비자는 요청 진입부에서 정책을 한 번만 읽어 차감·환불에 같은 값을 넘겨야 하고,
-        // 환불 시점에 다시 읽으면 이 테스트가 깨진다.
-        // 읽기는 메모리라 저장 후 적재를 유발해야 반영된다(운영에선 스케줄러 몫).
-        creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 41))
+    fun `차감 후 모델 가격이 바뀌어도 환불액은 원 차감액과 같다`() {
+        // 진행 중 가격 변경과 무관하게 환불은 차감 행의 금액을 사용한다.
+        chatModelRepository.save(chatModelRepository.findById("LITE").orElseThrow().apply { turnCost = 41 })
         creditPolicyService.refresh()
         val story = storyRepository.save(Story(title = "정책 변경 스토리", genre = "판타지"))
         val member = saveUser("정책변경회원")
@@ -238,7 +238,7 @@ class ChatTurnCreditRefundIntegrationTests {
         val chat = storyChatRepository.save(StoryChat(storyId = story.id, userId = member.id))
         // 차감이 끝난 뒤, 환불이 일어나기 전에 단가를 바꾼다.
         afterCharge = {
-            creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 7))
+            chatModelRepository.save(chatModelRepository.findById("LITE").orElseThrow().apply { turnCost = 7 })
             // 적재까지 해 둔다 — 환불이 그 시점 정책을 다시 읽는 구현이면 7 을 보고 금액이 어긋나야 red 가 된다.
             creditPolicyService.refresh()
         }
@@ -261,8 +261,8 @@ class ChatTurnCreditRefundIntegrationTests {
         val all = transactionRepository.findAll()
         assertThat(all.first { it.reason == CreditReason.CHAT_TURN }.amount).isEqualTo(-41)
         assertThat(all.first { it.reason == CreditReason.REFUND }.amount).isEqualTo(41)
-        // 정책 자체는 실제로 바뀌어 있어야 한다(훅이 안 돌았는데 통과하는 위양성 방지).
-        assertThat(creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)).isEqualTo(7)
+        // 모델 가격 자체는 실제로 바뀌어 있어야 한다(훅이 안 돌았는데 통과하는 위양성 방지).
+        assertThat(chatModelService.litePrice()).isEqualTo(7)
     }
 
     @Autowired

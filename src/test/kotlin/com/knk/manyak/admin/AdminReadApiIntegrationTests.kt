@@ -566,7 +566,7 @@ class AdminReadApiIntegrationTests {
         val fast = chat(story, owner, 51); val slow = chat(story); val silent = chat(story)
         message(fast, 30); message(slow, 901)
         message(fast, 40, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
-        ledger(owner, -20, "CHAT_TURN", ref = fast.id, refType = "CHAT")
+        ledger(owner, -20, "CHAT_TURN", ref = fast.id, refType = "CHAT_TURN")
         ledger(owner, -20, "CHAT_TURN", ref = fast.id, refType = "CHAT")
         ledger(owner, -5, "CHAT_IMAGE", ref = fast.id, refType = "CHAT_IMAGE")
         ledger(owner, -999, "CHAT_TURN", ref = silent.id, refType = "CHAT")

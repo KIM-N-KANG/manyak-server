@@ -15,7 +15,7 @@ import java.time.Instant
  *
  * enum으로 두는 이유: 조회를 문자열로 하면 오타가 예외가 아니라 "조용히 기본값"으로 나타나 아무도 눈치채지 못한다.
  *
- * [minimumAmount]는 **이 값 미만이면 크레딧 경로가 깨지는 하한**이다. 보상·소모 5종은 1 이상이어야 한다 —
+ * [minimumAmount]는 **이 값 미만이면 크레딧 경로가 깨지는 하한**이다. 보상·소모 4종은 1 이상이어야 한다 —
  * [CreditWalletService.reward]·[CreditWalletService.deduct]가 `require(amount > 0)`이라, 0을 넣으면
  * "보상을 잠깐 끄기"가 아니라 그 경로 전체가 500이 된다. `invite_monthly_cap`과 `chat_image_cost`는 0을 허용한다. 이미지 0은 지갑 호출을 생략한다:
  * 상한 0은 "초대자 적립 중단"이라는 뜻이 통하는 설정이고, 기존 코드가 이미 감당한다(집계 0 >= 상한 0 →
@@ -33,7 +33,6 @@ enum class CreditPolicyKey(val storageKey: String, val minimumAmount: Long) {
     INVITE_MONTHLY_CAP("invite_monthly_cap", 0),
     ATTENDANCE_REWARD("attendance_reward", 1),
     STORY_CREATION_COST("story_creation_cost", 1),
-    CHAT_TURN_COST("chat_turn_cost", 1),
     CHAT_IMAGE_COST("chat_image_cost", 0),
 }
 
@@ -74,7 +73,6 @@ class CreditPolicyService(
     @param:Value("\${manyak.credit.invite-monthly-cap}") inviteMonthlyCap: Long,
     @param:Value("\${manyak.credit.attendance-reward}") attendanceReward: Long,
     @param:Value("\${manyak.credit.story-creation-cost}") storyCreationCost: Long,
-    @param:Value("\${manyak.credit.chat-turn-cost}") chatTurnCost: Long,
     private val clock: Clock = Clock.systemUTC(),
     @param:Value("\${manyak.credit.chat-image-cost}") chatImageCost: Long = 0,
 ) {
@@ -87,7 +85,6 @@ class CreditPolicyService(
             CreditPolicyKey.INVITE_MONTHLY_CAP -> inviteMonthlyCap
             CreditPolicyKey.ATTENDANCE_REWARD -> attendanceReward
             CreditPolicyKey.STORY_CREATION_COST -> storyCreationCost
-            CreditPolicyKey.CHAT_TURN_COST -> chatTurnCost
             CreditPolicyKey.CHAT_IMAGE_COST -> chatImageCost
         }
     }
@@ -131,7 +128,7 @@ class CreditPolicyService(
     }
 
     /**
-     * 전체 키의 현재 유효값을 **한 번의 스냅샷·한 번의 now**로 계산한다. 7종을 [amountOf]로 따로 읽으면 그 사이에
+     * 전체 키의 현재 유효값을 **한 번의 스냅샷·한 번의 now**로 계산한다. 6종을 [amountOf]로 따로 읽으면 그 사이에
      * [refresh]가 끼어들어 한 응답 안에 옛 값과 새 값이 섞인다(만료 경계도 키마다 다르게 판정된다).
      * 여러 수치를 함께 내보내는 조회(`GET /api/v1/credits/policies`)는 이걸 쓴다. DB를 조회하지 않는다.
      */
