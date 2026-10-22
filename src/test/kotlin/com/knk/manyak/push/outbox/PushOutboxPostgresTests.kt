@@ -84,6 +84,18 @@ class PushOutboxPostgresTests {
         assertThat(row.message.messageId).isEqualTo("attendance:${user.publicId}:2026-09-25")
     }
 
+    @Test fun `캠페인 재실행은 실제 PG에서 기존 회원을 건너뛰고 추가 회원만 기록한다`() {
+        val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
+        val users = context.getBean(UserRepository::class.java)
+        `when`(users.findById(8)).thenReturn(Optional.of(User(id = 8, nickname = "추가 회원")))
+        val campaignId = UUID.randomUUID().toString()
+        val data = mapOf("type" to "PROMOTION", "campaignId" to campaignId)
+        assertThat(writer.record(listOf(7), data, "promotion", campaignId)).isEqualTo(1)
+        assertThat(writer.record(listOf(7, 8), data, "promotion", campaignId)).isEqualTo(1)
+        assertThat(writer.record(listOf(7, 8), data, "promotion", campaignId)).isZero()
+        assertThat(count()).isEqualTo(2)
+    }
+
     @Test fun `회차 중간 실패는 앞서 기록한 요청도 실제 PG에서 롤백한다`() {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
         val data = mapOf("type" to "PROMOTION")

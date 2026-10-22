@@ -290,6 +290,8 @@ manyak:
       enabled: ${MANYAK_PUSH_ATTENDANCE_REMINDER_ENABLED:true}
       # 09:00 KST. zone은 코드에 Asia/Seoul로 박혀 있어 서버 타임존과 무관하게 같은 시각에 돈다.
       cron: ${MANYAK_PUSH_ATTENDANCE_REMINDER_CRON:0 0 9 * * *}
+    campaign:
+      sending-ttl: ${MANYAK_PUSH_CAMPAIGN_SENDING_TTL:PT30M}
     promotion:
       # 프로모션 푸시(KNK-1117, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
       enabled: ${MANYAK_PUSH_PROMOTION_ENABLED:true}

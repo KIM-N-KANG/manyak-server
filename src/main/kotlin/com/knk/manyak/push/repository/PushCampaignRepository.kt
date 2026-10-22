@@ -1,5 +1,8 @@
 package com.knk.manyak.push.repository
 
+import com.knk.manyak.push.entity.PushCampaignStatus
+import java.util.UUID
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import com.knk.manyak.push.entity.PushCampaign
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
@@ -8,7 +11,10 @@ import org.springframework.data.repository.query.Param
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-interface PushCampaignRepository : JpaRepository<PushCampaign, Long> {
+interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecificationExecutor<PushCampaign> {
+    fun findByPublicId(publicId: UUID): PushCampaign?
+    fun findByStatusAndStartedAtLessThanEqual(status: PushCampaignStatus, cutoff: Instant): List<PushCampaign>
+
 
     /** 발송 시각이 지난 예약을 예약 순으로 돌려준다. 한 회차에 여럿이 도래하면 차례로 보낸다. */
     @Query(
@@ -37,4 +43,18 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long> {
         """,
     )
     fun claim(@Param("id") id: Long, @Param("startedAt") startedAt: Instant): Int
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""UPDATE PushCampaign c SET c.status = :next
+        WHERE c.publicId = :publicId AND c.status = :expected""")
+    fun changeStatus(publicId: UUID, expected: PushCampaignStatus, next: PushCampaignStatus): Int
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""UPDATE PushCampaign c SET c.status = :status, c.targetCount = :targets,
+        c.sentCount = :sent, c.finishedAt = :finishedAt
+        WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
+          AND c.startedAt = :startedAt""")
+    fun finishIfOwned(id: Long, startedAt: Instant, status: PushCampaignStatus,
+        targets: Int?, sent: Int?, finishedAt: Instant): Int
 }

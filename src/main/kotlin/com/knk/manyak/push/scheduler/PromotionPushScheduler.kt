@@ -36,6 +36,7 @@ class PromotionPushScheduler(
                 structuredLogger.event(
                     if (result.failed) "promotion_push_failed" else "promotion_push_sent",
                     "campaignId" to result.campaignId.toString(),
+                    "kind" to result.kind.name,
                     "targets" to result.targets,
                     "sent" to result.sent,
                 )

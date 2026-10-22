@@ -1,0 +1,190 @@
+# 관리자 캠페인·출석 문구 검증 (IntelliJ HTTP Client)
+# 준비: Postgres·Redis 기동 후 ./gradlew bootRun. auth.http에서 adminToken을 저장한다.
+# 위에서부터 실행. 테스트 환경에서만 실행한다. 즉시 예약은 다음 폴링에서 발송된다.
+# 취소 검증은 promotion 스케줄러를 끈 환경에서 실행한다.
+@baseUrl = http://localhost:8080
+
+### 1. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+### 2. 광고 대상 미리보기
+GET {{baseUrl}}/api/v1/admin/push/campaigns/target-count?kind=MARKETING
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("광고 대상", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.targetCount >= response.body.nightEligibleCount, "야간 대상은 전체 이하여야 함");
+        client.assert(typeof response.body.nightNow === "boolean", "야간 판정 누락");
+    });
+%}
+
+### 3. 서비스 대상 미리보기
+GET {{baseUrl}}/api/v1/admin/push/campaigns/target-count?kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("서비스 대상", () => client.assert(response.status === 200 && response.body.nightEligibleCount === null,
+        `expected=200/null actual=${response.status}/${response.body.nightEligibleCount}`));
+%}
+
+### 4. 예약 생성 — 먼 미래 시각은 필요에 맞춰 수정
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"테스트 이벤트","body":"테스트 안내 본문","scheduledAt":"2099-01-01T03:00:00Z","reason":"예약 검증"}
+
+> {%
+    client.test("광고 예약 생성", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(response.body.kind === "MARKETING", `expected=MARKETING actual=${response.body.kind}`);
+        client.assert(response.body.status === "SCHEDULED", `expected=SCHEDULED actual=${response.body.status}`);
+    });
+    if (response.status === 201) client.global.set("campaignId", response.body.campaignId);
+%}
+
+### 5. 페이지·정렬 목록
+GET {{baseUrl}}/api/v1/admin/push/campaigns?status=SCHEDULED&page=1&size=20&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("페이지 목록", () => {
+        client.assert(response.status === 200 && response.body.page === 1 && response.body.size === 20,
+            `expected=200/1/20 actual=${response.status}/${response.body.page}/${response.body.size}`);
+        client.assert(Array.isArray(response.body.items), "items 배열 필요");
+        client.assert(typeof response.body.totalElements === "number", "totalElements 필요");
+    });
+%}
+
+### 6. 상세 조회
+GET {{baseUrl}}/api/v1/admin/push/campaigns/{{campaignId}}
+Authorization: Bearer {{adminToken}}
+
+### 7. 예약 취소
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{campaignId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"테스트 예약 취소"}
+
+> {%
+    client.test("취소됨", () => client.assert(response.status === 200 && response.body.status === "CANCELED",
+        `expected=200/CANCELED actual=${response.status}/${response.body.status}`));
+%}
+
+### 8. 409 — 재취소
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{campaignId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"재취소 오류 검증"}
+
+> {%
+    client.test("상태 충돌", () => client.assert(response.status === 409, `expected=409 actual=${response.status}`));
+%}
+
+### 9. 즉시 예약 — 스케줄러를 끈 테스트 환경에서 실행
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"즉시 예약 검증","body":"스케줄러 실행 전 취소","reason":"즉시 예약 검증"}
+
+> {%
+    client.test("즉시 예약", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
+    if (response.status === 201) client.global.set("immediateCampaignId", response.body.campaignId);
+%}
+
+### 10. 즉시 예약 취소 — 선점 뒤에는 409
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{immediateCampaignId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"즉시 예약 취소 검증"}
+
+> {%
+    client.test("선점 전 취소", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 11. 400 — 과거 예약
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"오류","body":"본문","scheduledAt":"2000-01-01T00:00:00Z","reason":"과거 예약 오류"}
+
+> {%
+    client.test("과거 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 12. 400 — 허용하지 않는 내부 ID 정렬
+GET {{baseUrl}}/api/v1/admin/push/campaigns?sort=id
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("정렬 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 13. 404 — 없는 캠페인
+GET {{baseUrl}}/api/v1/admin/push/campaigns/00000000-0000-4000-8000-000000000099
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("상세 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 14. 문구 조회 — DB 기준이며 발송기 스냅샷과 갱신 주기 동안 다를 수 있다
+GET {{baseUrl}}/api/v1/admin/push/templates/attendance_reminder
+Authorization: Bearer {{adminToken}}
+
+### 15. 문구 즉시 변경 — 테스트 환경에서 기존 오버라이드 없음 전제
+PUT {{baseUrl}}/api/v1/admin/push/templates/attendance_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"테스트 출석 안내","body":"오늘의 출석 보상을 확인하세요.","reason":"문구 변경 검증"}
+
+> {%
+    client.test("DB 문구 즉시 적용", () => client.assert(response.status === 200 && response.body.effective.isDefault === false,
+        `expected=200/false actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 16. 400 — 과거 문구 시작
+PUT {{baseUrl}}/api/v1/admin/push/templates/attendance_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"오류","body":"본문","effectiveFrom":"2000-01-01T00:00:00Z","reason":"과거 시작 검증"}
+
+> {%
+    client.test("문구 시작 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 17. 기본 문구 복귀 — 활성·예약 행 종료, 이력 유지
+DELETE {{baseUrl}}/api/v1/admin/push/templates/attendance_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"테스트 문구 복귀"}
+
+> {%
+    client.test("기본 문구", () => client.assert(response.status === 200 && response.body.effective.isDefault === true,
+        `expected=200/true actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 18. 401 — 토큰 없음
+GET {{baseUrl}}/api/v1/admin/push/campaigns
+
+> {%
+    client.test("인증 필수", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 자유 조회 — 실패 캠페인 식별자를 실제 값으로 바꾼 뒤 재실행
+# FAILED에서만 허용, 결과 컬럼은 다음 회차 종료까지 유지한다.
+@failedCampaignId = 00000000-0000-4000-8000-000000000001
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{failedCampaignId}}/retry
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"발송 장애 원인 해결 후 재실행"}

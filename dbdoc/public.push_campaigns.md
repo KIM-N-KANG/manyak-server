@@ -13,14 +13,16 @@
 | target_count | integer |  | true |  |  |  |
 | sent_count | integer |  | true |  |  |  |
 | skipped_count | integer |  | true |  |  |  |
-| started_at | timestamp with time zone |  | true |  |  |  |
+| started_at | timestamp with time zone |  | true |  |  | 선점 시각. 전송 시간 초과 및 회차 종료 소유권 판정 기준 |
 | finished_at | timestamp with time zone |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| kind | varchar(16) | 'MARKETING'::character varying | false |  |  | 서비스 알림 또는 광고 알림. 기존 캠페인은 광고 종류 |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_push_campaigns_kind | CHECK | CHECK (((kind)::text = ANY ((ARRAY['SERVICE'::character varying, 'MARKETING'::character varying])::text[]))) |
 | ck_push_campaigns_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['SCHEDULED'::character varying, 'SENDING'::character varying, 'SENT'::character varying, 'CANCELED'::character varying, 'FAILED'::character varying])::text[]))) |
 | push_campaigns_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | push_campaigns_public_id_key | UNIQUE | UNIQUE (public_id) |
@@ -52,6 +54,7 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+  varchar_16_ kind
 }
 ```
 
