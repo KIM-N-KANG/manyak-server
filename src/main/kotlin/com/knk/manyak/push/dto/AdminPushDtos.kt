@@ -1,5 +1,6 @@
 package com.knk.manyak.push.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.push.entity.PushCampaignStatus
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
@@ -32,7 +33,13 @@ data class AdminPushTemplateRequest(
     val effectiveFrom: Instant? = null, val effectiveUntil: Instant? = null,
     @field:NotBlank @field:Size(max = 500) val reason: String,
 )
-data class AdminPushEffectiveTextResponse(val title: String, val body: String, val isDefault: Boolean)
+data class AdminPushEffectiveTextResponse(
+    val title: String,
+    val body: String,
+    // springdoc이 is 접두를 벗겨 default로 문서화하므로 런타임과 같은 와이어 필드명을 JsonProperty로 고정한다(isOwner와 동일).
+    @get:JsonProperty("isDefault")
+    val isDefault: Boolean,
+)
 data class AdminPushTemplateOverrideResponse(
     val title: String, val body: String, val effectiveFrom: Instant, val effectiveUntil: Instant?, val active: Boolean,
 )

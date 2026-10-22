@@ -1,5 +1,6 @@
 package com.knk.manyak.story.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -72,6 +73,8 @@ data class GenerateSimpleStorylinesRequest(
         example = "true",
         nullable = true,
     )
+    // springdoc이 is 접두를 벗겨 regenerated로 문서화하므로 스펙 와이어 이름(isRegenerated)을 JsonProperty로 고정한다.
+    @get:JsonProperty("isRegenerated")
     val isRegenerated: Boolean? = null,
 
     @field:Schema(
@@ -285,6 +288,8 @@ data class CreateSimpleStoryRequest(
         example = "false",
         nullable = true,
     )
+    // springdoc이 is 접두를 벗겨 regenerated로 문서화하므로 스펙 와이어 이름(isRegenerated)을 JsonProperty로 고정한다.
+    @get:JsonProperty("isRegenerated")
     val isRegenerated: Boolean? = null,
     @field:Schema(description = "생성 요청 기록과 같은 트랜잭션에서 삭제할 내 초안 ID", nullable = true)
     val draftId: UUID? = null,
