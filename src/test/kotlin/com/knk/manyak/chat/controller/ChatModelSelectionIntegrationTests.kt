@@ -42,6 +42,129 @@ class ChatModelSelectionIntegrationTests {
     @Autowired private lateinit var trials: GuestTrialLimitService
     @Autowired private lateinit var service: ChatService
 
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private lateinit var publisher: com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
+    @Autowired private lateinit var meters: io.micrometer.core.instrument.MeterRegistry
+    private val logs = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+    private val log = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.observability.StructuredLogger::class.java) as ch.qos.logback.classic.Logger
+
+    @BeforeEach fun captureLogs() { logs.list = java.util.concurrent.CopyOnWriteArrayList(); logs.start(); log.addAppender(logs) }
+    @AfterEach fun detachLogs() { log.detachAppender(logs); logs.stop() }
+
+    private fun events(type: String) = org.mockito.Mockito.mockingDetails(publisher).invocations
+        .filter { it.method.name == "publish" }
+        .map { it.arguments[0] as com.knk.manyak.global.observability.analytics.AnalyticsEvent }
+        .filter { it.eventType.endsWith(type) }
+
+    @Test fun `AI 실패 이벤트는 설정 변경 전의 긴 출력 분량을 기록하고 성공 이벤트는 없다`() {
+        val user = member()
+        val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), null, user.id, true)
+        GatedChatTurnAiClientConfig.gatedInput = "실패 분량"
+        GatedChatTurnAiClientConfig.turnFailure = IllegalStateException("test failure")
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("실패 분량", realtimeImage = false), user.id)
+        assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
+        service.changeSettings(chat.publicId.toString(), null, user.id, false)
+        GatedChatTurnAiClientConfig.gate.countDown()
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            val properties = events("aiMessage_processed_failed").single().eventProperties
+            assertThat(properties["long_response"]).isEqualTo(true)
+            assertThat(properties["model_code"]).isEqualTo("AURORA")
+            assertThat(properties).doesNotContainKey("turn_number")
+            assertThat(wallet.balanceOf(user.id)).isEqualTo(1000)
+        }
+        assertThat(events("aiMessage_processed_succeeded")).isEmpty()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
+    }
+
+    @Test fun `턴 시작 분량은 설정 변경과 턴 저장 뒤에도 유지되고 다음 이어쓰기와 재생성에 새 값이 적용된다`() {
+        val user = member()
+        val chat = chat(user)
+        GatedChatTurnAiClientConfig.gatedInput = "분량 변경 중"
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("분량 변경 중", realtimeImage = false), user.id)
+        assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isFalse()
+        service.changeSettings(chat.publicId.toString(), null, user.id, true)
+        GatedChatTurnAiClientConfig.gate.countDown()
+        waitForTurn(chat)
+        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        assertThat(chats.findById(chat.id).orElseThrow().longResponse).isTrue()
+        assertThat(logs.list.any { it.formattedMessage.contains("event_name=ai_response_saved") && it.formattedMessage.contains("long_response=false") }).isTrue()
+        val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
+        service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            assertThat(chats.findById(chat.id).orElseThrow().regeneratedCount).isEqualTo(1)
+            assertThat(logs.list.any { it.formattedMessage.contains("event_name=ai_response_regenerated") && it.formattedMessage.contains("long_response=true") }).isTrue()
+        }
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
+        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("다음 긴 응답", realtimeImage = false), user.id)
+        waitForTurn(chat, 2)
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            val succeeded = events("aiMessage_processed_succeeded")
+            assertThat(logs.list.any {
+                it.formattedMessage.contains("event_name=ai_response_saved") &&
+                    it.formattedMessage.contains("turn_number=2") && it.formattedMessage.contains("long_response=true")
+            }).isTrue()
+            assertThat(succeeded).hasSize(3)
+            assertThat(succeeded.map { it.eventProperties["long_response"] }).containsExactly(false, true, true)
+            assertThat(succeeded.map { it.eventProperties["is_regenerated"] }).containsExactly(false, true, false)
+        }
+        assertThat(meters.find("manyak.chat.turn.result").meters().flatMap { it.id.tags }.none { it.key == "long_response" }).isTrue()
+    }
+
+    @Test fun `저장 뒤 완료 이벤트 전달이 실패해도 시작 분량의 성공 이벤트만 한번 발행한다`() {
+        val user = member()
+        val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), null, user.id, true)
+        GatedChatTurnAiClientConfig.gatedInput = "완료 전달 실패"
+        val failedWrites = java.util.concurrent.atomic.AtomicInteger()
+        val committedAtFailure = java.util.concurrent.atomic.AtomicBoolean()
+        org.mockito.Mockito.doAnswer { factoryCall ->
+            val writer = org.mockito.Mockito.spy(factoryCall.callRealMethod() as com.knk.manyak.chat.service.ChatGenerationEvents.Writer)
+            org.mockito.Mockito.doAnswer { writeCall ->
+                if (writeCall.getArgument<String>(0) == "completed") {
+                    committedAtFailure.set(chats.findById(chat.id).orElseThrow().currentTurn == 1)
+                    failedWrites.incrementAndGet()
+                    throw IllegalStateException("completed delivery failed")
+                }
+                writeCall.callRealMethod()
+            }.`when`(writer).write(org.mockito.Mockito.anyString(), org.mockito.Mockito.any<Any>() ?: Any())
+            writer
+        }.`when`(generationEvents).writer(
+            org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(), org.mockito.Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.EPOCH,
+        )
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("완료 전달 실패", realtimeImage = false), user.id)
+        assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
+        service.changeSettings(chat.publicId.toString(), null, user.id, false)
+        GatedChatTurnAiClientConfig.gate.countDown()
+        await().atMost(Duration.ofSeconds(10)).until {
+            failedWrites.get() == 1 && service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null
+        }
+        val succeeded = events("aiMessage_processed_succeeded")
+        assertThat(succeeded).hasSize(1)
+        assertThat(succeeded.single().eventProperties["long_response"]).isEqualTo(true)
+        assertThat(events("aiMessage_processed_failed")).isEmpty()
+        assertThat(committedAtFailure.get()).isTrue()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+        assertThat(wallet.balanceOf(user.id)).isEqualTo(950)
+    }
+
+    @Test fun `회원 체험과 게스트도 저장한 긴 출력 분량을 AI에 보낸다`() {
+        val user = member(exhaust = false)
+        for ((owner, device) in listOf(user to null, null to "long-response-guest")) {
+            val chat = chat(owner)
+            service.changeSettings(chat.publicId.toString(), null, owner?.id, true)
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("긴 체험", realtimeImage = false), owner?.id, device)
+            waitForTurn(chat)
+            assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
+            assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("LITE")
+        }
+    }
+
     @BeforeEach fun reset() { cleaner.cleanAll(); GatedChatTurnAiClientConfig.reset() }
     @AfterEach fun release() { GatedChatTurnAiClientConfig.gate.countDown(); GatedChatTurnAiClientConfig.reset() }
 
@@ -89,7 +212,7 @@ class ChatModelSelectionIntegrationTests {
         service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("이어쓰기", realtimeImage = false), user.id)
         assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
         val started = chats.findById(chat.id).orElseThrow().updatedAt
-        service.changeModel(chat.publicId.toString(), "LITE", user.id)
+        service.changeSettings(chat.publicId.toString(), "LITE", user.id)
         assertThat(chats.findById(chat.id).orElseThrow().updatedAt).isEqualTo(started)
         models.save(models.findById("AURORA").orElseThrow().apply { turnCost = 90 })
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("AURORA")

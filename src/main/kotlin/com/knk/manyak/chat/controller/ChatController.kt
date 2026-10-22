@@ -1,8 +1,8 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.dto.ChatModelResponse
-import com.knk.manyak.chat.dto.ChangeChatModelRequest
-import com.knk.manyak.chat.dto.ChangeChatModelResponse
+import com.knk.manyak.chat.dto.ChangeChatSettingsRequest
+import com.knk.manyak.chat.dto.ChangeChatSettingsResponse
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
@@ -58,13 +58,13 @@ class ChatController(
     @GetMapping("/chats/models")
     fun getModels(): List<ChatModelResponse> = chatService.getModels()
 
-    @Operation(summary = "채팅 모델 변경", description = "소유자가 모델을 변경합니다. 진행 중인 턴은 시작 시 모델과 가격을 유지하며 다음 턴부터 적용합니다.")
+    @Operation(summary = "채팅 설정 변경", description = "model과 longResponse 중 보낸 필드만 변경합니다. 하나 이상 필수이며 null은 거절합니다. 진행 중 턴은 시작 시 모델, 가격, 출력 분량을 유지합니다.")
     @PatchMapping("/chats/{chatId}")
-    fun changeModel(
+    fun changeSettings(
         @PathVariable chatId: String,
-        @Valid @RequestBody request: ChangeChatModelRequest,
+        @Valid @RequestBody request: ChangeChatSettingsRequest,
         @CurrentUserId userId: Long?,
-    ): ChangeChatModelResponse = chatService.changeModel(chatId, request.model, userId)
+    ): ChangeChatSettingsResponse = chatService.changeSettings(chatId, request.model, userId, request.longResponse)
 
     @Operation(
         summary = "채팅 생성",

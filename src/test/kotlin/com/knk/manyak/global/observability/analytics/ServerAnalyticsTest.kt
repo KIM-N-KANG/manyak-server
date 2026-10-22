@@ -105,11 +105,20 @@ class ServerAnalyticsTest {
         assertThat(e.eventProperties["model_code"]).isEqualTo("AURORA")
     }
 
+    @Test fun `채팅 실패는 턴 시작 출력 분량을 보관하고 턴 번호는 없다`() {
+        analytics.chatAiMessageFailed(null, "chat", null, "AI_STREAM_FAILED", true, "AURORA", true)
+        val properties = publisher.events.single().eventProperties
+        assertThat(properties["long_response"]).isEqualTo(true)
+        assertThat(properties).doesNotContainKey("turn_number")
+    }
+
     @Test
     fun `채팅 성공은 ending_id가 있을 때만 싣는다`() {
         analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 1, isRegenerated = false, modelCode = "LITE", turnCost = 0)
-        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9", modelCode = "AURORA", turnCost = 50)
+        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9", modelCode = "AURORA", turnCost = 50, longResponse = true)
 
+        assertThat(publisher.events[0].eventProperties["long_response"]).isEqualTo(false)
+        assertThat(publisher.events[1].eventProperties["long_response"]).isEqualTo(true)
         assertThat(publisher.events[0].eventProperties["model_code"]).isEqualTo("LITE")
         assertThat(publisher.events[0].eventProperties["turn_cost"]).isEqualTo(0L)
         assertThat(publisher.events[1].eventProperties["model_code"]).isEqualTo("AURORA")

@@ -102,6 +102,7 @@ erDiagram
   text persona_name_snapshot
   text persona_description_snapshot
   varchar_20_ model_code FK
+  boolean long_response
 }
 "public.story_endings" {
   bigint id

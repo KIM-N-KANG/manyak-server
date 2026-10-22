@@ -57,6 +57,8 @@ data class CreateChatResponse(
     val persona: ChatPersonaResponse? = null,
     @field:Schema(description = "채팅 모델 코드. 상세는 비활성 모델을 기본 모델로 대체한 유효 코드", example = "AURORA")
     val model: String,
+    @field:Schema(description = "출력 분량. false는 짧은 응답, true는 긴 응답")
+    val longResponse: Boolean = false,
 )
 
 @Schema(description = "채팅 ID 목록 조회 요청")
@@ -157,6 +159,8 @@ data class ChatDetailResponse(
     val generatingTurn: GeneratingTurnResponse? = null,
     @field:Schema(description = "채팅 모델 코드. 상세는 비활성 모델을 기본 모델로 대체한 유효 코드", example = "AURORA")
     val model: String,
+    @field:Schema(description = "출력 분량. false는 짧은 응답, true는 긴 응답")
+    val longResponse: Boolean = false,
 )
 
 data class GeneratingTurnResponse(
@@ -409,6 +413,19 @@ data class ChatModelResponse(
     @get:JsonProperty("isDefault")
     val isDefault: Boolean,
 )
-@Schema(description = "다음 턴부터 적용할 채팅 모델")
-data class ChangeChatModelRequest(@field:NotBlank val model: String)
-data class ChangeChatModelResponse(val id: String, val model: String)
+@Schema(description = "채팅 설정 변경. model과 longResponse 중 하나 이상 필수, null은 거절", minProperties = 1)
+class ChangeChatSettingsRequest {
+    @set:com.fasterxml.jackson.annotation.JsonSetter(value = "model", nulls = com.fasterxml.jackson.annotation.Nulls.FAIL)
+    @get:Schema(description = "노출 중인 모델 코드. 생략하면 유지")
+    var model: String? = null
+
+    @set:com.fasterxml.jackson.annotation.JsonSetter(value = "longResponse", nulls = com.fasterxml.jackson.annotation.Nulls.FAIL)
+    @get:Schema(description = "출력 분량. 생략하면 유지")
+    var longResponse: Boolean? = null
+
+    @get:jakarta.validation.constraints.AssertTrue(message = "model과 longResponse 중 하나 이상을 보내야 합니다.")
+    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    @get:Schema(hidden = true)
+    val hasSettings: Boolean get() = model != null || longResponse != null
+}
+data class ChangeChatSettingsResponse(val id: String, val model: String, val longResponse: Boolean)
