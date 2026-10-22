@@ -21,6 +21,14 @@ class ChatTurnAiClientSerializationTests {
         val guest = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest()))
         assertTrue(guest["user_id"].isNull)
         assertEquals("LITE", guest["model_tier"].asText())
+        assertTrue(guest.has("long_response"))
+        assertFalse(guest["long_response"].asBoolean())
+    }
+
+    @Test fun `긴 출력 분량은 long_response true로 직렬화한다`() {
+        val json = objectMapper.readTree(objectMapper.writeValueAsString(sampleRequest().copy(longResponse = true)))
+        assertTrue(json["long_response"].asBoolean())
+        assertFalse(json.has("longResponse"))
     }
 
     @Test

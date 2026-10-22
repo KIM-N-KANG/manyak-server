@@ -59,6 +59,7 @@ data class ChatChoicesResult(
 data class ChatTurnAiRequest(
     @JsonProperty("user_id") val userId: String? = null,
     @JsonProperty("model_tier") val modelTier: String = "LITE",
+    @JsonProperty("long_response") val longResponse: Boolean = false,
     val genre: String,
     @JsonProperty("story_settings")
     val storySettings: ChatTurnStorySettings,

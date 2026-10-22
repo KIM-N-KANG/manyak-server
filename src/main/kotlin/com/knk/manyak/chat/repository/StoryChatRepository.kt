@@ -27,6 +27,14 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
     @Query("UPDATE StoryChat c SET c.modelCode = :model WHERE c.id = :id AND c.deletedAt IS NULL AND ((:userId IS NULL AND c.userId IS NULL) OR c.userId = :userId)")
     fun updateModel(id: Long, model: String, userId: Long?): Int
 
+    @Modifying
+    @Query("UPDATE StoryChat c SET c.longResponse = :longResponse WHERE c.id = :id AND c.deletedAt IS NULL AND ((:userId IS NULL AND c.userId IS NULL) OR c.userId = :userId)")
+    fun updateLongResponse(id: Long, longResponse: Boolean, userId: Long?): Int
+
+    // 벌크 UPDATE 뒤 영속성 컨텍스트의 이전 엔티티 대신 DB에 저장된 설정을 읽는다.
+    @Query("SELECT c.modelCode AS modelCode, c.longResponse AS longResponse FROM StoryChat c WHERE c.id = :id")
+    fun findSettingsById(id: Long): ChatSettingsProjection
+
     // KNK-447: 회원 서재(내 채팅 목록). 요청자 소유·미삭제만 최근 활동순(updatedAt)으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(userId: Long, pageable: Pageable): List<StoryChat>
     // 소프트 삭제된(deleted_at IS NOT NULL) 채팅은 조회에서 제외한다.
@@ -76,4 +84,9 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
 interface StoryTurnCountProjection {
     val storyId: Long
     val turnCount: Long
+}
+
+interface ChatSettingsProjection {
+    val modelCode: String
+    val longResponse: Boolean
 }

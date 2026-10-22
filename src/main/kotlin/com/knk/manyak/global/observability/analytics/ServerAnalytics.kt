@@ -53,6 +53,7 @@ class ServerAnalytics(
         endingId: String? = null,
         modelCode: String = "none",
         turnCost: Long = 0,
+        longResponse: Boolean = false,
     ) = emitForUser(
         EVENT_CHAT_SUCCEEDED,
         userId,
@@ -62,6 +63,7 @@ class ServerAnalytics(
             put("is_regenerated", isRegenerated)
             endingId?.let { put("ending_id", it) }
             put("model_code", modelCode)
+            put("long_response", longResponse)
             put("turn_cost", turnCost)
         },
     )
@@ -73,6 +75,7 @@ class ServerAnalytics(
         errorCode: String?,
         isRegenerated: Boolean,
         modelCode: String = "none",
+        longResponse: Boolean = false,
     ) = emitForUser(
         EVENT_CHAT_FAILED,
         userId,
@@ -82,6 +85,7 @@ class ServerAnalytics(
             put("error_type", AnalyticsErrorType.fromAiErrorCode(errorCode).wireValue)
             put("is_regenerated", isRegenerated)
             put("model_code", modelCode)
+            put("long_response", longResponse)
         },
     )
 

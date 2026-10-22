@@ -138,6 +138,9 @@ class StoryChat(
     @Column(name = "model_code", nullable = false, length = 20)
     val modelCode: String = "LITE",
 
+    @Column(name = "long_response", nullable = false)
+    val longResponse: Boolean = false,
+
     @Column(name = "deleted_at")
     var deletedAt: Instant? = null,
 ) {
