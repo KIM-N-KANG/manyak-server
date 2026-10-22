@@ -4,8 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) |  |  |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) [public.push_delivery_results](public.push_delivery_results.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) [public.push_delivery_results](public.push_delivery_results.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -263,6 +262,7 @@ erDiagram
   timestamp_with_time_zone expires_at
   bigint transaction_id FK
   timestamp_with_time_zone created_at
+}
 "public.push_delivery_results" {
   bigint id
   varchar_255_ message_id

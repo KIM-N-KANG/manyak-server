@@ -694,6 +694,7 @@ erDiagram
   timestamp_with_time_zone expires_at
   bigint transaction_id FK
   timestamp_with_time_zone created_at
+}
 "public.push_delivery_results" {
   bigint id
   varchar_255_ message_id

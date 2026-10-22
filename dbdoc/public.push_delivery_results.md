@@ -72,6 +72,7 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+  varchar_16_ kind
 }
 "public.users" {
   bigint id
