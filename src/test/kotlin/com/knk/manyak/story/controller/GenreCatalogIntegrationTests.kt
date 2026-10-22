@@ -105,7 +105,8 @@ class GenreCatalogIntegrationTests {
             java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC))
         val expired = provider.issueAccessToken(java.util.UUID.randomUUID())
         org.junit.jupiter.api.Assertions.assertThrows(org.springframework.security.oauth2.jwt.JwtValidationException::class.java) {
-            provider.jwtDecoder().decode(expired)
+            // 발급은 과거 시계, 검증은 현재 시계로 분리한다.
+            com.knk.manyak.auth.jwt.JwtTokenProvider(authProperties).jwtDecoder().decode(expired)
         }
         for (token in listOf(expired, "not-a-real-jwt.forged.token")) {
             client.get().uri("/api/v1/stories/genres").header("Authorization", "Bearer $token")

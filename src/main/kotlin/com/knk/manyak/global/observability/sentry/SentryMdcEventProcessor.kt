@@ -48,6 +48,11 @@ class SentryMdcEventProcessor : EventProcessor {
         request.headers = request.headers?.filterKeys { !it.equals("X-Manyak-Internal-Secret", ignoreCase = true) }
         val url = request.url ?: return
         val path = try { URI(url).path } catch (_: URISyntaxException) { return } ?: return
+        if (path == "/api/v1/admin/notices" || path.startsWith("/api/v1/admin/notices/")) {
+            request.data = null
+            request.queryString = null
+            return
+        }
         if (path !in AUTH_REQUEST_PATHS && !PROVIDER_AUTH_PATH.matches(path)) return
         // custom 헤더는 SDK의 기본 PII 제거 목록에 의존하지 않는다.
         request.data = null
@@ -66,6 +71,7 @@ class SentryMdcEventProcessor : EventProcessor {
         val PROVIDER_AUTH_PATH = Regex("/api/v1/auth/(social|links)/[^/]+")
         val AUTH_REQUEST_PATHS = setOf(
             "/api/v1/auth/login/google",
+            "/api/v1/admin/auth/login/google",
             "/api/v1/auth/login/kakao",
             "/api/v1/auth/token/refresh",
             "/api/v1/auth/logout",

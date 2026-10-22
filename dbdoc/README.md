@@ -5,7 +5,7 @@
 | Name | Columns | Comment | Type |
 | ---- | ------- | ------- | ---- |
 | [public.story_creation_tags](public.story_creation_tags.md) | 10 |  | BASE TABLE |
-| [public.story_creation_sessions](public.story_creation_sessions.md) | 8 |  | BASE TABLE |
+| [public.story_creation_sessions](public.story_creation_sessions.md) | 9 |  | BASE TABLE |
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 12 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 14 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -55,12 +55,18 @@
 | [public.user_personas](public.user_personas.md) | 8 |  | BASE TABLE |
 | [public.art_styles](public.art_styles.md) | 8 |  | BASE TABLE |
 | [public.story_drafts](public.story_drafts.md) | 13 |  | BASE TABLE |
+| [public.admin_accounts](public.admin_accounts.md) | 2 | 관리자 역할. 운영자가 직접 부여·회수한다 | BASE TABLE |
+| [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
+| [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
+| [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
+| [public.notices](public.notices.md) | 10 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
+"public.story_creation_sessions" }o--o| "public.ai_call_logs" : "FOREIGN KEY (storyline_ai_call_log_id) REFERENCES ai_call_logs(id) ON DELETE SET NULL"
 "public.story_creation_session_tags" }o--|| "public.story_creation_tags" : "FOREIGN KEY (tag_id) REFERENCES story_creation_tags(id)"
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_session_tags" }o--o| "public.story_creation_characters" : "FOREIGN KEY (character_id) REFERENCES story_creation_characters(id) ON DELETE CASCADE"
@@ -107,6 +113,7 @@ erDiagram
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
+"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
@@ -116,6 +123,14 @@ erDiagram
 "public.user_personas" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.story_drafts" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.story_drafts" }o--o| "public.story_creation_requests" : "FOREIGN KEY (generation_request_id) REFERENCES story_creation_requests(request_id)"
+"public.admin_accounts" |o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.admin_audit_logs" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
+"public.push_delivery_results" }o--o| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
+"public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -138,6 +153,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   uuid creation_request_id
   uuid storyline_request_id
+  bigint storyline_ai_call_log_id FK
 }
 "public.story_creation_session_tags" {
   bigint id
@@ -542,6 +558,8 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+  varchar_16_ kind
+  bigint notice_id FK
 }
 "public.credit_orders" {
   bigint id
@@ -647,6 +665,64 @@ erDiagram
   text thumbnail_object_key
   uuid generation_request_id FK
   integer version
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.admin_accounts" {
+  bigint user_id FK
+  timestamp_with_time_zone granted_at
+}
+"public.admin_audit_logs" {
+  bigint id
+  uuid public_id
+  bigint admin_user_id FK
+  varchar_10_ category
+  varchar_50_ action
+  varchar_30_ target_type
+  varchar_255_ target_id
+  varchar_500_ reason
+  jsonb before_state
+  jsonb after_state
+  varchar_64_ request_id
+  timestamp_with_time_zone created_at
+}
+"public.credit_admin_adjustments" {
+  bigint id
+  varchar_64_ idempotency_key
+  bigint admin_user_id FK
+  bigint user_id FK
+  varchar_10_ type
+  bigint requested_amount
+  bigint applied_amount
+  bigint shortfall
+  bigint balance_after
+  integer expires_in_days
+  timestamp_with_time_zone expires_at
+  bigint transaction_id FK
+  timestamp_with_time_zone created_at
+}
+"public.push_delivery_results" {
+  bigint id
+  varchar_255_ message_id
+  varchar_40_ type
+  varchar_16_ kind
+  bigint campaign_id FK
+  bigint user_id FK
+  varchar_16_ outcome
+  varchar_40_ reason
+  integer delivered_devices
+  integer failed_devices
+  timestamp_with_time_zone completed_at
+}
+"public.notices" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  text body
+  varchar_10_ status
+  timestamp_with_time_zone published_at
+  timestamp_with_time_zone notified_at
+  bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }

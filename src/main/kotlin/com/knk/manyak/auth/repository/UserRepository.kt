@@ -15,6 +15,10 @@ interface UserRepository : JpaRepository<User, Long> {
     // API 외부 식별자(public_id) 기준 조회. 순차 PK 열거(IDOR) 차단.
     fun findByPublicId(publicId: UUID): User?
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.publicId = :publicId")
+    fun findByPublicIdForUpdate(@Param("publicId") publicId: UUID): User?
+
     // 초대 코드로 초대자를 역해석한다(POST /auth/login/google의 inviteCode → 초대자 User). 없으면 null(무시).
     fun findByInviteCode(inviteCode: String): User?
 
@@ -118,6 +122,19 @@ interface UserRepository : JpaRepository<User, Long> {
         nativeQuery = true,
     )
     fun findMarketingPushTargetIds(): List<Long>
+
+    @Query("""SELECT u.id FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+        AND u.servicePushEnabled = true
+        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
+        ORDER BY u.id""")
+    fun findServicePushTargetIds(): List<Long>
+
+    @Query("""SELECT COUNT(u) FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
+        AND ((:marketing = false AND u.servicePushEnabled = true)
+          OR (:marketing = true AND u.marketingPushAgreedAt IS NOT NULL))
+        AND (:nightOnly = false OR u.marketingPushNightAgreedAt IS NOT NULL)""")
+    fun countPushTargets(marketing: Boolean, nightOnly: Boolean): Long
 
     /**
      * [id] 회원의 **보상 신원**(`coalesce(reward_identity_user_id, id)`)을 돌려준다(KNK-1053).

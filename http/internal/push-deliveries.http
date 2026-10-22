@@ -1,0 +1,81 @@
+# 로컬 서버와 PostgreSQL 준비 후 위에서부터 실행한다.
+# internalSecret은 http-client.private.env.json에, adminToken은 관리자 로그인으로 준비한다.
+# 같은 messageId로 재실행해도 최초 결과만 남는다. 아래 UUID는 없는 회원으로 참조가 NULL이 된다.
+@baseUrl = http://localhost:8080
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 도달 보고
+POST {{baseUrl}}/internal/push-deliveries
+X-Manyak-Internal-Secret: {{internalSecret}}
+Content-Type: application/json
+
+{"messageId":"manual-delivery-s10", "type":"STORY_COMPLETED", "kind":"SERVICE", "recipientId":"00000000-0000-4000-8000-000000000001", "outcome":"DELIVERED", "reason":"OK", "deliveredDevices":2, "failedDevices":0, "completedAt":"2026-10-21T00:00:00Z"}
+
+> {% client.test("도달 보고", () => client.assert(response.status === 204, `expected=204 actual=${response.status}`)); %}
+
+### 재보고 — 최초 도달 기기 2를 유지
+POST {{baseUrl}}/internal/push-deliveries
+X-Manyak-Internal-Secret: {{internalSecret}}
+Content-Type: application/json
+
+{"messageId":"manual-delivery-s10", "type":"STORY_COMPLETED", "kind":"SERVICE", "recipientId":"00000000-0000-4000-8000-000000000001", "outcome":"DELIVERED", "reason":"OK", "deliveredDevices":9, "failedDevices":0, "completedAt":"2026-10-21T00:00:00Z"}
+
+> {% client.test("재보고 멱등", () => client.assert(response.status === 204, `expected=204 actual=${response.status}`)); %}
+
+### 날짜 통계 (다른 기록이 있으면 합산됨)
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2026-10-21&to=2026-10-21&type=STORY_COMPLETED
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("통계 조회", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0, "결과 행이 없습니다."); }); %}
+
+### 종류 단독 필터 — 서비스 알림만
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2026-10-21&to=2026-10-21&kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("SERVICE 종류 필터", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0 && response.body.items.every(i => i.kind === "SERVICE"), "SERVICE 결과만 있어야 합니다."); }); %}
+
+### 시나리오와 종류 AND 필터
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2026-10-21&to=2026-10-21&type=STORY_COMPLETED&kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("type과 kind AND 필터", () => { client.assert(response.status === 200, `expected=200 actual=${response.status}`); client.assert(response.body.items.length > 0 && response.body.items.every(i => i.type === "STORY_COMPLETED" && i.kind === "SERVICE"), "type과 kind를 모두 만족해야 합니다."); }); %}
+
+### 지원하지 않는 종류
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?kind=UNKNOWN
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("종류 검증", () => { client.assert(response.status === 400, `expected=400 actual=${response.status}`); client.assert(response.body.code === "BAD_REQUEST", `expected=BAD_REQUEST actual=${response.body.code}`); }); %}
+
+### 필수 필드 오류
+POST {{baseUrl}}/internal/push-deliveries
+X-Manyak-Internal-Secret: {{internalSecret}}
+Content-Type: application/json
+
+{}
+
+> {% client.test("입력 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`)); %}
+
+### 인증 누락
+POST {{baseUrl}}/internal/push-deliveries
+Content-Type: application/json
+
+{}
+
+> {% client.test("내부 인증", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 367일 거절
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats?from=2020-01-01&to=2021-01-01
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 상한", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`)); %}
+
+### 관리자 인증 누락
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats
+
+> {% client.test("관리자 인증", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 자유 조회 — 오늘까지 7일
+GET {{baseUrl}}/api/v1/admin/push/delivery-stats
+Authorization: Bearer {{adminToken}}

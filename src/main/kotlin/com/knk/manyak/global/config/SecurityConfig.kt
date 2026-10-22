@@ -33,6 +33,31 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
+    @org.springframework.core.annotation.Order(1)
+    fun adminSecurityFilterChain(
+        http: HttpSecurity,
+        tokens: com.knk.manyak.auth.jwt.JwtTokenProvider,
+        users: UserRepository,
+        eligibility: com.knk.manyak.admin.service.AdminEligibilityService,
+        mapper: ObjectMapper,
+        errors: com.knk.manyak.global.error.GlobalExceptionHandler,
+    ): SecurityFilterChain = http
+        .securityMatcher("/api/v1/admin/**")
+        .cors { }
+        .csrf { it.disable() }
+        .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+        .authorizeHttpRequests {
+            it.requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,
+                com.knk.manyak.admin.security.AdminAuthenticationFilter.LOGIN_PATH)).permitAll()
+                .anyRequest().authenticated()
+        }
+        .exceptionHandling { it.authenticationEntryPoint(ApiAuthenticationEntryPoint(mapper)) }
+        .addFilterBefore(com.knk.manyak.admin.security.AdminAuthenticationFilter(
+            tokens.adminJwtDecoder(), users, eligibility, mapper, errors,
+        ), BearerTokenAuthenticationFilter::class.java)
+        .build()
+
+    @Bean
     fun securityFilterChain(
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,
@@ -195,6 +220,9 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            // 공지 공개 조회는 게스트·만료 토큰·관리자 토큰 모두 동일하게 처리한다.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/notices"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/notices/{noticeId}"),
             // 미지원 제공자도 컨트롤러가 400으로 판정하며 완료 경로도 포함한다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/auth/social/{provider}"),
             // 게스트 동의는 회원 토큰과 상태를 사용하지 않고 디바이스 헤더로만 식별한다.

@@ -9,8 +9,8 @@ import org.springframework.web.server.ResponseStatusException
 /**
  * 정지 계정 판정(스펙 §4-5, KNK-499 B20). [status]가 SUSPENDED면 소모·쓰기 요청을 차단한다.
  *
- * 게스트는 이 판정 대상이 아니다(정지는 회원 계정 개념). 관리자 API가 없어(Phase 1 범위 밖) 정지 자체는
- * 운영 DB 직접 수정으로만 이뤄지며, 이 판정은 이미 정지된 상태의 요청을 막는 집행만 담당한다.
+ * 게스트는 이 판정 대상이 아니다(정지는 회원 계정 개념). 정지·해제는 관리자 API가 담당하며,
+ * 이 판정은 정지된 상태의 소모·쓰기 요청을 막는 집행을 담당한다.
  */
 fun isActiveAccessAllowed(status: UserStatus): Boolean = status != UserStatus.SUSPENDED
 

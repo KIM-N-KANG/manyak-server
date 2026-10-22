@@ -22,6 +22,8 @@ import kotlin.math.min
 data class CreditDeduction(val amount: Long, val reason: CreditReason, val refType: String? = null, val refId: Long? = null)
 data class CreditDeductionOutcome(val balance: Long, val transactions: List<CreditTransaction>)
 
+data class AdminWalletOutcome(val beforeBalance: Long, val appliedAmount: Long, val balance: Long, val expiresAt: Instant?, val transactionId: Long?)
+
 /** 보상 적립 결과. [monthlyCapped]는 멱등 중복과 구별해 실제 월 상한으로 적립을 건너뛴 경우만 true다. */
 data class RewardOutcome(val rewarded: Boolean, val balance: Long, val monthlyCapped: Boolean = false)
 
@@ -159,29 +161,60 @@ class CreditWalletService(
                 return RewardOutcome(rewarded = false, balance = wallet.balance, monthlyCapped = true)
             }
         }
-        val transaction = transactionRepository.save(
-            CreditTransaction(
-                userId = userId,
-                amount = amount,
-                reason = reason,
-                refType = refType,
-                refId = refId,
-                idempotencyKey = idempotencyKey,
-            ),
-        )
-        // 적립·환불 1건당 로트 1개. 구매는 5년 뒤, 보상·환불은 적립 시점 + 30일에 만료된다(스펙 §4-3-7).
-        lotRepository.save(
-            CreditLot(
-                userId = userId,
-                transactionId = transaction.id,
-                originalAmount = amount,
-                remaining = amount,
-                expiresAt = expiryFor(reason, now),
-                createdAt = now,
-            ),
-        )
-        wallet.balance += amount
+        creditLocked(userId, wallet, amount, reason, idempotencyKey, refType, refId, now, expiryFor(reason, now))
         return RewardOutcome(rewarded = true, balance = wallet.balance)
+    }
+
+    /** 지갑을 잠근 호출자만 사용한다. 일반 적립과 관리자 지급의 원장·로트 기록을 공유한다. */
+    private fun creditLocked(
+        userId: Long, wallet: CreditWallet, amount: Long, reason: CreditReason, idempotencyKey: String,
+        refType: String?, refId: Long?, now: Instant, expiresAt: Instant?,
+    ): CreditTransaction {
+        val transaction = transactionRepository.save(CreditTransaction(
+            userId = userId, amount = amount, reason = reason, idempotencyKey = idempotencyKey,
+            refType = refType, refId = refId, createdAt = now,
+        ))
+        lotRepository.save(CreditLot(
+            userId = userId, transactionId = transaction.id, originalAmount = amount, remaining = amount,
+            expiresAt = expiresAt, createdAt = now,
+        ))
+        wallet.balance += amount
+        return transaction
+    }
+
+    /** 멱등 판정은 조정 행 삽입이 끝냈다. 원장 키는 추적용이며 중복 응답 경로를 사용하지 않는다. */
+    @Transactional
+    fun applyAdminAdjustment(userId: Long, amount: Long, grantDays: Int?, key: String): AdminWalletOutcome {
+        require(amount > 0)
+        if (grantDays != null) {
+            require(grantDays in 1..365)
+            ensureWallet(userId)
+        }
+        val wallet = walletRepository.findByUserIdForUpdate(userId)
+            ?: return AdminWalletOutcome(0, 0, 0, null, null)
+        // PostgreSQL timestamptz와 같은 정밀도로 저장해 첫 응답과 재요청의 만료 시각을 같게 한다.
+        val now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+        val lots = lotRepository.findActiveForUpdate(userId)
+        expireLots(userId, wallet, lots, now)
+        val before = wallet.balance
+        if (grantDays != null) {
+            val expiresAt = now.plus(Duration.ofDays(grantDays.toLong()))
+            val transaction = creditLocked(userId, wallet, amount, CreditReason.ADMIN_GRANT, key, null, null, now, expiresAt)
+            return AdminWalletOutcome(before, amount, wallet.balance, expiresAt, transaction.id)
+        }
+        val applied = min(amount, lots.sumOf { it.remaining })
+        var remaining = applied
+        for (lot in lots) {
+            val take = min(remaining, lot.remaining)
+            lot.remaining -= take
+            remaining -= take
+            if (remaining == 0L) break
+        }
+        val transaction = if (applied > 0) transactionRepository.save(CreditTransaction(
+            userId = userId, amount = -applied, reason = CreditReason.ADMIN_REVOKE, idempotencyKey = key, createdAt = now,
+        )) else null
+        wallet.balance -= applied
+        return AdminWalletOutcome(before, applied, wallet.balance, null, transaction?.id)
     }
 
     /**

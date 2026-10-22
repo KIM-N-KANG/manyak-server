@@ -1,5 +1,6 @@
 package com.knk.manyak.push.entity
 
+import com.knk.manyak.push.dto.PushKind
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -24,8 +25,8 @@ enum class PushCampaignStatus {
 /**
  * 프로모션 푸시의 예약과 이력(KNK-1117, V77, 스펙 §4-3-5).
  *
- * 운영자가 SQL로 `SCHEDULED` 행을 넣으면 예약이고, 스케줄러가 도래한 행을 조건부 UPDATE로 집어 발송한다.
- * 회원별 발송 기록은 두지 않는다 — 이력은 이 행의 카운트가 전부다.
+ * 관리자가 API로 `SCHEDULED` 행을 만들면 예약이고, 스케줄러가 도래한 행을 조건부 UPDATE로 집어 발송한다.
+ * 원격 모드는 회원별 아웃박스 메시지 식별자로 재실행 중복을 막는다.
  *
  * 카운트와 시각이 `var`인 이유: 회차가 끝날 때 같은 행에 결과를 적는다. 문구·예약 시각은 운영자 소유라 `val`이다.
  */
@@ -74,6 +75,13 @@ class PushCampaign(
 
     @Column(name = "finished_at")
     var finishedAt: Instant? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    val kind: PushKind = PushKind.MARKETING,
+
+    @Column(name = "notice_id", unique = true)
+    val noticeId: Long? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

@@ -46,6 +46,20 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
+    fun `요청 ID는 1에서 64자의 ASCII 안전 문자만 허용한다`() {
+        for (value in listOf("a", "A_z-09", "x".repeat(64))) {
+            val (mdc, response) = runFilter(request(requestId = value))
+            assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo(value)
+            assertThat(mdc["request_id"]).isEqualTo(value)
+        }
+        for (value in listOf("", "x".repeat(65), "has space", " 한글", "a.b", "a\nforged")) {
+            val (mdc, response) = runFilter(request(requestId = value))
+            assertThat(mdc["request_id"]).matches("req_[a-f0-9]{32}")
+            assertThat(response.getHeader("X-Manyak-Request-Id")).isEqualTo(mdc["request_id"])
+        }
+    }
+
+    @Test
     fun `내부 요청의 유효한 기기 해시는 재해시 없이 원문 헤더보다 우선한다`() {
         val hash = "device_hash_0123456789abcdef"
         for (raw in listOf(null, "raw-device")) {

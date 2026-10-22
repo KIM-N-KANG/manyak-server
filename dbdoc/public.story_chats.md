@@ -52,6 +52,8 @@
 | idx_story_chats_story | CREATE INDEX idx_story_chats_story ON public.story_chats USING btree (story_id) |
 | uq_story_chats_public_id | CREATE UNIQUE INDEX uq_story_chats_public_id ON public.story_chats USING btree (public_id) |
 | idx_story_chats_user_updated | CREATE INDEX idx_story_chats_user_updated ON public.story_chats USING btree (user_id, updated_at DESC, id DESC) WHERE (deleted_at IS NULL) |
+| idx_story_chats_admin_created_public | CREATE INDEX idx_story_chats_admin_created_public ON public.story_chats USING btree (created_at DESC, public_id) |
+| idx_story_chats_admin_story_created | CREATE INDEX idx_story_chats_admin_story_created ON public.story_chats USING btree (story_id, created_at DESC, public_id) INCLUDE (current_turn) WHERE (deleted_at IS NULL) |
 
 ## Relations
 

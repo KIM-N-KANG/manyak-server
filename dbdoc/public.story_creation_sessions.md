@@ -12,6 +12,7 @@
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | creation_request_id | uuid |  | true |  |  | KNK-644: 완성(STORY_CREATED) 시점 요청의 request_id. 회수 재실행 검증용이며 storyline_request_id(스토리라인 단계)와 다른 값이다. |
 | storyline_request_id | uuid |  | true |  |  | KNK-751: 스토리라인 생성(STORYLINE_GENERATION) 요청의 request_id. AI trace 여정을 묶는 creation_id로 헤더에 실린다. 이 컬럼 도입 전 세션은 NULL(헤더 생략). |
+| storyline_ai_call_log_id | bigint |  | true |  | [public.ai_call_logs](public.ai_call_logs.md) | 이 세션을 생성한 스토리라인 AI 호출. 완성 시 해당 로그의 story_id를 연결하며 기존 세션은 NULL |
 
 ## Constraints
 
@@ -19,6 +20,7 @@
 | ---- | ---- | ---------- |
 | ck_story_creation_sessions_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['STORYLINES_GENERATED'::character varying, 'STORY_CREATED'::character varying])::text[]))) |
 | story_creation_sessions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
+| story_creation_sessions_storyline_ai_call_log_id_fkey | FOREIGN KEY | FOREIGN KEY (storyline_ai_call_log_id) REFERENCES ai_call_logs(id) ON DELETE SET NULL |
 
 ## Indexes
 
@@ -27,6 +29,7 @@
 | story_creation_sessions_pkey | CREATE UNIQUE INDEX story_creation_sessions_pkey ON public.story_creation_sessions USING btree (id) |
 | idx_story_creation_sessions_story | CREATE INDEX idx_story_creation_sessions_story ON public.story_creation_sessions USING btree (story_id) |
 | idx_story_creation_sessions_storyline_request_id | CREATE INDEX idx_story_creation_sessions_storyline_request_id ON public.story_creation_sessions USING btree (storyline_request_id) |
+| idx_creation_sessions_admin_created | CREATE INDEX idx_creation_sessions_admin_created ON public.story_creation_sessions USING btree (created_at, user_id) |
 
 ## Relations
 
@@ -36,6 +39,7 @@ erDiagram
 "public.story_creation_session_tags" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_storylines" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
 "public.story_creation_characters" }o--|| "public.story_creation_sessions" : "FOREIGN KEY (creation_session_id) REFERENCES story_creation_sessions(id) ON DELETE CASCADE"
+"public.story_creation_sessions" }o--o| "public.ai_call_logs" : "FOREIGN KEY (storyline_ai_call_log_id) REFERENCES ai_call_logs(id) ON DELETE SET NULL"
 
 "public.story_creation_sessions" {
   bigint id
@@ -46,6 +50,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   uuid creation_request_id
   uuid storyline_request_id
+  bigint storyline_ai_call_log_id FK
 }
 "public.story_creation_session_tags" {
   bigint id
@@ -70,6 +75,30 @@ erDiagram
   varchar_10_ gender
   smallint sort_order
   timestamp_with_time_zone created_at
+}
+"public.ai_call_logs" {
+  bigint id
+  varchar_128_ request_id
+  varchar_50_ caller_service
+  varchar_40_ feature
+  varchar_64_ device_id_hash
+  varchar_128_ session_id
+  bigint story_id
+  uuid chat_id
+  integer turn_number
+  varchar_40_ provider
+  varchar_100_ model
+  varchar_40_ prompt_template_version
+  varchar_16_ status
+  bigint latency_ms
+  integer input_token_count
+  integer output_token_count
+  integer retry_count
+  varchar_100_ error_code
+  varchar_64_ sentry_event_id
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone completed_at
+  jsonb prompt_versions
 }
 ```
 

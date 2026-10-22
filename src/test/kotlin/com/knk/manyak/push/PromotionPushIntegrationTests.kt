@@ -131,8 +131,8 @@ class PromotionPushIntegrationTests {
             "title" to "(광고) 새 오리지널 스토리가 나왔어요",
             "body" to "이번 주 신작 5편을 지금 만나보세요.",
         )
-        verify(fcmPushSender).sendToUser(first.id, expected, NORMAL)
-        verify(fcmPushSender).sendToUser(second.id, expected, NORMAL)
+        verify(fcmPushSender).sendToUser(first.id, expected, NORMAL, messageId = "promotion:${campaign.publicId}:${first.publicId}")
+        verify(fcmPushSender).sendToUser(second.id, expected, NORMAL, messageId = "promotion:${campaign.publicId}:${second.publicId}")
 
         val result = results.single()
         assertThat(result.campaignId).isEqualTo(campaign.publicId)
@@ -153,7 +153,7 @@ class PromotionPushIntegrationTests {
 
         assertThat(service().sendDue(NOW)).isEmpty()
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SCHEDULED)
     }
 
@@ -164,7 +164,7 @@ class PromotionPushIntegrationTests {
 
         assertThat(service().sendDue(NOW)).isEmpty()
 
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.CANCELED)
     }
 
@@ -178,7 +178,7 @@ class PromotionPushIntegrationTests {
         val result = service().sendDue(NOW).single()
 
         assertThat(result.targets).isZero()
-        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
     }
 
@@ -192,8 +192,8 @@ class PromotionPushIntegrationTests {
 
         val result = service(Clock.fixed(NIGHT, ZoneOffset.UTC)).sendDue(NIGHT).single()
 
-        verify(fcmPushSender).sendToUser(eq(nightAgreed.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
-        verify(fcmPushSender, never()).sendToUser(eq(dayOnly.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender).sendToUser(eq(nightAgreed.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
+        verify(fcmPushSender, never()).sendToUser(eq(dayOnly.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(result.sent).isEqualTo(1)
         assertThat(reload(campaign).skippedCount).isNull()
     }
@@ -207,12 +207,12 @@ class PromotionPushIntegrationTests {
         doAnswer {
             withdrawMarketingConsent(second.id)
             null
-        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        }.`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
 
         val result = service().sendDue(NOW).single()
 
-        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
-        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
+        verify(fcmPushSender, never()).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(result.sent).isEqualTo(1)
     }
 
@@ -237,7 +237,7 @@ class PromotionPushIntegrationTests {
             pool.shutdownNow()
         }
 
-        verify(fcmPushSender, times(1)).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender, times(1)).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
     }
 
     @Test
@@ -245,11 +245,11 @@ class PromotionPushIntegrationTests {
         val first = eligibleMember()
         val second = eligibleMember()
         val campaign = saveCampaign()
-        doThrow(IllegalStateException("FCM down")).`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        doThrow(IllegalStateException("FCM down")).`when`(fcmPushSender).sendToUser(eq(first.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
 
         service().sendDue(NOW)
 
-        verify(fcmPushSender).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender).sendToUser(eq(second.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
     }
 
@@ -273,13 +273,13 @@ class PromotionPushIntegrationTests {
         val beforeNight = eligibleMember()
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
-        val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
+        val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
         val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, crossing)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 
-        verify(fcmPushSender).sendToUser(eq(beforeNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
-        verify(fcmPushSender, never()).sendToUser(eq(afterNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull())
+        verify(fcmPushSender).sendToUser(eq(beforeNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
+        verify(fcmPushSender, never()).sendToUser(eq(afterNight.id), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(result.sent).isEqualTo(1)
     }
 

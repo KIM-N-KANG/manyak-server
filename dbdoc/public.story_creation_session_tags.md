@@ -53,6 +53,7 @@ erDiagram
   timestamp_with_time_zone updated_at
   uuid creation_request_id
   uuid storyline_request_id
+  bigint storyline_ai_call_log_id FK
 }
 "public.story_creation_tags" {
   bigint id

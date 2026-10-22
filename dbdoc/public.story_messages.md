@@ -30,6 +30,8 @@
 | ---- | ---------- |
 | story_messages_pkey | CREATE UNIQUE INDEX story_messages_pkey ON public.story_messages USING btree (id) |
 | uq_story_messages_order | CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (chat_id, message_order) |
+| idx_story_messages_admin_role_created_chat | CREATE INDEX idx_story_messages_admin_role_created_chat ON public.story_messages USING btree (role, created_at, chat_id) |
+| idx_story_messages_admin_chat_role_created | CREATE INDEX idx_story_messages_admin_chat_role_created ON public.story_messages USING btree (chat_id, role, created_at) |
 
 ## Relations
 

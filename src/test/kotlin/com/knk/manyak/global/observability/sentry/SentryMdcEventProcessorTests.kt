@@ -37,6 +37,7 @@ class SentryMdcEventProcessorTests {
     @org.junit.jupiter.params.provider.ValueSource(strings = [
         "/api/v1/auth/social/google", "/api/v1/auth/social/kakao", "/api/v1/auth/social/complete",
         "/api/v1/auth/login/google", "/api/v1/auth/login/kakao",
+        "/api/v1/admin/auth/login/google",
         "/api/v1/auth/token/refresh", "/api/v1/auth/logout",
         "/api/v1/auth/links/reauth", "/api/v1/auth/links/google", "/api/v1/auth/links/kakao",
         "/api/v1/auth/social/unknown", "/api/v1/auth/links/unknown",
@@ -166,4 +167,14 @@ class SentryMdcEventProcessorTests {
         assertEquals("req_only", event.getTag(MdcKeys.REQUEST_ID))
         assertNull(event.contexts["identity"])
     }
+    @Test fun `공지 제목 본문 사유와 검색어는 Sentry 요청에서 제거한다`() {
+        for (path in listOf("/api/v1/admin/notices", "/api/v1/admin/notices/uuid/publish")) {
+            val request = io.sentry.protocol.Request().apply { url = "https://api.test$path"; data = "notice-body"; queryString = "q=notice-title" }
+            val event = processor.process(SentryEvent().apply { this.request = request }, Hint())
+            assertNull(event.request!!.data)
+            assertNull(event.request!!.queryString)
+            assertEquals("https://api.test$path", event.request!!.url)
+        }
+    }
+
 }

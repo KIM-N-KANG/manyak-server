@@ -68,10 +68,12 @@ class PushMessageTemplateService(
         return overrides
             .filter { it.templateKey == key.storageKey && it.isEffectiveAt(now) }
             // 유효한 행이 여럿이면 가장 최근에 시작된 것을 쓴다(예약 교체가 자연히 동작한다).
-            .maxByOrNull { it.effectiveFrom }
+            .maxWithOrNull(compareBy<PushMessageTemplate> { it.effectiveFrom }.thenBy { it.id })
             ?.let { PushMessageText(it.title, it.body) }
             ?: defaults.getValue(key)
     }
+
+    fun defaultTextOf(key: PushTemplateKey): PushMessageText = defaults.getValue(key)
 
     /** 오버라이드 스냅샷을 다시 적재한다. **예외를 밖으로 내보내지 않는다**(스케줄러가 한 번의 예외로 멈추지 않도록). */
     fun refresh() {

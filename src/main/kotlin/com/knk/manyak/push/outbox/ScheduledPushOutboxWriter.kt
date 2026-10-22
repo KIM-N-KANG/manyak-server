@@ -22,6 +22,7 @@ class ScheduledPushOutboxWriter(
         scenario: String,
         occurrence: String,
         expiresAt: Instant? = null,
+        kind: String = "MARKETING",
     ): Int {
         val now = clock.instant()
         return targetIds.sumOf { userId ->
@@ -30,12 +31,13 @@ class ScheduledPushOutboxWriter(
             val messageId = when (scenario) {
                 "attendance" -> "attendance:$recipientId:$occurrence"
                 "promotion" -> "promotion:$occurrence:$recipientId"
+                "notice" -> "notice:$occurrence:$recipientId"
                 else -> error("Unknown scheduled push scenario: $scenario")
             }
             store.insert(PushMessage(
                 messageId = messageId,
                 recipientId = recipientId,
-                kind = "MARKETING",
+                kind = kind,
                 type = data.getValue("type"),
                 data = data,
                 expiresAt = expiresAt,

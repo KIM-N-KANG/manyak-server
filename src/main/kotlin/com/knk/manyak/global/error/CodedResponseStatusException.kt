@@ -19,6 +19,8 @@ class CodedResponseStatusException(
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    const val ADMIN_ACCOUNT_PROTECTED = "ADMIN_ACCOUNT_PROTECTED"
+    const val IDEMPOTENCY_KEY_CONFLICT = "IDEMPOTENCY_KEY_CONFLICT"
     const val CHAT_TURN_IN_PROGRESS = "CHAT_TURN_IN_PROGRESS"
     const val CHAT_TURN_STALE = "CHAT_TURN_STALE"
     const val CHAT_ENDED = "CHAT_ENDED"

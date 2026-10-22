@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('push_campaigns_id_seq'::regclass) | false |  |  |  |
+| id | bigint | nextval('push_campaigns_id_seq'::regclass) | false | [public.push_delivery_results](public.push_delivery_results.md) |  |  |
 | public_id | uuid |  | false |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | body | varchar(300) |  | false |  |  |  |
@@ -13,17 +13,22 @@
 | target_count | integer |  | true |  |  |  |
 | sent_count | integer |  | true |  |  |  |
 | skipped_count | integer |  | true |  |  |  |
-| started_at | timestamp with time zone |  | true |  |  |  |
+| started_at | timestamp with time zone |  | true |  |  | 선점 시각. 전송 시간 초과 및 회차 종료 소유권 판정 기준 |
 | finished_at | timestamp with time zone |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| kind | varchar(16) | 'MARKETING'::character varying | false |  |  | 서비스 알림 또는 광고 알림. 기존 캠페인은 광고 종류 |
+| notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 공지당 한 번의 알림 요청. 공지 알림이 아니면 NULL |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_push_campaigns_kind | CHECK | CHECK (((kind)::text = ANY ((ARRAY['SERVICE'::character varying, 'MARKETING'::character varying])::text[]))) |
 | ck_push_campaigns_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['SCHEDULED'::character varying, 'SENDING'::character varying, 'SENT'::character varying, 'CANCELED'::character varying, 'FAILED'::character varying])::text[]))) |
 | push_campaigns_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | push_campaigns_public_id_key | UNIQUE | UNIQUE (public_id) |
+| push_campaigns_notice_id_fkey | FOREIGN KEY | FOREIGN KEY (notice_id) REFERENCES notices(id) |
+| uq_push_campaigns_notice | UNIQUE | UNIQUE (notice_id) |
 
 ## Indexes
 
@@ -32,12 +37,15 @@
 | push_campaigns_pkey | CREATE UNIQUE INDEX push_campaigns_pkey ON public.push_campaigns USING btree (id) |
 | push_campaigns_public_id_key | CREATE UNIQUE INDEX push_campaigns_public_id_key ON public.push_campaigns USING btree (public_id) |
 | idx_push_campaigns_status_scheduled_at | CREATE INDEX idx_push_campaigns_status_scheduled_at ON public.push_campaigns USING btree (status, scheduled_at) |
+| uq_push_campaigns_notice | CREATE UNIQUE INDEX uq_push_campaigns_notice ON public.push_campaigns USING btree (notice_id) |
 
 ## Relations
 
 ```mermaid
 erDiagram
 
+"public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
+"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 
 "public.push_campaigns" {
   bigint id
@@ -52,6 +60,33 @@ erDiagram
   timestamp_with_time_zone started_at
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
+  varchar_16_ kind
+  bigint notice_id FK
+}
+"public.push_delivery_results" {
+  bigint id
+  varchar_255_ message_id
+  varchar_40_ type
+  varchar_16_ kind
+  bigint campaign_id FK
+  bigint user_id FK
+  varchar_16_ outcome
+  varchar_40_ reason
+  integer delivered_devices
+  integer failed_devices
+  timestamp_with_time_zone completed_at
+}
+"public.notices" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  text body
+  varchar_10_ status
+  timestamp_with_time_zone published_at
+  timestamp_with_time_zone notified_at
+  bigint created_by_user_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

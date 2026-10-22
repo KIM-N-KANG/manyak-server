@@ -49,7 +49,10 @@ class ModerationPushListener(
         try {
             executor.execute {
                 try {
-                    if (users.findById(event.userId).orElse(null)?.servicePushEnabled == true) sender.sendToUser(event.userId, event.pushData(base))
+                    val messageId = "story-moderation:${event.submissionId}:${event.attempt}"
+                    if (users.findById(event.userId).orElse(null)?.servicePushEnabled == true) {
+                        sender.sendToUser(event.userId, event.pushData(base), messageId = messageId)
+                    } else sender.recordDiscarded(event.userId, event.pushData(base), messageId, "SERVICE_PUSH_DISABLED")
                 } catch (ex: RuntimeException) { log.warn("moderation_push_failed submission={} error={}", event.submissionId, ex.javaClass.simpleName) }
             }
         } catch (_: RejectedExecutionException) { log.warn("moderation_push_rejected submission={}", event.submissionId) }
