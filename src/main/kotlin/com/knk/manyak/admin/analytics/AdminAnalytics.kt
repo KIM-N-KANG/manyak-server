@@ -19,7 +19,7 @@ class AmplitudeDashboardProperties(
 data class AnalyticsDay(val date: LocalDate, val activeUsers: Long, val newUsers: Long)
 data class AdminAnalyticsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate,
     val todayActiveUsers: Long, val daily: List<AnalyticsDay>)
-data class AmplitudeSeries(val active: List<Long>, val new: List<Long>)
+data class AmplitudeSeries(val active: List<Long>, val new: List<Long>, val todayActive: Long)
 
 class AdminAnalyticsUnavailable : RuntimeException("분석 지표를 가져올 수 없습니다.")
 enum class AnalyticsFailureReason { no_credentials, http_error, rate_limited, timeout }
@@ -34,12 +34,12 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
         .build()
 
     /** 연결·본문 수신을 포함해 두 조회 전체가 하나의 5초 예산을 공유한다. 재시도하지 않는다. */
-    fun fetch(from: LocalDate, to: LocalDate): AmplitudeSeries {
+    fun fetch(from: LocalDate, to: LocalDate, today: LocalDate): AmplitudeSeries {
         if (properties.apiKey.isBlank() || properties.secretKey.isBlank()) throw AmplitudeFetchFailure(AnalyticsFailureReason.no_credentials)
         val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
         val active = query("active", from, to, deadline)
         val new = query("new", from, to, deadline)
-        return AmplitudeSeries(active, new)
+        return AmplitudeSeries(active, new, if (to == today) active.last() else query("active", today, today, deadline).single())
     }
 
     private fun query(metric: String, from: LocalDate, to: LocalDate, deadline: Long): List<Long> {
@@ -100,43 +100,55 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
 @Service
 class AdminAnalyticsService(private val client: AmplitudeDashboardClient, private val clock: Clock = Clock.systemUTC()) {
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
-    @Volatile private var cached: AdminAnalyticsResponse? = null
-    @Volatile private var retryAfter: Instant = Instant.MIN
-    private val refreshing = java.util.concurrent.atomic.AtomicBoolean()
+    private data class CachedResponse(val response: AdminAnalyticsResponse, val today: LocalDate)
+    private class Cache {
+        @Volatile var value: CachedResponse? = null
+        @Volatile var retryAfter: Instant = Instant.MIN
+        val refreshing = java.util.concurrent.atomic.AtomicBoolean()
+    }
+    private val ranges = linkedMapOf<com.knk.manyak.admin.dto.AdminDashboardRange, Cache>()
 
-    /** 태스크별 90일 캐시. 갱신 중인 요청을 기다리지 않고 이전 캐시 또는 503을 반환한다. */
-    fun dashboard(days: Int): AdminAnalyticsResponse {
-        if (days !in setOf(7, 30, 90)) throw org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "days는 7, 30, 90 중 하나여야 합니다.")
-        val previous = cached
-        if (isFresh(previous)) return slice(previous!!, days)
-        if (clock.instant().isBefore(retryAfter) || !refreshing.compareAndSet(false, true)) return fallback(days)
-        try {
-            // 앞선 갱신이 첫 상태 확인과 표식 획득 사이에 끝났을 수 있다.
-            val latest = cached
-            if (isFresh(latest) || clock.instant().isBefore(retryAfter)) return fallback(days)
-            val today = LocalDate.ofInstant(clock.instant(), java.time.ZoneId.of("Asia/Seoul"))
-            val from = today.minusDays(89)
-            val data = client.fetch(from, today)
-            val daily = data.active.indices.map { i -> AnalyticsDay(from.plusDays(i.toLong()), data.active[i], data.new[i]) }
-            val full = AdminAnalyticsResponse(clock.instant(), from, today, daily.last().activeUsers, daily)
-            cached = full
-            retryAfter = Instant.MIN
-            return slice(full, days)
-        } catch (failure: AmplitudeFetchFailure) {
-            retryAfter = clock.instant().plusSeconds(60)
-            log.warn("admin_analytics_fetch_failed reason={} status={}", failure.reason.name, failure.status)
-            return fallback(days)
-        } finally {
-            refreshing.set(false)
+    fun dashboard(request: com.knk.manyak.admin.dto.AdminChartsRequest): AdminAnalyticsResponse {
+        val range = request.resolve(clock)
+        val state = synchronized(ranges) {
+            ranges[range] ?: Cache().also {
+                // 임의 범위 조합으로 프로세스 캐시가 계속 늘어나지 않게 제한한다.
+                if (ranges.size >= 32) ranges.remove(ranges.keys.first())
+                ranges[range] = it
+            }
         }
+        return load(range, state)
     }
-    private fun isFresh(value: AdminAnalyticsResponse?): Boolean {
-        val now = clock.instant()
-        return value != null && value.to == LocalDate.ofInstant(now, java.time.ZoneId.of("Asia/Seoul")) && now.isBefore(value.asOf.plusSeconds(600))
-    }
-    private fun fallback(days: Int) = slice(cached ?: throw AdminAnalyticsUnavailable(), days)
-    private fun slice(full: AdminAnalyticsResponse, days: Int): AdminAnalyticsResponse {
-        val daily = full.daily.takeLast(days)
-        return full.copy(from = daily.first().date, daily = daily)
+
+    fun dashboard(days: Int): AdminAnalyticsResponse = dashboard(com.knk.manyak.admin.dto.AdminChartsRequest().apply { this.days = days.toString() })
+
+    private fun load(range: com.knk.manyak.admin.dto.AdminDashboardRange, state: Cache): AdminAnalyticsResponse {
+        fun fresh(value: CachedResponse?): Boolean {
+            if (value == null) return false
+            val now = clock.instant()
+            return value.response.from == range.from && value.response.to == range.to &&
+                value.today == now.atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate() &&
+                now.isBefore(value.response.asOf.plusSeconds(600))
+        }
+        fun fallback() = state.value?.response ?: throw AdminAnalyticsUnavailable()
+        if (fresh(state.value)) return state.value!!.response
+        if (clock.instant().isBefore(state.retryAfter) || !state.refreshing.compareAndSet(false, true)) return fallback()
+        try {
+            if (fresh(state.value) || clock.instant().isBefore(state.retryAfter)) return fallback()
+            val today = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate()
+            val data = client.fetch(range.from, range.to, today)
+            val daily = data.active.indices.map { i -> AnalyticsDay(range.from.plusDays(i.toLong()), data.active[i], data.new[i]) }
+            val full = AdminAnalyticsResponse(clock.instant(), range.from, range.to, data.todayActive, daily)
+            // 조회에 사용한 날짜와 응답을 함께 게시한다. 자정을 넘겨 완료돼도 전날 값은 신선하지 않다.
+            state.value = CachedResponse(full, today)
+            state.retryAfter = Instant.MIN
+            return full
+        } catch (failure: AmplitudeFetchFailure) {
+            state.retryAfter = clock.instant().plusSeconds(60)
+            log.warn("admin_analytics_fetch_failed reason={} status={}", failure.reason.name, failure.status)
+            return fallback()
+        } finally {
+            state.refreshing.set(false)
+        }
     }
 }

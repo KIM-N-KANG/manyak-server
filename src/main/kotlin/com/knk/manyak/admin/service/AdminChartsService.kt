@@ -16,14 +16,19 @@ class AdminChartsService(
     private val official: OfficialStoryAccount,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    fun charts(days: Int): AdminChartsResponse {
-        if (days !in setOf(7, 30, 90)) badAdminQuery("기간은 7, 30, 90일 중 하나여야 합니다.")
+    fun charts(days: Int): AdminChartsResponse = charts(AdminChartsRequest().apply { this.days = days.toString() })
+
+    fun charts(request: AdminChartsRequest): AdminChartsResponse {
+        val range = request.resolve(clock)
         val now = clock.instant()
-        val to = now.atZone(AdminDateRange.KST).toLocalDate()
-        val from = to.minusDays(days.toLong() - 1)
+        val from = range.from
+        val to = range.to
+        val days = java.time.temporal.ChronoUnit.DAYS.between(from, to).toInt() + 1
         val start = from.atStartOfDay(AdminDateRange.KST).toInstant()
-        val daily = repository.daily(start, now, properties.excludedUserIds)
-        val raw = repository.distributions(start, now, properties.excludedUserIds, official.officialUserId())
+        // DB timestamp 정밀도(마이크로초)에 맞춰 다음 KST 자정 직전까지만 포함한다.
+        val end = minOf(now, to.plusDays(1).atStartOfDay(AdminDateRange.KST).toInstant().minusNanos(1000))
+        val daily = repository.daily(start, end, properties.excludedUserIds)
+        val raw = repository.distributions(start, end, properties.excludedUserIds, official.officialUserId())
         fun Map<String, Any?>.number(key: String) = (this[key] as? Number)?.toDouble() ?: 0.0
         fun rounded(value: Double) = BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
         fun point(label: String, value: Double, list: String, params: Map<String, String>, prefix: String = "") =
