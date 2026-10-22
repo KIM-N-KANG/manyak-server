@@ -79,6 +79,35 @@ class AdminAnalyticsTests {
         pair(LocalDate.parse(request.from), 366); server.enqueue(MockResponse().setBody(body(today.plusDays(1), 1, 99)))
         assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
     }
+    @ParameterizedTest @ValueSource(booleans = [false, true])
+    fun `자정 전에 시작해 다음 날 끝난 조회는 전날 오늘 활성 수를 신선한 캐시로 쓰지 않는다`(endsToday: Boolean) {
+        clock.at = Instant.parse("2026-10-22T14:59:59Z")
+        val completedAt = Instant.parse("2026-10-22T15:00:01Z")
+        val start = if (endsToday) today.minusDays(1) else LocalDate.parse("2026-01-01")
+        val request = range(start.toString(), start.plusDays(1).toString())
+        val firstCalls = if (endsToday) 2 else 3
+        val responses = listOf(body(start, 2), body(start, 2, 100)) +
+            (if (endsToday) emptyList() else listOf(body(today, 1, 42))) +
+            listOf(body(start, 2), body(start, 2, 100), body(today.plusDays(1), 1, 99))
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                val number = calls.incrementAndGet()
+                // 마지막 외부 응답이 도착하기 직전에만 고정 시각을 자정 뒤로 옮긴다.
+                if (number == firstCalls) clock.at = completedAt
+                return responses.getOrNull(number - 1)?.let { MockResponse().setBody(it) } ?: MockResponse().setResponseCode(500)
+            }
+        }
+        val service = service()
+        val crossing = service.dashboard(request)
+        assertThat(crossing.asOf).isEqualTo(completedAt)
+        assertThat(crossing.todayActiveUsers).isEqualTo(if (endsToday) 1L else 42L)
+        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
+        assertThat(server.requestCount).isEqualTo(firstCalls + 3)
+        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
+        assertThat(server.requestCount).isEqualTo(firstCalls + 3)
+    }
+
     @ParameterizedTest @ValueSource(ints = [302, 400, 401, 403, 429, 500, 503])
     fun `외부 실패는 고정 예외와 60초 쿨다운이며 인증값과 본문을 로그에 남기지 않는다`(status: Int) {
         val service = service(); server.enqueue(MockResponse().setResponseCode(status).setBody("sensitive response test-api test-secret"))

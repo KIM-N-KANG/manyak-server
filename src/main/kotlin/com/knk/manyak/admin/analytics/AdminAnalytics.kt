@@ -100,8 +100,9 @@ class AmplitudeDashboardClient(private val properties: AmplitudeDashboardPropert
 @Service
 class AdminAnalyticsService(private val client: AmplitudeDashboardClient, private val clock: Clock = Clock.systemUTC()) {
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
+    private data class CachedResponse(val response: AdminAnalyticsResponse, val today: LocalDate)
     private class Cache {
-        @Volatile var response: AdminAnalyticsResponse? = null
+        @Volatile var value: CachedResponse? = null
         @Volatile var retryAfter: Instant = Instant.MIN
         val refreshing = java.util.concurrent.atomic.AtomicBoolean()
     }
@@ -122,16 +123,24 @@ class AdminAnalyticsService(private val client: AmplitudeDashboardClient, privat
     fun dashboard(days: Int): AdminAnalyticsResponse = dashboard(com.knk.manyak.admin.dto.AdminChartsRequest().apply { this.days = days.toString() })
 
     private fun load(range: com.knk.manyak.admin.dto.AdminDashboardRange, state: Cache): AdminAnalyticsResponse {
-        fun fresh(value: AdminAnalyticsResponse?) = value != null && value.from == range.from && value.to == range.to && value.asOf.atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate() == clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate() && clock.instant().isBefore(value.asOf.plusSeconds(600))
-        fun fallback() = state.response ?: throw AdminAnalyticsUnavailable()
-        if (fresh(state.response)) return state.response!!
+        fun fresh(value: CachedResponse?): Boolean {
+            if (value == null) return false
+            val now = clock.instant()
+            return value.response.from == range.from && value.response.to == range.to &&
+                value.today == now.atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate() &&
+                now.isBefore(value.response.asOf.plusSeconds(600))
+        }
+        fun fallback() = state.value?.response ?: throw AdminAnalyticsUnavailable()
+        if (fresh(state.value)) return state.value!!.response
         if (clock.instant().isBefore(state.retryAfter) || !state.refreshing.compareAndSet(false, true)) return fallback()
         try {
-            if (fresh(state.response) || clock.instant().isBefore(state.retryAfter)) return fallback()
-            val data = client.fetch(range.from, range.to, clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate())
+            if (fresh(state.value) || clock.instant().isBefore(state.retryAfter)) return fallback()
+            val today = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate()
+            val data = client.fetch(range.from, range.to, today)
             val daily = data.active.indices.map { i -> AnalyticsDay(range.from.plusDays(i.toLong()), data.active[i], data.new[i]) }
             val full = AdminAnalyticsResponse(clock.instant(), range.from, range.to, data.todayActive, daily)
-            state.response = full
+            // 조회에 사용한 날짜와 응답을 함께 게시한다. 자정을 넘겨 완료돼도 전날 값은 신선하지 않다.
+            state.value = CachedResponse(full, today)
             state.retryAfter = Instant.MIN
             return full
         } catch (failure: AmplitudeFetchFailure) {
