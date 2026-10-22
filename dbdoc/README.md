@@ -713,6 +713,7 @@ erDiagram
   integer delivered_devices
   integer failed_devices
   timestamp_with_time_zone completed_at
+}
 "public.notices" {
   bigint id
   uuid public_id

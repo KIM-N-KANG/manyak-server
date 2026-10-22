@@ -63,18 +63,6 @@ erDiagram
   varchar_16_ kind
   bigint notice_id FK
 }
-"public.notices" {
-  bigint id
-  uuid public_id
-  varchar_100_ title
-  text body
-  varchar_10_ status
-  timestamp_with_time_zone published_at
-  timestamp_with_time_zone notified_at
-  bigint created_by_user_id FK
-  timestamp_with_time_zone created_at
-  timestamp_with_time_zone updated_at
-}
 "public.push_delivery_results" {
   bigint id
   varchar_255_ message_id
@@ -87,6 +75,18 @@ erDiagram
   integer delivered_devices
   integer failed_devices
   timestamp_with_time_zone completed_at
+}
+"public.notices" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  text body
+  varchar_10_ status
+  timestamp_with_time_zone published_at
+  timestamp_with_time_zone notified_at
+  bigint created_by_user_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 
