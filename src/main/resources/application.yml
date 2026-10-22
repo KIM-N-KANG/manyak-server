@@ -101,6 +101,10 @@ springdoc:
 
 manyak:
   admin:
+    play-stats:
+      bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
+      package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
+      service-account-key-base64: ${MANYAK_PLAY_STATS_SA_KEY_BASE64:}
     dashboard:
       excluded-user-ids: ${MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS:1,2,3,4,5,10,11,206,207}
     token:

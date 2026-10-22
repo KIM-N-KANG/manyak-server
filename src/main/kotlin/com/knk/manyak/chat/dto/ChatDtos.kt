@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
@@ -400,7 +401,14 @@ data class ChatPersonaResponse(val name: String)
 
 
 @Schema(description = "노출 중인 채팅 모델과 회원 체험 소진 후 턴 가격")
-data class ChatModelResponse(val code: String, val name: String, val turnCost: Long, val isDefault: Boolean)
+data class ChatModelResponse(
+    val code: String,
+    val name: String,
+    val turnCost: Long,
+    // springdoc이 is 접두를 벗겨 default로 문서화하므로 런타임과 같은 와이어 필드명을 JsonProperty로 고정한다(isOwner와 동일).
+    @get:JsonProperty("isDefault")
+    val isDefault: Boolean,
+)
 @Schema(description = "다음 턴부터 적용할 채팅 모델")
 data class ChangeChatModelRequest(@field:NotBlank val model: String)
 data class ChangeChatModelResponse(val id: String, val model: String)

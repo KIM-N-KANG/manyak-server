@@ -1,5 +1,6 @@
 package com.knk.manyak.admin.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
@@ -74,7 +75,8 @@ class AdminChartsRequest {
 }
 
 data class AdminMemberListResponse(
-    val memberId: UUID, val nickname: String, val status: UserStatus, val isAdmin: Boolean, val createdAt: Instant,
+    // isAdmin: springdoc이 is 접두를 벗기지 않도록 와이어 필드명을 고정한다(AdminMemberSummary와 동일).
+    val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
 )
 data class AdminStorySummary(val storyId: UUID, val title: String, val genre: String)

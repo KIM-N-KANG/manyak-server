@@ -46,6 +46,11 @@ class AdminReadController(private val service: AdminReadService, private val cha
     @GetMapping("/payments/orders/{orderId}")
     fun payment(@PathVariable orderId: UUID) = service.payment(orderId)
 
+    @io.swagger.v3.oas.annotations.Operation(summary = "전체 이프 거래 내역", description = "팀 계정 제외를 적용하지 않아 대시보드의 지급·소진 합계와 다를 수 있습니다. 접속 기록은 남기지 않습니다.")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = com.knk.manyak.global.config.OpenApiConfig.SECURITY_SCHEME_NAME)
+    @GetMapping("/credits/transactions")
+    fun creditTransactions(@org.springdoc.core.annotations.ParameterObject @Valid @ModelAttribute request: AdminCreditTransactionsRequest) = service.creditTransactions(request)
+
     @GetMapping("/members/{memberId}/transactions")
     fun transactions(@PathVariable memberId: UUID, @Valid @ModelAttribute query: AdminListRequest, request: HttpServletRequest) =
         service.transactions(AdminRequester.userId(request), memberId, query)

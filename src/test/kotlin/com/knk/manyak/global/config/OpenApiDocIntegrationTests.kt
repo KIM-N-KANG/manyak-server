@@ -76,6 +76,40 @@ class OpenApiDocIntegrationTests {
     }
 
     @Test
+    fun `isDefault 응답 필드는 런타임 직렬화와 같은 isDefault 필드명으로 문서화된다`() {
+        // isNewUser와 같은 함정: springdoc이 is 접두를 벗겨 default로 문서화하면 웹 Orval 생성 타입이 어긋난다.
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.ChatModelResponse.properties.isDefault").exists()
+            .jsonPath("$.components.schemas.ChatModelResponse.properties.default").doesNotExist()
+            .jsonPath("$.components.schemas.AdminPushEffectiveTextResponse.properties.isDefault").exists()
+            .jsonPath("$.components.schemas.AdminPushEffectiveTextResponse.properties.default").doesNotExist()
+    }
+
+    @Test
+    fun `관리자 회원 응답의 isAdmin은 런타임 직렬화와 같은 isAdmin 필드명으로 문서화된다`() {
+        val body = restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+        for (schema in listOf("AdminMemberSummary", "AdminMemberListResponse", "AdminMemberDetailResponse")) {
+            body.jsonPath("$.components.schemas.$schema.properties.isAdmin").exists()
+                .jsonPath("$.components.schemas.$schema.properties.admin").doesNotExist()
+        }
+    }
+
+    @Test
+    fun `간편 제작 요청의 isRegenerated는 스펙 와이어 이름 그대로 문서화된다`() {
+        val body = restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+        for (schema in listOf("GenerateSimpleStorylinesRequest", "CreateSimpleStoryRequest")) {
+            body.jsonPath("$.components.schemas.$schema.properties.isRegenerated").exists()
+                .jsonPath("$.components.schemas.$schema.properties.regenerated").doesNotExist()
+        }
+    }
+
+    @Test
     fun `스토리 좋아요는 계정 상태 거부(401·403)를 실제 동작대로 문서화한다`() {
         // SuspensionGuard가 정지를 403, 탈퇴를 401로 막는데 문서에는 403이 빠져 있었다(KNK-1017 3차 리뷰).
         restTestClient.get().uri("/v3/api-docs").exchange()

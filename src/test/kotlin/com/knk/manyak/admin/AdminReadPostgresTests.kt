@@ -85,6 +85,19 @@ class AdminReadPostgresTests {
         assertThat(usage.second.creditsSpent).isEqualTo(20)
         assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
     }
+    @Test fun `실제 PostgreSQL에서 전체 이프 거래의 방향과 KST 날짜 및 회원 요약을 조회한다`() {
+        val page = reads.creditTransactions(AdminCreditTransactionsRequest().apply {
+            direction = "spent"; date = "2026-10-21"
+        }, AdminPagination(1, 20, "t.created_at desc"))
+        assertThat(page.totalElements).isEqualTo(1)
+        assertThat(page.items.single().amount).isEqualTo(-20)
+        assertThat(page.items.single().member.memberId).isEqualTo(memberId)
+        assertThat(page.items.single().member.isAdmin).isTrue()
+        assertThat(reads.creditTransactions(AdminCreditTransactionsRequest().apply {
+            date = "2026-10-20"
+        }, AdminPagination(1, 20, "t.created_at desc")).totalElements).isZero()
+    }
+
     @Test fun `실제 PostgreSQL도 빈 칸을 제외하고 특징 태그를 가진 인물을 한 번만 센다`() {
         val page = content.stories(AdminStoriesRequest().apply { supportingCharacterCount = 3 }, AdminPagination(1, 20, "s.id asc"), null)
         assertThat(page.totalElements).isEqualTo(1)
