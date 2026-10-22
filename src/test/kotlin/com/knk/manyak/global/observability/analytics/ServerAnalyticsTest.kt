@@ -61,14 +61,15 @@ class ServerAnalyticsTest {
     }
 
     @Test
-    fun `게스트 요청은 user_id가 null이고 device_id에 device_id_hash를 쓴다`() {
+    fun `원본 없이 해시만 있는 게스트 요청은 device_id가 unknown이다`() {
         MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_guest")
 
         analytics.storylineGenerationSucceeded(userId = null, creationId = 3L)
 
         val e = publisher.events.single()
         assertThat(e.userId).isNull()
-        assertThat(e.deviceId).isEqualTo("device_hash_guest")
+        assertThat(e.deviceId).isEqualTo("unknown")
+        assertThat(e.eventProperties["device_id_hash"]).isEqualTo("device_hash_guest")
         assertThat(e.eventProperties["is_logged_in"]).isEqualTo(false)
     }
 
