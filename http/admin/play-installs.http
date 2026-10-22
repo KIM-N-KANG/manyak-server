@@ -1,0 +1,62 @@
+# 관리자 Play 설치 지표. IntelliJ HTTP Client에서 위에서부터 실행한다.
+# 준비: PostgreSQL·Redis 및 ./gradlew bootRun. 관리자 로그인 응답의 accessToken을 넣는다.
+# 운영 키는 MANYAK_PLAY_STATS_SA_KEY_BASE64로만 주입한다. 실제 키를 이 파일에 넣지 않는다.
+# Play 기준 날짜를 KST로 바꾸지 않으며 보고서에 며칠 지연이 있을 수 있다.
+# 월별 overview 전체를 합산하고 1시간 캐시, 실패 완료 후 60초 쿨다운을 적용한다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@rolelessAdminToken = replace-with-admin-token-without-role
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 설치 지표 — 키가 설정된 환경에서 실행
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("설치 합계와 활성 기기 및 일별 누계", () => {
+  client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.daily.length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(b.asOf), `actual=${JSON.stringify(b)}`);
+  client.assert(b.daily[b.daily.length - 1].cumulativeInstalls === b.totalInstalls, "마지막 누계는 전체 설치 수와 같아야 합니다");
+  client.assert(b.daily[b.daily.length - 1].activeDevices === b.activeDevices, "마지막 보고일의 활성 기기를 사용해야 합니다");
+  client.assert(b.daily[b.daily.length - 1].date === b.asOf, "Play 원천의 마지막 날짜여야 합니다");
+  client.assert(b.daily.reduce((n, d) => n + d.installs, 0) === b.totalInstalls, "일별 기기 설치 합계여야 합니다");
+  client.assert(b.daily.every((d, i, rows) => i === 0 || Date.parse(d.date) - Date.parse(rows[i - 1].date) === 86400000), "누락일도 연속해서 채워야 합니다");
+});
+if (response.status === 200) client.global.set("playInstallsCached", JSON.stringify(response.body));
+%}
+
+### 한 시간 안의 재조회 — 같은 프로세스에 도달하는 로컬 서버에서 실행
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("캐시 재사용", () => client.assert(response.status === 200 && JSON.stringify(response.body) === client.global.get("playInstallsCached"), `actual=${response.status}`)); %}
+
+### 401: 관리자 토큰 필수
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+
+> {% client.test("관리자 인증 필수", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 403: 관리자 역할이 없는 토큰으로 선택 실행
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("관리자 역할 필수", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 503: 키를 비우고 새로 기동한 환경에서 선택 실행
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("설치 지표만 사용 불가", () => client.assert(response.status === 503 && response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.status}`)); %}
+
+### 저장소 미설정·장애 중에도 DB 대시보드는 정상
+GET {{baseUrl}}/api/v1/admin/dashboard/summary
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("DB 지표 격리", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
+
+### 자유 조회 — 기간 쿼리가 없으며 원천의 전체 기간을 반환한다
+GET {{baseUrl}}/api/v1/admin/dashboard/play-installs
+Authorization: Bearer {{adminToken}}
