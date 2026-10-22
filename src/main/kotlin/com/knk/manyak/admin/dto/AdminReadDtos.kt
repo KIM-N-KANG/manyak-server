@@ -42,6 +42,15 @@ class AdminMembersRequest : AdminSearchRequest() {
     var creditDate: String? = null
     var attendanceDate: String? = null
 }
+class AdminCreditTransactionsRequest : AdminListRequest() {
+    @field:Pattern(regexp = "granted|spent") var direction: String? = null
+    var date: String? = null
+}
+
+data class AdminCreditTransactionResponse(
+    val amount: Long, val reason: String, val createdAt: Instant, val member: AdminMemberSummary,
+)
+
 class AdminPaymentsRequest : AdminSearchRequest() {
     var status: CreditOrderStatus? = null
     var memberId: UUID? = null

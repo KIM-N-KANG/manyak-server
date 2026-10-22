@@ -61,6 +61,13 @@ class AdminReadService(
         result
     }
 
+    fun creditTransactions(request: AdminCreditTransactionsRequest): AdminPageResponse<AdminCreditTransactionResponse> {
+        if (request.direction != null && request.direction !in setOf("granted", "spent")) badAdminQuery("원장 방향이 올바르지 않습니다.")
+        AdminDateRange.of(request.date, request.date)
+        val page = request.pagination(mapOf("createdAt" to "t.created_at"), "createdAt")
+        return reads.creditTransactions(request, page)
+    }
+
     fun transactions(adminUserId: Long, memberId: UUID, request: AdminListRequest): AdminPageResponse<AdminTransactionResponse> = SocialAuthPrivacyFilter.safely {
         val page = request.pagination(mapOf("createdAt" to "created_at"), "createdAt")
         val user = requireMember(memberId)
