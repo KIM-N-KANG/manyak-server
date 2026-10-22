@@ -27,6 +27,38 @@ class AsyncMdcPropagationIntegrationTests {
     @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)
     private lateinit var pushExecutor: Executor
 
+    @Autowired
+    @Qualifier("taskExecutor")
+    private lateinit var defaultExecutor: Executor
+
+    @Autowired
+    @Qualifier("chatSseExecutor")
+    private lateinit var chatExecutor: Executor
+
+    @Test
+    fun `기본 Async와 채팅 SSE 실행기는 원본을 MDC와 분리해 전파한다`() {
+        val raw = "async-device-1761"
+        val hasher = DeviceIdHasher("test-pepper")
+        for (executor in listOf(defaultExecutor, chatExecutor)) {
+            val seen = CompletableFuture<Pair<String?, Map<String, String>>>()
+            val request = org.springframework.mock.web.MockHttpServletRequest("GET", "/api/v1/stories").apply {
+                addHeader(RequestCorrelationFilter.HEADER_DEVICE_ID, raw)
+            }
+            RequestCorrelationFilter(hasher).doFilter(request, org.springframework.mock.web.MockHttpServletResponse(),
+                jakarta.servlet.FilterChain { _, _ ->
+                    executor.execute {
+                        seen.complete(com.knk.manyak.global.observability.analytics.AnalyticsDeviceContext.currentDeviceId() to
+                            MDC.getCopyOfContextMap().orEmpty())
+                    }
+                })
+            val (deviceId, mdc) = seen.get(5, TimeUnit.SECONDS)
+            assertThat(deviceId).isEqualTo(raw)
+            assertThat(mdc[MdcKeys.DEVICE_ID_HASH]).isEqualTo(hasher.hash(raw))
+            assertThat(mdc.values).doesNotContain(raw)
+            assertThat(com.knk.manyak.global.observability.analytics.AnalyticsDeviceContext.currentDeviceId()).isNull()
+        }
+    }
+
     @AfterEach
     fun clearMdc() = MDC.clear()
 

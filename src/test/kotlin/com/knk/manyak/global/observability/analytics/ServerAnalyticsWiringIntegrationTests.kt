@@ -109,6 +109,32 @@ class ServerAnalyticsWiringIntegrationTests {
         capturingPublisher.events.clear()
     }
 
+    @Autowired private lateinit var deviceIdHasher: com.knk.manyak.global.observability.DeviceIdHasher
+
+    @Test
+    fun `실제 로그인 요청은 회원과 게스트 모두 원본 헤더와 누락 규칙을 따른다`() {
+        for (member in listOf(false, true)) {
+            for (raw in listOf(null, "client-device-wiring-1761")) {
+                capturingPublisher.events.clear()
+                val request = restTestClient.post().uri("/api/v1/auth/login/google")
+                    .contentType(MediaType.APPLICATION_JSON)
+                if (raw != null) request.header("X-Manyak-Device-Id", raw)
+                val token = if (member) "wiring-device-sub" else "invalid"
+                val result = request.body(mapOf("idToken" to token)).exchange()
+                if (member) result.expectStatus().isOk else result.expectStatus().isUnauthorized
+                val event = capturingPublisher.events.single()
+                assertThat(event.deviceId).isEqualTo(raw ?: if (member) null else "unknown")
+                assertThat(event.eventProperties["is_logged_in"]).isEqualTo(member)
+                if (raw == null) assertThat(event.eventProperties).doesNotContainKey("device_id_hash")
+                else {
+                    assertThat(event.eventProperties).containsEntry("device_id_hash", deviceIdHasher.hash(raw))
+                    assertThat(event.eventProperties.values).doesNotContain(raw)
+                }
+                if (member) assertThat(event.userId).isNotBlank() else assertThat(event.userId).isNull()
+            }
+        }
+    }
+
     @Test
     fun `피드백 제출 성공은 server_feedback 이벤트를 게스트 식별로 발행한다`() {
         restTestClient.post()

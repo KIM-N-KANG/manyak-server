@@ -161,3 +161,50 @@ X-Manyak-Device-Id: login-device
         client.assert(!!response.body.accessToken, "접근 토큰 누락");
     });
 %}
+
+### KNK-1761 분석 기기 식별자 검증
+# 분석 전송을 켠 검증 환경에서 Amplitude 이벤트를 함께 확인한다.
+# 원본은 device_id에만, device_id_hash 프로퍼티와 로그/Sentry identity에는 해시만 있어야 한다.
+# 아래 원본은 테스트용 가상 값이다. 로그인 성공에는 위에서 준비한 유효 Google ID 토큰이 필요하다.
+
+### 게스트 로그인 실패 + 기기 헤더: device_id=client-device-1761, device_id_hash=pepper 해시
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+X-Manyak-Device-Id: client-device-1761
+
+{ "idToken": "not-a-real-google-id-token.forged.value" }
+
+> {%
+    client.test("로그인 실패", () => { client.assert(response.status === 401, `actual=${response.status}`); });
+%}
+
+### 게스트 로그인 실패 + 헤더 없음: device_id=unknown, device_id_hash 생략
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+
+{ "idToken": "not-a-real-google-id-token.forged.value" }
+
+> {%
+    client.test("로그인 실패", () => { client.assert(response.status === 401, `actual=${response.status}`); });
+%}
+
+### 회원 로그인 성공 + 기기 헤더: user_id=공개 UUID, device_id=client-device-1761, device_id_hash=해시
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+X-Manyak-Device-Id: client-device-1761
+
+{ "idToken": "{{googleIdToken}}" }
+
+> {%
+    client.test("로그인 성공", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+%}
+
+### 회원 로그인 성공 + 헤더 없음: user_id=공개 UUID, device_id와 device_id_hash 생략
+POST {{baseUrl}}/api/v1/auth/login/google
+Content-Type: application/json
+
+{ "idToken": "{{googleIdToken}}" }
+
+> {%
+    client.test("로그인 성공", () => { client.assert(response.status === 200, `actual=${response.status}`); });
+%}
