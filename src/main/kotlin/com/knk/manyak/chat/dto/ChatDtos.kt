@@ -413,7 +413,7 @@ data class ChatModelResponse(
     @get:JsonProperty("isDefault")
     val isDefault: Boolean,
 )
-@Schema(description = "채팅 설정 변경. model과 longResponse 중 하나 이상 필수, null은 거절")
+@Schema(description = "채팅 설정 변경. model과 longResponse 중 하나 이상 필수, null은 거절", minProperties = 1)
 class ChangeChatSettingsRequest {
     @set:com.fasterxml.jackson.annotation.JsonSetter(value = "model", nulls = com.fasterxml.jackson.annotation.Nulls.FAIL)
     @get:Schema(description = "노출 중인 모델 코드. 생략하면 유지")

@@ -44,6 +44,8 @@ class ChatModelSelectionIntegrationTests {
 
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private lateinit var publisher: com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
     @Autowired private lateinit var meters: io.micrometer.core.instrument.MeterRegistry
     private val logs = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
     private val log = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.observability.StructuredLogger::class.java) as ch.qos.logback.classic.Logger
@@ -103,11 +105,52 @@ class ChatModelSelectionIntegrationTests {
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
             val succeeded = events("aiMessage_processed_succeeded")
+            assertThat(logs.list.any {
+                it.formattedMessage.contains("event_name=ai_response_saved") &&
+                    it.formattedMessage.contains("turn_number=2") && it.formattedMessage.contains("long_response=true")
+            }).isTrue()
             assertThat(succeeded).hasSize(3)
             assertThat(succeeded.map { it.eventProperties["long_response"] }).containsExactly(false, true, true)
             assertThat(succeeded.map { it.eventProperties["is_regenerated"] }).containsExactly(false, true, false)
         }
         assertThat(meters.find("manyak.chat.turn.result").meters().flatMap { it.id.tags }.none { it.key == "long_response" }).isTrue()
+    }
+
+    @Test fun `저장 뒤 완료 이벤트 전달이 실패해도 시작 분량의 성공 이벤트만 한번 발행한다`() {
+        val user = member()
+        val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), null, user.id, true)
+        GatedChatTurnAiClientConfig.gatedInput = "완료 전달 실패"
+        val failedWrites = java.util.concurrent.atomic.AtomicInteger()
+        val committedAtFailure = java.util.concurrent.atomic.AtomicBoolean()
+        org.mockito.Mockito.doAnswer { factoryCall ->
+            val writer = org.mockito.Mockito.spy(factoryCall.callRealMethod() as com.knk.manyak.chat.service.ChatGenerationEvents.Writer)
+            org.mockito.Mockito.doAnswer { writeCall ->
+                if (writeCall.getArgument<String>(0) == "completed") {
+                    committedAtFailure.set(chats.findById(chat.id).orElseThrow().currentTurn == 1)
+                    failedWrites.incrementAndGet()
+                    throw IllegalStateException("completed delivery failed")
+                }
+                writeCall.callRealMethod()
+            }.`when`(writer).write(org.mockito.Mockito.anyString(), org.mockito.Mockito.any<Any>() ?: Any())
+            writer
+        }.`when`(generationEvents).writer(
+            org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(), org.mockito.Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.EPOCH,
+        )
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("완료 전달 실패", realtimeImage = false), user.id)
+        assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
+        service.changeSettings(chat.publicId.toString(), null, user.id, false)
+        GatedChatTurnAiClientConfig.gate.countDown()
+        await().atMost(Duration.ofSeconds(10)).until {
+            failedWrites.get() == 1 && service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null
+        }
+        val succeeded = events("aiMessage_processed_succeeded")
+        assertThat(succeeded).hasSize(1)
+        assertThat(succeeded.single().eventProperties["long_response"]).isEqualTo(true)
+        assertThat(events("aiMessage_processed_failed")).isEmpty()
+        assertThat(committedAtFailure.get()).isTrue()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+        assertThat(wallet.balanceOf(user.id)).isEqualTo(950)
     }
 
     @Test fun `회원 체험과 게스트도 저장한 긴 출력 분량을 AI에 보낸다`() {

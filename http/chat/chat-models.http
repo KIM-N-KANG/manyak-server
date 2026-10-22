@@ -147,7 +147,15 @@ Content-Type: application/json
 
 {"longResponse":null}
 
-> {% client.test("출력 분량 null 400", () => { client.assert(response.status === 400, `actual=${response.status}`); }); %}
+> {%
+    client.test("출력 분량 null 400", () => {
+        client.assert(response.status === 400, `actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "요청 값이 올바르지 않습니다.", `message actual=${response.body.message}`);
+        client.assert(Array.isArray(response.body.details) && response.body.details.length === 0,
+            `details actual=${JSON.stringify(response.body.details)}`);
+    });
+%}
 
 ### 14. 다른 필드가 있어도 null 모델은 400
 PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
@@ -155,7 +163,15 @@ Content-Type: application/json
 
 {"model":null,"longResponse":true}
 
-> {% client.test("모델 null 400", () => { client.assert(response.status === 400, `actual=${response.status}`); }); %}
+> {%
+    client.test("모델 null 400", () => {
+        client.assert(response.status === 400, `actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "요청 값이 올바르지 않습니다.", `message actual=${response.body.message}`);
+        client.assert(Array.isArray(response.body.details) && response.body.details.length === 0,
+            `details actual=${JSON.stringify(response.body.details)}`);
+    });
+%}
 
 ### 15. 회원은 게스트 출력 분량을 바꿀 수 없다 (로그인 준비 필요)
 PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
@@ -164,7 +180,13 @@ Content-Type: application/json
 
 {"longResponse":true}
 
-> {% client.test("출력 분량 소유권 403", () => { client.assert(response.status === 403, `actual=${response.status}`); }); %}
+> {%
+    client.test("출력 분량 소유권 403", () => {
+        client.assert(response.status === 403, `actual=${response.status}`);
+        client.assert(response.body.code === "FORBIDDEN", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "채팅을 이어쓸 권한이 없습니다.", `message actual=${response.body.message}`);
+    });
+%}
 
 ### 자유 조회
 GET {{baseUrl}}/api/v1/chats/models

@@ -1,5 +1,7 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.chat.dto.ChangeChatSettingsRequest
+import org.springdoc.core.customizers.OpenApiCustomizer
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Info
@@ -33,6 +35,19 @@ class OpenApiConfig {
                         .description("access 토큰(HS256 JWT). `Authorization: Bearer <accessToken>` 로 보낸다."),
                 ),
             )
+
+    // springdoc 3.0.3의 KotlinNullablePropertyCustomizer는 @Schema의 types/nullable과 무관하게
+    // Kotlin nullable 프로퍼티에 null 타입을 추가한다. Nulls.FAIL로 null을 거절하는 이 요청만 보정한다.
+    @Bean
+    fun chatSettingsSchema(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        val schema = api.components?.schemas?.get(ChangeChatSettingsRequest::class.java.simpleName)
+            ?: return@OpenApiCustomizer
+        for (name in listOf("model", "longResponse")) {
+            val property = schema.properties?.get(name) ?: continue
+            property.types = property.types?.filterTo(linkedSetOf()) { it != "null" }
+            property.nullable = false
+        }
+    }
 
     companion object {
         /** 인증 필수 엔드포인트의 @SecurityRequirement(name = ...)와 일치해야 한다. */
