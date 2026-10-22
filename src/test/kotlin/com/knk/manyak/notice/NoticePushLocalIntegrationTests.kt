@@ -39,7 +39,7 @@ class NoticePushLocalIntegrationTests {
             assertThat(call.getArgument<AndroidConfig.Priority>(2)).isEqualTo(AndroidConfig.Priority.NORMAL)
             sent += call.getArgument<Long>(0) to call.getArgument<Map<String, String>>(1)
             null
-        }.`when`(sender).sendToUser(anyLong(), anyMap(), any(AndroidConfig.Priority::class.java) ?: AndroidConfig.Priority.NORMAL, isNull(), isNull())
+        }.`when`(sender).sendToUser(anyLong(), anyMap(), any(AndroidConfig.Priority::class.java) ?: AndroidConfig.Priority.NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
     }
     private fun user(name: String, service: Boolean = true, marketing: Boolean = false, night: Boolean = false, status: UserStatus = UserStatus.ACTIVE): User {
         val user = users.save(User(nickname = name, servicePushEnabled = service, status = status,
