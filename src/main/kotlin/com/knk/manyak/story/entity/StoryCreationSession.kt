@@ -41,6 +41,10 @@ class StoryCreationSession(
     @Column(name = "storyline_request_id")
     var storylineRequestId: UUID? = null,
 
+    // HTTP 추적 request_id와 제작 요청 UUID는 별개이므로, 생성한 AI 로그를 직접 보존한다.
+    @Column(name = "storyline_ai_call_log_id")
+    val storylineAiCallLogId: Long? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     var status: StoryCreationSessionStatus,

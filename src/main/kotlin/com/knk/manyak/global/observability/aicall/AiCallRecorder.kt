@@ -93,6 +93,14 @@ class AiCallRecorder(
         }
     }
 
+    /** 제작 저장 트랜잭션에서 확정한 스토리를 호출에 연결한다. */
+    fun attachStoryId(aiCallLogId: Long, storyId: Long) {
+        repository.findById(aiCallLogId).ifPresent { log ->
+            log.storyId = storyId
+            repository.save(log)
+        }
+    }
+
     /**
      * 적재된 호출에 Sentry 이벤트 id를 연결한다. 실패한 AI 호출을 캡처한 뒤 호출해
      * ai_call_logs와 Sentry 이벤트를 상호 참조할 수 있게 한다.

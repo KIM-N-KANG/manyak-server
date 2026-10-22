@@ -31,19 +31,25 @@ open class AdminListRequest {
         return AdminPagination(page, size, "$column $order NULLS LAST")
     }
 }
-class AdminMembersRequest : AdminListRequest() {
-    @field:Size(min = 1, max = 50) var query: String? = null
+class AdminMembersRequest : AdminSearchRequest() {
     var status: UserStatus? = null
+    var excludeDeleted: Boolean? = null
+    @field:Min(0) @field:Max(4) var chatBucket: Int? = null
+    var chatFrom: String? = null
+    var chatTo: String? = null
+    var creditDirection: String? = null
+    var creditDate: String? = null
+    var attendanceDate: String? = null
 }
-class AdminPaymentsRequest : AdminListRequest() {
+class AdminPaymentsRequest : AdminSearchRequest() {
     var status: CreditOrderStatus? = null
-    @field:Pattern(regexp = "\\d{4}-\\d{2}-\\d{2}") var from: String? = null
-    @field:Pattern(regexp = "\\d{4}-\\d{2}-\\d{2}") var to: String? = null
+    var memberId: UUID? = null
 }
-class AdminAuditLogsRequest : AdminListRequest() {
+class AdminAuditLogsRequest : AdminSearchRequest() {
     var adminId: UUID? = null
     var action: AdminAuditAction? = null
     var targetType: AdminAuditTargetType? = null
+    var category: com.knk.manyak.admin.entity.AdminAuditCategory? = null
     @field:Size(min = 1, max = 255) var targetId: String? = null
 }
 
@@ -54,8 +60,14 @@ data class AdminPagination(val page: Int, val size: Int, val orderBy: String) {
 data class AdminPageResponse<T>(val items: List<T>, val page: Int, val size: Int, val totalElements: Long, val totalPages: Long)
 data class AdminMemberDetailResponse(
     val memberId: UUID, val nickname: String, val status: UserStatus, val isAdmin: Boolean, val createdAt: Instant,
-    val creditBalance: Long, val storyCount: Long, val chatCount: Long, val deletedAt: Instant?,
-)
+    val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
+    val creditBalance: Long, val storyCount: Long, val deletedAt: Instant?,
+) {
+    constructor(member: AdminMemberListResponse, creditBalance: Long, storyCount: Long, deletedAt: Instant?) : this(
+        member.memberId, member.nickname, member.status, member.isAdmin, member.createdAt, member.lastActiveAt,
+        member.creditsSpent, member.paidKrw, member.chatCount, member.periodChatCount, creditBalance, storyCount, deletedAt)
+}
+
 data class AdminPaymentOrderResponse(
     val orderId: UUID, val member: AdminMemberSummary, val productId: String, val status: CreditOrderStatus,
     val priceKrw: Long, val creditAmount: Long, val completedAt: Instant, val refundedAt: Instant?, val reversalShortfall: Long?,
@@ -81,7 +93,7 @@ data class AdminDateRange(val from: Instant?, val until: Instant?) {
         val KST: ZoneId = ZoneId.of("Asia/Seoul")
         fun of(from: String?, to: String?): AdminDateRange {
             fun parse(value: String?) = value?.let {
-                try { LocalDate.parse(it) } catch (_: java.time.DateTimeException) { badAdminQuery("날짜가 올바르지 않습니다.") }
+                try { if (!it.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}"))) badAdminQuery("날짜가 올바르지 않습니다."); LocalDate.parse(it) } catch (_: java.time.DateTimeException) { badAdminQuery("날짜가 올바르지 않습니다.") }
             }
             val start = parse(from)
             val end = parse(to)

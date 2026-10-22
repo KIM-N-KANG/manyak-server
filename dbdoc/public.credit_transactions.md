@@ -32,6 +32,8 @@
 | idx_credit_transactions_user | CREATE INDEX idx_credit_transactions_user ON public.credit_transactions USING btree (user_id) |
 | idx_credit_transactions_ref | CREATE INDEX idx_credit_transactions_ref ON public.credit_transactions USING btree (user_id, ref_type, ref_id) |
 | idx_credit_transactions_user_history | CREATE INDEX idx_credit_transactions_user_history ON public.credit_transactions USING btree (user_id, created_at DESC, id DESC) |
+| idx_credit_transactions_admin_created | CREATE INDEX idx_credit_transactions_admin_created ON public.credit_transactions USING btree (created_at, user_id) INCLUDE (amount, reason) |
+| idx_credit_transactions_admin_chat_ref | CREATE INDEX idx_credit_transactions_admin_chat_ref ON public.credit_transactions USING btree (ref_id, ref_type) INCLUDE (amount) WHERE ((amount < 0) AND ((reason)::text = ANY ((ARRAY['CHAT_TURN'::character varying, 'CHAT_IMAGE'::character varying])::text[]))) |
 
 ## Relations
 

@@ -40,7 +40,7 @@ Authorization: Bearer {{adminToken}}
     });
 %}
 
-### 회원 전체 목록 — ACCESS 대상 ALL, 기본 size 20
+### 회원 전체 목록 — 접속 기록 없음, 기본 size 20
 GET {{baseUrl}}/api/v1/admin/members?page=1&size=20&sort=createdAt&order=desc
 Authorization: Bearer {{adminToken}}
 X-Manyak-Request-Id: admin_members_manual
@@ -55,8 +55,8 @@ X-Manyak-Request-Id: admin_members_manual
     });
 %}
 
-### 공개 UUID 검색 — 닉네임 부분 일치와 정확 일치 이메일도 query 사용, 상태 필터 선택
-GET {{baseUrl}}/api/v1/admin/members?query={{adminSelfId}}&status=ACTIVE
+### 공개 UUID 검색 — 닉네임 부분 일치와 정확 일치 이메일도 q 사용, 상태 필터 선택
+GET {{baseUrl}}/api/v1/admin/members?q={{adminSelfId}}&status=ACTIVE
 Authorization: Bearer {{adminToken}}
 
 > {%
@@ -172,5 +172,198 @@ GET {{baseUrl}}/api/v1/admin/dashboard/summary
 %}
 
 ### 자유 조회 — 실제 DB의 검색어·페이지·필터를 직접 바꿔 실행
-GET {{baseUrl}}/api/v1/admin/members?query=등대&page=1&size=20
+GET {{baseUrl}}/api/v1/admin/members?q=등대&page=1&size=20
 Authorization: Bearer {{adminToken}}
+
+
+### 차트 — 7일, 분포 8종, 빈 날짜는 0
+# 아래 막대·목록 수 비교는 MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS를 빈 값으로 기동한 환경에서 실행한다.
+# 채팅 분포는 삭제된 스토리에 남은 미삭제 채팅도 포함한다. 장르 깊이는 삭제 스토리를 제외한다.
+# 비교 중 데이터가 바뀌지 않는 로컬 fixture를 사용한다.
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("차트 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.daily.length === 7 && response.body.distributions.length === 8, "7일과 8개 차트가 필요합니다");
+        client.assert(response.body.distributions[1].points.length === 11, "턴 구간 11개가 필요합니다");
+        const link = response.body.distributions[1].points[1].link;
+        client.assert(link.list === "chats" && link.params.turnBucket === "1", `actual=${JSON.stringify(link)}`);
+    });
+    if (response.status === 200) {
+        for (const [chartId, prefix] of [["turns", "adminTurnDrill"], ["member-chats", "adminMemberDrill"], ["characters", "adminCharactersDrill"]]) {
+            const points = response.body.distributions.find(d => d.chartId === chartId).points;
+            const point = points.find(p => p.value > 0) || points[0];
+            const query = Object.entries(point.link.params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+            client.global.set(`${prefix}Path`, `${point.link.list}?${query}`);
+            client.global.set(`${prefix}Count`, point.value);
+        }
+        const genre = response.body.distributions.find(d => d.chartId === "genre-depth").points[0];
+        if (genre) {
+            const query = Object.entries(genre.link.params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+            client.global.set("adminGenreDrillPath", `${genre.link.list}?${query}&size=100`);
+            client.global.set("adminGenreAverage", genre.value);
+        }
+    }
+%}
+
+### 턴 수 막대의 링크 목록 — 앞 차트 요청 후 실행
+GET {{baseUrl}}/api/v1/admin/{{adminTurnDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("턴 수 막대와 목록 총계 일치", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements === Number(client.global.get("adminTurnDrillCount")), `actual=${response.body.totalElements}`);
+    });
+%}
+
+### 회원별 채팅 수 막대의 링크 목록 — 앞 차트 요청 후 실행
+GET {{baseUrl}}/api/v1/admin/{{adminMemberDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("회원 수 막대와 목록 총계 일치", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements === Number(client.global.get("adminMemberDrillCount")), `actual=${response.body.totalElements}`);
+    });
+%}
+
+### 인물 수 막대의 링크 목록 — 미삭제 스토리의 최신 완료 세션만 집계
+GET {{baseUrl}}/api/v1/admin/{{adminCharactersDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("인물 수 막대와 스토리 목록 총계 일치", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements === Number(client.global.get("adminCharactersDrillCount")), `actual=${response.body.totalElements}`);
+    });
+%}
+
+### 장르 깊이의 링크 목록 — 앞 차트에 장르가 있고 해당 스토리가 100개 이하인 고정 fixture에서 실행
+GET {{baseUrl}}/api/v1/admin/{{adminGenreDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("장르 깊이는 링크 스토리의 턴 합과 채팅 수로 계산", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements > 0 && response.body.items.length === response.body.totalElements, "비교할 스토리 전체가 한 페이지에 있어야 합니다");
+        const turns = response.body.items.reduce((sum, s) => sum + s.totalTurns, 0);
+        const chats = response.body.items.reduce((sum, s) => sum + s.chatCount, 0);
+        client.assert(chats > 0 && Math.abs(turns / chats - Number(client.global.get("adminGenreAverage"))) < 1e-9, `turns=${turns} chats=${chats}`);
+    });
+%}
+
+### 스토리 목록 — 팀 제외 없음, 비공개 포함, 공통 페이지
+GET {{baseUrl}}/api/v1/admin/stories?size=20&sort=totalTurns&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리 목록", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+    if (response.status === 200 && response.body.items.length) client.global.set("adminStoryId", response.body.items[0].storyId);
+%}
+
+### 스토리 상세 — 위 목록에 데이터가 있어야 함
+GET {{baseUrl}}/api/v1/admin/stories/{{adminStoryId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("유지율과 최근 채팅", () => {
+        client.assert(response.status === 200 && response.body.retention.length === 5, `actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.recentChats.length <= 5, "최근 채팅은 최대 5개입니다");
+    });
+%}
+
+### 채팅방 목록 — 메시지 원문 없음
+GET {{baseUrl}}/api/v1/admin/chats?size=20&sort=turnCount&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("채팅방 목록", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(c => !("messages" in c) && !("persona" in c) && !("summary" in c)), "원문 필드가 없어야 합니다");
+    });
+    if (response.status === 200 && response.body.items.length) client.global.set("adminChatId", response.body.items[0].chatId);
+%}
+
+### 채팅방 상세 — 위 목록에 데이터가 있어야 함
+GET {{baseUrl}}/api/v1/admin/chats/{{adminChatId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("채팅방 상세", () => client.assert(response.status === 200 && !("messages" in response.body), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 회원 거래 내역 — 원장 ID 없음, 각 행 누계, 접속 기록
+GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}/transactions?size=2
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("거래 내역", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(t => !("id" in t) && typeof t.balanceAfter === "number"), "원장 ID 없이 누계를 표시해야 합니다");
+    });
+%}
+
+### 회원 출석 — KST 날짜별 페이지, 접속 기록
+GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}/attendance?page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("출석 내역", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+%}
+
+### 결제 목록에서 상세 식별자 선택 — 실제 완료 주문이 있어야 함
+GET {{baseUrl}}/api/v1/admin/payments/orders?size=1
+Authorization: Bearer {{adminToken}}
+
+> {%
+    if (response.status === 200 && response.body.items.length) client.global.set("adminOrderId", response.body.items[0].orderId);
+%}
+
+### 결제 상세 — 첫 결제 전후
+GET {{baseUrl}}/api/v1/admin/payments/orders/{{adminOrderId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("결제 상세", () => client.assert(response.status === 200 && response.body.firstPaidAt && response.body.before && response.body.after, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 허용 외 차트 기간 400
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=10
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("기간 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 없는 채팅방 404
+GET {{baseUrl}}/api/v1/admin/chats/00000000-0000-4000-8000-000000000000
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("채팅방 없음", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 자유 조회 — 회원 활동과 출석 필터를 필요에 맞게 조합
+GET {{baseUrl}}/api/v1/admin/members?creditDirection=spent&creditDate=2026-10-21&sort=creditsSpent
+Authorization: Bearer {{adminToken}}
+
+
+### 새로 완성한 스토리의 제작 AI 필터 — http/story/simple-story-creation.http로 먼저 생성
+# 과거 로그는 백필하지 않으므로 이번 변경 이후 생성·완성한 스토리로 확인한다.
+GET {{baseUrl}}/api/v1/admin/stories?aiFeature=story_completion&aiStatus=SUCCEEDED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("완성 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+%}
+
+### 같은 제작 흐름의 스토리라인 생성 호출도 완성된 스토리로 조회
+GET {{baseUrl}}/api/v1/admin/stories?aiFeature=storyline_generation&aiStatus=SUCCEEDED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리라인 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+%}

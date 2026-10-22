@@ -40,6 +40,8 @@
 | stories_pkey | CREATE UNIQUE INDEX stories_pkey ON public.stories USING btree (id) |
 | uq_stories_public_id | CREATE UNIQUE INDEX uq_stories_public_id ON public.stories USING btree (public_id) |
 | idx_stories_user_created | CREATE INDEX idx_stories_user_created ON public.stories USING btree (user_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL) |
+| idx_stories_admin_created_public | CREATE INDEX idx_stories_admin_created_public ON public.stories USING btree (created_at DESC, public_id) |
+| idx_stories_admin_owner_created | CREATE INDEX idx_stories_admin_owner_created ON public.stories USING btree (user_id, created_at DESC) |
 
 ## Relations
 
