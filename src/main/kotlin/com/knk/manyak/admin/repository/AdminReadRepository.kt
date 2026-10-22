@@ -112,6 +112,20 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
         return (rows[0] ?: AdminPaymentUsage(0, 0, 0)) to (rows[1] ?: AdminPaymentUsage(0, 0, 0))
     }
 
+    fun creditTransactions(request: AdminCreditTransactionsRequest, page: AdminPagination): AdminPageResponse<AdminCreditTransactionResponse> {
+        val q = AdminQuery()
+        request.direction?.let { q.add(if (it == "granted") AdminQuery.GRANTED else AdminQuery.SPENT) }
+        request.date?.let {
+            val day = "FLOOR((EXTRACT(EPOCH FROM t.created_at) + ${AdminQuery.KST_OFFSET_SECONDS}) / 86400)"
+            q.equal(day, LocalDate.parse(it).toEpochDay())
+        }
+        return jdbc.adminPage("t.amount, t.reason, t.created_at, $MEMBER_COLUMNS",
+            "FROM credit_transactions t JOIN users u ON u.id=t.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
+            q, page, "t.id", RowMapper { rs, _ ->
+                AdminCreditTransactionResponse(rs.getLong("amount"), rs.getString("reason"), rs.instant("created_at")!!, memberSummary(rs)!!)
+            }, idDescending = true)
+    }
+
     fun transactions(userId: Long, page: AdminPagination): AdminPageResponse<AdminTransactionResponse> {
         val q = AdminQuery().apply { equal("user_id", userId) }
         // 누계를 전체 회원 원장에 먼저 적용하고 바깥에서 페이징한다. 동시각은 내부 기록 순서를 유지한다.

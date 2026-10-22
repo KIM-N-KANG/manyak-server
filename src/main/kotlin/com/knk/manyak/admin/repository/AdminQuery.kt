@@ -71,9 +71,9 @@ internal class AdminQuery {
 internal fun ResultSet.instant(name: String): Instant? = getTimestamp(name)?.toInstant()
 internal fun ResultSet.longOrNull(name: String): Long? = (getObject(name) as? Number)?.toLong()
 internal fun <T> NamedParameterJdbcTemplate.adminPage(select: String, from: String, query: AdminQuery, page: AdminPagination,
-    id: String, mapper: RowMapper<T>): AdminPageResponse<T> {
+    id: String, mapper: RowMapper<T>, idDescending: Boolean = false): AdminPageResponse<T> {
     val total = queryForObject("SELECT COUNT(*) $from WHERE ${query.where()}", query.params, Long::class.java)!!
     if (page.offset >= total) return page.response(emptyList(), total)
-    return page.response(query("SELECT $select $from WHERE ${query.where()} ORDER BY ${page.orderBy}, $id ASC LIMIT :size OFFSET :offset",
+    return page.response(query("SELECT $select $from WHERE ${query.where()} ORDER BY ${page.orderBy}, ${id} ${if (idDescending) "DESC" else "ASC"} LIMIT :size OFFSET :offset",
         query.params + mapOf("size" to page.size, "offset" to page.offset), mapper), total)
 }
