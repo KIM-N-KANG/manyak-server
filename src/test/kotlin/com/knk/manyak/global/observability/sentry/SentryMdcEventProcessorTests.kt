@@ -167,4 +167,14 @@ class SentryMdcEventProcessorTests {
         assertEquals("req_only", event.getTag(MdcKeys.REQUEST_ID))
         assertNull(event.contexts["identity"])
     }
+    @Test fun `공지 제목 본문 사유와 검색어는 Sentry 요청에서 제거한다`() {
+        for (path in listOf("/api/v1/admin/notices", "/api/v1/admin/notices/uuid/publish")) {
+            val request = io.sentry.protocol.Request().apply { url = "https://api.test$path"; data = "notice-body"; queryString = "q=notice-title" }
+            val event = processor.process(SentryEvent().apply { this.request = request }, Hint())
+            assertNull(event.request!!.data)
+            assertNull(event.request!!.queryString)
+            assertEquals("https://api.test$path", event.request!!.url)
+        }
+    }
+
 }

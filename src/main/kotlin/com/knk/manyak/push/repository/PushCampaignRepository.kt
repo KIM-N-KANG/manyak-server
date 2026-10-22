@@ -13,6 +13,9 @@ import java.time.Instant
 
 interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecificationExecutor<PushCampaign> {
     fun findByPublicId(publicId: UUID): PushCampaign?
+    /** FK를 외부 식별자로 투영할 뿐 공지의 내용·상태·서비스 연산을 사용하지 않는다. */
+    @Query("SELECT n.publicId FROM Notice n WHERE n.id=:noticeId")
+    fun findNoticePublicId(noticeId: Long): UUID?
     fun findByStatusAndStartedAtLessThanEqual(status: PushCampaignStatus, cutoff: Instant): List<PushCampaign>
 
 

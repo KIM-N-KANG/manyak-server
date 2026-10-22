@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 13 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 14 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -59,6 +59,7 @@
 | [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
+| [public.notices](public.notices.md) | 10 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
 
 ## Relations
 
@@ -112,6 +113,7 @@ erDiagram
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
+"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
@@ -128,6 +130,7 @@ erDiagram
 "public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.push_delivery_results" }o--o| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
+"public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -556,6 +559,7 @@ erDiagram
   timestamp_with_time_zone finished_at
   timestamp_with_time_zone created_at
   varchar_16_ kind
+  bigint notice_id FK
 }
 "public.credit_orders" {
   bigint id
@@ -709,6 +713,18 @@ erDiagram
   integer delivered_devices
   integer failed_devices
   timestamp_with_time_zone completed_at
+}
+"public.notices" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  text body
+  varchar_10_ status
+  timestamp_with_time_zone published_at
+  timestamp_with_time_zone notified_at
+  bigint created_by_user_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

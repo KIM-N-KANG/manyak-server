@@ -115,5 +115,38 @@ class ScheduledPushOutboxIntegrationTests {
         verifyNoInteractions(sender)
     }
 
+
+    @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
+
+    @Test fun `공지 캠페인은 종류별 동의자에게 공개 UUID와 딥링크 및 시나리오별 메시지 ID를 기록한다`() {
+        val all = users.findAll()
+        all.first().servicePushEnabled = false
+        users.saveAndFlush(all.first())
+        val serviceOnly = users.save(User(nickname = "서비스만", servicePushEnabled = true))
+        tokens.save(DevicePushToken(userId = serviceOnly.id, token = "service-only", platform = PushPlatform.ANDROID))
+        for (kind in listOf(com.knk.manyak.push.dto.PushKind.SERVICE, com.knk.manyak.push.dto.PushKind.MARKETING)) {
+            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", createdByUserId = all.first().id))
+            val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id))
+            messages.clear()
+            assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
+            assertThat(messages).hasSize(3)
+            val type = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) "NOTICE" else "PROMOTION"
+            val prefix = if (type == "NOTICE") "notice" else "promotion"
+            for (message in messages) {
+                assertThat(message.type).isEqualTo(type)
+                assertThat(message.kind).isEqualTo(kind.name)
+                assertThat(message.messageId).isEqualTo("$prefix:${campaign.publicId}:${message.recipientId}")
+                assertThat(message.data["noticeId"]).isEqualTo(notice.publicId.toString())
+                assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}")
+                assertThat(message.data["title"]).isEqualTo(if (type == "NOTICE") "공지 제목" else "(광고) 공지 제목")
+                assertThat(message.requestId).isEqualTo("unknown")
+                assertThat(message.sessionId).isEqualTo("unknown")
+            }
+            assertThat(messages.map { it.recipientId }).contains(if (type == "NOTICE") serviceOnly.publicId.toString() else all.first().publicId.toString())
+            assertThat(messages.map { it.recipientId }).doesNotContain(if (type == "NOTICE") all.first().publicId.toString() else serviceOnly.publicId.toString())
+        }
+        verifyNoInteractions(sender)
+    }
+
     private fun placeholder() = PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")
 }

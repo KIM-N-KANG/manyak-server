@@ -93,6 +93,7 @@ class AdminCampaignService(
     private fun response(row: PushCampaign, summary: CampaignDeliverySummary = deliveries.summaries(listOf(row.id))[row.id] ?: CampaignDeliverySummary()) = AdminCampaignResponse(row.publicId, row.kind, row.title, row.body,
         row.scheduledAt, row.status, targetCount = row.targetCount, sentCount = row.sentCount,
         startedAt = row.startedAt, finishedAt = row.finishedAt, createdAt = row.createdAt,
+        noticeId = row.noticeId?.let(campaigns::findNoticePublicId),
         deliveredMembers = summary.deliveredMembers, deliveredDevices = summary.deliveredDevices, failedDevices = summary.failedDevices)
     private fun badRequest(message: String): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
 }

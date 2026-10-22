@@ -1,0 +1,85 @@
+# 공개 공지 조회. Postgres·Redis와 서버를 기동하고 http/admin/notice.http에서 공지를 게시한다.
+# 알림 없이 게시한 공지를 사용해도 된다. 실제 공개 공지 UUID를 아래 변수에 넣는다.
+@baseUrl = http://localhost:8080
+@publicNoticeId = 00000000-0000-4000-8000-000000000000
+
+### 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 공개 목록 — 본문과 작성자 없음, 커서는 그대로 전달
+GET {{baseUrl}}/api/v1/notices?limit=2
+
+> {%
+    client.test("공개 목록", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(n => !("body" in n) && !("createdBy" in n)), "공개 목록에 본문과 작성자가 없어야 합니다");
+    });
+    if (response.status === 200) {
+        if (response.body.nextCursor) client.global.set("noticeNextCursor", response.body.nextCursor);
+        if (response.body.items.length) client.global.set("publicReadNoticeId", response.body.items[0].noticeId);
+    }
+%}
+
+### 다음 페이지 — 앞 목록에 nextCursor가 있을 때 실행
+GET {{baseUrl}}/api/v1/notices?limit=2&cursor={{noticeNextCursor}}
+
+> {%
+    client.test("다음 페이지", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 공개 상세 — 앞 목록에 데이터가 있을 때 실행
+GET {{baseUrl}}/api/v1/notices/{{publicReadNoticeId}}
+
+> {%
+    client.test("공개 상세", () => client.assert(response.status === 200 && typeof response.body.body === "string" && !("createdBy" in response.body), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 무효 토큰도 읽지 않음
+GET {{baseUrl}}/api/v1/notices
+Authorization: Bearer invalid.expired.token
+
+> {%
+    client.test("토큰 무시", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 커서 변조 400
+GET {{baseUrl}}/api/v1/notices?cursor=broken
+
+> {%
+    client.test("잘못된 커서", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 형식 오류도 부재 404
+GET {{baseUrl}}/api/v1/notices/not-a-uuid
+
+> {%
+    client.test("없는 공지", () => client.assert(response.status === 404, `actual=${response.status}`));
+%}
+
+### 자유 조회 — 실제 게시된 UUID를 변수에 입력
+GET {{baseUrl}}/api/v1/notices/{{publicNoticeId}}
+
+### limit 0은 1로 보정
+GET {{baseUrl}}/api/v1/notices?limit=0
+
+> {%
+    client.test("0 보정", () => client.assert(response.status === 200 && response.body.items.length <= 1, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### limit 음수도 1로 보정
+GET {{baseUrl}}/api/v1/notices?limit=-1
+
+> {%
+    client.test("음수 보정", () => client.assert(response.status === 200 && response.body.items.length <= 1, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### limit 상한은 50
+GET {{baseUrl}}/api/v1/notices?limit=999
+
+> {%
+    client.test("상한 보정", () => client.assert(response.status === 200 && response.body.items.length <= 50, `actual=${JSON.stringify(response.body)}`));
+%}

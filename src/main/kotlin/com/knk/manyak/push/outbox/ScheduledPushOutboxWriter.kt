@@ -31,6 +31,7 @@ class ScheduledPushOutboxWriter(
             val messageId = when (scenario) {
                 "attendance" -> "attendance:$recipientId:$occurrence"
                 "promotion" -> "promotion:$occurrence:$recipientId"
+                "notice" -> "notice:$occurrence:$recipientId"
                 else -> error("Unknown scheduled push scenario: $scenario")
             }
             store.insert(PushMessage(
