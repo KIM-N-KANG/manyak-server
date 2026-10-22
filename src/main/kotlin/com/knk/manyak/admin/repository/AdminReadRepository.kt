@@ -115,10 +115,7 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
     fun creditTransactions(request: AdminCreditTransactionsRequest, page: AdminPagination): AdminPageResponse<AdminCreditTransactionResponse> {
         val q = AdminQuery()
         request.direction?.let { q.add(if (it == "granted") AdminQuery.GRANTED else AdminQuery.SPENT) }
-        request.date?.let {
-            val day = "FLOOR((EXTRACT(EPOCH FROM t.created_at) + ${AdminQuery.KST_OFFSET_SECONDS}) / 86400)"
-            q.equal(day, LocalDate.parse(it).toEpochDay())
-        }
+        q.range("t.created_at", request.date, request.date)
         return jdbc.adminPage("t.amount, t.reason, t.created_at, $MEMBER_COLUMNS",
             "FROM credit_transactions t JOIN users u ON u.id=t.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
             q, page, "t.id", RowMapper { rs, _ ->
