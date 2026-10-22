@@ -46,6 +46,9 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatRegenerateControllerIntegrationTests {
+    @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
+    @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
+
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -89,7 +92,7 @@ class ChatRegenerateControllerIntegrationTests {
     @Autowired private lateinit var creditPolicyService: CreditPolicyService
 
     // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
-    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+    private val chatTurnCost: Long get() = chatModelService.litePrice()
 
     // 여러 턴을 견디는 충분한 잔액.
     private val seedBalance: Long get() = chatTurnCost * 10

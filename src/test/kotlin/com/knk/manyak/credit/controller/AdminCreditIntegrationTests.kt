@@ -79,7 +79,7 @@ class AdminCreditIntegrationTests {
         post(body(key = "failed-grant")).expectStatus().is5xxServerError
         post(body("REVOKE", 100, "failed-revoke")).expectStatus().is5xxServerError
         put("attendance_reward", policy(500)).expectStatus().is5xxServerError
-        put("chat_turn_cost", policy(50)).expectStatus().is5xxServerError
+        put("story_creation_cost", policy(50)).expectStatus().is5xxServerError
         delete("attendance_reward").expectStatus().is5xxServerError
         assertThat(count("credit_admin_adjustments")).isEqualTo(1)
         assertThat(count("credit_transactions")).isEqualTo(1)
@@ -260,7 +260,7 @@ class AdminCreditIntegrationTests {
         put("attendance_reward", policy(500, Instant.now().plusSeconds(3600).toString())).expectStatus().isOk
         policies.refresh()
         client.get().uri("$root/policies").header("Authorization", "Bearer $token").exchange().expectStatus().isOk
-            .expectBody().jsonPath("$.items.length()").isEqualTo(7)
+            .expectBody().jsonPath("$.items.length()").isEqualTo(6)
             .jsonPath("$.items[0].policyKey").isEqualTo("attendance_reward")
             .jsonPath("$.items[0].override.amount").isEqualTo(500).jsonPath("$.items[0].effectiveAmount").isEqualTo(500)
         put("attendance_reward", policy(300)).expectStatus().isOk

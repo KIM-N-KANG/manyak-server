@@ -26,6 +26,7 @@
 | occurred_main_event_names_snapshot | jsonb |  | true |  |  |  |
 | persona_name_snapshot | text |  | true |  |  |  |
 | persona_description_snapshot | text |  | true |  |  |  |
+| model_code | varchar(20) | 'LITE'::character varying | false |  | [public.chat_models](public.chat_models.md) |  |
 
 ## Constraints
 
@@ -43,6 +44,7 @@
 | uq_story_chats_public_id | UNIQUE | UNIQUE (public_id) |
 | fk_story_chats_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | fk_story_chats_target_main_event | FOREIGN KEY | FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL |
+| story_chats_model_code_fkey | FOREIGN KEY | FOREIGN KEY (model_code) REFERENCES chat_models(code) |
 
 ## Indexes
 
@@ -68,6 +70,7 @@ erDiagram
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.story_chats" }o--|| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
 
 "public.story_chats" {
   bigint id
@@ -92,6 +95,7 @@ erDiagram
   jsonb occurred_main_event_names_snapshot
   text persona_name_snapshot
   text persona_description_snapshot
+  varchar_20_ model_code FK
 }
 "public.story_messages" {
   bigint id
@@ -102,6 +106,7 @@ erDiagram
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
 }
 "public.story_choices" {
   bigint id
@@ -179,6 +184,16 @@ erDiagram
   integer min_turns
   text achievement_condition
   text epilogue
+}
+"public.chat_models" {
+  varchar_20_ code
+  varchar_30_ name
+  bigint turn_cost
+  integer sort_order
+  boolean is_active
+  boolean is_default
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 

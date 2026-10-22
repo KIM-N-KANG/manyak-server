@@ -40,10 +40,18 @@ class AdminReadPostgresTests {
         userId = jdbc.queryForObject("INSERT INTO users(public_id,nickname,created_at) VALUES (?, 'pg 검색 회원', '2026-10-21T00:00:00Z') RETURNING id", Long::class.java, memberId)!!
         jdbc.update("INSERT INTO admin_accounts(user_id) VALUES (?)", userId)
         val sid = jdbc.queryForObject("INSERT INTO stories(public_id,user_id,title,genre,created_at) VALUES (?,?,'pg 검색 스토리','판타지, 미스터리','2026-10-21T00:00:00Z') RETURNING id", Long::class.java, storyId, userId)!!
+        val session = jdbc.queryForObject("INSERT INTO story_creation_sessions(story_id,status,created_at) VALUES (?,'STORY_CREATED','2026-10-21T00:00:00Z') RETURNING id", Long::class.java, sid)!!
+        jdbc.update("INSERT INTO story_creation_characters(creation_session_id,role,name,gender,sort_order) VALUES (?, 'SUPPORTING_CHARACTER', NULL, NULL, 1), (?, 'SUPPORTING_CHARACTER', ?, NULL, 2), (?, 'SUPPORTING_CHARACTER', '이름', NULL, 3), (?, 'SUPPORTING_CHARACTER', NULL, 'FEMALE', 4)",
+            session, session, " \t\n　", session, session)
+        val tagged = jdbc.queryForObject("INSERT INTO story_creation_characters(creation_session_id,role,sort_order) VALUES (?, 'SUPPORTING_CHARACTER', 5) RETURNING id", Long::class.java, session)!!
+        for (source in listOf("PREDEFINED", "CUSTOM")) {
+            val tag = jdbc.queryForObject("INSERT INTO story_creation_tags(tag_type,name,tag_source,normalized_name,sort_order) VALUES ('SUPPORTING_CHARACTER', ?, ?, ?, 0) RETURNING id", Long::class.java, source, source, source.lowercase())!!
+            jdbc.update("INSERT INTO story_creation_session_tags(creation_session_id,character_id,tag_id) VALUES (?, ?, ?)", session, tagged, tag)
+        }
         val cid = jdbc.queryForObject("INSERT INTO story_chats(public_id,user_id,story_id,current_turn,created_at) VALUES (?,?,?,4,'2026-10-21T00:00:00Z') RETURNING id", Long::class.java, chatId, userId, sid)!!
         jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order,created_at) VALUES (?,'USER','fixture',1,'2026-10-21T00:00:30Z'),(?,'ASSISTANT','fixture',2,'2026-10-21T00:01:00Z')", cid, cid)
         jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,created_at) VALUES (?,250,'ATTENDANCE_REWARD','2026-10-21T00:00:01Z')", userId)
-        jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,ref_type,ref_id,created_at) VALUES (?,-20,'CHAT_TURN','CHAT',?,'2026-10-21T00:02:00Z')", userId, cid)
+        jdbc.update("INSERT INTO credit_transactions(user_id,amount,reason,ref_type,ref_id,created_at) VALUES (?,-20,'CHAT_TURN','CHAT_TURN',?,'2026-10-21T00:02:00Z')", userId, cid)
         jdbc.update("INSERT INTO credit_orders(public_id,user_id,product_id,provider,status,price_krw,credit_amount,completed_at) VALUES (?,?,'if_5000','GROBLE','COMPLETED',4800,5000,'2026-10-21T00:01:00Z')", orderId, userId)
         jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,status,latency_ms,chat_id,story_id,created_at) VALUES ('pg','test','chat_response','SUCCEEDED',1000,?,?,'2026-10-21T00:01:00Z')", chatId, sid)
         jdbc.update("INSERT INTO admin_audit_logs(public_id,admin_user_id,category,action,target_type,target_id,request_id,created_at) VALUES (gen_random_uuid(),?,'ACCESS','MEMBER_VIEWED','MEMBER',?,'pg','2026-10-21T00:01:00Z')", userId, memberId.toString())
@@ -76,6 +84,14 @@ class AdminReadPostgresTests {
         val usage = reads.paymentUsage(userId, reads.firstPaidAt(memberId))
         assertThat(usage.second.creditsSpent).isEqualTo(20)
         assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
+    }
+    @Test fun `실제 PostgreSQL도 빈 칸을 제외하고 특징 태그를 가진 인물을 한 번만 센다`() {
+        val page = content.stories(AdminStoriesRequest().apply { supportingCharacterCount = 3 }, AdminPagination(1, 20, "s.id asc"), null)
+        assertThat(page.totalElements).isEqualTo(1)
+        assertThat(page.items.single().supportingCharacterCount).isEqualTo(3)
+        val point = charts.distributions(start, now, emptyList(), null)[7].single()
+        assertThat((point["bucket"] as Number).toInt()).isEqualTo(3)
+        assertThat((point["n"] as Number).toLong()).isEqualTo(page.totalElements)
     }
     @Test fun `실제 PostgreSQL에서 일별 KST 집계와 분포 여덟 쿼리를 실행한다`() {
         val daily = charts.daily(start, now, emptyList()).values.single()

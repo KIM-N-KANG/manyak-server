@@ -45,7 +45,10 @@ class SentryMdcEventProcessor : EventProcessor {
     private fun scrubRequest(request: Request?) {
         if (request == null) return
         // 경로·URL 유효성과 무관하게 비밀값을 먼저 제거한다. SDK 기본 PII 목록에 의존하지 않는다.
-        request.headers = request.headers?.filterKeys { !it.equals("X-Manyak-Internal-Secret", ignoreCase = true) }
+        request.headers = request.headers?.filterKeys {
+            !it.equals("X-Manyak-Internal-Secret", ignoreCase = true) &&
+                !it.equals("X-Manyak-Device-Id", ignoreCase = true)
+        }
         val url = request.url ?: return
         val path = try { URI(url).path } catch (_: URISyntaxException) { return } ?: return
         if (path == "/api/v1/admin/notices" || path.startsWith("/api/v1/admin/notices/")) {

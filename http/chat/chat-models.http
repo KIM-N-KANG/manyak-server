@@ -1,0 +1,94 @@
+### KNK-1760 채팅 모델 목록·선택 검증 (IntelliJ HTTP Client)
+# 준비: docker compose up -d postgres redis, AI 서버 기동, ./gradlew bootRun
+# chat-create.http의 스토리 준비 1~2를 먼저 실행해 storyId를 저장한다.
+# 순서대로 실행. 회원 소유권 검증은 로그인 파일로 accessToken을 저장한다.
+@baseUrl = http://localhost:8080
+
+### 0. 상태 확인
+GET {{baseUrl}}/actuator/health
+
+### 1. 인증 없이 활성 모델 목록과 기본 모델 확인
+GET {{baseUrl}}/api/v1/chats/models
+
+> {%
+    client.test("모델 목록", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const rows = response.body;
+        const defaults = rows.filter(m => m.isDefault);
+        client.assert(defaults.length === 1, `기본 모델 수 actual=${defaults.length}`);
+        client.assert(rows.every(m => typeof m.code === "string" && m.turnCost > 0), "코드/가격 오류");
+        client.global.set("defaultChatModel", defaults[0].code);
+    });
+%}
+
+### 2. 게스트 채팅 생성: 기본 모델은 모델 목록이 기준
+POST {{baseUrl}}/api/v1/chats
+Content-Type: application/json
+
+{"storyId":"{{storyId}}"}
+
+> {%
+    client.test("기본 모델", () => {
+        client.assert(response.status === 201, `actual=${response.status}`);
+        client.assert(response.body.model === client.global.get("defaultChatModel"), `actual=${response.body.model}`);
+    });
+    client.global.set("modelChatId", response.body.id);
+%}
+
+### 3. 생성 중에도 변경 가능, 다음 턴부터 적용 (게스트 턴 AI는 항상 LITE)
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":"LITE"}
+
+> {%
+    client.test("모델 변경", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.model === "LITE", `actual=${response.body.model}`);
+    });
+%}
+
+### 4. 상세에도 유효 모델
+GET {{baseUrl}}/api/v1/chats/{{modelChatId}}
+
+> {%
+    client.test("상세 모델", () => {
+        client.assert(response.status === 200 && response.body.model === "LITE", `actual=${response.status}, ${response.body.model}`);
+    });
+%}
+
+### 5. 미지원 모델은 400 (비활성 모델도 동일)
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":"UNKNOWN"}
+
+> {% client.test("400", () => { client.assert(response.status === 400, `actual=${response.status}`); }); %}
+
+### 6. 누락은 400
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{}
+
+> {% client.test("누락 400", () => { client.assert(response.status === 400, `actual=${response.status}`); }); %}
+
+### 7. 회원은 게스트 소유 채팅을 변경할 수 없다 (로그인 준비 필요)
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"model":"AURORA"}
+
+> {% client.test("403", () => { client.assert(response.status === 403, `actual=${response.status}`); }); %}
+
+### 8. 형식 오류/미존재/삭제는 404
+PATCH {{baseUrl}}/api/v1/chats/invalid-id
+Content-Type: application/json
+
+{"model":"LITE"}
+
+> {% client.test("404", () => { client.assert(response.status === 404, `actual=${response.status}`); }); %}
+
+### 자유 조회
+GET {{baseUrl}}/api/v1/chats/models

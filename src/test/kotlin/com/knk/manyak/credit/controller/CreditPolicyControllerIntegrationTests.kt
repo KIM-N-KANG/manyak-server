@@ -25,6 +25,15 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class CreditPolicyControllerIntegrationTests {
+    @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
+
+    @Test
+    fun `chatTurnCost는 정책 갱신 없이 라이트 모델의 현재 가격을 반영한다`() {
+        models.save(models.findById("LITE").orElseThrow().apply { turnCost = 30 })
+        restTestClient.get().uri("/api/v1/credits/policies").exchange()
+            .expectStatus().isOk.expectBody().jsonPath("$.chatTurnCost").isEqualTo(30)
+    }
+
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var creditPolicyRepository: CreditPolicyRepository

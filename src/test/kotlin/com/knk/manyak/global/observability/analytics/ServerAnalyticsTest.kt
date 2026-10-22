@@ -61,14 +61,15 @@ class ServerAnalyticsTest {
     }
 
     @Test
-    fun `게스트 요청은 user_id가 null이고 device_id에 device_id_hash를 쓴다`() {
+    fun `원본 없이 해시만 있는 게스트 요청은 device_id가 unknown이다`() {
         MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_guest")
 
         analytics.storylineGenerationSucceeded(userId = null, creationId = 3L)
 
         val e = publisher.events.single()
         assertThat(e.userId).isNull()
-        assertThat(e.deviceId).isEqualTo("device_hash_guest")
+        assertThat(e.deviceId).isEqualTo("unknown")
+        assertThat(e.eventProperties["device_id_hash"]).isEqualTo("device_hash_guest")
         assertThat(e.eventProperties["is_logged_in"]).isEqualTo(false)
     }
 
@@ -92,6 +93,7 @@ class ServerAnalyticsTest {
             turnNumber = 4,
             errorCode = "provider_timeout",
             isRegenerated = true,
+            modelCode = "AURORA",
         )
 
         val e = publisher.events.single()
@@ -100,13 +102,18 @@ class ServerAnalyticsTest {
         assertThat(e.eventProperties["turn_number"]).isEqualTo(4)
         assertThat(e.eventProperties["error_type"]).isEqualTo("network")
         assertThat(e.eventProperties["is_regenerated"]).isEqualTo(true)
+        assertThat(e.eventProperties["model_code"]).isEqualTo("AURORA")
     }
 
     @Test
     fun `채팅 성공은 ending_id가 있을 때만 싣는다`() {
-        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 1, isRegenerated = false)
-        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9")
+        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 1, isRegenerated = false, modelCode = "LITE", turnCost = 0)
+        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9", modelCode = "AURORA", turnCost = 50)
 
+        assertThat(publisher.events[0].eventProperties["model_code"]).isEqualTo("LITE")
+        assertThat(publisher.events[0].eventProperties["turn_cost"]).isEqualTo(0L)
+        assertThat(publisher.events[1].eventProperties["model_code"]).isEqualTo("AURORA")
+        assertThat(publisher.events[1].eventProperties["turn_cost"]).isEqualTo(50L)
         assertThat(publisher.events[0].eventProperties).doesNotContainKey("ending_id")
         assertThat(publisher.events[1].eventProperties["ending_id"]).isEqualTo("end-9")
     }

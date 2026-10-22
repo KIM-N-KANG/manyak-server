@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability
 
+import com.knk.manyak.global.observability.analytics.AnalyticsDeviceContext
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -52,7 +53,9 @@ class RequestCorrelationFilter(
         MDC.put(MdcKeys.SESSION_ID, rawSessionId ?: UNKNOWN)
         MDC.put(MdcKeys.DEVICE_ID_HASH, forwardedDeviceHash ?: rawDeviceId?.let(deviceIdHasher::hash) ?: UNKNOWN)
         try {
-            filterChain.doFilter(request, response)
+            AnalyticsDeviceContext.withDeviceId(rawDeviceId) {
+                filterChain.doFilter(request, response)
+            }
         } finally {
             // 가장 바깥 필터로서 스레드의 MDC를 통째로 비워 스레드풀 재사용 시 값이 누수되지 않게 한다.
             MDC.clear()

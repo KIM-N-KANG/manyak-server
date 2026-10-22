@@ -38,6 +38,7 @@ class CreditReconciliationScheduler(
                 structuredLogger.event(
                     "credit_reconciliation_refunded",
                     "groups_scanned" to result.groupsScanned,
+                    "charges_scanned" to result.chargesScanned,
                     "refunds_emitted" to result.refundsEmitted,
                 )
             }

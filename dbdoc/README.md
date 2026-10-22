@@ -13,8 +13,8 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 22 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 8 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 23 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 9 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -27,7 +27,7 @@
 | [public.credit_wallets](public.credit_wallets.md) | 5 |  | BASE TABLE |
 | [public.credit_transactions](public.credit_transactions.md) | 8 |  | BASE TABLE |
 | [public.story_main_events](public.story_main_events.md) | 8 |  | BASE TABLE |
-| [public.story_message_versions](public.story_message_versions.md) | 6 |  | BASE TABLE |
+| [public.story_message_versions](public.story_message_versions.md) | 7 |  | BASE TABLE |
 | [public.credit_lots](public.credit_lots.md) | 7 |  | BASE TABLE |
 | [public.story_chat_main_events](public.story_chat_main_events.md) | 4 |  | BASE TABLE |
 | [public.user_story_ending_reaches](public.user_story_ending_reaches.md) | 6 |  | BASE TABLE |
@@ -60,6 +60,7 @@
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
 | [public.notices](public.notices.md) | 10 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
+| [public.chat_models](public.chat_models.md) | 8 |  | BASE TABLE |
 
 ## Relations
 
@@ -80,8 +81,10 @@ erDiagram
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
+"public.story_chats" }o--|| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.story_messages" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
@@ -94,6 +97,7 @@ erDiagram
 "public.credit_transactions" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_main_events" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+"public.story_message_versions" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.credit_lots" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.credit_lots" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
 "public.story_chat_main_events" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
@@ -245,6 +249,7 @@ erDiagram
   jsonb occurred_main_event_names_snapshot
   text persona_name_snapshot
   text persona_description_snapshot
+  varchar_20_ model_code FK
 }
 "public.story_messages" {
   bigint id
@@ -255,6 +260,7 @@ erDiagram
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
 }
 "public.story_choices" {
   bigint id
@@ -408,6 +414,7 @@ erDiagram
   text content
   text choices
   timestamp_with_time_zone created_at
+  bigint credit_transaction_id FK
 }
 "public.credit_lots" {
   bigint id
@@ -723,6 +730,16 @@ erDiagram
   timestamp_with_time_zone published_at
   timestamp_with_time_zone notified_at
   bigint created_by_user_id FK
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.chat_models" {
+  varchar_20_ code
+  varchar_30_ name
+  bigint turn_cost
+  integer sort_order
+  boolean is_active
+  boolean is_default
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
 }

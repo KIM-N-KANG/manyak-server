@@ -139,6 +139,16 @@ class CreditTransactionHistoryIntegrationTests {
     }
 
     @Test
+    fun `새 CHAT_TURN 참조의 소모와 환불도 채팅 스토리 제목을 조회한다`() {
+        val user = saveUser()
+        val story = story(user.id, "새 턴 제목")
+        val chat = chat(user.id, story.id)
+        tx(user.id, -50, CreditReason.CHAT_TURN, "CHAT_TURN", chat.id)
+        tx(user.id, 50, CreditReason.REFUND, "CHAT_TURN", chat.id)
+        assertThat(get(user).items.map { it.title }).containsExactly("새 턴 제목", "새 턴 제목")
+    }
+
+    @Test
     fun `토큰 없이 이용내역을 조회하면 401이다`() {
         restTestClient.get().uri("/api/v1/users/me/credits/transactions")
             .exchange().expectStatus().isUnauthorized

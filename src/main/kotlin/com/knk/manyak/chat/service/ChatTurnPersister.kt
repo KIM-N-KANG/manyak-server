@@ -46,6 +46,7 @@ class ChatTurnPersister(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val endingReachRecorder: EndingReachRecorder,
+    private val creditTransactionRepository: com.knk.manyak.credit.repository.CreditTransactionRepository,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -73,6 +74,7 @@ class ChatTurnPersister(
         // 매번 명시하게 한다 — 빠뜨리면 후보가 비어 도달·사건 판정이 조용히 전부 누락된다.
         judgmentSource: TurnJudgmentSource,
         expectedState: GenerationStartState,
+        creditTransactionId: Long? = null,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -80,6 +82,7 @@ class ChatTurnPersister(
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
         verifyStartState(chat, expectedState)
+        verifyCharge(creditTransactionId)
 
         // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
         val reachedEnding = resolveReachedEnding(chat, judgment.endingName, judgmentSource)
@@ -104,6 +107,7 @@ class ChatTurnPersister(
             StoryMessage(
                 chatId = chatId,
                 role = MessageRole.ASSISTANT,
+                creditTransactionId = creditTransactionId,
                 content = aiOutput,
                 messageOrder = user.messageOrder + 1,
                 reachedEndingId = reachedEnding?.id,
@@ -346,6 +350,7 @@ class ChatTurnPersister(
         aiOutput: String,
         choices: List<String>,
         expectedState: GenerationStartState,
+        creditTransactionId: Long? = null,
     ): PersistedTurn {
         // 채팅 행을 비관적 쓰기 락으로 잡아 같은 채팅의 재생성을 직렬화한다(제자리 교체라 message_order 유니크로
         // 자연 직렬화되지 않음). 이 락이 없으면 동시 재생성 둘이 같은 마지막 턴 검사를 통과해 중복 과금하고
@@ -353,6 +358,7 @@ class ChatTurnPersister(
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
         verifyStartState(chat, expectedState)
+        verifyCharge(creditTransactionId)
 
         // 재확인: 여전히 이 ASSISTANT가 마지막 턴인가. 그 사이 새 턴이 쌓였으면(마지막 id 불일치) 폐기한다.
         val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chatId)
@@ -371,11 +377,13 @@ class ChatTurnPersister(
                 messageId = lastAssistant.id,
                 versionNumber = storyMessageVersionRepository.countByMessageId(lastAssistant.id).toInt() + 1,
                 content = lastAssistant.content,
+                creditTransactionId = lastAssistant.creditTransactionId,
                 choices = objectMapper.writeValueAsString(existingChoices.map { it.choiceText }),
             ),
         )
 
         // AI 출력 제자리 교체(활성본). USER 입력·messageOrder는 그대로 둔다.
+        lastAssistant.creditTransactionId = creditTransactionId
         lastAssistant.content = aiOutput
         storyMessageRepository.save(lastAssistant)
 
@@ -471,6 +479,15 @@ class ChatTurnPersister(
      * 이름까지 바꾼 스토리에서는 이름만 남는다(FK를 만족시킬 id가 없다).
      */
     data class ReachedEnding(val id: Long?, val name: String)
+
+    private fun verifyCharge(id: Long?) {
+        if (id == null) return
+        val charge = creditTransactionRepository.findByIdForUpdate(id) ?: error("차감 행이 없습니다: $id")
+        check(charge.reason == com.knk.manyak.credit.entity.CreditReason.CHAT_TURN && charge.amount < 0)
+        if (creditTransactionRepository.existsByIdempotencyKey("refund:charge:$id")) {
+            throw IllegalStateException("이미 환불된 턴의 저장을 취소합니다.")
+        }
+    }
 
     private fun verifyStartState(chat: StoryChat, expected: GenerationStartState) {
         val lastId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)

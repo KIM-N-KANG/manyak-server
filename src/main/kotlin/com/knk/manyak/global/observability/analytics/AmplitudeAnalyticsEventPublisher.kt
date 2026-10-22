@@ -40,11 +40,11 @@ class AmplitudeAnalyticsEventPublisher(
                 .toBodilessEntity()
                 .subscribe(
                     { /* 성공: 응답 본문 불필요 */ },
-                    { error -> log.warn("Amplitude 이벤트 전송 실패: {} ({})", event.eventType, error.toString()) },
+                    { error -> log.warn("Amplitude 이벤트 전송 실패: {} ({})", event.eventType, error.javaClass.simpleName) },
                 )
         } catch (e: Exception) {
             // 요청 조립 단계 예외도 삼킨다(발행이 호출부를 깨지 않음).
-            log.warn("Amplitude 이벤트 발행 실패: {} ({})", event.eventType, e.toString())
+            log.warn("Amplitude 이벤트 발행 실패: {} ({})", event.eventType, e.javaClass.simpleName)
         }
     }
 

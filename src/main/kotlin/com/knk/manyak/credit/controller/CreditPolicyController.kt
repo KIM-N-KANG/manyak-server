@@ -22,12 +22,13 @@ import org.springframework.web.bind.annotation.RestController
  * 무인증이다 — 로그인 전 서비스 안내 화면도 같은 값을 쓰고, 비밀도 아니다(지급 응답에 그대로 실린다).
  * 잔액·이용내역과 달리 요청자별 데이터가 없어 `/api/v1/users/me` 아래가 아니라 별도 경로에 둔다.
  *
- * DB를 만지지 않는다 — [CreditPolicyService.effectiveAmounts]는 메모리 스냅샷 읽기다.
+ * 정책 6종은 메모리 스냅샷이며 deprecated chatTurnCost만 LITE 가격을 요청마다 읽는다.
  */
 @Tag(name = "Credits", description = "이프 API")
 @RestController
 class CreditPolicyController(
     private val creditPolicyService: CreditPolicyService,
+    private val chatModelService: com.knk.manyak.chat.service.ChatModelService,
 ) {
 
     @Operation(
@@ -39,7 +40,8 @@ class CreditPolicyController(
             - `inviteMonthlyCap`만 이프가 아니라 월 적립 **횟수**이며, **초대자 몫에만** 걸립니다(제출자 몫은 상한 없음).
             - `storyCreationCost`는 **간편 제작**에만 듭니다(일반 제작은 무료).
             - `storyCreationCost`·`chatTurnCost`는 회원의 무료 체험 잔여를 소진한 뒤 적용되는 단가입니다(게스트는 디바이스 한도를 씁니다).
-            - 변경 반영은 서버의 정책 스냅샷 갱신 주기를 따릅니다(기본 설정 기준 약 1분).
+            - `chatTurnCost`는 deprecated이며 LITE 가격을 즉시 반영합니다. 모델별 가격은 GET /api/v1/chats/models를 사용하세요.
+            - 다른 정책 변경은 서버의 스냅샷 갱신 주기를 따릅니다(기본 약 1분).
         """,
     )
     @ApiResponses(
@@ -53,7 +55,7 @@ class CreditPolicyController(
     )
     @GetMapping("/api/v1/credits/policies")
     fun getCreditPolicies(): CreditPolicyResponse {
-        // 7종을 하나씩 읽으면 그 사이 갱신에 옛 값과 새 값이 섞이므로 한 스냅샷에서 모두 꺼낸다.
+        // 정책 키 6종을 하나씩 읽으면 그 사이 갱신에 옛 값과 새 값이 섞이므로 한 스냅샷에서 모두 꺼낸다.
         val amounts = creditPolicyService.effectiveAmounts()
         return CreditPolicyResponse(
             signupReward = amounts.getValue(CreditPolicyKey.SIGNUP_REWARD),
@@ -61,7 +63,7 @@ class CreditPolicyController(
             inviteMonthlyCap = amounts.getValue(CreditPolicyKey.INVITE_MONTHLY_CAP),
             attendanceReward = amounts.getValue(CreditPolicyKey.ATTENDANCE_REWARD),
             storyCreationCost = amounts.getValue(CreditPolicyKey.STORY_CREATION_COST),
-            chatTurnCost = amounts.getValue(CreditPolicyKey.CHAT_TURN_COST),
+            chatTurnCost = chatModelService.litePrice(),
             chatImageCost = amounts.getValue(CreditPolicyKey.CHAT_IMAGE_COST),
         )
     }

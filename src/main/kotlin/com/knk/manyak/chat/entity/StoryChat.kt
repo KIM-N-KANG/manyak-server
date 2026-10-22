@@ -19,6 +19,7 @@ enum class ChatStatus {
     ENDED,
 }
 
+@org.hibernate.annotations.DynamicUpdate
 @Entity
 @Table(name = "story_chats")
 class StoryChat(
@@ -133,6 +134,9 @@ class StoryChat(
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
+
+    @Column(name = "model_code", nullable = false, length = 20)
+    val modelCode: String = "LITE",
 
     @Column(name = "deleted_at")
     var deletedAt: Instant? = null,

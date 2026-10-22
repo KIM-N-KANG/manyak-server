@@ -15,7 +15,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * 각 호출부(스토리라인 생성·채팅 응답·피드백·로그인·마이그레이션)는 이 파사드의 타입 안전한 메서드를 호출하고,
  * 이벤트명·프로퍼티·식별자 해석·[AnalyticsErrorType] 매핑은 모두 여기서 한 곳에 모은다.
  *
- * 식별자(§6-2): 회원 요청은 `user_id`=public_id, 게스트는 `device_id`=device_id_hash(MDC). 공통 프로퍼티로
+ * 식별자(§6-2): 회원 요청은 `user_id`=public_id, 기기 식별자는 `device_id`=요청 헤더 원본(Amplitude 전용 문맥). 공통 프로퍼티로
  * `is_logged_in`·`request_id`·`device_id_hash`(실제 해시일 때만)를 싣는다. 실제 발행·no-op은 [AnalyticsEventPublisher]가 담당한다.
  *
  * 관측이 비즈니스를 깨지 않도록 모든 발행 경로는 예외를 삼킨다(로그만 남김).
@@ -51,6 +51,8 @@ class ServerAnalytics(
         turnNumber: Int,
         isRegenerated: Boolean,
         endingId: String? = null,
+        modelCode: String = "none",
+        turnCost: Long = 0,
     ) = emitForUser(
         EVENT_CHAT_SUCCEEDED,
         userId,
@@ -59,6 +61,8 @@ class ServerAnalytics(
             put("turn_number", turnNumber)
             put("is_regenerated", isRegenerated)
             endingId?.let { put("ending_id", it) }
+            put("model_code", modelCode)
+            put("turn_cost", turnCost)
         },
     )
 
@@ -68,6 +72,7 @@ class ServerAnalytics(
         turnNumber: Int?,
         errorCode: String?,
         isRegenerated: Boolean,
+        modelCode: String = "none",
     ) = emitForUser(
         EVENT_CHAT_FAILED,
         userId,
@@ -76,6 +81,7 @@ class ServerAnalytics(
             turnNumber?.let { put("turn_number", it) }
             put("error_type", AnalyticsErrorType.fromAiErrorCode(errorCode).wireValue)
             put("is_regenerated", isRegenerated)
+            put("model_code", modelCode)
         },
     )
 
@@ -95,7 +101,7 @@ class ServerAnalytics(
             publishSafely(succeeded, userPublicId, mapOf("is_new_user" to isNewUser, "is_rejoined" to isRejoined))
         }
 
-    /** 로그인 실패는 처리 단계와 무관하게 게스트(device_id_hash)로 발행한다. */
+    /** 로그인 실패는 처리 단계와 무관하게 게스트(device_id)로 발행한다. */
     fun socialLoginFailed(provider: SocialProvider, errorType: AnalyticsErrorType) =
         loginEvents(provider)?.let { (_, failed) ->
             publishSafely(failed, userPublicId = null, mapOf("error_type" to errorType.wireValue))
@@ -245,13 +251,9 @@ class ServerAnalytics(
             val realDeviceHash = rawDeviceHash?.takeIf { it.isNotBlank() && it != UNKNOWN }
             val requestId = MDC.get(MdcKeys.REQUEST_ID)
             val sessionId = if (webhook) null else MDC.get(MdcKeys.SESSION_ID)?.toLongOrNull()
-            // 회원은 user_id로 귀속하므로 device_id는 실제 해시가 있을 때만(없으면 null). 게스트는 항상 device_id가 있어야
-            // Amplitude가 귀속할 수 있으므로 unknown이라도 채운다.
-            val deviceId = if (userPublicId != null) {
-                realDeviceHash
-            } else {
-                rawDeviceHash?.takeIf { it.isNotBlank() } ?: UNKNOWN
-            }
+            // 웹훅은 기기 식별자를 싣지 않는다. 그 외에는 원본 헤더를 사용하고, 게스트만 unknown으로 폴백한다.
+            val rawDeviceId = if (webhook) null else AnalyticsDeviceContext.currentDeviceId()
+            val deviceId = rawDeviceId ?: if (userPublicId == null) UNKNOWN else null
             val eventProperties = buildMap {
                 put("is_logged_in", userPublicId != null)
                 requestId?.let { put("request_id", it) }
@@ -269,7 +271,7 @@ class ServerAnalytics(
                 ),
             )
         } catch (e: Exception) {
-            log.warn("서버 분석 이벤트 발행 실패: {} ({})", eventType, e.toString())
+            log.warn("서버 분석 이벤트 발행 실패: {} ({})", eventType, e.javaClass.simpleName)
         }
     }
 

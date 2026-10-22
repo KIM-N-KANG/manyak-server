@@ -10,12 +10,14 @@
 | content | text |  | false |  |  |  |
 | choices | text |  | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
+| credit_transaction_id | bigint |  | true |  | [public.credit_transactions](public.credit_transactions.md) |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | fk_story_message_versions_message | FOREIGN KEY | FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE |
+| story_message_versions_credit_transaction_id_fkey | FOREIGN KEY | FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id) |
 | story_message_versions_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_story_message_versions | UNIQUE | UNIQUE (message_id, version_number) |
 
@@ -26,6 +28,7 @@
 | story_message_versions_pkey | CREATE UNIQUE INDEX story_message_versions_pkey ON public.story_message_versions USING btree (id) |
 | uq_story_message_versions | CREATE UNIQUE INDEX uq_story_message_versions ON public.story_message_versions USING btree (message_id, version_number) |
 | idx_story_message_versions_message_id | CREATE INDEX idx_story_message_versions_message_id ON public.story_message_versions USING btree (message_id) |
+| uq_story_message_versions_credit_transaction | CREATE UNIQUE INDEX uq_story_message_versions_credit_transaction ON public.story_message_versions USING btree (credit_transaction_id) WHERE (credit_transaction_id IS NOT NULL) |
 
 ## Relations
 
@@ -33,6 +36,7 @@
 erDiagram
 
 "public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
+"public.story_message_versions" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_message_versions" {
   bigint id
@@ -41,6 +45,7 @@ erDiagram
   text content
   text choices
   timestamp_with_time_zone created_at
+  bigint credit_transaction_id FK
 }
 "public.story_messages" {
   bigint id
@@ -51,6 +56,17 @@ erDiagram
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
+}
+"public.credit_transactions" {
+  bigint id
+  bigint user_id FK
+  bigint amount
+  varchar_30_ reason
+  varchar_30_ ref_type
+  bigint ref_id
+  varchar_255_ idempotency_key
+  timestamp_with_time_zone created_at
 }
 ```
 
