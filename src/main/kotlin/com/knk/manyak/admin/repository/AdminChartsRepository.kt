@@ -67,7 +67,7 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
             SELECT cs.id, COUNT(ch.id) AS n FROM story_creation_sessions cs
             JOIN stories s ON s.id=cs.story_id AND s.deleted_at IS NULL
             LEFT JOIN story_creation_characters ch
-            ON ch.creation_session_id=cs.id AND ch.role='SUPPORTING_CHARACTER'
+            ON ch.creation_session_id=cs.id AND ${AdminQuery.inputSupportingCharacter("ch")}
             WHERE cs.status='STORY_CREATED'
             AND cs.id=(SELECT MAX(x.id) FROM story_creation_sessions x WHERE x.story_id=cs.story_id AND x.status='STORY_CREATED')
             AND ${during("cs.created_at")} AND ${owner("cs.user_id", sessionExcluded)} GROUP BY cs.id

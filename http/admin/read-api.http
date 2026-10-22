@@ -231,6 +231,9 @@ Authorization: Bearer {{adminToken}}
 %}
 
 ### 인물 수 막대의 링크 목록 — 미삭제 스토리의 최신 완료 세션만 집계
+# 이름(공백 제외)·성별·인물 특징 태그(사전 정의/직접 입력) 중 하나라도 있는 주변 인물만 센다.
+# 빈 입력칸은 제외하고 태그가 여러 개여도 한 명이다. 빈 칸만 있는 세션은 0명이다.
+# 목록·상세 supportingCharacterCount와 필터도 동일하다. 제작 세션이 없으면 null이며 모든 인물 수 필터에서 제외된다.
 GET {{baseUrl}}/api/v1/admin/{{adminCharactersDrillPath}}
 Authorization: Bearer {{adminToken}}
 

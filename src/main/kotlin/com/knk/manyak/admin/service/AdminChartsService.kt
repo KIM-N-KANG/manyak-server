@@ -65,7 +65,7 @@ class AdminChartsService(
                 listOf("average" to "평균", "p50" to "P50", "p75" to "P75", "p90" to "P90").map { (key, label) -> point(label, wait.number(key), "chats", mapOf("hasFirstMessage" to "true")) }),
             AdminDistribution("ai-latency", "기능별 AI 지연", "성공한 호출 중 지연 값이 있는 호출의 평균", "초", ai(5, "SUCCEEDED")),
             AdminDistribution("ai-success", "기능별 AI 성공률", "완료된 호출 중 성공 비율, 진행 중 제외", "%", ai(6, "FINISHED")),
-            AdminDistribution("characters", "제작 세션 입력 인물 수", "미삭제 스토리의 최신 완료 세션 생성일 기준 주변 인물 수, 공식 계정 포함", "세션",
+            AdminDistribution("characters", "제작 세션 입력 인물 수", "미삭제 스토리의 최신 완료 세션 생성일 기준 직접 입력한 주변 인물 수, 공식 계정 포함", "세션",
                 buckets(7, (0..5).map { "${it}명" }, "stories", "supportingCharacterCount", "creation")),
         )
         return AdminChartsResponse(now, from, to, (0 until days).map { offset ->
