@@ -57,6 +57,8 @@ class AttendanceReminderService(
             if (!clock.instant().isBefore(expiry)) break
             val user = userRepository.findById(userId).orElse(null)
             if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(clock.instant())) {
+                fcmPushSender.recordDiscarded(userId, data, "attendance:${user?.publicId}:$today",
+                    if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE" else "MARKETING_NOT_AGREED")
                 continue
             }
             // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
@@ -65,6 +67,7 @@ class AttendanceReminderService(
             runCatching {
                 fcmPushSender.sendToUser(
                     userId, data, AndroidConfig.Priority.NORMAL, expiresAt = expiry,
+                    messageId = "attendance:${user.publicId}:$today",
                 )
             }
                 .onSuccess { sent++ }

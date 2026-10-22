@@ -157,18 +157,18 @@ class AdminCampaignIntegrationTests {
     @Test fun `목록과 상세는 발송 결과 행에서 도달과 실패를 집계한다`() {
         val id = create()["campaignId"].asText()
         val internalId = campaigns.findAll().single().id
-        // 결과 보고 도메인은 별도 릴리스다. 이 테스트는 그 정본 테이블의 읽기 계약만 제공한다.
-        jdbc.execute("CREATE TABLE push_delivery_results (campaign_id BIGINT, delivered_devices INT, failed_devices INT)")
-        try {
-            jdbc.update("INSERT INTO push_delivery_results VALUES (?, 2, 0), (?, 1, 1), (?, 0, 2)", internalId, internalId, internalId)
-            for (path in listOf("/campaigns/$id", "/campaigns")) {
-                val prefix = if (path == "/campaigns") "$.items[0]" else "$"
-                call(HttpMethod.GET, path).expectStatus().isOk.expectBody()
-                    .jsonPath("$prefix.deliveredMembers").isEqualTo(2)
-                    .jsonPath("$prefix.deliveredDevices").isEqualTo(3)
-                    .jsonPath("$prefix.failedDevices").isEqualTo(3)
-            }
-        } finally { jdbc.execute("DROP TABLE push_delivery_results") }
+        for ((i, counts) in listOf(2 to 0, 1 to 1, 0 to 2).withIndex()) {
+            jdbc.update("INSERT INTO push_delivery_results (message_id, type, kind, campaign_id, outcome, reason, delivered_devices, failed_devices, completed_at) " +
+                "VALUES (?, 'PROMOTION', 'MARKETING', ?, ?, 'OK', ?, ?, CURRENT_TIMESTAMP)",
+                "promotion:$id:$i", internalId, if (counts.first > 0) "DELIVERED" else "UNDELIVERED", counts.first, counts.second)
+        }
+        for (path in listOf("/campaigns/$id", "/campaigns")) {
+            val prefix = if (path == "/campaigns") "$.items[0]" else "$"
+            call(HttpMethod.GET, path).expectStatus().isOk.expectBody()
+                .jsonPath("$prefix.deliveredMembers").isEqualTo(2)
+                .jsonPath("$prefix.deliveredDevices").isEqualTo(3)
+                .jsonPath("$prefix.failedDevices").isEqualTo(3)
+        }
     }
 
     @Test fun `대상 수는 활성 토큰 보유와 종류별 동의 및 야간 동의를 구분한다`() {

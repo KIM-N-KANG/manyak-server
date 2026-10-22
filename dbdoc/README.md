@@ -58,6 +58,7 @@
 | [public.admin_accounts](public.admin_accounts.md) | 2 | 관리자 역할. 운영자가 직접 부여·회수한다 | BASE TABLE |
 | [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
+| [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
 
 ## Relations
 
@@ -124,6 +125,8 @@ erDiagram
 "public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (admin_user_id) REFERENCES users(id)"
 "public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_admin_adjustments" }o--o| "public.credit_transactions" : "FOREIGN KEY (transaction_id) REFERENCES credit_transactions(id)"
+"public.push_delivery_results" }o--o| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
+"public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -691,6 +694,19 @@ erDiagram
   timestamp_with_time_zone expires_at
   bigint transaction_id FK
   timestamp_with_time_zone created_at
+}
+"public.push_delivery_results" {
+  bigint id
+  varchar_255_ message_id
+  varchar_40_ type
+  varchar_16_ kind
+  bigint campaign_id FK
+  bigint user_id FK
+  varchar_16_ outcome
+  varchar_40_ reason
+  integer delivered_devices
+  integer failed_devices
+  timestamp_with_time_zone completed_at
 }
 ```
 

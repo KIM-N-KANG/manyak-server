@@ -92,10 +92,15 @@ class PromotionPushService(
                 val at = clock.instant()
                 val user = userRepository.findById(userId).orElse(null)
                 if (user == null || user.status != UserStatus.ACTIVE || (if (campaign.kind == PushKind.SERVICE) !user.servicePushEnabled else !user.canReceiveMarketingPush(at))) {
+                    fcmPushSender.recordDiscarded(userId, data, "promotion:${campaign.publicId}:${user?.publicId}",
+                        if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE"
+                        else if (campaign.kind == PushKind.SERVICE) "SERVICE_PUSH_DISABLED" else "MARKETING_NOT_AGREED")
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, data, if (campaign.kind == PushKind.SERVICE) AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL) }
+                runCatching { fcmPushSender.sendToUser(userId, data,
+                    if (campaign.kind == PushKind.SERVICE) AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL,
+                    messageId = "promotion:${campaign.publicId}:${user.publicId}") }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
             }
