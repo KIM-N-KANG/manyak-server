@@ -79,7 +79,7 @@ class AdminCreditPostgresConcurrencyTests {
             JpaTransactionManager(context.getBean(EntityManagerFactory::class.java)).apply { dataSource = ds }
         })
         context.registerBean(CreditPolicyService::class.java, Supplier {
-            CreditPolicyService(context.getBean(CreditPolicyRepository::class.java), 1000, 2000, 10, 250, 250, 20)
+            CreditPolicyService(context.getBean(CreditPolicyRepository::class.java), 1000, 2000, 10, 250, 250)
         })
         context.register(PostgresCreditAdminLocks::class.java, AdminChangeActorRepository::class.java, AdminAuditService::class.java, AdminCreditPolicyService::class.java,
             AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java)
@@ -155,9 +155,9 @@ class AdminCreditPostgresConcurrencyTests {
         assertThat(states[0].first).isNull()
         assertThat(states[1].first!!["amount"].asLong()).isEqualTo(300)
         assertThat(jdbc.queryForObject("SELECT amount FROM credit_policies", Long::class.java)).isEqualTo(500)
-        // 조회의 readOnly 트랜잭션에서도 7종의 advisory 잠금이 허용되고 저장된 행을 읽는다.
+        // 조회의 readOnly 트랜잭션에서도 6종의 advisory 잠금이 허용되고 저장된 행을 읽는다.
         val listed = policy.list()
-        assertThat(listed.items).hasSize(7)
+        assertThat(listed.items).hasSize(6)
         assertThat(listed.items.single { it.policyKey == "attendance_reward" }.override!!.amount).isEqualTo(500)
     }
     @Test fun `PG 두 변경의 감사 before는 실제 직전 커밋 값이다`() {

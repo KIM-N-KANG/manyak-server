@@ -44,6 +44,7 @@ import java.util.UUID
 class CreditReconciliationIntegrationTests {
 
 
+    @Autowired private lateinit var chargeReconciler: ChatChargeReconciler
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
@@ -76,8 +77,8 @@ class CreditReconciliationIntegrationTests {
 
     // 미래 시계: 시드한 charge(실제 now)가 cutoff(미래 now − 15m) 이전이 되게 해 "정지 상태"로 대사한다.
     private fun serviceAsOf(now: Instant) = CreditReconciliationService(
-        transactionRepository, creditWalletService, storyChatRepository, storyCreationSessionRepository,
-        structuredLogger, threshold, Clock.fixed(now, ZoneOffset.UTC),
+        transactionRepository, creditWalletService, storyCreationSessionRepository,
+        structuredLogger, threshold, Clock.fixed(now, ZoneOffset.UTC), chargeReconciler,
     )
 
     private val future: Instant get() = Instant.now().plus(Duration.ofHours(1))
@@ -97,7 +98,7 @@ class CreditReconciliationIntegrationTests {
 
     private fun inflightRefund(userId: Long, refType: String, refId: Long) {
         creditWalletService.reward(
-            userId, cost, CreditReason.REFUND, "refund:$refType:${UUID.randomUUID()}",
+            userId, cost, CreditReason.REFUND, if (refType == "CHAT") "refund:charge:${transactionRepository.findAll().last { it.userId == userId && it.refId == refId && it.reason == CreditReason.CHAT_TURN && !transactionRepository.existsByIdempotencyKey("refund:charge:${it.id}") }.id}" else "refund:$refType:${UUID.randomUUID()}",
             refType = refType, refId = refId,
         )
     }

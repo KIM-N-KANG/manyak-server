@@ -37,6 +37,7 @@ class DatabaseCleaner(
         } finally {
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE")
         }
+        jdbcTemplate.execute("INSERT INTO chat_models (code, name, turn_cost, sort_order, is_active, is_default, created_at, updated_at) VALUES ('LITE', '라이트', 20, 1, true, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('AURORA', '오로라', 50, 2, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
         val trialKeys = redisTemplate.keys("guest_trial:*").orEmpty() + redisTemplate.keys("member_trial:*").orEmpty()
         if (trialKeys.isNotEmpty()) {
             redisTemplate.delete(trialKeys)

@@ -93,6 +93,7 @@ class ServerAnalyticsTest {
             turnNumber = 4,
             errorCode = "provider_timeout",
             isRegenerated = true,
+            modelCode = "AURORA",
         )
 
         val e = publisher.events.single()
@@ -101,13 +102,18 @@ class ServerAnalyticsTest {
         assertThat(e.eventProperties["turn_number"]).isEqualTo(4)
         assertThat(e.eventProperties["error_type"]).isEqualTo("network")
         assertThat(e.eventProperties["is_regenerated"]).isEqualTo(true)
+        assertThat(e.eventProperties["model_code"]).isEqualTo("AURORA")
     }
 
     @Test
     fun `채팅 성공은 ending_id가 있을 때만 싣는다`() {
-        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 1, isRegenerated = false)
-        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9")
+        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 1, isRegenerated = false, modelCode = "LITE", turnCost = 0)
+        analytics.chatAiMessageSucceeded(userId = null, chatId = "c", turnNumber = 2, isRegenerated = false, endingId = "end-9", modelCode = "AURORA", turnCost = 50)
 
+        assertThat(publisher.events[0].eventProperties["model_code"]).isEqualTo("LITE")
+        assertThat(publisher.events[0].eventProperties["turn_cost"]).isEqualTo(0L)
+        assertThat(publisher.events[1].eventProperties["model_code"]).isEqualTo("AURORA")
+        assertThat(publisher.events[1].eventProperties["turn_cost"]).isEqualTo(50L)
         assertThat(publisher.events[0].eventProperties).doesNotContainKey("ending_id")
         assertThat(publisher.events[1].eventProperties["ending_id"]).isEqualTo("end-9")
     }

@@ -47,6 +47,9 @@ class StoryMessageVersion(
     @Column(nullable = false, columnDefinition = "TEXT")
     val choices: String,
 
+    @Column(name = "credit_transaction_id")
+    var creditTransactionId: Long? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

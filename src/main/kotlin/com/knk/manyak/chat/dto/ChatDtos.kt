@@ -54,6 +54,8 @@ data class CreateChatResponse(
     @field:Schema(description = "생성 시각", example = "2026-06-12T12:00:00Z")
     val createdAt: Instant,
     val persona: ChatPersonaResponse? = null,
+    @field:Schema(description = "채팅 모델 코드. 상세는 비활성 모델을 기본 모델로 대체한 유효 코드", example = "AURORA")
+    val model: String,
 )
 
 @Schema(description = "채팅 ID 목록 조회 요청")
@@ -152,6 +154,8 @@ data class ChatDetailResponse(
     val persona: ChatPersonaResponse? = null,
     @field:Schema(description = "생성 중 상태. 키가 없으면 null")
     val generatingTurn: GeneratingTurnResponse? = null,
+    @field:Schema(description = "채팅 모델 코드. 상세는 비활성 모델을 기본 모델로 대체한 유효 코드", example = "AURORA")
+    val model: String,
 )
 
 data class GeneratingTurnResponse(
@@ -393,3 +397,10 @@ data class ChatStreamErrorEvent(
 
 /** 채팅 응답에는 선택한 페르소나의 이름만 공개한다. */
 data class ChatPersonaResponse(val name: String)
+
+
+@Schema(description = "노출 중인 채팅 모델과 회원 체험 소진 후 턴 가격")
+data class ChatModelResponse(val code: String, val name: String, val turnCost: Long, val isDefault: Boolean)
+@Schema(description = "다음 턴부터 적용할 채팅 모델")
+data class ChangeChatModelRequest(@field:NotBlank val model: String)
+data class ChangeChatModelResponse(val id: String, val model: String)

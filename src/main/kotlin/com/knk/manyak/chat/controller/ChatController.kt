@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.dto.ChatModelResponse
+import com.knk.manyak.chat.dto.ChangeChatModelRequest
+import com.knk.manyak.chat.dto.ChangeChatModelResponse
 import com.knk.manyak.chat.dto.BatchChatRequest
 import com.knk.manyak.chat.dto.ChatChoicesResponse
 import com.knk.manyak.chat.dto.ChatDetailResponse
@@ -32,6 +35,7 @@ import org.springframework.http.MediaType
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -49,6 +53,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 class ChatController(
     private val chatService: ChatService,
 ) {
+
+    @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 회원 체험 소진 후 턴 가격을 노출 순서로 반환합니다. 인증은 선택입니다.")
+    @GetMapping("/chats/models")
+    fun getModels(): List<ChatModelResponse> = chatService.getModels()
+
+    @Operation(summary = "채팅 모델 변경", description = "소유자가 모델을 변경합니다. 진행 중인 턴은 시작 시 모델과 가격을 유지하며 다음 턴부터 적용합니다.")
+    @PatchMapping("/chats/{chatId}")
+    fun changeModel(
+        @PathVariable chatId: String,
+        @Valid @RequestBody request: ChangeChatModelRequest,
+        @CurrentUserId userId: Long?,
+    ): ChangeChatModelResponse = chatService.changeModel(chatId, request.model, userId)
 
     @Operation(
         summary = "채팅 생성",

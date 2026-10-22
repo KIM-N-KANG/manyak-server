@@ -12,6 +12,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 | reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
+| credit_transaction_id | bigint |  | true |  | [public.credit_transactions](public.credit_transactions.md) |  |
 
 ## Constraints
 
@@ -23,6 +24,7 @@
 | story_messages_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | fk_story_messages_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | uq_story_messages_order | UNIQUE | UNIQUE (chat_id, message_order) |
+| story_messages_credit_transaction_id_fkey | FOREIGN KEY | FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id) |
 
 ## Indexes
 
@@ -32,6 +34,7 @@
 | uq_story_messages_order | CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (chat_id, message_order) |
 | idx_story_messages_admin_role_created_chat | CREATE INDEX idx_story_messages_admin_role_created_chat ON public.story_messages USING btree (role, created_at, chat_id) |
 | idx_story_messages_admin_chat_role_created | CREATE INDEX idx_story_messages_admin_chat_role_created ON public.story_messages USING btree (chat_id, role, created_at) |
+| uq_story_messages_credit_transaction | CREATE UNIQUE INDEX uq_story_messages_credit_transaction ON public.story_messages USING btree (credit_transaction_id) WHERE (credit_transaction_id IS NOT NULL) |
 
 ## Relations
 
@@ -42,6 +45,7 @@ erDiagram
 "public.story_message_versions" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
+"public.story_messages" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 
 "public.story_messages" {
   bigint id
@@ -52,6 +56,7 @@ erDiagram
   timestamp_with_time_zone created_at
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
 }
 "public.story_choices" {
   bigint id
@@ -71,6 +76,7 @@ erDiagram
   text content
   text choices
   timestamp_with_time_zone created_at
+  bigint credit_transaction_id FK
 }
 "public.story_chats" {
   bigint id
@@ -95,6 +101,7 @@ erDiagram
   jsonb occurred_main_event_names_snapshot
   text persona_name_snapshot
   text persona_description_snapshot
+  varchar_20_ model_code FK
 }
 "public.story_endings" {
   bigint id
@@ -110,6 +117,16 @@ erDiagram
   integer min_turns
   text achievement_condition
   text epilogue
+}
+"public.credit_transactions" {
+  bigint id
+  bigint user_id FK
+  bigint amount
+  varchar_30_ reason
+  varchar_30_ ref_type
+  bigint ref_id
+  varchar_255_ idempotency_key
+  timestamp_with_time_zone created_at
 }
 ```
 

@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface StoryMessageRepository : JpaRepository<StoryMessage, Long> {
+    fun existsByCreditTransactionId(creditTransactionId: Long): Boolean
+
     fun findByChatIdOrderByMessageOrderAsc(chatId: Long): List<StoryMessage>
 
     /**

@@ -41,6 +41,9 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatTurnCreditIntegrationTests {
+    @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
+    @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
+
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -75,7 +78,7 @@ class ChatTurnCreditIntegrationTests {
     @Autowired private lateinit var creditPolicyRepository: CreditPolicyRepository
 
     // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
-    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+    private val chatTurnCost: Long get() = chatModelService.litePrice()
 
     // 여러 턴을 견디는 충분한 잔액.
     private val seedBalance: Long get() = chatTurnCost * 10
@@ -123,17 +126,14 @@ class ChatTurnCreditIntegrationTests {
         // CHAT_TURN 소모 원장 1건: 음수 amount, CHAT 참조
         val consumption = transactionRepository.findAll().first { it.reason == CreditReason.CHAT_TURN }
         assertThat(consumption.amount).isEqualTo(-chatTurnCost)
-        assertThat(consumption.refType).isEqualTo("CHAT")
+        assertThat(consumption.refType).isEqualTo("CHAT_TURN")
         assertThat(consumption.refId).isEqualTo(chat.id)
     }
 
     @Test
-    fun `chat_turn_cost 오버라이드가 실제 차감액에 반영된다`() {
-        // KNK-1056. 기대값과 시드를 같은 정책 서비스에서 읽는 다른 테스트들은 소비자가 수치를 하드코딩해도
-        // 통과한다. 여기서만 **리터럴 기대값**을 쓴다 — 오버라이드가 ChatService 까지 도달하는지 보는 게 목적이다.
-        // 읽기는 메모리라 저장만으로는 반영되지 않는다. 운영에선 스케줄러가 하는 적재를 테스트가 직접 유발한다
-        // (테스트 프로파일은 policy-refresh 스케줄러를 꺼 반영 시점을 테스트가 정한다).
-        creditPolicyRepository.save(CreditPolicy(policyKey = CreditPolicyKey.CHAT_TURN_COST.storageKey, amount = 37))
+    fun `라이트 모델 가격 변경이 실제 차감액에 즉시 반영된다`() {
+        // 리터럴 기대값으로 모델 표의 가격이 실제 차감까지 전달되는지 확인한다.
+        chatModelRepository.save(chatModelRepository.findById("LITE").orElseThrow().apply { turnCost = 37 })
         creditPolicyService.refresh()
         val story = storyRepository.save(Story(title = "오버라이드 스토리", genre = "판타지"))
         val member = saveUser("오버라이드회원")

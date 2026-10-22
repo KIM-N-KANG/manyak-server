@@ -79,6 +79,7 @@ erDiagram
   jsonb occurred_main_event_names_snapshot
   text persona_name_snapshot
   text persona_description_snapshot
+  varchar_20_ model_code FK
 }
 "public.story_endings" {
   bigint id

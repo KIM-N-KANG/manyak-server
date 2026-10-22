@@ -64,6 +64,9 @@ class StoryMessage(
     @Column(name = "reached_ending_name_snapshot", length = 100)
     val reachedEndingNameSnapshot: String? = null,
 
+    @Column(name = "credit_transaction_id")
+    var creditTransactionId: Long? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

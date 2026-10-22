@@ -48,6 +48,9 @@ import java.util.concurrent.RejectedExecutionException
     ],
 )
 class ChatTurnCreditScheduleRejectionIntegrationTests {
+    @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
+    @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
+
 
     @TestConfiguration
     class RejectingExecutorConfig {
@@ -86,7 +89,7 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
     @Autowired private lateinit var creditPolicyService: CreditPolicyService
 
     // 수치는 팀이 조정하는 정책값이라 리터럴로 박지 않고 해석 결과를 그대로 쓴다(KNK-1056).
-    private val chatTurnCost: Long get() = creditPolicyService.amountOf(CreditPolicyKey.CHAT_TURN_COST)
+    private val chatTurnCost: Long get() = chatModelService.litePrice()
 
     // 여러 턴을 견디는 충분한 잔액.
     private val seedBalance: Long get() = chatTurnCost * 10
@@ -120,7 +123,7 @@ class ChatTurnCreditScheduleRejectionIntegrationTests {
         val refund = all.filter { it.reason == CreditReason.REFUND }
         assertThat(refund).hasSize(1)
         assertThat(refund.first().amount).isEqualTo(chatTurnCost)
-        assertThat(refund.first().refType).isEqualTo("CHAT")
+        assertThat(refund.first().refType).isEqualTo("CHAT_TURN")
         assertThat(refund.first().refId).isEqualTo(chat.id)
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloaded.currentTurn).isZero()

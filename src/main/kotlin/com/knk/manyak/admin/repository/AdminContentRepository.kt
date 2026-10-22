@@ -66,7 +66,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
     // EXTRACT(EPOCH FROM timestamp subtraction)는 H2 PostgreSQL 모드와 PostgreSQL에서 같은 초 값을 낸다.
     private val firstSeconds = "EXTRACT(EPOCH FROM ($firstAt - c.created_at))"
     private val credits = """(SELECT COALESCE(SUM(-t.amount),0) FROM credit_transactions t WHERE t.ref_id=c.id
-        AND t.ref_type IN ('CHAT','CHAT_IMAGE') AND t.amount<0 AND CAST(t.reason AS VARCHAR) IN ('CHAT_TURN','CHAT_IMAGE'))"""
+        AND t.ref_type IN ('CHAT','CHAT_TURN','CHAT_IMAGE') AND t.amount<0 AND CAST(t.reason AS VARCHAR) IN ('CHAT_TURN','CHAT_IMAGE'))"""
     fun chats(request: AdminChatsRequest, page: AdminPagination, chatId: UUID? = null): AdminPageResponse<AdminChatResponse> {
         val q = AdminQuery()
         q.add("c.deleted_at IS NULL"); q.equal("c.public_id", chatId); q.equal("s.public_id", request.storyId); q.equal("u.public_id", request.memberId)

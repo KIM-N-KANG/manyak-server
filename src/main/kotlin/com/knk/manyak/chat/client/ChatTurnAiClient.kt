@@ -57,6 +57,8 @@ data class ChatChoicesResult(
  * 오프닝은 [startSettings]로만 전달하며 [history]에는 포함하지 않는다.
  */
 data class ChatTurnAiRequest(
+    @JsonProperty("user_id") val userId: String? = null,
+    @JsonProperty("model_tier") val modelTier: String = "LITE",
     val genre: String,
     @JsonProperty("story_settings")
     val storySettings: ChatTurnStorySettings,

@@ -76,6 +76,70 @@ class ChatCreateControllerIntegrationTests {
         databaseCleaner.cleanAll()
     }
 
+    @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
+
+    @Test
+    fun `비활성 모델은 목록에서 제외하고 상세는 기본 모델로 대체하되 저장 모델은 유지한다`() {
+        val story = storyRepository.save(Story(title = "비활성 모델"))
+        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id))
+        models.save(models.findById("LITE").orElseThrow().apply { isActive = false })
+        restTestClient.get().uri("/api/v1/chats/models").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.length()").isEqualTo(1).jsonPath("$[0].code").isEqualTo("AURORA")
+        restTestClient.get().uri("/api/v1/chats/${chat.publicId}").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.model").isEqualTo("AURORA")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().modelCode).isEqualTo("LITE")
+        restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"model":"LITE"}""")
+            .exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `모델 변경은 익명의 회원 채팅 접근과 회원의 게스트 채팅 접근을 거절한다`() {
+        val member = userRepository.save(User(nickname = "모델소유자", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(Story(title = "모델 소유권"))
+        val owned = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, userId = member.id))
+        val guest = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id))
+        restTestClient.patch().uri("/api/v1/chats/${owned.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"model":"LITE"}""")
+            .exchange().expectStatus().isForbidden
+        restTestClient.patch().uri("/api/v1/chats/${guest.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"model":"LITE"}""")
+            .exchange().expectStatus().isForbidden
+        restTestClient.patch().uri("/api/v1/chats/invalid-id")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"model":"LITE"}""")
+            .exchange().expectStatus().isNotFound
+    }
+
+    @Test
+    fun `모델 목록은 익명에게 활성 모델과 기본 모델을 제공한다`() {
+        restTestClient.get().uri("/api/v1/chats/models").exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$[0].code").isEqualTo("LITE")
+            .jsonPath("$[0].turnCost").isEqualTo(20)
+            .jsonPath("$[1].code").isEqualTo("AURORA")
+            .jsonPath("$[1].isDefault").isEqualTo(true)
+    }
+
+    @Test
+    fun `새 채팅 기본 모델을 변경하면 상세에도 반영하고 잘못된 코드는 거절한다`() {
+        val story = storyRepository.save(Story(title = "모델 선택"))
+        val chatId = restTestClient.post().uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"storyId":"${story.publicId}"}""")
+            .exchange().expectStatus().isCreated.expectBody()
+            .jsonPath("$.model").isEqualTo("AURORA")
+            .returnResult().responseBody!!.let { tools.jackson.databind.ObjectMapper().readTree(it)["id"].asText() }
+        restTestClient.patch().uri("/api/v1/chats/$chatId")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"model":"LITE"}""")
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.model").isEqualTo("LITE")
+        restTestClient.get().uri("/api/v1/chats/$chatId").exchange()
+            .expectStatus().isOk.expectBody().jsonPath("$.model").isEqualTo("LITE")
+        for (body in listOf("{}", """{"model":""}""", """{"model":"UNKNOWN"}""")) {
+            restTestClient.patch().uri("/api/v1/chats/$chatId")
+                .contentType(MediaType.APPLICATION_JSON).body(body).exchange().expectStatus().isBadRequest
+        }
+    }
+
     @Test
     fun `채팅을 생성하면 201과 함께 ACTIVE 플레이 세션이 만들어진다`() {
         val story = storyRepository.save(
