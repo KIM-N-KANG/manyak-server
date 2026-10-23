@@ -354,7 +354,7 @@ class AdminReadApiIntegrationTests {
             assertThat(body["daily"].size()).isEqualTo(days)
             assertThat(body["distributions"].size()).isEqualTo(8)
             val turns = body["distributions"][1]["points"]
-            assertThat(turns.size()).isEqualTo(11)
+            assertThat(turns.size()).isEqualTo(13)
             assertThat(turns[1]["link"]["params"]["turnBucket"].asText()).isEqualTo("1")
             assertThat(turns[1]["link"]["params"]["from"].asText()).isEqualTo(body["from"].asText())
             assertThat(body["daily"][0]["attendance"].asLong()).isZero()
@@ -377,7 +377,7 @@ class AdminReadApiIntegrationTests {
         assertThat(chat["startedAs"].asText()).isEqualTo("GUEST")
         assertThat(chat.has("messages")).isFalse()
         assertThat(chat.has("persona")).isFalse()
-        assertThat(json(get("/chats?turnBucket=10").expectStatus().isOk)["totalElements"].asLong()).isZero()
+        assertThat(json(get("/chats?turnBucket=12").expectStatus().isOk)["totalElements"].asLong()).isZero()
         val noGenre = storyRepository.save(com.knk.manyak.story.entity.Story(title = "장르 없음"))
         val noGenreChat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = noGenre.id))
         val genre = json(get("/stories/${noGenre.publicId}").expectStatus().isOk)["genre"]
@@ -520,6 +520,37 @@ class AdminReadApiIntegrationTests {
         messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id, role = role, content = "응답에 나오면 안 되는 원문",
             messageOrder = if (role == com.knk.manyak.chat.entity.MessageRole.USER) 1 else 2, createdAt = chat.createdAt.plusSeconds(seconds)))
 
+    @Test fun `턴 구간 13개는 2에서 6까지 개별 집계하고 모든 경계의 목록 링크와 일치한다`() {
+        val owner = member("턴 경계")
+        val story = story()
+        val turns = (0..7).toList() + listOf(9, 10, 14, 15, 19, 20, 29, 30, 49, 50, 51, Int.MAX_VALUE)
+        val samples = turns.map { it to chat(story, turns = it) } + listOf(5, 6).map { it to chat(story, owner, it) }
+        val cases = listOf("0" to (0..0), "1" to (1..1), "2" to (2..2), "3" to (3..3), "4" to (4..4),
+            "5" to (5..5), "6" to (6..6), "7~9" to (7..9), "10~14" to (10..14), "15~19" to (15..19),
+            "20~29" to (20..29), "30~49" to (30..49), "50+" to (50..Int.MAX_VALUE))
+        val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
+        val points = body["distributions"].first { it["chartId"].asText() == "turns" }["points"].toList()
+        assertThat(points.map { it["label"].asText() }).isEqualTo(cases.map { it.first })
+        points.forEachIndexed { index, point ->
+            val expected = samples.filter { it.first in cases[index].second }.map { it.second.publicId.toString() }
+            assertThat(point["value"].asInt()).isEqualTo(expected.size)
+            val params = point["link"]["params"]
+            assertThat(point["link"]["list"].asText()).isEqualTo("chats")
+            assertThat(params["turnBucket"].asText()).isEqualTo(index.toString())
+            val page = json(get("/chats?turnBucket=$index&from=${params["from"].asText()}&to=${params["to"].asText()}&size=100").expectStatus().isOk)
+            assertThat(page["totalElements"].asInt()).isEqualTo(expected.size)
+            assertThat(page["items"].toList().map { it["chatId"].asText() }).containsExactlyInAnyOrderElementsOf(expected)
+        }
+        for (bucket in listOf(5, 6)) for (startedAs in listOf("GUEST", "MEMBER")) {
+            val page = json(get("/chats?turnBucket=$bucket&startedAs=$startedAs").expectStatus().isOk)
+            assertThat(page["totalElements"].asInt()).isEqualTo(1)
+            assertThat(page["items"][0]["turnCount"].asInt()).isEqualTo(bucket)
+        }
+        for (value in listOf("-1", "13", "3~4", "5~6", "1.5", "bad")) {
+            get("/chats?turnBucket=$value").expectStatus().isBadRequest
+        }
+    }
+
     @Test fun `차트 분포는 다중 장르와 구간과 비율과 첫 메시지 통계를 계산하고 목록 링크와 일치한다`() {
         val owner = member("회원")
         val story = story()
@@ -539,7 +570,7 @@ class AdminReadApiIntegrationTests {
         ))
         assertThat(dist[0]["points"].size()).isEqualTo(2)
         assertThat(dist[0]["points"][0]["value"].asDouble()).isEqualTo(13.75)
-        for (i in listOf(0, 1, 3, 10)) assertThat(dist[1]["points"][i]["value"].asDouble()).isEqualTo(1.0)
+        for (i in listOf(0, 1, 4, 12)) assertThat(dist[1]["points"][i]["value"].asDouble()).isEqualTo(1.0)
         assertThat(dist[2]["points"][0]["value"].asDouble()).isEqualTo(25.0)
         assertThat(dist[2]["points"][1]["value"].asDouble()).isEqualTo(75.0)
         assertThat(dist[3]["points"][2]["value"].asDouble()).isEqualTo(1.0)
@@ -558,7 +589,7 @@ class AdminReadApiIntegrationTests {
         val live = story(genre = "유지 장르")
         val removed = story(genre = "삭제 장르")
         jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
-        val turns = listOf(0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50)
+        val turns = listOf(0, 1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50)
         val included = mutableListOf<com.knk.manyak.chat.entity.StoryChat>()
         for ((index, count) in listOf(1, 2, 3, 5, 10).withIndex()) {
             val owner = member("채팅 수 $count")
@@ -581,7 +612,7 @@ class AdminReadApiIntegrationTests {
             }
             return json(get("/${link["list"].asText()}?$query").expectStatus().isOk)["totalElements"].asLong()
         }
-        for ((id, size) in listOf("turns" to 11, "member-chats" to 5)) {
+        for ((id, size) in listOf("turns" to 13, "member-chats" to 5)) {
             val points = distributions.getValue(id)["points"]
             assertThat(points.size()).isEqualTo(size)
             for (point in points) {
@@ -655,7 +686,7 @@ class AdminReadApiIntegrationTests {
         aiLogs.save(com.knk.manyak.global.observability.aicall.AiCallLog(requestId = "chat-filter", callerService = "test",
             feature = com.knk.manyak.global.observability.aicall.AiCallFeature.CHAT_RESPONSE, chatId = fast.publicId, status = com.knk.manyak.global.observability.aicall.AiCallStatus.SUCCEEDED,
             latencyMs = 1200, createdAt = now))
-        val body = json(get("/chats?memberId=${owner.publicId}&storyId=${story.publicId}&startedAs=MEMBER&turnBucket=10&hasFirstMessage=true&turnDate=2026-10-21&aiFeature=chat_response&aiStatus=FINISHED&hasLatency=true&aiFrom=2026-10-21&aiTo=2026-10-21").expectStatus().isOk)
+        val body = json(get("/chats?memberId=${owner.publicId}&storyId=${story.publicId}&startedAs=MEMBER&turnBucket=12&hasFirstMessage=true&turnDate=2026-10-21&aiFeature=chat_response&aiStatus=FINISHED&hasLatency=true&aiFrom=2026-10-21&aiTo=2026-10-21").expectStatus().isOk)
         assertThat(body["totalElements"].asLong()).isEqualTo(1)
         assertThat(body["items"][0]["creditsSpent"].asLong()).isEqualTo(45)
         assertThat(body["items"][0]["firstMessageSeconds"].asLong()).isEqualTo(30)
@@ -942,7 +973,7 @@ class AdminReadApiIntegrationTests {
     @Test fun `모든 새 목록의 페이지 정렬과 필터 오류는 400이고 빈 페이지는 총계를 유지한다`() {
         for ((path, queries) in mapOf(
             "/stories" to listOf("scope=bad", "visibility=SECRET", "moderationStatus=BAD", "supportingCharacterCount=6", "aiFeature=chat_response", "aiStatus=BAD", "memberId=bad", "creationFrom=2026-10-22&creationTo=2026-10-21"),
-            "/chats" to listOf("turnBucket=-1", "turnBucket=11", "hasFirstMessage=bad", "storyId=bad", "memberId=bad", "aiFeature=story_completion", "turnDate=2026-02-30", "from=2026-10-22&to=2026-10-21"),
+            "/chats" to listOf("turnBucket=-1", "turnBucket=13", "hasFirstMessage=bad", "storyId=bad", "memberId=bad", "aiFeature=story_completion", "turnDate=2026-02-30", "from=2026-10-22&to=2026-10-21"),
             "/members" to listOf("chatBucket=5", "excludeDeleted=bad", "creditDirection=other", "attendanceDate=bad", "chatFrom=2026-10-22&chatTo=2026-10-21"),
             "/payments/orders" to listOf("memberId=bad"))) {
             for (query in queries + listOf("q=", "q=${"x".repeat(51)}", "sort=bad", "page=0", "size=101", "cursor=", "limit=")) {

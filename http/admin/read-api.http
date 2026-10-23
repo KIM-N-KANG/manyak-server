@@ -201,7 +201,10 @@ Authorization: Bearer {{adminToken}}
             client.assert(JSON.stringify([chart.chartId, chart.title, chart.unit]) === JSON.stringify(terms[i]), `차트 용어 actual=${JSON.stringify(chart)}`);
             client.assert(!/채팅방|제작 세션|AI 지연/.test(chart.description), `이전 용어 actual=${chart.description}`);
         });
-        client.assert(response.body.distributions[1].points.length === 11, "턴 구간 11개가 필요합니다");
+        const turns = response.body.distributions[1].points;
+        const turnLabels = ["0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"];
+        client.assert(JSON.stringify(turns.map(p => p.label)) === JSON.stringify(turnLabels), "턴 구간 13개가 필요합니다");
+        turns.forEach((p, i) => client.assert(p.link.list === "chats" && p.link.params.turnBucket === String(i), `턴 링크 actual=${JSON.stringify(p)}`));
         const link = response.body.distributions[1].points[1].link;
         client.assert(link.list === "chats" && link.params.turnBucket === "1", `actual=${JSON.stringify(link)}`);
     });
@@ -221,6 +224,58 @@ Authorization: Bearer {{adminToken}}
         }
     }
 %}
+
+### 5턴 게스트 — 로그인 경계 전, 구간 순번 5
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=5&startedAs=GUEST
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("5턴 게스트만 반환", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(c => c.turnCount === 5 && c.startedAs === "GUEST"), "5턴 게스트 구간이어야 합니다");
+    });
+%}
+
+### 6턴 회원 — 로그인 경계 후, 구간 순번 6
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=6&startedAs=MEMBER
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("6턴 회원만 반환", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(c => c.turnCount === 6 && c.startedAs === "MEMBER"), "6턴 회원 구간이어야 합니다");
+    });
+%}
+
+### 마지막 구간 50+ — 새 순번 12 허용
+# turnBucket은 구간 문자열이 아닌 정수 순번 0~12다. 기존 정수 3·4도 새 3턴·4턴으로 해석된다(결정 17).
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=12
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("50턴 이상 구간", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(c => c.turnCount >= 50), "50턴 이상이어야 합니다");
+    });
+%}
+
+### 허용 범위 밖 13은 400
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=13
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("turnBucket 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 이전 구간 표기 문자열 3~4는 400 — 정수 바인딩 실패
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=3~4
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("구간 문자열 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 이전 구간 표기 문자열 5~6은 400
+GET {{baseUrl}}/api/v1/admin/chats?turnBucket=5~6
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("구간 문자열 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 턴 수 막대의 링크 목록 — 앞 차트 요청 후 실행
 GET {{baseUrl}}/api/v1/admin/{{adminTurnDrillPath}}

@@ -19,6 +19,7 @@ import java.util.UUID
 class AdminReadPostgresTests {
     private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "admin-read-test")
         .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
+    private lateinit var jdbc: JdbcTemplate
     private lateinit var reads: AdminReadRepository
     private lateinit var content: AdminContentRepository
     private lateinit var charts: AdminChartsRepository
@@ -34,7 +35,7 @@ class AdminReadPostgresTests {
         pg.start()
         val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "admin-read-test")
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
-        val jdbc = JdbcTemplate(ds)
+        jdbc = JdbcTemplate(ds)
         val named = NamedParameterJdbcTemplate(jdbc)
         reads = AdminReadRepository(named, ObjectMapper()); content = AdminContentRepository(named); charts = AdminChartsRepository(named)
         userId = jdbc.queryForObject("INSERT INTO users(public_id,nickname,created_at) VALUES (?, 'pg 검색 회원', '2026-10-21T00:00:00Z') RETURNING id", Long::class.java, memberId)!!
@@ -118,4 +119,22 @@ class AdminReadPostgresTests {
         assertThat((raw[6].single()["metric_value"] as Number).toDouble()).isEqualTo(100.0)
         assertThat(charts.daily(start, now, listOf(userId)).values.sumOf { it["chats"] ?: 0 }).isZero()
     }
+    @Test fun `실제 PostgreSQL도 턴 0부터 6과 이후 경계의 집계 및 드릴다운 구간이 같다`() {
+        val publicId = UUID.randomUUID()
+        val sid = jdbc.queryForObject("INSERT INTO stories(public_id,title,genre,created_at) VALUES (?,'턴 경계 PG','판타지','2026-10-20T00:00:00Z') RETURNING id", Long::class.java, publicId)!!
+        val values = (0..7).toList() + listOf(9, 10, 14, 15, 19, 20, 29, 30, 49, 50, 51, Int.MAX_VALUE)
+        values.forEach { turn -> jdbc.update("INSERT INTO story_chats(public_id,story_id,current_turn,persona_name_snapshot,model_code,created_at) VALUES (?,?,?,NULL,'LITE','2026-10-20T00:00:00Z')", UUID.randomUUID(), sid, turn) }
+        val bounds = listOf(0..0, 1..1, 2..2, 3..3, 4..4, 5..5, 6..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
+        val raw = charts.distributions(Instant.parse("2026-10-19T15:00:00Z"), Instant.parse("2026-10-20T03:00:00Z"), emptyList(), null)[1]
+            .associate { (it["bucket"] as Number).toInt() to (it["n"] as Number).toLong() }
+        assertThat(raw.keys).containsExactlyInAnyOrderElementsOf((0..12).toList())
+        bounds.forEachIndexed { index, range ->
+            val expected = values.filter { it in range }
+            assertThat(raw[index]).isEqualTo(expected.size.toLong())
+            val page = content.chats(AdminChatsRequest().apply { storyId = publicId; turnBucket = index }, AdminPagination(1, 100, "c.id asc"))
+            assertThat(page.totalElements).isEqualTo(expected.size.toLong())
+            assertThat(page.items.map { it.turnCount }).containsExactlyInAnyOrderElementsOf(expected)
+        }
+    }
+
 }

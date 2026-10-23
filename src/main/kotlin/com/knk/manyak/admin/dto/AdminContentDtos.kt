@@ -48,7 +48,7 @@ class AdminChatsRequest : AdminAiRequest() {
     var storyId: UUID? = null
     var memberId: UUID? = null
     var startedAs: String? = null
-    @field:Min(0) @field:Max(10) var turnBucket: Int? = null
+    @field:Min(0) @field:Max(12) var turnBucket: Int? = null
     var hasFirstMessage: Boolean? = null
     var turnDate: String? = null
 }
