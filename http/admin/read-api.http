@@ -204,6 +204,12 @@ Authorization: Bearer {{adminToken}}
             client.assert(JSON.stringify([chart.chartId, chart.title, chart.unit]) === JSON.stringify(terms[i]), `차트 용어 actual=${JSON.stringify(chart)}`);
             client.assert(!/채팅방|제작 세션|AI 지연/.test(chart.description), `이전 용어 actual=${chart.description}`);
         });
+        const aiFeatures = ["chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion"];
+        for (const id of ["ai-latency", "ai-success"]) {
+            const points = response.body.distributions.find(c => c.chartId === id).points;
+            client.assert(JSON.stringify(points.map(p => p.label)) === JSON.stringify(aiFeatures), `AI 기능 순서 actual=${JSON.stringify(points)}`);
+            client.assert(points[2].link.list === "chats" && points[2].link.params.aiFeature === "chat_image", "이미지 AI는 채팅 목록으로 연결");
+        }
         const turns = response.body.distributions[1].points;
         const turnLabels = ["0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"];
         client.assert(JSON.stringify(turns.map(p => p.label)) === JSON.stringify(turnLabels), "턴 구간 13개가 필요합니다");
@@ -541,3 +547,15 @@ GET {{baseUrl}}/api/v1/admin/credits/transactions
 ### 자유 조회 — 원장 기록일과 페이지를 직접 바꿔 실행
 GET {{baseUrl}}/api/v1/admin/credits/transactions?date=2026-10-21&page=1&size=100
 Authorization: Bearer {{adminToken}}
+
+
+### 실시간 이미지 실패 호출이 있는 채팅 — 본문 성공/이미지 실패도 포함
+GET {{baseUrl}}/api/v1/admin/chats?aiFeature=chat_image&aiStatus=FAILED
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("이미지 호출 채팅 필터", () => {
+    client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    client.assert(Array.isArray(response.body.items), "페이지 items");
+});
+%}

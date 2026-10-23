@@ -13,7 +13,9 @@ import java.math.MathContext
 import java.time.*
 
 @ConfigurationProperties("manyak.admin.ai-prices")
-class AdminAiPrices(val models: Map<String, TokenPrice> = emptyMap())
+class AdminAiPrices(val models: Map<String, TokenPrice> = emptyMap(), val chatImageUnitCostKrw: BigDecimal = BigDecimal("48")) {
+    init { require(chatImageUnitCostKrw.signum() >= 0) }
+}
 data class TokenPrice(val inputMillionKrw: BigDecimal, val outputMillionKrw: BigDecimal) {
     init { require(inputMillionKrw.signum() >= 0 && outputMillionKrw.signum() >= 0) }
 }
@@ -29,7 +31,7 @@ data class ChatOptionResponse(val asOf: Instant, val from: LocalDate, val to: Lo
 data class AiCostItem(val feature: String, val model: String?, val calls: Long, val callsWithoutTokens: Long, val inputTokens: Long, val outputTokens: Long, val costKrw: BigDecimal?)
 data class AiCostDay(val date: LocalDate, val byFeature: List<AiCostItem>)
 data class AiCostTotals(val costKrw: BigDecimal, val costPerTurnKrw: BigDecimal?, val costPerStoryKrw: BigDecimal?)
-data class AiCostResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val currency: String, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>)
+data class AiCostResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val currency: String, val chatImageUnitCostKrw: BigDecimal, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>)
 
 @Repository
 class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
@@ -67,7 +69,7 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
         SUM(CASE WHEN input_token_count IS NULL OR output_token_count IS NULL THEN 1 ELSE 0 END) AS missing,
         SUM(COALESCE(input_token_count,0)) AS input, SUM(COALESCE(output_token_count,0)) AS output
         FROM ai_call_logs WHERE created_at>=:start AND created_at<:end AND status='SUCCEEDED'
-        AND feature IN ('chat_response','choice_generation','storyline_generation','story_completion')
+        AND feature IN ('chat_response','choice_generation','chat_image','storyline_generation','story_completion')
         GROUP BY ${day("created_at")}, feature, model ORDER BY metric_day, feature, model
         """, params(range, emptyList()))
 }
@@ -106,9 +108,10 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
     fun aiCost(query: AdminChartsRequest): AiCostResponse {
         val range = range(query); val rows = repository.aiCost(range).groupBy { it.date() }
         val daily = range.dates().map { date -> AiCostDay(date, rows[date].orEmpty().map { row ->
-            val model = row["model"] as String?; val input = row.n("input"); val output = row.n("output")
-            val cost = prices.models[model]?.let { (it.inputMillionKrw * BigDecimal.valueOf(input) + it.outputMillionKrw * BigDecimal.valueOf(output)).divide(BigDecimal.valueOf(1_000_000)) }
-            AiCostItem(row["feature"].toString(), model, row.n("calls"), row.n("missing"), input, output, cost)
+            val model = row["model"] as String?; val image = row["feature"] == "chat_image"
+            val input = if (image) 0L else row.n("input"); val output = if (image) 0L else row.n("output")
+            val cost = if (image) prices.chatImageUnitCostKrw * BigDecimal.valueOf(row.n("calls")) else prices.models[model]?.let { (it.inputMillionKrw * BigDecimal.valueOf(input) + it.outputMillionKrw * BigDecimal.valueOf(output)).divide(BigDecimal.valueOf(1_000_000)) }
+            AiCostItem(row["feature"].toString(), model, row.n("calls"), if (image) 0L else row.n("missing"), input, output, cost)
         }) }
         val all = daily.flatMap { it.byFeature }
         fun cost(items: List<AiCostItem>) = items.fold(BigDecimal.ZERO) { acc, item -> acc + (item.costKrw ?: BigDecimal.ZERO) }
@@ -116,7 +119,7 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
             val calls = all.filter { it.feature == denominator }.sumOf { it.calls }
             return if (calls == 0L) null else cost(all.filter { it.feature in features }).divide(BigDecimal.valueOf(calls), MathContext.DECIMAL128)
         }
-        return AiCostResponse(clock.instant(), range.from, range.to, "KRW", daily,
+        return AiCostResponse(clock.instant(), range.from, range.to, "KRW", prices.chatImageUnitCostKrw, daily,
             AiCostTotals(cost(all), per(setOf("chat_response", "choice_generation"), "chat_response"), per(setOf("storyline_generation", "story_completion"), "story_completion")),
             all.filter { it.costKrw == null }.mapNotNull { it.model }.distinct().sorted())
     }

@@ -42,6 +42,15 @@ class AdminMetricsPostgresTests {
             assertThat(cost.totals.costKrw).isEqualByComparingTo("6"); assertThat(cost.totals.costPerTurnKrw).isEqualByComparingTo("3")
             assertThat(cost.daily.single().byFeature.single { it.model==null }.callsWithoutTokens).isEqualTo(1)
             assertThat(cost.unpricedModels).containsExactly("unknown")
+            jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,status,created_at) SELECT 'image','test','chat_image','SUCCEEDED','2026-10-20T15:00:00Z'::timestamptz FROM generate_series(1,3)")
+            jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,status,created_at) VALUES ('image-failed','test','chat_image','FAILED','2026-10-20T15:00:00Z')")
+            val withImages=service.aiCost(q)
+            val image=withImages.daily.single().byFeature.single { it.feature=="chat_image" }
+            assertThat(image.calls).isEqualTo(3); assertThat(image.costKrw).isEqualByComparingTo("144")
+            assertThat(image.callsWithoutTokens).isZero(); assertThat(image.inputTokens).isZero(); assertThat(image.outputTokens).isZero()
+            assertThat(withImages.totals.costKrw).isEqualByComparingTo("150")
+            assertThat(withImages.totals.costPerTurnKrw).isEqualByComparingTo("3")
+            assertThat(withImages.unpricedModels).containsExactly("unknown")
         } finally { pg.stop() }
     }
 }

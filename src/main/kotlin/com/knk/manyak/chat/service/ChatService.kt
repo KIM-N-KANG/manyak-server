@@ -136,6 +136,7 @@ class ChatService(
     private val chatRealtimeImageService: ChatRealtimeImageService,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
+    private val imageAiCalls: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
@@ -1087,6 +1088,7 @@ class ChatService(
         var memberTrialCovered = false
         var guestDeviceId: String? = null
         var imageReservation = ChatRealtimeImageService.Reservation(null)
+        var imageCall: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder.Call? = null
         var charges = emptyList<CreditTransaction>()
         val refundGate = AtomicBoolean(false) // 턴 체험/턴 비용만 소유한다. 이미지 환불과 공유하지 않는다.
         val trialRefundKey = "refund:chatturn:${UUID.randomUUID()}"
@@ -1106,6 +1108,7 @@ class ChatService(
             )
         }
         fun refundImageQuietly() {
+            imageAiCalls.finish(imageCall, errorCode = "AI_IMAGE_TURN_FAILED")
             try {
                 refundImage()
             } catch (ex: Exception) {
@@ -1128,6 +1131,7 @@ class ChatService(
                 if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
             }
             chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
+            if (imageReservation.slot != null) imageCall = imageAiCalls.start(chat.storyId, chat.publicId)
         } catch (throwable: Throwable) {
             try {
                 refundImageQuietly()
@@ -1216,6 +1220,7 @@ class ChatService(
                         // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                         meta = { it.meta },
                     ) {
+                        imageAiCalls.bodyStarted(imageCall)
                         chatTurnAiClient.streamTurn(
                             aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot), modelTier = billingModel.code),
                             aiCall.traceLink,
@@ -1223,6 +1228,7 @@ class ChatService(
                             // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
                             // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                             onCharacterImage = { characterImage ->
+                                imageAiCalls.imageReceived(imageCall, characterImage.imageUrl, imageReservation.slot?.publicUrl)
                                 if (workerState.get() == TurnWorkerState.CANCELLED) {
                                     throw CancellationException("chat turn stream cancelled")
                                 }
@@ -1258,6 +1264,7 @@ class ChatService(
                     // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                     // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                     persisted.set(true)
+                    imageAiCalls.finish(imageCall, persistedTurn.turnNumber, validated.errorCode)
                     Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                     // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                     aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)

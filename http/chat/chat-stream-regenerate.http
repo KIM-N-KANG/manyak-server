@@ -1,3 +1,15 @@
+# KNK-1793 실시간 이미지 AI 기록 수동 확인 (업로드 위치를 발급한 턴만).
+# 준비된 로컬/검증 DB에서 채팅 공개 UUID로 ai_call_logs를 조회한다(아래 SQL은 실행 안내).
+# SELECT feature,status,turn_number,latency_ms,error_code,input_token_count,output_token_count,prompt_versions
+# FROM ai_call_logs WHERE chat_id='<채팅 공개 UUID>'::uuid ORDER BY id;
+# 발급 직후 chat_image STARTED → 턴 저장 뒤 SUCCEEDED/FAILED. 재생성도 새 행, 같은 저장 턴 번호.
+# 최초 발급 URL character_image 이벤트까지의 latency_ms이며 이벤트 없으면 null.
+# 본문 마커에 발급 URL 없음=AI_IMAGE_MISSING, HEAD 실패=AI_IMAGE_NOT_FOUND,
+# 스트림/저장 실패=AI_IMAGE_TURN_FAILED 및 turn_number=null. 이미지 실패만으로 턴은 실패하지 않는다.
+# realtimeImage=false/저장소 미설정/게스트 체험 소진/presign 실패는 이미지 행 없음.
+# 토큰과 prompt_versions는 항상 null. 이미지 기록 DB 오류는 WARN만, 턴 completed 정상.
+# 관리자 차트에 chat_image 포함. AI 비용은 성공 1장당 설정 48원(기본), 토큰 비용과 별개.
+
 ### [KNK-1677] 이어쓰기와 재생성은 생성 키를 공유합니다. 생성 중 409 CHAT_TURN_IN_PROGRESS, 낡은 대상 409 CHAT_TURN_STALE, 엔딩 도달 409 CHAT_ENDED.
 ### Redis 획득 장애는 과금 없이 503 SERVICE_UNAVAILABLE. started에는 UUID generationId가 포함됩니다.
 ### 생성 도중 요청을 취소해도 생성과 저장은 계속됩니다. 상세 generatingTurn으로 상태를 확인합니다.
