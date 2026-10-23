@@ -62,9 +62,9 @@ class AmplitudeBudget(private val clock: Clock = Clock.systemUTC(), private val 
         try {
             if (!calls.tryAcquire((deadline - System.nanoTime()).coerceAtLeast(0), java.util.concurrent.TimeUnit.NANOSECONDS))
                 throw AmplitudeFetchFailure(AnalyticsFailureReason.timeout)
-        } catch (_: InterruptedException) {
+        } catch (failure: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw AmplitudeFetchFailure(AnalyticsFailureReason.http_error)
+            throw AmplitudeFetchFailure(AnalyticsFailureReason.http_error, exceptionClass = failure.javaClass.name, phase = "concurrency")
         }
     }
     fun leave() { calls.release() }

@@ -138,7 +138,7 @@ class CampaignAnalyticsIntegrationTests {
         assertThat(sources["sources"][0].has("medium")).isFalse()
         assertThat(sources["posts"][0].has("source")).isFalse()
         assertThat(sources["posts"][0]["visitors"].asLong()).isEqualTo(9)
-        assertThat(requests.last().requestUrl!!.queryParameter("e")).contains("[Amplitude] Page Viewed", "\"in\"", "community", "social")
+        assertThat(requests.last().requestUrl!!.queryParameter("e")).contains("[Amplitude] Page Viewed", "\"is\"", "community", "social")
         for (suffix in listOf("analytics", "sources", "funnels/creation", "funnels/story-detail")) {
             for (query in listOf("days=90", "days=", "from=2026-10-20", "from=2026-10-24&to=2026-10-25", "from=2026-02-30&to=2026-10-23", "days=7&$range")) get("/campaigns/$suffix?$query").expectStatus().isBadRequest
         }

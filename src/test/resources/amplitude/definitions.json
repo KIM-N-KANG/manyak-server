@@ -1,0 +1,2762 @@
+{
+  "dashboard_active-0eb9d23e3a94aca5e742bdfda789abc5fe0f2602eb810615ef9b430c982c2a0b": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "dashboard_active-32a49be9a134dfe5ad8cda7bc975828acb48f1b4e8258644ca31faaacd55ee93": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "dashboard_active-6c79a634f07024450b10b9cae5065d22f8a65323d7851b3d7d29055f2950b674": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "dashboard_new-0a46330db807dcce69a1adc0d3f212b1a9488cd03962727873313a027c7043cc": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "dashboard_new-71c15e49cb28d74c8350f832cfa6e302aa5343d31de4f647afb64f6ade6e4cbb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "dashboard_new-f15c3f12183b73b8a0c6e813070c17ebfb16a319f06e687f03d486d257759d71": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_active-f9cdbc01f53031651cbbe095e2f12472e9ca8613e3227f8b890dbc79caba14bd": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_new-afed7c730368259d443790bfc1ff78843d05c3dc881140856c16b578b9de8c19": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_active-32a49be9a134dfe5ad8cda7bc975828acb48f1b4e8258644ca31faaacd55ee93": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_new-71c15e49cb28d74c8350f832cfa6e302aa5343d31de4f647afb64f6ade6e4cbb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_active-6c79a634f07024450b10b9cae5065d22f8a65323d7851b3d7d29055f2950b674": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_new-f15c3f12183b73b8a0c6e813070c17ebfb16a319f06e687f03d486d257759d71": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_active-b689d58815436438735d16adf16a188c0196586bd20f749b974bd594e947578e": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_new-144a0aae5e0c384c561674fe927f247f1ac59c0b677269befd4d8ee1188c8c10": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_messages-c285bb7ab267c3373b011d2cbdcd56566342603cc2a01a3babd48871d8e10313": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_messages-f1fa7fb99f9bdd45cee8e3b2a41498214d56299b72f1352f532f013f080cc384": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "activity_mau-f9cdbc01f53031651cbbe095e2f12472e9ca8613e3227f8b890dbc79caba14bd": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-25",
+        "2026-09-26",
+        "2026-09-27",
+        "2026-09-28",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03",
+        "2026-10-04",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09",
+        "2026-10-10",
+        "2026-10-11",
+        "2026-10-12",
+        "2026-10-13",
+        "2026-10-14",
+        "2026-10-15",
+        "2026-10-16",
+        "2026-10-17",
+        "2026-10-18",
+        "2026-10-19",
+        "2026-10-20",
+        "2026-10-21",
+        "2026-10-22"
+      ]
+    }
+  },
+  "users_session_average-461d974be7a52e5709edb943250d4322089d242c995ab7ea66c77a625751110f": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "xValues": [
+        "2026-10-22T00:00:00"
+      ]
+    }
+  },
+  "users_session_average-69872cb618766284d760f0f1401e9912e74a2baffb492fa8e565d70e1a1b418e": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "xValues": [
+        "2026-10-22T00:00:00"
+      ]
+    }
+  },
+  "users_session_average-7b689de3ee6519ca66ff915532cbc81b7f4984819cd0f9a0751db1848b9e1ba5": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "xValues": [
+        "2026-10-22T00:00:00"
+      ]
+    }
+  },
+  "users_retention-eba32706edb42ed235ecc29b28ecfbe3aa4ee32ee7af2c25bdd068c093029947": {
+    "status": 200,
+    "data": {
+      "series": [
+        {
+          "values": {
+            "Oct 22, 2026": [
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              }
+            ]
+          }
+        }
+      ],
+      "seriesLabels": [
+        "sample"
+      ]
+    }
+  },
+  "users_retention-4ea844084c3d7effc6f985b39c3fdb8170d6fb3d2db357f2893d1aef5f82d260": {
+    "status": 200,
+    "data": {
+      "series": [
+        {
+          "values": {
+            "Oct 22, 2026": [
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              }
+            ]
+          }
+        }
+      ],
+      "seriesLabels": [
+        "sample"
+      ]
+    }
+  },
+  "users_retention-4fab200ba533d29409029ed5e174bb1022465555027a71985567bf21a142c858": {
+    "status": 200,
+    "data": {
+      "series": [
+        {
+          "values": {
+            "Oct 22, 2026": [
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": true
+              }
+            ]
+          }
+        }
+      ],
+      "seriesLabels": [
+        "sample"
+      ]
+    }
+  },
+  "quality_messages-d2ffd5ecf93fcdca7991df23b9683fa484943cdcb9bf1f7199f86ae32231db4f": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-717508716175cefa1051e105e6c7fcd2b4b52008a8f010652180c73523680c2c": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-7af5bf6b62afdb90b5fa3e47549d2c1c63e074955873a80775c11023ac636e8e": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-f6982632b12251d10f14be43a783ddc576dbe63b0f3b81d0cfcea909857947d1": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_stream_errors-046a8477f675a4fded0c146bf91fc249df03ad3a42e74f11eef27b3caee6290b": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_chatLoadError-400f18aa1f3fb2eae506ce3f3dff1559f0191fdbb2a34133654ebbf34ea47ae8": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyListLoadError-41d21fe9f143fcc5a671e802a9be3f42affa507f19948a6f73afe70c0a555860": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyCompleteError-c1d2fb77662ab0935cc45514c7dfba51809f525765e4519141237642abafcd70": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditShortage-bebe53deb95196a854b88b7ed262f8f8c7dea8738429ba435747f41365f98ed7": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditChargeViewed-84904499391b745642a6bc31732600c6c10414d8b9af80135c50f78d7a05fca1": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_attendanceClicked-e04c6b23ac61b55ad96b2abe098dfecedeb37d3fdc9e9ea20eb37c7b01ff7dbf": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_inviteSucceeded-78b4684bf7ee2ca9e407799ce25977dfd4c73e2c6055d84c97ca48c9a5e0a5ec": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-6baf79e552f682ba42dbb5e12c9d2200356b96136fe593d17cab0177617b3951": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-72e580055f9b6d1c2664031c8145b1689c492e2f7bd0e4dccfdf1af15209dd83": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-d6b77d2b56c051043efcbf39bea6004f5f9cd6443e44117f527eb99b74cc82e7": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-cc89d3a465c3169c5a5932b8868b6e576b366615f98201daeb27cc0b105b0a43": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_stream_errors-5da684d019e2d54c75010403872146317dfae3c2ad36da1a21bd27f6ec8bbed1": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_chatLoadError-3704ac64050bb5523f6108c139b4de0f767a36ad43c5e55f02dc8bc8023363d9": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyListLoadError-1783308925ba0fe173a92dff5578ab198851464b33be5b2e0a4ac285bf4a18ae": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyCompleteError-16c772e096f109721b20742f79e6ff30318168dba04dbdf29b092aca4b0bf963": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditShortage-b8e820a43e59d628d4902cab43d0f02daa7bbd1c962afbdac140209659929551": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditChargeViewed-9e10d8cd3f23dc2629aa3900d91d5bbac27538482c15db4c7e7ed6abf7d6f561": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_attendanceClicked-7d0d5b3abdd351b4c691b28530e0cf3bf9832fd5b8868fe59317e6cc1e081605": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_inviteSucceeded-127b19d5e7e9e493d88aa5d6553a21b55766612504fcf2ab4164f069ad4225a4": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-2335e95cb5454d830c8b04b3f96fe7c1c91412b708fafce2dd56a142ad3b6710": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-0eef26410e665f5be82a5c8cab81b20fd48d437bd72574f5bfbda5b2de64dedc": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-e2836972895fe268ca3b2a6559fc45a5bdda5f3766db450a7c9f91525e1f88ca": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_messages-8380c35b249470e8c3faca2159aa82a64c19b893445a814e73baddd098e40ec7": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_stream_errors-3061a60c05871b75e42725e4ce65252e019d0baab4bd1b439c3075b79aa0ae62": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_chatLoadError-fb8580fdd0f68d6d8c422d09105c0596f58efbe08b6b1737ab12ed5c59d506bd": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyListLoadError-38055375c75cdf585247e095b9a38bb869090b3b5c21dd4258e9a3b76ee7db72": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_storyCompleteError-450ab0e091022226aca6569e06f957ecf4053fe13dabdd0ed6426025fae8ea5f": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditShortage-a5c41b4d1f0808587a91d6fc63c56187d282495805fdf54735daf6419f93c17d": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_creditChargeViewed-c2d1dd16db7f86165e9f362e5f3038af3b7a76f14191fdf96a52559e9026f110": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_attendanceClicked-be826646d06363506a633758e6678ee6e9c1c3551103b83ef0ede973de3afb59": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "quality_inviteSucceeded-2799cc56ecdb317a76e79d4413993b09a35fe9c86e7ef12b91bcc885ea42c4e7": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_active-32a49be9a134dfe5ad8cda7bc975828acb48f1b4e8258644ca31faaacd55ee93": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_new_all-71c15e49cb28d74c8350f832cfa6e302aa5343d31de4f647afb64f6ade6e4cbb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_new_ads-9f31a4f31835b7d8b31df67135758dc5cd5d5a3d689a515dc65b32ff6655bdaa": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_instagram-ca16373eb841270631a0e75e5eff987af4e0e02765be0864db067f3b30cf6481": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_threads-295b446bc13a4bbfc47bb810fe24a097c47465fcc854f2384361ec5c169ecfbb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_dcinside-320a88829fca8ac204460b1e3768a5a7378944faee0b14f264f9f7cc072f6cf0": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_other-3179bcb05348f7b74a4dbba035335c56c9667b683e0c6adc7061cdd812ebebec": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_google_all-55f5286c14a797497a7bcf7823b275a8b982c95de5856e7fd7f79255bcde7beb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_google_ads-d039f9cf1775b436f7274049cc6ad0bfacce7c131760aee3c508925a40a7ec02": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_kakao_all-9443f67eba4bdcdb48c29792c0449f4cfe41a83f431300a1f897a5d66f47f312": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_kakao_ads-223df39b0143d854a79432bdded6cec7d227ef27f429eafcdb015de66fa4bddc": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_storyline-222f1cbcbd340a0c27c449285c6276d0cedc76d12d79031004cd45cfcca821e9": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_completion-90c7998c82da48390a2eb02ccddece7f039cc8453e2f5bd6d00514e2344bad5d": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_messages-6baf79e552f682ba42dbb5e12c9d2200356b96136fe593d17cab0177617b3951": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_creation_all-b6a570c4ca9e14c31366bb8bf8041e32b0475639463da0161e2796b20d86c2c6": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "campaign_creation_ads-db2a2fcf461a1eb71ff4fcaeac94272c952fc2cb59829f7f602dae91ff336f8a": {
+    "status": 200,
+    "data": []
+  },
+  "campaign_story_detail-ca75435a743cd2b50e1fad848a89152606f916ae6d6ce1674a687becfc40db00": {
+    "status": 200,
+    "data": []
+  },
+  "campaign_new_ads-68aec12e5e47aa850bc50080c64ee43c8262a36f54a1178f2524b70f015d8ae5": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_instagram-722caa4f5375f3cdb5a6739b14b96fdc02ee5bf0268ec56be0c026307c3062d9": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_threads-1b187de340e651f75f6f797d0692d79679fb844e458230b8080c269305cd2d0a": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_dcinside-698b2a5cfa0a67da0aad7efbf88f6f849244b2931f2ed9d61b2501aba4658aef": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_other-463e06387365c841e410a75d2a0dfee9c32d1e6959e5091017a71f50b9e19324": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_google_ads-df77a77c54f88d71d07d0d0c9d6e5e796167271c1cb08e235af2dbd3faeafecb": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_kakao_ads-af7bfab1d16bbee229bfe950ad113882caaf5fe92acad834705d104f4f7b5364": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_creation_ads-39d2ca68a1a1fda025ddd4053521b1b7a1635c5adf8c551f5475336f89290e8f": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "campaign_story_detail-b943d6a6434ceebf2faf947564ebacd9a7716e3fd0470974ff4a49483990c5a7": {
+    "status": 200,
+    "data": []
+  },
+  "campaign_new_ads-17077c3bd3f0dd2726c50fafd10e708af5c37fb695d16b66eff23d6f2aa66553": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_instagram-5e3d0bfc670ae09669cdd5337b06a7fa729a2cc252aa23f1747d4299a9ec45b0": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_threads-cc150a93eccbaf0ff441b60b879fe0d473ce0e402eed924b8fa95aefc24814d1": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_dcinside-07f4c416f3f47e42e6ad5ffaba479b01e26e6de1525855a9984945f88b56d706": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_other-b226a58b86459c38b3bb688a879e4391d637a052468b5d644658a090bfde7370": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_google_ads-542401607703733e96b68f558e71a13959e2839d66195b7ba4ab138ff09a84e6": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_kakao_ads-e47c8fb6c17270c8b0b02215376f81deb5404d4fddd74181f02138a3680a724c": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_creation_ads-483cb9fc14378767c023f2775da4e242a9a3641b27a5b7ba12b6b6dbbc27efb3": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "campaign_story_detail-41866112b42abb61c967d53e0bf116e1c7a7c7935a0a382ba3a11019a1e05d00": {
+    "status": 200,
+    "data": []
+  },
+  "campaign_new_ads-42c8d494a2ee4e6932684937ab3c2eecd57c0b86466d3bd3954c515a7fe08991": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_instagram-5606ea2f976b254a958356af88296e3f32a82dd8496499b9b51a4cde624e446e": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_threads-89eb7391986f1b84574bf80e1fb98f5bb8173d93d575bef9025686a087da5083": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_dcinside-25d5e90655a37ec06fdad48066facab0c1009c2624f17b9aaf881a1f8fc9a263": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_source_other-06b583139db7bc9d93383f28d327bd8118ee899d81576265e1acd960bfe104ac": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_google_ads-89574fa21cc67a86f563ce8b7d6d226eb2babf564a91c26db0fb4a74fd7492f5": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_signup_kakao_ads-17c68c1d700c674b275e3b326c51950d7f8edfd478bd7887cb55f75f497b88c2": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_creation_ads-1aa17263479f8939fd7cbd6d404685310596cdf1b6d8230332e82635422b808a": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "campaign_story_detail-9d6acf889b650e4a9f553db85af573a16ad1afdbed17acb01009291aed58bfc3": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "campaign_sources-edb262f82adfcd46de9ef3bfd678cd727fae976004bb9b9894bc93ee2572261c": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ],
+        [
+          0
+        ],
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ],
+        [
+          {
+            "value": 0
+          }
+        ],
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        "sample",
+        "sample",
+        "sample"
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "campaign_posts-acad1ddf6eacabc7da0c348ee6b8b51fb3350fc5358b74fd41162abe53c3d716": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        [
+          0,
+          "sample"
+        ]
+      ],
+      "xValues": [
+        "2026-10-22"
+      ]
+    }
+  },
+  "conversion_web-first-visit-b6a570c4ca9e14c31366bb8bf8041e32b0475639463da0161e2796b20d86c2c6": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_android-first-visit-9fad8fbd0116e0a58b021af29ee0684e5248d2347aeedbb79e79f969c84ddf08": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-creation-ad3ce2136aae273cec1150265122750d9ee8066fc95452f5d773acaea5daa4a9": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-creation-b1f2db85bb4d206fddeac63aaf277b327b5c729e2229d367967503ec109e72e0": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-detail-chat-4bd701209ffd919be48c1ff6bd840be76684ffe81d49a14a5f643f1aa8ee638c": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-detail-chat-09af30ea5cee9ad0ff05c56ad5e93a2c59e417a2338e64c007edeff6aac53525": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-detail-chat-305654fc97d1c07bb4d37f6357bf7164e4801ef4312231e109d3839693ea3007": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_story-detail-chat-fd94737f18d7f58499bea0f325ded666428eef9e74c0651df18564b34a409bb8": {
+    "status": 200,
+    "data": [
+      {
+        "cumulativeRaw": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "conversion_guest-limit-login-8d24643dffe39faa79f7042dbf188833f7ddd3ef0c53f047ef4be0df8039b6b8": {
+    "status": 200,
+    "data": []
+  },
+  "conversion_guest-limit-login-b83ced1ac842973e1b93d7e0d226708ee90452d50f1d569238abe624f294688b": {
+    "status": 200,
+    "data": []
+  },
+  "conversion_guest-limit-login-22c7a64fd68ea1b533596757c5f0d113408a1697bf3ccc0dc3f23ec8cc4ed057": {
+    "status": 200,
+    "data": []
+  },
+  "conversion_guest-limit-login-a4791c802c3c56bb7f37541a31d12c01593439e96bfc7fc78984aab30f491635": {
+    "status": 200,
+    "data": []
+  },
+  "historical-users_session_average-461d974be7a52e5709edb943250d4322089d242c995ab7ea66c77a625751110f": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0.0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0.0
+          }
+        ]
+      ],
+      "xValues": [
+        "2026-07-01T00:00:00"
+      ]
+    }
+  },
+  "historical-activity_messages-c285bb7ab267c3373b011d2cbdcd56566342603cc2a01a3babd48871d8e10313": {
+    "status": 200,
+    "data": {
+      "series": [
+        [
+          0.0
+        ]
+      ],
+      "seriesCollapsed": [
+        [
+          {
+            "value": 0.0
+          }
+        ]
+      ],
+      "seriesLabels": [
+        0
+      ],
+      "xValues": [
+        "2026-07-01"
+      ]
+    }
+  },
+  "historical-users_retention-eba32706edb42ed235ecc29b28ecfbe3aa4ee32ee7af2c25bdd068c093029947": {
+    "status": 200,
+    "data": {
+      "series": [
+        {
+          "values": {
+            "Jul 01, 2026": [
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              },
+              {
+                "count": 0,
+                "outof": 0,
+                "incomplete": false
+              }
+            ]
+          }
+        }
+      ],
+      "seriesLabels": [
+        "sample"
+      ]
+    }
+  }
+}

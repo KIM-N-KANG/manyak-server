@@ -108,7 +108,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         }
         if (clock.instant().isBefore(state.retry) || !state.refreshing.compareAndSet(false, true)) return result()
         val started = System.nanoTime(); val deadline = started + timeout.toNanos()
-        var sent = 0; var cost = 0; var fetchedRange = false; val fetchedDates = mutableSetOf<LocalDate>()
+        var sent = 0; var cost = 0; var fetchedRange = false; var fetchingMetric: String? = null; val fetchedDates = mutableSetOf<LocalDate>()
         try {
             if (clock.instant().isBefore(state.retry)) return result()
             data class DailyPlan(val metric: DailyAnalyticsMetric, val dates: List<LocalDate>)
@@ -141,7 +141,8 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                 for (metric in plan.ranges) {
                     val current = store.range(metric.definition, metric.range.from, metric.range.to)
                     if (freshRange(metric, current)) { ranges[rangeKey(metric)] = current!!; continue }
-                    val value = AmplitudeResults.parse { metric.decode(client.fetch(metric.definition, metric.range, deadline) { sent++ }) }
+                    fetchingMetric = metric.definition.metric
+                    val value = client.fetchDecoded(metric.definition, metric.range, deadline, onSend = { sent++ }) { metric.decode(it) }
                     val raw = AnalyticsValue(value, clock.instant()).let { if (finalRange(metric, it)) it.copy(finalizedAt = clock.instant()) else it }
                     val spent = metric.range.days * metric.definition.perDay; reservation.succeeded(spent); cost += spent; fetchedRange = true
                     try { store.saveRange(metric.definition, metric.range.from, metric.range.to, raw); ranges[rangeKey(metric)] = store.range(metric.definition, metric.range.from, metric.range.to) ?: raw; if (raw.finalizedAt != null) finalized++ }
@@ -164,7 +165,10 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                         gaps.forEach { date -> if (contiguous.isEmpty() || contiguous.last().last().minusDays(1) != date) contiguous.add(mutableListOf(date)) else contiguous.last().add(date) }
                         for (gap in contiguous) {
                             val interval = AnalyticsRange(gap.min(), gap.max())
-                            val values = AmplitudeResults.parse { metric.decode(client.fetch(metric.definition, interval, deadline) { sent++ }, interval).also { require(it.keys == interval.dates().toSet()) } }
+                            fetchingMetric = metric.definition.metric
+                            val values = client.fetchDecoded(metric.definition, interval, deadline, onSend = { sent++ }) { data ->
+                                metric.decode(data, interval).also { require(it.keys == interval.dates().toSet()) }
+                            }
                             val rows = values.mapValues { (date, value) -> AnalyticsValue(value, clock.instant()).let { if (finalDaily(metric, date, it)) it.copy(finalizedAt = clock.instant()) else it } }
                             val spent = interval.days * metric.definition.perDay; reservation.succeeded(spent); cost += spent; fetchedDates += interval.dates()
                             try { store.saveDaily(metric.definition, rows); daily[metric.definition.hash]!!.putAll(store.daily(metric.definition, interval.from, interval.to)); finalized += rows.values.count { it.finalizedAt != null } }
@@ -177,7 +181,8 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         } catch (failure: AmplitudeFetchFailure) {
             progress.failure = failure.reason
             state.retry = clock.instant().plusSeconds(policy.cooldownSeconds)
-            log.warn("admin_analytics_fetch_failed reason={} status={} endpoint={}", failure.reason.name, failure.status, endpoint)
+            log.warn("admin_analytics_fetch_failed reason={} status={} endpoint={} metric={} exception={} error_code={} phase={}",
+                failure.reason.name, failure.status, endpoint, fetchingMetric, failure.exceptionClass ?: failure.javaClass.name, failure.errorCode, failure.phase)
         } finally {
             progress.cost = cost; progress.fetchedDays = fetchedDates.size
             finalizeReadValues()
