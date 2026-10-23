@@ -527,6 +527,16 @@ class AdminReadApiIntegrationTests {
         message(chats[0], 30); message(chats[1], 60); message(chats[2], 1000)
         val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
         val dist = body["distributions"]
+        assertThat(dist.toList().map { listOf(it["chartId"].asText(), it["title"].asText(), it["description"].asText(), it["unit"].asText()) }).isEqualTo(listOf(
+            listOf("genre-depth", "장르별 평균 턴 수", "채팅 생성일 기준 장르별 평균 현재 턴 수", "턴"),
+            listOf("turns", "턴 수 분포", "채팅 생성일을 기준으로 구간별 채팅 수 집계", "개"),
+            listOf("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅 비율", "%"),
+            listOf("member-chats", "회원별 채팅 생성 횟수", "기간에 채팅을 생성한 회원의 생성 횟수 분포", "명"),
+            listOf("first-message", "첫 사용자 입력까지 걸린 시간", "채팅 생성일 기준, 900초 초과 1건, 입력 없음 1건 제외", "초"),
+            listOf("ai-latency", "기능별 AI 평균 호출 시간", "호출 시간이 기록된 성공 호출의 평균 호출 시간", "초"),
+            listOf("ai-success", "기능별 AI 성공률", "완료된 호출 중 성공 비율, 진행 중 제외", "%"),
+            listOf("characters", "간편 제작별 입력 주변 인물 수", "미삭제 스토리의 최신 완료 간편 제작 생성일 기준 직접 입력한 주변 인물 수, 공식 계정 포함", "건"),
+        ))
         assertThat(dist[0]["points"].size()).isEqualTo(2)
         assertThat(dist[0]["points"][0]["value"].asDouble()).isEqualTo(13.75)
         for (i in listOf(0, 1, 3, 10)) assertThat(dist[1]["points"][i]["value"].asDouble()).isEqualTo(1.0)
