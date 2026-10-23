@@ -25,7 +25,7 @@ class AdminMetricsTests {
                 val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
-                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH)) to List(10) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==7)) } })))
+                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to List(10) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==7)) } })))
                     path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     else -> {
@@ -40,7 +40,7 @@ class AdminMetricsTests {
                             name=="client_chat_streamError_shown" -> 3
                             else -> 1
                         }
-                        mapOf("xValues" to range.dates().map { it.toString() }, "series" to listOf(List(range.days) { value }), "seriesCollapsed" to listOf(99999))
+                        mapOf("xValues" to range.dates().map { if (path.endsWith("/average")) it.toString()+"T00:00:00" else it.toString() }, "series" to listOf(List(range.days) { value }), "seriesCollapsed" to listOf(listOf(mapOf("value" to 73))))
                     }
                 }
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to data)))
@@ -57,15 +57,15 @@ class AdminMetricsTests {
         assertThat(value.daily.last().cumulativeNewVisitors).isEqualTo(PlatformCounts(7,7,7,7))
         assertThat(requests).hasSize(11)
         val first = requests.first().requestUrl!!
-        assertThat(first.encodedPath).isEqualTo("/api/2/users"); assertThat(first.queryParameter("start")).isEqualTo("20260922"); assertThat(first.queryParameter("end")).isEqualTo("20261021")
-        assertThat(first.queryParameter("s")).contains("country"); assertThat(first.queryParameter("i")).isEqualTo("30")
+        assertThat(first.encodedPath).isEqualTo("/api/2/events/segmentation"); assertThat(first.queryParameter("start")).isEqualTo("20260922"); assertThat(first.queryParameter("end")).isEqualTo("20261021")
+        assertThat(first.queryParameter("s")).isNull(); assertThat(first.queryParameter("e")).contains("_active", "country"); assertThat(first.queryParameter("i")).isEqualTo("1")
         requests.drop(1).forEach { assertThat(it.requestUrl!!.queryParameter("s")).isNull(); assertThat(it.requestUrl!!.queryParameter("g")).isNull() }
-        assertThat(fixture.budget.reserve(370)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(400)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         val count=requests.size; service.activity(range("2026-10-15","2026-10-21")); assertThat(requests).hasSize(count)
     }
-    @Test fun `활동 366일은 MAU 60을 먼저 받고 최근 44일을 준비한다`() {
+    @Test fun `활동 366일은 MAU 30을 먼저 받고 최근 47일을 준비한다`() {
         val value = service.activity(range("2025-10-23","2026-10-23"))
-        assertThat(value.daily).hasSize(44); assertThat(value.pendingDates).hasSize(322); assertThat(value.monthlyActiveUsers).isEqualTo(73)
+        assertThat(value.daily).hasSize(47); assertThat(value.pendingDates).hasSize(319); assertThat(value.monthlyActiveUsers).isEqualTo(73)
         assertThat(fixture.budget.reserve(1)).isFalse()
         assertThatThrownBy { service.activity(range("2025-10-22","2026-10-23")) }.hasMessageContaining("기간")
     }
@@ -128,10 +128,10 @@ class AdminMetricsTests {
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
     @Test fun `서로 다른 지표도 공용 예산을 나눠 쓰고 준비된 날짜만 반환한다`() {
-        service.activity(range("2026-10-15","2026-10-21")) // MAU 60 + 일별 70
+        service.activity(range("2026-10-15","2026-10-21")) // MAU 30 + 일별 70
         val result=service.quality(PlatformMetricsQuery().apply { from="2026-09-21"; to="2026-10-21" })
-        assertThat(result.daily).hasSize(30); assertThat(result.pendingDates).containsExactly(LocalDate.parse("2026-09-21"))
-        assertThat(fixture.budget.reserve(10)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(result.daily).hasSize(31); assertThat(result.pendingDates).isEmpty()
+        assertThat(fixture.budget.reserve(28)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `MAU 실패도 저장된 일별 활동은 반환하고 MAU만 null이다`() {
         val date=LocalDate.parse("2026-10-21")

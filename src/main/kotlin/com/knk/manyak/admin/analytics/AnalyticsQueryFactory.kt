@@ -18,7 +18,7 @@ class AnalyticsQueryFactory(private val mapper: ObjectMapper) {
                 val values = linkedMapOf<java.time.LocalDate, JsonNode>()
                 dates.forEachIndexed { i, date ->
                     val number = numbers[i]; require(date.isString && number.isNumber && number.asDouble().isFinite() && number.asDouble() >= 0)
-                    require(values.put(java.time.LocalDate.parse(date.asText()), mapper.valueToTree(number.asDouble())) == null)
+                    require(values.put(AmplitudeResults.date(date), mapper.valueToTree(number.asDouble())) == null)
                 }
                 range.dates().associateWith { requireNotNull(values[it]) }
             }

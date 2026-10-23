@@ -1,3 +1,11 @@
+# 운영 Amplitude 장애 진단: admin_analytics_fetch_failed의 status·metric·exception·error_code·phase 확인.
+# reason=parse_error/status=200/phase=response_decode 또는 result_decode는 응답 형식 오류다.
+# reason=http_error/status=null/phase=request는 응답 전 실패이며 HTTP 오류 상태도 http_error다.
+# 본문·API 키·Authorization·원문 예외 메시지는 기록하지 않는다.
+# 세션 xValues의 ISO 날짜시각과 리텐션의 연도 포함 코호트 라벨을 지원한다.
+# MAU는 /events/segmentation의 _active + country 필터로 to-29일~to를 한 번 조회한다.
+# monthlyActiveUsers는 seriesCollapsed의 범위 고유 사용자이며 일별 값의 합이 아니다.
+
 # 관리자 사용자·전환·품질 지표 수동 검증 (IntelliJ HTTP Client).
 # 준비: Postgres·Redis와 ./gradlew bootRun, 관리자 토큰 설정. 실제 Amplitude는 수동 실행 때 호출된다.
 # 먼저 health를 확인하고 원하는 카드를 선택 실행한다. 전체 공용 예산은 태스크당 5분 500이다.

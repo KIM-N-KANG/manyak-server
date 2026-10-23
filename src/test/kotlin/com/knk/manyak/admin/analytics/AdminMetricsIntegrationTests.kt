@@ -96,7 +96,7 @@ class AdminMetricsIntegrationTests {
                     u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { it.toString() to List(31) { day -> mapOf("count" to if(day==0) 20 else 5,"outof" to 20,"incomplete" to false) } })))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 30-it }))
                     u.encodedPath.endsWith("/users") -> mapOf("series" to listOf(listOf(100)))
-                    else -> mapOf("xValues" to dates.map { it.toString() },"series" to listOf(List(dates.size) { if(u.queryParameter("m")=="average" || u.encodedPath.endsWith("/average")) 4.5 else 10 }))
+                    else -> mapOf("xValues" to dates.map { it.toString() },"series" to listOf(List(dates.size) { if(u.queryParameter("m")=="average" || u.encodedPath.endsWith("/average")) 4.5 else 10 }), "seriesCollapsed" to listOf(listOf(mapOf("value" to 100))))
                 }
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to data)))
             }

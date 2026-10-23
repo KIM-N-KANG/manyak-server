@@ -111,6 +111,26 @@ class AnalyticsSnapshotsTests {
         assertThat(result.value(metric, date)!!.value.asLong()).isEqualTo(8); assertThat(server.requestCount).isZero()
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
+    @Test fun `성공 응답의 해석 오류 로그는 200 예외와 지표를 보존하고 캐시와 비용을 남기지 않는다`() {
+        val logger = org.slf4j.LoggerFactory.getLogger(AnalyticsSnapshots::class.java) as ch.qos.logback.classic.Logger
+        val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        logger.addAppender(events)
+        try {
+            server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setBody("""{"data":{"private":"secret response"}}""") }
+            val range = AnalyticsRange(day,day)
+            val result = fixture.snapshots.load("/test",range,listOf(metric))
+            assertThat(result.readyDates()).isEmpty()
+            assertThat(result.progress.failure?.name).isEqualTo("parse_error")
+            val failure = events.list.single { it.formattedMessage.startsWith("admin_analytics_fetch_failed") }
+            assertThat(failure.formattedMessage).contains("reason=parse_error", "status=200", "exception=java.lang.IllegalArgumentException", "phase=result_decode", "metric=stored_test")
+                .doesNotContain("secret response", "private", "Authorization")
+            assertThat(failure.throwableProxy).isNull()
+            assertThat(fixture.store.daily(metric.definition,day,day)).isEmpty()
+            fixture.snapshots.load("/test",range,listOf(metric)); assertThat(server.requestCount).isEqualTo(1)
+            assertThat(fixture.budget.reserve(500)).isTrue()
+        } finally { logger.detachAppender(events); events.stop() }
+    }
+
     @Test fun `갱신 로그는 호출 없이 재사용할 때 없고 수치와 안전한 오류 사유만 기록한다`() {
         val logger = org.slf4j.LoggerFactory.getLogger(AnalyticsSnapshots::class.java) as ch.qos.logback.classic.Logger
         val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
