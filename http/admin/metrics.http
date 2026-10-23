@@ -80,7 +80,32 @@ client.test("기능 사용과 안정성 응답", () => {
 GET {{baseUrl}}/api/v1/admin/users/signups?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("신규 가입자", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao + d.signups.other), "계약 필드 확인"); }); %}
+> {%
+client.test("신규 가입자와 서비스 시작부터 누계", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao + d.signups.other), "계약 필드 확인");
+  b.daily.forEach((d, i) => {
+    client.assert(d.cumulativeSignups >= d.signups.total, `범위 시작 전 가입 포함 actual=${JSON.stringify(d)}`);
+    if (i > 0) client.assert(d.cumulativeSignups === b.daily[i - 1].cumulativeSignups + d.signups.total, `일별 누계 actual=${JSON.stringify(d)}`);
+  });
+  client.global.set("membersSignupLastTotal", b.daily[b.daily.length - 1].cumulativeSignups);
+});
+%}
+
+### 신규 가입자 요청 직후 요약 비교 — 가입자 데이터가 고정된 로컬 환경에서 순서대로 실행
+# days=7은 오늘 포함. 두 요청 사이 가입/팀 제외 설정 변경이 없을 때 마지막 누계와 요약이 같다.
+GET {{baseUrl}}/api/v1/admin/dashboard/summary
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("마지막 가입 누계와 요약 일치", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const m = response.body.members;
+  client.assert(m.total === m.active + m.withdrawn, `actual=${JSON.stringify(m)}`);
+  client.assert(m.total === Number(client.global.get("membersSignupLastTotal")), `요약=${m.total}, 가입 누계=${client.global.get("membersSignupLastTotal")}`);
+});
+%}
 
 ### 턴 도달률 — Amplitude 장애와 무관하게 동작
 GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?days=7

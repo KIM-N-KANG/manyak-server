@@ -12,6 +12,7 @@ import java.time.temporal.ChronoUnit
 import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
+import com.knk.manyak.story.repository.StoryRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.beans.factory.annotation.Value
@@ -35,6 +36,7 @@ class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
     private val userRepository: UserRepository,
     private val fcmPushSender: FcmPushSender,
+    private val stories: StoryRepository,
     private val clock: Clock = Clock.systemUTC(),
     private val outbox: ScheduledPushOutboxWriter? = null,
     private val properties: PushCampaignProperties = PushCampaignProperties(),
@@ -93,7 +95,8 @@ class PromotionPushService(
                 data["deepLink"] = "${webBaseUrl.trimEnd('/')}/notices/$publicId"
             }
             if (outbox != null) {
-                sent = outbox.record(targetIds, data, if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
+                sent = outbox.record(targetIds, withStoryDestination(campaign, data),
+                    if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
             } else targetIds.forEach { userId ->
                 val messagePrefix = if (campaign.kind == PushKind.SERVICE) "notice" else "promotion"
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
@@ -106,7 +109,8 @@ class PromotionPushService(
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, data, AndroidConfig.Priority.NORMAL,
+                val deliveryData = withStoryDestination(campaign, data)
+                runCatching { fcmPushSender.sendToUser(userId, deliveryData, AndroidConfig.Priority.NORMAL,
                     messageId = "$messagePrefix:${campaign.publicId}:${user.publicId}") }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }
@@ -119,6 +123,16 @@ class PromotionPushService(
             if (finish(campaign, PushCampaignStatus.FAILED, targets, sent))
                 PromotionPushResult(campaign.publicId, targets, sent, failed = true, kind = campaign.kind) else null
         }
+    }
+
+    private fun withStoryDestination(campaign: PushCampaign, data: Map<String, String>): Map<String, String> {
+        // 예약 당시 공개였어도 지금은 비공개·초안·삭제 상태일 수 있다. 소유자 열람 예외는 적용하지 않는다.
+        // 공지 캠페인의 이동 목적지는 기존 공지 링크를 유지한다.
+        if (campaign.kind != PushKind.MARKETING || campaign.noticeId != null) return data
+        val storyId = campaign.storyId ?: return data
+        val story = stories.findByIdAndDeletedAtIsNull(storyId)?.takeIf { it.isPubliclyVisible() } ?: return data
+        return data + mapOf("storyId" to story.publicId.toString(),
+            "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${story.publicId}")
     }
 
     private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int): Boolean {

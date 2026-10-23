@@ -171,6 +171,85 @@ class AdminCampaignIntegrationTests {
         }
     }
 
+    @Test fun `검색어는 제목 본문과 공개 UUID에 적용하고 종류 상태와 AND로 조합한다`() {
+        val title = create(campaignBody().apply { put("title", "  Summer   Event  ") })["campaignId"].asText()
+        val body = create(campaignBody().apply { put("body", "summer\tEVENT 소식") })["campaignId"].asText()
+        val notice = create()["campaignId"].asText()
+        jdbc.update("UPDATE push_campaigns SET kind='SERVICE', status='SENT' WHERE public_id=?", UUID.fromString(body))
+        jdbc.update("UPDATE push_campaigns SET kind='SERVICE' WHERE public_id=?", UUID.fromString(notice))
+
+        fun ids(query: String) = mapper.readTree(call(HttpMethod.GET, "/campaigns?$query")
+            .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)["items"]
+            .toList().map { it["campaignId"].asText() }
+        assertThat(ids("q=  SUMMER   event  ")).containsExactlyInAnyOrder(title, body)
+        assertThat(ids("q=summer event&kind=SERVICE&status=SENT")).containsExactly(body)
+        assertThat(ids("q=summer event&kind=SERVICE&status=SCHEDULED")).isEmpty()
+        assertThat(ids("kind=SERVICE")).containsExactlyInAnyOrder(body, notice)
+        assertThat(ids("q=${title.uppercase()}")).containsExactly(title)
+        assertThat(ids("q=${UUID.randomUUID()}")).isEmpty()
+        // UUID 모양 검색어도 제목/본문의 부분 일치를 함께 적용한다.
+        create(campaignBody().apply { put("title", "참조 $title") })
+        assertThat(ids("q=$title")).hasSize(2)
+    }
+
+    @Test fun `검색어의 SQL 패턴 문자는 리터럴이며 잘못된 검색과 목록 쿼리를 거절한다`() {
+        create(campaignBody().apply { put("title", "할인 100%_보장") })
+        create()
+        call(HttpMethod.GET, "/campaigns?q=%_").expectStatus().isOk.expectBody()
+            .jsonPath("$.totalElements").isEqualTo(1)
+        for (query in listOf("q=", "q=   ", "q=${"x".repeat(51)}", "kind=INFO", "sort=body",
+            "sort=campaignId", "sort=startedAt", "sort=finishedAt", "order=ASC", "cursor=x", "limit=1")) {
+            call(HttpMethod.GET, "/campaigns?$query").expectStatus().isBadRequest
+        }
+    }
+
+    @Test fun `도달 세 정렬은 전체 집계를 기준으로 페이지를 나누고 동률은 UUID 오름차순이다`() {
+        val ids = (1..4).map { create()["campaignId"].asText() }.sorted()
+        // UUID 순서와 도달 순서를 다르게 만든다. 마지막 캠페인은 결과 행이 없어 0이다.
+        val results = listOf(listOf(1 to 1), listOf(2 to 2, 1 to 1), listOf(3 to 3, 0 to 0))
+        results.forEachIndexed { i, rows ->
+            val campaign = campaigns.findByPublicId(UUID.fromString(ids[i]))!!
+            rows.forEachIndexed { j, counts ->
+                jdbc.update("""INSERT INTO push_delivery_results
+                    (message_id, type, kind, campaign_id, outcome, reason, delivered_devices, failed_devices, completed_at)
+                    VALUES (?, 'PROMOTION', 'MARKETING', ?, 'DELIVERED', 'OK', ?, ?, CURRENT_TIMESTAMP)""",
+                    "$i:$j", campaign.id, counts.first, counts.second)
+            }
+        }
+        for (sort in listOf("deliveredMembers", "deliveredDevices", "failedDevices")) {
+            val expected = if (sort == "deliveredMembers") listOf(ids[1], ids[0], ids[2], ids[3])
+                else listOf(ids[1], ids[2], ids[0], ids[3])
+            for (order in listOf("asc", "desc")) {
+                val ordered = if (order == "desc") expected else if (sort == "deliveredMembers")
+                    listOf(ids[3], ids[0], ids[2], ids[1]) else listOf(ids[3], ids[0], ids[1], ids[2])
+                val actual = (1..2).flatMap { page ->
+                    val response = mapper.readTree(call(HttpMethod.GET, "/campaigns?sort=$sort&order=$order&page=$page&size=2")
+                        .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+                    assertThat(response["totalElements"].asInt()).isEqualTo(4)
+                    assertThat(response["totalPages"].asInt()).isEqualTo(2)
+                    response["items"].toList().map { it["campaignId"].asText() }
+                }
+                assertThat(actual).containsExactlyElementsOf(ordered)
+            }
+        }
+        call(HttpMethod.GET, "/campaigns?sort=deliveredDevices&q=${ids[1]}&kind=MARKETING&status=SCHEDULED")
+            .expectStatus().isOk.expectBody().jsonPath("$.totalElements").isEqualTo(1)
+            .jsonPath("$.items[0].deliveredDevices").isEqualTo(3)
+        call(HttpMethod.GET, "/campaigns?sort=failedDevices&page=3&size=2").expectStatus().isOk
+            .expectBody().jsonPath("$.items.length()").isEqualTo(0).jsonPath("$.totalElements").isEqualTo(4)
+    }
+
+    @Test fun `대상과 발송 수 정렬은 방향과 관계없이 null을 마지막에 둔다`() {
+        val empty = create()["campaignId"].asText()
+        val counted = create()["campaignId"].asText()
+        jdbc.update("UPDATE push_campaigns SET target_count=1, sent_count=0 WHERE public_id=?", UUID.fromString(counted))
+        for (sort in listOf("targetCount", "sentCount")) for (order in listOf("asc", "desc")) {
+            call(HttpMethod.GET, "/campaigns?sort=$sort&order=$order").expectStatus().isOk.expectBody()
+                .jsonPath("$.items[0].campaignId").isEqualTo(counted)
+                .jsonPath("$.items[1].campaignId").isEqualTo(empty)
+        }
+    }
+
     @Test fun `대상 수는 활성 토큰 보유와 종류별 동의 및 야간 동의를 구분한다`() {
         repeat(5) { i ->
             val user = users.save(User(nickname = "회원$i", marketingPushAgreedAt = if (i < 3) Instant.EPOCH else null,

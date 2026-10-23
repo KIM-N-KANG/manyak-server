@@ -64,7 +64,7 @@ internal class AdminQuery {
                     WHERE ct.character_id=$alias.id AND ct.creation_session_id=$alias.creation_session_id)))"""
         }
         fun normalized(column: String) = "LOWER(TRIM(REGEXP_REPLACE($column, '\\s+', ' ', 'g')))"
-        val turnBounds = listOf(0..0, 1..1, 2..2, 3..4, 5..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
+        val turnBounds = listOf(0..0, 1..1, 2..2, 3..3, 4..4, 5..5, 6..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
         val memberBounds = listOf(1..1, 2..2, 3..4, 5..9, 10..Int.MAX_VALUE)
     }
 }

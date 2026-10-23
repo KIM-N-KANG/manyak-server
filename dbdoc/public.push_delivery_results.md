@@ -74,6 +74,7 @@ erDiagram
   timestamp_with_time_zone created_at
   varchar_16_ kind
   bigint notice_id FK
+  bigint story_id FK
 }
 "public.users" {
   bigint id

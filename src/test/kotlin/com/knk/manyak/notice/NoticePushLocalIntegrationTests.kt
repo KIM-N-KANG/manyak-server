@@ -10,6 +10,7 @@ import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*
+import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -26,6 +27,7 @@ import java.time.ZoneOffset
 @SpringBootTest(properties = ["manyak.push.mode=local"])
 class NoticePushLocalIntegrationTests {
     @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: DevicePushTokenRepository
@@ -53,7 +55,7 @@ class NoticePushLocalIntegrationTests {
         user("정지", status = UserStatus.SUSPENDED)
         val notice = notices.save(Notice(title = "점검", body = "내용", createdByUserId = target.id))
         campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, users, sender, Clock.fixed(now, ZoneOffset.UTC))
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "NOTICE").containsEntry("noticeId", notice.publicId.toString())
@@ -65,7 +67,7 @@ class NoticePushLocalIntegrationTests {
         user("서비스만")
         val notice = notices.save(Notice(title = "이벤트", body = "내용", createdByUserId = target.id))
         campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, users, sender, Clock.fixed(now, ZoneOffset.UTC))
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())

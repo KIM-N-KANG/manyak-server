@@ -20,7 +20,9 @@ class AdminDashboardRepository(private val jdbc: NamedParameterJdbcTemplate) {
                 "FROM $table WHERE $extra AND ${owner(ownerColumn)}")
             return row.number("total") to row.number("today")
         }
-        val members = sums("""SUM(CASE WHEN status <> 'DELETED' THEN 1 ELSE 0 END) AS total,
+        val members = sums("""COUNT(*) AS total,
+            SUM(CASE WHEN status <> 'DELETED' THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status = 'DELETED' THEN 1 ELSE 0 END) AS withdrawn,
             SUM(CASE WHEN ${during("created_at")} THEN 1 ELSE 0 END) AS today""", "FROM users WHERE ${owner("id")}")
         val chats = counts("story_chats", "user_id")
         val turns = counts("story_messages m JOIN story_chats c ON c.id = m.chat_id", "c.user_id", "m.role = 'ASSISTANT'", "m.created_at")
@@ -38,7 +40,7 @@ class AdminDashboardRepository(private val jdbc: NamedParameterJdbcTemplate) {
             SUM(CASE WHEN ${during("completed_at")} THEN price_krw ELSE 0 END) AS amount_today""",
             "FROM credit_orders WHERE completed_at IS NOT NULL AND ${owner("user_id")}")
         return AdminDashboardSummaryResponse(now, today,
-            AdminMemberMetrics(members.number("total"), members.number("today")),
+            AdminMemberMetrics(members.number("total"), members.number("active"), members.number("withdrawn"), members.number("today")),
             AdminChatMetrics(chats.first, chats.second, turns.first, turns.second),
             AdminStoryMetrics(stories.first, stories.second),
             AdminCreditMetrics(credits.number("granted_total"), credits.number("granted_today"), credits.number("spent_total"), credits.number("spent_today")),

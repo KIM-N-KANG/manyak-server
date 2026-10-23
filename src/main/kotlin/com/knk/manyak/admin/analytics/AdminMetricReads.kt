@@ -37,6 +37,9 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
     private fun params(range: AnalyticsRange, excluded: List<Long>) = mapOf("start" to range.from.atStartOfDay(AdminDateRange.KST).toOffsetDateTime(),
         "end" to range.to.plusDays(1).atStartOfDay(AdminDateRange.KST).toOffsetDateTime(), "excluded" to excluded)
     private fun exclude(column: String, excluded: List<Long>) = if (excluded.isEmpty()) "" else " AND ($column IS NULL OR $column NOT IN (:excluded))"
+    fun signupsBefore(range: AnalyticsRange, excluded: List<Long>): Long = jdbc.queryForObject(
+        "SELECT COUNT(*) FROM users u WHERE u.created_at < :start ${exclude("u.id", excluded)}",
+        params(range, excluded), Long::class.java) ?: 0L
     fun signups(range: AnalyticsRange, excluded: List<Long>): List<Map<String, Any?>> = jdbc.queryForList("""
         SELECT ${day("u.created_at")} AS metric_day, COUNT(*) AS total,
         SUM(CASE WHEN s.provider='GOOGLE' THEN 1 ELSE 0 END) AS google,
@@ -77,7 +80,8 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
     private fun Map<String, Any?>.n(key: String) = (this[key] as Number?)?.toLong() ?: 0L
     private fun Map<String, Any?>.date() = LocalDate.ofEpochDay(n("metric_day"))
     fun signups(query: AdminChartsRequest): SignupResponse {
-        val range = range(query); val rows = repository.signups(range, dashboard.excludedUserIds).associateBy { it.date() }; var cumulative = 0L
+        val range = range(query); val rows = repository.signups(range, dashboard.excludedUserIds).associateBy { it.date() }
+        var cumulative = repository.signupsBefore(range, dashboard.excludedUserIds)
         return SignupResponse(clock.instant(), range.from, range.to, range.dates().map { date ->
             val row = rows[date] ?: emptyMap(); val total = row.n("total"); val google = row.n("google"); val kakao = row.n("kakao"); cumulative = Math.addExact(cumulative, total)
             SignupDay(date, SignupCounts(total, google, kakao, total-google-kakao), cumulative, row.n("migrated"))

@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_characters](public.story_characters.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.story_public_snapshots](public.story_public_snapshots.md) [public.story_submissions](public.story_submissions.md) |  |  |
+| id | bigint | nextval('stories_id_seq'::regclass) | false | [public.story_settings](public.story_settings.md) [public.story_start_settings](public.story_start_settings.md) [public.story_chats](public.story_chats.md) [public.story_lorebooks](public.story_lorebooks.md) [public.story_main_events](public.story_main_events.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_characters](public.story_characters.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.story_public_snapshots](public.story_public_snapshots.md) [public.push_campaigns](public.push_campaigns.md) [public.story_submissions](public.story_submissions.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
@@ -58,6 +58,7 @@ erDiagram
 "public.story_likes" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_reports" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_public_snapshots" |o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.push_campaigns" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id)"
 "public.story_submissions" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.stories" }o--o| "public.image_presets" : "FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key)"
 
@@ -185,6 +186,23 @@ erDiagram
   jsonb snapshot
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.push_campaigns" {
+  bigint id
+  uuid public_id
+  varchar_100_ title
+  varchar_300_ body
+  timestamp_with_time_zone scheduled_at
+  varchar_20_ status
+  integer target_count
+  integer sent_count
+  integer skipped_count
+  timestamp_with_time_zone started_at
+  timestamp_with_time_zone finished_at
+  timestamp_with_time_zone created_at
+  varchar_16_ kind
+  bigint notice_id FK
+  bigint story_id FK
 }
 "public.story_submissions" {
   bigint id
