@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*
 @RestController
 @RequestMapping("/api/v1/admin")
 @SecurityRequirement(name = "bearerAuth")
-class AdminMetricsController(private val metrics: AdminMetricsService, private val reads: AdminMetricReadService) {
+class AdminMetricsController(private val metrics: AdminMetricsService, private val reads: AdminMetricReadService, private val costs: AdminAiCostService) {
     @GetMapping("/users/activity") fun activity(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.activity(query)
     @GetMapping("/users/retention") fun retention(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.retention(query)
     @GetMapping("/users/sessions") fun sessions(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.sessions(query)
@@ -20,7 +20,9 @@ class AdminMetricsController(private val metrics: AdminMetricsService, private v
     @GetMapping("/conversion/turn-reach") fun reach(@ParameterObject @ModelAttribute query: AdminChartsRequest) = reads.reach(query)
     @GetMapping("/quality/client") fun quality(@ParameterObject @ModelAttribute query: PlatformMetricsQuery) = metrics.quality(query)
     @GetMapping("/quality/chat-options") fun options(@ParameterObject @ModelAttribute query: AdminChartsRequest) = reads.options(query)
-    @GetMapping("/quality/ai-cost") fun aiCost(@ParameterObject @ModelAttribute query: AdminChartsRequest) = reads.aiCost(query)
+    @GetMapping("/quality/ai-cost") fun aiCost(@ParameterObject @ModelAttribute query: AdminChartsRequest) = costs.aiCost(query)
+    @ExceptionHandler(AdminAiCostUnavailable::class)
+    fun aiCostUnavailable(request: HttpServletRequest) = ResponseEntity.status(503).body(ApiErrorResponse(status = 503, code = "SERVICE_UNAVAILABLE", message = "AI 비용을 가져올 수 없습니다.", path = request.requestURI))
     @ExceptionHandler(AdminAnalyticsUnavailable::class)
     fun unavailable(request: HttpServletRequest) = ResponseEntity.status(503).body(ApiErrorResponse(status = 503, code = "SERVICE_UNAVAILABLE", message = "분석 지표를 가져올 수 없습니다.", path = request.requestURI))
 }

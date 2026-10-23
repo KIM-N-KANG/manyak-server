@@ -4,22 +4,12 @@ import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.AdminChartsRequest
 import com.knk.manyak.admin.dto.AdminDateRange
 import com.knk.manyak.admin.repository.AdminQuery
-import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
-import java.math.MathContext
 import java.time.*
 
-@ConfigurationProperties("manyak.admin.ai-prices")
-class AdminAiPrices(val models: Map<String, TokenPrice> = emptyMap(), val chatImageUnitCostKrw: BigDecimal = BigDecimal("48")) {
-    init { require(chatImageUnitCostKrw.signum() >= 0) }
-}
-data class TokenPrice(val inputMillionKrw: BigDecimal, val outputMillionKrw: BigDecimal) {
-    init { require(inputMillionKrw.signum() >= 0 && outputMillionKrw.signum() >= 0) }
-}
 data class SignupCounts(val total: Long, val google: Long, val kakao: Long, val other: Long)
 data class SignupDay(val date: LocalDate, val signups: SignupCounts, val cumulativeSignups: Long, val migratedFromGuest: Long)
 data class SignupResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val daily: List<SignupDay>)
@@ -32,7 +22,8 @@ data class ChatOptionResponse(val asOf: Instant, val from: LocalDate, val to: Lo
 data class AiCostItem(val feature: String, val model: String?, val calls: Long, val callsWithoutTokens: Long, val inputTokens: Long, val outputTokens: Long, val costKrw: BigDecimal?)
 data class AiCostDay(val date: LocalDate, val byFeature: List<AiCostItem>)
 data class AiCostTotals(val costKrw: BigDecimal, val costPerTurnKrw: BigDecimal?, val costPerStoryKrw: BigDecimal?)
-data class AiCostResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val currency: String, val chatImageUnitCostKrw: BigDecimal, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>)
+data class AiCostResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val currency: String, val chatImageUnitCostKrw: BigDecimal, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>, val pendingDates: List<LocalDate>, val usdKrwRate: BigDecimal, val unmapped: List<AiCostUnmapped>)
+data class AiCostUnmapped(val traceName: String, val costKrw: BigDecimal)
 
 @Repository
 class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
@@ -84,9 +75,8 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
 }
 
 @Service
-@EnableConfigurationProperties(AdminAiPrices::class)
 class AdminMetricReadService(private val repository: AdminMetricReadRepository, private val dashboard: AdminDashboardProperties,
-    private val prices: AdminAiPrices, private val clock: Clock = Clock.systemUTC()) {
+    private val clock: Clock = Clock.systemUTC()) {
     private fun range(query: AdminChartsRequest) = query.resolve(clock).let { AnalyticsRange(it.from, it.to) }
     private fun Map<String, Any?>.n(key: String) = (this[key] as Number?)?.toLong() ?: 0L
     private fun Map<String, Any?>.date() = LocalDate.ofEpochDay(n("metric_day"))
@@ -117,23 +107,5 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
                 rows.associate { it["model"].toString() to it.n("chats") },
                 turns[date].orEmpty().associate { it["model"].toString() to it.n("turns") })
         })
-    }
-    fun aiCost(query: AdminChartsRequest): AiCostResponse {
-        val range = range(query); val rows = repository.aiCost(range).groupBy { it.date() }
-        val daily = range.dates().map { date -> AiCostDay(date, rows[date].orEmpty().map { row ->
-            val model = row["model"] as String?; val image = row["feature"] == "chat_image"
-            val input = if (image) 0L else row.n("input"); val output = if (image) 0L else row.n("output")
-            val cost = if (image) prices.chatImageUnitCostKrw * BigDecimal.valueOf(row.n("calls")) else prices.models[model]?.let { (it.inputMillionKrw * BigDecimal.valueOf(input) + it.outputMillionKrw * BigDecimal.valueOf(output)).divide(BigDecimal.valueOf(1_000_000)) }
-            AiCostItem(row["feature"].toString(), model, row.n("calls"), if (image) 0L else row.n("missing"), input, output, cost)
-        }) }
-        val all = daily.flatMap { it.byFeature }
-        fun cost(items: List<AiCostItem>) = items.fold(BigDecimal.ZERO) { acc, item -> acc + (item.costKrw ?: BigDecimal.ZERO) }
-        fun per(features: Set<String>, denominator: String): BigDecimal? {
-            val calls = all.filter { it.feature == denominator }.sumOf { it.calls }
-            return if (calls == 0L) null else cost(all.filter { it.feature in features }).divide(BigDecimal.valueOf(calls), MathContext.DECIMAL128)
-        }
-        return AiCostResponse(clock.instant(), range.from, range.to, "KRW", prices.chatImageUnitCostKrw, daily,
-            AiCostTotals(cost(all), per(setOf("chat_response", "choice_generation"), "chat_response"), per(setOf("storyline_generation", "story_completion"), "story_completion")),
-            all.filter { it.costKrw == null }.mapNotNull { it.model }.distinct().sorted())
     }
 }
