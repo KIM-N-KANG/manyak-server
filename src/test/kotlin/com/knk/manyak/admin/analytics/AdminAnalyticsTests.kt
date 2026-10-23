@@ -1,177 +1,173 @@
 package com.knk.manyak.admin.analytics
 
 import com.knk.manyak.admin.dto.AdminChartsRequest
-import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.slf4j.LoggerFactory
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 import java.util.concurrent.*
 
 class AdminAnalyticsTests {
     private lateinit var server: MockWebServer
+    private lateinit var fixture: AnalyticsTestFixture
     private val mapper = ObjectMapper()
-    private lateinit var clock: MutableAnalyticsClock
     private val today = LocalDate.parse("2026-10-22")
-    private val now = Instant.parse("2026-10-21T15:30:00Z")
-    private val log = LoggerFactory.getLogger(AdminAnalyticsService::class.java) as Logger
-    private lateinit var appender: ListAppender<ILoggingEvent>
+    private val now = Instant.parse("2026-10-22T03:00:00Z")
     @BeforeEach fun setup() {
-        server = MockWebServer().apply { start() }; clock = MutableAnalyticsClock(now)
-        appender = ListAppender<ILoggingEvent>().apply { start() }; log.addAppender(appender)
+        server = MockWebServer().apply { start() }
+        fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", "team", server.url("/").toString()), MutableAnalyticsClock(now))
     }
-    @AfterEach fun cleanup() { server.shutdown(); log.detachAppender(appender); appender.stop() }
-    private fun service(key: String = "test-api", secret: String = "test-secret", cohort: String = "") = AdminAnalyticsService(
-        AmplitudeDashboardClient(AmplitudeDashboardProperties(key, secret, cohort, server.url("/").toString()), mapper), clock)
-    private fun body(from: LocalDate = today.minusDays(6), count: Int = 7, base: Long = 0): String = mapper.writeValueAsString(mapOf("data" to mapOf(
-        "xValues" to (0 until count).map { from.plusDays(it.toLong()).toString() }, "series" to listOf((0 until count).map { base + it }), "seriesMeta" to listOf("All Users"))))
-    private fun pair(from: LocalDate = today.minusDays(6), count: Int = 7, base: Long = 0) {
-        server.enqueue(MockResponse().setBody(body(from, count, base))); server.enqueue(MockResponse().setBody(body(from, count, base + 100)))
-    }
-    private fun range(from: String, to: String) = AdminChartsRequest().apply { this.from = from; this.to = to }
-
-    @Test fun `days와 같은 직접 범위는 캐시를 공유하고 요청 범위만 조회하며 KST와 코호트를 적용한다`() {
-        val service = service(cohort = "team-cohort"); pair()
-        val response = service.dashboard(7)
-        assertThat(response.from).isEqualTo(today.minusDays(6)); assertThat(response.to).isEqualTo(today)
-        assertThat(response.daily).hasSize(7); assertThat(response.todayActiveUsers).isEqualTo(6)
-        assertThat(response.daily.last().newUsers).isEqualTo(106)
-        assertThat(service.dashboard(range("2026-10-16", "2026-10-22"))).isEqualTo(response)
-        assertThat(server.requestCount).isEqualTo(2)
-        for (metric in listOf("active", "new")) {
-            val request = server.takeRequest(1, TimeUnit.SECONDS)!!; val url = request.requestUrl!!
-            assertThat(url.encodedPath).isEqualTo("/api/2/users"); assertThat(url.queryParameter("m")).isEqualTo(metric)
-            assertThat(url.queryParameter("start")).isEqualTo("20261016"); assertThat(url.queryParameter("end")).isEqualTo("20261022")
-            assertThat(url.queryParameter("i")).isEqualTo("1"); assertThat(url.queryParameter("e")).isNull()
-            assertThat(request.getHeader("Authorization")).isEqualTo("Basic " + java.util.Base64.getEncoder().encodeToString("test-api:test-secret".toByteArray()))
-            assertThat(url.queryParameter("s")).contains("team-cohort", "userdata_cohort")
+    @AfterEach fun stop() = server.shutdown()
+    private fun request(from: LocalDate, to: LocalDate) = AdminChartsRequest().apply { this.from = from.toString(); this.to = to.toString() }
+    private fun dispatcher() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(r: RecordedRequest): MockResponse {
+                val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val to = LocalDate.parse(url.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val dates = from.datesUntil(to.plusDays(1)).toList().map { it.toString() }
+                return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates, "series" to listOf(List(dates.size) { if (mapper.readTree(url.queryParameter("e")!!)["event_type"].asText() == "_active") 10 else 5 })))))
+            }
         }
     }
-    @Test fun `과거 범위는 오늘 활성 수를 별도 조회하고 범위별 캐시와 만료 및 쿨다운을 지킨다`() {
-        val service = service(); val request = range("2026-01-01", "2026-01-02")
-        pair(LocalDate.parse(request.from), 2); server.enqueue(MockResponse().setBody(body(today, 1, 42)))
-        val cached = service.dashboard(request)
-        assertThat(cached.todayActiveUsers).isEqualTo(42); assertThat(cached.daily.last().activeUsers).isEqualTo(1)
-        assertThat(server.requestCount).isEqualTo(3)
-        repeat(2) { server.takeRequest() }
-        assertThat(server.takeRequest().requestUrl!!.queryParameter("start")).isEqualTo("20261022")
-        clock.at = now.plusSeconds(599); assertThat(service.dashboard(request)).isEqualTo(cached)
-        pair(); assertThat(service.dashboard(7).daily).hasSize(7)
-        clock.at = now.plusSeconds(600); server.enqueue(MockResponse().setResponseCode(500))
-        assertThat(service.dashboard(request)).isEqualTo(cached)
-        clock.at = now.plusSeconds(659); assertThat(service.dashboard(request)).isEqualTo(cached)
+    @Test fun `개요 분석은 국가와 명시 플랫폼 여섯 조회의 독립 값을 반환한다`() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(r: RecordedRequest): MockResponse {
+                val e = r.requestUrl!!.queryParameter("e")?.let { mapper.readTree(it) }
+                val p = e?.get("filters")?.toList()?.first { it["subprop_key"].asText()=="platform" }?.get("subprop_value")
+                val value = when { p==null -> 0; p.size()==2 -> 13; p[0].asText()=="Web" -> 10; else -> 5 }
+                return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to listOf(today.toString()), "series" to listOf(listOf(value))))))
+            }
+        }
+        val response = mapper.valueToTree<tools.jackson.databind.JsonNode>(fixture.service.dashboard(request(today,today)))
+        assertThat(response["todayActiveUsers"].isObject).isTrue()
+        for (value in listOf(response["todayActiveUsers"], response["daily"][0]["activeUsers"], response["daily"][0]["newUsers"])) {
+            assertThat(value["total"].asLong()).isEqualTo(13); assertThat(value["web"].asLong()).isEqualTo(10); assertThat(value["android"].asLong()).isEqualTo(5)
+        }
         assertThat(server.requestCount).isEqualTo(6)
-        clock.at = now.plusSeconds(660); pair(LocalDate.parse(request.from), 2); server.enqueue(MockResponse().setBody(body(today, 1, 43)))
-        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(43)
+        repeat(6) {
+            val u=server.takeRequest().requestUrl!!
+            assertThat(u.encodedPath).isEqualTo("/api/2/events/segmentation"); assertThat(u.queryParameter("m")).isEqualTo("uniques")
+            assertThat(u.queryParameter("e")).contains("country","South Korea","(none)","platform"); assertThat(u.queryParameter("s")).contains("userdata_cohort","team")
+        }
+        assertThat(fixture.budget.reserve(488)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
-    @Test fun `366일 범위도 마지막 날까지 조회하고 자정 뒤 오늘 활성 수를 갱신한다`() {
-        val service = service(); val request = range("2025-10-22", "2026-10-22")
-        pair(LocalDate.parse(request.from), 366)
-        assertThat(service.dashboard(request).daily).hasSize(366)
-        clock.at = Instant.parse("2026-10-22T15:00:00Z")
-        pair(LocalDate.parse(request.from), 366); server.enqueue(MockResponse().setBody(body(today.plusDays(1), 1, 99)))
-        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
+    @Test fun `요청 범위와 코호트 및 기본 인증을 적용하고 DB 저장 값을 재사용한다`() {
+        dispatcher(); val response = fixture.service.dashboard(7)
+        assertThat(response.daily).hasSize(7); assertThat(response.pendingDates).isEmpty(); assertThat(response.todayActiveUsers).isEqualTo(DashboardPlatformCounts(10, 10, 10))
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(6)
+        repeat(6) {
+            val r = server.takeRequest(); assertThat(r.requestUrl!!.queryParameter("start")).isEqualTo("20261016")
+            assertThat(r.requestUrl!!.queryParameter("s")).contains("userdata_cohort", "team")
+            assertThat(r.getHeader("Authorization")).isEqualTo("Basic bW9jazptb2Nr")
+        }
     }
-    @ParameterizedTest @ValueSource(booleans = [false, true])
-    fun `자정 전에 시작해 다음 날 끝난 조회는 전날 오늘 활성 수를 신선한 캐시로 쓰지 않는다`(endsToday: Boolean) {
-        clock.at = Instant.parse("2026-10-22T14:59:59Z")
-        val completedAt = Instant.parse("2026-10-22T15:00:01Z")
-        val start = if (endsToday) today.minusDays(1) else LocalDate.parse("2026-01-01")
-        val request = range(start.toString(), start.plusDays(1).toString())
-        val firstCalls = if (endsToday) 2 else 3
-        val responses = listOf(body(start, 2), body(start, 2, 100)) +
-            (if (endsToday) emptyList() else listOf(body(today, 1, 42))) +
-            listOf(body(start, 2), body(start, 2, 100), body(today.plusDays(1), 1, 99))
-        val calls = java.util.concurrent.atomic.AtomicInteger()
-        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
-            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
-                val number = calls.incrementAndGet()
-                // 마지막 외부 응답이 도착하기 직전에만 고정 시각을 자정 뒤로 옮긴다.
-                if (number == firstCalls) clock.at = completedAt
-                return responses.getOrNull(number - 1)?.let { MockResponse().setBody(it) } ?: MockResponse().setResponseCode(500)
+    @Test fun `366일의 첫 조회는 최근 41일을 받고 예산 회복 뒤 다음 날짜를 이어 받는다`() {
+        dispatcher(); val request = request(today.minusDays(365), today)
+        val first = fixture.service.dashboard(request)
+        assertThat(first.daily).hasSize(41); assertThat(first.pendingDates).hasSize(325)
+        assertThat(first.daily.first().date).isEqualTo(today.minusDays(40))
+        assertThat(fixture.service.dashboard(request)).isEqualTo(first); assertThat(server.requestCount).isEqualTo(6)
+        fixture.clock.at = now.plusSeconds(300)
+        val next = fixture.service.dashboard(request)
+        assertThat(next.daily).hasSize(82); assertThat(next.pendingDates).hasSize(284)
+        assertThat(server.requestCount).isEqualTo(12)
+        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo("20261022"); repeat(5) { server.takeRequest() }
+        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo(today.minusDays(41).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+    }
+    @Test fun `오늘은 10분마다 어제는 하루 한 번만 다시 받고 확정 날짜는 받지 않는다`() {
+        dispatcher(); fixture.service.dashboard(7)
+        fixture.clock.at = now.plusSeconds(599); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(6)
+        fixture.clock.at = now.plusSeconds(600); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(12)
+        repeat(6) { server.takeRequest() }
+        repeat(6) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261022"); assertThat(url.queryParameter("end")).isEqualTo("20261022") }
+        fixture.clock.at = now.plusSeconds(86400)
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(18) // 어제와 새 오늘 active를 연속 구간 한 번, 어제 new 한 번
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(18)
+    }
+    @Test fun `배포 뒤 새 서비스도 과거 DB 값을 재사용하고 오늘 값만 별도로 갱신한다`() {
+        dispatcher(); val request = request(today.minusDays(10), today.minusDays(2))
+        val first = fixture.service.dashboard(request); val calls = server.requestCount
+        val reboot = AnalyticsTestFixture(fixture.properties, fixture.clock, repository = fixture.store)
+        assertThat(reboot.service.dashboard(request)).isEqualTo(first); assertThat(server.requestCount).isEqualTo(calls)
+        fixture.clock.at = now.plusSeconds(23 * 3600)
+        assertThat(reboot.service.dashboard(request).daily).isEqualTo(first.daily); assertThat(server.requestCount).isEqualTo(calls + 3)
+    }
+    @Test fun `자정 뒤 실패해도 지난 날짜 응답은 유지하고 전날 오늘 값은 null이다`() {
+        dispatcher(); val request = request(today, today); fixture.service.dashboard(request)
+        fixture.clock.at = Instant.parse("2026-10-22T15:01:00Z")
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        val result = fixture.service.dashboard(request)
+        assertThat(result.todayActiveUsers).isNull(); assertThat(result.daily).hasSize(1)
+    }
+    @Test fun `조회 중 자정을 지나면 전날 활성 세 값을 오늘 값으로 반환하지 않는다`() {
+        fixture.clock.at = Instant.parse("2026-10-22T14:59:59Z")
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(r: RecordedRequest): MockResponse {
+                fixture.clock.at = Instant.parse("2026-10-22T15:00:01Z")
+                val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val dates = from.datesUntil(to.plusDays(1)).toList()
+                return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 8 })))))
             }
         }
-        val service = service()
-        val crossing = service.dashboard(request)
-        assertThat(crossing.asOf).isEqualTo(completedAt)
-        assertThat(crossing.todayActiveUsers).isEqualTo(if (endsToday) 1L else 42L)
-        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
-        assertThat(server.requestCount).isEqualTo(firstCalls + 3)
-        assertThat(service.dashboard(request).todayActiveUsers).isEqualTo(99)
-        assertThat(server.requestCount).isEqualTo(firstCalls + 3)
+        val q = request(today, today)
+        val first = fixture.service.dashboard(q)
+        assertThat(first.todayActiveUsers).isNull(); assertThat(first.daily.single().activeUsers).isEqualTo(DashboardPlatformCounts(8, 8, 8))
+        val next = fixture.service.dashboard(q)
+        assertThat(next.todayActiveUsers).isEqualTo(DashboardPlatformCounts(8, 8, 8)); assertThat(server.requestCount).isEqualTo(9)
     }
-
+    @Test fun `오늘 활성 세 조회 중 하나를 못 받으면 부분 객체 대신 null을 반환한다`() {
+        val day = today.minusDays(2)
+        fixture.service.dailyMetrics().forEach { metric -> fixture.store.saveDaily(metric.definition, mapOf(day to AnalyticsValue(mapper.valueToTree(4), now, now))) }
+        repeat(2) { server.enqueue(MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[9]]}}")) }
+        server.enqueue(MockResponse().setResponseCode(500))
+        val result = fixture.service.dashboard(request(day,day))
+        assertThat(result.daily).hasSize(1); assertThat(result.todayActiveUsers).isNull(); assertThat(server.requestCount).isEqualTo(3)
+    }
     @ParameterizedTest @ValueSource(ints = [302, 400, 401, 403, 429, 500, 503])
-    fun `외부 실패는 고정 예외와 60초 쿨다운이며 인증값과 본문을 로그에 남기지 않는다`(status: Int) {
-        val service = service(); server.enqueue(MockResponse().setResponseCode(status).setBody("sensitive response test-api test-secret"))
-        assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-        clock.at = now.plusSeconds(59); assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+    fun `실패는 60초 쿨다운 후 다시 받고 저장이 없으면 503이다`(status: Int) {
+        server.enqueue(MockResponse().setResponseCode(status).setBody("sensitive mock"))
+        assertThatThrownBy { fixture.service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        fixture.clock.at = now.plusSeconds(59); assertThatThrownBy { fixture.service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(server.requestCount).isEqualTo(1)
-        assertThat(appender.list).hasSize(1)
-        assertThat(appender.list.single().formattedMessage).contains("status=$status").doesNotContain("test-api", "test-secret", "sensitive response")
-        assertThat(appender.list.single().throwableProxy).isNull()
-        clock.at = now.plusSeconds(60); pair(); assertThat(service.dashboard(7).todayActiveUsers).isEqualTo(6)
+        fixture.clock.at = now.plusSeconds(60); dispatcher(); assertThat(fixture.service.dashboard(7).daily).hasSize(7)
     }
-    @ParameterizedTest @ValueSource(strings = ["{}", "not-json", "{\"data\":{\"xValues\":[],\"series\":[]}}"])
-    fun `형식 오류와 누락은 0으로 간주하지 않는다`(body: String) {
-        server.enqueue(MockResponse().setBody(body)); assertThatThrownBy { service().dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+    @ParameterizedTest @ValueSource(strings = ["{}", "not-json", "{\"data\":{\"xValues\":[],\"series\":[]}}", "{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[-1]]}}", "{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[0.5]]}}"])
+    fun `응답 해석 실패는 0으로 간주하지 않고 비용을 반환한다`(body: String) {
+        server.enqueue(MockResponse().setBody(body))
+        assertThatThrownBy { fixture.service.dashboard(request(today, today)) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(fixture.budget.reserve(500)).isTrue()
     }
-    @Test fun `수치는 음이 아닌 정수이고 날짜 중복은 거부한다`() {
-        for (invalid in listOf(body().replace("[0,1,2,3,4,5,6]", "[-1,1,2,3,4,5,6]"), body().replace("2026-10-16", "2026-10-17"), body().replace("[0,1,2,3,4,5,6]", "[0.5,1,2,3,4,5,6]"))) {
-            server.enqueue(MockResponse().setBody(invalid)); assertThatThrownBy { service().dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-        }
-    }
-    @Test fun `갱신은 부분 성공으로 캐시를 덮어쓰지 않는다`() {
-        val service = service(); pair(); val previous = service.dashboard(7); clock.at = now.plusSeconds(600)
-        server.enqueue(MockResponse().setBody(body(base = 2000))); server.enqueue(MockResponse().setResponseCode(500))
-        assertThat(service.dashboard(7)).isEqualTo(previous)
-    }
-    @ParameterizedTest @ValueSource(booleans = [false, true])
-    fun `동시 갱신은 한 요청만 호출하고 나머지는 즉시 이전 값 또는 사용 불가를 받는다`(hasCache: Boolean) {
-        val service = service(); val previous = if (hasCache) { pair(); service.dashboard(7) } else null
-        clock.at = now.plusSeconds(600)
+    @Test fun `단일 갱신 중 다른 요청은 기다리지 않고 저장 값으로 응답한다`() {
+        dispatcher(); val previous = fixture.service.dashboard(7); fixture.clock.at = now.plusSeconds(600)
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
-        val calls = java.util.concurrent.atomic.AtomicInteger()
-        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
-            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
-                if (calls.incrementAndGet() == 1) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
-                return MockResponse().setBody(body(base = 1000))
-            }
-        }
-        val pool = Executors.newFixedThreadPool(4)
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
+            entered.countDown(); release.await(3, TimeUnit.SECONDS)
+            return MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[20]]}}")
+        } }
+        val pool = Executors.newSingleThreadExecutor()
         try {
-            val pending = pool.submit<AdminAnalyticsResponse> { service.dashboard(7) }
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue()
-            val others = (1..3).map { pool.submit<AdminAnalyticsResponse?> {
-                if (previous == null) { assertThatThrownBy { service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java); null } else service.dashboard(7)
-            } }
-            others.forEach { assertThat(it.get(1, TimeUnit.SECONDS)).isEqualTo(previous) }
-            assertThat(calls.get()).isEqualTo(1); release.countDown()
-            assertThat(pending.get(3, TimeUnit.SECONDS).todayActiveUsers).isEqualTo(1006)
-            assertThat(calls.get()).isEqualTo(2)
+            val job = pool.submit<AdminAnalyticsResponse> { fixture.service.dashboard(7) }; assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue()
+            assertThat(fixture.service.dashboard(7)).isEqualTo(previous)
+            release.countDown(); assertThat(job.get(2, TimeUnit.SECONDS).todayActiveUsers).isEqualTo(DashboardPlatformCounts(20, 20, 20))
         } finally { release.countDown(); pool.shutdownNow() }
     }
-    @Test fun `키가 없으면 HTTP 없이 사용 불가이고 잘못된 기간도 호출하지 않는다`() {
-        for ((key, secret) in listOf("" to "test-secret", "test-api" to "")) assertThatThrownBy { service(key, secret).dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-        for (days in listOf(0, 10, 100)) assertThatThrownBy { service().dashboard(days) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
-        assertThat(server.requestCount).isZero()
+    @Test fun `키가 없어도 저장 값은 반환하고 잘못된 기간은 HTTP 전에 거절한다`() {
+        dispatcher(); fixture.service.dashboard(7)
+        val sameDefinitionWithoutKeys = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId = "team"), fixture.clock, repository = fixture.store)
+        assertThat(sameDefinitionWithoutKeys.service.dashboard(7).daily).hasSize(7)
+        val noKeys = AnalyticsTestFixture(AmplitudeDashboardProperties(), fixture.clock, repository = fixture.store)
+        // 코호트 정의가 바뀌면 옛 값과 섞이지 않는다.
+        assertThatThrownBy { noKeys.service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThatThrownBy { fixture.service.dashboard(request(today.minusDays(366), today)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+        assertThatThrownBy { fixture.service.dashboard(10) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
-    @Test fun `본문이 멈춰도 5초 전체 예산을 지킨다`() {
-        server.enqueue(MockResponse().setBody(body()).setBodyDelay(6, TimeUnit.SECONDS))
-        val started = System.nanoTime(); assertThatThrownBy { service().dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+    @Test fun `본문 수신도 전체 5초 예산에 포함된다`() {
+        server.enqueue(MockResponse().setBody("{\"data\":{}}").setBodyDelay(6, TimeUnit.SECONDS))
+        val started = System.nanoTime(); assertThatThrownBy { fixture.service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isBetween(Duration.ofMillis(4800), Duration.ofSeconds(7))
     }
-}
-
-class MutableAnalyticsClock(@Volatile var at: Instant) : Clock() {
-    override fun instant() = at
-    override fun getZone(): ZoneId = ZoneOffset.UTC
-    override fun withZone(zone: ZoneId): Clock = this
 }
