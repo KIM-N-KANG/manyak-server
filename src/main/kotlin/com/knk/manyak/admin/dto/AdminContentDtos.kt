@@ -1,5 +1,6 @@
 package com.knk.manyak.admin.dto
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
@@ -131,7 +132,11 @@ data class AdminDistribution(val chartId: String, val title: String, val descrip
         else -> error("Unknown distribution: $chartId")
     }
 }
-data class AdminChartPoint(val label: String, val value: Double, val link: AdminChartLink)
+data class AdminChartPoint(
+    val label: String, val value: Double, val link: AdminChartLink,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val chats: Long? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val totalTurns: Long? = null,
+)
 data class AdminChartLink(val list: String, val params: Map<String, String>)
 
 internal data class AdminDashboardRange(val from: java.time.LocalDate, val to: java.time.LocalDate)

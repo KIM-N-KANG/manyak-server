@@ -111,13 +111,74 @@ client.test("마지막 가입 누계와 요약 일치", () => {
 GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("턴 도달률", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.segments.map(s => s.segment).join(",") === "all,guest,member" && b.segments.every(s => s.reached.length === 4), "계약 필드 확인"); }); %}
+> {%
+client.test("턴 도달률의 열두 기준 턴과 비율", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  const thresholds = [1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50];
+  client.assert(b.segments.map(s => s.segment).join(",") === "all,guest,member", "세 구간 순서");
+  b.segments.forEach(s => {
+    client.assert(JSON.stringify(s.reached.map(p => p.turn)) === JSON.stringify(thresholds), `기준 턴 actual=${JSON.stringify(s.reached)}`);
+    s.reached.forEach(p => client.assert(p.rate === (s.chats === 0 ? 0 : p.chats / s.chats), `도달률 actual=${JSON.stringify(p)}`));
+  });
+});
+%}
 
 ### 채팅 옵션 — Amplitude 장애와 무관하게 동작
+# byModel은 채팅의 현재 선택 모델, turnsByModel은 메시지에 기록된 청구 모델이다.
+# 게스트 응답은 LITE, 기록 전(NULL) 응답은 UNRECORDED. 턴이 없는 키는 생략한다.
 GET {{baseUrl}}/api/v1/admin/quality/chat-options?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("채팅 옵션", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.daily.length === 7 && b.daily.every(d => d.withPersona <= d.chats), "계약 필드 확인"); }); %}
+> {%
+client.test("채팅 옵션과 모델별 턴 수", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.daily.length === 7 && b.daily.every(d => d.withPersona <= d.chats), "계약 필드 확인");
+  b.daily.forEach(d => {
+    client.assert(d.turnsByModel !== null && typeof d.turnsByModel === "object" && !Array.isArray(d.turnsByModel), `모델별 턴 actual=${JSON.stringify(d)}`);
+    Object.values(d.turnsByModel).forEach(n => client.assert(Number.isInteger(n) && n > 0, `턴 없는 모델은 키 없음 actual=${n}`));
+  });
+  client.global.set("adminOptionsFrom", b.from);
+  client.global.set("adminOptionsTo", b.to);
+  client.global.set("adminTurnsByDate", JSON.stringify(Object.fromEntries(b.daily.map(d => [d.date, Object.values(d.turnsByModel).reduce((a, n) => a + n, 0)]))));
+});
+%}
+
+### 모델별 턴 합과 차트 일별 턴 비교 — 위 채팅 옵션 요청 다음에 실행
+# 데이터가 바뀌지 않는 fixture에서 실행한다. 채팅 생성일·삭제 여부 무관, 재생성 판본과 팀 계정은 제외한다.
+# 10/21 예시: 메시지 AURORA 2개(판본 2개), 이전 채팅의 LITE 3개, 삭제 채팅의 LITE 1개,
+# 선택 모델 AURORA인 게스트의 LITE 1개, NULL 1개, 팀 계정 응답 1개 → AURORA 2, LITE 5, UNRECORDED 1, 합 8.
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from={{adminOptionsFrom}}&to={{adminOptionsTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("모델별 턴 합과 일별 턴 일치", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const totals = JSON.parse(client.global.get("adminTurnsByDate"));
+  response.body.daily.forEach(d => client.assert(d.turns === totals[d.date], `date=${d.date} chart=${d.turns} models=${totals[d.date]}`));
+});
+%}
+
+### 청구 모델 고정 fixture — 위 10/21 예시만 준비한 격리 DB에서 선택 실행
+GET {{baseUrl}}/api/v1/admin/quality/chat-options?from=2026-10-21&to=2026-10-21
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("청구 모델과 기록 전 턴 분리", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const models = response.body.daily[0].turnsByModel;
+  client.assert(models.AURORA === 2 && models.LITE === 5 && models.UNRECORDED === 1 && Object.keys(models).length === 3,
+    `expected={AURORA:2,LITE:5,UNRECORDED:1}, actual=${JSON.stringify(models)}`);
+  client.global.set("adminOptionsFrom", response.body.from);
+  client.global.set("adminOptionsTo", response.body.to);
+  client.global.set("adminTurnsByDate", JSON.stringify({"2026-10-21": 8}));
+});
+%}
+# 바로 위의 대시보드 비교 요청을 다시 실행하면 합 8을 검증한다.
+# 모델 변경 검증: http/chat/chat-models.http의 회원 턴 시나리오를 실행한다.
+# LITE 3턴 뒤 모델만 AURORA로 바꾸면 byModel만 변경되고 turnsByModel의 LITE 3은 유지된다.
+# 마지막 턴을 AURORA로 재생성하면 같은 메시지 생성일의 LITE 1이 AURORA 1로 이동하며 합은 유지된다.
 
 ### AI 비용 — Amplitude 장애와 무관하게 동작
 GET {{baseUrl}}/api/v1/admin/quality/ai-cost?days=7

@@ -757,11 +757,12 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = false,
                 realtimeImage = request.realtimeImage,
-                persist = { result, chargeId ->
+                persist = { result, chargeId, billingModelCode ->
                     chatTurnPersister.persistTurn(
                         chatId = chat.id,
                         expectedState = startState,
                         creditTransactionId = chargeId,
+                        billingModelCode = billingModelCode,
                         userInput = request.userInput,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
@@ -855,7 +856,7 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = true,
                 realtimeImage = request.realtimeImage,
-                persist = { result, chargeId ->
+                persist = { result, chargeId, billingModelCode ->
                     // 현재 채팅 상태로 요청하고 판정 메타는 재적용하지 않는다. 직전 턴 상태를 복원해 새 판정을
                     // 반영하려면 턴별 메타 델타 이력이 필요하지만 현 스키마에는 없다. 엔딩 도달 턴은 위에서
                     // 거절하므로 최초 도달 불변식은 유지된다(regenerateLastTurn은 judgment를 받지 않음).
@@ -864,6 +865,7 @@ class ChatService(
                         expectedAssistantId = request.turnId,
                         expectedState = startState,
                         creditTransactionId = chargeId,
+                        billingModelCode = billingModelCode,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
                     )
@@ -1080,7 +1082,7 @@ class ChatService(
         deviceId: String?,
         isRegenerated: Boolean,
         realtimeImage: Boolean,
-        persist: (ChatTurnAiResult, Long?) -> ChatTurnPersister.PersistedTurn,
+        persist: (ChatTurnAiResult, Long?, String) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long, String, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
@@ -1256,7 +1258,7 @@ class ChatService(
                     if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
                     val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
                         val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
-                        val saved = persist(checked.result, turnCharge()?.id)
+                        val saved = persist(checked.result, turnCharge()?.id, billingModel.code)
                         if (!checked.success) refundImage()
                         checked to saved
                     })

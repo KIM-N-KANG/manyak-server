@@ -65,6 +65,8 @@ internal class AdminQuery {
         }
         fun normalized(column: String) = "LOWER(TRIM(REGEXP_REPLACE($column, '\\s+', ' ', 'g')))"
         val turnBounds = listOf(0..0, 1..1, 2..2, 3..3, 4..4, 5..5, 6..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
+        // 스토리 상세와 전환 지표는 0을 뺀 턴 분포 구간의 시작 턴을 공통 기준으로 쓴다.
+        val turnReachThresholds = turnBounds.drop(1).map { it.first }
         val memberBounds = listOf(1..1, 2..2, 3..4, 5..9, 10..Int.MAX_VALUE)
     }
 }

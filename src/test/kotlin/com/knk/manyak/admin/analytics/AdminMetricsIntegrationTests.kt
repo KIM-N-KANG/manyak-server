@@ -150,7 +150,7 @@ class AdminMetricsIntegrationTests {
         val signup=reads.signups(q).daily.single()
         assertThat(signup.signups).isEqualTo(SignupCounts(3,1,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(4)
         val reach=reads.reach(q)
-        assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.5,0.25)
+        assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.75,0.75,0.75,0.5,0.5,0.5,0.25,0.25,0.0,0.0)
         assertThat(reach.segments[1].chats).isEqualTo(2); assertThat(reach.segments[2].chats).isEqualTo(2)
         assertThat(reach.guestToMember).isEqualTo(GuestConversion(1,1,1.0))
         val options=reads.options(q).daily.single()

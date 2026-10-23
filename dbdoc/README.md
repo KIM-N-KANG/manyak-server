@@ -14,7 +14,7 @@
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
 | [public.story_chats](public.story_chats.md) | 24 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 9 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -87,6 +87,7 @@ erDiagram
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_messages" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
+"public.story_messages" }o--o| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_messages" : "FOREIGN KEY (message_id) REFERENCES story_messages(id) ON DELETE CASCADE"
 "public.story_creation_storyline_ratings" |o--|| "public.story_creation_storylines" : "FOREIGN KEY (storyline_id) REFERENCES story_creation_storylines(id) ON DELETE CASCADE"
@@ -265,6 +266,7 @@ erDiagram
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
+  varchar_20_ model_code FK
 }
 "public.story_choices" {
   bigint id

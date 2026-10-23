@@ -8,9 +8,21 @@ class InfraMetricCatalogTests {
         val props = InfraMetricsProperties(cluster = "cluster-secret", services = "server=manyak-prod,ai=manyak-prod-ai,notification=manyak-prod-notification",
             loadBalancer = "app/manyak-prod-alb/test", cacheClusters = "manyak-prod-redis-rg-001,manyak-prod-redis-rg-002", database = "private-rds", domain = "manyak-logs", accountId = "000000000000")
         val queries = InfraMetricCatalog(props).queries()
-        assertThat(queries).hasSize(23)
+        assertThat(queries).hasSize(29)
         assertThat(queries.map { it.id() }).doesNotHaveDuplicates()
         assertThat(queries).allMatch { it.metricStat().period() == 300 && it.returnData() }
+        val ecs = queries.filter { it.metricStat().metric().namespace() == "AWS/ECS" }
+        assertThat(ecs).hasSize(12)
+        for ((_, service) in props.servicePairs()) {
+            val serviceQueries = ecs.filter { q -> q.metricStat().metric().dimensions().any { it.name() == "ServiceName" && it.value() == service } }
+            assertThat(serviceQueries).hasSize(4)
+            for (metric in listOf("CPUUtilization", "MemoryUtilization")) {
+                assertThat(serviceQueries.filter { it.metricStat().metric().metricName() == metric }.map { it.metricStat().stat() })
+                    .containsExactlyInAnyOrder("Average", "Maximum")
+            }
+            assertThat(serviceQueries).allMatch { q -> q.metricStat().metric().dimensions().associate { it.name() to it.value() } ==
+                mapOf("ClusterName" to "cluster-secret", "ServiceName" to service) }
+        }
         val running = queries.filter { it.metricStat().metric().metricName() == "RunningTaskCount" }
         assertThat(running).isEmpty()
         assertThat(queries.filter { it.id().endsWith("_cpu") && it.metricStat().metric().namespace() == "AWS/ECS" }.flatMap { it.metricStat().metric().dimensions() }.filter { it.name() == "ServiceName" }.map { it.value() })

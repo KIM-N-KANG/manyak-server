@@ -44,6 +44,7 @@ class ChatModelSelectionIntegrationTests {
     @Autowired private lateinit var wallet: CreditWalletService
     @Autowired private lateinit var trials: GuestTrialLimitService
     @Autowired private lateinit var service: ChatService
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
 
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private lateinit var publisher: com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
@@ -186,6 +187,13 @@ class ChatModelSelectionIntegrationTests {
         }
     }
 
+    private fun assertResponseModel(chat: StoryChat, model: String) {
+        assertThat(jdbc.queryForList("SELECT model_code FROM story_messages WHERE chat_id = ? AND role = 'ASSISTANT' ORDER BY message_order",
+            String::class.java, chat.id)).containsOnly(model)
+        assertThat(jdbc.queryForList("SELECT model_code FROM story_messages WHERE chat_id = ? AND role = 'USER' ORDER BY message_order",
+            String::class.java, chat.id)).isNotEmpty().containsOnlyNulls()
+    }
+
     @Test fun `기본 모델이 없으면 활성 모델 채팅도 과금 전에 실패한다`() {
         val user = member()
         val chat = chat(user)
@@ -206,6 +214,7 @@ class ChatModelSelectionIntegrationTests {
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("AURORA")
         assertThat(wallet.balanceOf(user.id)).isEqualTo(950)
         assertThat(chats.findById(chat.id).orElseThrow().modelCode).isEqualTo("LITE")
+        assertResponseModel(chat, "AURORA")
     }
 
     @Test fun `오로라 유료 턴 중 모델과 가격을 변경해도 원래 가격으로 저장하고 다음 재생성부터 라이트를 쓴다`() {
@@ -228,6 +237,7 @@ class ChatModelSelectionIntegrationTests {
         assertThat(chargeA.idempotencyKey).isNull()
         assertThat(chargeA.refType).isEqualTo("CHAT_TURN")
         assertThat(chats.findById(chat.id).orElseThrow().modelCode).isEqualTo("LITE")
+        assertResponseModel(chat, "AURORA")
         service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
             assertThat(chats.findById(chat.id).orElseThrow().regeneratedCount).isEqualTo(1)
@@ -239,6 +249,7 @@ class ChatModelSelectionIntegrationTests {
         assertThat(transactions.findById(chargeB).orElseThrow().idempotencyKey).isNull()
         assertThat(transactions.findById(chargeB).orElseThrow().refType).isEqualTo("CHAT_TURN")
         assertThat(wallet.balanceOf(user.id)).isEqualTo(930)
+        assertResponseModel(chat, "LITE")
     }
 
     @Test fun `라이트 회원 체험은 회원 공개 식별자를 보내고 차감 없이 체험을 소모한다`() {
@@ -252,6 +263,7 @@ class ChatModelSelectionIntegrationTests {
         assertThat(wallet.balanceOf(user.id)).isEqualTo(1000)
         assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId).isNull()
+        assertResponseModel(chat, "LITE")
     }
 
     @Test fun `오로라 회원은 체험 잔여가 있어도 50을 차감하고 체험 카운터를 유지한다`() {
@@ -265,6 +277,7 @@ class ChatModelSelectionIntegrationTests {
         assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isZero()
         val chargeId = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId!!
         assertThat(transactions.findById(chargeId).orElseThrow().amount).isEqualTo(-50)
+        assertResponseModel(chat, "AURORA")
     }
 
     @Test fun `오로라 회원은 체험 잔여와 잔액 49이면 402이고 체험 카운터를 유지한다`() {
@@ -293,7 +306,9 @@ class ChatModelSelectionIntegrationTests {
         waitForTurn(chat)
         await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
         val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
+        assertResponseModel(chat, "LITE")
         service.changeSettings(chat.publicId.toString(), "AURORA", user.id)
+        assertResponseModel(chat, "LITE")
         service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
             assertThat(chats.findById(chat.id).orElseThrow().regeneratedCount).isEqualTo(1)
@@ -304,6 +319,8 @@ class ChatModelSelectionIntegrationTests {
         val chargeId = messages.findById(first.id).orElseThrow().creditTransactionId!!
         assertThat(transactions.findById(chargeId).orElseThrow().amount).isEqualTo(-50)
         assertThat(versions.findAll().single().creditTransactionId).isNull()
+        assertResponseModel(chat, "AURORA")
+        assertThat(messages.findById(first.id).orElseThrow().createdAt).isEqualTo(first.createdAt)
     }
 
     @Test fun `게스트는 선택 모델을 보관하면서 라이트로 호출하고 user_id는 null이다`() {
@@ -314,5 +331,6 @@ class ChatModelSelectionIntegrationTests {
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.userId).isNull()
         assertThat(chats.findById(chat.id).orElseThrow().modelCode).isEqualTo("AURORA")
         assertThat(transactions.findAll()).isEmpty()
+        assertResponseModel(chat, "LITE")
     }
 }
