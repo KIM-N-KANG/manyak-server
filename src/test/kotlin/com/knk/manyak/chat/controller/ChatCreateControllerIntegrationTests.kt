@@ -153,7 +153,11 @@ class ChatCreateControllerIntegrationTests {
     @Test
     fun `동시 설정 변경은 각각 보낸 컬럼을 보존한다`() {
         val story = storyRepository.save(Story(title = "동시 설정"))
-        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, modelCode = "AURORA"))
+        // 시계 정밀도와 무관하게 나노초를 넣어 DB의 마이크로초 저장 정밀도 차이를 재현한다.
+        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(
+            storyId = story.id, modelCode = "AURORA", updatedAt = Instant.parse("2026-10-23T00:00:00.123456789Z"),
+        ))
+        val before = storyChatRepository.findById(chat.id).orElseThrow().updatedAt
         val start = java.util.concurrent.CountDownLatch(1)
         val tasks = listOf("""{"model":"LITE"}""", """{"longResponse":true}""").map { body ->
             java.util.concurrent.CompletableFuture.runAsync {
@@ -166,7 +170,7 @@ class ChatCreateControllerIntegrationTests {
         tasks.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
         restTestClient.get().uri("/api/v1/chats/${chat.publicId}").exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.model").isEqualTo("LITE").jsonPath("$.longResponse").isEqualTo(true)
-        assertThat(storyChatRepository.findById(chat.id).orElseThrow().updatedAt).isEqualTo(chat.updatedAt)
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().updatedAt).isEqualTo(before)
     }
 
     @Test
