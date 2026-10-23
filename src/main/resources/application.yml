@@ -101,6 +101,22 @@ springdoc:
 
 manyak:
   admin:
+    infra:
+      region: ${AWS_REGION:ap-northeast-2}
+      cache-seconds: 300
+      timeout-seconds: 10
+      cluster: manyak-prod
+      services:
+        server: manyak-prod
+        ai: manyak-prod-ai
+        notification: manyak-prod-notification
+      # CloudWatch 차원은 ALB 이름이 아니라 app/name/hash 형식의 ARN suffix다.
+      load-balancer: ${MANYAK_INFRA_LOAD_BALANCER:}
+      database: manyak-prod-pg
+      cache-clusters: [manyak-prod-redis, manyak-prod-redis-rg-001]
+      cache-node-id: '0001'
+      domain: manyak-logs
+      account-id: ${AWS_ACCOUNT_ID:}
     play-stats:
       bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
       package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
