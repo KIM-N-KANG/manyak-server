@@ -122,7 +122,15 @@ data class AdminDailyMetrics(
     val date: LocalDate, val joined: Long = 0, val chats: Long = 0, val turns: Long = 0, val stories: Long = 0,
     val granted: Long = 0, val spent: Long = 0, val payments: Long = 0, val revenue: Long = 0, val attendance: Long = 0,
 )
-data class AdminDistribution(val chartId: String, val title: String, val description: String, val unit: String, val points: List<AdminChartPoint>)
+data class AdminDistribution(val chartId: String, val title: String, val description: String, val unit: String, val points: List<AdminChartPoint>) {
+    val category: String = when (chartId) {
+        "started-as", "member-chats" -> "users"
+        "genre-depth", "turns", "first-message" -> "engagement"
+        "characters" -> "content"
+        "ai-latency", "ai-success" -> "ai-quality"
+        else -> error("Unknown distribution: $chartId")
+    }
+}
 data class AdminChartPoint(val label: String, val value: Double, val link: AdminChartLink)
 data class AdminChartLink(val list: String, val params: Map<String, String>)
 
