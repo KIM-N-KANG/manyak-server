@@ -261,14 +261,16 @@ class AdminReadApiIntegrationTests {
         assertThat(json(get("/members?q=팀").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
     }
 
-    @Test fun `대시보드는 삭제된 카드를 응답하지 않고 활성과 정지 회원을 센다`() {
+    @Test fun `대시보드는 탈퇴 포함 누적과 현재 회원 및 탈퇴 수를 응답한다`() {
         member("정지", UserStatus.SUSPENDED)
         member("추가 활성")
         member("탈퇴", UserStatus.DELETED)
         val body = json(get("/dashboard/summary").expectStatus().isOk)
-        assertThat(body["members"]["total"].asLong()).isEqualTo(3)
-        assertThat(body["members"].has("withdrawnTotal")).isFalse()
-        assertThat(body["members"].has("withdrawnToday")).isFalse()
+        assertThat(body["members"].has("active")).isTrue()
+        assertThat(body["members"].has("withdrawn")).isTrue()
+        assertThat(body["members"]["total"].asLong()).isEqualTo(4)
+        assertThat(body["members"]["active"].asLong()).isEqualTo(3)
+        assertThat(body["members"]["withdrawn"].asLong()).isEqualTo(1)
         assertThat(body["payments"].has("refundedTotal")).isFalse()
         assertThat(body["payments"].has("refundedToday")).isFalse()
         assertThat(body.has("moderation")).isFalse()

@@ -92,7 +92,7 @@ data class AdminDashboardSummaryResponse(
     val asOf: Instant, val todayStartsAt: Instant, val members: AdminMemberMetrics, val chats: AdminChatMetrics,
     val stories: AdminStoryMetrics, val credits: AdminCreditMetrics, val payments: AdminPaymentMetrics,
 )
-data class AdminMemberMetrics(val total: Long, val joinedToday: Long)
+data class AdminMemberMetrics(val total: Long, val active: Long, val withdrawn: Long, val joinedToday: Long)
 data class AdminChatMetrics(val startedTotal: Long, val startedToday: Long, val turnsTotal: Long, val turnsToday: Long)
 data class AdminStoryMetrics(val total: Long, val createdToday: Long)
 data class AdminCreditMetrics(val grantedTotal: Long, val grantedToday: Long, val spentTotal: Long, val spentToday: Long)

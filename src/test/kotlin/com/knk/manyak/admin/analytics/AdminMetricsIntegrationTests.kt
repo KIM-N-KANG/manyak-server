@@ -126,7 +126,7 @@ class AdminMetricsIntegrationTests {
         chat(a.id,100,deleted=start); chat(null,100,at=end)
         val q=com.knk.manyak.admin.dto.AdminChartsRequest().apply { from="2026-10-21"; to="2026-10-21" }
         val signup=reads.signups(q).daily.single()
-        assertThat(signup.signups).isEqualTo(SignupCounts(3,1,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(3)
+        assertThat(signup.signups).isEqualTo(SignupCounts(3,1,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(4)
         val reach=reads.reach(q)
         assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.5,0.25)
         assertThat(reach.segments[1].chats).isEqualTo(2); assertThat(reach.segments[2].chats).isEqualTo(2)
