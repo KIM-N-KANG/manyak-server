@@ -59,7 +59,7 @@ class AdminChartsService(
             AdminDistribution("genre-depth", "장르별 평균 턴 수", "채팅 생성일 기준 장르별 평균 현재 턴 수", "턴",
                 genres.toSortedMap().map { (genre, value) -> point(genre, value.first / value.second, "stories", mapOf("genre" to genre), "chat") }),
             AdminDistribution("turns", "턴 수 분포", "채팅 생성일을 기준으로 구간별 채팅 수 집계", "개",
-                buckets(1, listOf("0", "1", "2", "3~4", "5~6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"), "chats", "turnBucket")),
+                buckets(1, listOf("0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"), "chats", "turnBucket")),
             AdminDistribution("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅 비율", "%",
                 listOf("GUEST" to "게스트", "MEMBER" to "회원").map { (key, label) -> point(label,
                     rounded(if (total == 0.0) 0.0 else 100 * (raw[2].firstOrNull { it["label"] == key }?.number("n") ?: 0.0) / total),
