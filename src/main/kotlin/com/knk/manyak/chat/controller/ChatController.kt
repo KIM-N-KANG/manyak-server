@@ -54,7 +54,7 @@ class ChatController(
     private val chatService: ChatService,
 ) {
 
-    @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 회원 체험 소진 후 턴 가격을 노출 순서로 반환합니다. 인증은 선택입니다.")
+    @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 턴 가격을 노출 순서로 반환합니다. 회원 턴 체험은 LITE에만 적용됩니다. 인증은 선택입니다.")
     @GetMapping("/chats/models")
     fun getModels(): List<ChatModelResponse> = chatService.getModels()
 

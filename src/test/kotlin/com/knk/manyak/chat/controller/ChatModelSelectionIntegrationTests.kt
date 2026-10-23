@@ -26,10 +26,13 @@ import org.springframework.test.context.ActiveProfiles
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
+@org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(GatedChatTurnAiClientConfig::class)
 class ChatModelSelectionIntegrationTests {
+    @Autowired private lateinit var restTestClient: org.springframework.test.web.servlet.client.RestTestClient
+    @Autowired private lateinit var jwtTokenProvider: com.knk.manyak.auth.jwt.JwtTokenProvider
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var stories: StoryRepository
@@ -157,7 +160,7 @@ class ChatModelSelectionIntegrationTests {
         val user = member(exhaust = false)
         for ((owner, device) in listOf(user to null, null to "long-response-guest")) {
             val chat = chat(owner)
-            service.changeSettings(chat.publicId.toString(), null, owner?.id, true)
+            service.changeSettings(chat.publicId.toString(), "LITE", owner?.id, true)
             service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("긴 체험", realtimeImage = false), owner?.id, device)
             waitForTurn(chat)
             assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
@@ -168,9 +171,9 @@ class ChatModelSelectionIntegrationTests {
     @BeforeEach fun reset() { cleaner.cleanAll(); GatedChatTurnAiClientConfig.reset() }
     @AfterEach fun release() { GatedChatTurnAiClientConfig.gate.countDown(); GatedChatTurnAiClientConfig.reset() }
 
-    private fun member(exhaust: Boolean = true): User {
+    private fun member(exhaust: Boolean = true, balance: Long = 1000): User {
         val user = users.save(User(nickname = "모델회원", status = UserStatus.ACTIVE))
-        wallet.reward(user.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        wallet.reward(user.id, balance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
         if (exhaust) repeat(5) { trials.reserveMember(user.id, GuestTrialLimitService.Counter.CHAT_TURN) }
         return user
     }
@@ -238,15 +241,69 @@ class ChatModelSelectionIntegrationTests {
         assertThat(wallet.balanceOf(user.id)).isEqualTo(930)
     }
 
-    @Test fun `회원 체험은 선택 모델에 관계없이 라이트와 회원 공개 식별자를 보내고 차감 연결이 없다`() {
+    @Test fun `라이트 회원 체험은 회원 공개 식별자를 보내고 차감 없이 체험을 소모한다`() {
         val user = member(exhaust = false)
         val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), "LITE", user.id)
         service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("회원 체험", realtimeImage = false), user.id)
         waitForTurn(chat)
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("LITE")
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.userId).isEqualTo(user.publicId.toString())
         assertThat(wallet.balanceOf(user.id)).isEqualTo(1000)
+        assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId).isNull()
+    }
+
+    @Test fun `오로라 회원은 체험 잔여가 있어도 50을 차감하고 체험 카운터를 유지한다`() {
+        val user = member(exhaust = false)
+        val chat = chat(user)
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("오로라 유료", realtimeImage = false), user.id)
+        waitForTurn(chat)
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("AURORA")
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.userId).isEqualTo(user.publicId.toString())
+        assertThat(wallet.balanceOf(user.id)).isEqualTo(950)
+        assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isZero()
+        val chargeId = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId!!
+        assertThat(transactions.findById(chargeId).orElseThrow().amount).isEqualTo(-50)
+    }
+
+    @Test fun `오로라 회원은 체험 잔여와 잔액 49이면 402이고 체험 카운터를 유지한다`() {
+        val user = member(exhaust = false, balance = 49)
+        val chat = chat(user)
+        restTestClient.post()
+            .uri("/api/v1/chats/${chat.publicId}/turns/stream")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .accept(org.springframework.http.MediaType.TEXT_EVENT_STREAM, org.springframework.http.MediaType.APPLICATION_JSON)
+            .body("""{"userInput":"잔액 부족", "realtimeImage":false}""")
+            .exchange()
+            .expectStatus().isEqualTo(402)
+            .expectBody().jsonPath("$.code").isEqualTo("INSUFFICIENT_CREDIT")
+        assertThat(wallet.balanceOf(user.id)).isEqualTo(49)
+        assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isZero()
+        assertThat(GatedChatTurnAiClientConfig.lastRequest).isNull()
+        assertThat(transactions.findAll().none { it.reason == CreditReason.CHAT_TURN }).isTrue()
+    }
+
+    @Test fun `오로라 재생성은 체험 잔여가 있어도 50을 차감하고 체험 카운터를 유지한다`() {
+        val user = member(exhaust = false)
+        val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), "LITE", user.id)
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("재생성 준비", realtimeImage = false), user.id)
+        waitForTurn(chat)
+        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
+        service.changeSettings(chat.publicId.toString(), "AURORA", user.id)
+        service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            assertThat(chats.findById(chat.id).orElseThrow().regeneratedCount).isEqualTo(1)
+        }
+        assertThat(GatedChatTurnAiClientConfig.lastRequest!!.modelTier).isEqualTo("AURORA")
+        assertThat(wallet.balanceOf(user.id)).isEqualTo(950)
+        assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
+        val chargeId = messages.findById(first.id).orElseThrow().creditTransactionId!!
+        assertThat(transactions.findById(chargeId).orElseThrow().amount).isEqualTo(-50)
+        assertThat(versions.findAll().single().creditTransactionId).isNull()
     }
 
     @Test fun `게스트는 선택 모델을 보관하면서 라이트로 호출하고 user_id는 null이다`() {

@@ -28,7 +28,8 @@
 ###   엔딩 도달 후 채팅은 ENDED가 되어 재생성이 409로 막히며(이어쓰기는 계속 가능), 스토리에 주요 사건·엔딩이 저장돼 있어야 판정이 동작합니다.
 ###
 ### [KNK-399·KNK-477] 크레딧 차감·게스트 체험 한도(스펙 §4-3-7)·소유권(스펙 §4-5):
-###   - 회원은 체험을 소진한 뒤 유효 모델 가격을 선차감합니다(LITE 20, AURORA 50, 새 채팅 기본 AURORA).
+###   - 회원은 LITE 턴에서만 잔여 체험을 쓰고, 소진 후 20을 선차감합니다. AURORA는 체험을 예약하지 않고 50을 선차감합니다(새 채팅 기본 AURORA).
+###   - AURORA + 체험 잔여 + 잔액 49면 스트림 개시 전 402이며 턴 체험 사용량은 그대로입니다.
 ###     [KNK-1056] 이 수치는 릴리스 없이 chat_models 의 turn_cost로 바꿉니다(절차는 credit/credits.http).
 ###   - 잔액이 부족하면 SSE를 열기 전에 동기 402(JSON)로 응답합니다(스트림 안 error 이벤트가 아님). 아래 11번 참고.
 ###   - 턴이 completed 없이 끝나면(AI error·생성 마감·스케줄 거부) 선차감분을 전액 환불합니다(정상 완료 턴은 환불 없음).
@@ -249,7 +250,7 @@ Authorization: Bearer {{accessToken}}
 %}
 
 ### 10. (해피 패스) 회원이 충분한 잔액으로 이어쓰기 → 200 스트리밍 + 채팅 턴 1회분 차감(새 채팅 기본 AURORA 50)
-# started → token… → completed 로 정상 종료하면 회원 체험 소진 뒤 유효 모델 가격이 차감됩니다(잔액은 회원 계정 원장에서 확인).
+# started → token… → completed 로 정상 종료하면 AURORA는 체험 잔여와 무관하게 50이 차감되고 턴 체험 사용량은 유지됩니다. LITE는 체험 잔여가 있으면 무료로 1회 소모하고, 없으면 20이 차감됩니다(잔액은 회원 계정 원장에서 확인).
 # 선택한 유효 모델의 turn_cost만큼입니다.
 POST {{baseUrl}}/api/v1/chats/{{memberChatId}}/turns/stream
 Content-Type: application/json

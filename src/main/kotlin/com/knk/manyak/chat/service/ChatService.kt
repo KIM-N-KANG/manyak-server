@@ -1059,7 +1059,8 @@ class ChatService(
     /**
      * 채팅 턴/재생성 공통 SSE 스트리밍. 검증(404/403/409)과 AI 요청 조립은 호출부에서 동기로 끝낸 뒤 여기로 넘긴다.
      *
-     * 회원([userId] != null)이면 SseEmitter를 만들기 **전에** 동기로 1턴분을 선차감한다(잔액 부족 시 여기서
+     * 회원([userId] != null)은 LITE 턴의 잔여 체험을 먼저 쓰고, 그 외에는 SseEmitter를 만들기 **전에**
+     * 동기로 유효 모델의 1턴분을 선차감한다(잔액 부족 시 여기서
      * InsufficientCreditException이 던져져 컨트롤러가 402로 변환, 스트림 미개시). 실제 토큰 스트리밍과 저장은
      * [chatSseExecutor] 위에서 비동기로 처리한다. 저장([persist])이 completed 없이 끝나면(error·생성 마감·미완료·
      * 마지막 턴 변경) 선차감분을 전액 환불한다(정확히 1회, 멱등 키로 이중 방어).
@@ -1113,7 +1114,8 @@ class ChatService(
             }
         }
         try {
-            memberTrialCovered = userId != null && guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
+            memberTrialCovered = userId != null && billingModel.code == "LITE" &&
+                guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
             guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
             if (userId == null || memberTrialCovered) billingModel = BillingModel("LITE", 0)
             recordResult.modelCode = billingModel.code
