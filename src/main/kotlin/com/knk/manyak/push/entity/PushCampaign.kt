@@ -83,6 +83,10 @@ class PushCampaign(
     @Column(name = "notice_id", unique = true)
     val noticeId: Long? = null,
 
+    /** 이동 대상 스토리의 내부 FK. API와 푸시 데이터에는 스토리 publicId를 사용한다. */
+    @Column(name = "story_id")
+    val storyId: Long? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

@@ -9,9 +9,8 @@ import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.CampaignDeliverySummaryRepository
 import com.knk.manyak.push.repository.CampaignDeliverySummary
 import com.knk.manyak.push.repository.PushCampaignRepository
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.domain.Sort
-import org.springframework.data.jpa.domain.Specification
+import com.knk.manyak.push.repository.AdminCampaignListRepository
+import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -28,26 +27,12 @@ class AdminCampaignService(
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
     private val deliveries: CampaignDeliverySummaryRepository,
+    private val campaignList: AdminCampaignListRepository,
+    private val stories: StoryRepository,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     @Transactional(readOnly = true)
-    fun list(status: PushCampaignStatus?, page: Int, size: Int, sort: String, order: String): AdminCampaignPageResponse {
-        val fields = mapOf("campaignId" to "publicId", "createdAt" to "createdAt", "scheduledAt" to "scheduledAt",
-            "status" to "status", "kind" to "kind", "title" to "title", "targetCount" to "targetCount",
-            "sentCount" to "sentCount", "startedAt" to "startedAt", "finishedAt" to "finishedAt")
-        val field = fields[sort] ?: badRequest("지원하지 않는 정렬입니다.")
-        val direction = when (order.lowercase()) {
-            "asc" -> Sort.Direction.ASC
-            "desc" -> Sort.Direction.DESC
-            else -> badRequest("정렬 방향은 asc 또는 desc여야 합니다.")
-        }
-        if (page < 1 || size !in 1..100) badRequest("page는 1 이상, size는 1~100이어야 합니다.")
-        val ordering = Sort.by(direction, field).let { if (field == "publicId") it else it.and(Sort.by("publicId")) }
-        val predicate = Specification<PushCampaign> { root, _, cb -> status?.let { cb.equal(root.get<PushCampaignStatus>("status"), it) } ?: cb.conjunction() }
-        val result = campaigns.findAll(predicate, PageRequest.of(page - 1, size, ordering))
-        val summaries = deliveries.summaries(result.content.map { it.id })
-        return AdminCampaignPageResponse(result.content.map { response(it, summaries[it.id] ?: CampaignDeliverySummary()) }, page, size, result.totalElements, result.totalPages)
-    }
+    fun list(request: AdminCampaignListRequest): AdminCampaignPageResponse = campaignList.list(request)
 
     @Transactional(readOnly = true)
     fun detail(id: UUID): AdminCampaignResponse = response(find(id))
@@ -56,8 +41,12 @@ class AdminCampaignService(
     fun create(adminUserId: Long, request: AdminCampaignRequest): AdminCampaignResponse {
         val now = clock.instant()
         if (request.scheduledAt?.isBefore(now) == true) badRequest("예약 시각은 현재 이후여야 합니다.")
+        val story = request.storyId?.let { publicId ->
+            stories.findByPublicIdAndDeletedAtIsNull(publicId)?.takeIf { it.isPubliclyVisible() }
+                ?: badRequest("이동 대상은 공개 스토리여야 합니다.")
+        }
         val row = campaigns.save(PushCampaign(title = request.title, body = request.body,
-            scheduledAt = request.scheduledAt ?: now, createdAt = now))
+            scheduledAt = request.scheduledAt ?: now, createdAt = now, storyId = story?.id))
         val response = response(row)
         audit.recordChange(adminUserId, AdminAuditAction.PUSH_CAMPAIGN_CREATED, row.publicId.toString(), request.reason,
             after = mapper.valueToTree(response))
@@ -94,6 +83,7 @@ class AdminCampaignService(
         row.scheduledAt, row.status, targetCount = row.targetCount, sentCount = row.sentCount,
         startedAt = row.startedAt, finishedAt = row.finishedAt, createdAt = row.createdAt,
         noticeId = row.noticeId?.let(campaigns::findNoticePublicId),
+        storyId = row.storyId?.let { stories.findById(it).orElse(null)?.publicId },
         deliveredMembers = summary.deliveredMembers, deliveredDevices = summary.deliveredDevices, failedDevices = summary.failedDevices)
     private fun badRequest(message: String): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
 }

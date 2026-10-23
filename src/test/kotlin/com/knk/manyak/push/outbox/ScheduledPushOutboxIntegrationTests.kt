@@ -6,6 +6,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*
+import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
@@ -27,6 +28,7 @@ class ScheduledPushOutboxIntegrationTests {
     @MockitoBean private lateinit var store: PushOutboxStore
     @MockitoBean private lateinit var relay: PushOutboxRelay
     @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var writer: ScheduledPushOutboxWriter
     @Autowired private lateinit var promotion: PromotionPushService
@@ -71,7 +73,7 @@ class ScheduledPushOutboxIntegrationTests {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, users, sender, Clock.fixed(night, ZoneOffset.UTC), writer)
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)

@@ -2,7 +2,6 @@ package com.knk.manyak.push.controller
 
 import com.knk.manyak.admin.security.AdminRequester
 import com.knk.manyak.push.dto.*
-import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.service.AdminCampaignService
 import com.knk.manyak.push.service.AdminPushTemplateService
 import jakarta.servlet.http.HttpServletRequest
@@ -15,9 +14,7 @@ import java.util.UUID
 @RequestMapping("/api/v1/admin/push")
 class AdminPushController(private val campaigns: AdminCampaignService, private val templates: AdminPushTemplateService) {
     @GetMapping("/campaigns")
-    fun list(@RequestParam(required = false) status: PushCampaignStatus?, @RequestParam(defaultValue = "1") page: Int,
-        @RequestParam(defaultValue = "20") size: Int, @RequestParam(defaultValue = "createdAt") sort: String,
-        @RequestParam(defaultValue = "desc") order: String) = campaigns.list(status, page, size, sort, order)
+    fun list(@Valid @ModelAttribute query: AdminCampaignListRequest) = campaigns.list(query)
 
     @PostMapping("/campaigns") @ResponseStatus(HttpStatus.CREATED)
     fun create(@Valid @RequestBody body: AdminCampaignRequest, request: HttpServletRequest) = campaigns.create(AdminRequester.userId(request), body)

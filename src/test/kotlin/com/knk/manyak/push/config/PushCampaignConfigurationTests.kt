@@ -5,6 +5,7 @@ import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
+import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -22,6 +23,7 @@ class PushCampaignConfigurationTests {
         .withBean(PushCampaignRepository::class.java, { campaigns })
         .withBean(UserRepository::class.java, { mock(UserRepository::class.java) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
+        .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
         .withPropertyValues("manyak.push.promotion.enabled=false")
 
     @ParameterizedTest

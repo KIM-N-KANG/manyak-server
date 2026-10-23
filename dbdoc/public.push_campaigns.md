@@ -18,6 +18,7 @@
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | kind | varchar(16) | 'MARKETING'::character varying | false |  |  | 서비스 알림 또는 광고 알림. 기존 캠페인은 광고 종류 |
 | notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 공지당 한 번의 알림 요청. 공지 알림이 아니면 NULL |
+| story_id | bigint |  | true |  | [public.stories](public.stories.md) | 프로모션 이동 대상 스토리. 없으면 NULL |
 
 ## Constraints
 
@@ -25,6 +26,7 @@
 | ---- | ---- | ---------- |
 | ck_push_campaigns_kind | CHECK | CHECK (((kind)::text = ANY ((ARRAY['SERVICE'::character varying, 'MARKETING'::character varying])::text[]))) |
 | ck_push_campaigns_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['SCHEDULED'::character varying, 'SENDING'::character varying, 'SENT'::character varying, 'CANCELED'::character varying, 'FAILED'::character varying])::text[]))) |
+| push_campaigns_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) |
 | push_campaigns_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | push_campaigns_public_id_key | UNIQUE | UNIQUE (public_id) |
 | push_campaigns_notice_id_fkey | FOREIGN KEY | FOREIGN KEY (notice_id) REFERENCES notices(id) |
@@ -46,6 +48,7 @@ erDiagram
 
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 "public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
+"public.push_campaigns" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id)"
 
 "public.push_campaigns" {
   bigint id
@@ -62,6 +65,7 @@ erDiagram
   timestamp_with_time_zone created_at
   varchar_16_ kind
   bigint notice_id FK
+  bigint story_id FK
 }
 "public.push_delivery_results" {
   bigint id
@@ -87,6 +91,24 @@ erDiagram
   bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.stories" {
+  bigint id
+  bigint user_id
+  varchar_100_ title
+  varchar_255_ one_line_intro
+  text description
+  varchar_255_ genre
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+  timestamp_with_time_zone deleted_at
+  uuid public_id
+  varchar_20_ status
+  varchar_20_ visibility
+  varchar_64_ thumbnail_image_key FK
+  text thumbnail_image_url
+  varchar_20_ thumbnail_moderation_status
+  text protagonist_name
 }
 ```
 
