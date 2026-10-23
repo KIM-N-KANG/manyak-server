@@ -21,14 +21,18 @@ class InfraDatabasePostgresTests {
                 jdbc.execute("CREATE TABLE public.small_table(id INT)")
                 jdbc.execute("ANALYZE infra_test.\"big table\"")
                 val repo = InfraDatabaseRepository(NamedParameterJdbcTemplate(ds))
-                val rows = repo.largestTables(1)
+                val snapshot = repo.snapshot(1)
+                val rows = snapshot.tables
+                assertThat(snapshot.tableCount).isEqualTo(2)
+                assertThat(snapshot.databaseBytes).isPositive()
                 assertThat(rows).hasSize(1)
                 val row = rows.single()
-                assertThat(row.schema).isEqualTo("infra_test"); assertThat(row.table).isEqualTo("big table")
-                assertThat(row.totalBytes).isEqualTo(row.tableBytes + row.indexBytes)
+                assertThat(row.schema).isEqualTo("infra_test"); assertThat(row.name).isEqualTo("big table")
+                assertThat(row.totalBytes).isGreaterThanOrEqualTo(row.tableBytes + row.indexBytes)
+                assertThat(row.tableBytes).isEqualTo(jdbc.queryForObject("SELECT pg_relation_size('infra_test.\"big table\"'::regclass)", Long::class.java))
                 assertThat(row.indexBytes).isPositive(); assertThat(row.estimatedRows).isEqualTo(10000)
-                assertThat(repo.largestTables(100).map { it.schema }).doesNotContain("pg_catalog", "information_schema")
-                assertThatThrownBy { repo.largestTables(0) }.isInstanceOf(IllegalArgumentException::class.java)
+                assertThat(repo.snapshot(100).tables.map { it.schema }).doesNotContain("pg_catalog", "information_schema")
+                assertThatThrownBy { repo.snapshot(0) }.isInstanceOf(IllegalArgumentException::class.java)
             }
     }
 }
