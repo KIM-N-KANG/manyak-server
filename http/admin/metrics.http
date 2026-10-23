@@ -123,7 +123,21 @@ Authorization: Bearer {{adminToken}}
 GET {{baseUrl}}/api/v1/admin/quality/ai-cost?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("AI 비용", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.currency === "KRW" && Array.isArray(b.unpricedModels) && b.totals.costKrw >= 0, "계약 필드 확인"); }); %}
+> {%
+client.test("AI 비용과 이미지 장당 원가", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.currency === "KRW" && Array.isArray(b.unpricedModels) && b.totals.costKrw >= 0, "계약 필드 확인");
+  client.assert(typeof b.chatImageUnitCostKrw === "number" && b.chatImageUnitCostKrw >= 0, `이미지 장당 설정 원가=${b.chatImageUnitCostKrw}`);
+  b.daily.flatMap(d => d.byFeature).filter(f => f.feature === "chat_image").forEach(f => {
+    client.assert(f.costKrw === f.calls * b.chatImageUnitCostKrw, `이미지 성공 수 × 장당 원가 actual=${JSON.stringify(f)}`);
+    client.assert(f.inputTokens === 0 && f.outputTokens === 0 && f.callsWithoutTokens === 0, "이미지는 토큰 지표에서 제외");
+  });
+});
+%}
+# 이미지 성공 수는 총원가에만 포함하고 턴당·스토리당 원가의 분자·분모에서는 제외한다.
+# 기본 단가 48원, 이미지 성공 3·실패 1과 본문 원가 3원 fixture: 이미지 144원 / totals 147원 / 턴당 3원.
+
 
 ### 전환 퍼널 web-first-visit
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-first-visit?days=7

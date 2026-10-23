@@ -261,6 +261,33 @@ class AdminReadApiIntegrationTests {
         assertThat(json(get("/members?q=팀").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
     }
 
+    @Test fun `이미지 AI 차트는 다섯 기능 순서와 완료 분모 및 채팅 목록 링크를 따른다`() {
+        val story = storyRepository.save(com.knk.manyak.story.entity.Story(title="이미지 차트", userId=admin.id))
+        val chat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId=story.id, userId=admin.id))
+        for ((i, status) in listOf("SUCCEEDED", "SUCCEEDED", "FAILED", "STARTED").withIndex()) {
+            jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,chat_id,status,latency_ms,created_at) VALUES (0,?,'test','chat_image',?,?,?,?)", "image-$i", chat.publicId, status, if(i==0) 1200L else null, java.sql.Timestamp.from(midnight))
+        }
+        val charts = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
+        val expected = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion")
+        for (id in listOf("ai-latency", "ai-success")) {
+            val points = charts.first { it["chartId"].asText() == id }["points"]
+            assertThat(points.toList().map { it["label"].asText() }).containsExactlyElementsOf(expected)
+            val image = points[2]
+            assertThat(image["value"].asDouble()).isEqualTo(if(id=="ai-latency") 1.2 else 66.67)
+            assertThat(image["link"]["list"].asText()).isEqualTo("chats")
+            assertThat(image["link"]["params"]["aiFeature"].asText()).isEqualTo("chat_image")
+        }
+        assertThat(json(get("/chats?aiFeature=chat_image&aiStatus=SUCCEEDED&hasLatency=true&aiFrom=2026-10-21&aiTo=2026-10-21").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
+        val team = member("팀 이미지")
+        val teamChat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId=story.id,userId=team.id))
+        jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,chat_id,status,latency_ms,retry_count,created_at) VALUES ('team-image','test','chat_image',?,'SUCCEEDED',9000,0,?)", teamChat.publicId, java.sql.Timestamp.from(midnight))
+        val filtered = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
+            com.knk.manyak.admin.config.AdminDashboardProperties(listOf(team.id)), official, java.time.Clock.fixed(now, java.time.ZoneOffset.UTC)).charts(7)
+        assertThat(filtered.distributions.first { it.chartId == "ai-latency" }.points[2].value).isEqualTo(1.2)
+        assertThat(filtered.distributions.first { it.chartId == "ai-success" }.points[2].value).isEqualTo(66.67)
+        assertThat(json(get("/chats?aiFeature=chat_image&aiStatus=FAILED").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
+    }
+
     @Test fun `대시보드는 탈퇴 포함 누적과 현재 회원 및 탈퇴 수를 응답한다`() {
         member("정지", UserStatus.SUSPENDED)
         member("추가 활성")
@@ -532,7 +559,7 @@ class AdminReadApiIntegrationTests {
             "20~29" to (20..29), "30~49" to (30..49), "50+" to (50..Int.MAX_VALUE))
         val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
         val points = body["distributions"].first { it["chartId"].asText() == "turns" }["points"].toList()
-        assertThat(points.map { it["label"].asText() }).isEqualTo(cases.map { it.first })
+        assertThat(points.toList().map { it["label"].asText() }).isEqualTo(cases.map { it.first })
         points.forEachIndexed { index, point ->
             val expected = samples.filter { it.first in cases[index].second }.map { it.second.publicId.toString() }
             assertThat(point["value"].asInt()).isEqualTo(expected.size)
@@ -654,7 +681,7 @@ class AdminReadApiIntegrationTests {
 
         val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
         val points = body["distributions"].first { it["chartId"].asText() == "genre-depth" }["points"].toList()
-        assertThat(points.map { it["label"].asText() }).containsExactlyInAnyOrder("판타지", "미스터리")
+        assertThat(points.toList().map { it["label"].asText() }).containsExactlyInAnyOrder("판타지", "미스터리")
         for (point in points) {
             val link = point["link"]
             assertThat(link["list"].asText()).isEqualTo("stories")
@@ -761,7 +788,7 @@ class AdminReadApiIntegrationTests {
         assertThat(body.distributions[5].points[0].value).isEqualTo(2.0)
         assertThat(body.distributions[6].points[0].value).isEqualTo(66.67)
         assertThat(body.distributions[5].points[1].value).isEqualTo(1.234)
-        assertThat(body.distributions[5].points[3].value).isEqualTo(3.0)
+        assertThat(body.distributions[5].points[4].value).isEqualTo(3.0)
         assertThat(body.daily.last().chats).isEqualTo(1)
     }
 

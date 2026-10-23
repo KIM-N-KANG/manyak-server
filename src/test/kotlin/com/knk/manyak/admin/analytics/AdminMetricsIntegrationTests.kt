@@ -41,6 +41,28 @@ class AdminMetricsIntegrationTests {
     @Autowired private lateinit var socials: com.knk.manyak.auth.repository.SocialAccountRepository
     @Autowired private lateinit var clock: Clock
     private val mapper = ObjectMapper()
+    @Test fun `이미지 성공 3장은 144원이고 본문 3원과 합산하되 턴당 원가에는 섞지 않는다`() {
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "이미지 원가 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
+        for ((i, model) in listOf(null, "image-unknown", "priced").withIndex()) {
+            jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,model,status,input_token_count,output_token_count,created_at) VALUES (0,?,'test','chat_image',?,'SUCCEEDED',9,9,'2026-10-21T00:00:00Z')", "image-$i", model)
+        }
+        jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,status,created_at) VALUES (0,'image-failed','test','chat_image','FAILED','2026-10-21T00:00:00Z')")
+        jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,model,status,input_token_count,output_token_count,created_at) VALUES (0,'body','test','chat_response','priced','SUCCEEDED',1000,500,'2026-10-21T00:00:00Z')")
+        val body = mapper.readTree(client.get().uri("/api/v1/admin/quality/ai-cost?from=2026-10-21&to=2026-10-21")
+            .header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+        val images = body["daily"][0]["byFeature"].filter { it["feature"].asText() == "chat_image" }
+        assertThat(images.sumOf { it["calls"].asLong() }).isEqualTo(3)
+        assertThat(images.sumOf { it["costKrw"].asDouble() }).isEqualTo(144.0)
+        for (image in images) for (key in listOf("callsWithoutTokens", "inputTokens", "outputTokens")) assertThat(image[key].asLong()).isZero()
+        assertThat(body["chatImageUnitCostKrw"].asDouble()).isEqualTo(48.0)
+        assertThat(body["totals"]["costKrw"].asDouble()).isEqualTo(147.0)
+        assertThat(body["totals"]["costPerTurnKrw"].asDouble()).isEqualTo(3.0)
+        assertThat(body["totals"]["costPerStoryKrw"].isNull).isTrue()
+        assertThat(body["unpricedModels"].size()).isZero()
+    }
+
     @Test fun `아홉 관리자 지표 API의 권한과 DB 장애 격리 계약`() {
         cleaner.cleanAll()
         server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }

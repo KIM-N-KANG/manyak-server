@@ -166,6 +166,7 @@ manyak:
           start-date: '2026-10-22'
           story-id: cca6358a-0ef3-4709-88d1-100b9faeeca8
     ai-prices:
+      chat-image-unit-cost-krw: 48
       # 백만 토큰당 KRW. 단가가 없는 모델은 costKrw=null과 unpricedModels로 알린다.
       models: {}
     dashboard:

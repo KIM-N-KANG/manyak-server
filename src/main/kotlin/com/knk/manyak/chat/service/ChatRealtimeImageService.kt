@@ -33,7 +33,7 @@ class ChatRealtimeImageService(
     ) {
         internal val restored = AtomicBoolean(false)
     }
-    data class Validated(val result: ChatTurnAiResult, val success: Boolean)
+    data class Validated(val result: ChatTurnAiResult, val success: Boolean, val errorCode: String? = null)
 
     /** 체험·비용 판정만 한다. 비용을 실제 차감하기 전에는 presign하지 않는다. */
     fun prepare(enabled: Boolean, userId: Long?, deviceId: String?): Reservation {
@@ -82,6 +82,7 @@ class ChatRealtimeImageService(
                 characterImages = result.characterImages.filterNot { invalid(it.imageUrl) },
             ),
             accepted,
+            if (accepted || slot == null) null else if (slot.publicUrl !in urls) "AI_IMAGE_MISSING" else "AI_IMAGE_NOT_FOUND",
         )
     }
 

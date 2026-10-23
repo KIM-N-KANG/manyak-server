@@ -187,6 +187,124 @@ class ChatImageFailureIntegrationTests {
         }
     }
 
+    @Autowired private lateinit var imageRecorder: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder
+    @Test fun `소요 시간은 큐 대기를 빼고 첫 발급 URL 이벤트까지만 센다`() {
+        val oldClock = ReflectionTestUtils.getField(imageRecorder, "clock")
+        val clock = com.knk.manyak.admin.analytics.MutableAnalyticsClock(java.time.Instant.parse("2026-10-24T00:00:00Z"))
+        ReflectionTestUtils.setField(imageRecorder, "clock", clock)
+        org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "image-request")
+        try {
+            start(); clock.at = clock.at.plusSeconds(30) // 큐 대기는 제외한다.
+            GatedChatTurnAiClientConfig.onImageStream = { request, event ->
+                clock.at = clock.at.plusMillis(1000)
+                event(com.knk.manyak.chat.client.ChatCharacterImageEvent("다른 인물", "https://cdn.test/other.webp"))
+                clock.at = clock.at.plusMillis(200)
+                event(com.knk.manyak.chat.client.ChatCharacterImageEvent("이미지", request.imageSlots.single().publicUrl))
+                clock.at = clock.at.plusSeconds(1)
+                event(com.knk.manyak.chat.client.ChatCharacterImageEvent("중복", request.imageSlots.single().publicUrl))
+            }
+            queued.get().run()
+            val log = imageLog()
+            assertThat(log.latencyMs).isEqualTo(1200)
+            assertThat(log.status.name).isEqualTo("SUCCEEDED")
+            assertThat(log.requestId).isEqualTo("image-request")
+            val body = aiLogs.findAll().single { it.feature.value == "chat_response" }
+            assertThat(log.requestId).isEqualTo(body.requestId)
+            assertThat(log.sessionId).isEqualTo(body.sessionId)
+            assertThat(log.deviceIdHash).isEqualTo(body.deviceIdHash)
+        } finally {
+            ReflectionTestUtils.setField(imageRecorder, "clock", oldClock)
+            org.slf4j.MDC.clear()
+        }
+    }
+    @Test fun `이미지 적재와 전이 오류는 WARN만 남기고 턴을 정상 저장한다`() {
+        val original = ReflectionTestUtils.getField(imageRecorder, "repository") as com.knk.manyak.global.observability.aicall.AiCallLogRepository
+        val logger = org.slf4j.LoggerFactory.getLogger(imageRecorder.javaClass) as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val broken = mock(com.knk.manyak.global.observability.aicall.AiCallLogRepository::class.java)
+            `when`(broken.saveAndFlush(any(com.knk.manyak.global.observability.aicall.AiCallLog::class.java))).thenThrow(IllegalStateException("private db detail"))
+            ReflectionTestUtils.setField(imageRecorder, "repository", broken)
+            start(); queued.get().run()
+            assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+            assertThat(aiLogs.findAll().filter { it.feature.value == "chat_image" }).isEmpty()
+            // 다음 턴은 시작 행을 실제로 저장하되 전이 조회만 실패시킨다.
+            `when`(broken.saveAndFlush(any(com.knk.manyak.global.observability.aicall.AiCallLog::class.java))).thenAnswer { original.saveAndFlush(it.getArgument<com.knk.manyak.global.observability.aicall.AiCallLog>(0)) }
+            `when`(broken.findById(anyLong())).thenThrow(IllegalStateException("private db detail"))
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest(userInput = "다음"), deviceId = device)
+            queued.get().run()
+            assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(4)
+            assertThat(imageLog().status.name).isEqualTo("STARTED")
+            assertThat(appender.list.map { it.formattedMessage }).anyMatch { it.contains("phase=start") }.anyMatch { it.contains("phase=finish") }
+                .allMatch { !it.contains("private db detail") }
+        } finally {
+            ReflectionTestUtils.setField(imageRecorder, "repository", original)
+            logger.detachAppender(appender); appender.stop()
+        }
+    }
+
+    @Autowired private lateinit var aiLogs: com.knk.manyak.global.observability.aicall.AiCallLogRepository
+    private fun imageLog() = aiLogs.findAll().filter { it.feature.value == "chat_image" }.single()
+
+    @Test fun `이미지 위치 발급 직후 STARTED이고 이벤트 없는 검증 성공은 시간 없이 저장 턴에 연결한다`() {
+        start()
+        assertThat(imageLog().status.name).isEqualTo("STARTED")
+        queued.get().run()
+        val log = imageLog()
+        assertThat(log.status.name).isEqualTo("SUCCEEDED")
+        assertThat(log.turnNumber).isEqualTo(1)
+        assertThat(log.chatId).isEqualTo(chat.publicId)
+        assertThat(log.storyId).isEqualTo(chat.storyId)
+        assertThat(log.latencyMs).isNull()
+        assertThat(log.inputTokenCount).isNull(); assertThat(log.outputTokenCount).isNull()
+        assertThat(log.promptVersions).isNull(); assertThat(log.model).isNull(); assertThat(log.provider).isNull()
+    }
+    @Test fun `마커 없는 이미지와 객체 없는 이미지는 각각 실패 코드와 저장 턴을 기록한다`() {
+        start(); GatedChatTurnAiClientConfig.realtimeEnabled = false
+        queued.get().run()
+        assertThat(imageLog().status.name).isEqualTo("FAILED")
+        assertThat(imageLog().errorCode).isEqualTo("AI_IMAGE_MISSING")
+        assertThat(imageLog().turnNumber).isEqualTo(1)
+    }
+    @Test fun `객체 검증 실패는 NOT_FOUND로 끝나고 본문은 저장한다`() {
+        start(); GatedChatTurnAiClientConfig.realtimeExists = false
+        queued.get().run()
+        assertThat(imageLog().errorCode).isEqualTo("AI_IMAGE_NOT_FOUND")
+        assertThat(imageLog().status.name).isEqualTo("FAILED")
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+    }
+    @Test fun `본문 실패와 큐 마감은 저장 턴 없이 이미지 호출 실패로 끝난다`() {
+        start(); GatedChatTurnAiClientConfig.turnFailure = ChatTurnAiException("AI_ERROR", "test")
+        queued.get().run()
+        assertThat(imageLog().status.name).isEqualTo("FAILED")
+        assertThat(imageLog().errorCode).isEqualTo("AI_IMAGE_TURN_FAILED")
+        assertThat(imageLog().turnNumber).isNull()
+    }
+    @Test fun `큐 마감도 발급된 이미지 호출을 실패로 종료한다`() {
+        start(); deadline.run(); queued.get().run()
+        assertThat(imageLog().errorCode).isEqualTo("AI_IMAGE_TURN_FAILED")
+        assertThat(imageLog().turnNumber).isNull()
+    }
+    @Test fun `이미지 검증 뒤 턴 롤백은 별도 트랜잭션에서 이미지 실패로 남긴다`() {
+        start()
+        GatedChatTurnAiClientConfig.onRealtimeHead = {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun beforeCommit(readOnly: Boolean) { error("rollback") }
+            })
+        }
+        queued.get().run()
+        assertThat(imageLog().errorCode).isEqualTo("AI_IMAGE_TURN_FAILED")
+        assertThat(imageLog().turnNumber).isNull()
+        assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id)).isEmpty()
+    }
+    @Test fun `위치를 발급하지 않은 턴은 이미지 호출 행을 만들지 않는다`() {
+        GatedChatTurnAiClientConfig.realtimeEnabled = false
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest(userInput = "이미지 끔", realtimeImage = false), deviceId = device)
+        queued.get().run()
+        assertThat(aiLogs.findAll().filter { it.feature.value == "chat_image" }).isEmpty()
+    }
+
     @BeforeEach fun setup() {
         cleaner.cleanAll()
         policy.refresh()
