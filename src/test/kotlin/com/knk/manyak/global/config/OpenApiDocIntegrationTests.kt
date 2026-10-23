@@ -22,6 +22,27 @@ class OpenApiDocIntegrationTests {
 
     @Autowired private lateinit var restTestClient: RestTestClient
 
+    @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
+
+    @Test
+    fun `채팅 설정은 선택 필드지만 null을 허용하지 않고 하나 이상 필요하며 보조 필드는 숨긴다`() {
+        val body = restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+        val schema = mapper.readTree(body)["components"]["schemas"]["ChangeChatSettingsRequest"]
+        val artifact = java.nio.file.Path.of("build", "reports", "chat-settings-schema.json")
+        java.nio.file.Files.createDirectories(artifact.parent)
+        java.nio.file.Files.writeString(artifact, mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schema))
+        for ((name, type) in listOf("model" to "string", "longResponse" to "boolean")) {
+            val property = schema["properties"][name]
+            val types = property["type"].let { if (it.isArray) it.toList().map { value -> value.asString() } else listOf(it.asString()) }
+            assertThat(types).isEqualTo(listOf(type))
+            assertThat(property.path("nullable").asBoolean()).isFalse()
+            assertThat(schema.path("required").toList().map { it.asString() }).doesNotContain(name)
+        }
+        assertThat(schema["properties"].has("hasSettings")).isFalse()
+        assertThat(schema.path("minProperties").asInt()).isEqualTo(1)
+    }
+
     @Test
     fun `이어쓰기 lastTurnId는 nullable int64로 문서화하고 입력 여부 플래그는 숨긴다`() {
         restTestClient.get().uri("/v3/api-docs").exchange()
@@ -73,6 +94,40 @@ class OpenApiDocIntegrationTests {
             .expectBody()
             .jsonPath("$.components.schemas.StoryDetailResponse.properties.isLiked").exists()
             .jsonPath("$.components.schemas.StoryDetailResponse.properties.liked").doesNotExist()
+    }
+
+    @Test
+    fun `isDefault 응답 필드는 런타임 직렬화와 같은 isDefault 필드명으로 문서화된다`() {
+        // isNewUser와 같은 함정: springdoc이 is 접두를 벗겨 default로 문서화하면 웹 Orval 생성 타입이 어긋난다.
+        restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.components.schemas.ChatModelResponse.properties.isDefault").exists()
+            .jsonPath("$.components.schemas.ChatModelResponse.properties.default").doesNotExist()
+            .jsonPath("$.components.schemas.AdminPushEffectiveTextResponse.properties.isDefault").exists()
+            .jsonPath("$.components.schemas.AdminPushEffectiveTextResponse.properties.default").doesNotExist()
+    }
+
+    @Test
+    fun `관리자 회원 응답의 isAdmin은 런타임 직렬화와 같은 isAdmin 필드명으로 문서화된다`() {
+        val body = restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+        for (schema in listOf("AdminMemberSummary", "AdminMemberListResponse", "AdminMemberDetailResponse")) {
+            body.jsonPath("$.components.schemas.$schema.properties.isAdmin").exists()
+                .jsonPath("$.components.schemas.$schema.properties.admin").doesNotExist()
+        }
+    }
+
+    @Test
+    fun `간편 제작 요청의 isRegenerated는 스펙 와이어 이름 그대로 문서화된다`() {
+        val body = restTestClient.get().uri("/v3/api-docs").exchange()
+            .expectStatus().isOk
+            .expectBody()
+        for (schema in listOf("GenerateSimpleStorylinesRequest", "CreateSimpleStoryRequest")) {
+            body.jsonPath("$.components.schemas.$schema.properties.isRegenerated").exists()
+                .jsonPath("$.components.schemas.$schema.properties.regenerated").doesNotExist()
+        }
     }
 
     @Test

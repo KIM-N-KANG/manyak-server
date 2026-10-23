@@ -1,5 +1,6 @@
 package com.knk.manyak.admin.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
@@ -52,11 +53,30 @@ class AdminChatsRequest : AdminAiRequest() {
     var turnDate: String? = null
 }
 class AdminChartsRequest {
-    var days: Int = 30
+    @field:io.swagger.v3.oas.annotations.media.Schema(type = "integer", allowableValues = ["7", "30", "90"])
+    var days: String? = null
+    var from: String? = null
+    var to: String? = null
+
+    internal fun resolve(clock: java.time.Clock): AdminDashboardRange {
+        val today = clock.instant().atZone(AdminDateRange.KST).toLocalDate()
+        if ((from == null) != (to == null) || (days != null && from != null)) badAdminQuery("from과 to는 함께 지정하고 days와 함께 사용할 수 없습니다.")
+        if (from != null) {
+            AdminDateRange.of(from, to)
+            val start = java.time.LocalDate.parse(from)
+            val end = java.time.LocalDate.parse(to)
+            if (end > today || java.time.temporal.ChronoUnit.DAYS.between(start, end) !in 0..365) badAdminQuery("기간은 오늘까지 1~366일이어야 합니다.")
+            return AdminDashboardRange(start, end)
+        }
+        val length = if (days == null) 30 else days!!.toIntOrNull() ?: badAdminQuery("days는 7, 30, 90 중 하나여야 합니다.")
+        if (length !in setOf(7, 30, 90)) badAdminQuery("days는 7, 30, 90 중 하나여야 합니다.")
+        return AdminDashboardRange(today.minusDays(length.toLong() - 1), today)
+    }
 }
 
 data class AdminMemberListResponse(
-    val memberId: UUID, val nickname: String, val status: UserStatus, val isAdmin: Boolean, val createdAt: Instant,
+    // isAdmin: springdoc이 is 접두를 벗기지 않도록 와이어 필드명을 고정한다(AdminMemberSummary와 동일).
+    val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
 )
 data class AdminStorySummary(val storyId: UUID, val title: String, val genre: String)
@@ -102,6 +122,16 @@ data class AdminDailyMetrics(
     val date: LocalDate, val joined: Long = 0, val chats: Long = 0, val turns: Long = 0, val stories: Long = 0,
     val granted: Long = 0, val spent: Long = 0, val payments: Long = 0, val revenue: Long = 0, val attendance: Long = 0,
 )
-data class AdminDistribution(val chartId: String, val title: String, val description: String, val unit: String, val points: List<AdminChartPoint>)
+data class AdminDistribution(val chartId: String, val title: String, val description: String, val unit: String, val points: List<AdminChartPoint>) {
+    val category: String = when (chartId) {
+        "started-as", "member-chats" -> "users"
+        "genre-depth", "turns", "first-message" -> "engagement"
+        "characters" -> "content"
+        "ai-latency", "ai-success" -> "ai-quality"
+        else -> error("Unknown distribution: $chartId")
+    }
+}
 data class AdminChartPoint(val label: String, val value: Double, val link: AdminChartLink)
 data class AdminChartLink(val list: String, val params: Map<String, String>)
+
+internal data class AdminDashboardRange(val from: java.time.LocalDate, val to: java.time.LocalDate)

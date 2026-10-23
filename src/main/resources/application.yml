@@ -101,6 +101,54 @@ springdoc:
 
 manyak:
   admin:
+    play-stats:
+      bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
+      package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
+      service-account-key-base64: ${MANYAK_PLAY_STATS_SA_KEY_BASE64:}
+    analytics:
+      batch:
+        enabled: true
+        cron: '0 */5 * * * *'
+        nightly-start: '03:00'
+        backfill-start: '2026-07-01'
+        budget-cost: 300
+      budget-window-seconds: 300
+      budget-cost: 500
+      current-ttl-seconds: 600
+      historical-ttl-seconds: 86400
+      cooldown-seconds: 60
+      request-timeout-seconds: 10
+      refresh-timeout-seconds: 60
+    campaigns:
+      source-groups:
+        instagram: [ig]
+        threads: [th, threads]
+        dcinside: [dc]
+      items:
+        - key: meta-web-1
+          name: 1차
+          campaign: KR_META_WEB_ACTIVATION_COLD_202607
+          start-date: '2026-07-21'
+          end-date: '2026-07-31'
+        - key: meta-web-2
+          name: 2차
+          campaign: KR_META_WEB_ACTIVATION_COLD_202608
+          start-date: '2026-08-21'
+          end-date: '2026-09-16'
+        - key: meta-web-3
+          name: 3차
+          campaign: KR_META_WEB_ACTIVATION_COLD_202609
+          start-date: '2026-09-17'
+          end-date: '2026-10-21'
+          story-id: cca6358a-0ef3-4709-88d1-100b9faeeca8
+        - key: meta-web-4
+          name: 4차
+          campaign: KR_META_WEB_ACTIVATION_COLD_202610
+          start-date: '2026-10-22'
+          story-id: cca6358a-0ef3-4709-88d1-100b9faeeca8
+    ai-prices:
+      # 백만 토큰당 KRW. 단가가 없는 모델은 costKrw=null과 unpricedModels로 알린다.
+      models: {}
     dashboard:
       excluded-user-ids: ${MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS:1,2,3,4,5,10,11,206,207}
     token:

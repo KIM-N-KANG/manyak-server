@@ -370,3 +370,102 @@ Authorization: Bearer {{adminToken}}
 > {%
     client.test("스토리라인 호출 연결 조회", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
 %}
+
+
+### 차트 직접 기간 — KST 양끝 포함, 최대 366일
+# days와 함께 지정할 수 없으며 from·to는 모두 필수, to는 오늘 이하여야 한다.
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from=2026-10-01&to=2026-10-20
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("직접 기간 응답", () => {
+  client.assert(response.status === 200 && response.body.from === "2026-10-01" && response.body.to === "2026-10-20" && response.body.daily.length === 20, `actual=${JSON.stringify(response.body)}`);
+});
+%}
+
+### 기간과 days 중복 400
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7&from=2026-10-01&to=2026-10-20
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("중복 기간 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 날짜 한쪽만 지정 400
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from=2026-10-01
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("날짜 쌍 필수", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 전체 이프 거래 — 최신순, 같은 시각은 내부 기록 순서의 역순
+# 팀 계정 제외를 적용하지 않아 대시보드 카드·추이의 지급/소진 합계와 다를 수 있다.
+# memberId 필터는 없다. 한 회원의 거래는 위 회원 거래 내역 API로 조회한다(접속 기록 있음).
+# 전체 거래 목록은 접속 기록을 남기지 않으며 balanceAfter·내부 원장 ID·이메일은 반환하지 않는다.
+GET {{baseUrl}}/api/v1/admin/credits/transactions?size=20&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("전체 거래와 공통 회원 요약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(Array.isArray(response.body.items) && response.body.page === 1, `actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.items.every(t => !("id" in t) && !("userId" in t) && !("balanceAfter" in t) &&
+            t.member.memberId && typeof t.member.isAdmin === "boolean" && t.member.createdAt && !("email" in t.member)), "공개 회원 요약만 반환해야 합니다");
+        client.assert(response.body.items.every((t, i, rows) => i === 0 || Date.parse(rows[i - 1].createdAt) >= Date.parse(t.createdAt)), "기록 시각 최신순이어야 합니다");
+    });
+%}
+
+### 지급 거래 — 지급 사유이면서 양수인 행만
+GET {{baseUrl}}/api/v1/admin/credits/transactions?direction=granted
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("지급 필터", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.every(t => t.amount > 0 && ["SIGNUP_REWARD", "INVITE_REWARD", "ATTENDANCE_REWARD", "PURCHASE", "ADMIN_GRANT"].includes(t.reason)), "지급 정의와 일치해야 합니다");
+    });
+%}
+
+### 소진과 KST 날짜 필터 — 실제 데이터 날짜로 바꿔 실행
+GET {{baseUrl}}/api/v1/admin/credits/transactions?direction=spent&date=2026-10-21
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("소진 및 KST 날짜", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.every(t => t.amount < 0 && ["STORY_CREATION", "CHAT_TURN", "CHAT_IMAGE"].includes(t.reason) &&
+            new Date(Date.parse(t.createdAt) + 9 * 3600000).toISOString().slice(0, 10) === "2026-10-21"), "소진 정의와 KST 날짜를 모두 만족해야 합니다");
+    });
+%}
+
+### 허용하지 않는 원장 방향 400
+GET {{baseUrl}}/api/v1/admin/credits/transactions?direction=refund
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("방향 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`));
+%}
+
+### 잘못된 KST 날짜 400
+GET {{baseUrl}}/api/v1/admin/credits/transactions?date=2026-02-30
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("날짜 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`));
+%}
+
+### 허용하지 않는 정렬 열 400
+GET {{baseUrl}}/api/v1/admin/credits/transactions?sort=amount
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("거래 정렬 거절", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 전체 거래 무토큰 401
+GET {{baseUrl}}/api/v1/admin/credits/transactions
+
+> {%
+    client.test("거래 관리자 인증 필수", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+### 자유 조회 — 원장 기록일과 페이지를 직접 바꿔 실행
+GET {{baseUrl}}/api/v1/admin/credits/transactions?date=2026-10-21&page=1&size=100
+Authorization: Bearer {{adminToken}}

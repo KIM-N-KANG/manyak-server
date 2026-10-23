@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 23 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 24 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 9 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -61,6 +61,8 @@
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
 | [public.notices](public.notices.md) | 10 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
 | [public.chat_models](public.chat_models.md) | 8 |  | BASE TABLE |
+| [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
+| [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
 
 ## Relations
 
@@ -250,6 +252,7 @@ erDiagram
   text persona_name_snapshot
   text persona_description_snapshot
   varchar_20_ model_code FK
+  boolean long_response
 }
 "public.story_messages" {
   bigint id
@@ -742,6 +745,27 @@ erDiagram
   boolean is_default
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+}
+"public.admin_analytics_daily_values" {
+  bigint id
+  varchar_64_ metric
+  character_64_ params_hash
+  jsonb params
+  date metric_date
+  jsonb value
+  timestamp_with_time_zone fetched_at
+  timestamp_with_time_zone finalized_at
+}
+"public.admin_analytics_range_values" {
+  bigint id
+  varchar_64_ metric
+  character_64_ params_hash
+  jsonb params
+  date range_from
+  date range_to
+  jsonb value
+  timestamp_with_time_zone fetched_at
+  timestamp_with_time_zone finalized_at
 }
 ```
 

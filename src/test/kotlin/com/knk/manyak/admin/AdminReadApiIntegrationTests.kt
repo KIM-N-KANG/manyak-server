@@ -393,6 +393,78 @@ class AdminReadApiIntegrationTests {
         }
     }
 
+    private fun credit(user: User, amount: Long, reason: String, at: Instant = now) {
+        jdbc.update("INSERT INTO credit_transactions(user_id, amount, reason, created_at) VALUES (?, ?, ?, ?)",
+            user.id, amount, reason, java.sql.Timestamp.from(at))
+    }
+
+    @Test fun `전체 이프 거래는 최신순 동시각 역기록순으로 페이지하고 공개 회원 요약만 반환한다`() {
+        val active = member("거래 회원")
+        val deleted = member("탈퇴 회원", UserStatus.DELETED)
+        val suspended = member("정지 회원", UserStatus.SUSPENDED)
+        credit(active, 100, "SIGNUP_REWARD", midnight)
+        credit(deleted, -20, "CHAT_TURN")
+        credit(suspended, 30, "REFUND")
+        val page = json(get("/credits/transactions?size=2").expectStatus().isOk)
+        assertThat(page["page"].asInt()).isEqualTo(1)
+        assertThat(page["size"].asInt()).isEqualTo(2)
+        assertThat(page["totalElements"].asLong()).isEqualTo(3)
+        assertThat(page["totalPages"].asLong()).isEqualTo(2)
+        assertThat(page["items"].toList().map { it["amount"].asLong() }).containsExactly(30L, -20L)
+        assertThat(page["items"][0]["member"]["memberId"].asText()).isEqualTo(suspended.publicId.toString())
+        assertThat(page["items"][0]["member"]["nickname"].asText()).isEqualTo(suspended.nickname)
+        assertThat(page["items"][0]["member"]["status"].asText()).isEqualTo("SUSPENDED")
+        assertThat(page["items"][1]["member"]["status"].asText()).isEqualTo("DELETED")
+        assertThat(page["items"][0]["createdAt"].asText()).isEqualTo(now.toString())
+        assertThat(page["items"][0]["reason"].asText()).isEqualTo("REFUND")
+        for (item in page["items"]) {
+            assertThat(item.properties().map { it.key }).containsExactlyInAnyOrder("amount", "reason", "createdAt", "member")
+            assertThat(item["member"].properties().map { it.key }).containsExactlyInAnyOrder("memberId", "nickname", "status", "isAdmin", "createdAt")
+        }
+        val next = json(get("/credits/transactions?page=2&size=2&sort=createdAt&order=desc").expectStatus().isOk)
+        assertThat(next["items"].toList().map { it["amount"].asLong() }).containsExactly(100L)
+        assertThat(next["items"][0]["member"]["createdAt"].asText()).isEqualTo(active.createdAt.toString())
+        assertThat(next["items"][0]["member"]["isAdmin"].asBoolean()).isFalse()
+        val ascending = json(get("/credits/transactions?order=asc").expectStatus().isOk)
+        assertThat(ascending["items"].toList().map { it["amount"].asLong() }).containsExactly(100L, 30L, -20L)
+        assertThat(json(get("/credits/transactions?page=2147483647&size=100").expectStatus().isOk)["items"].size()).isZero()
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
+    }
+
+    @Test fun `전체 이프 거래의 방향은 요약과 같고 KST 날짜를 필터한다`() {
+        val owner = member("조건 회원")
+        val other = member("다른 회원")
+        for (reason in listOf("SIGNUP_REWARD", "INVITE_REWARD", "ATTENDANCE_REWARD", "PURCHASE", "ADMIN_GRANT")) credit(owner, 10, reason, midnight)
+        for (reason in listOf("STORY_CREATION", "CHAT_TURN", "CHAT_IMAGE")) credit(owner, -5, reason, midnight.plusSeconds(86399))
+        for ((amount, reason) in listOf(20L to "REFUND", -20L to "EXPIRE", -20L to "ADMIN_REVOKE", -20L to "PURCHASE_REVERSAL",
+            -10L to "SIGNUP_REWARD", 5L to "CHAT_TURN")) credit(owner, amount, reason)
+        credit(owner, 10, "SIGNUP_REWARD", midnight.minusSeconds(1))
+        credit(owner, -5, "CHAT_TURN", midnight.plusSeconds(86400))
+        credit(other, 10, "ADMIN_GRANT", midnight)
+        fun count(query: String) = json(get("/credits/transactions?$query").expectStatus().isOk)["totalElements"].asLong()
+        assertThat(count("direction=granted&date=2026-10-21")).isEqualTo(6)
+        assertThat(count("direction=spent&date=2026-10-21")).isEqualTo(3)
+        assertThat(count("date=2026-10-21")).isEqualTo(15)
+        assertThat(count("direction=spent")).isEqualTo(4)
+        assertThat(count("date=2026-10-23")).isZero()
+        val empty = json(get("/credits/transactions?date=2026-10-23").expectStatus().isOk)
+        assertThat(empty["items"].size()).isZero()
+        assertThat(empty["totalPages"].asLong()).isZero()
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
+    }
+
+    @Test fun `전체 이프 거래는 관리자 인증과 쿼리 검증을 적용한다`() {
+        client.get().uri("/api/v1/admin/credits/transactions").exchange().expectStatus().isUnauthorized
+        val ordinary = member("일반 회원")
+        client.get().uri("/api/v1/admin/credits/transactions").header("Authorization", "Bearer ${tokens.issueAdminToken(ordinary.publicId)}")
+            .exchange().expectStatus().isForbidden
+        for (query in listOf("direction=other", "direction=", "date=2026-02-30", "date=2026-2-01", "date=bad",
+            "sort=amount", "order=bad", "page=0", "size=101", "size=0", "page=bad", "cursor=bad", "limit=20")) {
+            val error = json(get("/credits/transactions?$query").expectStatus().isBadRequest)
+            assertThat(error["code"].asText()).isEqualTo("BAD_REQUEST")
+        }
+    }
+
     @Test fun `회원 거래 페이지는 누계만 공개하고 출석은 KST 날짜별이며 상세 접속 기록을 남긴다`() {
         val user = member("거래")
         for ((amount, reason, instant) in listOf(Triple(250L, "ATTENDANCE_REWARD", midnight),
@@ -708,6 +780,29 @@ class AdminReadApiIntegrationTests {
         }
     }
 
+    @Test fun `직접 기간은 KST 양끝을 포함하고 링크와 빈 날짜를 같은 범위로 만든다`() {
+        for (at in listOf(midnight.minusSeconds(86400), midnight.minusSeconds(1), midnight)) users.save(User(nickname = "경계", createdAt = at))
+        val body = json(get("/dashboard/charts?from=2026-10-20&to=2026-10-20").expectStatus().isOk)
+        assertThat(body["from"].asText()).isEqualTo("2026-10-20")
+        assertThat(body["to"].asText()).isEqualTo("2026-10-20")
+        assertThat(body["daily"].size()).isEqualTo(1)
+        assertThat(body["daily"][0]["joined"].asLong()).isEqualTo(2)
+        val links = body["distributions"][1]["points"][0]["link"]["params"]
+        assertThat(links["from"].asText()).isEqualTo("2026-10-20")
+        assertThat(links["to"].asText()).isEqualTo("2026-10-20")
+        val full = json(get("/dashboard/charts?from=2025-10-21&to=2026-10-21").expectStatus().isOk)
+        assertThat(full["daily"].size()).isEqualTo(366)
+        assertThat(full["distributions"][7]["points"][0]["link"]["params"]["creationFrom"].asText()).isEqualTo("2025-10-21")
+    }
+
+    @Test fun `두 대시보드 기간은 양쪽 날짜 필수이고 366일 이내 과거 또는 오늘만 허용한다`() {
+        for (path in listOf("/dashboard/charts", "/dashboard/analytics")) {
+            for (query in listOf("from=2026-10-20", "to=2026-10-20", "days=7&from=2026-10-20&to=2026-10-21",
+                "from=2026-10-21&to=2026-10-20", "from=2026-10-21&to=2026-10-22", "from=2025-10-20&to=2026-10-21",
+                "from=2026-02-30&to=2026-10-21", "from=2026-1-01&to=2026-10-21", "from=&to=", "days=")) get("$path?$query").expectStatus().isBadRequest
+        }
+    }
+
     @Test fun `인물 수 분포의 모든 막대는 완성된 미삭제 스토리의 최신 세션 목록 총계와 같다`() {
         fun session(target: com.knk.manyak.story.entity.Story?, count: Int, complete: Boolean = true, created: Instant = midnight) {
             val row = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = target?.id,
@@ -856,6 +951,14 @@ class AdminReadApiIntegrationTests {
     @Test fun `관리자 상세 응답 스키마를 포함한 전체 OpenAPI 문서가 직렬화된다`() {
         val body = json(client.get().uri("/v3/api-docs").exchange().expectStatus().isOk)
         val schemas = body["components"]["schemas"]
+        val operation = body["paths"]["/api/v1/admin/credits/transactions"]["get"]
+        assertThat(operation).isNotNull()
+        assertThat(operation["parameters"].toList().map { it["name"].asText() }).contains("direction", "date", "sort", "page", "size", "order").doesNotContain("memberId")
+        assertThat(operation["responses"].has("200")).isTrue()
+        assertThat(operation["security"][0].has("bearerAuth")).isTrue()
+        assertThat(schemas["AdminCreditTransactionResponse"]["properties"].has("member")).isTrue()
+        assertThat(schemas["AdminCreditTransactionResponse"]["properties"].has("balanceAfter")).isFalse()
+
         assertThat(schemas["AdminStoryDetailResponse"]["properties"].has("retention")).isTrue()
         assertThat(schemas["AdminMemberDetailResponse"]["properties"].has("creditBalance")).isTrue()
         assertThat(schemas["AdminPaymentDetailResponse"]["properties"].has("firstPaidAt")).isTrue()

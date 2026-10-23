@@ -1,4 +1,4 @@
-### KNK-1760 채팅 모델 목록·선택 검증 (IntelliJ HTTP Client)
+### KNK-1795 채팅 모델·출력 분량 설정 검증 (IntelliJ HTTP Client)
 # 준비: docker compose up -d postgres redis, AI 서버 기동, ./gradlew bootRun
 # chat-create.http의 스토리 준비 1~2를 먼저 실행해 storyId를 저장한다.
 # 순서대로 실행. 회원 소유권 검증은 로그인 파일로 accessToken을 저장한다.
@@ -30,6 +30,7 @@ Content-Type: application/json
 > {%
     client.test("기본 모델", () => {
         client.assert(response.status === 201, `actual=${response.status}`);
+        client.assert(response.body.longResponse === false, `longResponse actual=${response.body.longResponse}`);
         client.assert(response.body.model === client.global.get("defaultChatModel"), `actual=${response.body.model}`);
     });
     client.global.set("modelChatId", response.body.id);
@@ -89,6 +90,103 @@ Content-Type: application/json
 {"model":"LITE"}
 
 > {% client.test("404", () => { client.assert(response.status === 404, `actual=${response.status}`); }); %}
+
+### 9. 출력 분량만 켜기: 모델 유지
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"longResponse":true}
+
+> {%
+    client.test("출력 분량만 변경", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.model === "LITE" && response.body.longResponse === true,
+            `actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 10. 기존 모델 요청은 출력 분량 유지
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":"AURORA"}
+
+> {%
+    client.test("모델만 변경", () => {
+        client.assert(response.status === 200 && response.body.longResponse === true,
+            `actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 11. 상세 재조회에도 출력 분량 유지
+GET {{baseUrl}}/api/v1/chats/{{modelChatId}}
+
+> {%
+    client.test("저장된 설정", () => {
+        client.assert(response.status === 200 && response.body.model === "AURORA" && response.body.longResponse === true,
+            `actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 12. 모델과 출력 분량 함께 변경
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":"LITE","longResponse":false}
+
+> {%
+    client.test("두 설정 변경", () => {
+        client.assert(response.status === 200 && response.body.model === "LITE" && response.body.longResponse === false,
+            `actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 13. 명시적 null은 400
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"longResponse":null}
+
+> {%
+    client.test("출력 분량 null 400", () => {
+        client.assert(response.status === 400, `actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "요청 값이 올바르지 않습니다.", `message actual=${response.body.message}`);
+        client.assert(Array.isArray(response.body.details) && response.body.details.length === 0,
+            `details actual=${JSON.stringify(response.body.details)}`);
+    });
+%}
+
+### 14. 다른 필드가 있어도 null 모델은 400
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":null,"longResponse":true}
+
+> {%
+    client.test("모델 null 400", () => {
+        client.assert(response.status === 400, `actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "요청 값이 올바르지 않습니다.", `message actual=${response.body.message}`);
+        client.assert(Array.isArray(response.body.details) && response.body.details.length === 0,
+            `details actual=${JSON.stringify(response.body.details)}`);
+    });
+%}
+
+### 15. 회원은 게스트 출력 분량을 바꿀 수 없다 (로그인 준비 필요)
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"longResponse":true}
+
+> {%
+    client.test("출력 분량 소유권 403", () => {
+        client.assert(response.status === 403, `actual=${response.status}`);
+        client.assert(response.body.code === "FORBIDDEN", `code actual=${response.body.code}`);
+        client.assert(response.body.message === "채팅을 이어쓸 권한이 없습니다.", `message actual=${response.body.message}`);
+    });
+%}
 
 ### 자유 조회
 GET {{baseUrl}}/api/v1/chats/models

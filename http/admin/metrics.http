@@ -1,0 +1,188 @@
+# 관리자 사용자·전환·품질 지표 수동 검증 (IntelliJ HTTP Client).
+# 준비: Postgres·Redis와 ./gradlew bootRun, 관리자 토큰 설정. 실제 Amplitude는 수동 실행 때 호출된다.
+# 먼저 health를 확인하고 원하는 카드를 선택 실행한다. 전체 공용 예산은 태스크당 5분 500이다.
+# 앞 요청이 예산을 썼다면 다음 카드는 partial/503일 수 있다. 200 전체 검증은 5분 뒤 재실행한다.
+# 일별 준비 중 날짜는 pendingDates이며 60초 뒤 같은 요청으로 이어 받는다. 기간은 KST 양끝 포함.
+# 신규 가입자·턴 도달·채팅 옵션은 팀 계정 제외, AI 비용은 팀 계정도 포함한다.
+# 단가 설정: manyak.admin.ai-prices.models.<모델명>.input-million-krw / output-million-krw.
+# 단가가 없으면 해당 costKrw는 null이며 unpricedModels로 확인한다. 단위는 백만 토큰당 KRW다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@rolelessAdminToken = replace-with-admin-token-without-role
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 사용자 활동
+GET {{baseUrl}}/api/v1/admin/users/activity?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("사용자 활동 응답", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  const b = response.body;
+  if (response.status === 200) {
+    client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
+    client.assert(b.monthlyActiveUsers === null || Number.isInteger(b.monthlyActiveUsers), "MAU 미수신은 null");
+    for (const d of b.daily) client.assert(["all","web","android","unknown"].every(k => Number.isInteger(d.activeUsers[k])) && d.messagesPerUser.all === null && d.messagesPerUser.unknown === null, "플랫폼별 값 구조");
+  } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
+});
+%}
+
+### 리텐션
+GET {{baseUrl}}/api/v1/admin/users/retention?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("리텐션 응답", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  const b = response.body;
+  if (response.status === 200) {
+    client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
+    client.assert(b.platforms.map(p => p.platform).join(",") === "all,web,android", "플랫폼 순서");
+    for (const p of b.platforms) client.assert(p.cohorts.length + b.pendingDates.length === 7, "코호트 준비 상태");
+  } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
+});
+%}
+
+### 평균 세션 길이
+GET {{baseUrl}}/api/v1/admin/users/sessions?days=14
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("평균 세션 길이 응답", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  const b = response.body;
+  if (response.status === 200) {
+    client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
+    for (const d of b.daily) client.assert(d.averageSessionSeconds.unknown === null && typeof d.averageSessionSeconds.web === "number", "세션 평균 초");
+  } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
+});
+%}
+
+### 기능 사용과 안정성
+GET {{baseUrl}}/api/v1/admin/quality/client?platform=web&days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("기능 사용과 안정성 응답", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  const b = response.body;
+  if (response.status === 200) {
+    client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
+    client.assert(b.platform === "web", "적용 플랫폼");
+    for (const d of b.daily) client.assert(d.streamErrorRate === null || d.streamErrorRate >= 0, "오류율은 1을 넘을 수 있음");
+  } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
+});
+%}
+
+### 신규 가입자 — Amplitude 장애와 무관하게 동작
+GET {{baseUrl}}/api/v1/admin/users/signups?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("신규 가입자", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao + d.signups.other), "계약 필드 확인"); }); %}
+
+### 턴 도달률 — Amplitude 장애와 무관하게 동작
+GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("턴 도달률", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.segments.map(s => s.segment).join(",") === "all,guest,member" && b.segments.every(s => s.reached.length === 4), "계약 필드 확인"); }); %}
+
+### 채팅 옵션 — Amplitude 장애와 무관하게 동작
+GET {{baseUrl}}/api/v1/admin/quality/chat-options?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("채팅 옵션", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.daily.length === 7 && b.daily.every(d => d.withPersona <= d.chats), "계약 필드 확인"); }); %}
+
+### AI 비용 — Amplitude 장애와 무관하게 동작
+GET {{baseUrl}}/api/v1/admin/quality/ai-cost?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("AI 비용", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.currency === "KRW" && Array.isArray(b.unpricedModels) && b.totals.costKrw >= 0, "계약 필드 확인"); }); %}
+
+### 전환 퍼널 web-first-visit
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-first-visit?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("web-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 6, "단계 수"); }); %}
+
+### 전환 퍼널 android-first-visit
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-first-visit?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("android-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 2, "단계 수"); }); %}
+
+### 전환 퍼널 story-creation
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/story-creation?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("story-creation", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 4, "단계 수"); }); %}
+
+### 전환 퍼널 story-detail-chat
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/story-detail-chat?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("story-detail-chat", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 7, "단계 수"); }); %}
+
+### 전환 퍼널 guest-limit-login
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/guest-limit-login?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("guest-limit-login", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 3, "단계 수"); }); %}
+
+### 오류 401
+GET {{baseUrl}}/api/v1/admin/users/activity
+
+> {% client.test("401 확인", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/users/sessions?days=30
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/users/retention?days=30
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/quality/client?platform=unknown
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/quality/ai-cost?from=2025-10-20&to=2026-10-23
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-first-visit?platform=web
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/story-detail-chat?storyId=bad
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 400
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/unknown
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("400 확인", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 오류 403
+GET {{baseUrl}}/api/v1/admin/users/signups
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("403 확인", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 자유 조회 — 스토리 공개 UUID로 한정 (원하는 UUID로 교체)
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/story-detail-chat?platform=android&storyId=cca6358a-0ef3-4709-88d1-100b9faeeca8&days=7
+Authorization: Bearer {{adminToken}}

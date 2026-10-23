@@ -27,6 +27,7 @@
 | persona_name_snapshot | text |  | true |  |  |  |
 | persona_description_snapshot | text |  | true |  |  |  |
 | model_code | varchar(20) | 'LITE'::character varying | false |  | [public.chat_models](public.chat_models.md) |  |
+| long_response | boolean | false | false |  |  |  |
 
 ## Constraints
 
@@ -96,6 +97,7 @@ erDiagram
   text persona_name_snapshot
   text persona_description_snapshot
   varchar_20_ model_code FK
+  boolean long_response
 }
 "public.story_messages" {
   bigint id

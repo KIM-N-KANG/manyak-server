@@ -79,6 +79,101 @@ class ChatCreateControllerIntegrationTests {
     @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
 
     @Test
+    fun `출력 분량은 기본 false이고 부분 변경과 모델 기존 요청을 지원한다`() {
+        val story = storyRepository.save(Story(title = "출력 분량"))
+        val chatId = restTestClient.post().uri("/api/v1/chats")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"storyId":"${story.publicId}"}""")
+            .exchange().expectStatus().isCreated.expectBody()
+            .jsonPath("$.longResponse").isEqualTo(false)
+            .returnResult().responseBody!!.let { tools.jackson.databind.ObjectMapper().readTree(it)["id"].asText() }
+        val before = storyChatRepository.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(chatId))!!.updatedAt
+        restTestClient.get().uri("/api/v1/chats/$chatId").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.longResponse").isEqualTo(false)
+        val newer = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id))
+        fun batch() = restTestClient.post().uri("/api/v1/chats/batch").contentType(MediaType.APPLICATION_JSON)
+            .body("""{"chatIds":["$chatId","${newer.publicId}"]}""")
+            .exchange().expectStatus().isOk.expectBody().returnResult().responseBody!!
+            .let { tools.jackson.databind.ObjectMapper().readTree(it) }
+        val listBefore = batch()
+        for ((body, model, longResponse) in listOf(
+            Triple("""{"longResponse":true}""", "AURORA", true),
+            Triple("""{"model":"LITE"}""", "LITE", true),
+            Triple("""{"model":"AURORA","longResponse":false}""", "AURORA", false),
+            Triple("""{"longResponse":false}""", "AURORA", false),
+        )) {
+            restTestClient.patch().uri("/api/v1/chats/$chatId").contentType(MediaType.APPLICATION_JSON).body(body)
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.model").isEqualTo(model).jsonPath("$.longResponse").isEqualTo(longResponse)
+            restTestClient.get().uri("/api/v1/chats/$chatId").exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.model").isEqualTo(model).jsonPath("$.longResponse").isEqualTo(longResponse)
+        }
+        assertThat(storyChatRepository.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(chatId))!!.updatedAt).isEqualTo(before)
+        assertThat(batch()).isEqualTo(listBefore)
+        for (body in listOf("{}", """{"model":null}""", """{"longResponse":null}""",
+            """{"model":"LITE","longResponse":null}""", """{"model":null,"longResponse":true}""")) {
+            restTestClient.patch().uri("/api/v1/chats/$chatId").contentType(MediaType.APPLICATION_JSON).body(body)
+                .exchange().expectStatus().isBadRequest
+        }
+    }
+
+    @Test
+    fun `출력 분량만 변경해도 응답은 유효 모델이고 비활성 저장 모델은 유지한다`() {
+        val story = storyRepository.save(Story(title = "비활성 모델 출력 분량"))
+        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id))
+        models.save(models.findById("LITE").orElseThrow().apply { isActive = false })
+        restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"longResponse":true}""")
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.model").isEqualTo("AURORA")
+            .jsonPath("$.longResponse").isEqualTo(true)
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().modelCode).isEqualTo("LITE")
+    }
+
+    @Test
+    fun `회원 출력 분량 변경은 소유권과 정지 상태를 검사한다`() {
+        val owner = userRepository.save(User(nickname = "설정소유자", status = UserStatus.ACTIVE))
+        val other = userRepository.save(User(nickname = "다른회원", status = UserStatus.ACTIVE))
+        val story = storyRepository.save(Story(title = "설정 권한"))
+        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, userId = owner.id))
+        for (member in listOf(owner, other)) {
+            val response = restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+                .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+                .contentType(MediaType.APPLICATION_JSON).body("""{"longResponse":true}""").exchange()
+            if (member.id == owner.id) response.expectStatus().isOk else response.expectStatus().isForbidden
+        }
+        restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"longResponse":true}""")
+            .exchange().expectStatus().isForbidden
+        userRepository.save(owner.apply { status = UserStatus.SUSPENDED })
+        restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+            .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"longResponse":false}""")
+            .exchange().expectStatus().isForbidden
+    }
+
+    @Test
+    fun `동시 설정 변경은 각각 보낸 컬럼을 보존한다`() {
+        val story = storyRepository.save(Story(title = "동시 설정"))
+        // 시계 정밀도와 무관하게 나노초를 넣어 DB의 마이크로초 저장 정밀도 차이를 재현한다.
+        val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(
+            storyId = story.id, modelCode = "AURORA", updatedAt = Instant.parse("2026-10-23T00:00:00.123456789Z"),
+        ))
+        val before = storyChatRepository.findById(chat.id).orElseThrow().updatedAt
+        val start = java.util.concurrent.CountDownLatch(1)
+        val tasks = listOf("""{"model":"LITE"}""", """{"longResponse":true}""").map { body ->
+            java.util.concurrent.CompletableFuture.runAsync {
+                check(start.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                restTestClient.patch().uri("/api/v1/chats/${chat.publicId}")
+                    .contentType(MediaType.APPLICATION_JSON).body(body).exchange().expectStatus().isOk
+            }
+        }
+        start.countDown()
+        tasks.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+        restTestClient.get().uri("/api/v1/chats/${chat.publicId}").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.model").isEqualTo("LITE").jsonPath("$.longResponse").isEqualTo(true)
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().updatedAt).isEqualTo(before)
+    }
+
+    @Test
     fun `비활성 모델은 목록에서 제외하고 상세는 기본 모델로 대체하되 저장 모델은 유지한다`() {
         val story = storyRepository.save(Story(title = "비활성 모델"))
         val chat = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id))

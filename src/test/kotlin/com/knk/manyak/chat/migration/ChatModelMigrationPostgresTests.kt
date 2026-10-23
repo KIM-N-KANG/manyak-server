@@ -10,7 +10,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 
-/** V104의 실제 채팅을 만든 뒤 V105를 적용한다. H2 ddl-auto로 검증할 수 없는 경로다. */
+/** V104의 실제 채팅을 만든 뒤 V105 이후 마이그레이션을 적용한다. H2 ddl-auto로 검증할 수 없는 경로다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatModelMigrationPostgresTests {
     private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "chat-model-test")
@@ -28,6 +28,14 @@ class ChatModelMigrationPostgresTests {
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").load().migrate()
     }
     @AfterAll fun stop() { pg.stop() }
+
+    @Test fun `출력 분량은 기존 행과 구버전 컬럼 생략 삽입에 false를 채우고 null을 거절한다`() {
+        assertThat(jdbc.queryForObject("SELECT long_response FROM story_chats WHERE id = ?", Boolean::class.java, chatId)).isFalse()
+        val story = jdbc.queryForObject("SELECT story_id FROM story_chats WHERE id = ?", Long::class.java, chatId)!!
+        assertThat(jdbc.queryForObject("INSERT INTO story_chats(story_id) VALUES (?) RETURNING long_response", Boolean::class.java, story)).isFalse()
+        assertThatThrownBy { jdbc.update("UPDATE story_chats SET long_response = NULL WHERE id = ?", chatId) }
+            .isInstanceOf(DataIntegrityViolationException::class.java)
+    }
 
     @Test fun `V105 적용 뒤 구버전과 롤백 이미지의 컬럼 생략 INSERT도 LITE로 저장된다`() {
         val story = jdbc.queryForObject("SELECT story_id FROM story_chats WHERE id = ?", Long::class.java, chatId)!!

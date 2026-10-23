@@ -1,5 +1,6 @@
 package com.knk.manyak.admin.dto
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.admin.entity.AdminAuditAction
 import com.knk.manyak.admin.entity.AdminAuditTargetType
 import com.knk.manyak.auth.entity.UserStatus
@@ -41,6 +42,15 @@ class AdminMembersRequest : AdminSearchRequest() {
     var creditDate: String? = null
     var attendanceDate: String? = null
 }
+class AdminCreditTransactionsRequest : AdminListRequest() {
+    @field:Pattern(regexp = "granted|spent") var direction: String? = null
+    var date: String? = null
+}
+
+data class AdminCreditTransactionResponse(
+    val amount: Long, val reason: String, val createdAt: Instant, val member: AdminMemberSummary,
+)
+
 class AdminPaymentsRequest : AdminSearchRequest() {
     var status: CreditOrderStatus? = null
     var memberId: UUID? = null
@@ -59,7 +69,8 @@ data class AdminPagination(val page: Int, val size: Int, val orderBy: String) {
 }
 data class AdminPageResponse<T>(val items: List<T>, val page: Int, val size: Int, val totalElements: Long, val totalPages: Long)
 data class AdminMemberDetailResponse(
-    val memberId: UUID, val nickname: String, val status: UserStatus, val isAdmin: Boolean, val createdAt: Instant,
+    // isAdmin: springdoc이 is 접두를 벗기지 않도록 와이어 필드명을 고정한다(AdminMemberSummary와 동일).
+    val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
     val creditBalance: Long, val storyCount: Long, val deletedAt: Instant?,
 ) {

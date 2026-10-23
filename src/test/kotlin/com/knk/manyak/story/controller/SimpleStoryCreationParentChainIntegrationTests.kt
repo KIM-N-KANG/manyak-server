@@ -15,6 +15,7 @@ import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
+import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.ParentLinkError
 import com.knk.manyak.story.entity.StoryCreationRequest
@@ -107,6 +108,7 @@ class SimpleStoryCreationParentChainIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
 
     private var tagId: Long = 0
 
@@ -114,6 +116,31 @@ class SimpleStoryCreationParentChainIntegrationTests {
     fun setUp() {
         databaseCleaner.cleanAll()
         tagId = savePredefinedGenreTag().id
+    }
+
+    @Test
+    fun `재생성 여부는 스펙 와이어 이름 isRegenerated로만 받는다`() {
+        // springdoc이 is 접두를 벗겨 regenerated로 문서화하던 함정: 런타임 키는 스펙(4-2-CONTRACT)의 isRegenerated다.
+        postStorylinesWith(""","isRegenerated":true""")
+        assertThat(storyAiClient.storylineLink.get().isRegenerated).isTrue()
+
+        postStorylinesWith(""","regenerated":true""")
+        assertThat(storyAiClient.storylineLink.get().isRegenerated).isNull()
+
+        // 완성 요청도 같은 와이어 이름을 런타임 매퍼로 고정한다(완성 흐름 전체를 재현하지 않고 역직렬화만 본다).
+        val base = """"requestId":"${UUID.randomUUID()}","simpleCreationId":1,"storylineId":1"""
+        assertThat(mapper.readValue("""{$base,"isRegenerated":true}""", CreateSimpleStoryRequest::class.java).isRegenerated).isTrue()
+        assertThat(mapper.readValue("""{$base,"regenerated":true}""", CreateSimpleStoryRequest::class.java).isRegenerated).isNull()
+    }
+
+    private fun postStorylinesWith(extraFields: String) {
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"${UUID.randomUUID()}","genreTagIds":[$tagId],"protagonist":{}$extraFields}""")
+            .exchange()
+            .expectStatus().isCreated
     }
 
     @Test
