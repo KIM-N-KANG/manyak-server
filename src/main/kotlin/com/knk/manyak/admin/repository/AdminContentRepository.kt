@@ -56,10 +56,10 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         return result.copy(items = result.items.map { it.copy(tags = tags[it.storyId] ?: emptyList()) })
     }
     fun retention(storyId: UUID): List<AdminRetention> {
-        val columns = listOf(1, 3, 5, 10, 20).joinToString(",") { "SUM(CASE WHEN c.current_turn >= $it THEN 1 ELSE 0 END) AS n$it" }
+        val columns = AdminQuery.turnReachThresholds.joinToString(",") { "SUM(CASE WHEN c.current_turn >= $it THEN 1 ELSE 0 END) AS n$it" }
         val row = jdbc.queryForMap("SELECT COUNT(*) AS total, $columns FROM story_chats c JOIN stories s ON s.id=c.story_id WHERE s.public_id=:id AND c.deleted_at IS NULL", mapOf("id" to storyId))
         val total = (row["total"] as Number).toDouble()
-        return listOf(1, 3, 5, 10, 20).map { AdminRetention(it, if (total == 0.0) 0.0 else (row["n$it"] as Number).toDouble() / total) }
+        return AdminQuery.turnReachThresholds.map { AdminRetention(it, if (total == 0.0) 0.0 else (row["n$it"] as Number).toDouble() / total) }
     }
 
     private val firstAt = "(SELECT MIN(m.created_at) FROM story_messages m WHERE m.chat_id=c.id AND m.role='USER')"

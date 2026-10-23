@@ -395,12 +395,14 @@ class AdminReadApiIntegrationTests {
         val story = storyRepository.save(com.knk.manyak.story.entity.Story(title = "차트 스토리", genre = "판타지, 미스터리"))
         val chats = listOf(0, 1, 5, 12).map { turns -> chatRepository.save(com.knk.manyak.chat.entity.StoryChat(
             storyId = story.id, currentTurn = turns, createdAt = midnight)) }
+        chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, currentTurn = 50, deletedAt = now))
         val list = json(get("/stories?genre=판타지").expectStatus().isOk)
         assertThat(list["items"][0]["owner"].isNull).isTrue()
         assertThat(list["items"][0]["chatCount"].asLong()).isEqualTo(4)
         val detail = json(get("/stories/${story.publicId}").expectStatus().isOk)
-        assertThat(detail["retention"][0]["rate"].asDouble()).isEqualTo(0.75)
-        assertThat(detail["retention"][4]["rate"].asDouble()).isZero()
+        assertThat(detail["retention"].toList().map { it["turn"].asInt() }).containsExactly(1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50)
+        assertThat(detail["retention"].toList().map { it["rate"].asDouble() })
+            .containsExactly(0.75, 0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0)
         assertThat(detail["recentChats"].size()).isEqualTo(4)
         val chat = json(get("/chats/${chats[0].publicId}").expectStatus().isOk)
         assertThat(chat["startedAs"].asText()).isEqualTo("GUEST")
@@ -408,6 +410,9 @@ class AdminReadApiIntegrationTests {
         assertThat(chat.has("persona")).isFalse()
         assertThat(json(get("/chats?turnBucket=12").expectStatus().isOk)["totalElements"].asLong()).isZero()
         val noGenre = storyRepository.save(com.knk.manyak.story.entity.Story(title = "장르 없음"))
+        val emptyRetention = json(get("/stories/${noGenre.publicId}").expectStatus().isOk)["retention"]
+        assertThat(emptyRetention).hasSize(12)
+        assertThat(emptyRetention.toList().map { it["rate"].asDouble() }).containsOnly(0.0)
         val noGenreChat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = noGenre.id))
         val genre = json(get("/stories/${noGenre.publicId}").expectStatus().isOk)["genre"]
         val chatGenre = json(get("/chats/${noGenreChat.publicId}").expectStatus().isOk)["story"]["genre"]
@@ -681,7 +686,7 @@ class AdminReadApiIntegrationTests {
 
         val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
         val points = body["distributions"].first { it["chartId"].asText() == "genre-depth" }["points"].toList()
-        assertThat(points.toList().map { it["label"].asText() }).containsExactlyInAnyOrder("판타지", "미스터리")
+        assertThat(points.toList().map { it["label"].asText() }).containsExactly("판타지", "미스터리")
         for (point in points) {
             val link = point["link"]
             assertThat(link["list"].asText()).isEqualTo("stories")
@@ -698,7 +703,28 @@ class AdminReadApiIntegrationTests {
             val chatCount = page["items"].sumOf { it["chatCount"].asLong() }
             assertThat(chatCount).isEqualTo(3)
             assertThat(totalTurns).isEqualTo(if (point["label"].asText() == "판타지") 18 else 14)
+            assertThat(point["chats"].asLong()).isEqualTo(chatCount)
+            assertThat(point["totalTurns"].asLong()).isEqualTo(totalTurns)
             assertThat(point["value"].asDouble()).isEqualTo(totalTurns.toDouble() / chatCount)
+        }
+    }
+
+    @Test fun `장르 깊이는 소표본과 모든 장르를 포함하고 평균 내림차순 동률 이름순으로 응답한다`() {
+        chat(story(genre = "던전"), turns = 465)
+        val romance = story(genre = "로맨스")
+        repeat(6) { chat(romance, turns = 10) }
+        val multi = story(genre = "판타지, 미스터리")
+        chat(multi, turns = 2); chat(multi, turns = 4)
+        chat(story(genre = "일상"), turns = 0)
+        val charts = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
+        val points = charts.first { it["chartId"].asText() == "genre-depth" }["points"]
+        assertThat(points.toList().map { it["label"].asText() }).containsExactly("던전", "로맨스", "미스터리", "판타지", "일상")
+        assertThat(points.toList().map { it["value"].asDouble() }).containsExactly(465.0, 10.0, 3.0, 3.0, 0.0)
+        assertThat(points.toList().map { it["chats"].asLong() }).containsExactly(1L, 6L, 2L, 2L, 1L)
+        assertThat(points.toList().map { it["totalTurns"].asLong() }).containsExactly(465L, 60L, 6L, 6L, 0L)
+        charts.filter { it["chartId"].asText() != "genre-depth" }.flatMap { it["points"].toList() }.forEach {
+            assertThat(it.has("chats")).isFalse()
+            assertThat(it.has("totalTurns")).isFalse()
         }
     }
 

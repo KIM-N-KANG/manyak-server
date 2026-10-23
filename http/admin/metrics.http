@@ -111,13 +111,51 @@ client.test("마지막 가입 누계와 요약 일치", () => {
 GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("턴 도달률", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.segments.map(s => s.segment).join(",") === "all,guest,member" && b.segments.every(s => s.reached.length === 4), "계약 필드 확인"); }); %}
+> {%
+client.test("턴 도달률의 열두 기준 턴과 비율", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  const thresholds = [1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50];
+  client.assert(b.segments.map(s => s.segment).join(",") === "all,guest,member", "세 구간 순서");
+  b.segments.forEach(s => {
+    client.assert(JSON.stringify(s.reached.map(p => p.turn)) === JSON.stringify(thresholds), `기준 턴 actual=${JSON.stringify(s.reached)}`);
+    s.reached.forEach(p => client.assert(p.rate === (s.chats === 0 ? 0 : p.chats / s.chats), `도달률 actual=${JSON.stringify(p)}`));
+  });
+});
+%}
 
 ### 채팅 옵션 — Amplitude 장애와 무관하게 동작
 GET {{baseUrl}}/api/v1/admin/quality/chat-options?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("채팅 옵션", () => { client.assert(response.status === 200, `actual=${response.status}`); const b = response.body; client.assert(b.daily.length === 7 && b.daily.every(d => d.withPersona <= d.chats), "계약 필드 확인"); }); %}
+> {%
+client.test("채팅 옵션과 모델별 턴 수", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.daily.length === 7 && b.daily.every(d => d.withPersona <= d.chats), "계약 필드 확인");
+  b.daily.forEach(d => {
+    client.assert(d.turnsByModel !== null && typeof d.turnsByModel === "object" && !Array.isArray(d.turnsByModel), `모델별 턴 actual=${JSON.stringify(d)}`);
+    Object.values(d.turnsByModel).forEach(n => client.assert(Number.isInteger(n) && n > 0, `턴 없는 모델은 키 없음 actual=${n}`));
+  });
+  client.global.set("adminOptionsFrom", b.from);
+  client.global.set("adminOptionsTo", b.to);
+  client.global.set("adminTurnsByDate", JSON.stringify(Object.fromEntries(b.daily.map(d => [d.date, Object.values(d.turnsByModel).reduce((a, n) => a + n, 0)]))));
+});
+%}
+
+### 모델별 턴 합과 차트 일별 턴 비교 — 위 채팅 옵션 요청 다음에 실행
+# 데이터가 바뀌지 않는 fixture에서 실행한다. 채팅 생성일·삭제 여부 무관, 재생성 판본과 팀 계정은 제외한다.
+# 10/21 예시: AURORA 응답 2개(판본 2개), 이전 LITE 채팅 응답 3개, 삭제 LITE 채팅 응답 1개 → AURORA 2, LITE 4.
+GET {{baseUrl}}/api/v1/admin/dashboard/charts?from={{adminOptionsFrom}}&to={{adminOptionsTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("모델별 턴 합과 일별 턴 일치", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  const totals = JSON.parse(client.global.get("adminTurnsByDate"));
+  response.body.daily.forEach(d => client.assert(d.turns === totals[d.date], `date=${d.date} chart=${d.turns} models=${totals[d.date]}`));
+});
+%}
 
 ### AI 비용 — Amplitude 장애와 무관하게 동작
 GET {{baseUrl}}/api/v1/admin/quality/ai-cost?days=7
