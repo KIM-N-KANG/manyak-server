@@ -11,6 +11,7 @@ import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.scheduler.PromotionPushScheduler
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
+import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -50,7 +51,7 @@ class PromotionPushCleanupFailureTests {
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {
-            PromotionPushScheduler(PromotionPushService(campaigns, users, sender, clock), StructuredLogger(), clock).run()
+            PromotionPushScheduler(PromotionPushService(campaigns, users, sender, mock(StoryRepository::class.java), clock), StructuredLogger(), clock).run()
             verify(campaigns).claim(scheduled.id, now)
             verify(users).findMarketingPushTargetIds()
             verify(campaigns).finishIfOwned(scheduled.id, now, PushCampaignStatus.SENT, 0, 0, now)

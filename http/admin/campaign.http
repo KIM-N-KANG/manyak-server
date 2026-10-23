@@ -40,6 +40,7 @@ Content-Type: application/json
         client.assert(response.status === 201, `expected=201 actual=${response.status}`);
         client.assert(response.body.kind === "MARKETING", `expected=MARKETING actual=${response.body.kind}`);
         client.assert(response.body.status === "SCHEDULED", `expected=SCHEDULED actual=${response.body.status}`);
+        client.assert(response.body.storyId === null, `expected=null actual=${response.body.storyId}`);
     });
     if (response.status === 201) client.global.set("campaignId", response.body.campaignId);
 %}
@@ -179,6 +180,268 @@ GET {{baseUrl}}/api/v1/admin/push/campaigns
 > {%
     client.test("인증 필수", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
 %}
+
+### 19. 검색·종류·상태 AND 필터 (위에서 취소한 예약)
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q={{campaignId}}&kind=MARKETING&status=CANCELED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("UUID 정확 검색과 필터", () => {
+        client.assert(response.status === 200 && response.body.totalElements === 1, `actual=${response.status}/${JSON.stringify(response.body)}`);
+        client.assert(response.body.items[0].campaignId === client.global.get("campaignId"), "캠페인 UUID 불일치");
+    });
+%}
+
+### 20. 공백 정규화 제목·본문 부분 검색
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q=%20%20테스트%20%20%20안내%20%20&kind=MARKETING
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("본문 부분 검색", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.some(it => it.campaignId === client.global.get("campaignId")), "앞서 만든 테스트 안내 본문이 검색되어야 함");
+    });
+%}
+
+### 21. 서비스 캠페인만 조회
+GET {{baseUrl}}/api/v1/admin/push/campaigns?kind=SERVICE
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("서비스 필터", () => client.assert(response.status === 200 && response.body.items.every(it => it.kind === "SERVICE"), `actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 22. deliveredMembers 전체 집계 내림차순 (페이지별 정렬 아님)
+GET {{baseUrl}}/api/v1/admin/push/campaigns?sort=deliveredMembers&order=desc&page=1&size=100
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("deliveredMembers 정렬", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const rows = response.body.items;
+        rows.forEach((row, index) => {
+            client.assert(row.deliveredMembers >= 0, "결과 없는 캠페인도 0 이상");
+            if (index) {
+                const prev = rows[index - 1];
+                client.assert(prev.deliveredMembers > row.deliveredMembers || (prev.deliveredMembers === row.deliveredMembers && prev.campaignId < row.campaignId), "집계 내림차순·동률 UUID 오름차순 필요");
+            }
+        });
+    });
+%}
+
+### 23. deliveredDevices 전체 집계 내림차순 (페이지별 정렬 아님)
+GET {{baseUrl}}/api/v1/admin/push/campaigns?sort=deliveredDevices&order=desc&page=1&size=100
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("deliveredDevices 정렬", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const rows = response.body.items;
+        rows.forEach((row, index) => {
+            client.assert(row.deliveredDevices >= 0, "결과 없는 캠페인도 0 이상");
+            if (index) {
+                const prev = rows[index - 1];
+                client.assert(prev.deliveredDevices > row.deliveredDevices || (prev.deliveredDevices === row.deliveredDevices && prev.campaignId < row.campaignId), "집계 내림차순·동률 UUID 오름차순 필요");
+            }
+        });
+    });
+%}
+
+### 24. failedDevices 전체 집계 내림차순 (페이지별 정렬 아님)
+GET {{baseUrl}}/api/v1/admin/push/campaigns?sort=failedDevices&order=desc&page=1&size=100
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("failedDevices 정렬", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const rows = response.body.items;
+        rows.forEach((row, index) => {
+            client.assert(row.failedDevices >= 0, "결과 없는 캠페인도 0 이상");
+            if (index) {
+                const prev = rows[index - 1];
+                client.assert(prev.failedDevices > row.failedDevices || (prev.failedDevices === row.failedDevices && prev.campaignId < row.campaignId), "집계 내림차순·동률 UUID 오름차순 필요");
+            }
+        });
+    });
+%}
+
+### 400 — 빈 검색어
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q=
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("빈 검색어 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 400 — 공백 검색어
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q=%20%20
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("공백 검색어 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 400 — 긴 검색어
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("긴 검색어 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 400 — 미지원 종류
+GET {{baseUrl}}/api/v1/admin/push/campaigns?kind=INFO
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("미지원 종류 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 400 — 미지원 정렬
+GET {{baseUrl}}/api/v1/admin/push/campaigns?sort=body
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("미지원 정렬 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 400 — 커서 페이지
+GET {{baseUrl}}/api/v1/admin/push/campaigns?cursor=x
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("커서 페이지 거절", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 스토리 검증 준비 — 전용 오리지널 초안 생성
+# MANYAK_OFFICIAL_USER_PUBLIC_ID에 공식 회원 설정 필요 (originals.http와 같은 준비).
+POST {{baseUrl}}/api/v1/admin/originals
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"푸시 이동 검증 스토리","reason":"캠페인 스토리 검증"}
+
+> {%
+    client.test("스토리 준비", () => client.assert(response.status === 201, `actual=${response.status}`));
+    if (response.status === 201) client.global.set("campaignStoryId", response.body.storyId);
+%}
+
+### 400 — 비공개 초안을 캠페인 이동 대상으로 지정
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"초안 거절 검증","body":"본문","storyId":"{{campaignStoryId}}","reason":"비공개 거절 검증"}
+
+> {%
+    client.test("비공개 거절", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 400 — UUID 형식 오류
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"UUID 검증","body":"본문","storyId":"not-a-uuid","reason":"형식 검증"}
+
+> {%
+    client.test("UUID 거절", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 400 — 없는 스토리 UUID
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"없는 스토리 검증","body":"본문","storyId":"00000000-0000-4000-8000-000000000099","reason":"미존재 검증"}
+
+> {%
+    client.test("미존재 거절", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 스토리를 발행·공개로 변경
+PATCH {{baseUrl}}/api/v1/admin/originals/{{campaignStoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title":"푸시 이동 검증 스토리", "oneLineIntro":"알림 이동 검증",
+  "genres":["판타지"], "status":"PUBLISHED", "visibility":"PUBLIC",
+  "storySettings":{"worldSetting":"세계관", "characterSetting":"등장인물", "userRoleSetting":"주인공", "ruleSetting":"규칙"},
+  "startSettings":[{"name":"시작", "prologue":"프롤로그", "startSituation":"시작 상황", "suggestedInputs":["주변을 살핀다","인사를 한다","앞으로 간다"]}],
+  "reason":"공개 스토리 이동 검증"
+}
+
+> {%
+    client.test("공개 발행", () => client.assert(response.status === 200 && response.body.visibility === "PUBLIC", `actual=${response.status}`));
+%}
+
+### 공개 스토리로 즉시 예약 — 테스트 수신자·스케줄러 설정 후 실행
+# 수신자는 ACTIVE + 광고 동의 + 토큰 보유, 야간은 야간 동의도 필요.
+# 다음 폴링 후 로컬 FCM data 또는 원격 push_outbox.payload.data에서
+# storyId={{campaignStoryId}}, deepLink=https://manyak.app/stories/{{campaignStoryId}} 확인.
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"스토리 공개 이동 검증","body":"스토리를 만나보세요","storyId":"{{campaignStoryId}}","reason":"공개 딥링크 검증"}
+
+> {%
+    client.test("공개 UUID 응답", () => client.assert(response.status === 201 && response.body.storyId === client.global.get("campaignStoryId"), `actual=${response.status}/${JSON.stringify(response.body)}`));
+    if (response.status === 201) client.global.set("storyCampaignId", response.body.campaignId);
+%}
+
+### 상세 조회 — SENT가 된 뒤 위 발송 데이터를 확인하고 다음 단계 실행
+GET {{baseUrl}}/api/v1/admin/push/campaigns/{{storyCampaignId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리 UUID 유지", () => client.assert(response.status === 200 && response.body.storyId === client.global.get("campaignStoryId"), `actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 발송 재검증 준비 — 공개 상태에서 2분 뒤 예약
+< {%
+    client.global.set("storyCampaignScheduledAt", new Date(Date.now() + 120000).toISOString());
+%}
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"비공개 전환 재검증","body":"링크 없이 발송","storyId":"{{campaignStoryId}}","scheduledAt":"{{storyCampaignScheduledAt}}","reason":"발송 시 공개 재검증"}
+
+> {%
+    client.test("미래 예약", () => client.assert(response.status === 201, `actual=${response.status}`));
+    if (response.status === 201) client.global.set("hiddenStoryCampaignId", response.body.campaignId);
+%}
+
+### 예약 2분이 지나기 전에 비공개로 변경
+PATCH {{baseUrl}}/api/v1/admin/originals/{{campaignStoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"visibility":"PRIVATE","reason":"발송 전 공개 철회 검증"}
+
+> {%
+    client.test("비공개 전환", () => client.assert(response.status === 200 && response.body.visibility === "PRIVATE", `actual=${response.status}`));
+%}
+
+### 예약 시각 이후 확인 — SENT이며 발송 data에는 storyId·deepLink가 없어야 함
+# 로컬: 테스트 기기의 FCM data 확인. 원격: 해당 campaignId의 push_outbox.payload.data 확인.
+# 삭제 재검증은 별도 테스트 스토리로 공개 예약한 뒤 deleted_at을 설정하고 같은 방식으로 확인한다.
+# 관리자 이력의 storyId는 유지되며 내부 FK는 stories.id다.
+GET {{baseUrl}}/api/v1/admin/push/campaigns/{{hiddenStoryCampaignId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("회차 완료와 이력", () => {
+        client.assert(response.status === 200 && response.body.status === "SENT", `actual=${response.status}/${JSON.stringify(response.body)}`);
+        client.assert(response.body.storyId === client.global.get("campaignStoryId"), "이력의 공개 UUID 유지");
+    });
+%}
+
+### 자유 조회 — 검색·종류·도달 정렬
+GET {{baseUrl}}/api/v1/admin/push/campaigns?q=스토리&kind=MARKETING&sort=deliveredDevices&order=desc&page=1&size=20
+Authorization: Bearer {{adminToken}}
 
 ### 자유 조회 — 실패 캠페인 식별자를 실제 값으로 바꾼 뒤 재실행
 # FAILED에서만 허용, 결과 컬럼은 다음 회차 종료까지 유지한다.
