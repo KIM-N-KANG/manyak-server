@@ -165,26 +165,27 @@ manyak:
           campaign: KR_META_WEB_ACTIVATION_COLD_202610
           start-date: '2026-10-22'
           story-id: cca6358a-0ef3-4709-88d1-100b9faeeca8
-    ai-prices:
+    ai-cost:
       chat-image-unit-cost-krw: 48
-      # 백만 토큰당 KRW. 단가가 없는 모델은 costKrw=null과 unpricedModels로 알린다.
-      # Langfuse 모델 단가, 환율 1달러=1,400원 환산; 캐시 입력 할인 미반영으로 비용 과대 추정.
-      models:
-        '[deepseek-flash]':
-          input-million-krw: 210
-          output-million-krw: 840
-        '[gemini-3.7-flash]':
-          input-million-krw: 1050
-          output-million-krw: 5250
-        '[gemini-3.8-flash]':
-          input-million-krw: 1050
-          output-million-krw: 5250
-        '[gpt-6-luna]':
-          input-million-krw: 140
-          output-million-krw: 700
-        '[gpt-6.1-sol]':
-          input-million-krw: 2800
-          output-million-krw: 14000
+      usd-krw-rate: 1400
+      trace-features:
+        '[채팅 턴]': chat_response
+        '[채팅 선택지]': choice_generation
+        '[스토리라인 생성]': storyline_generation
+        '[스토리 컴파일]': story_completion
+    langfuse:
+      host: ${MANYAK_ADMIN_LANGFUSE_HOST:}
+      public-key: ${MANYAK_ADMIN_LANGFUSE_PUBLIC_KEY:}
+      secret-key: ${MANYAK_ADMIN_LANGFUSE_SECRET_KEY:}
+      environment: ${MANYAK_ADMIN_LANGFUSE_ENVIRONMENT:}
+      request-timeout: 10s
+      call-interval: 1s
+      today-ttl: 10m
+      yesterday-ttl: 1h
+      cooldown: 60s
+      max-calls: 6
+      max-days: 3
+      row-limit: 1000
     dashboard:
       excluded-user-ids: ${MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS:1,2,3,4,5,10,11,206,207}
     token:
