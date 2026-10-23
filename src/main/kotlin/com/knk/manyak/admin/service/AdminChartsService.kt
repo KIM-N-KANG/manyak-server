@@ -56,21 +56,21 @@ class AdminChartsService(
         }
         val wait = raw[4].single()
         val charts = listOf(
-            AdminDistribution("genre-depth", "장르별 채팅 깊이", "채팅 시작일 기준 장르별 평균 현재 턴", "턴",
+            AdminDistribution("genre-depth", "장르별 평균 턴 수", "채팅 생성일 기준 장르별 평균 현재 턴 수", "턴",
                 genres.toSortedMap().map { (genre, value) -> point(genre, value.first / value.second, "stories", mapOf("genre" to genre), "chat") }),
-            AdminDistribution("turns", "턴 수 분포", "채팅 시작일 기준 구간별 채팅방 수", "개",
+            AdminDistribution("turns", "턴 수 분포", "채팅 생성일을 기준으로 구간별 채팅 수 집계", "개",
                 buckets(1, listOf("0", "1", "2", "3~4", "5~6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"), "chats", "turnBucket")),
-            AdminDistribution("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅방 비율", "%",
+            AdminDistribution("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅 비율", "%",
                 listOf("GUEST" to "게스트", "MEMBER" to "회원").map { (key, label) -> point(label,
                     rounded(if (total == 0.0) 0.0 else 100 * (raw[2].firstOrNull { it["label"] == key }?.number("n") ?: 0.0) / total),
                     "chats", mapOf("startedAs" to key)) }),
-            AdminDistribution("member-chats", "회원별 채팅방 생성 횟수", "기간에 채팅방을 생성한 회원의 생성 횟수 분포", "명",
+            AdminDistribution("member-chats", "회원별 채팅 생성 횟수", "기간에 채팅을 생성한 회원의 생성 횟수 분포", "명",
                 buckets(3, listOf("1개", "2개", "3~4개", "5~9개", "10개+"), "members", "chatBucket", "chat")),
-            AdminDistribution("first-message", "첫 사용자 메시지까지 시간", "채팅 시작일 기준, 900초 초과 ${wait.number("overdue").toLong()}건, 입력 없음 ${wait.number("missing").toLong()}건 제외", "초",
+            AdminDistribution("first-message", "첫 사용자 입력까지 걸린 시간", "채팅 생성일 기준, 900초 초과 ${wait.number("overdue").toLong()}건, 입력 없음 ${wait.number("missing").toLong()}건 제외", "초",
                 listOf("average" to "평균", "p50" to "P50", "p75" to "P75", "p90" to "P90").map { (key, label) -> point(label, wait.number(key), "chats", mapOf("hasFirstMessage" to "true")) }),
-            AdminDistribution("ai-latency", "기능별 AI 지연", "성공한 호출 중 지연 값이 있는 호출의 평균", "초", ai(5, "SUCCEEDED")),
+            AdminDistribution("ai-latency", "기능별 AI 평균 호출 시간", "호출 시간이 기록된 성공 호출의 평균 호출 시간", "초", ai(5, "SUCCEEDED")),
             AdminDistribution("ai-success", "기능별 AI 성공률", "완료된 호출 중 성공 비율, 진행 중 제외", "%", ai(6, "FINISHED")),
-            AdminDistribution("characters", "제작 세션 입력 인물 수", "미삭제 스토리의 최신 완료 세션 생성일 기준 직접 입력한 주변 인물 수, 공식 계정 포함", "세션",
+            AdminDistribution("characters", "간편 제작별 입력 주변 인물 수", "미삭제 스토리의 최신 완료 간편 제작 생성일 기준 직접 입력한 주변 인물 수, 공식 계정 포함", "건",
                 buckets(7, (0..5).map { "${it}명" }, "stories", "supportingCharacterCount", "creation")),
         )
         return AdminChartsResponse(now, from, to, (0 until days).map { offset ->

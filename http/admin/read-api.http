@@ -178,7 +178,7 @@ Authorization: Bearer {{adminToken}}
 
 ### 차트 — 7일, 분포 8종, 빈 날짜는 0
 # 아래 막대·목록 수 비교는 MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS를 빈 값으로 기동한 환경에서 실행한다.
-# 채팅 분포는 삭제된 스토리에 남은 미삭제 채팅도 포함한다. 장르 깊이는 삭제 스토리를 제외한다.
+# 채팅 분포는 삭제된 스토리에 남은 미삭제 채팅도 포함한다. 장르별 평균 턴 수는 삭제 스토리를 제외한다.
 # 비교 중 데이터가 바뀌지 않는 로컬 fixture를 사용한다.
 GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7
 Authorization: Bearer {{adminToken}}
@@ -187,6 +187,20 @@ Authorization: Bearer {{adminToken}}
     client.test("차트 계약", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
         client.assert(response.body.daily.length === 7 && response.body.distributions.length === 8, "7일과 8개 차트가 필요합니다");
+        const terms = [
+            ["genre-depth", "장르별 평균 턴 수", "턴"],
+            ["turns", "턴 수 분포", "개"],
+            ["started-as", "게스트와 회원 비율", "%"],
+            ["member-chats", "회원별 채팅 생성 횟수", "명"],
+            ["first-message", "첫 사용자 입력까지 걸린 시간", "초"],
+            ["ai-latency", "기능별 AI 평균 호출 시간", "초"],
+            ["ai-success", "기능별 AI 성공률", "%"],
+            ["characters", "간편 제작별 입력 주변 인물 수", "건"]
+        ];
+        response.body.distributions.forEach((chart, i) => {
+            client.assert(JSON.stringify([chart.chartId, chart.title, chart.unit]) === JSON.stringify(terms[i]), `차트 용어 actual=${JSON.stringify(chart)}`);
+            client.assert(!/채팅방|제작 세션|AI 지연/.test(chart.description), `이전 용어 actual=${chart.description}`);
+        });
         client.assert(response.body.distributions[1].points.length === 11, "턴 구간 11개가 필요합니다");
         const link = response.body.distributions[1].points[1].link;
         client.assert(link.list === "chats" && link.params.turnBucket === "1", `actual=${JSON.stringify(link)}`);
