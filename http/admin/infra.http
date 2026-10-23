@@ -1,0 +1,152 @@
+# KNK-1796 관리자 인프라 지표 — BACKEND 4-2-33·34 (2644797 + 6d09781)
+# 준비: 로컬 PostgreSQL/Redis 기동 후 ./gradlew bootRun, 관리자 로그인으로 ADMIN 토큰 발급.
+# adminToken/rolelessAdminToken은 http/admin/auth.http에서 준비한 값으로 교체한다.
+# AWS 성공 검증은 6-3의 MANYAK_ADMIN_INFRA_* 7개와 태스크 역할 자격이 있는 환경에서만 수동 실행한다.
+# 기본 개발 환경은 리소스 설정이 모두 비어 metrics=503, db-tables=200이다.
+# 아래 AWS 성공 요청은 실제 AWS를 호출하므로 필요할 때만 개별 실행한다. 자동 테스트는 SDK 대역만 사용한다.
+# 캐시 비교 요청은 바로 위 요청부터 순서대로, metrics는 60초/DB는 5분 안에 실행한다.
+@baseUrl = http://localhost:8080
+@adminToken = REPLACE_ADMIN_TOKEN
+@rolelessAdminToken = REPLACE_ROLELESS_ADMIN_TOKEN
+@from = 2026-10-22
+@to = 2026-10-23
+
+### 기동 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+client.test("서버 기동", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 설정된 환경: 기본 KST 오늘, 300초 간격, 현재 태스크 수
+GET {{baseUrl}}/api/v1/admin/infra/metrics
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("인프라 응답 계약", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const b = response.body;
+    client.assert(b.from === b.to && b.periodSeconds === 300, JSON.stringify(b));
+    client.assert(Number.isFinite(Date.parse(b.asOf)), `asOf=${b.asOf}`);
+    if (b.ecs !== null) b.ecs.services.forEach(s => {
+        [s.runningTasks, s.desiredTasks, s.pendingTasks].forEach(v => client.assert(Number.isInteger(v) && v >= 0, `count=${v}`));
+        client.assert(typeof s.name === "string", JSON.stringify(s));
+    });
+    const series = [];
+    if (b.ecs !== null) b.ecs.services.forEach(s => series.push(s.cpu, s.memory));
+    if (b.alb !== null) series.push(b.alb.requests, b.alb.elb5xx, b.alb.target5xx, b.alb.responseTimeP95Ms);
+    if (b.rds !== null) series.push(b.rds.cpu, b.rds.freeStorageBytes, b.rds.connections, b.rds.readLatencyMs, b.rds.writeLatencyMs);
+    if (b.redis !== null) b.redis.nodes.forEach(n => series.push(n.cpu, n.memory, n.connections));
+    if (b.opensearch !== null) series.push(b.opensearch.freeStorageBytes, b.opensearch.jvmMemoryPressure);
+    series.forEach(points => points.forEach((p, i) => {
+        client.assert(Number.isFinite(p.value), JSON.stringify(p));
+        if (i > 0) client.assert(Date.parse(points[i - 1].at) < Date.parse(p.at), "점 오름차순");
+    }));
+    if (b.alb !== null) [b.alb.requests, b.alb.elb5xx, b.alb.target5xx].forEach(points => points.forEach((p, i) => {
+        if (i > 0) client.assert(Date.parse(p.at) - Date.parse(points[i - 1].at) === b.periodSeconds * 1000, "건수 빈 구간 포함");
+    }));
+    client.global.set("infraAsOf", b.asOf);
+});
+%}
+
+### 바로 재조회: 캐시 생성 시각 유지 (위 요청 후 60초 이내)
+GET {{baseUrl}}/api/v1/admin/infra/metrics
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("응답 캐시 asOf", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(response.body.asOf === client.global.get("infraAsOf"), `asOf=${response.body.asOf}`);
+});
+%}
+
+### PostgreSQL: 기본 limit=20, 전체 대상 테이블 수와 DB 크기
+GET {{baseUrl}}/api/v1/admin/infra/db-tables
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("DB 테이블 크기 계약", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const b = response.body;
+    client.assert(b.databaseBytes > 0 && b.tableCount >= b.tables.length && b.tables.length <= 20, JSON.stringify(b));
+    b.tables.forEach((t, i) => {
+        client.assert(!["pg_catalog", "information_schema", "pg_toast"].includes(t.schema), t.schema);
+        client.assert(t.totalBytes >= t.tableBytes + t.indexBytes && t.estimatedRows >= 0, JSON.stringify(t));
+        if (i > 0) client.assert(b.tables[i - 1].totalBytes >= t.totalBytes, "크기 내림차순");
+    });
+    client.global.set("infraDbAsOf", b.asOf);
+});
+%}
+
+### 바로 재조회: DB 캐시 (위 요청 후 5분 이내)
+GET {{baseUrl}}/api/v1/admin/infra/db-tables
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("DB 캐시 asOf", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(response.body.asOf === client.global.get("infraDbAsOf"), `asOf=${response.body.asOf}`);
+});
+%}
+
+### 400: 한쪽만 지정한 날짜
+GET {{baseUrl}}/api/v1/admin/infra/metrics?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("날짜 쌍 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400: 형식 오류
+GET {{baseUrl}}/api/v1/admin/infra/metrics?from=not-a-date&to=not-a-date
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("날짜 형식 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400: 32일
+GET {{baseUrl}}/api/v1/admin/infra/metrics?from=2026-08-01&to=2026-09-01
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("31일 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400: limit 범위
+GET {{baseUrl}}/api/v1/admin/infra/db-tables?limit=101
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("개수 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400: limit 정수 검증
+GET {{baseUrl}}/api/v1/admin/infra/db-tables?limit=1.5
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("정수 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 401: 미인증
+GET {{baseUrl}}/api/v1/admin/infra/metrics
+
+> {% client.test("미인증 거절", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 403: ADMIN 토큰이지만 관리자 역할 없는 계정
+GET {{baseUrl}}/api/v1/admin/infra/db-tables
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("역할 없음 거절", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 개발 환경 전용: 설정 모두 비어 있으면 503 (AWS 호출 없음)
+# AWS 장애/불완전 결과/5초 초과/쿨다운/갱신 중도 캐시 없으면 동일 503.
+# 같은 범위의 만료 캐시가 있으면 200과 이전 asOf. SDK 대역 통합 테스트로 검증한다.
+GET {{baseUrl}}/api/v1/admin/infra/metrics
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("인프라 사용 불가", () => {
+    client.assert(response.status === 503, `actual=${response.status}`);
+    client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+});
+%}
+
+### 자유 조회: 날짜/환경에 맞춰 수정 (실제 AWS 호출 가능)
+GET {{baseUrl}}/api/v1/admin/infra/metrics?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+### 자유 조회: 상위 5개
+GET {{baseUrl}}/api/v1/admin/infra/db-tables?limit=5
+Authorization: Bearer {{adminToken}}

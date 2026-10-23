@@ -101,6 +101,25 @@ springdoc:
 
 manyak:
   admin:
+    infra:
+      region: ${AWS_REGION:ap-northeast-2}
+      cache-seconds: 60
+      cache-keys: 100
+      cooldown-seconds: 60
+      timeout-seconds: 5
+      database-cache-seconds: 300
+      max-range-days: 31
+      short-range-days: 2
+      medium-range-days: 7
+      fine-retention-days: 63
+      database-max-limit: 100
+      cluster: ${MANYAK_ADMIN_INFRA_ECS_CLUSTER:}
+      services: ${MANYAK_ADMIN_INFRA_ECS_SERVICES:}
+      load-balancer: ${MANYAK_ADMIN_INFRA_ALB:}
+      database: ${MANYAK_ADMIN_INFRA_RDS_INSTANCE:}
+      cache-clusters: ${MANYAK_ADMIN_INFRA_REDIS_NODES:}
+      domain: ${MANYAK_ADMIN_INFRA_OPENSEARCH_DOMAIN:}
+      account-id: ${MANYAK_ADMIN_INFRA_AWS_ACCOUNT_ID:}
     play-stats:
       bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
       package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
