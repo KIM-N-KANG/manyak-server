@@ -23,6 +23,10 @@ management:
       enabled: false
 
 manyak:
+  admin:
+    analytics:
+      batch:
+        enabled: false
   search:
     opensearch:
       endpoint: ""

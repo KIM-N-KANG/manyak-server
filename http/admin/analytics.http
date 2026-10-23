@@ -10,6 +10,12 @@
 # 5분 예산은 태스크당 500이고 요청 범위에서 최근 날짜부터 채운다. 미수신 날짜는 pendingDates에 남고 60초 뒤 재요청한다.
 # 갱신 중에는 기다리지 않고 저장 값으로 응답하며, 준비된 날짜가 하나도 없으면 503이다.
 # 실패 완료 뒤 60초 동안은 재호출하지 않고 기존 캐시(asOf 유지) 또는 503을 반환한다.
+# 새벽 배치·백필: application.yml의 manyak.admin.analytics.batch.enabled(기본 true), cron(5분),
+# nightly-start(03:00 KST), backfill-start(2026-07-01), budget-cost(300)로 조정한다. 테스트 프로파일은 끈다.
+# Redis SET NX 슬롯 TTL은 10분. 로그 admin_analytics_backfill의 phase/result/remaining_days/cost로 진행을 확인한다.
+# 배치 300점은 전체 500점 안의 몫이며 화면과 같은 DB 값을 채운다. 새벽 작업 완료 다음 실행부터 백필한다.
+# 아래 과거 범위 요청은 배치 완료 뒤 pendingDates가 비고, DB의 확정 날짜는 Amplitude 재호출 없이 재사용된다.
+# 캠페인 추이·사용자 활동·세션·기능 사용·리텐션도 미리 채우며 퍼널·유입 소스·MAU는 제외한다.
 # MANYAK_AMPLITUDE_TEAM_COHORT_ID가 있으면 userdata_cohort is not 조건으로 제외한다.
 @baseUrl = http://localhost:8080
 @adminToken = replace-with-admin-token

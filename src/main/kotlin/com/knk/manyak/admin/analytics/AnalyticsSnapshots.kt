@@ -15,8 +15,14 @@ data class AnalyticsRange(val from: LocalDate, val to: LocalDate) {
 class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false,
     val decode: (JsonNode, AnalyticsRange) -> Map<LocalDate, JsonNode>)
 class RangeAnalyticsMetric(val definition: AnalyticsDefinition, val range: AnalyticsRange, val decode: (JsonNode) -> JsonNode)
+class AnalyticsRefreshProgress {
+    var cost: Int = 0; internal set
+    var fetchedDays: Int = 0; internal set
+    var failure: AnalyticsFailureReason? = null; internal set
+}
 class AnalyticsSnapshotResult(
     val daily: Map<String, Map<LocalDate, AnalyticsValue>>, val ranges: Map<String, AnalyticsValue>, val metrics: List<DailyAnalyticsMetric>, val range: AnalyticsRange,
+    val progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress(),
 ) {
     fun values(date: LocalDate) = metrics.mapNotNull { daily[it.definition.hash]?.get(date) }
     fun readyDates() = range.dates().filter { values(it).size == metrics.size }
@@ -53,8 +59,21 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
     private fun freshRange(metric: RangeAnalyticsMetric, value: AnalyticsValue?) = value != null &&
         (finalRange(metric, value) || clock.instant().isBefore(value.fetchedAt.plusSeconds(policy.currentTtlSeconds)))
 
+    /** 배치도 화면과 같은 확정일·어제·리텐션 유효 판정을 쓴다. */
+    fun missingDates(metric: DailyAnalyticsMetric, range: AnalyticsRange): List<LocalDate> {
+        val values = store.daily(metric.definition, range.from, range.to)
+        values.forEach { (date, value) ->
+            if (value.finalizedAt == null && finalDaily(metric, date, value)) {
+                try { store.finalizeDaily(metric.definition, date, value, clock.instant()) }
+                catch (failure: Exception) { log.warn("admin_analytics_store_failed endpoint=batch metric={} exception={}", metric.definition.metric, failure.javaClass.simpleName) }
+            }
+        }
+        return range.dates().filter { !freshDaily(metric, it, values[it]) }
+    }
+
     fun load(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>, extraDaily: List<Pair<DailyAnalyticsMetric, LocalDate>> = emptyList(),
-        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds)): AnalyticsSnapshotResult {
+        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds), backgroundLimit: Int? = null): AnalyticsSnapshotResult {
+        val progress = AnalyticsRefreshProgress()
         val dailySpecs = (metrics + extraDaily.map { it.first }).distinctBy { it.definition.hash }
         val daily = dailySpecs.associate { metric ->
             val dates = range.dates() + extraDaily.filter { it.first.definition.hash == metric.definition.hash }.map { it.second }
@@ -76,7 +95,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
             } } }
         }
         finalizeReadValues()
-        fun result() = AnalyticsSnapshotResult(daily, ranges, metrics, range)
+        fun result() = AnalyticsSnapshotResult(daily, ranges, metrics, range, progress)
         fun missing(metric: DailyAnalyticsMetric, date: LocalDate) = !freshDaily(metric, date, daily[metric.definition.hash]?.get(date))
         val needs = metrics.any { metric -> range.dates().any { missing(metric, it) } } || extraDaily.any { missing(it.first, it.second) } || rangeMetrics.any { !freshRange(it, ranges[rangeKey(it)]) }
         if (!needs) return result()
@@ -94,7 +113,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
             if (clock.instant().isBefore(state.retry)) return result()
             data class DailyPlan(val metric: DailyAnalyticsMetric, val dates: List<LocalDate>)
             data class Plan(val daily: List<DailyPlan>, val ranges: List<RangeAnalyticsMetric>)
-            val (reservation, plan) = budget.plan { available ->
+            val (reservation, plan) = budget.plan(backgroundLimit) { available ->
                 var remaining = available
                 val neededRanges = rangeMetrics.filter { !freshRange(it, ranges[rangeKey(it)]) }
                 val rangeCost = neededRanges.sumOf { it.range.days * it.definition.perDay }
@@ -156,9 +175,11 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
             }
             state.retry = Instant.MIN
         } catch (failure: AmplitudeFetchFailure) {
+            progress.failure = failure.reason
             state.retry = clock.instant().plusSeconds(policy.cooldownSeconds)
             log.warn("admin_analytics_fetch_failed reason={} status={} endpoint={}", failure.reason.name, failure.status, endpoint)
         } finally {
+            progress.cost = cost; progress.fetchedDays = fetchedDates.size
             finalizeReadValues()
             state.refreshing.set(false)
             if (sent > 0) log.info("admin_analytics_refreshed endpoint={} queries={} fetched_days={} reused_days={} pending_days={} cost={} finalized_rows={} duration_ms={}",

@@ -16,7 +16,7 @@ class AnalyticsPolicy(
 @Component
 @org.springframework.boot.context.properties.EnableConfigurationProperties(AnalyticsPolicy::class)
 class AmplitudeBudget(private val clock: Clock = Clock.systemUTC(), private val policy: AnalyticsPolicy = AnalyticsPolicy()) {
-    internal class Used(val at: Instant, var cost: Int)
+    internal class Used(val at: Instant, var cost: Int, val background: Boolean = false)
     private val used = java.util.ArrayDeque<Used>()
     // 프로젝트 한도를 여러 태스크가 공유하므로 한 태스크는 한 호출만 전송한다.
     private val calls = java.util.concurrent.Semaphore(1, true)
@@ -45,13 +45,15 @@ class AmplitudeBudget(private val clock: Clock = Clock.systemUTC(), private val 
         return Reservation(entry)
     }
     /** 날짜 선택과 그 날짜들의 전체 비용 예약을 같은 잠금 안에서 처리한다. */
-    @Synchronized fun <T> plan(build: (Int) -> Pair<Int, T>): Pair<Reservation, T> {
+    @Synchronized fun <T> plan(backgroundLimit: Int? = null, build: (Int) -> Pair<Int, T>): Pair<Reservation, T> {
         val now = clock.instant()
         while (used.isNotEmpty() && !used.first.at.isAfter(now.minusSeconds(policy.budgetWindowSeconds))) used.removeFirst()
-        val remaining = (policy.budgetCost - used.sumOf { it.cost }).coerceAtLeast(0)
+        val totalRemaining = (policy.budgetCost - used.sumOf { it.cost }).coerceAtLeast(0)
+        val remaining = if (backgroundLimit == null) totalRemaining else minOf(totalRemaining,
+            (backgroundLimit - used.filter { it.background }.sumOf { it.cost }).coerceAtLeast(0))
         val (cost, value) = build(remaining)
         require(cost in 0..remaining)
-        val entry = Used(now, cost); used.addLast(entry)
+        val entry = Used(now, cost, backgroundLimit != null); used.addLast(entry)
         return Reservation(entry) to value
     }
     /** 외부 호출 없이 비용을 소비할 때도 같은 원자적 확인을 거친다. */
