@@ -4,7 +4,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.env.YamlPropertySourceLoader
-import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.core.env.StandardEnvironment
 import org.springframework.core.io.ClassPathResource
@@ -36,7 +35,6 @@ class AdminAiPricesTests {
             }
     }
 
-    @TestConfiguration(proxyBeanMethods = false)
     @EnableConfigurationProperties(AdminAiPrices::class)
     class PriceConfiguration
 }
