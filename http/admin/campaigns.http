@@ -1,0 +1,122 @@
+# 관리자 캠페인 분석. IntelliJ HTTP Client에서 위에서부터 실행한다.
+# 준비: Postgres·Redis, ./gradlew bootRun, 기존 관리자 로그인으로 얻은 adminToken.
+# 조회 환경의 MANYAK_AMPLITUDE_API_KEY / MANYAK_AMPLITUDE_SECRET_KEY를 사용한다. 키를 파일에 넣지 않는다.
+# 추이 366일(미수신 날짜는 pendingDates), 간편 제작 20일, 상세 진입 31일, 유입 소스 10일 상한.
+# from/to는 양끝 포함 KST, days와 중복 불가. 간편 제작·소스의 days는 7만 허용한다.
+# 원값은 DB에 저장한다. 확정일은 영구 재사용, 일별 어제 값은 하루 한 번, 오늘 값은 10분마다 갱신한다.
+# 퍼널·소스는 범위별 저장이며 오늘·어제 포함 범위는 10분마다 갱신한다. 실패 뒤 60초 쿨다운.
+# 모든 분석 API는 태스크당 5분 500 비용을 공유하므로 예산 부족 카드는 60초 뒤 다시 요청한다.
+# 일별 지표는 받은 날짜만 반환하고 준비 중 날짜는 pendingDates에 남는다. 저장 값이 없으면 503이다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@from = 2026-10-22
+@to = 2026-10-23
+
+### 서버 상태
+GET {{baseUrl}}/actuator/health
+
+### 캠페인 목록 — 종료일 없는 마지막 항목이 기본 캠페인
+GET {{baseUrl}}/api/v1/admin/campaigns
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("캠페인 목록", () => client.assert(response.status === 200 && response.body.items.length === 4, `actual=${response.status}`));
+%}
+
+### 캠페인 추이 — 기본 4차, 임의 campaign도 허용
+GET {{baseUrl}}/api/v1/admin/campaigns/analytics?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("추이와 세그먼트 계산", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.daily.every(d => d.newVisitors.nonAds === d.newVisitors.all - d.newVisitors.ads && d.signups.nonAds === d.signups.all - d.signups.ads), "전체에서 광고를 빼야 합니다");
+  client.assert(Array.isArray(response.body.pendingDates), "미수신 날짜 목록이 있어야 합니다");
+  const t = response.body.totals;
+  client.assert(t.adsShare === (t.newVisitors.all === 0 ? null : t.newVisitors.ads / t.newVisitors.all), "광고 비중은 0~1이고 분모 0은 null입니다");
+});
+%}
+
+### 간편 제작 퍼널 — 기본 최근 7일, 최대 20일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("간편 제작 6단계", () => client.assert(response.status === 200 && response.body.steps.length === 6, `actual=${response.status}`)); %}
+
+### 상세 진입 퍼널 — 캠페인 목록의 대상 스토리를 기본 사용
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/story-detail
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("상세 진입 7단계", () => {
+  client.assert(response.status === 200 && response.body.steps.length === 7, `actual=${response.status}`);
+  client.assert(response.body.steps.slice(2).every((s, i) => s.turnNumber === i + 1), "전송 턴 1~5여야 합니다");
+});
+%}
+
+### 유입 소스·매체와 게시글 — 캠페인 필터 없음
+# [Amplitude] Page Viewed와 utm_medium의 in 연산자는 카탈로그 원문이며 운영 검증은 남아 있다.
+GET {{baseUrl}}/api/v1/admin/campaigns/sources?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("방문자 내림차순", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.sources.every((r, i, rows) => i === 0 || rows[i - 1].newVisitors >= r.newVisitors), "소스별 신규 방문자 내림차순입니다");
+  client.assert(response.body.posts.every((r, i, rows) => i === 0 || rows[i - 1].visitors >= r.visitors), "게시글별 방문자 내림차순입니다");
+});
+%}
+
+### 400 — 허용되지 않는 기간
+GET {{baseUrl}}/api/v1/admin/campaigns/analytics?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 — 임의 캠페인에 대상 스토리도 없음
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/story-detail?campaign=UNKNOWN
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("대상 스토리 필수", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 401 — 관리자 인증 필요
+GET {{baseUrl}}/api/v1/admin/campaigns
+
+> {% client.test("인증 필수", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 503 — 키 미설정으로 새로 기동한 환경에서 선택 실행
+GET {{baseUrl}}/api/v1/admin/campaigns/analytics?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("분석만 사용 불가", () => client.assert(response.status === 503 && response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.status}`)); %}
+
+### 자유 조회 — 기간·캠페인·스토리를 원하는 값으로 바꿔 실행
+GET {{baseUrl}}/api/v1/admin/campaigns/analytics?days=7&campaign=KR_META_WEB_ACTIVATION_COLD_202609
+Authorization: Bearer {{adminToken}}
+
+
+### 400 — 간편 제작은 21일 범위를 받지 않음
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation?from=2026-10-03&to=2026-10-23
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("간편 제작 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 — 유입 소스는 11일 범위를 받지 않음
+GET {{baseUrl}}/api/v1/admin/campaigns/sources?from=2026-10-13&to=2026-10-23
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("유입 소스 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 긴 추이 첫 조회 — 준비된 날짜와 준비 중 날짜 확인, 예산 회복 후 같은 요청으로 이어 받기
+GET {{baseUrl}}/api/v1/admin/campaigns/analytics?from=2025-10-23&to=2026-10-23
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("부분 응답과 이어 받기", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    client.assert(response.body.daily.length + response.body.pendingDates.length === 366, "전체 기간을 빠짐없이 표현해야 합니다");
+    client.assert(response.body.daily.every(d => !response.body.pendingDates.includes(d.date)), "준비 중 날짜는 daily에서 제외합니다");
+  }
+});
+%}
