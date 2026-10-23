@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| code | varchar(20) |  | false | [public.story_chats](public.story_chats.md) |  |  |
+| code | varchar(20) |  | false | [public.story_chats](public.story_chats.md) [public.story_messages](public.story_messages.md) |  |  |
 | name | varchar(30) |  | false |  |  |  |
 | turn_cost | bigint |  | false |  |  |  |
 | sort_order | integer |  | false |  |  |  |
@@ -35,6 +35,7 @@
 erDiagram
 
 "public.story_chats" }o--|| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
+"public.story_messages" }o--o| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
 
 "public.chat_models" {
   varchar_20_ code
@@ -71,6 +72,18 @@ erDiagram
   text persona_description_snapshot
   varchar_20_ model_code FK
   boolean long_response
+}
+"public.story_messages" {
+  bigint id
+  bigint chat_id FK
+  varchar_16_ role
+  text content
+  integer message_order
+  timestamp_with_time_zone created_at
+  bigint reached_ending_id FK
+  varchar_100_ reached_ending_name_snapshot
+  bigint credit_transaction_id FK
+  varchar_20_ model_code FK
 }
 ```
 

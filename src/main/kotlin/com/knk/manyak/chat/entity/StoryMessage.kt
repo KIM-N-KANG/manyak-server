@@ -67,6 +67,10 @@ class StoryMessage(
     @Column(name = "credit_transaction_id")
     var creditTransactionId: Long? = null,
 
+    // 활성 AI 응답을 만든 턴의 청구 모델. 재생성 시 교체하며 사용자 입력·기존 행은 NULL로 둔다.
+    @Column(name = "model_code", length = 20)
+    var modelCode: String? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )

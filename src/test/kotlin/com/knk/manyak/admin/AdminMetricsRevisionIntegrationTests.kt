@@ -107,12 +107,16 @@ class AdminMetricsRevisionIntegrationTests {
         val old = chat(at = start.minusSeconds(86400))
         val deleted = chat(deleted = end)
         val team = chat(owner = 900001)
+        val guest = chat(model = "AURORA")
         chat() // 채팅은 있지만 응답은 없는 행
         val orders = mutableMapOf<Long, Int>()
-        fun message(chat: StoryChat, at: Instant = start, role: MessageRole = MessageRole.ASSISTANT): StoryMessage {
+        fun message(chat: StoryChat, at: Instant = start, role: MessageRole = MessageRole.ASSISTANT,
+                    model: String? = if (role == MessageRole.ASSISTANT) chat.modelCode else null): StoryMessage {
             val order = (orders[chat.id] ?: 0) + 1
             orders[chat.id] = order
-            return messages.save(StoryMessage(chatId = chat.id, role = role, content = "테스트", messageOrder = order, createdAt = at))
+            val saved = messages.save(StoryMessage(chatId = chat.id, role = role, content = "테스트", messageOrder = order, createdAt = at))
+            jdbc.update("UPDATE story_messages SET model_code = ? WHERE id = ?", model, saved.id)
+            return saved
         }
         val original = message(aurora)
         repeat(2) { versions.save(StoryMessageVersion(messageId = original.id, versionNumber = it + 1,
@@ -121,20 +125,22 @@ class AdminMetricsRevisionIntegrationTests {
         repeat(3) { message(old, start.plusSeconds(it.toLong())) }
         message(deleted)
         message(team)
+        message(guest, model = "LITE")
+        message(aurora, model = null)
         message(aurora, role = MessageRole.USER)
         message(aurora, role = MessageRole.SYSTEM)
         message(aurora, start.minusMillis(1))
         message(old, end)
 
         val day = get("/quality/chat-options?$period")["daily"].single()
-        assertThat(day["chats"].asLong()).isEqualTo(2)
+        assertThat(day["chats"].asLong()).isEqualTo(3)
         assertThat(day["withPersona"].asLong()).isEqualTo(1)
         assertThat(day["byModel"].properties().associate { it.key to it.value.asLong() })
-            .containsExactlyInAnyOrderEntriesOf(mapOf("AURORA" to 1L, "LITE" to 1L))
+            .containsExactlyInAnyOrderEntriesOf(mapOf("AURORA" to 2L, "LITE" to 1L))
         assertThat(day["turnsByModel"].properties().associate { it.key to it.value.asLong() })
-            .containsExactlyInAnyOrderEntriesOf(mapOf("AURORA" to 2L, "LITE" to 4L))
+            .containsExactlyInAnyOrderEntriesOf(mapOf("AURORA" to 2L, "LITE" to 5L, "UNRECORDED" to 1L))
         val charts = get("/dashboard/charts?$period")
-        assertThat(day["turnsByModel"].properties().sumOf { it.value.asLong() }).isEqualTo(charts["daily"].single()["turns"].asLong()).isEqualTo(6)
+        assertThat(day["turnsByModel"].properties().sumOf { it.value.asLong() }).isEqualTo(charts["daily"].single()["turns"].asLong()).isEqualTo(8)
 
         val daily = get("/quality/chat-options?from=2026-10-19&to=2026-10-22")["daily"]
         assertThat(daily.toList().map { it["date"].asText() }).containsExactly("2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22")
@@ -144,5 +150,22 @@ class AdminMetricsRevisionIntegrationTests {
         assertThat(daily[3]["chats"].asLong()).isZero()
         assertThat(daily[3]["byModel"].size()).isZero()
         assertThat(daily[3]["turnsByModel"].properties().associate { it.key to it.value.asLong() }).isEqualTo(mapOf("LITE" to 1L))
+    }
+
+    @Test fun `채팅 모델 변경은 byModel만 재분류하고 과거 턴의 청구 모델은 유지한다`() {
+        val chat = chat(owner = 101)
+        repeat(3) { index ->
+            val message = messages.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT,
+                content = "모델 변경 전", messageOrder = index + 1, createdAt = start))
+            jdbc.update("UPDATE story_messages SET model_code = 'LITE' WHERE id = ?", message.id)
+        }
+        val before = get("/quality/chat-options?$period")["daily"].single()
+        assertThat(before["byModel"]["LITE"].asLong()).isEqualTo(1)
+        assertThat(before["turnsByModel"]["LITE"].asLong()).isEqualTo(3)
+        jdbc.update("UPDATE story_chats SET model_code = 'AURORA' WHERE id = ?", chat.id)
+        val after = get("/quality/chat-options?$period")["daily"].single()
+        assertThat(after["byModel"].properties().associate { it.key to it.value.asLong() }).isEqualTo(mapOf("AURORA" to 1L))
+        assertThat(after["turnsByModel"]).isEqualTo(before["turnsByModel"])
+        assertThat(get("/dashboard/charts?$period")["daily"].single()["turns"].asLong()).isEqualTo(3)
     }
 }

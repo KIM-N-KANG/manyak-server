@@ -187,7 +187,7 @@ class ChatChargeReconciliationIntegrationTests {
         val competing = java.util.concurrent.CountDownLatch(1)
         val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
         val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
-        fun save() = persister.persistTurn(chatId, "입력", "출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), creditTransactionId = id)
+        fun save() = persister.persistTurn(chatId, "입력", "출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), billingModelCode = "AURORA", creditTransactionId = id)
         try {
             val first = executor.submit(java.util.concurrent.Callable {
                 tx.execute {
@@ -237,7 +237,7 @@ class ChatChargeReconciliationIntegrationTests {
         wallet.reward(userId, 50, CreditReason.REFUND, "refund:charge:$id", "CHAT_TURN", chatId)
         assertThat(reconciliation.reconcile().refundsEmitted).isZero()
         assertThatThrownBy {
-            persister.persistTurn(chatId, "입력", "늦은 출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), creditTransactionId = id)
+            persister.persistTurn(chatId, "입력", "늦은 출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), billingModelCode = "AURORA", creditTransactionId = id)
         }.isInstanceOf(IllegalStateException::class.java)
         assertThat(messages.findAll()).isEmpty()
         assertThat(wallet.balanceOf(userId)).isEqualTo(1000)
@@ -245,7 +245,7 @@ class ChatChargeReconciliationIntegrationTests {
 
     @Test fun `저장이 먼저 완료된 차감과 기준 시각 이내 차감은 환불하지 않는다`() {
         val id = charge(50)
-        persister.persistTurn(chatId, "입력", "출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), creditTransactionId = id)
+        persister.persistTurn(chatId, "입력", "출력", emptyList(), judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(null, 0), billingModelCode = "AURORA", creditTransactionId = id)
         wallet.deduct(userId, 20, CreditReason.CHAT_TURN, "CHAT_TURN", chatId)
         assertThat(reconciliation.reconcile().refundsEmitted).isZero()
         assertThat(wallet.balanceOf(userId)).isEqualTo(930)

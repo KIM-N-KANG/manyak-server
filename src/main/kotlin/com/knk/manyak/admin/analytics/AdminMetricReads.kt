@@ -65,12 +65,13 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
         FROM story_chats c WHERE c.created_at>=:start AND c.created_at<:end AND c.deleted_at IS NULL ${exclude("c.user_id", excluded)}
         GROUP BY ${day("c.created_at")}, c.model_code ORDER BY metric_day, model
         """, params(range, excluded))
-    // 판본은 별도 테이블이므로 활성 AI 응답 메시지만 센다. 채팅의 생성일과 삭제 여부는 제한하지 않는다.
+    // 활성 응답의 청구 모델로 센다. 채팅 모델 변경은 과거 턴을 재분류하지 않으며 기록 전 행은 추정하지 않는다.
+    // 판본은 별도 테이블이므로 제외한다. 채팅의 생성일과 삭제 여부는 제한하지 않는다.
     fun turnsByModel(range: AnalyticsRange, excluded: List<Long>): List<Map<String, Any?>> = jdbc.queryForList("""
-        SELECT ${day("m.created_at")} AS metric_day, c.model_code AS model, COUNT(*) AS turns
+        SELECT ${day("m.created_at")} AS metric_day, COALESCE(m.model_code, 'UNRECORDED') AS model, COUNT(*) AS turns
         FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
         WHERE m.created_at>=:start AND m.created_at<:end AND m.role='ASSISTANT' ${exclude("c.user_id", excluded)}
-        GROUP BY ${day("m.created_at")}, c.model_code ORDER BY metric_day, model
+        GROUP BY ${day("m.created_at")}, COALESCE(m.model_code, 'UNRECORDED') ORDER BY metric_day, model
         """, params(range, excluded))
     fun aiCost(range: AnalyticsRange): List<Map<String, Any?>> = jdbc.queryForList("""
         SELECT ${day("created_at")} AS metric_day, feature, model, COUNT(*) AS calls,

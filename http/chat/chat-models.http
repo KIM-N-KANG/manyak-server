@@ -188,5 +188,98 @@ Content-Type: application/json
     });
 %}
 
+### 16. 청구 모델 검증: 게스트 선택 모델을 AURORA로 준비
+PATCH {{baseUrl}}/api/v1/chats/{{modelChatId}}
+Content-Type: application/json
+
+{"model":"AURORA"}
+
+> {%
+    client.test("게스트 선택 모델", () => {
+        client.assert(response.status === 200 && response.body.model === "AURORA", `actual=${JSON.stringify(response.body)}`);
+        client.global.set("billingModelDeviceId", "billing-model-" + Date.now());
+    });
+%}
+
+### 17. 게스트 턴 저장: AI 응답 model_code=LITE, 사용자 입력=NULL
+POST {{baseUrl}}/api/v1/chats/{{modelChatId}}/turns/stream
+X-Manyak-Device-Id: {{billingModelDeviceId}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"userInput":"주변을 살펴본다.","realtimeImage":false}
+
+# SSE completed 뒤 아래 SQL을 로컬/검증 DB에서 실행한다. model_code는 공개 응답 필드가 아니다.
+# SELECT m.id,m.role,m.model_code,m.credit_transaction_id,m.created_at,c.model_code AS selected_model
+# FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
+# WHERE c.public_id='<modelChatId UUID>'::uuid ORDER BY m.message_order;
+# 기대: USER NULL, ASSISTANT LITE, selected_model AURORA. 게스트 credit_transaction_id는 NULL.
+
+### 18. 회원 청구 모델 검증용 채팅 생성 (accessToken 필요)
+POST {{baseUrl}}/api/v1/chats
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"storyId":"{{storyId}}"}
+
+> {%
+    client.test("회원 채팅 생성", () => {
+        client.assert(response.status === 201, `actual=${response.status}`);
+        client.global.set("billingMemberChatId", response.body.id);
+    });
+%}
+
+### 19. 첫 턴은 LITE로 준비
+PATCH {{baseUrl}}/api/v1/chats/{{billingMemberChatId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"model":"LITE"}
+
+> {% client.test("LITE 설정", () => { client.assert(response.status === 200 && response.body.model === "LITE", `actual=${JSON.stringify(response.body)}`); }); %}
+
+### 20. 회원 LITE 턴 생성 — completed 이후 진행
+POST {{baseUrl}}/api/v1/chats/{{billingMemberChatId}}/turns/stream
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"userInput":"주변을 살펴본다.","realtimeImage":false}
+
+### 21. 저장된 턴 ID 확보
+GET {{baseUrl}}/api/v1/chats/{{billingMemberChatId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("LITE 턴 저장", () => {
+        client.assert(response.status === 200 && response.body.turns.length === 1, `actual=${JSON.stringify(response.body)}`);
+        client.global.set("billingMemberTurnId", response.body.turns[0].id);
+    });
+%}
+
+### 22. AURORA로 설정 변경 — 기존 응답의 model_code는 LITE 유지
+PATCH {{baseUrl}}/api/v1/chats/{{billingMemberChatId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"model":"AURORA"}
+
+> {% client.test("AURORA 설정", () => { client.assert(response.status === 200 && response.body.model === "AURORA", `actual=${JSON.stringify(response.body)}`); }); %}
+# 17의 SQL에 billingMemberChatId를 넣어 USER NULL, ASSISTANT LITE, selected_model AURORA를 확인한다.
+# admin/metrics.http에서 해당 날짜 byModel은 AURORA, turnsByModel은 LITE임을 확인한다.
+
+### 23. AURORA 재생성 — 잔액 필요, completed 뒤 동일 메시지의 model_code=AURORA
+POST {{baseUrl}}/api/v1/chats/{{billingMemberChatId}}/turns/regenerate/stream
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{"turnId":{{billingMemberTurnId}},"realtimeImage":false}
+
+# 같은 메시지 id·created_at 유지, model_code=AURORA 및 새 credit_transaction_id를 확인한다.
+# USER는 NULL, 이전 응답은 story_message_versions에 보관. turnsByModel 합은 그대로이고 활성본만 AURORA로 이동한다.
+# AI 실패 시 본문·청구 모델·차감 연결 모두 기존 값 유지, 새 차감은 환불된다.
+# 마이그레이션 전 메시지는 NULL 유지(백필 없음), 관리자 집계에서 UNRECORDED로 표시된다.
+
 ### 자유 조회
 GET {{baseUrl}}/api/v1/chats/models

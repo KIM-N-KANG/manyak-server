@@ -74,6 +74,7 @@ class ChatTurnPersister(
         // 매번 명시하게 한다 — 빠뜨리면 후보가 비어 도달·사건 판정이 조용히 전부 누락된다.
         judgmentSource: TurnJudgmentSource,
         expectedState: GenerationStartState,
+        billingModelCode: String,
         creditTransactionId: Long? = null,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
@@ -108,6 +109,7 @@ class ChatTurnPersister(
                 chatId = chatId,
                 role = MessageRole.ASSISTANT,
                 creditTransactionId = creditTransactionId,
+                modelCode = billingModelCode,
                 content = aiOutput,
                 messageOrder = user.messageOrder + 1,
                 reachedEndingId = reachedEnding?.id,
@@ -350,6 +352,7 @@ class ChatTurnPersister(
         aiOutput: String,
         choices: List<String>,
         expectedState: GenerationStartState,
+        billingModelCode: String,
         creditTransactionId: Long? = null,
     ): PersistedTurn {
         // 채팅 행을 비관적 쓰기 락으로 잡아 같은 채팅의 재생성을 직렬화한다(제자리 교체라 message_order 유니크로
@@ -384,6 +387,7 @@ class ChatTurnPersister(
 
         // AI 출력 제자리 교체(활성본). USER 입력·messageOrder는 그대로 둔다.
         lastAssistant.creditTransactionId = creditTransactionId
+        lastAssistant.modelCode = billingModelCode
         lastAssistant.content = aiOutput
         storyMessageRepository.save(lastAssistant)
 

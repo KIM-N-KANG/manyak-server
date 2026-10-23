@@ -13,6 +13,7 @@
 | reached_ending_id | bigint |  | true |  | [public.story_endings](public.story_endings.md) |  |
 | reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
 | credit_transaction_id | bigint |  | true |  | [public.credit_transactions](public.credit_transactions.md) |  |
+| model_code | varchar(20) |  | true |  | [public.chat_models](public.chat_models.md) |  |
 
 ## Constraints
 
@@ -25,6 +26,7 @@
 | fk_story_messages_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
 | uq_story_messages_order | UNIQUE | UNIQUE (chat_id, message_order) |
 | story_messages_credit_transaction_id_fkey | FOREIGN KEY | FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id) |
+| story_messages_model_code_fkey | FOREIGN KEY | FOREIGN KEY (model_code) REFERENCES chat_models(code) |
 
 ## Indexes
 
@@ -46,6 +48,7 @@ erDiagram
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_messages" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_messages" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
+"public.story_messages" }o--o| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
 
 "public.story_messages" {
   bigint id
@@ -57,6 +60,7 @@ erDiagram
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
+  varchar_20_ model_code FK
 }
 "public.story_choices" {
   bigint id
@@ -128,6 +132,16 @@ erDiagram
   bigint ref_id
   varchar_255_ idempotency_key
   timestamp_with_time_zone created_at
+}
+"public.chat_models" {
+  varchar_20_ code
+  varchar_30_ name
+  bigint turn_cost
+  integer sort_order
+  boolean is_active
+  boolean is_default
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
 }
 ```
 
