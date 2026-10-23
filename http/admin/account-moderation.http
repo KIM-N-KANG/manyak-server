@@ -1,5 +1,6 @@
 # 계정 정지·해제와 검수 보류 운영 API. 로컬 PostgreSQL·Redis 및 ./gradlew bootRun 필요.
-# 관리자 Google client ID 허용 목록과 관리자 역할을 준비한다. 위에서부터 실행한다.
+# 관리자 Google client ID 허용 목록과 관리자 역할을 준비한다. 공통 준비는 서버 상태→관리자 로그인이다.
+# 읽기 검증은 GET만 실행하고, 상태 변경 POST/DELETE는 필요한 로컬 검증에서만 실행한다.
 # googleIdToken과 memberId(관리자 역할 없는 로컬 검증용 회원), heldSubmissionId(보류 중 로컬 제출본)를 바꾼다.
 # 정지·보류 해제는 실제 상태를 바꾸므로 로컬 검증용 데이터에만 실행한다. 보류는 기존 검수 실행 흐름으로 준비한다.
 @baseUrl = http://localhost:8080
@@ -151,4 +152,75 @@ GET {{baseUrl}}/api/v1/admin/moderation/holds
 
 ### 자유 조회 — 로컬 데이터 기준으로 페이지·정렬을 바꿔 확인
 GET {{baseUrl}}/api/v1/admin/moderation/holds?page=1&size=100&sort=heldAt&order=asc
+Authorization: Bearer {{adminToken}}
+
+### 검수 제출본 전체 목록 — 기존 보류 API와 별개인 읽기 전용 경로
+# 같은 정렬 값(함께 null 포함)은 공개 UUID asc이며 size=2로 페이지를 넘겨 중복·누락을 확인한다.
+# 준비: story/story-general-create.http로 로컬 제출본을 만들거나 기존 제출본이 있는 DB를 사용한다.
+# 위 관리자 로그인 요청만 먼저 실행하면 된다. 계정 정지·보류 해제 요청 실행은 필요 없다.
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("제출본 목록과 안전한 회원 요약", () => {
+    client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    client.assert(Array.isArray(response.body.items) && response.body.page === 1, "items/page 구조");
+    response.body.items.forEach(item => {
+        client.assert(["PENDING","HELD","APPROVED","REJECTED","FAILED"].includes(item.status), "관리자 제출 상태");
+        client.assert(typeof item.owner.isAdmin === "boolean" && !!item.owner.memberId, "공통 회원 요약");
+        client.assert(!("payload" in item) && !("inputForm" in item) && !("id" in item), "원문/내부 식별자 노출 금지");
+    });
+});
+if (response.status === 200 && response.body.items.length > 0) client.global.set("moderationSubmissionId", response.body.items[0].submissionId);
+%}
+
+### 제출본 상세 — 위 목록에 적어도 한 건 필요, 또는 moderationSubmissionId 직접 지정
+GET {{baseUrl}}/api/v1/admin/moderation/submissions/{{moderationSubmissionId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("선택한 필드만 반환하고 감사 기록을 남기지 않는 조회", () => {
+    client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    client.assert(!!response.body.submissionId && !!response.body.fields.title, "상세 필드");
+    client.assert(Array.isArray(response.body.issues) && Array.isArray(response.body.imageResults), "위반과 이미지 결과");
+    response.body.imageResults.forEach(image => {
+        client.assert(["APPROVED","REJECTED","ERROR","PENDING"].includes(image.moderationStatus), "폼 값과 무관한 이미지 검수 결과");
+        client.assert(image.moderationStatus === "ERROR" ? typeof image.errorCode === "string" : image.errorCode === null, "ERROR만 이미지 오류 코드");
+    });
+    client.assert(Object.keys(response.body.fields).every(k => ["title","oneLineIntro","description","protagonistName","genres","visibility","characterNames"].includes(k)), "허용 필드만");
+    client.assert(!("payload" in response.body) && !("imageCopies" in response.body), "원문과 복사 매핑 없음");
+});
+%}
+
+### 보류 아닌 대기만 — HELD와 겹치지 않음
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?status=PENDING&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+
+### 보류만 — 판정 시각 없는 행은 정렬 방향과 무관하게 뒤
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?status=HELD&sort=decidedAt&order=asc
+Authorization: Bearer {{adminToken}}
+
+### 반려 목록 — 저장 위반 요약은 상세 재대응 결과와 다를 수 있음
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?status=REJECTED
+Authorization: Bearer {{adminToken}}
+
+### 잘못된 상태 400
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?status=DRAFT
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("상태 오류", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 잘못된 상세 식별자 404
+GET {{baseUrl}}/api/v1/admin/moderation/submissions/not-a-uuid
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("상세 형식 오류", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 새 조회도 토큰 없음 401
+GET {{baseUrl}}/api/v1/admin/moderation/submissions
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 자유 조회 — 날짜·회원·스토리·검색어·페이지를 로컬 데이터로 조정
+GET {{baseUrl}}/api/v1/admin/moderation/submissions?from=2026-07-01&to=2026-10-24&q=제목&size=20&page=1&sort=heldAt&order=desc
 Authorization: Bearer {{adminToken}}
