@@ -10,6 +10,7 @@ import java.time.LocalDate
 abstract class AdminAnalyticsValue {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) var id: Long = 0
     @Column(nullable = false, length = 64) var metric: String = ""
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "params_hash", nullable = false, length = 64, columnDefinition = "char(64)") var paramsHash: String = ""
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable = false, columnDefinition = "jsonb") var params: String = "{}"
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "\"value\"", nullable = false, columnDefinition = "jsonb") var value: String = "0"

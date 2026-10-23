@@ -3,6 +3,12 @@ package com.knk.manyak.admin.analytics
 import org.assertj.core.api.Assertions.*
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import org.hibernate.boot.MetadataSources
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder
+import com.knk.manyak.admin.entity.AdminAnalyticsDailyValue
+import com.knk.manyak.admin.entity.AdminAnalyticsRangeValue
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -16,18 +22,35 @@ class AnalyticsValuesPostgresTests {
     private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "analytics-test")
         .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var store: AnalyticsValueRepository
+    private lateinit var ds: DriverManagerDataSource
     private val mapper = ObjectMapper()
     private val now = Instant.parse("2026-10-22T03:00:00Z")
     private val date = LocalDate.parse("2026-10-20")
     private val definition = AnalyticsDefinition("pg_daily", "/api/2/users", listOf("m" to "active", "i" to "1"), 1, mapper)
     @BeforeAll fun start() {
         pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "analytics-test")
+        ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "analytics-test")
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
         store = AnalyticsValueRepository(NamedParameterJdbcTemplate(ds), mapper, DataSourceTransactionManager(ds))
     }
     @AfterAll fun stop() = pg.stop()
     private fun value(count: Int, fetched: Instant = now, finalized: Instant? = null) = AnalyticsValue(mapper.valueToTree(count), fetched, finalized)
+    @ParameterizedTest
+    @ValueSource(classes = [AdminAnalyticsDailyValue::class, AdminAnalyticsRangeValue::class])
+    fun `Flyway 테이블과 Hibernate 엔티티의 타입을 validate로 검증한다`(entity: Class<*>) {
+        val registry = StandardServiceRegistryBuilder().applySettings(mapOf(
+            "hibernate.connection.datasource" to ds,
+            "hibernate.hbm2ddl.auto" to "validate",
+            "hibernate.jdbc.time_zone" to "UTC",
+        )).build()
+        try {
+            MetadataSources(registry).addAnnotatedClass(entity).buildMetadata().buildSessionFactory().use { factory ->
+                assertThat(factory.isOpen).isTrue()
+            }
+        } finally {
+            org.hibernate.boot.registry.StandardServiceRegistryBuilder.destroy(registry)
+        }
+    }
     @Test fun `PostgreSQL 일별 upsert는 미확정 행만 갱신하고 확정 값과 받은 시각을 보호한다`() {
         store.saveDaily(definition, mapOf(date to value(1)))
         store.saveDaily(definition, mapOf(date to value(2, now.plusSeconds(5), now.plusSeconds(5))))
