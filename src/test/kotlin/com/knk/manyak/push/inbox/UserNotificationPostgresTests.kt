@@ -54,6 +54,86 @@ class UserNotificationPostgresTests {
         assertThat(jdbc.queryForObject("SELECT notice_tag FROM push_campaigns WHERE id=2", String::class.java)).isNull()
     }
 
+    @Test fun `완료 기록과 초안 재요청은 사용자부터 잠가 PG 데드락 없이 함께 끝난다`() {
+        // 실제 updateStatus를 실행하되 저장소 경계를 같은 PG 연결의 SELECT FOR UPDATE로 연결한다.
+        // 재요청은 resolveExistingLocked와 같은 users → 생성 요청 잠금 순서로 겹친다.
+        jdbc.execute("CREATE TABLE story_creation_requests(id BIGINT PRIMARY KEY, user_id BIGINT, status TEXT, result_json TEXT)")
+        jdbc.update("INSERT INTO story_creation_requests VALUES (42,1,'PENDING',NULL)")
+        val userHeld = java.util.concurrent.CountDownLatch(1)
+        val completionAttempt = java.util.concurrent.CountDownLatch(1)
+        val replayAttempt = java.util.concurrent.CountDownLatch(1)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val requestId = UUID.randomUUID()
+        val row = com.knk.manyak.story.entity.StoryCreationRequest(id = 42, requestId = requestId,
+            userId = 1, stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION)
+        val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java) { call ->
+            if (call.method.name == "findByIdForUpdate") {
+                completionAttempt.countDown()
+                jdbc.execute("SET LOCAL statement_timeout = '5s'")
+                jdbc.queryForObject("SELECT id FROM users WHERE id=1 FOR UPDATE", Long::class.java)
+                com.knk.manyak.auth.entity.User(id = 1, nickname = "잠금")
+            } else org.mockito.Answers.RETURNS_DEFAULTS.answer(call)
+        }
+        val repository = org.mockito.Mockito.mock(com.knk.manyak.story.repository.StoryCreationRequestRepository::class.java) { call ->
+            when (call.method.name) {
+                "findUserIdById" -> jdbc.queryForObject("SELECT user_id FROM story_creation_requests WHERE id=42", Long::class.java)
+                "findByIdForUpdate" -> {
+                    jdbc.execute("SET LOCAL statement_timeout = '5s'")
+                    jdbc.queryForObject("SELECT id FROM story_creation_requests WHERE id=42 FOR UPDATE", Long::class.java)
+                    completionAttempt.countDown()
+                    check(replayAttempt.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    row
+                }
+                "save" -> {
+                    jdbc.update("UPDATE story_creation_requests SET status=?,result_json=? WHERE id=42", row.status.name, row.resultJson)
+                    row
+                }
+                else -> org.mockito.Answers.RETURNS_DEFAULTS.answer(call)
+            }
+        }
+        val recorder = com.knk.manyak.story.service.StoryCreationRequestRecorder(repository,
+            tools.jackson.module.kotlin.jacksonObjectMapper(),
+            org.mockito.Mockito.mock(com.knk.manyak.user.draft.StoryDraftRepository::class.java), users, 300,
+            DataSourceTransactionManager(jdbc.dataSource!!))
+        try {
+            val replay = pool.submit {
+                tx.executeWithoutResult {
+                    jdbc.execute("SET LOCAL statement_timeout = '5s'")
+                    jdbc.queryForObject("SELECT id FROM users WHERE id=1 FOR UPDATE", Long::class.java)
+                    userHeld.countDown()
+                    check(completionAttempt.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    replayAttempt.countDown()
+                    jdbc.queryForObject("SELECT id FROM story_creation_requests WHERE id=42 FOR UPDATE", Long::class.java)
+                }
+            }
+            check(userHeld.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val completion = pool.submit {
+                val recordNotification: () -> Unit = {
+                    users.findByIdForUpdate(1)
+                    store.insert(UserNotification(userId = 1, messageKey = "story-completed:$requestId",
+                        type = NotificationType.STORY_COMPLETED, title = "완성", body = "본문"))
+                    Unit
+                }
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod<Unit>(recorder, "updateStatus",
+                    42L, com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED, "{}", recordNotification)
+            }
+            val errors = listOf(completion, replay).mapNotNull { future ->
+                runCatching { future.get(15, java.util.concurrent.TimeUnit.SECONDS) }.exceptionOrNull()
+            }
+            val details = errors.map { error -> generateSequence(error) { it.cause }.joinToString(" -> ") {
+                "${it.javaClass.simpleName}:${(it as? java.sql.SQLException)?.sqlState}:${it.message}"
+            } }
+            assertThat(errors).withFailMessage("동시 완료/재요청 실패: %s", details).isEmpty()
+            assertThat(jdbc.queryForObject("SELECT status FROM story_creation_requests WHERE id=42", String::class.java)).isEqualTo("COMPLETED")
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(1)
+        } finally {
+            completionAttempt.countDown(); replayAttempt.countDown()
+            pool.shutdownNow()
+            pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
+            jdbc.execute("DROP TABLE story_creation_requests")
+        }
+    }
+
     @Test fun `공지 태그 마이그레이션은 기존 행만 SERVICE로 채우고 기본값 없이 다섯 값만 허용한다`() {
         assertThat(jdbc.queryForObject("SELECT tag FROM notices WHERE id=1", String::class.java)).isEqualTo("SERVICE")
         val column = jdbc.queryForMap("SELECT character_maximum_length,is_nullable,column_default FROM information_schema.columns WHERE table_name='notices' AND column_name='tag'")

@@ -56,7 +56,7 @@ abstract class NotificationRecordingIntegrationTests {
     @Autowired private lateinit var creation: SimpleStoryCreationService
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository
-    @Autowired private lateinit var requests: StoryCreationRequestRepository
+    @MockitoSpyBean private lateinit var requests: StoryCreationRequestRepository
     @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var campaignService: com.knk.manyak.push.service.AdminCampaignService
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
@@ -226,14 +226,14 @@ abstract class NotificationRecordingIntegrationTests {
 
     @Test fun `스토리 저장 뒤 탈퇴가 커밋되면 늦은 완성은 내역을 되살리지 않는다`() {
         val request = creationRequest(user.id)
-        val target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject<DomainNotificationRecorder>(recorder)
+        // 사용자 잠금이 완료 기록 진입부로 이동했으므로 그 전의 비잠금 소유자 조회에서 탈퇴를 먼저 커밋한다.
         doAnswer { call ->
             val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
             try { pool.submit { withdrawal.withdraw(user.id) }.get(10, java.util.concurrent.TimeUnit.SECONDS) }
             finally { pool.shutdownNow() }
-            call.callRealMethod()
-        }.`when`(target).completed(any(StoryCompletedEvent::class.java)
-            ?: StoryCompletedEvent(user.id, UUID.randomUUID(), UUID.randomUUID().toString(), ""))
+            // Spring Data 쿼리 메서드는 추상 메서드이므로 spy에서 callRealMethod 대신 동일한 비잠금 조회를 실행한다.
+            jdbc.queryForObject("SELECT user_id FROM story_creation_requests WHERE id=?", Long::class.java, call.getArgument<Long>(0))
+        }.`when`(requests).findUserIdById(anyLong())
         creation.createSimpleStory(request, user.id)
         assertThat(users.findById(user.id).orElseThrow().status).isEqualTo(UserStatus.DELETED)
         assertThat(requests.findByRequestId(request.requestId)!!.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)

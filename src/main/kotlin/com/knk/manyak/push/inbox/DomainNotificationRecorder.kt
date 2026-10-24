@@ -20,7 +20,7 @@ class DomainNotificationRecorder(
 ) {
     @Transactional(propagation = Propagation.MANDATORY)
     fun completed(event: StoryCompletedEvent) {
-        // 완료 요청 행 다음 사용자 행. 탈퇴가 먼저 커밋됐으면 지워진 내역을 다시 만들지 않는다.
+        // 완료 기록이 먼저 잡은 사용자 잠금은 같은 트랜잭션에서 재사용한다. 탈퇴가 먼저 커밋됐으면 내역을 다시 만들지 않는다.
         val user = users.findByIdForUpdate(event.userId) ?: return
         if (user.status == com.knk.manyak.auth.entity.UserStatus.DELETED) return
         val type = NotificationType.STORY_COMPLETED

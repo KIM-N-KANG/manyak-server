@@ -240,7 +240,8 @@ class StoryCreationRequestRecorder(
     /** 기존 요청 행을 비관적 락으로 조회해 상태별로 해석한다(동시 FAILED 재실행 직렬화). */
     private fun resolveExistingLocked(requestId: UUID, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?, draftId: UUID?): Claim =
         txTemplate.execute {
-            // 재접수도 users → 생성 요청 → 초안 순서로 잠근다. replay·진행 중 충돌은 초안을 건드리지 않는다.
+            // users → 생성 요청 → 초안 순서로 잠근다.
+            // replay·진행 중 충돌은 초안을 건드리지 않는다.
             if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
             val row = repository.findByRequestIdForUpdate(requestId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
@@ -312,6 +313,9 @@ class StoryCreationRequestRecorder(
         inTransaction: (() -> Unit)? = null,
     ) {
         txTemplate.execute {
+            // users → 생성 요청 → 초안 순서로 잠근다.
+            // 소유자만 비잠금 조회해 대기 전에 엔티티 상태가 영속성 컨텍스트에 남지 않게 한다. 게스트는 사용자 잠금 없음.
+            repository.findUserIdById(id)?.let { users.findByIdForUpdate(it) }
             val row = repository.findByIdForUpdate(id)
                 ?: throw IllegalStateException("Story creation request row $id disappeared")
             row.status = status
