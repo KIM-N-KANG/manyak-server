@@ -295,7 +295,8 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(row["category"]).isEqualTo("NEWS")
         assertThat(row["notice_tag"]).isEqualTo("PROMOTION")
         assertThat(row["notice_public_id"]).isEqualTo(notice.noticeId)
-        assertThat(row["title"]).isEqualTo("(광고) 원문 제목")
+        assertThat(row["title"]).isEqualTo("(광고) 알림 제목")
+        assertThat(row["body"]).isEqualTo("직접 쓴 알림 본문\n줄바꿈")
     }
 
     @Test fun `정보성 공지는 서비스 설정과 토큰 광고 동의 없이 활성 회원 셋에게 태그를 남긴다`() {
@@ -309,7 +310,8 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(rows().map { it["type"] }).containsOnly("NOTICE")
         assertThat(rows().map { it["notice_tag"] }).containsOnly("UPDATE")
         assertThat(rows().map { it["notice_public_id"] }).containsOnly(notice.noticeId)
-        assertThat(rows().map { it["title"] }).containsOnly("원문 제목")
+        assertThat(rows().map { it["title"] }).containsOnly("알림 제목")
+        assertThat(rows().map { it["body"] }).containsOnly("직접 쓴 알림 본문\n줄바꿈")
     }
 
     @Test fun `공지 캠페인 취소 뒤 해제와 재게시도 캠페인과 내역을 새로 만들지 않는다`() {
@@ -339,7 +341,7 @@ abstract class NotificationRecordingIntegrationTests {
 
     private fun publishNotice(tag: com.knk.manyak.notice.entity.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", user.id)
-        val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest("원문 제목", "본문", tag, "작성"))
+        val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest(title = "원문 제목", body = "본문", tag = tag, notificationTitle = "알림 제목", notificationBody = "직접 쓴 알림 본문\n줄바꿈", reason = "작성"))
         return noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))
     }
 

@@ -19,8 +19,4 @@ class NoticeCursorTests {
         }
         assertThatThrownBy { codec("other-notice-test-secret-at-least-32-bytes").decode(encoded) }.isInstanceOf(ResponseStatusException::class.java)
     }
-    @Test fun `알림 본문은 줄바꿈을 공백으로 바꾸고 300자로 제한한다`() {
-        assertThat(NoticeService.notificationBody("첫째\r\n둘째\r셋째\n끝")).isEqualTo("첫째 둘째 셋째 끝")
-        assertThat(NoticeService.notificationBody("가".repeat(400))).isEqualTo("가".repeat(300))
-    }
 }

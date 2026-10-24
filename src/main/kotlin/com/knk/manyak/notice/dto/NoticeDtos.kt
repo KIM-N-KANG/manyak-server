@@ -12,10 +12,14 @@ data class CreateNoticeRequest(
     @field:NotBlank @field:Size(max = 100) val title: String,
     @field:NotBlank @field:Size(max = 5000) val body: String,
     @field:NotNull val tag: NoticeTag,
+    @field:NotBlank @field:Size(max = 100) @field:Pattern(regexp = "(?sU).*\\S.*") val notificationTitle: String,
+    @field:NotBlank @field:Size(max = 300) @field:Pattern(regexp = "(?sU).*\\S.*") val notificationBody: String,
     @field:NotBlank @field:Size(max = 500) val reason: String,
 )
 data class UpdateNoticeRequest(
     val tag: NoticeTag? = null,
+    @field:Size(min = 1, max = 100) @field:Pattern(regexp = "(?sU).*\\S.*") val notificationTitle: String? = null,
+    @field:Size(min = 1, max = 300) @field:Pattern(regexp = "(?sU).*\\S.*") val notificationBody: String? = null,
     @field:Size(min = 1, max = 100) @field:Pattern(regexp = "(?sU).*\\S.*") val title: String? = null,
     @field:Size(min = 1, max = 5000) @field:Pattern(regexp = "(?sU).*\\S.*") val body: String? = null,
     @field:NotBlank @field:Size(max = 500) val reason: String,
@@ -41,9 +45,16 @@ data class AdminNoticeResponse(
     @get:JsonInclude(JsonInclude.Include.NON_NULL) val body: String?,
     val status: NoticeStatus, val publishedAt: Instant?, val notifiedAt: Instant?, val createdBy: NoticeAuthorResponse,
     val createdAt: Instant, val updatedAt: Instant,
+    val notificationTitle: String?, val notificationBody: String?,
     @get:JsonInclude(JsonInclude.Include.NON_NULL) val notified: Boolean? = null,
 )
-data class AdminNoticePageResponse(val items: List<AdminNoticeResponse>, val page: Int, val size: Int, val totalElements: Long, val totalPages: Long)
+/** 목록에는 원문 본문과 알림 문구를 싣지 않는다. 상세의 기존 NULL 문구는 명시적으로 응답한다. */
+data class AdminNoticeItemResponse(
+    val noticeId: UUID, val title: String, val tag: NoticeTag,
+    val status: NoticeStatus, val publishedAt: Instant?, val notifiedAt: Instant?, val createdBy: NoticeAuthorResponse,
+    val createdAt: Instant, val updatedAt: Instant,
+)
+data class AdminNoticePageResponse(val items: List<AdminNoticeItemResponse>, val page: Int, val size: Int, val totalElements: Long, val totalPages: Long)
 data class PublicNoticeResponse(val noticeId: UUID, val title: String, val tag: NoticeTag, val body: String, val publishedAt: Instant, val updatedAt: Instant)
 data class PublicNoticeItemResponse(val noticeId: UUID, val title: String, val tag: NoticeTag, val publishedAt: Instant)
 data class PublicNoticePageResponse(val items: List<PublicNoticeItemResponse>, val nextCursor: String?)
