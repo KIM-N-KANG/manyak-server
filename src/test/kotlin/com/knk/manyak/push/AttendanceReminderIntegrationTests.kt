@@ -53,6 +53,7 @@ class AttendanceReminderIntegrationTests {
 
     @MockitoBean private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
 
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
@@ -65,7 +66,7 @@ class AttendanceReminderIntegrationTests {
     // 서비스, 스케줄러, 출석 키의 날짜를 같은 시계로 맞추고 실제 cron은 켜지 않는다.
     private var clock: Clock = atHour(15)
     private val attendanceReminderService: AttendanceReminderService
-        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock)
+        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
     private val attendanceReminderScheduler: AttendanceReminderScheduler
         get() = AttendanceReminderScheduler(attendanceReminderService, redisTemplate, structuredLogger, clock)
 

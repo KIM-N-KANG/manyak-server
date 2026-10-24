@@ -38,6 +38,7 @@ class UserWithdrawalService(
     private val devicePushTokenRepository: DevicePushTokenRepository,
     private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
     private val analytics: ServerAnalytics,
+    private val notifications: com.knk.manyak.push.inbox.UserNotificationStore,
 ) {
 
     @Transactional
@@ -81,6 +82,7 @@ class UserWithdrawalService(
         submissions.deleteForUser(id)
         drafts.deleteForUser(id)
         devicePushTokenRepository.deleteByUserId(id)
+        notifications.deleteForUser(id)
         refreshTokenStore.revokeAllForUser(id)
         analytics.withdrawalSucceeded(
             user.publicId.toString(), ChronoUnit.DAYS.between(user.createdAt, now),

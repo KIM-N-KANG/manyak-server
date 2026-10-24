@@ -35,7 +35,7 @@ GET {{baseUrl}}/api/v1/notices?limit=2&cursor={{noticeNextCursor}}
 GET {{baseUrl}}/api/v1/notices/{{publicReadNoticeId}}
 
 > {%
-    client.test("공개 상세", () => client.assert(response.status === 200 && typeof response.body.body === "string" && !("createdBy" in response.body), `actual=${JSON.stringify(response.body)}`));
+    client.test("공개 상세", () => client.assert(response.status === 200 && typeof response.body.body === "string" && ["SERVICE", "UPDATE", "MAINTENANCE", "EVENT", "PROMOTION"].includes(response.body.tag) && !("createdBy" in response.body), `actual=${JSON.stringify(response.body)}`));
 %}
 
 ### 무효 토큰도 읽지 않음
@@ -82,4 +82,18 @@ GET {{baseUrl}}/api/v1/notices?limit=999
 
 > {%
     client.test("상한 보정", () => client.assert(response.status === 200 && response.body.items.length <= 50, `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 태그별 목록 — 다음 페이지에도 같은 tag를 보낸다
+GET {{baseUrl}}/api/v1/notices?tag=MAINTENANCE&limit=20
+
+> {%
+    client.test("태그 필터", () => client.assert(response.status === 200 && response.body.items.every(n => n.tag === "MAINTENANCE"), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 모르는 태그 400
+GET {{baseUrl}}/api/v1/notices?tag=NOTICE
+
+> {%
+    client.test("태그 오류", () => client.assert(response.status === 400, `actual=${response.status}`));
 %}

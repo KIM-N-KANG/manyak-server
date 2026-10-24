@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit
 
 @SpringBootTest
 class CampaignLifecycleIntegrationTests {
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
@@ -35,7 +36,7 @@ class CampaignLifecycleIntegrationTests {
     @MockitoBean private lateinit var sender: FcmPushSender
     private val now = Instant.parse("2026-10-21T03:00:00Z")
     @BeforeEach fun clean() { cleaner.cleanAll(); reset(users, sender) }
-    private fun service(at: Instant = now) = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC))
+    private fun service(at: Instant = now) = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications)
     private fun row(start: Instant? = null) = campaigns.save(PushCampaign(title = "예약", body = "본문", scheduledAt = now,
         status = if (start == null) PushCampaignStatus.SCHEDULED else PushCampaignStatus.SENDING, startedAt = start,
         targetCount = 4, sentCount = 2))
@@ -49,7 +50,7 @@ class CampaignLifecycleIntegrationTests {
             override fun withZone(zone: java.time.ZoneId): Clock = this
         }
         doAnswer { at = at.plusSeconds(60); emptyList<Long>() }.`when`(users).findMarketingPushTargetIds()
-        PromotionPushService(campaigns, users, sender, stories, clock).sendDue(now)
+        PromotionPushService(campaigns, users, sender, stories, clock, notifications = notifications).sendDue(now)
         assertThat(campaigns.findAll().map { it.startedAt }.sortedBy { it }).containsExactly(now, now.plusSeconds(60))
     }
 

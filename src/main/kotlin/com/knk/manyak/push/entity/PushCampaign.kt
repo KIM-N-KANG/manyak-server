@@ -83,6 +83,10 @@ class PushCampaign(
     @Column(name = "notice_id", unique = true)
     val noticeId: Long? = null,
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notice_tag", length = 16)
+    val noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+
     /** 이동 대상 스토리의 내부 FK. API와 푸시 데이터에는 스토리 publicId를 사용한다. */
     @Column(name = "story_id")
     val storyId: Long? = null,

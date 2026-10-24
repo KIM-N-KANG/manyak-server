@@ -24,6 +24,7 @@ class PushCampaignConfigurationTests {
         .withBean(UserRepository::class.java, { mock(UserRepository::class.java) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
         .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
+        .withBean(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java, { mock(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java) })
         .withPropertyValues("manyak.push.promotion.enabled=false")
 
     @ParameterizedTest

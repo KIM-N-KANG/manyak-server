@@ -11,6 +11,10 @@ interface StoryCreationRequestRepository : JpaRepository<StoryCreationRequest, L
     fun findByRequestId(requestId: UUID): StoryCreationRequest?
     fun findByUserIdAndStatus(userId: Long, status: com.knk.manyak.story.entity.StoryCreationRequestStatus): List<StoryCreationRequest>
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM StoryCreationRequest r WHERE r.id = :id")
+    fun findByIdForUpdate(id: Long): StoryCreationRequest?
+
     /** 재요청 판정을 직렬화하려 행을 비관적 락으로 조회한다(동시 FAILED 재실행이 둘 다 통과하지 않도록). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT r FROM StoryCreationRequest r WHERE r.requestId = :requestId")

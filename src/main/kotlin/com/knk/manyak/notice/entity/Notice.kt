@@ -4,6 +4,16 @@ import jakarta.persistence.*
 import java.time.Instant
 import java.util.UUID
 
+enum class NoticeTag {
+    SERVICE, UPDATE, MAINTENANCE, EVENT, PROMOTION;
+
+    val pushKind: com.knk.manyak.push.dto.PushKind
+        get() = when (this) {
+            EVENT, PROMOTION -> com.knk.manyak.push.dto.PushKind.MARKETING
+            else -> com.knk.manyak.push.dto.PushKind.SERVICE
+        }
+}
+
 enum class NoticeStatus { DRAFT, PUBLISHED }
 
 @Entity
@@ -13,6 +23,7 @@ class Notice(
     @Column(name = "public_id", nullable = false, unique = true) val publicId: UUID = UUID.randomUUID(),
     @Column(nullable = false, length = 100) var title: String,
     @Column(nullable = false, columnDefinition = "text") var body: String,
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16) var tag: NoticeTag,
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 10) var status: NoticeStatus = NoticeStatus.DRAFT,
     @Column(name = "published_at") var publishedAt: Instant? = null,
     @Column(name = "notified_at") var notifiedAt: Instant? = null,

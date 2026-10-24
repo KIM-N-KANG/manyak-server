@@ -31,9 +31,9 @@ class NoticeService(
 ) {
     fun list(request: AdminNoticesRequest) = reads.list(request)
     fun detail(id: UUID) = reads.detail(id) ?: missing()
-    fun published(limit: Int, cursor: String?): PublicNoticePageResponse {
+    fun published(limit: Int, cursor: String?, tag: NoticeTag? = null): PublicNoticePageResponse {
         val size = limit.coerceIn(1, 50)
-        val rows = reads.published(size + 1, cursor?.let(cursors::decode))
+        val rows = reads.published(size + 1, cursor?.let(cursors::decode), tag)
         val items = rows.take(size)
         return PublicNoticePageResponse(items.map { it.item }, if (rows.size > size) cursors.encode(items.last().cursor) else null)
     }
@@ -41,21 +41,21 @@ class NoticeService(
     fun publishedDetail(id: String): PublicNoticeResponse {
         val uuid = runCatching { UUID.fromString(id) }.getOrNull()?.takeIf { it.toString().equals(id, true) } ?: missing()
         val notice = notices.findByPublicId(uuid)?.takeIf { it.status == NoticeStatus.PUBLISHED } ?: missing()
-        return PublicNoticeResponse(notice.publicId, notice.title, notice.body, notice.publishedAt!!, notice.updatedAt)
+        return PublicNoticeResponse(notice.publicId, notice.title, notice.tag, notice.body, notice.publishedAt!!, notice.updatedAt)
     }
     @Transactional
     fun create(actor: Long, request: CreateNoticeRequest): AdminNoticeResponse {
         val now = now()
-        val row = notices.save(Notice(title = request.title, body = request.body, createdByUserId = actor, createdAt = now, updatedAt = now))
+        val row = notices.save(Notice(title = request.title, body = request.body, tag = request.tag, createdByUserId = actor, createdAt = now, updatedAt = now))
         val result = detail(row.publicId)
         audits.recordChange(actor, AdminAuditAction.NOTICE_CREATED, row.publicId.toString(), request.reason, after = state(row))
         return result
     }
     @Transactional
     fun update(actor: Long, id: UUID, request: UpdateNoticeRequest): AdminNoticeResponse {
-        if (request.title == null && request.body == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목 또는 본문을 지정하세요.")
+        if (request.title == null && request.body == null && request.tag == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목, 본문 또는 태그를 지정하세요.")
         val row = lock(id); val before = state(row)
-        request.title?.let { row.title = it }; request.body?.let { row.body = it }; row.updatedAt = now()
+        request.title?.let { row.title = it }; request.body?.let { row.body = it }; request.tag?.let { row.tag = it }; row.updatedAt = now()
         notices.flush()
         val result = detail(id)
         audits.recordChange(actor, AdminAuditAction.NOTICE_UPDATED, id.toString(), request.reason, before, state(row))
@@ -63,14 +63,13 @@ class NoticeService(
     }
     @Transactional
     fun publish(actor: Long, id: UUID, request: PublishNoticeRequest): AdminNoticeResponse {
-        if (request.notify && request.notificationKind == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "알림 유형을 지정하세요.")
         val row = lock(id)
         if (row.status != NoticeStatus.DRAFT) conflict("이미 게시된 공지입니다.")
         val before = publicationState(row); val now = now()
         row.status = NoticeStatus.PUBLISHED; row.publishedAt = now; row.updatedAt = now
-        val notified = request.notify && row.notifiedAt == null
+        val notified = row.notifiedAt == null
         if (notified) {
-            pushes.request(row.id, row.title, notificationBody(row.body), request.notificationKind!!, now)
+            pushes.request(row.id, row.title, notificationBody(row.body), row.tag.pushKind, row.tag, now)
             row.notifiedAt = now
         }
         notices.flush()
@@ -80,7 +79,7 @@ class NoticeService(
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
             override fun afterCommit() {
                 val fields = mutableMapOf<String, Any?>("notice_id" to id.toString(), "notified" to notified)
-                if (notified) fields["notification_kind"] = request.notificationKind!!.name
+                if (notified) fields["notification_kind"] = row.tag.pushKind.name
                 logger.event("notice_published", fields)
             }
         })
@@ -105,7 +104,7 @@ class NoticeService(
         notices.delete(row); notices.flush()
         audits.recordChange(actor, AdminAuditAction.NOTICE_DELETED, id.toString(), reason, before = before)
     }
-    private fun state(row: Notice) = mapper.createObjectNode().put("title", row.title).put("status", row.status.name)
+    private fun state(row: Notice) = mapper.createObjectNode().put("title", row.title).put("tag", row.tag.name).put("status", row.status.name)
     private fun publicationState(row: Notice): tools.jackson.databind.JsonNode = mapper.valueToTree(mapOf(
         "status" to row.status.name, "publishedAt" to row.publishedAt, "notifiedAt" to row.notifiedAt,
     ))

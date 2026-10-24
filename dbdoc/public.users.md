@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) [public.push_delivery_results](public.push_delivery_results.md) [public.notices](public.notices.md) |  |  |
+| id | bigint | nextval('users_id_seq'::regclass) | false | [public.users](public.users.md) [public.social_accounts](public.social_accounts.md) [public.credit_wallets](public.credit_wallets.md) [public.credit_transactions](public.credit_transactions.md) [public.credit_lots](public.credit_lots.md) [public.user_story_ending_reaches](public.user_story_ending_reaches.md) [public.story_likes](public.story_likes.md) [public.story_reports](public.story_reports.md) [public.device_push_tokens](public.device_push_tokens.md) [public.credit_orders](public.credit_orders.md) [public.user_consents](public.user_consents.md) [public.story_submissions](public.story_submissions.md) [public.user_personas](public.user_personas.md) [public.story_drafts](public.story_drafts.md) [public.admin_accounts](public.admin_accounts.md) [public.admin_audit_logs](public.admin_audit_logs.md) [public.credit_admin_adjustments](public.credit_admin_adjustments.md) [public.push_delivery_results](public.push_delivery_results.md) [public.notices](public.notices.md) [public.user_notifications](public.user_notifications.md) |  |  |
 | public_id | uuid | gen_random_uuid() | false |  |  |  |
 | nickname | varchar(50) |  | false |  |  |  |
 | profile_image_url | text |  | true |  |  |  |
@@ -70,6 +70,7 @@ erDiagram
 "public.credit_admin_adjustments" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.push_delivery_results" }o--o| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
+"public.user_notifications" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.users" {
   bigint id
@@ -288,6 +289,23 @@ erDiagram
   bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_16_ tag
+}
+"public.user_notifications" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_255_ message_key
+  varchar_40_ type
+  varchar_16_ category
+  varchar_120_ title
+  varchar_300_ body
+  varchar_512_ deep_link
+  uuid story_public_id
+  uuid notice_public_id
+  varchar_16_ notice_tag
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone read_at
 }
 ```
 

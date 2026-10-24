@@ -312,8 +312,8 @@ class StoryCreationRequestRecorder(
         inTransaction: (() -> Unit)? = null,
     ) {
         txTemplate.execute {
-            val row = repository.findById(id)
-                .orElseThrow { IllegalStateException("Story creation request row $id disappeared") }
+            val row = repository.findByIdForUpdate(id)
+                ?: throw IllegalStateException("Story creation request row $id disappeared")
             row.status = status
             if (resultJson != null) {
                 row.resultJson = resultJson

@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 15 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 16 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -59,10 +59,11 @@
 | [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
-| [public.notices](public.notices.md) | 10 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
+| [public.notices](public.notices.md) | 11 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
 | [public.chat_models](public.chat_models.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
+| [public.user_notifications](public.user_notifications.md) | 14 |  | BASE TABLE |
 
 ## Relations
 
@@ -139,6 +140,7 @@ erDiagram
 "public.push_delivery_results" }o--o| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
+"public.user_notifications" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -574,6 +576,7 @@ erDiagram
   varchar_16_ kind
   bigint notice_id FK
   bigint story_id FK
+  varchar_16_ notice_tag
 }
 "public.credit_orders" {
   bigint id
@@ -739,6 +742,7 @@ erDiagram
   bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_16_ tag
 }
 "public.chat_models" {
   varchar_20_ code
@@ -770,6 +774,22 @@ erDiagram
   jsonb value
   timestamp_with_time_zone fetched_at
   timestamp_with_time_zone finalized_at
+}
+"public.user_notifications" {
+  bigint id
+  uuid public_id
+  bigint user_id FK
+  varchar_255_ message_key
+  varchar_40_ type
+  varchar_16_ category
+  varchar_120_ title
+  varchar_300_ body
+  varchar_512_ deep_link
+  uuid story_public_id
+  uuid notice_public_id
+  varchar_16_ notice_tag
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone read_at
 }
 ```
 

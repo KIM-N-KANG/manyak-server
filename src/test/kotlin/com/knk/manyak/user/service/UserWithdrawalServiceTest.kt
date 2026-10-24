@@ -29,7 +29,8 @@ class UserWithdrawalServiceTest {
     private val refreshTokenStore: RefreshTokenStore = mock(RefreshTokenStore::class.java)
     private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val analytics = mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
-    private val service = UserWithdrawalService(org.mockito.Mockito.mock(com.knk.manyak.story.submission.StorySubmissionRepository::class.java), userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository, mock(com.knk.manyak.user.draft.StoryDraftRepository::class.java), analytics)
+    private val notifications = mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java)
+    private val service = UserWithdrawalService(org.mockito.Mockito.mock(com.knk.manyak.story.submission.StorySubmissionRepository::class.java), userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository, mock(com.knk.manyak.user.draft.StoryDraftRepository::class.java), analytics, notifications)
 
     @Test
     fun `탈퇴는 사용자 행을 잠그고 읽는다`() {
@@ -41,6 +42,7 @@ class UserWithdrawalServiceTest {
 
         // 잠금 없는 findById로 읽으면 동시 갱신이 되돌아간다 — 반드시 findByIdForUpdate여야 한다.
         verify(userRepository).findByIdForUpdate(5L)
+        verify(notifications).deleteForUser(5L)
         verify(userRepository, never()).findById(5L)
         assertThat(user.status).isEqualTo(UserStatus.DELETED)
         assertThat(user.withdrawnFromStatus).isEqualTo(UserStatus.ACTIVE)

@@ -42,6 +42,7 @@ class PromotionPushService(
     private val properties: PushCampaignProperties = PushCampaignProperties(),
     private val structuredLogger: StructuredLogger = StructuredLogger(),
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String = "https://manyak.app",
+    private val notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -80,8 +81,6 @@ class PromotionPushService(
         var targets = 0
         var sent = 0
         return try {
-            val targetIds = if (campaign.kind == PushKind.SERVICE) userRepository.findServicePushTargetIds() else userRepository.findMarketingPushTargetIds()
-            targets = targetIds.size
             // 문구는 회차 시작에 한 번만 조립한다. (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
             val data = mutableMapOf(
                 "type" to if (campaign.kind == PushKind.SERVICE) "NOTICE" else TYPE_PROMOTION,
@@ -92,12 +91,15 @@ class PromotionPushService(
             campaign.noticeId?.let { id ->
                 val publicId = requireNotNull(pushCampaignRepository.findNoticePublicId(id)) { "공지 참조가 없습니다." }
                 data["noticeId"] = publicId.toString()
+                campaign.noticeTag?.let { data["noticeTag"] = it.name }
                 data["deepLink"] = pushDeepLink(webBaseUrl, "/notices/$publicId", data.getValue("type"), campaign.publicId.toString())
             }
-            if (outbox != null) {
-                sent = outbox.record(targetIds, withStoryDestination(campaign, data),
-                    if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(), kind = campaign.kind.name)
-            } else targetIds.forEach { userId ->
+            val round = notifications.record(withStoryDestination(campaign, data),
+                if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(),
+                outbox, kind = campaign.kind.name, onTargetsSelected = { targets = it })
+            if (round.recordedPushes != null) {
+                sent = round.recordedPushes
+            } else round.pushTargetIds.forEach { userId ->
                 val messagePrefix = if (campaign.kind == PushKind.SERVICE) "notice" else "promotion"
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
