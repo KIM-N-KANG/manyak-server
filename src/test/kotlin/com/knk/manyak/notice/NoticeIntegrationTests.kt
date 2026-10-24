@@ -292,6 +292,11 @@ class NoticeIntegrationTests {
         assertThat(api["paths"]["/api/v1/admin/notices"]["get"]["security"].toString()).contains("bearerAuth")
         assertThat(api["components"]["schemas"]["AdminNoticeResponse"]["properties"].has("noticeId")).isTrue()
     }
+    @Test fun `공지 생성 계약은 태그를 필수로 표시한다`() {
+        val api = json(client.get().uri("/v3/api-docs").exchange().expectStatus().isOk)
+        val required = api["components"]["schemas"]["CreateNoticeRequest"]["required"]
+        assertThat(required.toString()).contains("\"tag\"")
+    }
     @Test fun `알림 없이 게시했던 공지도 첫 알림 요청은 재게시 때 한 번 가능하다`() {
         val id = create()["noticeId"].asText()
         jdbc.update("UPDATE notices SET published_at=CURRENT_TIMESTAMP WHERE public_id=?", UUID.fromString(id))

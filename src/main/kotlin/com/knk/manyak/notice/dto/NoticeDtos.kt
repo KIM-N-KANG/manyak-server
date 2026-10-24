@@ -11,7 +11,7 @@ import java.util.UUID
 data class CreateNoticeRequest(
     @field:NotBlank @field:Size(max = 100) val title: String,
     @field:NotBlank @field:Size(max = 5000) val body: String,
-    val tag: NoticeTag,
+    @field:NotNull val tag: NoticeTag,
     @field:NotBlank @field:Size(max = 500) val reason: String,
 )
 data class UpdateNoticeRequest(
