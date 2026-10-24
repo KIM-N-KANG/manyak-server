@@ -32,8 +32,9 @@ class UserNotificationPostgresTests {
             marketing_push_agreed_at TIMESTAMPTZ, reward_identity_user_id BIGINT);
             CREATE TABLE credit_transactions(idempotency_key TEXT);
             CREATE TABLE notices(id BIGINT PRIMARY KEY);
-            CREATE TABLE push_campaigns(id BIGINT PRIMARY KEY);
-            INSERT INTO notices VALUES (1)""")
+            CREATE TABLE push_campaigns(id BIGINT PRIMARY KEY, notice_id BIGINT UNIQUE REFERENCES notices(id));
+            INSERT INTO notices VALUES (1);
+            INSERT INTO push_campaigns(id, notice_id) VALUES (1, 1), (2, NULL)""")
         jdbc.execute(File("src/main/resources/db/migration/V111__create_user_notifications.sql").readText())
         jdbc.execute(File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText())
         store = UserNotificationStore(jdbc)
@@ -44,6 +45,13 @@ class UserNotificationPostgresTests {
         jdbc.update("DELETE FROM credit_transactions")
         jdbc.update("DELETE FROM push_outbox")
         jdbc.update("INSERT INTO users VALUES (1, ?, 'ACTIVE', ?, NULL)", UUID.randomUUID(), java.sql.Timestamp.from(now))
+    }
+
+    @Test fun `태그 없던 기존 공지 캠페인은 V111 후 연결 공지 태그를 갖는다`() {
+        assertThat(jdbc.queryForObject("SELECT notice_tag FROM push_campaigns WHERE id=1", String::class.java))
+            .isEqualTo(jdbc.queryForObject("SELECT tag FROM notices WHERE id=1", String::class.java))
+            .isEqualTo("SERVICE")
+        assertThat(jdbc.queryForObject("SELECT notice_tag FROM push_campaigns WHERE id=2", String::class.java)).isNull()
     }
 
     @Test fun `공지 태그 마이그레이션은 기존 행만 SERVICE로 채우고 기본값 없이 다섯 값만 허용한다`() {
