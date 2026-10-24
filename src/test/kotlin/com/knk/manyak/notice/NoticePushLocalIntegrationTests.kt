@@ -27,6 +27,8 @@ import java.time.ZoneOffset
 @SpringBootTest(properties = ["manyak.push.mode=local"])
 class NoticePushLocalIntegrationTests {
     @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var users: UserRepository
@@ -53,24 +55,36 @@ class NoticePushLocalIntegrationTests {
         val target = user("서비스 수신")
         user("서비스 거부", service = false, marketing = true)
         user("정지", status = UserStatus.SUSPENDED)
-        val notice = notices.save(Notice(title = "점검", body = "내용", createdByUserId = target.id))
-        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
+        val notice = notices.save(Notice(title = "점검", body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, createdByUserId = target.id))
+        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
+        assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
+        assertThat(jdbc.queryForList("SELECT deep_link FROM user_notifications", String::class.java))
+            .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=notice")
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "NOTICE").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
+            .containsEntry("noticeTag", "UPDATE").containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
     }
-    @Test fun `로컬 광고성 공지는 서비스 동의와 별개로 광고와 야간 동의를 재확인한다`() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["이벤트", "(광고) 이벤트"])
+    fun `로컬 광고성 공지는 동의와 태그 및 광고 중복을 확인한다`(title: String) {
         val target = user("야간 수신", service = false, marketing = true, night = true)
         user("주간만", marketing = true)
         user("서비스만")
-        val notice = notices.save(Notice(title = "이벤트", body = "내용", createdByUserId = target.id))
-        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
+        val notice = notices.save(Notice(title = title, body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = target.id))
+        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
+        assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
+        assertThat(jdbc.queryForList("SELECT deep_link FROM user_notifications", String::class.java))
+            .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=promotion")
         assertThat(sent.single().first).isEqualTo(target.id)
+        assertThat(jdbc.queryForList("SELECT title FROM user_notifications", String::class.java)).containsOnly("(광고) 이벤트")
+        assertThat(notices.findById(notice.id).orElseThrow().title).isEqualTo(title)
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
+            .containsEntry("noticeTag", "EVENT").containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
     }
 }

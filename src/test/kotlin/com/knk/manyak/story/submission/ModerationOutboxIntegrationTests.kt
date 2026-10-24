@@ -23,6 +23,9 @@ import java.util.concurrent.Executor
 @ActiveProfiles("test")
 @SpringBootTest(properties = ["manyak.push.mode=remote"])
 class ModerationOutboxIntegrationTests {
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private lateinit var inbox: com.knk.manyak.push.inbox.UserNotificationStore
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
@@ -108,6 +111,25 @@ class ModerationOutboxIntegrationTests {
         assertEquals("APPROVED", messages.single().data["status"])
         worker.finish(row.id, 1, ModerationResult("APPROVED", emptyList(), null))
         assertEquals(1, messages.size)
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = SubmissionStatus::class, names = ["APPROVED", "REJECTED", "FAILED"])
+    fun `내역 DB 장애이면 검수 종료와 라이브 변경을 함께 롤백한다`(status: SubmissionStatus) {
+        val user = users.save(User(nickname = "작가", servicePushEnabled = false))
+        val story = stories.save(Story(userId = user.id, title = "원본"))
+        service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정"), user.id)
+        val row = submissions.findAll().single()
+        Mockito.doThrow(org.springframework.dao.TransientDataAccessResourceException("inbox unavailable")).`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(inbox)).insert(
+            Mockito.any(com.knk.manyak.push.inbox.UserNotification::class.java)
+                ?: com.knk.manyak.push.inbox.UserNotification(userId = user.id, messageKey = "", type = com.knk.manyak.push.inbox.NotificationType.STORY_MODERATION_COMPLETED, title = "", body = ""))
+        assertThrows(org.springframework.dao.TransientDataAccessResourceException::class.java) {
+            if (status == SubmissionStatus.FAILED) worker.fail(row.id, 1, "APPLY_FAILED")
+            else worker.finish(row.id, 1, ModerationResult(status.name, emptyList(), null))
+        }
+        assertEquals(SubmissionStatus.PENDING, submissions.findById(row.id).orElseThrow().status)
+        assertEquals("원본", stories.findById(story.id).orElseThrow().title)
+        assertEquals(0L, jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java))
     }
 
     @Test fun `아웃박스 DB 장애이면 라이브와 승인 상태가 함께 롤백된다`() {

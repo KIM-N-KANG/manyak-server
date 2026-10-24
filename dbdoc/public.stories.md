@@ -203,6 +203,7 @@ erDiagram
   varchar_16_ kind
   bigint notice_id FK
   bigint story_id FK
+  varchar_16_ notice_tag
 }
 "public.story_submissions" {
   bigint id

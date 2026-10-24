@@ -2,6 +2,7 @@ package com.knk.manyak.notice.repository
 
 import com.knk.manyak.notice.dto.*
 import com.knk.manyak.notice.entity.NoticeStatus
+import com.knk.manyak.notice.entity.NoticeTag
 import com.knk.manyak.notice.service.NoticeCursor
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.RowMapper
@@ -16,9 +17,9 @@ import java.util.UUID
 internal data class PublicNoticeRow(val item: PublicNoticeItemResponse, val cursor: NoticeCursor)
 @Repository
 class NoticeReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
-    private val columns = "n.public_id,n.title,n.status,n.published_at,n.notified_at,n.created_at,n.updated_at,u.public_id AS author_id,u.nickname"
+    private val columns = "n.public_id,n.title,n.tag,n.status,n.published_at,n.notified_at,n.created_at,n.updated_at,u.public_id AS author_id,u.nickname"
     private val from = "FROM notices n JOIN users u ON u.id=n.created_by_user_id"
-    private fun response(rs: ResultSet, body: String? = null) = AdminNoticeResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), body,
+    private fun response(rs: ResultSet, body: String? = null) = AdminNoticeResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), NoticeTag.valueOf(rs.getString("tag")), body,
         NoticeStatus.valueOf(rs.getString("status")), rs.getTimestamp("published_at")?.toInstant(), rs.getTimestamp("notified_at")?.toInstant(),
         NoticeAuthorResponse(rs.getObject("author_id", UUID::class.java), rs.getString("nickname")), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant())
     fun detail(id: UUID): AdminNoticeResponse? = jdbc.query("SELECT $columns,n.body $from WHERE n.public_id=:id", mapOf("id" to id),
@@ -46,15 +47,16 @@ class NoticeReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
             params + mapOf("size" to request.size, "offset" to offset), RowMapper { rs, _ -> response(rs) })
         return AdminNoticePageResponse(rows, request.page, request.size, count, (count + request.size - 1) / request.size)
     }
-    internal fun published(limit: Int, cursor: NoticeCursor?): List<PublicNoticeRow> {
+    internal fun published(limit: Int, cursor: NoticeCursor?, tag: NoticeTag?): List<PublicNoticeRow> {
         val params = mutableMapOf<String, Any>("limit" to limit)
+        val tagCondition = tag?.let { params["tag"] = it.name; "AND tag=:tag" } ?: ""
         val condition = cursor?.let {
             params["at"] = it.publishedAt.atOffset(ZoneOffset.UTC); params["id"] = it.id
             "AND (published_at < :at OR (published_at = :at AND id < :id))"
         } ?: ""
-        return jdbc.query("SELECT id,public_id,title,published_at FROM notices WHERE status='PUBLISHED' $condition ORDER BY published_at DESC,id DESC LIMIT :limit", params, RowMapper { rs, _ ->
+        return jdbc.query("SELECT id,public_id,title,tag,published_at FROM notices WHERE status='PUBLISHED' $tagCondition $condition ORDER BY published_at DESC,id DESC LIMIT :limit", params, RowMapper { rs, _ ->
             val at = rs.getTimestamp("published_at").toInstant()
-            PublicNoticeRow(PublicNoticeItemResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), at), NoticeCursor(at, rs.getLong("id")))
+            PublicNoticeRow(PublicNoticeItemResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), NoticeTag.valueOf(rs.getString("tag")), at), NoticeCursor(at, rs.getLong("id")))
         })
     }
     private fun badRequest(): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, "검색어와 페이지·정렬 값을 확인하세요.")

@@ -59,6 +59,7 @@ class PromotionPushIntegrationTests {
 
     @MockitoSpyBean private lateinit var userRepository: UserRepository
 
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var pushCampaignRepository: PushCampaignRepository
@@ -94,7 +95,7 @@ class PromotionPushIntegrationTests {
      * 주입된 시스템 시계를 그대로 두면 테스트를 21시 이후에 돌릴 때 결과가 달라진다.
      */
     private fun service(clock: Clock = Clock.fixed(NOW, ZoneOffset.UTC)) =
-        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, clock)
+        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, clock, notifications = notifications)
 
     private fun eligibleMember(nightAgreed: Boolean = false): User =
         saveMember(nightAgreed = nightAgreed).also { saveToken(it) }
@@ -299,7 +300,7 @@ class PromotionPushIntegrationTests {
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
         val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
-        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, crossing)
+        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, crossing, notifications = notifications)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 
