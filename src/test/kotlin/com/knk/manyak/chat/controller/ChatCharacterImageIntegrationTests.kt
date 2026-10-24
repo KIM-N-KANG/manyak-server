@@ -47,6 +47,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatCharacterImageIntegrationTests {
 
+    @Autowired private lateinit var aiLogs: com.knk.manyak.global.observability.aicall.AiCallLogRepository
+    @Autowired private lateinit var imageRecorder: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder
     @Autowired private lateinit var trials: com.knk.manyak.credit.service.GuestTrialLimitService
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -230,6 +232,9 @@ class ChatCharacterImageIntegrationTests {
             .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult()
         val second = GatedChatTurnAiClientConfig.lastRequest!!.imageSlots.single()
         assertThat(second.key).isNotEqualTo(first.key).startsWith("chat-images/${chat.publicId}/1-")
+        val imageLogs = aiLogs.findAll().filter { it.feature.value == "chat_image" }
+        assertThat(imageLogs).hasSize(2).allMatch { it.status.name == "SUCCEEDED" && it.turnNumber == 1 && it.chatId == chat.publicId }
+
         assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_IMAGE).used).isEqualTo(2)
     }
 
@@ -305,6 +310,20 @@ class ChatCharacterImageIntegrationTests {
 
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.characterImages.map { it.imageUrl })
             .containsExactly("https://cdn.test/characters/uploaded/s/new.webp")
+    }
+
+    @Test fun `이미지 관측 적재 오류에도 HTTP 스트림은 completed로 끝난다`() {
+        GatedChatTurnAiClientConfig.realtimeEnabled = true
+        GatedChatTurnAiClientConfig.realtimeExists = true
+        val old = org.springframework.test.util.ReflectionTestUtils.getField(imageRecorder, "repository")
+        val broken = org.mockito.Mockito.mock(com.knk.manyak.global.observability.aicall.AiCallLogRepository::class.java)
+        org.mockito.Mockito.`when`(broken.saveAndFlush(org.mockito.Mockito.any(com.knk.manyak.global.observability.aicall.AiCallLog::class.java))).thenThrow(IllegalStateException("db unavailable"))
+        org.springframework.test.util.ReflectionTestUtils.setField(imageRecorder, "repository", broken)
+        try {
+            val chat = storyChatRepository.save(StoryChat(storyId = seedStory().id))
+            assertThat(stream(chat, "살펴본다")).contains("event:completed").doesNotContain("event:error")
+            assertThat(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)).hasSize(2)
+        } finally { org.springframework.test.util.ReflectionTestUtils.setField(imageRecorder, "repository", old) }
     }
 
     private fun seedStory(): Story = storyRepository.save(Story(title = "인물 이미지 스토리", genre = "판타지"))

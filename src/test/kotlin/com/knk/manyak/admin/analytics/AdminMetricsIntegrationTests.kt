@@ -20,15 +20,20 @@ import java.time.*
 @AutoConfigureRestTestClient
 @org.springframework.context.annotation.Import(AdminMetricsTestClock::class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids=", "manyak.admin.ai-prices.models.priced.input-million-krw=1000", "manyak.admin.ai-prices.models.priced.output-million-krw=4000"])
+    properties = ["manyak.admin.dashboard.excluded-user-ids="])
 class AdminMetricsIntegrationTests {
     companion object {
         private val server = MockWebServer().apply { start() }
+        private val langfuse = MockWebServer().apply { start() }
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
+            r.add("manyak.admin.langfuse.host") { langfuse.url("/").toString() }
+            r.add("manyak.admin.langfuse.public-key") { "mock" }
+            r.add("manyak.admin.langfuse.secret-key") { "mock" }
+            r.add("manyak.admin.langfuse.environment") { "prod" }
             r.add("manyak.analytics.amplitude.api-key") { "mock" }; r.add("manyak.analytics.amplitude.secret-key") { "mock" }
             r.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
         }
-        @JvmStatic @AfterAll fun stop() { server.shutdown() }
+        @JvmStatic @AfterAll fun stop() { server.shutdown(); langfuse.shutdown() }
     }
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
@@ -36,20 +41,58 @@ class AdminMetricsIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var reads: AdminMetricReadService
+    @Autowired private lateinit var costs: AdminAiCostService
     @Autowired private lateinit var stories: com.knk.manyak.story.repository.StoryRepository
     @Autowired private lateinit var chats: com.knk.manyak.chat.repository.StoryChatRepository
     @Autowired private lateinit var socials: com.knk.manyak.auth.repository.SocialAccountRepository
     @Autowired private lateinit var clock: Clock
     private val mapper = ObjectMapper()
+    @BeforeEach fun prepareLangfuse() {
+        (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(120)
+        langfuse.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setBody("{\"data\":[]}")
+        }
+    }
+    private fun langfuseCosts(vararg rows: Triple<String, String, String>) {
+        langfuse.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to rows.map { (trace, model, cost) ->
+                mapOf("time_dimension" to "2026-10-21T00:00:00Z", "traceName" to trace, "providedModelName" to model, "sum_totalCost" to cost, "sum_totalTokens" to "1000")
+            })))
+        }
+    }
+    @Test fun `이미지 성공 3장은 144원이고 Langfuse 본문 비용과 합산하되 턴당 원가에는 섞지 않는다`() {
+        langfuseCosts(Triple("채팅 턴", "priced", "0.004"))
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "이미지 원가 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
+        for ((i, model) in listOf(null, "image-unknown", "priced").withIndex()) {
+            jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,model,status,input_token_count,output_token_count,created_at) VALUES (0,?,'test','chat_image',?,'SUCCEEDED',9,9,'2026-10-21T00:00:00Z')", "image-$i", model)
+        }
+        jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,status,created_at) VALUES (0,'image-failed','test','chat_image','FAILED','2026-10-21T00:00:00Z')")
+        jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,model,status,input_token_count,output_token_count,created_at) VALUES (0,'body','test','chat_response','priced','SUCCEEDED',1000,500,'2026-10-21T00:00:00Z')")
+        val body = mapper.readTree(client.get().uri("/api/v1/admin/quality/ai-cost?from=2026-10-21&to=2026-10-21")
+            .header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+        val images = body["daily"][0]["byFeature"].filter { it["feature"].asText() == "chat_image" }
+        assertThat(images.sumOf { it["calls"].asLong() }).isEqualTo(3)
+        assertThat(images.sumOf { it["costKrw"].asDouble() }).isEqualTo(144.0)
+        for (image in images) for (key in listOf("callsWithoutTokens", "inputTokens", "outputTokens")) assertThat(image[key].asLong()).isZero()
+        assertThat(body["chatImageUnitCostKrw"].asDouble()).isEqualTo(48.0)
+        assertThat(body["totals"]["costKrw"].asDouble()).isEqualTo(149.6)
+        assertThat(body["totals"]["costPerTurnKrw"].asDouble()).isEqualTo(5.6)
+        assertThat(body["totals"]["costPerStoryKrw"].isNull).isTrue()
+        assertThat(body["unpricedModels"].size()).isZero()
+    }
+
     @Test fun `아홉 관리자 지표 API의 권한과 DB 장애 격리 계약`() {
         cleaner.cleanAll()
         server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         val admin = users.save(User(nickname = "관리자")); val ordinary = users.save(User(nickname = "회원"))
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", admin.id)
         val token = jwt.issueAdminToken(admin.publicId)
-        val db = listOf("/users/signups", "/conversion/turn-reach", "/quality/chat-options", "/quality/ai-cost")
-        val amplitude = listOf("/users/activity", "/users/retention", "/users/sessions", "/conversion/funnels/web-first-visit", "/quality/client")
-        for (path in db + amplitude) {
+        val db = listOf("/users/signups", "/conversion/turn-reach", "/quality/chat-options")
+        langfuse.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
+        val external = listOf("/quality/ai-cost", "/users/activity", "/users/retention", "/users/sessions", "/conversion/funnels/web-first-visit", "/quality/client")
+        for (path in db + external) {
             client.get().uri("/api/v1/admin$path").exchange().expectStatus().isUnauthorized
             client.get().uri("/api/v1/admin$path").header("Authorization", "Bearer ${jwt.issueAdminToken(ordinary.publicId)}").exchange().expectStatus().isForbidden
             val response = client.get().uri("/api/v1/admin$path").header("Authorization", "Bearer $token").exchange()
@@ -74,7 +117,7 @@ class AdminMetricsIntegrationTests {
                     u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { it.toString() to List(31) { day -> mapOf("count" to if(day==0) 20 else 5,"outof" to 20,"incomplete" to false) } })))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 30-it }))
                     u.encodedPath.endsWith("/users") -> mapOf("series" to listOf(listOf(100)))
-                    else -> mapOf("xValues" to dates.map { it.toString() },"series" to listOf(List(dates.size) { if(u.queryParameter("m")=="average" || u.encodedPath.endsWith("/average")) 4.5 else 10 }))
+                    else -> mapOf("xValues" to dates.map { it.toString() },"series" to listOf(List(dates.size) { if(u.queryParameter("m")=="average" || u.encodedPath.endsWith("/average")) 4.5 else 10 }), "seriesCollapsed" to listOf(listOf(mapOf("value" to 100))))
                 }
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to data)))
             }
@@ -128,7 +171,7 @@ class AdminMetricsIntegrationTests {
         val signup=reads.signups(q).daily.single()
         assertThat(signup.signups).isEqualTo(SignupCounts(3,1,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(4)
         val reach=reads.reach(q)
-        assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.5,0.25)
+        assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.75,0.75,0.75,0.5,0.5,0.5,0.25,0.25,0.0,0.0)
         assertThat(reach.segments[1].chats).isEqualTo(2); assertThat(reach.segments[2].chats).isEqualTo(2)
         assertThat(reach.guestToMember).isEqualTo(GuestConversion(1,1,1.0))
         val options=reads.options(q).daily.single()
@@ -139,22 +182,25 @@ class AdminMetricsIntegrationTests {
         ai("chat_response","priced",1000,500); ai("chat_response","priced",1000,500)
         ai("story_completion","unpriced",3000,1000); ai("chat_response",null,null,null); ai("chat_response","priced",0,null)
         ai("chat_response","priced",999999,999999,"FAILED"); ai("chat_response","priced",999999,999999,at=end)
-        val cost=reads.aiCost(q); val items=cost.daily.single().byFeature
-        val priced=items.first { it.model=="priced" }
+        langfuseCosts(Triple("채팅 턴", "priced", "0.004"), Triple("채팅 선택지", "priced", "0.001"),
+            Triple("스토리라인 생성", "priced", "0.004"), Triple("스토리 컴파일", "priced", "0.001"), Triple("스토리 컴파일", "unpriced", "0"))
+        val cost=costs.aiCost(q); val items=cost.daily.single().byFeature
+        val priced=items.first { it.model=="priced" && it.feature=="chat_response" }
         assertThat(priced.calls).isEqualTo(3); assertThat(priced.callsWithoutTokens).isEqualTo(1)
-        assertThat(priced.costKrw).isEqualByComparingTo("6")
+        assertThat(priced.costKrw).isEqualByComparingTo("5.6")
         assertThat(items.first { it.model==null }.callsWithoutTokens).isEqualTo(1)
-        assertThat(cost.totals.costPerTurnKrw).isEqualByComparingTo("1.5"); assertThat(cost.totals.costPerStoryKrw).isEqualByComparingTo("0")
+        assertThat(cost.totals.costPerTurnKrw).isEqualByComparingTo("1.75"); assertThat(cost.totals.costPerStoryKrw).isEqualByComparingTo("7")
         assertThat(cost.unpricedModels).containsExactly("unpriced")
         ai("choice_generation","priced",1000,0); ai("storyline_generation","priced",2000,1000); ai("story_completion","priced",1000,0)
-        val combined=reads.aiCost(q)
+        val combined=costs.aiCost(q)
         assertThat(combined.totals.costKrw).isEqualByComparingTo("14")
         assertThat(combined.totals.costPerTurnKrw).isEqualByComparingTo("1.75")
         assertThat(combined.totals.costPerStoryKrw).isEqualByComparingTo("3.5")
+        prepareLangfuse()
         q.from="2026-10-19"; q.to="2026-10-20"
         assertThat(reads.options(q).daily).hasSize(2); assertThat(reads.options(q).daily.sumOf { it.chats }).isZero()
         assertThat(reads.reach(q).segments.all { it.reached.all { p -> p.rate==0.0 } }).isTrue()
-        assertThat(reads.aiCost(q).totals.costPerTurnKrw).isNull()
+        assertThat(costs.aiCost(q).totals.costPerTurnKrw).isNull()
     }
 
 }

@@ -55,7 +55,8 @@ client.test("상세 진입 7단계", () => {
 %}
 
 ### 유입 소스·매체와 게시글 — 캠페인 필터 없음
-# [Amplitude] Page Viewed와 utm_medium의 in 연산자는 카탈로그 원문이며 운영 검증은 남아 있다.
+# 운영 검증 완료: [Amplitude] Page Viewed + utm_medium is [community,social], utm_content 묶음.
+# in 연산자는 HTTP 400(code 229)이므로 사용하지 않는다. 빈 정상 퍼널은 단계별 0이다.
 GET {{baseUrl}}/api/v1/admin/campaigns/sources?from={{from}}&to={{to}}
 Authorization: Bearer {{adminToken}}
 

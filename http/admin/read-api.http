@@ -183,6 +183,7 @@ Authorization: Bearer {{adminToken}}
 # 아래 막대·목록 수 비교는 MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS를 빈 값으로 기동한 환경에서 실행한다.
 # 채팅 분포는 삭제된 스토리에 남은 미삭제 채팅도 포함한다. 장르별 평균 턴 수는 삭제 스토리를 제외한다.
 # 비교 중 데이터가 바뀌지 않는 로컬 fixture를 사용한다.
+# 장르 소표본 fixture: 던전 1개 465턴, 로맨스 6개 합 60턴이면 던전(465,1,465), 로맨스(10,6,60) 순이다.
 GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7
 Authorization: Bearer {{adminToken}}
 
@@ -204,6 +205,24 @@ Authorization: Bearer {{adminToken}}
             client.assert(JSON.stringify([chart.chartId, chart.title, chart.unit]) === JSON.stringify(terms[i]), `차트 용어 actual=${JSON.stringify(chart)}`);
             client.assert(!/채팅방|제작 세션|AI 지연/.test(chart.description), `이전 용어 actual=${chart.description}`);
         });
+        const aiFeatures = ["chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion"];
+        for (const id of ["ai-latency", "ai-success"]) {
+            const points = response.body.distributions.find(c => c.chartId === id).points;
+            client.assert(JSON.stringify(points.map(p => p.label)) === JSON.stringify(aiFeatures), `AI 기능 순서 actual=${JSON.stringify(points)}`);
+            client.assert(points[2].link.list === "chats" && points[2].link.params.aiFeature === "chat_image", "이미지 AI는 채팅 목록으로 연결");
+        }
+        const genres = response.body.distributions.find(c => c.chartId === "genre-depth").points;
+        genres.forEach((p, i) => {
+            client.assert(Number.isInteger(p.chats) && p.chats > 0 && Number.isInteger(p.totalTurns) && p.totalTurns >= 0, `장르 표본 actual=${JSON.stringify(p)}`);
+            client.assert(Math.abs(p.value - p.totalTurns / p.chats) < 1e-9, `장르 평균 actual=${JSON.stringify(p)}`);
+            if (i > 0) {
+                const previous = genres[i - 1];
+                client.assert(previous.value > p.value || (previous.value === p.value && previous.label < p.label), `장르 정렬 actual=${JSON.stringify(genres)}`);
+            }
+        });
+        response.body.distributions.filter(c => c.chartId !== "genre-depth").forEach(c => c.points.forEach(p => {
+            client.assert(!("chats" in p) && !("totalTurns" in p), `장르 전용 필드 actual=${JSON.stringify(p)}`);
+        }));
         const turns = response.body.distributions[1].points;
         const turnLabels = ["0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"];
         client.assert(JSON.stringify(turns.map(p => p.label)) === JSON.stringify(turnLabels), "턴 구간 13개가 필요합니다");
@@ -344,8 +363,11 @@ GET {{baseUrl}}/api/v1/admin/stories/{{adminStoryId}}
 Authorization: Bearer {{adminToken}}
 
 > {%
-    client.test("유지율과 최근 채팅", () => {
-        client.assert(response.status === 200 && response.body.retention.length === 5, `actual=${JSON.stringify(response.body)}`);
+    client.test("턴 도달률과 최근 채팅", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const thresholds = [1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50];
+        client.assert(JSON.stringify(response.body.retention.map(p => p.turn)) === JSON.stringify(thresholds), `기준 턴 actual=${JSON.stringify(response.body.retention)}`);
+        response.body.retention.forEach(p => client.assert(p.rate >= 0 && p.rate <= 1, `도달률 actual=${JSON.stringify(p)}`));
         client.assert(response.body.recentChats.length <= 5, "최근 채팅은 최대 5개입니다");
     });
 %}
@@ -541,3 +563,15 @@ GET {{baseUrl}}/api/v1/admin/credits/transactions
 ### 자유 조회 — 원장 기록일과 페이지를 직접 바꿔 실행
 GET {{baseUrl}}/api/v1/admin/credits/transactions?date=2026-10-21&page=1&size=100
 Authorization: Bearer {{adminToken}}
+
+
+### 실시간 이미지 실패 호출이 있는 채팅 — 본문 성공/이미지 실패도 포함
+GET {{baseUrl}}/api/v1/admin/chats?aiFeature=chat_image&aiStatus=FAILED
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("이미지 호출 채팅 필터", () => {
+    client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+    client.assert(Array.isArray(response.body.items), "페이지 items");
+});
+%}

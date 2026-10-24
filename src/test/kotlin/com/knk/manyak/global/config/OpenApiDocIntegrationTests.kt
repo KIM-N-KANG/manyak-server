@@ -152,6 +152,11 @@ class OpenApiDocIntegrationTests {
             // 인증 필수: 스토리 좋아요 등록·취소(KNK-1017 — 게스트 불가).
             .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].post.security[0].bearerAuth").exists()
             .jsonPath("$.paths['/api/v1/stories/{storyId}/like'].delete.security[0].bearerAuth").exists()
+            // 관리자 인증 필수: 검수 제출본 목록·상세와 보류 목록·해제.
+            .jsonPath("$.paths['/api/v1/admin/moderation/submissions'].get.security[0].bearerAuth").exists()
+            .jsonPath("$.paths['/api/v1/admin/moderation/submissions/{submissionId}'].get.security[0].bearerAuth").exists()
+            .jsonPath("$.paths['/api/v1/admin/moderation/holds'].get.security[0].bearerAuth").exists()
+            .jsonPath("$.paths['/api/v1/admin/moderation/holds/{submissionId}/release'].post.security[0].bearerAuth").exists()
             // 공개(permitAll·optional 인증): 스토리 상세 — security를 걸지 않는다.
             .jsonPath("$.paths['/api/v1/stories/{storyId}'].get.security").doesNotExist()
     }

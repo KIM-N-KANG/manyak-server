@@ -1,3 +1,15 @@
+# KNK-1793 실시간 이미지 AI 기록 수동 확인 (업로드 위치를 발급한 턴만).
+# 준비된 로컬/검증 DB에서 채팅 공개 UUID로 ai_call_logs를 조회한다(아래 SQL은 실행 안내).
+# SELECT feature,status,turn_number,latency_ms,error_code,input_token_count,output_token_count,prompt_versions
+# FROM ai_call_logs WHERE chat_id='<채팅 공개 UUID>'::uuid ORDER BY id;
+# 발급 직후 chat_image STARTED → 턴 저장 뒤 SUCCEEDED/FAILED. 재생성도 새 행, 같은 저장 턴 번호.
+# 최초 발급 URL character_image 이벤트까지의 latency_ms이며 이벤트 없으면 null.
+# 본문 마커에 발급 URL 없음=AI_IMAGE_MISSING, HEAD 실패=AI_IMAGE_NOT_FOUND,
+# 스트림/저장 실패=AI_IMAGE_TURN_FAILED 및 turn_number=null. 이미지 실패만으로 턴은 실패하지 않는다.
+# realtimeImage=false/저장소 미설정/게스트 체험 소진/presign 실패는 이미지 행 없음.
+# 토큰과 prompt_versions는 항상 null. 이미지 기록 DB 오류는 WARN만, 턴 completed 정상.
+# 관리자 차트에 chat_image 포함. AI 비용은 성공 1장당 설정 48원(기본), 토큰 비용과 별개.
+
 ### [KNK-1677] Redis 필요. 생성 키 TTL 150초, 생성 마감은 접수부터 큐 대기 포함 120초.
 ### 연결 종료는 생성을 취소하지 않습니다. started.generationId는 UUID이며 상세 generatingTurn에도 같은 값이 나옵니다.
 ### 1단계 복구: 생성 중이면 2초 간격 상세 재조회. 재연결 API는 KNK-1678 범위입니다.

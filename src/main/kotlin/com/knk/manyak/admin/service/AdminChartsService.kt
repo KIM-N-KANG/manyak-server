@@ -38,26 +38,29 @@ class AdminChartsService(
             point(label, raw[index].firstOrNull { it.number("bucket").toInt() == i }?.number("n") ?: 0.0, list, mapOf(key to i.toString()), prefix)
         }
         // 다중 장르 문자열 그룹을 분리하되 채팅 수로 가중 평균한다. 조합 문자열을 개별 행으로 메모리에 적재하지 않는다.
-        val genres = mutableMapOf<String, Pair<Double, Double>>()
+        val genres = mutableMapOf<String, Pair<Long, Long>>()
         raw[0].forEach { row ->
             (row["label"] as? String)?.split(", ")?.filter { it.isNotBlank() }?.distinct()?.forEach { genre ->
-                val old = genres[genre] ?: (0.0 to 0.0)
-                genres[genre] = old.first + row.number("turns") to old.second + row.number("n")
+                val old = genres[genre] ?: (0L to 0L)
+                genres[genre] = old.first + (row["turns"] as Number).toLong() to old.second + (row["n"] as Number).toLong()
             }
         }
         val total = raw[2].sumOf { it.number("n") }
-        val aiFeatures = listOf("chat_response", "choice_generation", "storyline_generation", "story_completion")
+        val aiFeatures = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion")
         fun ai(index: Int, status: String) = aiFeatures.map { feature ->
             val params = mutableMapOf("aiFeature" to feature, "aiStatus" to status)
             if (index == 5) params["hasLatency"] = "true"
             val value = raw[index].firstOrNull { it["label"] == feature }?.number("metric_value") ?: 0.0
             point(feature, if (index == 6) rounded(value) else value,
-                if (feature in aiFeatures.take(2)) "chats" else "stories", params, "ai")
+                if (feature in aiFeatures.take(3)) "chats" else "stories", params, "ai")
         }
         val wait = raw[4].single()
         val charts = listOf(
             AdminDistribution("genre-depth", "장르별 평균 턴 수", "채팅 생성일 기준 장르별 평균 현재 턴 수", "턴",
-                genres.toSortedMap().map { (genre, value) -> point(genre, value.first / value.second, "stories", mapOf("genre" to genre), "chat") }),
+                genres.map { (genre, value) ->
+                    point(genre, value.first.toDouble() / value.second, "stories", mapOf("genre" to genre), "chat")
+                        .copy(chats = value.second, totalTurns = value.first)
+                }.sortedWith(compareByDescending<AdminChartPoint> { it.value }.thenBy { it.label })),
             AdminDistribution("turns", "턴 수 분포", "채팅 생성일을 기준으로 구간별 채팅 수 집계", "개",
                 buckets(1, listOf("0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"), "chats", "turnBucket")),
             AdminDistribution("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅 비율", "%",

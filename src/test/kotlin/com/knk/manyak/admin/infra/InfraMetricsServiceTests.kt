@@ -39,13 +39,13 @@ internal class InfraFixture(val properties: InfraMetricsProperties = infraFullPr
 }
 
 class InfraMetricsServiceTests {
-    @Test fun `기본 KST 범위와 23개 질의 및 태스크 현재값과 변환과 건수만 0 채움을 조립한다`(): Unit = InfraFixture().use { f ->
+    @Test fun `기본 KST 범위와 29개 질의 및 태스크 현재값과 변환과 건수만 0 채움을 조립한다`(): Unit = InfraFixture().use { f ->
         val result = f.service.metrics(InfraMetricsQuery())
         assertThat(result.from.toString()).isEqualTo("2026-10-23"); assertThat(result.to).isEqualTo(result.from)
         assertThat(result.periodSeconds).isEqualTo(300)
         assertThat(f.requests.single().startTime()).isEqualTo(Instant.parse("2026-10-22T15:00:00Z"))
         assertThat(f.requests.single().endTime()).isEqualTo(f.clock.instant())
-        assertThat(f.requests.single().metricDataQueries()).hasSize(23)
+        assertThat(f.requests.single().metricDataQueries()).hasSize(29)
         assertThat(f.ecsRequests.single().services()).containsExactly("private-server", "private-ai", "private-notification")
         assertThat(result.ecs!!.services.map { it.name }).containsExactly("server", "ai", "notification")
         assertThat(result.ecs.services.first().runningTasks).isEqualTo(2); assertThat(result.ecs.services.first().desiredTasks).isEqualTo(3); assertThat(result.ecs.services.first().pendingTasks).isEqualTo(1)

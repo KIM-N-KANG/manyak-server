@@ -66,7 +66,8 @@ class InfraMetricsService(private val gateway: InfraAwsGateway, private val cata
         return InfraMetricsResponse(clock.instant(), range.from, range.to, range.periodSeconds,
             if (pairs.isEmpty()) null else InfraEcsMetrics(pairs.mapIndexed { i, (key, name) ->
                 val task = data.tasks.getValue(name)
-                InfraServiceMetrics(key, task.running, task.desired, task.pending, points("ecs_${i}_cpu"), points("ecs_${i}_memory")) }),
+                InfraServiceMetrics(key, task.running, task.desired, task.pending, points("ecs_${i}_cpu"), points("ecs_${i}_memory"),
+                    points("ecs_${i}_cpu_max"), points("ecs_${i}_memory_max")) }),
             if (properties.loadBalancer.isBlank()) null else InfraAlbMetrics(counts("alb_requests"), counts("alb_elb_5xx"), counts("alb_target_5xx"), points("alb_response_p95", 1000.0)),
             if (properties.database.isBlank()) null else InfraRdsMetrics(points("rds_cpu"), points("rds_storage"), points("rds_connections"), points("rds_read_latency", 1000.0), points("rds_write_latency", 1000.0)),
             if (properties.nodes().isEmpty()) null else InfraRedisMetrics(properties.nodes().mapIndexed { i, name -> InfraRedisNode(name, points("cache_${i}_cpu"), points("cache_${i}_memory"), points("cache_${i}_connections")) }),

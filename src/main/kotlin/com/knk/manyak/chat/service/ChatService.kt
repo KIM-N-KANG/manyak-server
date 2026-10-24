@@ -136,6 +136,7 @@ class ChatService(
     private val chatRealtimeImageService: ChatRealtimeImageService,
     private val structuredLogger: StructuredLogger,
     private val aiCallRecorder: AiCallRecorder,
+    private val imageAiCalls: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder,
     private val creditWalletService: CreditWalletService,
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
@@ -756,11 +757,12 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = false,
                 realtimeImage = request.realtimeImage,
-                persist = { result, chargeId ->
+                persist = { result, chargeId, billingModelCode ->
                     chatTurnPersister.persistTurn(
                         chatId = chat.id,
                         expectedState = startState,
                         creditTransactionId = chargeId,
+                        billingModelCode = billingModelCode,
                         userInput = request.userInput,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
@@ -854,7 +856,7 @@ class ChatService(
                 deviceId = deviceId,
                 isRegenerated = true,
                 realtimeImage = request.realtimeImage,
-                persist = { result, chargeId ->
+                persist = { result, chargeId, billingModelCode ->
                     // 현재 채팅 상태로 요청하고 판정 메타는 재적용하지 않는다. 직전 턴 상태를 복원해 새 판정을
                     // 반영하려면 턴별 메타 델타 이력이 필요하지만 현 스키마에는 없다. 엔딩 도달 턴은 위에서
                     // 거절하므로 최초 도달 불변식은 유지된다(regenerateLastTurn은 judgment를 받지 않음).
@@ -863,6 +865,7 @@ class ChatService(
                         expectedAssistantId = request.turnId,
                         expectedState = startState,
                         creditTransactionId = chargeId,
+                        billingModelCode = billingModelCode,
                         aiOutput = result.aiOutput,
                         choices = result.choices,
                     )
@@ -1079,7 +1082,7 @@ class ChatService(
         deviceId: String?,
         isRegenerated: Boolean,
         realtimeImage: Boolean,
-        persist: (ChatTurnAiResult, Long?) -> ChatTurnPersister.PersistedTurn,
+        persist: (ChatTurnAiResult, Long?, String) -> ChatTurnPersister.PersistedTurn,
         onPersisted: (ChatTurnPersister.PersistedTurn, Long, String, Long) -> Unit,
     ): SseEmitter {
         val chatPk = chat.id
@@ -1087,6 +1090,7 @@ class ChatService(
         var memberTrialCovered = false
         var guestDeviceId: String? = null
         var imageReservation = ChatRealtimeImageService.Reservation(null)
+        var imageCall: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder.Call? = null
         var charges = emptyList<CreditTransaction>()
         val refundGate = AtomicBoolean(false) // 턴 체험/턴 비용만 소유한다. 이미지 환불과 공유하지 않는다.
         val trialRefundKey = "refund:chatturn:${UUID.randomUUID()}"
@@ -1106,6 +1110,7 @@ class ChatService(
             )
         }
         fun refundImageQuietly() {
+            imageAiCalls.finish(imageCall, errorCode = "AI_IMAGE_TURN_FAILED")
             try {
                 refundImage()
             } catch (ex: Exception) {
@@ -1128,6 +1133,7 @@ class ChatService(
                 if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
             }
             chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
+            if (imageReservation.slot != null) imageCall = imageAiCalls.start(chat.storyId, chat.publicId)
         } catch (throwable: Throwable) {
             try {
                 refundImageQuietly()
@@ -1216,6 +1222,7 @@ class ChatService(
                         // chat meta는 completed 결과(ChatTurnAiResult)에 실려 오므로, 같은 적재 저장에 반영한다.
                         meta = { it.meta },
                     ) {
+                        imageAiCalls.bodyStarted(imageCall)
                         chatTurnAiClient.streamTurn(
                             aiCall.request.copy(imageSlots = listOfNotNull(imageReservation.slot), modelTier = billingModel.code),
                             aiCall.traceLink,
@@ -1223,6 +1230,7 @@ class ChatService(
                             // AI가 스트리밍 중 보내는 인물 이미지 이벤트를 그대로 중계한다(KNK-943).
                             // 스트림 이벤트는 중계하고, 실시간 이미지의 발급 URL·객체 검증은 completed 저장 직전에 수행한다.
                             onCharacterImage = { characterImage ->
+                                imageAiCalls.imageReceived(imageCall, characterImage.imageUrl, imageReservation.slot?.publicUrl)
                                 if (workerState.get() == TurnWorkerState.CANCELLED) {
                                     throw CancellationException("chat turn stream cancelled")
                                 }
@@ -1250,7 +1258,7 @@ class ChatService(
                     if (!workerState.compareAndSet(TurnWorkerState.RUNNING, TurnWorkerState.SAVING)) return@runAsync
                     val (validated, persistedTurn) = requireNotNull(turnSaveTransactionTemplate.execute {
                         val checked = chatRealtimeImageService.validate(imageReservation, recorded.result.copy(choices = emptyList()))
-                        val saved = persist(checked.result, turnCharge()?.id)
+                        val saved = persist(checked.result, turnCharge()?.id, billingModel.code)
                         if (!checked.success) refundImage()
                         checked to saved
                     })
@@ -1258,6 +1266,7 @@ class ChatService(
                     // 저장이 확정된 순간 차감을 굳힌다(completed 전송 전). 이후 completed 전송이 실패하거나 클라이언트가
                     // 끊겨도 환불하지 않는다 — 저장된 턴은 이력에 남아 회원이 재조회로 볼 수 있으므로 과금이 정당하다(Codex P1).
                     persisted.set(true)
+                    imageAiCalls.finish(imageCall, persistedTurn.turnNumber, validated.errorCode)
                     Sentry.addBreadcrumb("chat turn persisted: turn=${persistedTurn.turnNumber}", "db")
                     // 실제 turn 번호는 persist가 확정하므로, 적재된 호출에 그 값을 채워 정합성을 맞춘다.
                     aiCallRecorder.attachTurnNumber(recorded.aiCallLogId, persistedTurn.turnNumber)

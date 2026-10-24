@@ -59,6 +59,36 @@ class AdminReadPostgresTests {
     }
     @AfterAll fun stop() { pg.stop() }
 
+    @Test fun `실제 PostgreSQL 제출본 동률은 UUID 오름차순이며 페이지 누락이 없다`() {
+        val ids=listOf("00000000-0000-4000-8000-000000000001","ffffffff-0000-4000-8000-000000000001","80000000-0000-4000-8000-000000000001","7fffffff-0000-4000-8000-000000000001").map(UUID::fromString)
+        val repository=com.knk.manyak.story.submission.AdminSubmissionReadRepository(NamedParameterJdbcTemplate(jdbc),ObjectMapper())
+        try {
+            ids.forEach { jdbc.update("""INSERT INTO story_submissions(public_id,user_id,kind,payload,input_form,status,created_at)
+                VALUES (?,?,'CREATE','{"title":"동률 PG"}','{}','PENDING',?)""",it,userId,now.atOffset(java.time.ZoneOffset.UTC)) }
+            for(sort in listOf("createdAt","decidedAt")) for(order in listOf("asc","desc")) {
+                val actual=(1..2).flatMap { number -> repository.list(com.knk.manyak.story.submission.AdminSubmissionListRequest().apply { q="동률 PG";size=2;page=number;this.sort=sort;this.order=order }).items }.map { it.submissionId.toString() }
+                assertThat(actual).containsExactlyElementsOf(ids.map { it.toString() }.sorted())
+            }
+        } finally { ids.forEach { jdbc.update("DELETE FROM story_submissions WHERE public_id=?",it) } }
+    }
+
+    @Test fun `실제 PostgreSQL 제출본 JSON 제목과 저장 위반 요약 및 KST 범위를 조회한다`() {
+        val repository=com.knk.manyak.story.submission.AdminSubmissionReadRepository(NamedParameterJdbcTemplate(jdbc),ObjectMapper())
+        val id=UUID.randomUUID(); val before=UUID.randomUUID()
+        val title="""제목 "인용" %_"""
+        try {
+            for((key,at) in listOf(before to start.minusNanos(1000),id to start)) jdbc.update("""INSERT INTO story_submissions(public_id,user_id,kind,payload,input_form,status,issues,created_at,decided_at)
+                VALUES (?,?,'CREATE',CAST(? AS jsonb),'{}','REJECTED',CAST(? AS jsonb),?,?)""",key,userId,
+                ObjectMapper().writeValueAsString(mapOf("title" to title)), """[{"path":"title","type":"TEXT","rule":"DRUGS","reason":"첫 이유"}]""",at.atOffset(java.time.ZoneOffset.UTC),now.atOffset(java.time.ZoneOffset.UTC))
+            val result=repository.list(com.knk.manyak.story.submission.AdminSubmissionListRequest().apply { from="2026-10-21";to="2026-10-21";memberId=this@AdminReadPostgresTests.memberId;q="인용";sort="decidedAt";order="asc" })
+            assertThat(result.items.map { it.submissionId }).containsExactly(id)
+            assertThat(result.items.single().story.title).isEqualTo(title)
+            assertThat(result.items.single().issueRules).containsExactly("DRUGS")
+            assertThat(result.items.single().firstIssueReason).isEqualTo("첫 이유")
+            assertThat(repository.summary(id)!!.owner.memberId).isEqualTo(memberId)
+        } finally { jdbc.update("DELETE FROM story_submissions WHERE public_id IN (?,?)",id,before) }
+    }
+
     @Test fun `실제 PostgreSQL의 회원 집계 필터 정렬과 원장 누계 및 출석 날짜를 조회한다`() {
         val request = AdminMembersRequest().apply {
             q = "pg 검색"; chatBucket = 0; chatFrom = "2026-10-21"; creditDirection = "spent"; creditDate = "2026-10-21"; attendanceDate = "2026-10-21"

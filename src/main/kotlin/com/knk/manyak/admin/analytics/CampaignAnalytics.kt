@@ -121,8 +121,8 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
     fun sources(query: AnalyticsRangeQuery): CampaignSourceResponse {
         val range = query.range(clock, 10, 7, setOf(7))
         val source = queries.grouped("campaign_sources", range, CampaignEvents.event("_new", CampaignEvents.common()), listOf("g" to "gp:initial_utm_source"))
-        // 카탈로그 원문. 이벤트명과 in 연산자는 운영 검증이 남아 있다.
-        val page = CampaignEvents.event("[Amplitude] Page Viewed", CampaignEvents.common() + CampaignEvents.filter("utm_medium", listOf("community", "social"), op = "in")) +
+        // Amplitude 이벤트 필터의 is + 여러 값은 OR 조건이다. in은 운영에서 HTTP 400(code 229).
+        val page = CampaignEvents.event("[Amplitude] Page Viewed", CampaignEvents.common() + CampaignEvents.filter("utm_medium", listOf("community", "social"))) +
             mapOf("group_by" to listOf(mapOf("type" to "event", "value" to "utm_content")))
         val post = queries.grouped("campaign_posts", range, page)
         val result = snapshots.load("/api/v1/admin/campaigns/sources", range, emptyList(), rangeMetrics = listOf(source, post))

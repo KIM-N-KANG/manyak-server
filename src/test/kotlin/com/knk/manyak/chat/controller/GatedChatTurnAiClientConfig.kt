@@ -52,6 +52,7 @@ class GatedChatTurnAiClientConfig {
                 // 무한 대기 금지 — 검증 대상이 깨져도 테스트가 매달리지 않고 실패로 끝나야 한다.
                 gate.await(AWAIT_SECONDS, TimeUnit.SECONDS)
             }
+            onImageStream(request, onCharacterImage)
             turnFailure?.let { throw it }
             onToken("생성 ")
             // 인물 이미지 이벤트는 본문 토큰 사이에 끼어든다(스펙 §4-3-3의 이벤트 순서).
@@ -75,6 +76,7 @@ class GatedChatTurnAiClientConfig {
     }
 
     companion object {
+        @Volatile var onImageStream: (ChatTurnAiRequest, (ChatCharacterImageEvent) -> Unit) -> Unit = { _, _ -> }
         @Volatile var onRealtimeHead: () -> Unit = {}
         @Volatile var turnFailure: RuntimeException? = null
         @Volatile var realtimeEnabled = false
@@ -118,6 +120,7 @@ class GatedChatTurnAiClientConfig {
             nextChoices = emptyList()
             lastRequest = null
             nextCharacterImage = null
+            onImageStream = { _, _ -> }
             onRealtimeHead = {}
             turnFailure = null
             realtimeEnabled = false

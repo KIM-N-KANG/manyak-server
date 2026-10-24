@@ -63,6 +63,7 @@ class ChatRegenerateConcurrencyIntegrationTests {
                         chatId = chat.id,
                         expectedAssistantId = lastAssistant.id,
                         expectedState = GenerationStartState(lastAssistant.id, 0),
+                        billingModelCode = "LITE",
                         aiOutput = "재생성 응답 $i",
                         choices = listOf("선택 $i-1", "선택 $i-2"),
                     )

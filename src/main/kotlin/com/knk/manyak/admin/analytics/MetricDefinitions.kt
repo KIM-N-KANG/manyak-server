@@ -18,12 +18,14 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     } } + listOf("web", "android").map { queries.daily("activity_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters(it)), "average", false) }
     fun mau(to: LocalDate): RangeAnalyticsMetric {
         val range = AnalyticsRange(to.minusDays(29), to)
-        val def = AnalyticsDefinition("activity_mau", "/api/2/users", listOf("m" to "active", "i" to "30", "s" to mapper.writeValueAsString(listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))))), 2, mapper)
+        val def = AnalyticsDefinition("activity_mau", "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters("all"))), "m" to "uniques", "i" to "1"), 1, mapper)
         return RangeAnalyticsMetric(def, range) { data -> AmplitudeResults.parse {
-            val series = data["series"]; require(series != null && series.isArray && series.size() == 1 && series[0].isArray && series[0].size() == 1)
-            mapper.valueToTree(AmplitudeResults.number(series[0][0]))
+            val values = data["seriesCollapsed"]; require(values != null && values.isArray && values.size() == 1)
+            val value = values[0].let { if (it.isArray) { require(it.size() == 1); it[0] } else it }.let { if (it.isObject) it["value"] else it }
+            mapper.valueToTree(AmplitudeResults.number(requireNotNull(value)))
         } }
     }
+
     fun retention(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
         val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(AdminMetricEvents.event("_new", filters(platform))),
             "re" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters(platform))), "i" to "1"), 8, mapper)
@@ -32,7 +34,9 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
             val values = series[0]["values"]; require(values != null && values.isObject)
             val result = linkedMapOf<LocalDate, JsonNode>()
             for (date in range.dates()) {
-                val array = values[date.toString()] ?: values[date.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH))]
+                val array = values[date.toString()]
+                    ?: values[date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH))]
+                    ?: values[date.format(DateTimeFormatter.ofPattern("MMM dd, uuuu", Locale.ENGLISH))] ?: values[date.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH))]
                     ?: values[date.format(DateTimeFormatter.ofPattern("MMM dd", Locale.ENGLISH))]
                 require(array != null && array.isArray && !array.isEmpty)
                 array.forEach { point ->
@@ -56,7 +60,7 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         val values = linkedMapOf<LocalDate, JsonNode>()
         x.forEachIndexed { i, date ->
             val value = series[0][i]; require(value.isNumber && value.asDouble().isFinite() && value.asDouble() >= 0)
-            require(values.put(LocalDate.parse(date.asText()), value) == null)
+            require(values.put(AmplitudeResults.date(date), value) == null)
         }
         range.dates().associateWith { requireNotNull(values[it]) }
     }

@@ -19,8 +19,9 @@ data class AnalyticsDay(val date: LocalDate, val activeUsers: DashboardPlatformC
 data class AdminAnalyticsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate,
     val todayActiveUsers: DashboardPlatformCounts?, val daily: List<AnalyticsDay>, val pendingDates: List<LocalDate>)
 class AdminAnalyticsUnavailable : RuntimeException("분석 지표를 가져올 수 없습니다.")
-enum class AnalyticsFailureReason { no_credentials, http_error, rate_limited, budget_exceeded, timeout }
-class AmplitudeFetchFailure(val reason: AnalyticsFailureReason, val status: Int? = null) : RuntimeException("Amplitude dashboard request failed")
+enum class AnalyticsFailureReason { no_credentials, http_error, rate_limited, budget_exceeded, timeout, parse_error }
+class AmplitudeFetchFailure(val reason: AnalyticsFailureReason, val status: Int? = null,
+    val exceptionClass: String? = null, val errorCode: String? = null, val phase: String? = null) : RuntimeException("Amplitude dashboard request failed")
 
 @Service
 class AdminAnalyticsService(private val snapshots: AnalyticsSnapshots, properties: AmplitudeDashboardProperties, mapper: tools.jackson.databind.ObjectMapper,

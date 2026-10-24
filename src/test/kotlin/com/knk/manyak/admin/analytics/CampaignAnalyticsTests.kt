@@ -76,6 +76,9 @@ class CampaignAnalyticsTests {
         assertThat(requests[0].requestUrl!!.queryParameter("g")).isEqualTo("gp:initial_utm_source")
         assertThat(requests[0].requestUrl!!.queryParameter("g2")).isNull()
         val event = fixture.mapper.readTree(requests[1].requestUrl!!.queryParameter("e")!!)
+        val medium = event["filters"].toList().single { it["subprop_key"].asText() == "utm_medium" }
+        assertThat(medium["subprop_op"].asText()).isEqualTo("is")
+        assertThat(medium["subprop_value"].toList().map { it.asText() }).containsExactly("community", "social")
         assertThat(event["group_by"].size()).isEqualTo(1); assertThat(event["group_by"][0]["value"].asText()).isEqualTo("utm_content")
         q.from = day.minusDays(10).toString(); assertThatThrownBy { service.sources(q) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }

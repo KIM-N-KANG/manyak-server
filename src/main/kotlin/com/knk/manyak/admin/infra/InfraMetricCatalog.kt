@@ -18,6 +18,8 @@ class InfraMetricCatalog(private val properties: InfraMetricsProperties) {
             val dimensions = mapOf("ClusterName" to properties.cluster, "ServiceName" to service)
             add("ecs_${index}_cpu", "AWS/ECS", "CPUUtilization", dimensions)
             add("ecs_${index}_memory", "AWS/ECS", "MemoryUtilization", dimensions)
+            add("ecs_${index}_cpu_max", "AWS/ECS", "CPUUtilization", dimensions, "Maximum")
+            add("ecs_${index}_memory_max", "AWS/ECS", "MemoryUtilization", dimensions, "Maximum")
         }
         if (properties.loadBalancer.isNotBlank()) {
             val alb = mapOf("LoadBalancer" to properties.loadBalancer)

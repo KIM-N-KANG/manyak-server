@@ -24,7 +24,8 @@ class InfraMetricsQuery {
 data class InfraRange(val from: LocalDate, val to: LocalDate, val since: Instant, val until: Instant, val periodSeconds: Int)
 data class InfraMetricPoint(val at: Instant, val value: Double)
 data class InfraServiceMetrics(val name: String, val runningTasks: Int, val desiredTasks: Int, val pendingTasks: Int,
-    val cpu: List<InfraMetricPoint>, val memory: List<InfraMetricPoint>)
+    val cpu: List<InfraMetricPoint>, val memory: List<InfraMetricPoint>,
+    val cpuMax: List<InfraMetricPoint>, val memoryMax: List<InfraMetricPoint>)
 data class InfraEcsMetrics(val services: List<InfraServiceMetrics>)
 data class InfraAlbMetrics(val requests: List<InfraMetricPoint>, val elb5xx: List<InfraMetricPoint>, val target5xx: List<InfraMetricPoint>, val responseTimeP95Ms: List<InfraMetricPoint>)
 data class InfraRdsMetrics(val cpu: List<InfraMetricPoint>, val freeStorageBytes: List<InfraMetricPoint>, val connections: List<InfraMetricPoint>, val readLatencyMs: List<InfraMetricPoint>, val writeLatencyMs: List<InfraMetricPoint>)

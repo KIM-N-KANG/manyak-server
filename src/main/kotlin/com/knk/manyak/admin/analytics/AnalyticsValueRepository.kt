@@ -9,7 +9,8 @@ import tools.jackson.databind.ObjectMapper
 import java.time.*
 
 /** 정의에는 날짜와 비밀값을 넣지 않는다. 이벤트·필터의 JSON 객체 키도 정렬해 해시한다. */
-class AnalyticsDefinition(val metric: String, val path: String, val parameters: List<Pair<String, String>>, val perDay: Int, mapper: ObjectMapper) {
+class AnalyticsDefinition(val metric: String, val path: String, val parameters: List<Pair<String, String>>, val perDay: Int, mapper: ObjectMapper,
+    hashParameters: List<Pair<String, String>> = emptyList()) {
     val params: String
     val hash: String
     init {
@@ -21,7 +22,9 @@ class AnalyticsDefinition(val metric: String, val path: String, val parameters: 
         }
         val query = parameters.sortedBy { it.first }.map { (key, value) -> listOf(key, if (key in setOf("e", "e2", "se", "re", "s", "rb")) ordered(mapper.readTree(value)) else value) }
         params = mapper.writeValueAsString(sortedMapOf("path" to path, "query" to query))
-        hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(params.toByteArray(Charsets.UTF_8)))
+        // 원본 식별에만 필요한 공개 키 등은 params에 저장하지 않는다. 기존 분석 정의의 해시는 유지한다.
+        val hashInput = if (hashParameters.isEmpty()) params else mapper.writeValueAsString(listOf(params, hashParameters.sortedBy { it.first }.map { listOf(it.first, it.second) }))
+        hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(hashInput.toByteArray(Charsets.UTF_8)))
     }
 }
 data class AnalyticsValue(val value: JsonNode, val fetchedAt: Instant, val finalizedAt: Instant? = null)

@@ -54,7 +54,19 @@ class InfraMetricsIntegrationTests {
         verifyNoInteractions(cw, ecs, repository)
         `when`(cw.getMetricData(any(GetMetricDataRequest::class.java))).thenAnswer { call ->
             val request = call.getArgument<GetMetricDataRequest>(0)
-            GetMetricDataResponse.builder().metricDataResults(request.metricDataQueries().map { q -> MetricDataResult.builder().id(q.id()).statusCode(StatusCode.COMPLETE).timestamps(request.startTime()).values(1.0).build() }).build()
+            assertThat(request.metricDataQueries()).hasSize(29)
+            GetMetricDataResponse.builder().metricDataResults(request.metricDataQueries().map { q ->
+                val stat = q.metricStat()
+                val value = when (stat.metric().metricName()) {
+                    "CPUUtilization" -> if (stat.stat() == "Maximum") 21.0 else 7.4
+                    "MemoryUtilization" -> if (stat.stat() == "Maximum") 44.0 else 41.2
+                    else -> 1.0
+                }
+                val empty = q.id() == "ecs_2_memory_max"
+                MetricDataResult.builder().id(q.id()).statusCode(StatusCode.COMPLETE)
+                    .timestamps(if (empty) emptyList() else listOf(request.startTime()))
+                    .values(if (empty) emptyList() else listOf(value)).build()
+            }).build()
         }
         `when`(ecs.describeServices(any(DescribeServicesRequest::class.java))).thenReturn(DescribeServicesResponse.builder().services(listOf("private-server", "private-ai", "private-notification").map {
             software.amazon.awssdk.services.ecs.model.Service.builder().serviceName(it).runningCount(2).desiredCount(2).pendingCount(0).build() }).build())
@@ -63,6 +75,17 @@ class InfraMetricsIntegrationTests {
         assertThat(body["from"].asText()).isEqualTo("2026-10-23"); assertThat(body["periodSeconds"].asInt()).isEqualTo(300)
         assertThat(body["ecs"]["services"].size()).isEqualTo(3)
         assertThat(body["ecs"]["services"][0]["runningTasks"].asInt()).isEqualTo(2)
+        for ((index, service) in body["ecs"]["services"].withIndex()) {
+            for ((metric, expected) in mapOf("cpu" to 7.4, "cpuMax" to 21.0, "memory" to 41.2, "memoryMax" to 44.0)) {
+                val points = service[metric]
+                if (index == 2 && metric == "memoryMax") assertThat(points).isEmpty()
+                else {
+                    assertThat(points).hasSize(1)
+                    assertThat(points[0]["value"].asDouble()).isEqualTo(expected)
+                    assertThat(points[0]["at"].asText()).isEqualTo("2026-10-22T15:00:00Z")
+                }
+            }
+        }
         assertThat(body["alb"]["requests"].size()).isEqualTo(108)
         assertThat(raw).doesNotContain("123456789012", "private-cluster", "private-server", "private-alb", "private-rds", "private-domain")
         get("/infra/metrics").expectStatus().isOk

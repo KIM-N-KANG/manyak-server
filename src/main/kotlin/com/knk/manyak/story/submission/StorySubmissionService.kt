@@ -114,13 +114,19 @@ class StorySubmissionService(
     private fun accept(row: StorySubmission) = SubmissionAccepted(row.publicId.toString())
 
     private fun response(row: StorySubmission): Map<String, Any?> {
-        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row)
-        form.remove("submission")
+        val form = restoredForm(row)
         return linkedMapOf("submissionId" to row.publicId.toString(), "storyId" to row.storyId?.let { stories.findById(it).orElse(null)?.publicId?.toString() },
             "kind" to row.kind, "payload" to form, "status" to row.status,
             "issues" to forms.remap(row.issues, mapper.readTree(row.inputForm), form), "errorCode" to row.errorCode,
             "imageErrors" to forms.remapImageErrors(row.imageErrors, mapper.readTree(row.inputForm), form),
             "createdAt" to row.createdAt, "updatedAt" to row.updatedAt, "decidedAt" to row.decidedAt)
+    }
+
+    /** 소유자 상세와 관리자 상세가 같은 복원 규칙을 사용한다. */
+    internal fun restoredForm(row: StorySubmission): tools.jackson.databind.node.ObjectNode {
+        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row)
+        form.remove("submission")
+        return form
     }
 
     private fun currentForm(row: StorySubmission): tools.jackson.databind.node.ObjectNode = when (row.kind) {

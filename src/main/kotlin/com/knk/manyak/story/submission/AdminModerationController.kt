@@ -2,6 +2,7 @@ package com.knk.manyak.story.submission
 
 import com.knk.manyak.admin.dto.AdminOperationReason
 import com.knk.manyak.admin.security.AdminRequester
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
@@ -14,12 +15,19 @@ import java.time.Instant
 import java.util.UUID
 
 @RestController
-@RequestMapping("/api/v1/admin/moderation/holds")
+@RequestMapping("/api/v1/admin/moderation")
+@SecurityRequirement(name = "bearerAuth")
 class AdminModerationController(private val service: AdminModerationService) {
-    @GetMapping
+    @GetMapping("/holds")
     fun holds(@Valid @ModelAttribute query: AdminHoldListRequest) = service.holds(query)
 
-    @PostMapping("/{submissionId}/release")
+    @GetMapping("/submissions")
+    fun submissions(@org.springdoc.core.annotations.ParameterObject @Valid @ModelAttribute query: AdminSubmissionListRequest) = service.submissions(query)
+
+    @GetMapping("/submissions/{submissionId}")
+    fun submission(@PathVariable submissionId: String) = service.submission(submissionId)
+
+    @PostMapping("/holds/{submissionId}/release")
     fun release(@PathVariable submissionId: UUID, @Valid @RequestBody body: AdminOperationReason, request: HttpServletRequest) =
         service.release(AdminRequester.userId(request), submissionId, body.reason)
 }

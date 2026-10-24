@@ -17,6 +17,7 @@ enum class AiCallFeature(val value: String) {
     STORY_COMPLETION("story_completion"),
     CHAT_RESPONSE("chat_response"),
     CHOICE_GENERATION("choice_generation"),
+    CHAT_IMAGE("chat_image"),
     ;
 
     companion object {

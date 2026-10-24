@@ -68,6 +68,7 @@ erDiagram
   bigint reached_ending_id FK
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
+  varchar_20_ model_code FK
 }
 "public.story_message_versions" {
   bigint id
