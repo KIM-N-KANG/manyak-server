@@ -36,4 +36,14 @@ class AdminAiCostUnavailableIntegrationTests {
         client.get().uri("/api/v1/admin/quality/ai-cost?days=367").header("Authorization", auth)
             .exchange().expectStatus().isBadRequest
     }
+    @Test fun `설정이 없는 서버도 보관 기간 밖 범위만이면 200과 null asOf다`() {
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "과거 비용 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", admin.id)
+        client.get().uri("/api/v1/admin/quality/ai-cost?from=2026-07-01&to=2026-07-31")
+            .header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.expiredDates.length()").isEqualTo(31).jsonPath("$.pendingDates.length()").isEqualTo(0)
+            .jsonPath("$.asOf").isEmpty
+    }
+
 }

@@ -18,6 +18,16 @@ class LangfuseCostSnapshots(
     private val clock: Clock = Clock.systemUTC(),
 ) {
     val definition get() = client.definition
+    val retentionDays get() = properties.retentionDays
+    val retentionStartDate: LocalDate get() = clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(retentionDays.toLong() - 2)
+
+    /** Amplitude의 작업 유무와 예산과 별개로, 같은 슬롯에서 확정일 비용을 보존한다. */
+    fun refreshFinalized() {
+        if (clock.instant().isBefore(retryAt)) return
+        val from = retentionStartDate
+        val to = clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(2)
+        if (from <= to) load(AnalyticsRange(from, to))
+    }
     private val refreshing = AtomicBoolean()
     @Volatile private var retryAt = Instant.MIN
     private var nextCallNanos: Long? = null
@@ -34,6 +44,12 @@ class LangfuseCostSnapshots(
     }
 
     fun load(range: AnalyticsRange): Map<LocalDate, LangfuseCostDay> {
+        val values = store.daily(definition, range.from, range.to).toMutableMap()
+        fun result() = values.mapValues { (_, value) -> LangfuseCostDay(
+            value.value.toList().map { entry -> LangfuseCostEntry(entry["traceName"].asText(), entry["model"].let { if (it.isNull) null else it.asText() },
+                entry["costUsd"].asText().toBigDecimal(), entry["totalTokens"].asLong()) }, value.fetchedAt) }
+        // 원본을 묻지 않는 과거 범위는 설정 없음·대기·쿨다운보다 먼저 저장 값으로 응답한다.
+        if (range.to < retentionStartDate) return result()
         if (!properties.configured()) {
             // 설정 없음도 반복 로그를 억제한다. 저장 값 유무와 무관하게 503이다.
             synchronized(refreshing) {
@@ -44,10 +60,6 @@ class LangfuseCostSnapshots(
             }
             throw AdminAiCostUnavailable()
         }
-        val values = store.daily(definition, range.from, range.to).toMutableMap()
-        fun result() = values.mapValues { (_, value) -> LangfuseCostDay(
-            value.value.toList().map { entry -> LangfuseCostEntry(entry["traceName"].asText(), entry["model"].let { if (it.isNull) null else it.asText() },
-                entry["costUsd"].asText().toBigDecimal(), entry["totalTokens"].asLong()) }, value.fetchedAt) }
         fun today() = clock.instant().atZone(AdminDateRange.KST).toLocalDate()
         fun dayEnd(date: LocalDate) = date.plusDays(1).atStartOfDay(AdminDateRange.KST).toInstant()
         fun complete(date: LocalDate, value: AnalyticsValue) = value.fetchedAt >= dayEnd(date)
@@ -55,7 +67,7 @@ class LangfuseCostSnapshots(
             (date <= today().minusDays(2) && complete(date, value))
         fun fresh(date: LocalDate): Boolean {
             val value = values[date] ?: return false
-            if (final(date, value)) return true
+            if (date < retentionStartDate || final(date, value)) return true
             val fetchedDay = value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate()
             return when (date) {
                 today() -> fetchedDay == date && clock.instant().isBefore(value.fetchedAt.plus(properties.todayTtl))
@@ -72,7 +84,8 @@ class LangfuseCostSnapshots(
             }
         }
         finalizeValues()
-        if (range.dates().all(::fresh) || clock.instant().isBefore(retryAt) || !refreshing.compareAndSet(false, true)) return result()
+        fun eligibleDates() = range.dates().filter { it >= retentionStartDate }
+        if (eligibleDates().all(::fresh) || clock.instant().isBefore(retryAt) || !refreshing.compareAndSet(false, true)) return result()
         try {
             if (clock.instant().isBefore(retryAt)) return result()
             var calls = 0
@@ -81,7 +94,7 @@ class LangfuseCostSnapshots(
                 // 다른 태스크가 받은 날짜는 재조회하지 않는다.
                 values.putAll(store.daily(definition, range.from, range.to))
                 val batch = pendingBatch?.takeIf { batch ->
-                    batch.dates.all { it >= range.from && it <= range.to } && batch.remainingDates().all { date ->
+                    batch.dates.all { it >= range.from && it <= range.to && it >= retentionStartDate } && batch.remainingDates().all { date ->
                         val now = clock.instant()
                         !fresh(date) && !(batch.startedAt < dayEnd(date) && now >= dayEnd(date)) && when (date) {
                             today() -> now < batch.startedAt.plus(properties.todayTtl)
@@ -91,7 +104,7 @@ class LangfuseCostSnapshots(
                     }
                 } ?: run {
                     pendingBatch = null
-                    val missing = range.dates().asReversed().filter { it !in attempted && !fresh(it) }
+                    val missing = eligibleDates().asReversed().filter { it !in attempted && !fresh(it) }
                     if (missing.isEmpty()) return result()
                     val dates = mutableListOf(missing.first())
                     for (date in missing.drop(1)) {
@@ -110,6 +123,11 @@ class LangfuseCostSnapshots(
                     nextCallNanos?.let { next ->
                         val remaining = next - System.nanoTime()
                         if (remaining > 0) TimeUnit.NANOSECONDS.sleep(remaining)
+                    }
+                    // 호출 간격 대기 중 자정이 지나면 보관 경계 밖 구간은 다음 실행에서 다시 고른다.
+                    if (interval.dates().any { it < retentionStartDate }) {
+                        pendingBatch = null
+                        return result()
                     }
                     val startedAt = clock.instant()
                     calls++
