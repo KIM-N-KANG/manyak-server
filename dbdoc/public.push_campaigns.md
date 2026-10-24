@@ -95,6 +95,8 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_16_ tag
+  varchar_100_ notification_title
+  varchar_300_ notification_body
 }
 "public.stories" {
   bigint id

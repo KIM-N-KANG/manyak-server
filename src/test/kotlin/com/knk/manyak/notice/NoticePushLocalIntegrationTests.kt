@@ -34,6 +34,7 @@ class NoticePushLocalIntegrationTests {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: DevicePushTokenRepository
     @Autowired private lateinit var notices: NoticeRepository
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var cleaner: DatabaseCleaner
     private val now = Instant.parse("2026-10-22T13:00:00Z") // KST 야간
     private val sent = mutableListOf<Pair<Long, Map<String, String>>>()
@@ -87,4 +88,30 @@ class NoticePushLocalIntegrationTests {
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())
             .containsEntry("noticeTag", "EVENT").containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
     }
+    @Test fun `게시로 만든 다섯 태그의 푸시와 내역은 직접 입력한 문구와 광고 접두를 사용한다`() {
+        val target = user("알림 문구 수신", marketing = true, night = true)
+        jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?,CURRENT_TIMESTAMP)", target.id)
+        org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "notice-text-test")
+        try {
+            for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
+                sent.clear()
+                val notificationTitle = "직접 쓴 알림 제목 ${tag.name}"
+                val notificationBody = "직접 쓴 알림 본문\n줄바꿈 유지"
+                val notice = noticeService.create(target.id, com.knk.manyak.notice.dto.CreateNoticeRequest(
+                    title = "원문 제목 ${tag.name}", body = "원문 본문", tag = tag,
+                    notificationTitle = notificationTitle, notificationBody = notificationBody, reason = "작성"))
+                noticeService.publish(target.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))
+                val at = Instant.now().plusSeconds(1)
+                val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications)
+                assertThat(service.sendDue(at).single().sent).isEqualTo(1)
+                val expectedTitle = if (tag.pushKind == PushKind.MARKETING) "(광고) $notificationTitle" else notificationTitle
+                assertThat(sent.single().second).containsEntry("title", expectedTitle).containsEntry("body", notificationBody)
+                val row = jdbc.queryForMap("SELECT title,body FROM user_notifications WHERE notice_public_id=?", notice.noticeId)
+                assertThat(row["title"]).isEqualTo(expectedTitle); assertThat(row["body"]).isEqualTo(notificationBody)
+                assertThat(notices.findByPublicId(notice.noticeId)!!.title).isEqualTo("원문 제목 ${tag.name}")
+                assertThat(campaigns.findAll().single { it.noticeId == notices.findByPublicId(notice.noticeId)!!.id }.title).isEqualTo(notificationTitle)
+            }
+        } finally { org.slf4j.MDC.remove(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID) }
+    }
+
 }
