@@ -87,7 +87,27 @@ class ScheduledPushOutboxIntegrationTests {
             assertThat(it.data).doesNotContainKey("deepLink")
         }
         assertThat(campaigns.findById(campaign.id).orElseThrow().skippedCount).isNull()
+        assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isFalse()
         verifyNoInteractions(sender)
+    }
+
+    @Test fun `회차의 딥링크 기록은 재실행에서 참을 거짓으로 바꾸지 않는다`() {
+        val campaign=campaigns.save(PushCampaign(title="누적 링크",body="본문",scheduledAt=Instant.EPOCH))
+        val data=mapOf("type" to "PROMOTION","campaignId" to campaign.publicId.toString(),"title" to "(광고) 제목","body" to "본문")
+        notifications.record(data + mapOf("storyId" to java.util.UUID.randomUUID().toString(),"deepLink" to "https://manyak.app/stories/test"),
+            "promotion",campaign.publicId.toString(),writer)
+        assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isTrue()
+        notifications.record(data,"promotion",campaign.publicId.toString(),writer)
+        assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isTrue()
+    }
+
+    @Test fun `새 요청이 없으면 링크 여부를 추정하지 않고 기존 null을 유지한다`() {
+        val campaign = campaigns.save(PushCampaign(title="중복 회차", body="본문", scheduledAt=Instant.EPOCH))
+        doReturn(0).`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)
+        notifications.record(mapOf("type" to "PROMOTION", "campaignId" to campaign.publicId.toString(),
+            "title" to "제목", "body" to "본문", "deepLink" to "https://manyak.app/"),
+            "promotion", campaign.publicId.toString(), writer)
+        assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isNull()
     }
 
     @Test fun `원격 기록 실패는 캠페인을 실패로 두고 같은 행의 재예약을 허용한다`() {
@@ -103,6 +123,7 @@ class ScheduledPushOutboxIntegrationTests {
         assertThat(failed.sent).isZero()
         val saved = campaigns.findById(campaign.id).orElseThrow()
         assertThat(saved.status).isEqualTo(PushCampaignStatus.FAILED)
+        assertThat(saved.deepLinkIncluded).isNull()
         assertThat(saved.targetCount).isEqualTo(3)
         assertThat(saved.sentCount).isZero()
         assertThat(promotion.sendDue(Instant.now())).isEmpty()
@@ -136,6 +157,7 @@ class ScheduledPushOutboxIntegrationTests {
             messages.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
             assertThat(messages).hasSize(3)
+            assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isTrue()
             val type = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) "NOTICE" else "PROMOTION"
             val prefix = if (type == "NOTICE") "notice" else "promotion"
             for (message in messages) {

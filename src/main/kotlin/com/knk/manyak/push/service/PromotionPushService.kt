@@ -94,7 +94,8 @@ class PromotionPushService(
                 campaign.noticeTag?.let { data["noticeTag"] = it.name }
                 data["deepLink"] = pushDeepLink(webBaseUrl, "/notices/$publicId", data.getValue("type"), campaign.publicId.toString())
             }
-            val round = notifications.record(withStoryDestination(campaign, data),
+            val deliveryData = withStoryDestination(campaign, data)
+            val round = notifications.record(deliveryData,
                 if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(),
                 outbox, kind = campaign.kind.name, onTargetsSelected = { targets = it })
             if (round.recordedPushes != null) {
@@ -111,7 +112,6 @@ class PromotionPushService(
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                val deliveryData = withStoryDestination(campaign, data)
                 runCatching { fcmPushSender.sendToUser(userId, deliveryData, AndroidConfig.Priority.NORMAL,
                     messageId = "$messagePrefix:${campaign.publicId}:${user.publicId}") }
                     .onSuccess { sent++ }

@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 16 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 17 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -577,6 +577,7 @@ erDiagram
   bigint notice_id FK
   bigint story_id FK
   varchar_16_ notice_tag
+  boolean deep_link_included
 }
 "public.credit_orders" {
   bigint id

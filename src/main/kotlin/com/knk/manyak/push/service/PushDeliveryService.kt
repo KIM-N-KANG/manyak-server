@@ -31,6 +31,12 @@ class PushDeliveryService(
         repository.insert(report, campaignId, users.findByPublicId(report.recipientId)?.id)
     }
 
+    @Transactional(readOnly = true)
+    fun campaignReach(from: LocalDate, to: LocalDate): List<PushCampaignReach> = repository.campaignReach(from, to)
+
+    @Transactional(readOnly = true)
+    fun activityReach(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushActivityReach> = repository.activityReach(from, to, types)
+
     /** S8 캠페인 상세에서 이미 해석한 내부 PK로 호출한다. 결과가 없어도 모두 0이다. */
     @Transactional(readOnly = true)
     fun campaignStats(campaignId: Long): CampaignDeliveryStats = repository.campaignStats(campaignId)

@@ -163,7 +163,7 @@ class PromotionPushIntegrationTests {
     }
 
     @Test
-    fun `로컬 회차 도중 스토리가 비공개로 바뀌면 다음 회원에게는 링크 없이 보낸다`() {
+    fun `로컬 회차는 스토리 공개 여부와 딥링크를 시작 때 한 번 판정한다`() {
         val owner = eligibleMember()
         eligibleMember()
         val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = owner.id))
@@ -180,7 +180,21 @@ class PromotionPushIntegrationTests {
         assertThat(sentData).hasSize(2)
         assertThat(sentData[0]).containsEntry("storyId", story.publicId.toString())
             .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
-        assertThat(sentData[1]).doesNotContainKeys("storyId", "deepLink").containsEntry("body", "본문")
+        assertThat(sentData[1]).isEqualTo(sentData[0])
+        assertThat(reload(campaign).deepLinkIncluded).isTrue()
+    }
+
+    @Test
+    fun `회차 시작 때 비공개인 이동 스토리는 링크 없이 발송하고 거짓으로 기록한다`() {
+        val owner = eligibleMember()
+        val story = stories.saveAndFlush(Story(title = "비공개 스토리", userId = owner.id, visibility = StoryVisibility.PRIVATE))
+        val campaign = pushCampaignRepository.save(PushCampaign(title = "추천", body = "본문", scheduledAt = NOW, storyId = story.id))
+        doAnswer { invocation ->
+            assertThat(invocation.getArgument<Map<String, String>>(1)).doesNotContainKeys("storyId", "deepLink")
+            null
+        }.`when`(fcmPushSender).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
+        assertThat(service().sendDue(NOW).single().sent).isEqualTo(1)
+        assertThat(reload(campaign).deepLinkIncluded).isFalse()
     }
 
     @Test
@@ -204,6 +218,7 @@ class PromotionPushIntegrationTests {
         val result = service().sendDue(NOW).single()
 
         assertThat(result.targets).isZero()
+        assertThat(reload(campaign).deepLinkIncluded).isNull()
         verify(fcmPushSender, never()).sendToUser(anyLong(), anyMap(), eq(NORMAL) ?: NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
         assertThat(reload(campaign).status).isEqualTo(PushCampaignStatus.SENT)
     }

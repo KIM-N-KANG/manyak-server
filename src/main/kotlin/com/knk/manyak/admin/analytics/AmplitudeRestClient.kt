@@ -106,5 +106,19 @@ object AmplitudeResults {
             Group(parts.map { if (it.isNull || it.asText() == "(none)") null else it.asText() }, number(requireNotNull(value)))
         }
     }
+    /** 그룹별 일별 값: 날짜의 빈 그룹도 빈 배열로 저장해 정상 0과 미수집을 구분한다. */
+    fun dailyGroups(data: JsonNode, range: AnalyticsRange): Map<LocalDate, List<Group>> = parse {
+        val dates = requireNotNull(data["xValues"]); val labels = requireNotNull(data["seriesLabels"]); val series = requireNotNull(data["series"])
+        require(dates.isArray && dates.size() == range.days && labels.isArray && series.isArray && labels.size() == series.size())
+        val parsedDates = dates.toList().map(::date)
+        require(parsedDates.toSet() == range.dates().toSet() && parsedDates.distinct().size == range.days)
+        val names = labels.toList().map { label ->
+            val parts = if (label.isArray) label.toList().let { if (it.size == 2 && it.first().isNumber) it.drop(1) else it } else listOf(label)
+            require(parts.size == 1 && parts.all { it.isString || it.isNull })
+            parts.first().let { if (it.isNull || it.asText() == "(none)") null else it.asText() }
+        }
+        series.forEach { require(it.isArray && it.size() == range.days) }
+        parsedDates.mapIndexed { i, date -> date to names.mapIndexed { group, name -> Group(listOf(name), number(series[group][i])) } }.toMap()
+    }
     fun <T> parse(block: () -> T): T = try { block() } catch (failure: AmplitudeFetchFailure) { throw failure } catch (failure: Exception) { throw AmplitudeFetchFailure(AnalyticsFailureReason.parse_error, exceptionClass = failure.javaClass.name, phase = "result_decode") }
 }
