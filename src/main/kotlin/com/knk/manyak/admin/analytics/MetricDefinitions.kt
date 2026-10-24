@@ -11,14 +11,13 @@ import java.util.Locale
 @Component
 class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val mapper: ObjectMapper) {
     val platforms = listOf("all", "web", "android", "unknown")
-    fun filters(platform: String): List<Map<String, Any>> = AdminMetricEvents.common(false) + if (platform == "all") emptyList() else
-        listOf(AdminMetricEvents.filter("platform", listOf(when (platform) { "web" -> "Web"; "android" -> "Android"; "unknown" -> "(none)"; else -> error("Invalid platform") }), "user"))
+    fun filters(platform: String): List<Map<String, Any>> = AdminMetricEvents.platformFilters(platform)
     fun activity(): List<DailyAnalyticsMetric> = platforms.flatMap { platform -> listOf("active", "new").map { event ->
         queries.daily("activity_$event", AdminMetricEvents.event("_$event", filters(platform)))
-    } } + listOf("web", "android").map { queries.daily("activity_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters(it)), "average", false) }
-    fun mau(to: LocalDate): RangeAnalyticsMetric {
+    } } + listOf(queries.daily("activity_active", AdminMetricEvents.event("_active", filters("android_overseas")))) + listOf("web", "android").map { queries.daily("activity_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters(it)), "average", false) }
+    fun mau(to: LocalDate, platform: String = "all"): RangeAnalyticsMetric {
         val range = AnalyticsRange(to.minusDays(29), to)
-        val def = AnalyticsDefinition("activity_mau", "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters("all"))), "m" to "uniques", "i" to "1"), 1, mapper)
+        val def = AnalyticsDefinition("activity_mau", "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters(platform))), "m" to "uniques", "i" to "1"), 1, mapper)
         return RangeAnalyticsMetric(def, range) { data -> AmplitudeResults.parse {
             val values = data["seriesCollapsed"]; require(values != null && values.isArray && values.size() == 1)
             val value = values[0].let { if (it.isArray) { require(it.size() == 1); it[0] } else it }.let { if (it.isObject) it["value"] else it }
@@ -27,8 +26,10 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     }
 
     fun retention(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
-        val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(AdminMetricEvents.event("_new", filters(platform))),
-            "re" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters(platform))), "i" to "1"), 8, mapper)
+        // 리텐션 전체는 평균·코호트처럼 국내 사용자 전체 한 조회를 유지한다.
+        val filters = if (platform == "all") AdminMetricEvents.common(false) else filters(platform)
+        val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(AdminMetricEvents.event("_new", filters)),
+            "re" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters)), "i" to "1"), 8, mapper)
         DailyAnalyticsMetric(def, retention = true) { data, range -> AmplitudeResults.parse {
             val series = data["series"]; require(series != null && series.isArray && series.size() == 1)
             val values = series[0]["values"]; require(values != null && values.isObject)
@@ -67,7 +68,12 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     val qualityEvents = linkedMapOf("chatLoadError" to "client_chat_loadError_shown", "storyListLoadError" to "client_storyList_loadError_shown",
         "storyCompleteError" to "client_storyCreate_completeError_shown", "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
         "attendanceClicked" to "client_creditCharge_attendanceButton_clicked", "inviteSucceeded" to "client_invite_codeInput_succeeded")
-    fun quality(platform: String): List<DailyAnalyticsMetric> {
+    fun quality(platform: String): List<DailyAnalyticsMetric> = when (platform) {
+        "all" -> listOf("all", "android", "android_overseas")
+        "android" -> listOf("android", "android_overseas")
+        else -> listOf(platform)
+    }.flatMap { qualityGroup(it) }
+    private fun qualityGroup(platform: String): List<DailyAnalyticsMetric> {
         val filters = filters(platform)
         val all = queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters), "totals")
         val modes = listOf("choice", "plain", "block").map { queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters + AdminMetricEvents.filter("input_mode", listOf(it))), "totals") }

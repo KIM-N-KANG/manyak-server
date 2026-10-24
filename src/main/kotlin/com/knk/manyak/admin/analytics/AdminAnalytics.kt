@@ -26,20 +26,20 @@ class AmplitudeFetchFailure(val reason: AnalyticsFailureReason, val status: Int?
 @Service
 class AdminAnalyticsService(private val snapshots: AnalyticsSnapshots, properties: AmplitudeDashboardProperties, mapper: tools.jackson.databind.ObjectMapper,
     private val clock: Clock = Clock.systemUTC()) {
-    private fun metric(name: String, platforms: List<String>, properties: AmplitudeDashboardProperties, mapper: tools.jackson.databind.ObjectMapper): DailyAnalyticsMetric {
+    private fun metric(name: String, platform: String, properties: AmplitudeDashboardProperties, mapper: tools.jackson.databind.ObjectMapper): DailyAnalyticsMetric {
         val cohort = if (properties.teamCohortId.isBlank()) emptyList() else listOf("s" to mapper.writeValueAsString(listOf(mapOf("prop" to "userdata_cohort", "op" to "is not", "values" to listOf(properties.teamCohortId)))))
-        fun filter(key: String, values: List<String>) = mapOf("subprop_type" to "user", "subprop_key" to key, "subprop_op" to "is", "subprop_value" to values)
-        val event = mapper.writeValueAsString(mapOf("event_type" to "_$name", "filters" to listOf(filter("country", listOf("South Korea", "(none)")), filter("platform", platforms))))
+        val event = mapper.writeValueAsString(AdminMetricEvents.event("_$name", AdminMetricEvents.platformFilters(platform)))
         val definition = AnalyticsDefinition("dashboard_$name", "/api/2/events/segmentation", listOf("e" to event, "m" to "uniques", "i" to "1") + cohort, if (cohort.isEmpty()) 1 else 2, mapper)
         return DailyAnalyticsMetric(definition) { data, range -> range.dates().zip(AmplitudeResults.series(data, range).map { mapper.valueToTree<tools.jackson.databind.JsonNode>(it) }).toMap() }
     }
-    private val platformFilters = listOf(listOf("Web", "Android"), listOf("Web"), listOf("Android"))
-    private val active = platformFilters.map { metric("active", it, properties, mapper) }
-    private val new = platformFilters.map { metric("new", it, properties, mapper) }
+    private val active = listOf("web", "android", "android_overseas").map { metric("active", it, properties, mapper) }
+    private val new = listOf("web", "android").map { metric("new", it, properties, mapper) }
     fun dailyMetrics(): List<DailyAnalyticsMetric> = active + new
     private fun counts(values: List<AnalyticsValue>): DashboardPlatformCounts {
-        check(values.size == 3)
-        return DashboardPlatformCounts(values[0].value.asLong(), values[1].value.asLong(), values[2].value.asLong())
+        check(values.size in 2..3)
+        val web = values[0].value.asLong()
+        val android = values.drop(1).fold(0L) { sum, value -> Math.addExact(sum, value.value.asLong()) }
+        return DashboardPlatformCounts(Math.addExact(web, android), web, android)
     }
     fun dashboard(request: com.knk.manyak.admin.dto.AdminChartsRequest): AdminAnalyticsResponse {
         val requested = request.resolve(clock); val range = AnalyticsRange(requested.from, requested.to)

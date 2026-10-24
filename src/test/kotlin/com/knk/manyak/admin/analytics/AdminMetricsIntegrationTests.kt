@@ -129,7 +129,7 @@ class AdminMetricsIntegrationTests {
         }
         val period="from=2026-10-19&to=2026-10-21"
         val activity=body("/users/activity?$period")
-        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(100)
+        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(300)
         assertThat(activity["daily"][0]["activeUsers"]["unknown"].asLong()).isEqualTo(10)
         assertThat(activity["daily"][0]["messagesPerUser"]["all"].isNull).isTrue()
         val retention=body("/users/retention?$period")

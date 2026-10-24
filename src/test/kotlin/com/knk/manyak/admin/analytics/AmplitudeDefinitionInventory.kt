@@ -45,7 +45,7 @@ internal class AmplitudeDefinitionInventory {
         val campaigns = CampaignAnalyticsService(settings, snapshots, queries, clock)
         val metrics = AdminMetricsService(definitions, snapshots, queries, clock)
         dashboard.dailyMetrics().forEach { daily(it, "dashboard + today") }
-        definitions.activity().forEach { daily(it, "users/activity") }; interval(definitions.mau(date), "users/activity:MAU")
+        definitions.activity().forEach { daily(it, "users/activity") }; listOf("all", "android", "android_overseas").forEach { interval(definitions.mau(date, it), "users/activity:MAU") }
         definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.retention().forEach { daily(it, "users/retention") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
         for (item in items) {
