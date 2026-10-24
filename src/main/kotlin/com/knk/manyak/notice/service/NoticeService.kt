@@ -46,15 +46,22 @@ class NoticeService(
     @Transactional
     fun create(actor: Long, request: CreateNoticeRequest): AdminNoticeResponse {
         val now = now()
-        val row = notices.save(Notice(title = request.title, body = request.body, tag = request.tag, createdByUserId = actor, createdAt = now, updatedAt = now))
+        val row = notices.save(Notice(title = request.title, body = request.body, tag = request.tag, notificationTitle = request.notificationTitle, notificationBody = request.notificationBody, createdByUserId = actor, createdAt = now, updatedAt = now))
         val result = detail(row.publicId)
         audits.recordChange(actor, AdminAuditAction.NOTICE_CREATED, row.publicId.toString(), request.reason, after = state(row))
         return result
     }
     @Transactional
     fun update(actor: Long, id: UUID, request: UpdateNoticeRequest): AdminNoticeResponse {
-        if (request.title == null && request.body == null && request.tag == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목, 본문 또는 태그를 지정하세요.")
+        if (request.title == null && request.body == null && request.tag == null && request.notificationTitle == null && request.notificationBody == null) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "제목, 본문, 태그 또는 알림 문구를 지정하세요.")
         val row = lock(id); val before = state(row)
+        // null은 생략이다. API의 형식 검증 뒤, 알림 요청 여부를 기존 문구의 쌍 검사보다 먼저 판정한다.
+        if (request.notificationTitle != null || request.notificationBody != null) {
+            if (row.notifiedAt != null) conflict("이미 알림을 요청한 공지의 알림 문구는 변경할 수 없습니다.")
+            if ((request.notificationTitle ?: row.notificationTitle) == null || (request.notificationBody ?: row.notificationBody) == null)
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "알림 제목과 본문을 함께 입력하세요.")
+        }
+        request.notificationTitle?.let { row.notificationTitle = it }; request.notificationBody?.let { row.notificationBody = it }
         request.title?.let { row.title = it }; request.body?.let { row.body = it }; request.tag?.let { row.tag = it }; row.updatedAt = now()
         notices.flush()
         val result = detail(id)
@@ -65,11 +72,13 @@ class NoticeService(
     fun publish(actor: Long, id: UUID, request: PublishNoticeRequest): AdminNoticeResponse {
         val row = lock(id)
         if (row.status != NoticeStatus.DRAFT) conflict("이미 게시된 공지입니다.")
+        if (row.notifiedAt == null && (row.notificationTitle == null || row.notificationBody == null))
+            conflict("알림 제목과 본문을 입력한 뒤 게시하세요.")
         val before = publicationState(row); val now = now()
         row.status = NoticeStatus.PUBLISHED; row.publishedAt = now; row.updatedAt = now
         val notified = row.notifiedAt == null
         if (notified) {
-            pushes.request(row.id, row.title, notificationBody(row.body), row.tag.pushKind, row.tag, now)
+            pushes.request(row.id, requireNotNull(row.notificationTitle), requireNotNull(row.notificationBody), row.tag.pushKind, row.tag, now)
             row.notifiedAt = now
         }
         notices.flush()
@@ -100,11 +109,13 @@ class NoticeService(
     fun delete(actor: Long, id: UUID, reason: String) {
         val row = lock(id)
         if (row.status != NoticeStatus.DRAFT || row.notifiedAt != null) conflict("삭제할 수 없는 공지입니다.")
-        val before = state(row)
+        val before = state(row, includeNotificationTitle = false)
         notices.delete(row); notices.flush()
         audits.recordChange(actor, AdminAuditAction.NOTICE_DELETED, id.toString(), reason, before = before)
     }
-    private fun state(row: Notice) = mapper.createObjectNode().put("title", row.title).put("tag", row.tag.name).put("status", row.status.name)
+    private fun state(row: Notice, includeNotificationTitle: Boolean = true) = mapper.createObjectNode()
+        .put("title", row.title).put("tag", row.tag.name).put("status", row.status.name)
+        .apply { if (includeNotificationTitle) put("notificationTitle", row.notificationTitle) }
     private fun publicationState(row: Notice): tools.jackson.databind.JsonNode = mapper.valueToTree(mapOf(
         "status" to row.status.name, "publishedAt" to row.publishedAt, "notifiedAt" to row.notifiedAt,
     ))
@@ -112,7 +123,4 @@ class NoticeService(
     private fun lock(id: UUID) = notices.lockByPublicId(id) ?: missing()
     private fun missing(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "공지를 찾을 수 없습니다.")
     private fun conflict(message: String): Nothing = throw ResponseStatusException(HttpStatus.CONFLICT, message)
-    companion object {
-        fun notificationBody(body: String): String = body.replace(Regex("\\r\\n|\\r|\\n"), " ").take(300)
-    }
 }

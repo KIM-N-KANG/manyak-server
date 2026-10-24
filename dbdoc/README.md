@@ -59,7 +59,7 @@
 | [public.admin_audit_logs](public.admin_audit_logs.md) | 12 | 관리자 변경·개인정보 접속 기록. 영구 보존 | BASE TABLE |
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
-| [public.notices](public.notices.md) | 11 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
+| [public.notices](public.notices.md) | 13 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
 | [public.chat_models](public.chat_models.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
@@ -743,6 +743,8 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   varchar_16_ tag
+  varchar_100_ notification_title
+  varchar_300_ notification_body
 }
 "public.chat_models" {
   varchar_20_ code
