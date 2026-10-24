@@ -117,10 +117,10 @@ abstract class CampaignStoryIntegrationTests {
 
     @Test fun `공개 스토리 알림은 발송 데이터에 UUID와 스토리 절대 딥링크를 싣는다`() {
         val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = admin.id))
-        create(story)
+        val campaign = create(story)
         assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(1)
         assertThat(data.single()).containsEntry("storyId", story.publicId.toString())
-            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}")
+            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign["campaignId"].asText()}&utm_content=promotion")
             .containsEntry("type", "PROMOTION").containsEntry("title", "(광고) 스토리 추천")
     }
 

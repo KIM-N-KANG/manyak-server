@@ -2,6 +2,7 @@ package com.knk.manyak.story.submission
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.service.FcmPushSender
+import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.push.outbox.PushOutboxStore
 import com.knk.manyak.push.outbox.PushMessage
 import org.slf4j.LoggerFactory
@@ -32,7 +33,7 @@ internal fun StoryModerationCompleted.pushData(base: String): Map<String, String
     put("submissionId", submissionId)
     put("status", status.name)
     storyId?.let { put("storyId", it) }
-    put("deepLink", "${base.trimEnd('/')}/studio")
+    put("deepLink", pushDeepLink(base, "/studio", "STORY_MODERATION_COMPLETED"))
 }
 
 @Component

@@ -43,7 +43,7 @@ class AttendanceReminderService(
             // (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
             "title" to withAdPrefix(text.title),
             "body" to text.body,
-            "deepLink" to "${webBaseUrl.trimEnd('/')}/my/credits?tab=free",
+            "deepLink" to pushDeepLink(webBaseUrl, "/my/credits?tab=free", TYPE_ATTENDANCE_REMINDER),
         )
 
         if (outbox != null) {

@@ -92,7 +92,7 @@ class PromotionPushService(
             campaign.noticeId?.let { id ->
                 val publicId = requireNotNull(pushCampaignRepository.findNoticePublicId(id)) { "공지 참조가 없습니다." }
                 data["noticeId"] = publicId.toString()
-                data["deepLink"] = "${webBaseUrl.trimEnd('/')}/notices/$publicId"
+                data["deepLink"] = pushDeepLink(webBaseUrl, "/notices/$publicId", data.getValue("type"), campaign.publicId.toString())
             }
             if (outbox != null) {
                 sent = outbox.record(targetIds, withStoryDestination(campaign, data),
@@ -132,7 +132,7 @@ class PromotionPushService(
         val storyId = campaign.storyId ?: return data
         val story = stories.findByIdAndDeletedAtIsNull(storyId)?.takeIf { it.isPubliclyVisible() } ?: return data
         return data + mapOf("storyId" to story.publicId.toString(),
-            "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${story.publicId}")
+            "deepLink" to pushDeepLink(webBaseUrl, "/stories/${story.publicId}", TYPE_PROMOTION, campaign.publicId.toString()))
     }
 
     private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int): Boolean {

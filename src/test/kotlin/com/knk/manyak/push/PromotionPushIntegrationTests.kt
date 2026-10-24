@@ -166,7 +166,7 @@ class PromotionPushIntegrationTests {
         val owner = eligibleMember()
         eligibleMember()
         val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = owner.id))
-        pushCampaignRepository.save(PushCampaign(title = "추천", body = "본문", scheduledAt = NOW, storyId = story.id))
+        val campaign = pushCampaignRepository.save(PushCampaign(title = "추천", body = "본문", scheduledAt = NOW, storyId = story.id))
         val sentData = mutableListOf<Map<String, String>>()
         doAnswer { invocation ->
             sentData += invocation.getArgument<Map<String, String>>(1).toMap()
@@ -178,7 +178,7 @@ class PromotionPushIntegrationTests {
         assertThat(service().sendDue(NOW).single().sent).isEqualTo(2)
         assertThat(sentData).hasSize(2)
         assertThat(sentData[0]).containsEntry("storyId", story.publicId.toString())
-            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}")
+            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
         assertThat(sentData[1]).doesNotContainKeys("storyId", "deepLink").containsEntry("body", "본문")
     }
 

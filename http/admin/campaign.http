@@ -379,7 +379,9 @@ Content-Type: application/json
 ### 공개 스토리로 즉시 예약 — 테스트 수신자·스케줄러 설정 후 실행
 # 수신자는 ACTIVE + 광고 동의 + 토큰 보유, 야간은 야간 동의도 필요.
 # 다음 폴링 후 로컬 FCM data 또는 원격 push_outbox.payload.data에서
-# storyId={{campaignStoryId}}, deepLink=https://manyak.app/stories/{{campaignStoryId}} 확인.
+# storyId={{campaignStoryId}}, deepLink=https://manyak.app/stories/{{campaignStoryId}}?utm_source=push&utm_medium=push&utm_campaign={예약 응답 campaignId}&utm_content=promotion 확인.
+# UTM 순서는 source·medium·campaign·content. campaign 값은 스토리 ID가 아닌 캠페인 공개 UUID.
+# 공지 캠페인은 /notices/{noticeId}와 같은 UTM을 사용하며 SERVICE는 content=notice, MARKETING은 content=promotion.
 POST {{baseUrl}}/api/v1/admin/push/campaigns
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json

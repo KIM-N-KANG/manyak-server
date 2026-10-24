@@ -1,6 +1,7 @@
 package com.knk.manyak.push.outbox
 
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Value
@@ -32,7 +33,7 @@ class StoryCompletionOutboxListener(
             messageId = "story-completed:${event.requestId}",
             recipientId = user.publicId.toString(),
             data = mapOf("type" to "STORY_COMPLETED", "storyId" to event.storyPublicId, "title" to event.title,
-                "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${event.storyPublicId}"),
+                "deepLink" to pushDeepLink(webBaseUrl, "/stories/${event.storyPublicId}", "STORY_COMPLETED")),
             requestId = MDC.get("request_id") ?: "unknown",
             sessionId = MDC.get("session_id") ?: "unknown",
         ), clock.instant())

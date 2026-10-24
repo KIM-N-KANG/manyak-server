@@ -134,7 +134,7 @@ class AttendanceReminderIntegrationTests {
             mapOf(
                 "type" to "ATTENDANCE_REMINDER",
                 "date" to today().toString(),
-                "deepLink" to "https://manyak.app/my/credits?tab=free",
+                "deepLink" to "https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder",
                 "title" to "(광고) 이프 250이 도착했어요 🍃",
                 "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?",
             ),
