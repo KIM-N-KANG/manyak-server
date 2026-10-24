@@ -3,7 +3,11 @@
 # reason=http_error/status=null/phase=request는 응답 전 실패이며 HTTP 오류 상태도 http_error다.
 # 본문·API 키·Authorization·원문 예외 메시지는 기록하지 않는다.
 # 세션 xValues의 ISO 날짜시각과 리텐션의 연도 포함 코호트 라벨을 지원한다.
-# MAU는 /events/segmentation의 _active + country 필터로 to-29일~to를 한 번 조회한다.
+# MAU는 _active의 Android 외·앱 국내·앱 해외 로그인 3회를 to-29일~to로 조회해 seriesCollapsed를 더한다.
+# 활동 all은 Android 외+앱 국내+앱 해외 로그인, android는 앱 두 조회의 합. 신규·평균·세션·리텐션·퍼널은 국내만.
+# 리텐션 all은 플랫폼 제한 없는 국내 조회 하나다. 동일 사용자의 플랫폼 전환 복귀를 포함한다.
+# 합은 조건별 고유 사용자 수의 합이라 같은 사람이 같은 날/30일 안에 조건을 넘나들면 중복으로 센다.
+# 합 구성 조회 하나라도 값이 없으면 해당 날짜는 pendingDates/503, 일부 MAU 구성만 있으면 monthlyActiveUsers=null.
 # monthlyActiveUsers는 seriesCollapsed의 범위 고유 사용자이며 일별 값의 합이 아니다.
 
 # 관리자 사용자·전환·품질 지표 수동 검증 (IntelliJ HTTP Client).
@@ -70,6 +74,7 @@ client.test("평균 세션 길이 응답", () => {
 });
 %}
 
+# 기능 사용: web=12회, android=국내+해외 로그인 24회, all=Android 외+앱 둘 36회. 일별 비용도 12/24/36.
 ### 기능 사용과 안정성
 GET {{baseUrl}}/api/v1/admin/quality/client?platform=web&days=7
 Authorization: Bearer {{adminToken}}

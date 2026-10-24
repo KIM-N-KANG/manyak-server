@@ -9,11 +9,13 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class AmplitudeDefinitionCompatibilityTests {
-    @TestFactory fun `운영 응답의 비식별 구조를 모든 실제 디코더로 검증한다`(): List<DynamicTest> {
+    @TestFactory fun `비식별 운영 응답과 신규 조건의 대역 구조를 모든 실제 디코더로 검증한다`(): List<DynamicTest> {
         val inventory = AmplitudeDefinitionInventory()
         val responses = responses(inventory)
+        // 신규 조건은 실호출하지 않는다. 같은 엔드포인트·지표의 기존 비식별 응답 형태만 대역으로 재사용한다.
+        val aliases = inventory.mapper.readTree(ClassPathResource("amplitude/app-overseas-shape-aliases.json").inputStream.bufferedReader().use { it.readText() })
         return inventory.entries.map { (hash, entry) -> DynamicTest.dynamicTest(entry.definition.metric + ":" + hash.takeLast(64).take(8)) {
-            val response = responses[hash]
+            val response = requireNotNull(responses[hash] ?: aliases[hash]?.let { responses[it.asText()] }) { "응답 형태 fixture 누락: $hash" }
             assertThat(response).describedAs("실제 응답 구조 fixture: " + hash).isNotNull()
             assertThat(response["status"].asInt()).isEqualTo(200)
             entry.decode(response["data"])

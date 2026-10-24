@@ -30,12 +30,13 @@ class AdminMetricsTests {
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     else -> {
                         val event = url.queryParameter("e")?.let { mapper.readTree(it) }; val filters = event?.get("filters")?.toList().orEmpty()
-                        val platform = filters.firstOrNull { it["subprop_key"].asText()=="platform" }?.get("subprop_value")?.get(0)?.asText()
+                        val platformFilter = filters.firstOrNull { it["subprop_key"].asText()=="platform" }
+                        val platform = if (platformFilter?.get("subprop_op")?.asText()=="is not") "nonAndroid" else platformFilter?.get("subprop_value")?.get(0)?.asText()
                         val name = event?.get("event_type")?.asText()
                         val value: Number = when {
                             path.endsWith("/average") -> 123.75
                             url.queryParameter("m")=="average" -> 4.5
-                            name=="_active" -> when(platform) { "Web" -> 10; "Android" -> 3; "(none)" -> 2; else -> 13 }
+                            name=="_active" -> if(filters.any { it["subprop_key"].asText()=="user_id" }) 1 else when(platform) { "Web" -> 10; "Android" -> 2; "(none)" -> 2; "nonAndroid" -> 11; else -> 13 }
                             name==AdminMetricEvents.MESSAGE -> if (filters.any { it["subprop_key"].asText()=="input_mode" }) 0 else 2
                             name=="client_chat_streamError_shown" -> 3
                             else -> 1
@@ -51,22 +52,22 @@ class AdminMetricsTests {
     private fun range(from: String, to: String) = AnalyticsRangeQuery().apply { this.from=from; this.to=to }
     @Test fun `활동은 전체와 플랫폼을 따로 조회하고 MAU를 우선 예약한다`() {
         val value = service.activity(range("2026-10-15", "2026-10-21"))
-        assertThat(value.monthlyActiveUsers).isEqualTo(73)
-        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(13,10,3,2))
+        assertThat(value.monthlyActiveUsers).isEqualTo(219)
+        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(14,10,3,2))
         assertThat(value.daily.first().messagesPerUser).isEqualTo(PlatformDecimals(null,4.5,4.5))
-        assertThat(value.daily.last().cumulativeNewVisitors).isEqualTo(PlatformCounts(7,7,7,7))
-        assertThat(requests).hasSize(11)
+        assertThat(value.daily.last().cumulativeNewVisitors).isEqualTo(PlatformCounts(14,7,7,7))
+        assertThat(requests).hasSize(14)
         val first = requests.first().requestUrl!!
         assertThat(first.encodedPath).isEqualTo("/api/2/events/segmentation"); assertThat(first.queryParameter("start")).isEqualTo("20260922"); assertThat(first.queryParameter("end")).isEqualTo("20261021")
         assertThat(first.queryParameter("s")).isNull(); assertThat(first.queryParameter("e")).contains("_active", "country"); assertThat(first.queryParameter("i")).isEqualTo("1")
-        requests.drop(1).forEach { assertThat(it.requestUrl!!.queryParameter("s")).isNull(); assertThat(it.requestUrl!!.queryParameter("g")).isNull() }
-        assertThat(fixture.budget.reserve(400)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        requests.drop(3).forEach { assertThat(it.requestUrl!!.queryParameter("s")).isNull(); assertThat(it.requestUrl!!.queryParameter("g")).isNull() }
+        assertThat(fixture.budget.reserve(333)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         val count=requests.size; service.activity(range("2026-10-15","2026-10-21")); assertThat(requests).hasSize(count)
     }
-    @Test fun `활동 366일은 MAU 30을 먼저 받고 최근 47일을 준비한다`() {
+    @Test fun `활동 366일은 MAU 90을 먼저 받고 최근 37일을 준비한다`() {
         val value = service.activity(range("2025-10-23","2026-10-23"))
-        assertThat(value.daily).hasSize(47); assertThat(value.pendingDates).hasSize(319); assertThat(value.monthlyActiveUsers).isEqualTo(73)
-        assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(value.daily).hasSize(37); assertThat(value.pendingDates).hasSize(329); assertThat(value.monthlyActiveUsers).isEqualTo(219)
+        assertThat(fixture.budget.reserve(3)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         assertThatThrownBy { service.activity(range("2025-10-22","2026-10-23")) }.hasMessageContaining("기간")
     }
     @Test fun `리텐션은 인덱스1과 가중 평균을 쓰고 incomplete와 미종료일은 null이다`() {
@@ -128,10 +129,10 @@ class AdminMetricsTests {
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
     @Test fun `서로 다른 지표도 공용 예산을 나눠 쓰고 준비된 날짜만 반환한다`() {
-        service.activity(range("2026-10-15","2026-10-21")) // MAU 30 + 일별 70
+        service.activity(range("2026-10-15","2026-10-21")) // MAU 90 + 일별 77
         val result=service.quality(PlatformMetricsQuery().apply { from="2026-09-21"; to="2026-10-21" })
-        assertThat(result.daily).hasSize(31); assertThat(result.pendingDates).isEmpty()
-        assertThat(fixture.budget.reserve(28)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(result.daily).hasSize(9); assertThat(result.pendingDates).hasSize(22)
+        assertThat(fixture.budget.reserve(9)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `MAU 실패도 저장된 일별 활동은 반환하고 MAU만 null이다`() {
         val date=LocalDate.parse("2026-10-21")
@@ -148,8 +149,8 @@ class AdminMetricsTests {
         assertThat(retention.platforms.first().cohorts).hasSize(20); assertThat(retention.pendingDates).hasSize(346)
         fixture.clock.at=fixture.clock.at.plusSeconds(300)
         val quality=service.quality(PlatformMetricsQuery().apply { from="2025-10-23"; to="2026-10-23" })
-        assertThat(quality.daily).hasSize(41); assertThat(quality.pendingDates).hasSize(325)
-        assertThat(fixture.budget.reserve(8)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(quality.daily).hasSize(13); assertThat(quality.pendingDates).hasSize(353)
+        assertThat(fixture.budget.reserve(32)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
 
 }

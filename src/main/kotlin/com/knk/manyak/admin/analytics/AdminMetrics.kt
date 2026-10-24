@@ -28,18 +28,21 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
     private val clock: Clock = Clock.systemUTC()) {
     private fun ready(result: AnalyticsSnapshotResult): List<LocalDate> = result.readyDates().also { if (it.isEmpty()) throw AdminAnalyticsUnavailable() }
     fun activity(query: AnalyticsRangeQuery): ActivityResponse {
-        val range = query.range(clock); val metrics = definitions.activity(); val mau = definitions.mau(range.to)
-        val result = snapshots.load("users/activity", range, metrics, rangeMetrics = listOf(mau)); val dates = ready(result)
+        val range = query.range(clock); val metrics = definitions.activity(); val mau = listOf("all", "android", "android_overseas").map { definitions.mau(range.to, it) }
+        val result = snapshots.load("users/activity", range, metrics, rangeMetrics = mau); val dates = ready(result)
         val cumulative = LongArray(4)
         val daily = dates.map { date ->
             fun n(i: Int) = result.value(metrics[i], date)!!.value.asLong()
             fun d(i: Int) = result.value(metrics[i], date)!!.value.asDouble()
-            for (i in 0..3) cumulative[i] = Math.addExact(cumulative[i], n(i * 2 + 1))
-            ActivityDay(date, PlatformCounts(n(0), n(2), n(4), n(6)), PlatformCounts(n(1), n(3), n(5), n(7)),
-                PlatformCounts(cumulative[0], cumulative[1], cumulative[2], cumulative[3]), PlatformDecimals(null, d(8), d(9)))
+            val android = Math.addExact(n(4), n(8))
+            val new = listOf(Math.addExact(n(1), n(5)), n(3), n(5), n(7))
+            for (i in 0..3) cumulative[i] = Math.addExact(cumulative[i], new[i])
+            ActivityDay(date, PlatformCounts(Math.addExact(n(0), android), n(2), android, n(6)), PlatformCounts(new[0], new[1], new[2], new[3]),
+                PlatformCounts(cumulative[0], cumulative[1], cumulative[2], cumulative[3]), PlatformDecimals(null, d(9), d(10)))
         }
-        val monthly = result.value(mau)
-        return ActivityResponse(result.asOf(dates.flatMap { result.values(it) } + listOfNotNull(monthly)), range.from, range.to, monthly?.value?.asLong(), daily, result.pendingDates())
+        val monthly = mau.mapNotNull { result.value(it) }.takeIf { it.size == mau.size }
+        val monthlyTotal = monthly?.fold(0L) { sum, value -> Math.addExact(sum, value.value.asLong()) }
+        return ActivityResponse(result.asOf(dates.flatMap { result.values(it) } + monthly.orEmpty()), range.from, range.to, monthlyTotal, daily, result.pendingDates())
     }
     fun retention(query: AnalyticsRangeQuery): RetentionResponse {
         val range = query.range(clock, default = 7, allowed = setOf(7), endOffset = -1)
@@ -72,7 +75,8 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
         val range = query.range(clock); val metrics = definitions.quality(platform)
         val result = snapshots.load("quality/client", range, metrics); val dates = ready(result)
         return QualityResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, platform, dates.map { date ->
-            val v = metrics.map { result.value(it, date)!!.value.asLong() }
+            // 구성 조회 하나라도 없으면 readyDates에서 제외한다. 빠진 묶음을 0으로 간주하지 않는다.
+            val v = (0 until 12).map { index -> metrics.indices.filter { it % 12 == index }.fold(0L) { sum, i -> Math.addExact(sum, result.value(metrics[i], date)!!.value.asLong()) } }
             QualityDay(date, linkedMapOf("choice" to v[1], "plain" to v[2], "block" to v[3], "unknown" to v[0] - v[1] - v[2] - v[3]), v[4],
                 if (v[0] == 0L) null else v[4].toDouble() / v[0], definitions.qualityEvents.keys.zip(v.drop(5)).toMap())
         }, result.pendingDates())

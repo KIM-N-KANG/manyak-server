@@ -51,7 +51,7 @@ class AdminAnalyticsPersistenceIntegrationTests {
         val token = jwt.issueAdminToken(admin.publicId)
         fun get(query: String) = http.get().uri("/api/v1/admin/dashboard/analytics?$query").header("Authorization", "Bearer $token").exchange()
         get("days=7").expectStatus().isOk
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_daily_values", Long::class.java)).isEqualTo(42)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_daily_values", Long::class.java)).isEqualTo(35)
         val count = server.requestCount
         get("from=2026-10-17&to=2026-10-21").expectStatus().isOk.expectBody().jsonPath("$.pendingDates.length()").isEqualTo(0)
         assertThat(server.requestCount).isEqualTo(count)
