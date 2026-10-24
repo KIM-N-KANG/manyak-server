@@ -56,7 +56,7 @@ class AdminReadService(
     fun member(adminUserId: Long, memberId: UUID): AdminMemberDetailResponse = SocialAuthPrivacyFilter.safely {
         val user = requireMember(memberId)
         val summary = reads.members(AdminMembersRequest(), AdminPagination(1, 1, "u.created_at desc"), memberId).items.single()
-        val result = AdminMemberDetailResponse(summary, wallet.balanceOf(user.id), reads.contentCount("stories", user.id), user.deletedAt)
+        val result = AdminMemberDetailResponse(summary, wallet.balanceOf(user.id), reads.contentCount("stories", user.id), reads.memberTurnCount(user.id), user.deletedAt)
         audits.recordAccess(adminUserId, AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
         result
     }
