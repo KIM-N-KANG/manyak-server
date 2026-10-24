@@ -154,6 +154,11 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
                     rs.getString("after_state")?.let(mapper::readTree), rs.getString("request_id"), rs.instant("created_at")!!)
             })
     }
+    // 삭제·게스트 이관 여부와 무관하게 현재 소유 채팅의 활성 AI 응답만 센다. 재생성 판본은 별도 테이블이다.
+    fun memberTurnCount(userId: Long): Long = jdbc.queryForObject("""SELECT COUNT(*)
+        FROM story_chats c JOIN story_messages m ON m.chat_id=c.id
+        WHERE c.user_id=:id AND m.role='ASSISTANT'""", mapOf("id" to userId), Long::class.java)!!
+
     fun contentCount(table: String, userId: Long): Long {
         require(table in setOf("stories", "story_chats"))
         return jdbc.queryForObject("SELECT COUNT(*) FROM $table WHERE user_id=:id AND deleted_at IS NULL", mapOf("id" to userId), Long::class.java)!!

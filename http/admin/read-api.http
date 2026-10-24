@@ -54,7 +54,7 @@ X-Manyak-Request-Id: admin_members_manual
         client.assert(Array.isArray(response.body.items) && response.body.items.length <= 20, `actual=${JSON.stringify(response.body)}`);
         client.assert(response.body.page === 1 && response.body.size === 20, `actual=${JSON.stringify(response.body)}`);
         client.assert(typeof response.body.totalElements === "number" && typeof response.body.totalPages === "number", "전체 페이지 정보가 필요합니다");
-        client.assert(response.body.items.every(m => !("email" in m) && !("userId" in m)), "이메일·내부 ID가 없어야 합니다");
+        client.assert(response.body.items.every(m => !("email" in m) && !("userId" in m) && !("turnCount" in m)), "이메일·내부 ID·상세 전용 turnCount가 없어야 합니다");
     });
 %}
 
@@ -66,7 +66,9 @@ Authorization: Bearer {{adminToken}}
     client.test("UUID 검색", () => client.assert(response.status === 200 && response.body.items.length === 1, `actual=${JSON.stringify(response.body)}`));
 %}
 
-### 회원 상세 — 로트 기준 미만료 잔액과 삭제되지 않은 콘텐츠 수, 조회마다 ACCESS 기록
+### 회원 상세 — 로트 기준 미만료 잔액·콘텐츠 수·누적 턴, 조회마다 ACCESS 기록
+# turnCount는 소유 채팅의 ASSISTANT 메시지 수. 삭제·이관 게스트 채팅 포함, 재생성 판본·USER 제외.
+# 팀 계정도 포함한다. 세 채팅에 AI 응답 2·3·4개(삭제 1개, 게스트 이관 1개)를 준비하면 9, 채팅 없으면 0.
 GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}
 Authorization: Bearer {{adminToken}}
 X-Manyak-Request-Id: admin_member_detail_manual
@@ -74,7 +76,8 @@ X-Manyak-Request-Id: admin_member_detail_manual
 > {%
     client.test("회원 상세", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
-        for (const key of ["creditBalance", "storyCount", "chatCount"]) client.assert(typeof response.body[key] === "number", `field=${key} actual=${response.body[key]}`);
+        for (const key of ["creditBalance", "storyCount", "chatCount", "turnCount"]) client.assert(typeof response.body[key] === "number", `field=${key} actual=${response.body[key]}`);
+        client.assert(Number.isInteger(response.body.turnCount) && response.body.turnCount >= 0, `turnCount=${response.body.turnCount}`);
         client.assert(!("email" in response.body) && !("id" in response.body), "개인 식별 필드가 없어야 합니다");
     });
 %}
