@@ -221,7 +221,7 @@ class FcmPushSenderTest {
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))
         val data = mapOf(
             "type" to "STORY_MODERATION_COMPLETED", "title" to "검수를 통과했어요",
-            "body" to "「스토리」의 등록이 완료됐어요. 지금 확인해 보세요.", "deepLink" to "https://manyak.app/studio",
+            "body" to "「스토리」의 등록이 완료됐어요. 지금 확인해 보세요.", "deepLink" to "https://manyak.app/studio?utm_source=push&utm_medium=push&utm_campaign=story_moderation_completed&utm_content=story_moderation_completed",
         )
 
         sender.sendToUser(7L, data)

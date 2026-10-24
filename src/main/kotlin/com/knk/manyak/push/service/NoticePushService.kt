@@ -12,6 +12,6 @@ import java.time.Instant
 @Service
 class NoticePushService(private val campaigns: PushCampaignRepository) {
     @Transactional(propagation = Propagation.MANDATORY)
-    fun request(noticeId: Long, title: String, body: String, kind: PushKind, at: Instant): PushCampaign =
-        campaigns.save(PushCampaign(title = title, body = body, kind = kind, noticeId = noticeId, scheduledAt = at, createdAt = at))
+    fun request(noticeId: Long, title: String, body: String, kind: PushKind, tag: com.knk.manyak.notice.entity.NoticeTag, at: Instant): PushCampaign =
+        campaigns.save(PushCampaign(title = title, body = body, kind = kind, noticeId = noticeId, noticeTag = tag, scheduledAt = at, createdAt = at))
 }

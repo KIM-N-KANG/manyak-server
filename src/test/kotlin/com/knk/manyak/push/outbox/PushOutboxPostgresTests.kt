@@ -123,7 +123,7 @@ class PushOutboxPostgresTests {
         assertThat(payload.propertyNames()).containsExactlyInAnyOrder("messageId", "recipientId", "kind", "type", "data", "requestId", "sessionId", "schemaVersion")
         assertThat(message()).isEqualTo(PushMessage("story-completed:${event.requestId}", user.publicId.toString(),
             data = mapOf("type" to "STORY_COMPLETED", "storyId" to event.storyPublicId, "title" to event.title,
-                "deepLink" to "https://manyak.app/stories/${event.storyPublicId}"), requestId = "trace-request", sessionId = "trace-session"))
+                "deepLink" to "https://manyak.app/stories/${event.storyPublicId}?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed"), requestId = "trace-request", sessionId = "trace-session"))
     }
     @Test fun `완성 트랜잭션 롤백은 아웃박스도 롤백한다`() {
         tx.executeWithoutResult { status -> context.publishEvent(event); status.setRollbackOnly() }

@@ -53,6 +53,7 @@ class AttendanceReminderIntegrationTests {
 
     @MockitoBean private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
 
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
@@ -65,7 +66,7 @@ class AttendanceReminderIntegrationTests {
     // 서비스, 스케줄러, 출석 키의 날짜를 같은 시계로 맞추고 실제 cron은 켜지 않는다.
     private var clock: Clock = atHour(15)
     private val attendanceReminderService: AttendanceReminderService
-        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock)
+        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
     private val attendanceReminderScheduler: AttendanceReminderScheduler
         get() = AttendanceReminderScheduler(attendanceReminderService, redisTemplate, structuredLogger, clock)
 
@@ -134,7 +135,7 @@ class AttendanceReminderIntegrationTests {
             mapOf(
                 "type" to "ATTENDANCE_REMINDER",
                 "date" to today().toString(),
-                "deepLink" to "https://manyak.app/my/credits?tab=free",
+                "deepLink" to "https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder",
                 "title" to "(광고) 이프 250이 도착했어요 🍃",
                 "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?",
             ),

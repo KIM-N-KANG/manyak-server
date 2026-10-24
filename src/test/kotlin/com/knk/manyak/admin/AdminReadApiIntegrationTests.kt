@@ -346,6 +346,38 @@ class AdminReadApiIntegrationTests {
         assertThat(json(get("/members?q=${user.publicId}&status=DELETED").expectStatus().isOk)["items"][0]["status"].asText()).isEqualTo("DELETED")
     }
 
+    @Test fun `회원 상세 누적 턴은 삭제 채팅과 이관 게스트를 포함하고 입력과 재생성 판본은 제외한다`() {
+        val story = storyRepository.save(com.knk.manyak.story.entity.Story(userId = admin.id, title = "누적 턴"))
+        for ((index, count) in listOf(2, 3, 4).withIndex()) {
+            val chat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(
+                userId = if (index == 2) null else admin.id, storyId = story.id,
+                currentTurn = 99, deletedAt = if (index == 1) now else null))
+            repeat(count) { n ->
+                val message = messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(
+                    chatId = chat.id, role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT,
+                    content = "응답", messageOrder = n + 1))
+                if (n == 0) repeat(2) { v -> versions.save(com.knk.manyak.chat.entity.StoryMessageVersion(
+                    messageId = message.id, versionNumber = v + 1, content = "과거 판본", choices = "[]")) }
+            }
+            messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
+                role = com.knk.manyak.chat.entity.MessageRole.USER, content = "입력", messageOrder = count + 1))
+            if (index == 2) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", admin.id, chat.id)
+        }
+        val other = member("다른 회원")
+        val otherChat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(userId = other.id, storyId = story.id))
+        messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = otherChat.id,
+            role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "다른 응답", messageOrder = 1))
+        val body = json(get("/members/${admin.publicId}").expectStatus().isOk)
+        assertThat(body.has("turnCount")).isTrue()
+        assertThat(body["turnCount"].asLong()).isEqualTo(9)
+        assertThat(body["periodChatCount"].isNull).isTrue()
+        assertThat(json(get("/members").expectStatus().isOk)["items"].all { !it.has("turnCount") }).isTrue()
+        val empty = member("채팅 없는 회원", UserStatus.DELETED)
+        val emptyBody = json(get("/members/${empty.publicId}").expectStatus().isOk)
+        assertThat(emptyBody.has("turnCount")).isTrue()
+        assertThat(emptyBody["turnCount"].asLong()).isZero()
+    }
+
     @Test fun `상세는 로트 기반 잔액과 콘텐츠 수를 응답하고 접속 기록을 남긴다`() {
         val user = member("대상")
         val body = json(get("/members/${user.publicId}").expectStatus().isOk)

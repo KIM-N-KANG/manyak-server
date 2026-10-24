@@ -72,11 +72,11 @@ data class AdminMemberDetailResponse(
     // isAdmin: springdoc이 is 접두를 벗기지 않도록 와이어 필드명을 고정한다(AdminMemberSummary와 동일).
     val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
-    val creditBalance: Long, val storyCount: Long, val deletedAt: Instant?,
+    val creditBalance: Long, val storyCount: Long, val turnCount: Long, val deletedAt: Instant?,
 ) {
-    constructor(member: AdminMemberListResponse, creditBalance: Long, storyCount: Long, deletedAt: Instant?) : this(
+    constructor(member: AdminMemberListResponse, creditBalance: Long, storyCount: Long, turnCount: Long, deletedAt: Instant?) : this(
         member.memberId, member.nickname, member.status, member.isAdmin, member.createdAt, member.lastActiveAt,
-        member.creditsSpent, member.paidKrw, member.chatCount, member.periodChatCount, creditBalance, storyCount, deletedAt)
+        member.creditsSpent, member.paidKrw, member.chatCount, member.periodChatCount, creditBalance, storyCount, turnCount, deletedAt)
 }
 
 data class AdminPaymentOrderResponse(

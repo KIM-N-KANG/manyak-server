@@ -24,16 +24,13 @@ class AttendanceReminderService(
     @Value("\${manyak.push.web-base-url:https://manyak.app}")
     private val webBaseUrl: String = "https://manyak.app",
     private val outbox: ScheduledPushOutboxWriter? = null,
+    private val notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun sendReminders(): AttendanceReminderResult {
         val today = LocalDate.now(clock.withZone(SEOUL_ZONE))
         val expiry = today.plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant()
-        val targetIds = userRepository.findAttendanceReminderTargetIds(today.toString())
-        if (targetIds.isEmpty()) {
-            return AttendanceReminderResult(targets = 0, sent = 0)
-        }
 
         // 문구는 회차 시작에 한 번만 해석한다. 회원마다 읽으면 갱신이 중간에 끼어들어 같은 회차가 두 문구로 나간다.
         val text = pushMessageTemplateService.templateOf(PushTemplateKey.ATTENDANCE_REMINDER)
@@ -43,13 +40,12 @@ class AttendanceReminderService(
             // (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
             "title" to withAdPrefix(text.title),
             "body" to text.body,
-            "deepLink" to "${webBaseUrl.trimEnd('/')}/my/credits?tab=free",
+            "deepLink" to pushDeepLink(webBaseUrl, "/my/credits?tab=free", TYPE_ATTENDANCE_REMINDER),
         )
 
-        if (outbox != null) {
-            val sent = outbox.record(targetIds, data, "attendance", today.toString(), expiry)
-            return AttendanceReminderResult(targetIds.size, sent)
-        }
+        val round = notifications.record(data, "attendance", today.toString(), outbox, expiry)
+        val targetIds = round.pushTargetIds
+        round.recordedPushes?.let { return AttendanceReminderResult(targetIds.size, it) }
 
         var sent = 0
         for (userId in targetIds) {

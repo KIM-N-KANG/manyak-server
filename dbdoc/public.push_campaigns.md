@@ -19,6 +19,7 @@
 | kind | varchar(16) | 'MARKETING'::character varying | false |  |  | 서비스 알림 또는 광고 알림. 기존 캠페인은 광고 종류 |
 | notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 공지당 한 번의 알림 요청. 공지 알림이 아니면 NULL |
 | story_id | bigint |  | true |  | [public.stories](public.stories.md) | 프로모션 이동 대상 스토리. 없으면 NULL |
+| notice_tag | varchar(16) |  | true |  |  |  |
 
 ## Constraints
 
@@ -26,6 +27,7 @@
 | ---- | ---- | ---------- |
 | ck_push_campaigns_kind | CHECK | CHECK (((kind)::text = ANY ((ARRAY['SERVICE'::character varying, 'MARKETING'::character varying])::text[]))) |
 | ck_push_campaigns_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['SCHEDULED'::character varying, 'SENDING'::character varying, 'SENT'::character varying, 'CANCELED'::character varying, 'FAILED'::character varying])::text[]))) |
+| push_campaigns_notice_tag_check | CHECK | CHECK (((notice_tag)::text = ANY ((ARRAY['SERVICE'::character varying, 'UPDATE'::character varying, 'MAINTENANCE'::character varying, 'EVENT'::character varying, 'PROMOTION'::character varying])::text[]))) |
 | push_campaigns_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) |
 | push_campaigns_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | push_campaigns_public_id_key | UNIQUE | UNIQUE (public_id) |
@@ -66,6 +68,7 @@ erDiagram
   varchar_16_ kind
   bigint notice_id FK
   bigint story_id FK
+  varchar_16_ notice_tag
 }
 "public.push_delivery_results" {
   bigint id
@@ -91,6 +94,7 @@ erDiagram
   bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_16_ tag
 }
 "public.stories" {
   bigint id

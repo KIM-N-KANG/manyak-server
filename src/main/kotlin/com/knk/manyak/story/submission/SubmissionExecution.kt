@@ -81,6 +81,7 @@ class SubmissionTransactions(
     private val forms: SubmissionFormAssembler,
     private val mapper: ObjectMapper,
     private val events: ApplicationEventPublisher,
+    private val notifications: com.knk.manyak.push.inbox.DomainNotificationRecorder,
     private val entityManager: EntityManager,
     private val images: SubmissionImages,
     private val retries: SubmissionRetryPolicy,
@@ -178,6 +179,8 @@ class SubmissionTransactions(
         row.errorCode = code
         row.decidedAt = Instant.now()
         row.updatedAt = row.decidedAt!!
-        events.publishEvent(StoryModerationCompleted(row.userId, row.publicId.toString(), row.storyId?.let { stories.findById(it).orElseThrow().publicId.toString() }, status, row.attempt, mapper.readTree(row.inputForm).path("title").asText()))
+        val event = StoryModerationCompleted(row.userId, row.publicId.toString(), row.storyId?.let { stories.findById(it).orElseThrow().publicId.toString() }, status, row.attempt, mapper.readTree(row.inputForm).path("title").asText())
+        notifications.moderated(event)
+        events.publishEvent(event)
     }
 }

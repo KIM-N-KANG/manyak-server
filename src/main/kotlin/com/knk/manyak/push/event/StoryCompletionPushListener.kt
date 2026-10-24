@@ -1,6 +1,7 @@
 package com.knk.manyak.push.event
 
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.push.config.PushAsyncConfig
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.event.StoryCompletedEvent
@@ -61,7 +62,7 @@ class StoryCompletionPushListener(
                 "type" to STORY_COMPLETED_TYPE,
                 "storyId" to event.storyPublicId,
                 "title" to event.title,
-                "deepLink" to "${webBaseUrl.trimEnd('/')}/stories/${event.storyPublicId}",
+                "deepLink" to pushDeepLink(webBaseUrl, "/stories/${event.storyPublicId}", "STORY_COMPLETED"),
             )
             fcmPushSender.sendToUser(event.userId, data, messageId = "story-completed:${event.requestId}")
         } catch (ex: RuntimeException) {

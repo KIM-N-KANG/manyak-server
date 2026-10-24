@@ -132,7 +132,7 @@ class StoryCompletionPushIntegrationTests {
                 "type" to "STORY_COMPLETED",
                 "storyId" to storyId,
                 "title" to STORY_TITLE,
-                "deepLink" to "https://manyak.app/stories/$storyId",
+                "deepLink" to "https://manyak.app/stories/$storyId?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed",
             ),
             messageId = "story-completed:$requestId",
         )

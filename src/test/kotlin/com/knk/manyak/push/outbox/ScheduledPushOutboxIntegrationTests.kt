@@ -28,6 +28,8 @@ class ScheduledPushOutboxIntegrationTests {
     @MockitoBean private lateinit var store: PushOutboxStore
     @MockitoBean private lateinit var relay: PushOutboxRelay
     @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var writer: ScheduledPushOutboxWriter
@@ -64,6 +66,7 @@ class ScheduledPushOutboxIntegrationTests {
                 .plusDays(1).atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant())
             assertThat(it.kind).isEqualTo("MARKETING")
             assertThat(it.type).isEqualTo("ATTENDANCE_REMINDER")
+            assertThat(it.data["deepLink"]).isEqualTo("https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder")
             assertThat(it.requestId).isEqualTo("unknown")
             assertThat(it.sessionId).isEqualTo("unknown")
         }
@@ -73,7 +76,7 @@ class ScheduledPushOutboxIntegrationTests {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer)
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
@@ -96,6 +99,7 @@ class ScheduledPushOutboxIntegrationTests {
         }.`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)
         val failed = promotion.sendDue(Instant.now()).single()
         assertThat(failed.failed).isTrue()
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isZero()
         assertThat(failed.sent).isZero()
         val saved = campaigns.findById(campaign.id).orElseThrow()
         assertThat(saved.status).isEqualTo(PushCampaignStatus.FAILED)
@@ -127,8 +131,8 @@ class ScheduledPushOutboxIntegrationTests {
         val serviceOnly = users.save(User(nickname = "서비스만", servicePushEnabled = true))
         tokens.save(DevicePushToken(userId = serviceOnly.id, token = "service-only", platform = PushPlatform.ANDROID))
         for (kind in listOf(com.knk.manyak.push.dto.PushKind.SERVICE, com.knk.manyak.push.dto.PushKind.MARKETING)) {
-            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", createdByUserId = all.first().id))
-            val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id))
+            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.entity.NoticeTag.UPDATE else com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = all.first().id))
+            val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id, noticeTag = notice.tag))
             messages.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
             assertThat(messages).hasSize(3)
@@ -138,8 +142,9 @@ class ScheduledPushOutboxIntegrationTests {
                 assertThat(message.type).isEqualTo(type)
                 assertThat(message.kind).isEqualTo(kind.name)
                 assertThat(message.messageId).isEqualTo("$prefix:${campaign.publicId}:${message.recipientId}")
+                assertThat(message.data["noticeTag"]).isEqualTo(notice.tag.name)
                 assertThat(message.data["noticeId"]).isEqualTo(notice.publicId.toString())
-                assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}")
+                assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=${type.lowercase()}")
                 assertThat(message.data["title"]).isEqualTo(if (type == "NOTICE") "공지 제목" else "(광고) 공지 제목")
                 assertThat(message.requestId).isEqualTo("unknown")
                 assertThat(message.sessionId).isEqualTo("unknown")

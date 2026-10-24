@@ -1,0 +1,171 @@
+# 회원 알림함 — NOTIFICATION/BACKEND 4-2-22~25, KNK-1728
+# 사전 준비: docker compose up -d, ./gradlew bootRun. auth/auth-login-google.http로 accessToken을 저장합니다.
+# 데이터 준비: 로그인한 회원으로 스토리를 완성하거나 검수를 종료합니다.
+# story/simple-story-creation.http의 제작 요청에 Authorization 헤더를 붙여 회원으로 실행할 수 있습니다.
+# 배포 이전 알림은 소급하지 않습니다. 알림 2개 이상을 준비하면 다음 페이지도 검증할 수 있습니다.
+# 위에서부터 실행합니다. 읽음 검증은 계정의 실제 읽음 상태를 변경합니다.
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+@suspendedAccessToken = PUT_A_SUSPENDED_ACCOUNT_TOKEN_HERE
+@deletedAccessToken = PUT_A_WITHDRAWN_ACCOUNT_TOKEN_HERE
+
+### 0. 서버 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 1. 최신 알림과 다음 커서 저장
+GET {{baseUrl}}/api/v1/users/me/notifications?limit=1
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("목록 계약", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(Array.isArray(response.body.items), JSON.stringify(response.body));
+        client.assert(response.body.items.length === 1, "회원으로 알림을 먼저 생성하세요.");
+        const n = response.body.items[0];
+        client.assert(n.noticeTag === null || ["SERVICE", "UPDATE", "MAINTENANCE", "EVENT", "PROMOTION"].includes(n.noticeTag), `noticeTag=${n.noticeTag}`);
+        client.assert(n.notificationId && n.type && n.title && n.createdAt, JSON.stringify(n));
+        client.assert(["NEWS", "ACTIVITY"].includes(n.category), `category=${n.category}`);
+        client.assert(n.deepLink === null || n.deepLink.includes("utm_source=inbox&utm_medium=inbox"), `deepLink=${n.deepLink}`);
+        client.global.set("inboxNotificationId", n.notificationId);
+        client.global.set("inboxNextCursor", response.body.nextCursor || n.notificationId);
+    });
+%}
+
+### 2. UUID 커서 다음 페이지 (마지막 알림 이후면 빈 items)
+GET {{baseUrl}}/api/v1/users/me/notifications?limit=1&cursor={{inboxNextCursor}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("커서 조회", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 3. 소식 필터
+GET {{baseUrl}}/api/v1/users/me/notifications?category=NEWS
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("소식만 반환", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.items.every(n => n.category === "NEWS"), JSON.stringify(response.body));
+    });
+%}
+
+### 4. 안 읽은 수
+GET {{baseUrl}}/api/v1/users/me/notifications/unread-count
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("전체는 분류 합", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const b = response.body;
+        client.assert(b.total === b.news + b.activity, JSON.stringify(b));
+    });
+%}
+
+### 5. 개별 읽음 — 반복해도 204
+POST {{baseUrl}}/api/v1/users/me/notifications/{{inboxNotificationId}}/read
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("읽음 성공", () => client.assert(response.status === 204, `actual=${response.status}`));
+%}
+
+### 6. 읽은 시각 저장
+GET {{baseUrl}}/api/v1/users/me/notifications?limit=1
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("최초 읽은 시각", () => {
+        const n = response.body.items[0];
+        client.assert(n.noticeTag === null || ["SERVICE", "UPDATE", "MAINTENANCE", "EVENT", "PROMOTION"].includes(n.noticeTag), `noticeTag=${n.noticeTag}`);
+        client.assert(n.notificationId === client.global.get("inboxNotificationId") && n.readAt !== null, JSON.stringify(n));
+        client.global.set("inboxFirstReadAt", n.readAt);
+    });
+%}
+
+### 7. 소식 모두 읽음
+POST {{baseUrl}}/api/v1/users/me/notifications/read-all?category=NEWS
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("소식 모두 읽음", () => client.assert(response.status === 204, `actual=${response.status}`));
+%}
+
+### 8. 전체 모두 읽음 — 반복해도 204
+POST {{baseUrl}}/api/v1/users/me/notifications/read-all
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("전체 모두 읽음", () => client.assert(response.status === 204, `actual=${response.status}`));
+%}
+
+### 9. 최초 읽은 시각 유지 (검증 중 새 알림이 생기지 않아야 함)
+GET {{baseUrl}}/api/v1/users/me/notifications?limit=1
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("최초 시각 보존", () => client.assert(response.body.items[0].readAt === client.global.get("inboxFirstReadAt"), JSON.stringify(response.body)));
+%}
+
+### 10. 모두 읽음 집계 (검증 중 새 알림이 생기지 않아야 함)
+GET {{baseUrl}}/api/v1/users/me/notifications/unread-count
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("전체 0", () => client.assert(response.body.total === 0, JSON.stringify(response.body)));
+%}
+
+### 11. 모르는 분류 → 400
+GET {{baseUrl}}/api/v1/users/me/notifications?category=ALL
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("분류 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", JSON.stringify(response.body)));
+%}
+
+### 12. 잘못된 커서 → 400
+GET {{baseUrl}}/api/v1/users/me/notifications?cursor=bad
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("커서 거절", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 13. 없는 알림 또는 타인 UUID로 교체 → 404
+POST {{baseUrl}}/api/v1/users/me/notifications/00000000-0000-0000-0000-000000000000/read
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("미존재와 타인 은닉", () => client.assert(response.status === 404 && response.body.code === "NOT_FOUND", JSON.stringify(response.body)));
+%}
+
+### 14. 미인증 → 401
+GET {{baseUrl}}/api/v1/users/me/notifications
+
+> {%
+    client.test("인증 필수", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+### 15. 정지 회원 → 403 (별도 계정 토큰 준비)
+GET {{baseUrl}}/api/v1/users/me/notifications
+Authorization: Bearer {{suspendedAccessToken}}
+
+> {%
+    client.test("정지 거절", () => client.assert(response.status === 403, `actual=${response.status}`));
+%}
+
+### 16. 탈퇴 뒤 남은 토큰 → 401 (별도 계정 토큰 준비)
+GET {{baseUrl}}/api/v1/users/me/notifications/unread-count
+Authorization: Bearer {{deletedAccessToken}}
+
+> {%
+    client.test("탈퇴 거절", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+### 17. 자유 조회
+GET {{baseUrl}}/api/v1/users/me/notifications?category=ACTIVITY&limit=50
+Authorization: Bearer {{accessToken}}

@@ -59,6 +59,7 @@ class PromotionPushIntegrationTests {
 
     @MockitoSpyBean private lateinit var userRepository: UserRepository
 
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var pushCampaignRepository: PushCampaignRepository
@@ -94,7 +95,7 @@ class PromotionPushIntegrationTests {
      * 주입된 시스템 시계를 그대로 두면 테스트를 21시 이후에 돌릴 때 결과가 달라진다.
      */
     private fun service(clock: Clock = Clock.fixed(NOW, ZoneOffset.UTC)) =
-        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, clock)
+        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, clock, notifications = notifications)
 
     private fun eligibleMember(nightAgreed: Boolean = false): User =
         saveMember(nightAgreed = nightAgreed).also { saveToken(it) }
@@ -166,7 +167,7 @@ class PromotionPushIntegrationTests {
         val owner = eligibleMember()
         eligibleMember()
         val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = owner.id))
-        pushCampaignRepository.save(PushCampaign(title = "추천", body = "본문", scheduledAt = NOW, storyId = story.id))
+        val campaign = pushCampaignRepository.save(PushCampaign(title = "추천", body = "본문", scheduledAt = NOW, storyId = story.id))
         val sentData = mutableListOf<Map<String, String>>()
         doAnswer { invocation ->
             sentData += invocation.getArgument<Map<String, String>>(1).toMap()
@@ -178,7 +179,7 @@ class PromotionPushIntegrationTests {
         assertThat(service().sendDue(NOW).single().sent).isEqualTo(2)
         assertThat(sentData).hasSize(2)
         assertThat(sentData[0]).containsEntry("storyId", story.publicId.toString())
-            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}")
+            .containsEntry("deepLink", "https://manyak.app/stories/${story.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
         assertThat(sentData[1]).doesNotContainKeys("storyId", "deepLink").containsEntry("body", "본문")
     }
 
@@ -299,7 +300,7 @@ class PromotionPushIntegrationTests {
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
         val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
-        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, crossing)
+        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, crossing, notifications = notifications)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 

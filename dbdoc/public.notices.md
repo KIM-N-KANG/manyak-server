@@ -18,11 +18,13 @@
 | created_by_user_id | bigint |  | false |  | [public.users](public.users.md) |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| tag | varchar(16) |  | false |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| chk_notices_tag | CHECK | CHECK (((tag)::text = ANY ((ARRAY['SERVICE'::character varying, 'UPDATE'::character varying, 'MAINTENANCE'::character varying, 'EVENT'::character varying, 'PROMOTION'::character varying])::text[]))) |
 | ck_notices_published_at | CHECK | CHECK ((((status)::text <> 'PUBLISHED'::text) OR (published_at IS NOT NULL))) |
 | notices_body_check | CHECK | CHECK ((((length(body) >= 1) AND (length(body) <= 5000)) AND (length(btrim(body)) > 0))) |
 | notices_status_check | CHECK | CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying])::text[]))) |
@@ -59,6 +61,7 @@ erDiagram
   bigint created_by_user_id FK
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  varchar_16_ tag
 }
 "public.push_campaigns" {
   bigint id
@@ -76,6 +79,7 @@ erDiagram
   varchar_16_ kind
   bigint notice_id FK
   bigint story_id FK
+  varchar_16_ notice_tag
 }
 "public.users" {
   bigint id

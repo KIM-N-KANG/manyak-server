@@ -59,6 +59,32 @@ class AdminReadPostgresTests {
     }
     @AfterAll fun stop() { pg.stop() }
 
+    @Test fun `실제 PostgreSQL 누적 턴은 삭제와 이관 채팅을 포함하고 재생성은 제외한다`() {
+        val owner = jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'누적 턴 PG') RETURNING id", Long::class.java, UUID.randomUUID())!!
+        val sid = jdbc.queryForObject("SELECT id FROM stories WHERE public_id=?", Long::class.java, storyId)!!
+        try {
+            assertThat(reads.memberTurnCount(owner)).isZero()
+            for ((index, count) in listOf(2, 3, 4).withIndex()) {
+                val cid = jdbc.queryForObject("""INSERT INTO story_chats(public_id,user_id,story_id,current_turn,deleted_at)
+                    VALUES (?,?,?,99,?) RETURNING id""", Long::class.java, UUID.randomUUID(),
+                    if (index == 2) null else owner, sid, if (index == 1) now.atOffset(java.time.ZoneOffset.UTC) else null)!!
+                repeat(count) { n ->
+                    val mid = jdbc.queryForObject("""INSERT INTO story_messages(chat_id,role,content,message_order)
+                        VALUES (?,'ASSISTANT','fixture',?) RETURNING id""", Long::class.java, cid, n + 1)!!
+                    if (n == 0) repeat(2) { v -> jdbc.update("""INSERT INTO story_message_versions(message_id,version_number,content,choices)
+                        VALUES (?,?,'fixture','[]')""", mid, v + 1) }
+                }
+                jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order) VALUES (?,'USER','fixture',?)", cid, count + 1)
+                if (index == 2) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", owner, cid)
+            }
+            assertThat(reads.memberTurnCount(owner)).isEqualTo(9)
+            assertThat(reads.memberTurnCount(userId)).isEqualTo(1)
+        } finally {
+            jdbc.update("DELETE FROM story_chats WHERE user_id=?", owner)
+            jdbc.update("DELETE FROM users WHERE id=?", owner)
+        }
+    }
+
     @Test fun `실제 PostgreSQL 제출본 동률은 UUID 오름차순이며 페이지 누락이 없다`() {
         val ids=listOf("00000000-0000-4000-8000-000000000001","ffffffff-0000-4000-8000-000000000001","80000000-0000-4000-8000-000000000001","7fffffff-0000-4000-8000-000000000001").map(UUID::fromString)
         val repository=com.knk.manyak.story.submission.AdminSubmissionReadRepository(NamedParameterJdbcTemplate(jdbc),ObjectMapper())

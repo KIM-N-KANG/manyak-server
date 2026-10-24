@@ -42,7 +42,7 @@ class StoryCompletionPushModeTests {
         "type" to STORY_COMPLETED,
         "storyId" to storyPublicId,
         "title" to "제목",
-        "deepLink" to "$WEB_BASE_URL/stories/$storyPublicId",
+        "deepLink" to "$WEB_BASE_URL/stories/$storyPublicId?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed",
     )
 
     // 제출을 즉시 실행해 검증을 결정적으로 만든다. 실행기를 실제 풀로 두면 verify가 경쟁한다.

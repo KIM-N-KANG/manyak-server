@@ -49,6 +49,7 @@ class StoryCompletionOutboxIntegrationTests {
             val message = invocation.getArgument<PushMessage>(0)
             assertThat(message.messageId).isEqualTo("story-completed:${request.requestId}")
             assertThat(message.recipientId).isEqualTo(user.publicId.toString())
+            assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/stories/${message.data["storyId"]}?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed")
             null
         }.`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(java.time.Instant::class.java) ?: java.time.Instant.EPOCH)
         service.createSimpleStory(request, user.id)
