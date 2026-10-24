@@ -60,4 +60,11 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
           AND c.startedAt = :startedAt""")
     fun finishIfOwned(id: Long, startedAt: Instant, status: PushCampaignStatus,
         targets: Int?, sent: Int?, finishedAt: Instant): Int
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""UPDATE PushCampaign c SET c.deepLinkIncluded =
+        CASE WHEN c.deepLinkIncluded = TRUE OR :included = TRUE THEN TRUE ELSE FALSE END
+        WHERE c.publicId = :id""")
+    fun accumulateDeepLink(id: UUID, included: Boolean): Int
+
 }

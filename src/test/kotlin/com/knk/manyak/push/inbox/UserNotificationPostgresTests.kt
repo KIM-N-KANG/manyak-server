@@ -219,6 +219,8 @@ class UserNotificationPostgresTests {
             context.registerBean("transactionManager", DataSourceTransactionManager::class.java, java.util.function.Supplier { manager })
             context.registerBean(com.knk.manyak.auth.repository.UserRepository::class.java, java.util.function.Supplier { users })
             context.registerBean(UserNotificationStore::class.java, java.util.function.Supplier { store })
+            context.registerBean(com.knk.manyak.push.repository.PushCampaignRepository::class.java, java.util.function.Supplier {
+                org.mockito.Mockito.mock(com.knk.manyak.push.repository.PushCampaignRepository::class.java) })
             context.register(ScheduledNotificationWriter::class.java)
             context.refresh()
             val round = context.getBean(ScheduledNotificationWriter::class.java)

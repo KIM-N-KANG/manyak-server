@@ -20,6 +20,7 @@
 | notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 공지당 한 번의 알림 요청. 공지 알림이 아니면 NULL |
 | story_id | bigint |  | true |  | [public.stories](public.stories.md) | 프로모션 이동 대상 스토리. 없으면 NULL |
 | notice_tag | varchar(16) |  | true |  |  |  |
+| deep_link_included | boolean |  | true |  |  |  |
 
 ## Constraints
 
@@ -69,6 +70,7 @@ erDiagram
   bigint notice_id FK
   bigint story_id FK
   varchar_16_ notice_tag
+  boolean deep_link_included
 }
 "public.push_delivery_results" {
   bigint id

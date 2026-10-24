@@ -204,6 +204,7 @@ erDiagram
   bigint notice_id FK
   bigint story_id FK
   varchar_16_ notice_tag
+  boolean deep_link_included
 }
 "public.story_submissions" {
   bigint id

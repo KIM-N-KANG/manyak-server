@@ -51,4 +51,28 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
             PushDeliveryType.valueOf(rs.getString("type")), PushKind.valueOf(rs.getString("kind")),
             rs.getLong("requested"), rs.getLong("members"), rs.getLong("delivered"), rs.getLong("failed")) }, *args.toTypedArray())
     }
+    fun campaignReach(from: LocalDate, to: LocalDate): List<PushCampaignReach> {
+        val zone = ZoneId.of("Asia/Seoul")
+        return jdbc.query("""SELECT c.public_id,c.kind,c.title,n.public_id AS notice_id,c.started_at,c.deep_link_included,
+            (SELECT COUNT(*) FROM push_delivery_results r WHERE r.campaign_id=c.id AND r.delivered_devices>0) AS reached
+            FROM push_campaigns c LEFT JOIN notices n ON n.id=c.notice_id
+            WHERE c.started_at >= ? AND c.started_at < ? ORDER BY c.started_at DESC,c.public_id ASC""",
+            { rs, _ -> PushCampaignReach(rs.getObject("public_id",UUID::class.java),PushKind.valueOf(rs.getString("kind")),rs.getString("title"),
+                rs.getObject("notice_id",UUID::class.java),rs.getTimestamp("started_at").toInstant(),rs.getObject("deep_link_included") as Boolean?,rs.getLong("reached")) },
+            Timestamp.from(from.atStartOfDay(zone).toInstant()),Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()))
+    }
+
+    fun activityReach(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushActivityReach> {
+        if (types.isEmpty()) return emptyList()
+        val zone = ZoneId.of("Asia/Seoul")
+        return org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc).query("""
+            SELECT type,FLOOR((EXTRACT(EPOCH FROM completed_at)+32400)/86400) AS epoch_day,COUNT(DISTINCT user_id) AS reached
+            FROM push_delivery_results WHERE completed_at>=:from AND completed_at<:to
+                AND type IN (:types) AND delivered_devices>0 AND user_id IS NOT NULL
+            GROUP BY type,FLOOR((EXTRACT(EPOCH FROM completed_at)+32400)/86400) ORDER BY epoch_day ASC,type ASC""",
+            mapOf("from" to Timestamp.from(from.atStartOfDay(zone).toInstant()),"to" to Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()),"types" to types.map { it.name })) { rs,_ ->
+                PushActivityReach(PushDeliveryType.valueOf(rs.getString("type")),LocalDate.ofEpochDay(rs.getLong("epoch_day")),rs.getLong("reached"))
+            }
+    }
+
 }

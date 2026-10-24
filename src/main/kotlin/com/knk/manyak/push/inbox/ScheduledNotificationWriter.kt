@@ -19,6 +19,7 @@ class ScheduledNotificationWriter(
     private val store: UserNotificationStore,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val base: String,
     private val clock: Clock = Clock.systemUTC(),
+    private val campaigns: com.knk.manyak.push.repository.PushCampaignRepository,
 ) {
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     fun record(
@@ -46,6 +47,10 @@ class ScheduledNotificationWriter(
         store.insertScheduled(NotificationContent(type, data.getValue("title"), data.getValue("body"),
             inboxDeepLink(base, path, type, data["campaignId"]), storyId, noticeId, data["noticeTag"]?.let(com.knk.manyak.notice.entity.NoticeTag::valueOf)), scenario, occurrence, clock.instant())
         val sent = outbox?.record(targetIds, data, scenario, occurrence, expiresAt, kind)
+        // 요청이 실제 기록된 회차만 갱신한다. 로컬은 발송 전 회차 커밋에 포함하며 실패하면 함께 롤백한다.
+        if ((sent ?: targetIds.size) > 0) data["campaignId"]?.let {
+            campaigns.accumulateDeepLink(UUID.fromString(it), data.containsKey("deepLink"))
+        }
         return NotificationRound(targetIds, sent)
     }
 }
