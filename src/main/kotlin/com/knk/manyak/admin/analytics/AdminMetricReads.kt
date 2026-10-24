@@ -22,7 +22,7 @@ data class ChatOptionResponse(val asOf: Instant, val from: LocalDate, val to: Lo
 data class AiCostItem(val feature: String, val model: String?, val calls: Long, val callsWithoutTokens: Long, val inputTokens: Long, val outputTokens: Long, val costKrw: BigDecimal?)
 data class AiCostDay(val date: LocalDate, val byFeature: List<AiCostItem>)
 data class AiCostTotals(val costKrw: BigDecimal, val costPerTurnKrw: BigDecimal?, val costPerStoryKrw: BigDecimal?)
-data class AiCostResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val currency: String, val chatImageUnitCostKrw: BigDecimal, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>, val pendingDates: List<LocalDate>, val usdKrwRate: BigDecimal, val unmapped: List<AiCostUnmapped>)
+data class AiCostResponse(val asOf: Instant?, val from: LocalDate, val to: LocalDate, val currency: String, val chatImageUnitCostKrw: BigDecimal, val daily: List<AiCostDay>, val totals: AiCostTotals, val unpricedModels: List<String>, val pendingDates: List<LocalDate>, val usdKrwRate: BigDecimal, val unmapped: List<AiCostUnmapped>, val expiredDates: List<LocalDate>, val retentionDays: Int, val retentionStartDate: LocalDate)
 data class AiCostUnmapped(val traceName: String, val costKrw: BigDecimal)
 
 @Repository

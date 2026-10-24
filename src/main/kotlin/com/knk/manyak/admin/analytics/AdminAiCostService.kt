@@ -33,7 +33,9 @@ class AdminAiCostService(
     fun aiCost(query: AdminChartsRequest): AiCostResponse {
         val range = query.resolve(clock).let { AnalyticsRange(it.from, it.to) }
         val costs = snapshots.load(range)
-        if (costs.isEmpty()) throw AdminAiCostUnavailable()
+        val retentionStart = snapshots.retentionStartDate
+        val missing = range.dates().filter { it !in costs }
+        if (range.to >= retentionStart && costs.isEmpty()) throw AdminAiCostUnavailable()
         val rows = repository.aiCost(range).groupBy { LocalDate.ofEpochDay(it.n("metric_day")) }
         val daily = range.dates().map { date ->
             val db = rows[date].orEmpty().associateBy { it["feature"].toString() to it["model"] as String? }
@@ -56,15 +58,17 @@ class AdminAiCostService(
         val all = daily.flatMap { it.byFeature }
         fun sum(items: List<AiCostItem>) = items.sumOf { it.costKrw ?: BigDecimal.ZERO }
         fun per(features: Set<String>, denominator: String): BigDecimal? {
-            val calls = all.filter { it.feature == denominator }.sumOf { it.calls }
-            return if (calls == 0L) null else sum(all.filter { it.feature in features }).divide(calls.toBigDecimal(), MathContext.DECIMAL128)
+            val ready = daily.filter { it.date in costs }.flatMap { it.byFeature }
+            val calls = ready.filter { it.feature == denominator }.sumOf { it.calls }
+            return if (calls == 0L) null else sum(ready.filter { it.feature in features }).divide(calls.toBigDecimal(), MathContext.DECIMAL128)
         }
         // 사용량은 있으나 범위 비용 합이 0인 모델이다. 단가 누락과 정상 0원은 구별하지 않는다.
         val unpriced = raw.filter { it.model != null }.groupBy { it.model!! }
             .filterValues { entries -> entries.any { it.totalTokens > 0 } && entries.sumOf { it.costUsd }.signum() == 0 }.keys.sorted()
-        return AiCostResponse(costs.values.minOf { it.fetchedAt }, range.from, range.to, "KRW", properties.chatImageUnitCostKrw, daily,
+        return AiCostResponse(costs.values.minOfOrNull { it.fetchedAt }, range.from, range.to, "KRW", properties.chatImageUnitCostKrw, daily,
             AiCostTotals(sum(all) + unmapped.sumOf { it.costKrw }, per(setOf("chat_response", "choice_generation"), "chat_response"),
                 per(setOf("storyline_generation", "story_completion"), "story_completion")), unpriced,
-            range.dates().filter { it !in costs }, properties.usdKrwRate, unmapped)
+            missing.filter { it >= retentionStart }, properties.usdKrwRate, unmapped,
+            missing.filter { it < retentionStart }, snapshots.retentionDays, retentionStart)
     }
 }

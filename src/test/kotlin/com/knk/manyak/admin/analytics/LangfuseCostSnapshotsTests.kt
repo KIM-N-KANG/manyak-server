@@ -115,7 +115,7 @@ class LangfuseCostSnapshotsTests {
         assertThat(fixture.store.daily(s.definition, day.from, day.to)[day.from]!!.finalizedAt).isNotNull()
     }
 
-    @Test fun `90일은 최근부터 3일씩 여섯 번 받고 다음 요청도 18일을 더 채운다`() {
+    @Test fun `90일도 최근 18일을 받고 다음 요청은 보관 기간 안 나머지 11일만 채운다`() {
         val long = AnalyticsRange(range.to.minusDays(89), range.to)
         val s = snapshots()
         repeat(6) { respond() }
@@ -128,8 +128,8 @@ class LangfuseCostSnapshotsTests {
             assertThat(Duration.between(Instant.parse(query["fromTimestamp"].asText()), Instant.parse(query["toTimestamp"].asText()).plusMillis(1))).isEqualTo(Duration.ofDays(3))
         }
         repeat(6) { respond() }
-        assertThat(s.load(long)).hasSize(36)
-        assertThat(server.requestCount).isEqualTo(12)
+        assertThat(s.load(long)).hasSize(29)
+        assertThat(server.requestCount).isEqualTo(10)
     }
 
     @Test fun `유효한 중간 날짜를 다시 받지 않고 빈 연속 구간에 두 호출을 쓴다`() {

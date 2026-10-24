@@ -10,7 +10,8 @@ import org.springframework.web.bind.annotation.*
 @RestController
 @RequestMapping("/api/v1/admin/campaigns")
 @SecurityRequirement(name = "bearerAuth")
-class CampaignAnalyticsController(private val service: CampaignAnalyticsService) {
+class CampaignAnalyticsController(private val service: CampaignAnalyticsService, private val pushOpens: PushOpensService) {
+    @GetMapping("/push-opens") fun pushOpens(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = pushOpens.read(query)
     @GetMapping fun catalog() = service.catalog()
     @GetMapping("/analytics") fun analytics(@ParameterObject @ModelAttribute query: CampaignQuery) = service.analytics(query)
     @GetMapping("/funnels/creation") fun creation(@ParameterObject @ModelAttribute query: CampaignQuery) = service.creation(query)

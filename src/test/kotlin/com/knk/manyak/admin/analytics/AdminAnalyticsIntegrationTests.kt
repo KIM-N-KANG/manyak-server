@@ -51,12 +51,12 @@ class AdminAnalyticsIntegrationTests {
         assertThat(server.requestCount).isZero()
         val end = LocalDate.now(ZoneId.of("Asia/Seoul"))
         val body = mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to (0L..29).map { end.minusDays(29).plusDays(it).toString() }, "series" to listOf(List(30) { 12 }))))
-        repeat(6) { server.enqueue(MockResponse().setBody(body)) }
+        repeat(5) { server.enqueue(MockResponse().setBody(body)) }
         client.get().uri(path).header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody()
-            .jsonPath("$.daily.length()").isEqualTo(30).jsonPath("$.to").isEqualTo(end.toString()).jsonPath("$.todayActiveUsers.total").isEqualTo(12)
+            .jsonPath("$.daily.length()").isEqualTo(30).jsonPath("$.to").isEqualTo(end.toString()).jsonPath("$.todayActiveUsers.total").isEqualTo(36)
         client.get().uri("$path?from=${end.minusDays(29)}&to=$end").header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody().jsonPath("$.daily.length()").isEqualTo(30)
-        assertThat(server.requestCount).isEqualTo(6)
-        for (metric in listOf("_active", "_active", "_active", "_new", "_new", "_new")) {
+        assertThat(server.requestCount).isEqualTo(5)
+        for (metric in listOf("_active", "_active", "_active", "_new", "_new")) {
             val request = server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)!!
             assertThat(request.requestUrl!!.encodedPath).isEqualTo("/api/2/events/segmentation")
             assertThat(request.requestUrl!!.queryParameter("m")).isEqualTo("uniques")
@@ -67,15 +67,15 @@ class AdminAnalyticsIntegrationTests {
         val start = end.minusDays(100)
         val finish = start.plusDays(1)
         val custom = mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to listOf(start.toString(), finish.toString()), "series" to listOf(listOf(3, 4)))))
-        repeat(6) { server.enqueue(MockResponse().setBody(custom)) }
+        repeat(5) { server.enqueue(MockResponse().setBody(custom)) }
         repeat(2) {
             client.get().uri("$path?from=$start&to=$finish").header("Authorization", "Bearer $token").exchange()
                 .expectStatus().isOk.expectBody().jsonPath("$.from").isEqualTo(start.toString())
                 .jsonPath("$.to").isEqualTo(finish.toString()).jsonPath("$.daily.length()").isEqualTo(2)
-                .jsonPath("$.todayActiveUsers.total").isEqualTo(12)
+                .jsonPath("$.todayActiveUsers.total").isEqualTo(36)
         }
-        assertThat(server.requestCount).isEqualTo(12)
-        repeat(6) {
+        assertThat(server.requestCount).isEqualTo(10)
+        repeat(5) {
             val request = server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)!!
             assertThat(request.requestUrl!!.queryParameter("start")).isEqualTo(start.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
             assertThat(request.requestUrl!!.queryParameter("end")).isEqualTo(finish.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))

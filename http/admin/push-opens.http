@@ -1,0 +1,84 @@
+# 푸시 열람 — ADMIN BACKEND 4-1-24·4-2-35, KNK-1728
+# 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken 준비.
+# MANYAK_ADMIN_PUSH_OPENS_MEASURED_FROM은 푸시 UTM 서버를 배포한 KST 날짜(YYYY-MM-DD).
+# 비워 두면 Amplitude 호출 없이 BEFORE_MEASUREMENT. 설정했으면 Amplitude 키와 발송 결과 데이터 필요.
+# 아래 from/to를 오늘 이하로 조정하고 위에서부터 실행. 실제 서버에서는 Amplitude 예산을 소비할 수 있음.
+# 캠페인은 마지막 started_at이 범위 안인 항목만, activityTypes는 고정 3종. 알림함 UTM은 열람에 포함하지 않음.
+@baseUrl = http://localhost:8080
+@adminToken = PUT_AN_ADMIN_TOKEN_HERE
+@from = 2026-10-18
+@to = 2026-10-24
+
+### 0. 상태 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 1. 기본 최근 7일 — 날짜별 고유 사용자 수의 합, 1 초과 열람률 허용
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("푸시 열람 계약", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const b = response.body;
+        client.assert(Array.isArray(b.pendingDates) && Array.isArray(b.campaigns), JSON.stringify(b));
+        client.assert(!("serviceTypes" in b), "activityTypes를 사용해야 합니다");
+        client.assert(JSON.stringify(b.activityTypes.map(t => t.type)) === JSON.stringify(["STORY_COMPLETED", "STORY_MODERATION_COMPLETED", "ATTENDANCE_REMINDER"]), JSON.stringify(b.activityTypes));
+        const states = ["MEASURED", "BEFORE_MEASUREMENT", "NO_LINK", "PENDING"];
+        b.campaigns.forEach(c => {
+            client.assert(states.includes(c.openState), JSON.stringify(c));
+            if (c.openState !== "MEASURED") client.assert(c.pushOpens === null && c.pushOpenRate === null, JSON.stringify(c));
+            if (c.deliveredMembers === 0) client.assert(c.pushOpenRate === null, JSON.stringify(c));
+        });
+        if (b.measuredFrom === null) {
+            client.assert(b.asOf === null && b.activityFrom === null && b.pendingDates.length === 0, JSON.stringify(b));
+            client.assert(b.activityTypes.every(t => t.openState === "BEFORE_MEASUREMENT" && t.pushOpens === null), JSON.stringify(b));
+        }
+    });
+%}
+
+### 2. 명시 범위 — 측정 시작일 이전은 pendingDates에 포함하지 않음
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("명시 범위", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const b = response.body;
+        if (b.measuredFrom) client.assert(b.pendingDates.every(d => d >= b.measuredFrom), JSON.stringify(b.pendingDates));
+    });
+%}
+
+### 3. 빠른 범위 30일
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?days=30
+Authorization: Bearer {{adminToken}}
+
+### 4. 허용하지 않는 days → 400
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?days=90
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("기간 오류", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 5. days와 명시 범위 혼용 → 400
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?days=7&from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("기간 혼용", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 6. 미인증 → 401
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens
+
+> {%
+    client.test("인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+### 7. 자유 조회 — 준비 날짜를 조정해 직접 확인
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
