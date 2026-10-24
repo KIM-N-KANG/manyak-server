@@ -24,6 +24,11 @@ class AnalyticsQueryFactory(private val mapper: ObjectMapper) {
             }
         }
     }
+    fun dailyGrouped(metric: String, event: Map<String, Any>): DailyAnalyticsMetric {
+        val def = AnalyticsDefinition(metric, "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(event),
+            "m" to "uniques", "i" to "1", "limit" to "1000"), 25, mapper)
+        return DailyAnalyticsMetric(def) { data, range -> AmplitudeResults.dailyGroups(data, range).mapValues { mapper.valueToTree<JsonNode>(it.value) } }
+    }
     fun funnel(metric: String, range: AnalyticsRange, events: List<Map<String, Any>>): RangeAnalyticsMetric {
         val def = AnalyticsDefinition(metric, "/api/2/funnels", events.map { "e" to mapper.writeValueAsString(it) } +
             listOf("mode" to "ordered", "cs" to "86400", "n" to "active", "i" to "1"), events.size * 2, mapper)

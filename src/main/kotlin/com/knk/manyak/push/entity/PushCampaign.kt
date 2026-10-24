@@ -73,6 +73,9 @@ class PushCampaign(
     @Column(name = "started_at")
     var startedAt: Instant? = null,
 
+    @Column(name = "deep_link_included")
+    var deepLinkIncluded: Boolean? = null,
+
     @Column(name = "finished_at")
     var finishedAt: Instant? = null,
 
