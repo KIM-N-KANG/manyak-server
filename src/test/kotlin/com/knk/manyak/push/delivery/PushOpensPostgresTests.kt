@@ -55,7 +55,7 @@ class PushOpensPostgresTests {
         report(PushDeliveryType.STORY_COMPLETED,other,"2026-10-24T15:00:00Z")
     }
     @AfterAll fun stop() { pg.stop() }
-    @Test fun `V112는 기존 발송 기록을 추측하지 않고 nullable 기본값 없음으로 추가한다`() {
+    @Test fun `V113은 기존 발송 기록을 추측하지 않고 nullable 기본값 없음으로 추가한다`() {
         assertThat(jdbc.queryForObject("SELECT deep_link_included FROM push_campaigns WHERE public_id=?",Boolean::class.java,ids[2])).isNull()
         val col=jdbc.queryForMap("SELECT is_nullable,column_default FROM information_schema.columns WHERE table_name='push_campaigns' AND column_name='deep_link_included'")
         assertThat(col["is_nullable"]).isEqualTo("YES");assertThat(col["column_default"]).isNull()
