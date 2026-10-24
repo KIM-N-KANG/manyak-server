@@ -54,23 +54,23 @@ class NoticePushLocalIntegrationTests {
         user("서비스 거부", service = false, marketing = true)
         user("정지", status = UserStatus.SUSPENDED)
         val notice = notices.save(Notice(title = "점검", body = "내용", createdByUserId = target.id))
-        campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, scheduledAt = Instant.EPOCH))
+        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, scheduledAt = Instant.EPOCH))
         val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "NOTICE").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}")
+            .containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
     }
     @Test fun `로컬 광고성 공지는 서비스 동의와 별개로 광고와 야간 동의를 재확인한다`() {
         val target = user("야간 수신", service = false, marketing = true, night = true)
         user("주간만", marketing = true)
         user("서비스만")
         val notice = notices.save(Notice(title = "이벤트", body = "내용", createdByUserId = target.id))
-        campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, scheduledAt = Instant.EPOCH))
+        val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, scheduledAt = Instant.EPOCH))
         val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC))
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}")
+            .containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
     }
 }

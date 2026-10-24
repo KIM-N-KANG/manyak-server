@@ -14,7 +14,7 @@ class ModerationPushDataTests {
         for (storyId in listOf(null, UUID.randomUUID().toString())) {
             for (base in listOf("https://example.com", "https://example.com/", "https://example.com///")) {
                 val data = StoryModerationCompleted(1L, submissionId, storyId, status, 1, "제목").pushData(base)
-                assertEquals("https://example.com/studio", data["deepLink"])
+                assertEquals("https://example.com/studio?utm_source=push&utm_medium=push&utm_campaign=story_moderation_completed&utm_content=story_moderation_completed", data["deepLink"])
                 assertEquals("STORY_MODERATION_COMPLETED", data["type"])
                 assertEquals(submissionId, data["submissionId"])
                 assertEquals(status.name, data["status"])

@@ -7,6 +7,17 @@
 ### Kafka 복구 뒤 같은 message_id가 PUBLISHED로 바뀌고 push.requested에 recipientId 키로 들어오는지 확인합니다.
 ### 동일 요청을 재실행해도 행 수가 늘지 않아야 합니다. local 모드에서는 행이 생기지 않습니다.
 ### 서비스 알림 동의는 소비자가 발송 직전에 확인하므로 remote 기록 자체는 동의와 무관합니다.
+### UTM 확인: 큐를 멈춘 테스트 환경에서 아래 SQL로 완성 payload를 확인합니다(FCM 토큰·키는 조회하지 않음).
+### SELECT message_id, payload->'data'->>'deepLink' AS deep_link FROM push_outbox ORDER BY id DESC LIMIT 10;
+### 완성: /stories/{storyId}?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed
+### 검수 완료(통과·반려·실패): /studio?utm_source=push&utm_medium=push&utm_campaign=story_moderation_completed&utm_content=story_moderation_completed
+### 출석: /my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder
+### 공지·스토리 캠페인은 http/admin/campaign.http로 예약합니다. campaign은 공지/스토리 ID가 아닌 캠페인 공개 UUID입니다.
+### 공지: /notices/{noticeId}?utm_source=push&utm_medium=push&utm_campaign={campaignId}&utm_content=notice (광고 공지는 promotion)
+### 스토리: /stories/{storyId}?utm_source=push&utm_medium=push&utm_campaign={campaignId}&utm_content=promotion
+### 이동 대상 없는 프로모션/발송 전 비공개 전환은 deepLink와 UTM 모두 없어야 합니다.
+### 소비자 처리 후 WEB fcmOptions.link와 Android data.deepLink가 큐의 URL을 그대로 보존하는지 테스트 기기에서 확인합니다.
+### 직접 조립한 기대 링크는 아래 handler가 저장합니다. 실제 알림·아웃박스 값과 비교하며, 스토리 조회 응답에 deepLink가 생기는 것은 아닙니다.
 
 @baseUrl = http://localhost:8080
 @accessToken = PUT_A_TEST_ACCESS_TOKEN_HERE
@@ -38,6 +49,9 @@ X-Manyak-Session-Id: session_outbox_manual
 > {%
     client.test("스토리 완성", () => client.assert(response.status === 201, `expected=201 actual=${response.status}`));
     client.global.set("outboxStoryId", response.body.id);
+    const utm = "?utm_source=push&utm_medium=push&utm_campaign=story_completed&utm_content=story_completed";
+    client.global.set("expectedPushDeepLink", "https://manyak.app/stories/" + response.body.id + utm);
+    client.log("기본 웹 주소 기준 기대 푸시 링크: " + client.global.get("expectedPushDeepLink"));
 %}
 
 ### 3. 완성 결과 조회

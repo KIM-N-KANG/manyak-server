@@ -73,7 +73,7 @@ class ModerationOutboxIntegrationTests {
         val data = messages.single().data
         assertEquals(title, data["title"])
         assertEquals(body, data["body"])
-        assertEquals("https://manyak.app/studio", data["deepLink"])
+        assertEquals("https://manyak.app/studio?utm_source=push&utm_medium=push&utm_campaign=story_moderation_completed&utm_content=story_moderation_completed", data["deepLink"])
         assertEquals(row.publicId.toString(), data["submissionId"])
         assertEquals(status.name, data["status"])
         if (kind == SubmissionKind.CREATE && status != SubmissionStatus.APPROVED) assertFalse(data.containsKey("storyId"))

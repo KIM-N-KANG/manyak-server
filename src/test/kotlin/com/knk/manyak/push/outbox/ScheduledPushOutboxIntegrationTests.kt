@@ -64,6 +64,7 @@ class ScheduledPushOutboxIntegrationTests {
                 .plusDays(1).atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant())
             assertThat(it.kind).isEqualTo("MARKETING")
             assertThat(it.type).isEqualTo("ATTENDANCE_REMINDER")
+            assertThat(it.data["deepLink"]).isEqualTo("https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder")
             assertThat(it.requestId).isEqualTo("unknown")
             assertThat(it.sessionId).isEqualTo("unknown")
         }
@@ -139,7 +140,7 @@ class ScheduledPushOutboxIntegrationTests {
                 assertThat(message.kind).isEqualTo(kind.name)
                 assertThat(message.messageId).isEqualTo("$prefix:${campaign.publicId}:${message.recipientId}")
                 assertThat(message.data["noticeId"]).isEqualTo(notice.publicId.toString())
-                assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}")
+                assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=${type.lowercase()}")
                 assertThat(message.data["title"]).isEqualTo(if (type == "NOTICE") "공지 제목" else "(광고) 공지 제목")
                 assertThat(message.requestId).isEqualTo("unknown")
                 assertThat(message.sessionId).isEqualTo("unknown")
