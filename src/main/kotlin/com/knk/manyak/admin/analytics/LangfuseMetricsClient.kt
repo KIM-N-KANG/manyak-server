@@ -30,9 +30,11 @@ class AdminLangfuseProperties(
     val maxCalls: Int = 6,
     val maxDays: Int = 3,
     val rowLimit: Int = 1000,
+    val retentionDays: Int = 30,
 ) {
     init {
         require(listOf(requestTimeout, callInterval, todayTtl, yesterdayTtl, cooldown).all { !it.isNegative && !it.isZero })
+        require(retentionDays >= 2)
         require(maxCalls in 1..6 && maxDays in 1..3 && rowLimit == 1000)
     }
     fun configured() = listOf(host, publicKey, secretKey, environment).all { it.isNotBlank() }

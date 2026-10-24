@@ -205,11 +205,13 @@ client.test("AI 비용과 이미지 장당 원가", () => {
   const b = response.body;
   client.assert(b.currency === "KRW" && Array.isArray(b.unpricedModels) && b.totals.costKrw >= 0, "계약 필드 확인");
   client.assert(typeof b.usdKrwRate === "number" && b.usdKrwRate > 0, `환율 actual=${b.usdKrwRate}`);
-  client.assert(Array.isArray(b.pendingDates) && Array.isArray(b.unmapped), "Langfuse 준비 중·미매핑 필드");
+  client.assert(Array.isArray(b.pendingDates) && Array.isArray(b.expiredDates) && Array.isArray(b.unmapped), "Langfuse 준비 중·보관 기간 밖·미매핑 필드");
+  client.assert(Number.isInteger(b.retentionDays) && b.retentionDays >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(b.retentionStartDate), "보관 설정과 KST 시작일");
+  client.assert(b.pendingDates.every(d => d >= b.retentionStartDate) && b.expiredDates.every(d => d < b.retentionStartDate), "준비 중과 만료 날짜의 경계");
   client.assert(b.daily.length === 7, `빈 날짜도 포함 expected=7 actual=${b.daily.length}`);
   client.assert(JSON.stringify(b.pendingDates) === JSON.stringify([...b.pendingDates].sort()), "준비 중 날짜 오름차순");
-  b.daily.filter(d => b.pendingDates.includes(d.date)).forEach(d => {
-    client.assert(d.byFeature.filter(f => f.feature !== "chat_image").every(f => f.costKrw === null), "준비 중 날짜의 Langfuse 금액은 null");
+  b.daily.filter(d => b.pendingDates.includes(d.date) || b.expiredDates.includes(d.date)).forEach(d => {
+    client.assert(d.byFeature.filter(f => f.feature !== "chat_image").every(f => f.costKrw === null), "준비 중·보관 기간 밖 날짜의 Langfuse 금액은 null");
   });
   const total = b.daily.flatMap(d => d.byFeature).reduce((sum, f) => sum + (f.costKrw ?? 0), 0)
     + b.unmapped.reduce((sum, item) => sum + item.costKrw, 0);
@@ -224,21 +226,44 @@ client.test("AI 비용과 이미지 장당 원가", () => {
 # 이미지 성공 수는 총원가에만 포함하고 턴당·스토리당 원가의 분자·분모에서는 제외한다.
 # 기본 단가 48원, 이미지 성공 3·실패 1과 Langfuse 본문 0.004 USD(환율 1400) fixture:
 # 이미지 144원 / 본문 5.6원 / totals 149.6원. 스토리 컴파일 표지·인물 이미지는 Langfuse 비용에 포함.
-# 날짜별 저장 값이 없으면 최근부터 3일씩 최대 6번 받는다. 분할 없는 90일 첫 요청은 최근 18일·pendingDates 72일이다.
+# 날짜별 저장 값이 없으면 최근부터 3일씩 최대 6번 받는다. 기본 보관 일수 30, 고정 KST 2026-10-24의 빈 90일은 최근 18일·pendingDates 11일·expiredDates 61일이다.
 # v2 /api/public/v2/metrics?query=<URL 인코딩 JSON>, config.row_limit=1000. 1000행이면 저장하지 않고 반으로 분할한다.
 # 분할 호출도 6번에 포함하며 최소 1시간도 1000행이면 parse_error다. pendingDates가 남으면 같은 범위를 재요청한다.
 # KST 종료일 다음 날 00:00의 1ms 전까지 조회한다. 자정 관측과 자정 넘는 추적의 관측은 새 날짜에 한 번만 더한다.
 # 정상 조회의 빈 날짜는 value=[]로 저장한다. 저장은 USD, params에는 공개 키를 넣지 않는다.
 # 금액에는 실패 관측 비용도 포함한다. 호출 수·토큰 수·원가 분모는 성공한 DB 기록만 센다.
-# 확정일은 고정, 어제는 1시간, 오늘은 10분. 실패 시 저장값을 재사용하며 저장값이 전혀 없을 때 503.
+# 확정일은 고정, 어제는 1시간, 오늘은 10분. 실패 시 요청 범위 전체의 저장값을 재사용하며 저장값이 전혀 없을 때 503. 보관 기간 밖만이면 호출 없이 200.
 
-### AI 비용 긴 범위 — 분할 없는 첫 요청은 최근 18일, 이후 요청으로 나머지 날짜를 채움
+# 보관 시작일 = KST 오늘 − (retentionDays − 2). MANYAK_ADMIN_LANGFUSE_RETENTION_DAYS 기본 30.
+# 보관 시작일 전 저장값은 확정 여부와 무관하게 재사용하며, 없는 날짜만 expiredDates로 남는다.
+# 5분 배치는 03:00 전에도 확정일(오늘−2)까지 수집한다. 기본 27일은 18일+9일 두 실행, 이후 평소 하루 1회.
+# Amplitude 단계 뒤에 작업 없음·예산 소진·429와 무관하게 실행하고, Langfuse만 화면과 직렬화·간격·429·쿨다운(400 포함)을 공유한다.
+# 배포 검증: retentionStartDate~오늘−2의 metric=langfuse_ai_cost 행과 finalized_at이 모두 존재하는지 확인한다.
+# 화면 요청과 배치 각각 6회 상한, 3일 구간·1초 간격. Amplitude 비용 예산을 사용하지 않는다.
+
+### AI 비용 긴 범위 — 보관 기간 안의 준비 중 날짜만 다음 요청에서 채움
 GET {{baseUrl}}/api/v1/admin/quality/ai-cost?from=2026-07-26&to=2026-10-23
 Authorization: Bearer {{adminToken}}
 
 > {% client.test("긴 범위 비용", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   client.assert(response.body.daily.length === 90 && Array.isArray(response.body.pendingDates), "90일과 준비 중 날짜");
+}); %}
+
+### AI 비용 보관 기간 밖만 — 설정 없어도 200, 저장값 없는 옛 기간에서 호출·실패 로그 없음
+GET {{baseUrl}}/api/v1/admin/quality/ai-cost?from=2026-07-01&to=2026-07-31
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("과거 미저장 날짜는 오류가 아닌 보관 기간 밖", () => {
+  client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.pendingDates.length === 0, "보관 밖 날짜는 pending이 아님");
+  if (b.expiredDates.length === 31) {
+    client.assert(b.asOf === null, "Langfuse 저장값 없음이면 asOf=null");
+    client.assert(b.totals.costPerTurnKrw === null && b.totals.costPerStoryKrw === null, "원가 분모에서 만료 날짜 제외");
+    const images = b.daily.flatMap(d => d.byFeature).filter(f => f.feature === "chat_image").reduce((a,f) => a + f.costKrw, 0);
+    client.assert(b.totals.costKrw === images, `이미지 비용만 합산 actual=${b.totals.costKrw}`);
+  }
 }); %}
 
 ### AI 비용 503 — 네 설정 중 하나가 비어 있는 개발 서버 또는 저장값 없이 외부 장애인 서버에서 실행

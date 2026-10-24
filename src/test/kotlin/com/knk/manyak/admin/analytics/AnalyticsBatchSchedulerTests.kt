@@ -12,6 +12,7 @@ import java.util.concurrent.*
 class AnalyticsBatchSchedulerTests {
     private val clock = MutableAnalyticsClock(Instant.parse("2026-10-22T18:02:00Z"))
     private val runner = mock(AnalyticsBatchRunner::class.java)
+    private val langfuse = mock(LangfuseCostSnapshots::class.java)
     private val redis = mock(StringRedisTemplate::class.java)
     @Suppress("UNCHECKED_CAST") private val values = mock(ValueOperations::class.java) as ValueOperations<String, String>
     private val events = CopyOnWriteArrayList<Map<String, Any?>>()
@@ -24,7 +25,7 @@ class AnalyticsBatchSchedulerTests {
         `when`(values.setIfAbsent(anyString(), eq("1"), eq(Duration.ofMinutes(10)))).thenAnswer { slots.add(it.getArgument(0)) }
         `when`(runner.run()).thenReturn(AnalyticsBatchResult("nightly", "done", keys = 1, fetchedDays = 1, cost = 1))
     }
-    private fun scheduler() = AnalyticsBatchScheduler(runner, redis, log, clock)
+    private fun scheduler() = AnalyticsBatchScheduler(runner, redis, log, clock, langfuse = langfuse)
     @Test fun `두 인스턴스의 같은 KST5분 슬롯은 SET NX 승자만 조회하고 기록한다`() {
         val pool = Executors.newFixedThreadPool(2)
         try { listOf(scheduler(), scheduler()).map { s -> pool.submit { s.run() } }.forEach { it.get(2, TimeUnit.SECONDS) } }
@@ -63,4 +64,36 @@ class AnalyticsBatchSchedulerTests {
             verify(runner, times(1)).run()
         } finally { release.countDown(); pool.shutdownNow() }
     }
+    @Test fun `03시 이전에도 Amplitude 할 일과 무관하게 Langfuse 저장을 실행한다`() {
+        clock.at = Instant.parse("2026-10-23T15:05:00Z")
+        `when`(runner.run()).thenReturn(null)
+        scheduler().run()
+        verify(langfuse).refreshFinalized()
+        assertThat(events).isEmpty()
+    }
+    @Test fun `Amplitude 예산 소진과 429와 예외가 Langfuse 실행을 막지 않는다`() {
+        for (reason in listOf("budget_share", "rate_limited", "http_error")) {
+            `when`(runner.run()).thenReturn(AnalyticsBatchResult("nightly", "partial", reason))
+            scheduler().run()
+            clock.at = clock.at.plusSeconds(300)
+        }
+        `when`(runner.run()).thenThrow(IllegalStateException())
+        scheduler().run()
+        verify(langfuse, times(4)).refreshFinalized()
+    }
+    @Test fun `Langfuse 설정 없음은 Amplitude를 중단하지 않으며 슬롯 미선점이면 둘 다 실행하지 않는다`() {
+        doThrow(AdminAiCostUnavailable()).`when`(langfuse).refreshFinalized()
+        scheduler().run()
+        verify(runner).run()
+        scheduler().run()
+        verify(langfuse, times(1)).refreshFinalized()
+    }
+
+    @Test fun `Amplitude 단계가 먼저 끝나고 AI 비용 저장 단계가 뒤따른다`() {
+        scheduler().run()
+        val order = inOrder(runner, langfuse)
+        order.verify(runner).run()
+        order.verify(langfuse).refreshFinalized()
+    }
+
 }

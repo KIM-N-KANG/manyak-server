@@ -21,14 +21,14 @@ class LangfuseCostStateTests {
     private fun snapshots() = LangfuseCostSnapshots(fixture.store, client, properties, fixture.mapper, clock)
     private val today = LocalDate.parse("2026-10-23")
 
-    @Test fun `90일은 최근 18일을 먼저 저장하고 재시작 뒤 다음 18일만 받는다`() {
+    @Test fun `90일은 최근 18일을 먼저 저장하고 재시작 뒤 보관 기간 안 11일만 더 받는다`() {
         val range = AnalyticsRange(today.minusDays(89), today)
         val s = snapshots()
         assertThat(s.load(range)).hasSize(18)
         assertThat(calls).containsExactlyElementsOf((0L..5L).map { LangfuseInterval(AnalyticsRange(today.minusDays(2 + it * 3), today.minusDays(it * 3))) })
-        assertThat(snapshots().load(range)).hasSize(36)
-        assertThat(calls.last()).isEqualTo(LangfuseInterval(AnalyticsRange(today.minusDays(35), today.minusDays(33))))
-        assertThat(fixture.store.daily(s.definition, range.from, range.to).values.count { it.finalizedAt != null }).isEqualTo(34)
+        assertThat(snapshots().load(range)).hasSize(29)
+        assertThat(calls.last()).isEqualTo(LangfuseInterval(AnalyticsRange(today.minusDays(28), today.minusDays(27))))
+        assertThat(fixture.store.daily(s.definition, range.from, range.to).values.count { it.finalizedAt != null }).isEqualTo(27)
     }
 
     @Test fun `어제 한 시간 오늘 십 분 확정일은 영구 재사용한다`() {

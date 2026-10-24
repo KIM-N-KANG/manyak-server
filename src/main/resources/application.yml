@@ -180,6 +180,7 @@ manyak:
       public-key: ${MANYAK_ADMIN_LANGFUSE_PUBLIC_KEY:}
       secret-key: ${MANYAK_ADMIN_LANGFUSE_SECRET_KEY:}
       environment: ${MANYAK_ADMIN_LANGFUSE_ENVIRONMENT:}
+      retention-days: ${MANYAK_ADMIN_LANGFUSE_RETENTION_DAYS:30}
       request-timeout: 10s
       call-interval: 1s
       today-ttl: 10m

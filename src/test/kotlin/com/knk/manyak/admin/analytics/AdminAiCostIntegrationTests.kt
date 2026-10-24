@@ -106,7 +106,7 @@ class AdminAiCostIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_daily_values WHERE metric='langfuse_ai_cost'", Long::class.java)).isEqualTo(3)
     }
 
-    @Test fun `긴 범위의 pending 날짜에도 DB 호출과 장당 원가를 유지하고 asOf는 가장 이른 수신 시각이다`() {
+    @Test fun `긴 범위의 만료 날짜에도 DB 호출과 장당 원가를 유지하고 asOf는 가장 이른 수신 시각이다`() {
         respond("{\"data\":[]}")
         call("chat_response", "db-only", time = "2026-07-26T00:00:00Z")
         call("chat_image", null, time = "2026-07-26T00:00:00Z")
@@ -114,14 +114,18 @@ class AdminAiCostIntegrationTests {
         val first = body("from=2026-07-26&to=2026-10-23")
         assertThat(server.requestCount - count).isEqualTo(6)
         assertThat(first["daily"].size()).isEqualTo(90)
-        assertThat(first["pendingDates"].size()).isEqualTo(72)
-        assertThat(first["pendingDates"][0].asText()).isEqualTo("2026-07-26")
+        assertThat(first["pendingDates"].size()).isEqualTo(11)
+        assertThat(first["expiredDates"].size()).isEqualTo(61)
+        assertThat(first["retentionStartDate"].asText()).isEqualTo("2026-09-25")
+        assertThat(first["retentionDays"].asInt()).isEqualTo(30)
+        assertThat(first["expiredDates"][0].asText()).isEqualTo("2026-07-26")
         val entries = first["daily"][0]["byFeature"]
         assertThat(entries.single { it["feature"].asText() == "chat_response" }["costKrw"].isNull).isTrue()
         assertThat(entries.single { it["feature"].asText() == "chat_image" }["costKrw"].asInt()).isEqualTo(48)
         (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(30)
         val second = body("from=2026-07-26&to=2026-10-23")
-        assertThat(second["pendingDates"].size()).isEqualTo(54)
+        assertThat(second["pendingDates"].size()).isZero()
+        assertThat(second["expiredDates"].size()).isEqualTo(61)
         assertThat(second["asOf"].asText()).isEqualTo(first["asOf"].asText())
     }
 
@@ -203,4 +207,20 @@ class AdminAiCostIntegrationTests {
         assertThat(stale["asOf"].asText()).isEqualTo(initial["asOf"].asText())
         assertThat(stale["pendingDates"].size()).isZero()
     }
+    @Test fun `보관 밖 범위는 Langfuse 호출 없이 null asOf와 이미지 비용만 반환한다`(output: CapturedOutput) {
+        respond("upstream-private-body", 400)
+        call("chat_response", "x", time = "2026-07-01T01:00:00Z")
+        call("chat_image", null, time = "2026-07-01T01:00:00Z")
+        val count = server.requestCount
+        val result = body("from=2026-07-01&to=2026-07-31")
+        assertThat(server.requestCount).isEqualTo(count)
+        assertThat(result["asOf"].isNull).isTrue()
+        assertThat(result["expiredDates"].size()).isEqualTo(31)
+        assertThat(result["pendingDates"].size()).isZero()
+        assertThat(result["totals"]["costKrw"].asInt()).isEqualTo(48)
+        assertThat(result["totals"]["costPerTurnKrw"].isNull).isTrue()
+        assertThat(result["totals"]["costPerStoryKrw"].isNull).isTrue()
+        assertThat(output.out).doesNotContain("admin_ai_cost_fetch_failed")
+    }
+
 }
