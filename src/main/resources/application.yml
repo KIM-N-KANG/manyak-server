@@ -396,8 +396,8 @@ manyak:
       # (광고) 표기는 여기 넣지 않는다 — 서버가 발송 시점에 붙인다(빠뜨리면 되돌릴 수 없는 발송이 된다).
       # 문구의 250은 출석 지급량(manyak.credit.attendance-reward)과 별도로 관리한다.
       credit-expiry-reminder:
-        title: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE:이프 소멸 예정 안내}
-        body: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY:곧 소멸되는 이프가 있어요}
+        title: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE:이프 만료 예정 안내}
+        body: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY:곧 만료되는 이프가 있어요}
       attendance-reminder:
         title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:이프 250이 도착했어요 🍃}
         body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?}

@@ -51,7 +51,7 @@ class UserNotificationPostgresTests {
     @Test fun `V114는 이프 안내 ACTIVITY를 허용하고 모르는 type은 계속 거부한다`() {
         tx.executeWithoutResult {
             store.insert(UserNotification(userId = 1, messageKey = "credit-expiry:member:2026-10-25",
-                type = NotificationType.CREDIT_EXPIRY_REMINDER, title = "이프 소멸 예정 안내", body = "곧 소멸되는 이프가 있어요"))
+                type = NotificationType.CREDIT_EXPIRY_REMINDER, title = "이프 만료 예정 안내", body = "곧 만료되는 이프가 있어요"))
         }
         assertThat(jdbc.queryForObject("SELECT type FROM user_notifications", String::class.java)).isEqualTo("CREDIT_EXPIRY_REMINDER")
         assertThat(jdbc.queryForObject("SELECT category FROM user_notifications", String::class.java)).isEqualTo("ACTIVITY")

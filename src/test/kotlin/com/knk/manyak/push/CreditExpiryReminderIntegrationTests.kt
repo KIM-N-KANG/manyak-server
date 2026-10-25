@@ -66,7 +66,7 @@ class CreditExpiryReminderIntegrationTests {
         }.`when`(store).insert(any(PushMessage::class.java) ?: fallback, any(Instant::class.java) ?: now)
     }
     private fun member(status: UserStatus = UserStatus.ACTIVE, enabled: Boolean = true, token: Boolean = true): User {
-        val user = users.save(User(nickname = "소멸 안내", status = status, servicePushEnabled = enabled))
+        val user = users.save(User(nickname = "만료 안내", status = status, servicePushEnabled = enabled))
         if (token) tokens.save(DevicePushToken(userId = user.id, token = "expiry-${user.id}", platform = PushPlatform.ANDROID))
         return user
     }
@@ -92,17 +92,18 @@ class CreditExpiryReminderIntegrationTests {
             assertThat(it.requestId).isEqualTo("unknown")
             assertThat(it.sessionId).isEqualTo("unknown")
             assertThat(it.data.keys).containsExactlyInAnyOrder("type", "title", "body", "deepLink")
-            assertThat(it.data["title"]).isEqualTo("이프 소멸 예정 안내").doesNotContain("(광고)")
-            assertThat(it.data["body"]).isEqualTo("곧 소멸되는 이프가 있어요")
+            assertThat(it.data["title"]).isEqualTo("이프 만료 예정 안내").doesNotContain("(광고)")
+            assertThat(it.data["body"]).isEqualTo("곧 만료되는 이프가 있어요")
         }
         listOf(first, second, third).forEach {
             assertThat(redis.opsForValue().get(cooldown(it.id))).isEqualTo("1")
             assertThat(redis.getExpire(cooldown(it.id))).isBetween(604790L, 604800L)
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications WHERE category='ACTIVITY' AND type='CREDIT_EXPIRY_REMINDER'", Long::class.java)).isEqualTo(3)
-        val rows = jdbc.queryForList("SELECT message_key, deep_link, read_at, story_public_id, notice_public_id, notice_tag FROM user_notifications ORDER BY user_id")
+        val rows = jdbc.queryForList("SELECT title, body, message_key, deep_link, read_at, story_public_id, notice_public_id, notice_tag FROM user_notifications ORDER BY user_id")
         rows.zip(messages).forEach { (row, message) ->
-            assertThat(row).containsEntry("message_key", message.messageId).containsEntry("deep_link", message.data["deepLink"])
+            assertThat(row).containsEntry("title", message.data["title"]).containsEntry("body", message.data["body"])
+                .containsEntry("message_key", message.messageId).containsEntry("deep_link", message.data["deepLink"])
                 .containsEntry("read_at", null).containsEntry("story_public_id", null).containsEntry("notice_public_id", null).containsEntry("notice_tag", null)
         }
         verifyNoInteractions(sender)
@@ -144,10 +145,10 @@ class CreditExpiryReminderIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(1)
     }
     @Test fun `유효한 템플릿 오버라이드를 사용한다`() {
-        templates.save(PushMessageTemplate(templateKey = "credit_expiry_reminder", title = "소멸 안내", body = "이프 화면에서 확인해 주세요", effectiveFrom = Instant.EPOCH))
+        templates.save(PushMessageTemplate(templateKey = "credit_expiry_reminder", title = "만료 안내", body = "이프 화면에서 확인해 주세요", effectiveFrom = Instant.EPOCH))
         text.refresh(); lot(member())
         service().sendReminders()
-        assertThat(messages.single().data).containsEntry("title", "소멸 안내").containsEntry("body", "이프 화면에서 확인해 주세요")
+        assertThat(messages.single().data).containsEntry("title", "만료 안내").containsEntry("body", "이프 화면에서 확인해 주세요")
     }
     @Test fun `두 인스턴스 동시 회차 중 하나만 실행하고 24시간 선점한다`() {
         lot(member())

@@ -454,7 +454,7 @@ Content-Type: application/json
 
 {"reason":"발송 장애 원인 해결 후 재실행"}
 
-### 이프 소멸 예정 안내 문구 조회 — 정보성, 금액·수량·충전 권유 금지
+### 이프 만료 예정 안내 문구 조회 — 정보성, 금액·수량·충전 권유 금지
 GET {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
 Authorization: Bearer {{adminToken}}
 
@@ -468,7 +468,7 @@ PUT {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
-{"title":"이프 소멸 예정 안내","body":"소멸 예정 이프는 이프 화면에서 확인해 주세요.","reason":"정보성 안내 문구 검증"}
+{"title":"이프 만료 예정 안내","body":"만료 예정 이프는 이프 화면에서 확인해 주세요.","reason":"정보성 안내 문구 검증"}
 
 > {%
     client.test("이프 문구 적용", () => client.assert(response.status === 200 && response.body.effective.isDefault === false,
@@ -494,7 +494,7 @@ Content-Type: application/json
 {"reason":"정보성 안내 검증 후 복귀"}
 
 > {%
-    client.test("이프 기본 문구 복귀", () => client.assert(response.status === 200 && response.body.effective.isDefault === true && response.body.effective.body === "곧 소멸되는 이프가 있어요",
+    client.test("이프 기본 문구 복귀", () => client.assert(response.status === 200 && response.body.effective.isDefault === true && response.body.effective.body === "곧 만료되는 이프가 있어요",
         `expected=200/default actual=${response.status}/${JSON.stringify(response.body)}`));
 %}
 

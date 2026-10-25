@@ -72,7 +72,7 @@ class CreditExpiryReminderService(
                     sender.sendToUser(target.userId, data, HIGH, expiresAt = target.expiresAt,
                         messageId = messageId)
                 }.onFailure {
-                    logger.warn("이프 소멸 예정 안내 발송 실패 (error={})", it.javaClass.simpleName)
+                    logger.warn("이프 만료 예정 안내 발송 실패 (error={})", it.javaClass.simpleName)
                 }
             }
         }
