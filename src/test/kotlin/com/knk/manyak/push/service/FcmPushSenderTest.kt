@@ -89,6 +89,29 @@ class FcmPushSenderTest {
     }
 
     @Test
+    fun `FCM 미설정이면 이프 안내를 FCM_DISABLED로 기록하고 FCM을 호출하지 않는다`() {
+        val now = Instant.parse("2026-10-25T01:00:00Z")
+        val deliveries = mock(PushDeliveryService::class.java)
+        val disabled = FcmPushSender(null, repository, userRepository, registry,
+            clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
+        val messageId = "credit-expiry:$publicId:2026-10-25"
+
+        disabled.sendToUser(7L, mapOf("type" to "CREDIT_EXPIRY_REMINDER"),
+            expiresAt = now.plusSeconds(60), messageId = messageId)
+
+        val records = org.mockito.Mockito.mockingDetails(deliveries).invocations.filter { it.method.name == "record" }
+        assertThat(records).hasSize(1)
+        val report = records.single().getArgument<com.knk.manyak.push.dto.PushDeliveryReportRequest>(0)
+        assertThat(report.messageId).isEqualTo(messageId)
+        assertThat(report.type).isEqualTo(com.knk.manyak.push.dto.PushDeliveryType.CREDIT_EXPIRY_REMINDER)
+        assertThat(report.kind).isEqualTo(com.knk.manyak.push.dto.PushKind.SERVICE)
+        assertThat(report.outcome).isEqualTo(com.knk.manyak.push.dto.PushDeliveryOutcome.DISCARDED)
+        assertThat(report.reason).isEqualTo("FCM_DISABLED")
+        verify(repository, never()).findTop10ByUserIdOrderByUpdatedAtDesc(7L)
+        verify(messaging, never()).send(any())
+    }
+
+    @Test
     fun `서비스 계정이 없으면 아무것도 하지 않는다`() {
         val disabled = FcmPushSender(null, repository, userRepository, registry)
 

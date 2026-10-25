@@ -283,7 +283,7 @@ class CreditExpiryReminderIntegrationTests {
         assertThat(redis.hasKey(cooldown(next.id))).isTrue()
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
     }
-    @Test fun `로컬 FCM 미설정 no-op 호출에도 쿨다운을 기록한다`() {
+    @Test fun `로컬 발송기가 no-op이어도 쿨다운을 유지한다`() {
         val user = member(); lot(user)
         assertThat(service(remote = false).sendReminders().sent).isEqualTo(1)
         assertThat(redis.hasKey(cooldown(user.id))).isTrue()
