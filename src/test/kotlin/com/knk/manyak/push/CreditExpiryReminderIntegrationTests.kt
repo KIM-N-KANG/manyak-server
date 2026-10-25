@@ -94,6 +94,7 @@ class CreditExpiryReminderIntegrationTests {
             assertThat(it.data.keys).containsExactlyInAnyOrder("type", "title", "body", "deepLink")
             assertThat(it.data["title"]).isEqualTo("이프 만료 예정 안내").doesNotContain("(광고)")
             assertThat(it.data["body"]).isEqualTo("곧 만료되는 이프가 있어요")
+            assertThat(it.data["deepLink"]).isEqualTo("https://manyak.app/my/credits?tab=history&utm_source=push&utm_medium=push&utm_campaign=credit_expiry_reminder&utm_content=credit_expiry_reminder")
         }
         listOf(first, second, third).forEach {
             assertThat(redis.opsForValue().get(cooldown(it.id))).isEqualTo("1")
@@ -107,6 +108,16 @@ class CreditExpiryReminderIntegrationTests {
                 .containsEntry("read_at", null).containsEntry("story_public_id", null).containsEntry("notice_public_id", null).containsEntry("notice_tag", null)
         }
         verifyNoInteractions(sender)
+    }
+
+    @ParameterizedTest @ValueSource(booleans = [true, false])
+    fun `만료 안내 알림함 딥링크는 발송 모드와 관계없이 내역 탭과 기존 UTM을 저장한다`(remote: Boolean) {
+        val user = member(); lot(user)
+
+        service(remote = remote).sendReminders()
+
+        assertThat(jdbc.queryForObject("SELECT deep_link FROM user_notifications WHERE user_id = ?", String::class.java, user.id))
+            .isEqualTo("https://manyak.app/my/credits?tab=history&utm_source=push&utm_medium=push&utm_campaign=credit_expiry_reminder&utm_content=credit_expiry_reminder")
     }
 
     @ParameterizedTest @NullSource @ValueSource(longs = [0, -1, -86400, 86401])

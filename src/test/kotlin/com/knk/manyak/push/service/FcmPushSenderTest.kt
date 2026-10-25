@@ -73,7 +73,7 @@ class FcmPushSenderTest {
             clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "expiry")))
         val data = mapOf("type" to "CREDIT_EXPIRY_REMINDER", "title" to "이프 만료 예정 안내",
-            "body" to "곧 만료되는 이프가 있어요", "deepLink" to "https://manyak.app/my/credits?tab=free")
+            "body" to "곧 만료되는 이프가 있어요", "deepLink" to "https://manyak.app/my/credits?tab=history")
         local.sendToUser(7L, data, expiresAt = now.plusSeconds(60), messageId = "credit-expiry:$publicId:2026-10-25")
         val captor = ArgumentCaptor.forClass(Message::class.java)
         verify(messaging).send(captor.capture())
