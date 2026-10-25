@@ -37,6 +37,11 @@ class AdminReadController(private val service: AdminReadService, private val cha
     @GetMapping("/stories/{storyId}")
     fun story(@PathVariable storyId: UUID) = service.story(storyId)
 
+    @io.swagger.v3.oas.annotations.Operation(summary = "스토리 설정", description = "삭제되지 않은 모든 스토리의 현재 저장값 원문과 이미지 전부를 검수 상태와 함께 돌려줍니다. 승인 전 제출본은 반영하지 않으며 접속 기록은 남기지 않습니다.")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = com.knk.manyak.global.config.OpenApiConfig.SECURITY_SCHEME_NAME)
+    @GetMapping("/stories/{storyId}/settings")
+    fun storySettings(@PathVariable storyId: UUID) = service.storySettings(storyId)
+
     @GetMapping("/chats")
     fun chats(@Valid @ModelAttribute request: AdminChatsRequest) = service.chats(request)
 
