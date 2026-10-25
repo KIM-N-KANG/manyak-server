@@ -44,7 +44,7 @@ class CreditExpiryReminderService(
         val targets = candidates.filter { it.userId !in cooling }
         val text = templates.templateOf(PushTemplateKey.CREDIT_EXPIRY_REMINDER)
         val data = mapOf("type" to TYPE, "title" to text.title, "body" to text.body,
-            "deepLink" to pushDeepLink(webBaseUrl, "/my/credits?tab=free", TYPE))
+            "deepLink" to pushDeepLink(webBaseUrl, "/my/credits?tab=history", TYPE))
         val round = notifications.recordCreditExpiry(targets, targets, data, today, outbox)
         // 모드·푸시 자격과 관계없이 커밋된 알림 내역 대상 전체에 쿨다운을 건다.
         targets.forEach { redis.opsForValue().set(cooldownKey(it.userId), "1", Duration.ofDays(7)) }
