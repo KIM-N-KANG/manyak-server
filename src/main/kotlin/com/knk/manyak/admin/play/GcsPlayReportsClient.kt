@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.play
 
-import com.google.auth.oauth2.ServiceAccountCredentials
+import com.google.auth.oauth2.GoogleCredentials
 import jakarta.annotation.PreDestroy
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
@@ -16,15 +16,18 @@ fun interface PlayStatsAccessToken { fun token(): String }
 
 @Component
 class GooglePlayStatsAccessToken(private val properties: PlayStatsProperties) : PlayStatsAccessToken {
-    private var credentials: com.google.auth.oauth2.GoogleCredentials? = null
+    private var credentials: GoogleCredentials? = null
     @Synchronized override fun token(): String {
-        val scoped = credentials ?: ServiceAccountCredentials.fromStream(
-            java.util.Base64.getDecoder().decode(properties.serviceAccountKeyBase64).inputStream())
-            .createScoped(listOf("https://www.googleapis.com/auth/devstorage.read_only")).also { credentials = it }
+        val scoped = credentials ?: playStatsCredentials(properties.serviceAccountKeyBase64).also { credentials = it }
         scoped.refreshIfExpired()
         return requireNotNull(scoped.accessToken).tokenValue
     }
 }
+
+/** service_account·authorized_user JSON 모두 받는다. 사용자 계정 자격에는 scope가 적용되지 않는다(no-op). */
+internal fun playStatsCredentials(keyBase64: String): GoogleCredentials =
+    GoogleCredentials.fromStream(java.util.Base64.getDecoder().decode(keyBase64).inputStream())
+        .createScoped(listOf("https://www.googleapis.com/auth/devstorage.read_only"))
 
 /** 토큰 발급·목록 페이지·전체 월별 다운로드가 하나의 10초 예산을 공유한다. */
 @Component

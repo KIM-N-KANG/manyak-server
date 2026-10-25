@@ -1,6 +1,6 @@
 # 관리자 Play 설치 지표. IntelliJ HTTP Client에서 위에서부터 실행한다.
 # 준비: PostgreSQL·Redis 및 ./gradlew bootRun. 관리자 로그인 응답의 accessToken을 넣는다.
-# 운영 키는 MANYAK_PLAY_STATS_SA_KEY_BASE64로만 주입한다. 실제 키를 이 파일에 넣지 않는다.
+# 운영 자격(서비스 계정 키 또는 사용자 계정 자격 JSON)은 MANYAK_PLAY_STATS_SA_KEY_BASE64로만 주입한다. 실제 키를 이 파일에 넣지 않는다.
 # Play 기준 날짜를 KST로 바꾸지 않으며 보고서에 며칠 지연이 있을 수 있다.
 # 월별 overview 전체를 합산하고 1시간 캐시, 실패 완료 후 60초 쿨다운을 적용한다.
 @baseUrl = http://localhost:8080
