@@ -125,6 +125,7 @@ manyak:
     play-stats:
       bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
       package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
+      # 서비스 계정 키 또는 사용자 계정 자격(authorized_user) JSON의 base64. 이름은 호환을 위해 유지한다(KNK-1773).
       service-account-key-base64: ${MANYAK_PLAY_STATS_SA_KEY_BASE64:}
     analytics:
       batch:
