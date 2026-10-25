@@ -21,6 +21,27 @@ class ScheduledNotificationWriter(
     private val clock: Clock = Clock.systemUTC(),
     private val campaigns: com.knk.manyak.push.repository.PushCampaignRepository,
 ) {
+    /** 이프 안내도 알림함과 회원별 유효 기한의 발송 요청을 회차 전체로 커밋한다. */
+    @Transactional
+    fun recordCreditExpiry(
+        inboxTargets: List<com.knk.manyak.credit.repository.CreditExpiryTarget>,
+        pushTargets: List<com.knk.manyak.credit.repository.CreditExpiryTarget>,
+        data: Map<String, String>, occurrence: String, outbox: ScheduledPushOutboxWriter?,
+    ): NotificationRound {
+        val now = clock.instant()
+        val type = NotificationType.CREDIT_EXPIRY_REMINDER
+        for (target in inboxTargets) {
+            val user = users.findById(target.userId).orElseThrow()
+            store.insert(UserNotification(userId = user.id, messageKey = "credit-expiry:${user.publicId}:$occurrence",
+                type = type, title = data.getValue("title"), body = data.getValue("body"),
+                deepLink = data.getValue("deepLink"), createdAt = now))
+        }
+        val targetIds = pushTargets.map { it.userId }
+        val sent = outbox?.record(targetIds, data, "credit-expiry", occurrence, kind = "SERVICE",
+            expiresAtByUserId = pushTargets.associate { it.userId to it.expiresAt })
+        return NotificationRound(targetIds, sent)
+    }
+
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     fun record(
         data: Map<String, String>, scenario: String, occurrence: String,

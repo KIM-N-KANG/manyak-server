@@ -1,4 +1,4 @@
-# 관리자 캠페인·출석 문구 검증 (IntelliJ HTTP Client)
+# 관리자 캠페인·알림 문구 검증 (IntelliJ HTTP Client)
 # 준비: Postgres·Redis 기동 후 ./gradlew bootRun. auth.http에서 adminToken을 저장한다.
 # 위에서부터 실행. 테스트 환경에서만 실행한다. 즉시 예약은 다음 폴링에서 발송된다.
 # 취소 검증은 promotion 스케줄러를 끈 환경에서 실행한다.
@@ -453,3 +453,51 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {"reason":"발송 장애 원인 해결 후 재실행"}
+
+### 이프 만료 예정 안내 문구 조회 — 정보성, 금액·수량·충전 권유 금지
+GET {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("이프 안내 키 조회", () => client.assert(response.status === 200 && response.body.templateKey === "credit_expiry_reminder",
+        `expected=200/credit_expiry_reminder actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 이프 안내 즉시 변경 — 위 관리자 인증 준비 후 순서대로 실행한다
+PUT {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"이프 만료 예정 안내","body":"만료 예정 이프는 이프 화면에서 확인해 주세요.","reason":"정보성 안내 문구 검증"}
+
+> {%
+    client.test("이프 문구 적용", () => client.assert(response.status === 200 && response.body.effective.isDefault === false,
+        `expected=200/false actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 이프 안내 400 — 종료가 시작보다 앞선 문구
+PUT {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"이프 안내","body":"본문","effectiveFrom":"2099-01-02T00:00:00Z","effectiveUntil":"2099-01-01T00:00:00Z","reason":"기간 검증"}
+
+> {%
+    client.test("이프 문구 기간 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 이프 안내 기본 문구 복귀 — 활성·예약 행 종료
+DELETE {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"정보성 안내 검증 후 복귀"}
+
+> {%
+    client.test("이프 기본 문구 복귀", () => client.assert(response.status === 200 && response.body.effective.isDefault === true && response.body.effective.body === "곧 만료되는 이프가 있어요",
+        `expected=200/default actual=${response.status}/${JSON.stringify(response.body)}`));
+%}
+
+### 이프 안내 자유 조회
+GET {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
+Authorization: Bearer {{adminToken}}

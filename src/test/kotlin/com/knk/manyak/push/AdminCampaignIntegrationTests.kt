@@ -277,6 +277,36 @@ class AdminCampaignIntegrationTests {
         assertThat(count("push_campaigns")).isZero()
     }
 
+    @Test fun `관리자 OpenAPI는 이프 만료 알림 결과 필터를 문서화한다`() {
+        val document = client.get().uri("/v3/api-docs").exchange().expectStatus().isOk
+            .expectBody(String::class.java).returnResult().responseBody!!
+        val root = mapper.readTree(document)
+        val type = root["paths"]["/api/v1/admin/push/delivery-stats"]["get"]["parameters"]
+            .first { it["name"].asText() == "type" }["schema"]["enum"]
+        assertThat(type.toList().map { it.asText() }).contains("CREDIT_EXPIRY_REMINDER")
+        val export = java.nio.file.Path.of("build/reports/admin-openapi.json")
+        java.nio.file.Files.createDirectories(export.parent)
+        java.nio.file.Files.writeString(export, document)
+    }
+
+    @Test fun `이프 만료 템플릿의 조회 변경 복귀는 출석 문구와 독립적이다`() {
+        val path = "/templates/credit_expiry_reminder"
+        call(HttpMethod.GET, path).expectStatus().isOk.expectBody()
+            .jsonPath("$.effective.title").isEqualTo("이프 만료 예정 안내")
+            .jsonPath("$.effective.body").isEqualTo("곧 만료되는 이프가 있어요")
+        call(HttpMethod.PUT, path, mapOf("title" to "만료 안내", "body" to "확인해 주세요", "reason" to "문구 변경"))
+            .expectStatus().isOk.expectBody().jsonPath("$.effective.title").isEqualTo("만료 안내")
+            .jsonPath("$.overrides[0].active").isEqualTo(true)
+        call(HttpMethod.GET, path).expectStatus().isOk.expectBody().jsonPath("$.effective.isDefault").isEqualTo(false)
+        text.refresh()
+        assertThat(text.templateOf(PushTemplateKey.CREDIT_EXPIRY_REMINDER).title).isEqualTo("만료 안내")
+        assertThat(templateGet()["effective"]["isDefault"].asBoolean()).isTrue()
+        call(HttpMethod.DELETE, path, mapOf("reason" to "기본 복귀")).expectStatus().isOk.expectBody()
+            .jsonPath("$.effective.isDefault").isEqualTo(true)
+        call(HttpMethod.GET, path).expectStatus().isOk.expectBody().jsonPath("$.effective.title").isEqualTo("이프 만료 예정 안내")
+        call(HttpMethod.GET, "/templates/missing").expectStatus().isNotFound
+    }
+
     @Test fun `문구는 행을 추가하고 즉시 조회와 발송 스냅샷을 구분한다`() {
         assertThat(templateGet()["effective"]["isDefault"].asBoolean()).isTrue()
         call(HttpMethod.PUT, "/templates/attendance_reminder", templateBody()).expectStatus().isOk

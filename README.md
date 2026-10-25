@@ -73,7 +73,7 @@ MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
 
 `MANYAK_PUSH_MODE=remote`는 스토리 완성의 `COMPLETED` 마킹과 같은 트랜잭션에 `push_outbox`를 기록합니다. 기본 `local`은 기존 서버 FCM 발송을 유지하고 아웃박스를 만들지 않습니다. remote의 동의·토큰 확인은 알림 서비스가 발송 직전에 수행합니다. 기존 HTTP 발송 클라이언트와 `manyak.push.notification.*` 설정은 제거했습니다.
 
-원격 모드의 출석 리마인드·프로모션도 회원마다 같은 아웃박스에 요청을 기록합니다. 회차의 요청은 한 트랜잭션으로 커밋하며, 출석은 `attendance:{회원 공개 식별자}:{KST 날짜}`, 프로모션은 `promotion:{캠페인 공개 식별자}:{회원 공개 식별자}`로 중복 기록을 막습니다. 출석 요청의 `expiresAt`은 당일 KST 자정이고 그 외 알림은 이 필드를 생략합니다. 자격 재확인과 야간 판정은 소비자가 발송 직전에 수행합니다. 로컬 모드는 서버 발송기를 사용하고 출석 회차가 자정에 도달하면 남은 회원 발송을 중단합니다.
+원격 모드의 출석 리마인드·프로모션도 회원마다 같은 아웃박스에 요청을 기록합니다. 회차의 요청은 한 트랜잭션으로 커밋하며, 출석은 `attendance:{회원 공개 식별자}:{KST 날짜}`, 프로모션은 `promotion:{캠페인 공개 식별자}:{회원 공개 식별자}`로 중복 기록을 막습니다. 출석 요청의 `expiresAt`은 당일 KST 자정이며, 이프 만료 예정 안내는 회원별 만료 기한을 사용합니다. 자격 재확인과 야간 판정은 소비자가 발송 직전에 수행합니다. 로컬 모드는 서버 발송기를 사용하고 출석 회차가 자정에 도달하면 남은 회원 발송을 중단합니다.
 
 회차 로그의 `targets`는 조회 대상 수이며, `sent`는 원격 모드의 신규 요청 수(로컬 모드는 발송기 호출 수)입니다. `skipped`는 기록하지 않고 캠페인의 `skipped_count`도 사용하지 않습니다. 실패한 캠페인은 원인 해결 후 같은 행을 `SCHEDULED`로 되돌려 재실행할 수 있습니다. 기존 요청은 추가되지 않으며 마지막 회차의 대상 수와 신규 요청 수를 남깁니다. 이 경우 `finished_at` 등 이전 회차 결과는 종료 시 갱신됩니다.
 
@@ -144,3 +144,16 @@ brew install tbls          # 최초 1회
 - 팀 위키: `../llm-wiki`
 - 팀 LLM 하네스: `../knk-harness`
 - 서버 레포 LLM 지침: `CLAUDE.md`
+
+### 이프 만료 예정 안내
+
+매일 10:00 KST에 `now < expires_at <= now + 24h`, `remaining > 0` 로트를 가진 활성 회원을 조회합니다. 회원별 창 안 가장 늦은 만료 시각을 `expiresAt`으로 사용하며 무기한 승계 로트는 제외합니다. `CREDIT_EXPIRY_REMINDER`는 SERVICE이며 광고 동의·광고 표기가 없습니다. 데이터에는 `type`, `title`, `body`, `deepLink`, 발송기가 추가하는 `recipientId`만 있고 금액·수량·만료 시각을 넣지 않습니다.
+
+알림함에는 푸시 설정·토큰과 관계없이 ACTIVITY로 기록하고, 원격 모드에서는 대상 회원 전원의 푸시 요청을 같은 회차 트랜잭션에 기록하고 소비자가 서비스 설정·토큰을 재확인합니다. 두 모드 모두 커밋 후 알림함 대상 전체에 7일 쿨다운을 겁니다. 로컬 모드는 쿨다운 기록 뒤 트랜잭션 밖에서 자격을 재확인하고 발송기를 호출합니다. Redis 조회 실패는 기록 전에 중단하고, 커밋 뒤 쿨다운 저장 실패는 요청을 유지하며 회차 실패를 기록합니다.
+
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_ENABLED`: 기본 `true`
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_CRON`: 기본 `0 0 10 * * *`, KST
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE`: 기본 `이프 만료 예정 안내`
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY`: 기본 `곧 만료되는 이프가 있어요`
+
+관리자 `/api/v1/admin/push/templates/credit_expiry_reminder`의 GET/PUT/DELETE로 문구를 조회·변경·기본값 복원합니다. 금액·수량이나 충전·이용 권유 문구를 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
