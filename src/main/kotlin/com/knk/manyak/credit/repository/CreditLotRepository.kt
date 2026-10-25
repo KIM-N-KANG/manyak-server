@@ -8,7 +8,21 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.Instant
 
+interface CreditExpiryTarget {
+    val userId: Long
+    val expiresAt: Instant
+}
+
 interface CreditLotRepository : JpaRepository<CreditLot, Long> {
+
+    /** 창 안 잔여 로트를 회원별로 모으고 가장 늦은 만료 시각을 발송 유효 기한으로 쓴다. */
+    @Query("""
+        SELECT l.userId AS userId, MAX(l.expiresAt) AS expiresAt FROM CreditLot l, User u
+        WHERE u.id = l.userId AND u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+          AND l.remaining > 0 AND l.expiresAt > :now AND l.expiresAt <= :until
+        GROUP BY l.userId ORDER BY l.userId
+    """)
+    fun findExpiryReminderTargets(now: Instant, until: Instant): List<CreditExpiryTarget>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT l FROM CreditLot l WHERE l.userId = :userId AND l.transactionId = :transactionId")

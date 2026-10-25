@@ -17,7 +17,7 @@ class PushOpensTests {
     private lateinit var delivery: PushDeliveryService
     private val day = LocalDate.parse("2026-10-24")
     private val id = UUID.fromString("4b7f0c2a-9d1e-4f3a-8c5b-6e2d1a0f9b37")
-    private val types = listOf(PushDeliveryType.STORY_COMPLETED, PushDeliveryType.STORY_MODERATION_COMPLETED, PushDeliveryType.ATTENDANCE_REMINDER)
+    private val types = listOf(PushDeliveryType.STORY_COMPLETED, PushDeliveryType.STORY_MODERATION_COMPLETED, PushDeliveryType.ATTENDANCE_REMINDER, PushDeliveryType.CREDIT_EXPIRY_REMINDER)
     private val requests = java.util.concurrent.CopyOnWriteArrayList<RecordedRequest>()
     @BeforeEach fun setup() {
         server = MockWebServer().apply { start() }
@@ -75,10 +75,10 @@ class PushOpensTests {
         assertThat(result.campaigns.single().pushOpens).isEqualTo(35)
         assertThat(result.campaigns.single().pushOpenRate).isEqualTo(0.35)
         assertThat(result.campaigns.single().openState).isEqualTo(PushOpenState.MEASURED)
-        assertThat(result.activityTypes.last().pushOpens).isEqualTo(4)
+        assertThat(result.activityTypes.single { it.type == PushDeliveryType.ATTENDANCE_REMINDER }.pushOpens).isEqualTo(4)
         assertThat(result.activityTypes.first().pushOpens).isZero()
         assertThat(result.activityTypes.first().pushOpenRate).isNull()
-        assertThat(result.activityTypes.last().pushOpenRate).isNull()
+        assertThat(result.activityTypes.single { it.type == PushDeliveryType.ATTENDANCE_REMINDER }.pushOpenRate).isNull()
     }
     @Test fun `측정 전 우선 판정과 NO_LINK PENDING을 구분한다`() {
         `when`(delivery.campaignReach(anyValue(), anyValue())).thenReturn(listOf(campaign(false),campaign(null),campaign(true, day.minusDays(4))))
@@ -100,11 +100,11 @@ class PushOpensTests {
     }
     @Test fun `집계 구간을 측정일부터 자르고 시작 전 날짜를 pending에 넣지 않는다`() {
         val measured=day.minusDays(3)
-        `when`(delivery.activityReach(measured,day,types)).thenReturn(listOf(PushActivityReach(types.last(),measured,2)))
+        `when`(delivery.activityReach(measured,day,types)).thenReturn(listOf(PushActivityReach(PushDeliveryType.ATTENDANCE_REMINDER,measured,2)))
         val result=service(measured).read(query(day.minusDays(6)))
         assertThat(result.activityFrom).isEqualTo(measured)
-        assertThat(result.activityTypes.last().deliveredMembers).isEqualTo(2)
-        assertThat(result.activityTypes.last().pushOpenRate).isEqualTo(4.0)
+        assertThat(result.activityTypes.single { it.type == PushDeliveryType.ATTENDANCE_REMINDER }.deliveredMembers).isEqualTo(2)
+        assertThat(result.activityTypes.single { it.type == PushDeliveryType.ATTENDANCE_REMINDER }.pushOpenRate).isEqualTo(4.0)
         assertThat(result.pendingDates).isEmpty()
         assertThat(requests.single().requestUrl!!.queryParameter("start")).isEqualTo(measured.format(BASIC_ISO_DATE))
         verify(delivery).activityReach(measured,day,types)

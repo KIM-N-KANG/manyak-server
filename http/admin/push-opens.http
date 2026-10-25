@@ -3,7 +3,7 @@
 # MANYAK_ADMIN_PUSH_OPENS_MEASURED_FROM은 푸시 UTM 서버를 배포한 KST 날짜(YYYY-MM-DD).
 # 비워 두면 Amplitude 호출 없이 BEFORE_MEASUREMENT. 설정했으면 Amplitude 키와 발송 결과 데이터 필요.
 # 아래 from/to를 오늘 이하로 조정하고 위에서부터 실행. 실제 서버에서는 Amplitude 예산을 소비할 수 있음.
-# 캠페인은 마지막 started_at이 범위 안인 항목만, activityTypes는 고정 3종. 알림함 UTM은 열람에 포함하지 않음.
+# 캠페인은 마지막 started_at이 범위 안인 항목만, activityTypes는 이프 만료 예정 안내를 포함한 고정 4종. 알림함 UTM은 열람에 포함하지 않음.
 @baseUrl = http://localhost:8080
 @adminToken = PUT_AN_ADMIN_TOKEN_HERE
 @from = 2026-10-18
@@ -26,7 +26,7 @@ Authorization: Bearer {{adminToken}}
         const b = response.body;
         client.assert(Array.isArray(b.pendingDates) && Array.isArray(b.campaigns), JSON.stringify(b));
         client.assert(!("serviceTypes" in b), "activityTypes를 사용해야 합니다");
-        client.assert(JSON.stringify(b.activityTypes.map(t => t.type)) === JSON.stringify(["STORY_COMPLETED", "STORY_MODERATION_COMPLETED", "ATTENDANCE_REMINDER"]), JSON.stringify(b.activityTypes));
+        client.assert(JSON.stringify(b.activityTypes.map(t => t.type)) === JSON.stringify(["STORY_COMPLETED", "STORY_MODERATION_COMPLETED", "ATTENDANCE_REMINDER", "CREDIT_EXPIRY_REMINDER"]), JSON.stringify(b.activityTypes));
         const states = ["MEASURED", "BEFORE_MEASUREMENT", "NO_LINK", "PENDING"];
         b.campaigns.forEach(c => {
             client.assert(states.includes(c.openState), JSON.stringify(c));

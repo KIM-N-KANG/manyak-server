@@ -13,6 +13,7 @@ import java.time.Instant
 /** 런타임 조정 가능한 푸시 문구의 키(KNK-1116). [storageKey]가 `push_message_templates.template_key`와 짝이다. */
 enum class PushTemplateKey(val storageKey: String) {
     ATTENDANCE_REMINDER("attendance_reminder"),
+    CREDIT_EXPIRY_REMINDER("credit_expiry_reminder"),
 }
 
 /** 해석된 알림 문구. 오버라이드 행 또는 yml 기본값에서 온다. */
@@ -52,12 +53,15 @@ class PushMessageTemplateService(
     @param:Value("\${manyak.push.templates.attendance-reminder.title}") attendanceReminderTitle: String,
     @param:Value("\${manyak.push.templates.attendance-reminder.body}") attendanceReminderBody: String,
     private val clock: Clock = Clock.systemUTC(),
+    @param:Value("\${manyak.push.templates.credit-expiry-reminder.title}") creditExpiryReminderTitle: String,
+    @param:Value("\${manyak.push.templates.credit-expiry-reminder.body}") creditExpiryReminderBody: String,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private val defaults: Map<PushTemplateKey, PushMessageText> = PushTemplateKey.entries.associateWith { key ->
         when (key) {
             PushTemplateKey.ATTENDANCE_REMINDER -> PushMessageText(attendanceReminderTitle, attendanceReminderBody)
+            PushTemplateKey.CREDIT_EXPIRY_REMINDER -> PushMessageText(creditExpiryReminderTitle, creditExpiryReminderBody)
         }
     }
 

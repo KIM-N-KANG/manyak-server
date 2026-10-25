@@ -372,6 +372,9 @@ manyak:
       # 미설정(빈 값)이면 FCM 빈을 만들지 않아 발송이 no-op이다(Slack 웹훅과 같은 관례). 운영은 manyak/prod/app
       # 시크릿 JSON에 키를 추가하고, 태스크 정의 secrets 목록에 그 키를 노출하는 terraform apply가 함께 필요하다.
       service-account-json: ${MANYAK_FCM_SERVICE_ACCOUNT_JSON:}
+    credit-expiry-reminder:
+      enabled: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_ENABLED:true}
+      cron: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_CRON:0 0 10 * * *}
     attendance-reminder:
       # 출석 리마인드 푸시(KNK-1116, 광고성). 끄면 스케줄러 빈 자체를 만들지 않는다.
       enabled: ${MANYAK_PUSH_ATTENDANCE_REMINDER_ENABLED:true}
@@ -392,6 +395,9 @@ manyak:
       # 알림 문구의 기본값(정본). DB(push_message_templates)에 유효한 행이 있으면 그 값이 이긴다.
       # (광고) 표기는 여기 넣지 않는다 — 서버가 발송 시점에 붙인다(빠뜨리면 되돌릴 수 없는 발송이 된다).
       # 문구의 250은 출석 지급량(manyak.credit.attendance-reward)과 별도로 관리한다.
+      credit-expiry-reminder:
+        title: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE:이프 만료 예정 안내}
+        body: ${MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY:곧 만료되는 이프가 있어요}
       attendance-reminder:
         title: ${MANYAK_PUSH_ATTENDANCE_REMINDER_TITLE:이프 250이 도착했어요 🍃}
         body: ${MANYAK_PUSH_ATTENDANCE_REMINDER_BODY:출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?}

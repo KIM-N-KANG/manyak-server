@@ -66,6 +66,52 @@ class FcmPushSenderTest {
         registry.find(FcmPushSender.METRIC_PUSH_SEND_RESULT).tag("outcome", outcome).counter()?.count() ?: 0.0
 
     @Test
+    fun `이프 안내는 금액 없는 데이터와 높은 우선순위 TTL을 보내고 로컬 결과를 기록한다`() {
+        val now = Instant.parse("2026-10-25T01:00:00Z")
+        val deliveries = mock(PushDeliveryService::class.java)
+        val local = FcmPushSender(messaging, repository, userRepository, registry,
+            clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "expiry")))
+        val data = mapOf("type" to "CREDIT_EXPIRY_REMINDER", "title" to "이프 만료 예정 안내",
+            "body" to "곧 만료되는 이프가 있어요", "deepLink" to "https://manyak.app/my/credits?tab=free")
+        local.sendToUser(7L, data, expiresAt = now.plusSeconds(60), messageId = "credit-expiry:$publicId:2026-10-25")
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging).send(captor.capture())
+        assertThat(dataOf(captor.value)).isEqualTo(data + ("recipientId" to publicId.toString()))
+        val android = fieldOf(captor.value, "androidConfig")!!
+        assertThat(fieldOf(android, "priority")).isEqualTo("high")
+        assertThat(fieldOf(android, "ttl")).isEqualTo("60s")
+        val records = org.mockito.Mockito.mockingDetails(deliveries).invocations.filter { it.method.name == "record" }
+        assertThat(records).hasSize(1)
+        val report = records.single().getArgument<com.knk.manyak.push.dto.PushDeliveryReportRequest>(0)
+        assertThat(report.type).isEqualTo(com.knk.manyak.push.dto.PushDeliveryType.CREDIT_EXPIRY_REMINDER)
+        assertThat(report.kind).isEqualTo(com.knk.manyak.push.dto.PushKind.SERVICE)
+    }
+
+    @Test
+    fun `FCM 미설정이면 이프 안내를 FCM_DISABLED로 기록하고 FCM을 호출하지 않는다`() {
+        val now = Instant.parse("2026-10-25T01:00:00Z")
+        val deliveries = mock(PushDeliveryService::class.java)
+        val disabled = FcmPushSender(null, repository, userRepository, registry,
+            clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
+        val messageId = "credit-expiry:$publicId:2026-10-25"
+
+        disabled.sendToUser(7L, mapOf("type" to "CREDIT_EXPIRY_REMINDER"),
+            expiresAt = now.plusSeconds(60), messageId = messageId)
+
+        val records = org.mockito.Mockito.mockingDetails(deliveries).invocations.filter { it.method.name == "record" }
+        assertThat(records).hasSize(1)
+        val report = records.single().getArgument<com.knk.manyak.push.dto.PushDeliveryReportRequest>(0)
+        assertThat(report.messageId).isEqualTo(messageId)
+        assertThat(report.type).isEqualTo(com.knk.manyak.push.dto.PushDeliveryType.CREDIT_EXPIRY_REMINDER)
+        assertThat(report.kind).isEqualTo(com.knk.manyak.push.dto.PushKind.SERVICE)
+        assertThat(report.outcome).isEqualTo(com.knk.manyak.push.dto.PushDeliveryOutcome.DISCARDED)
+        assertThat(report.reason).isEqualTo("FCM_DISABLED")
+        verify(repository, never()).findTop10ByUserIdOrderByUpdatedAtDesc(7L)
+        verify(messaging, never()).send(any())
+    }
+
+    @Test
     fun `서비스 계정이 없으면 아무것도 하지 않는다`() {
         val disabled = FcmPushSender(null, repository, userRepository, registry)
 
@@ -136,8 +182,9 @@ class FcmPushSenderTest {
         assertThat(fieldOf(android, "ttl")).isEqualTo("0.500000000s")
     }
 
-    @Test
-    fun `기기마다 남은 TTL을 다시 계산하고 자정부터 나머지 기기를 중단한다`() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["ATTENDANCE_REMINDER", "CREDIT_EXPIRY_REMINDER"])
+    fun `기기마다 남은 TTL을 다시 계산하고 기한부터 나머지 기기를 중단한다`(type: String) {
         val midnight = Instant.parse("2026-10-17T15:00:00Z")
         val clock = mock(Clock::class.java)
         `when`(clock.instant()).thenReturn(midnight.minusSeconds(2), midnight.minusMillis(500), midnight)
@@ -146,7 +193,8 @@ class FcmPushSenderTest {
             listOf(token(1, "a"), token(2, "b"), token(3, "c"), token(4, "d")),
         )
 
-        sender.sendToUser(7L, mapOf("type" to "ATTENDANCE_REMINDER"), AndroidConfig.Priority.NORMAL, expiresAt = midnight)
+        sender.sendToUser(7L, mapOf("type" to type),
+            if (type == "CREDIT_EXPIRY_REMINDER") AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL, expiresAt = midnight)
 
         val captor = ArgumentCaptor.forClass(Message::class.java)
         verify(messaging, times(2)).send(captor.capture())
