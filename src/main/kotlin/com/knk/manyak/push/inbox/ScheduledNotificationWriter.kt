@@ -21,10 +21,33 @@ class ScheduledNotificationWriter(
     private val clock: Clock = Clock.systemUTC(),
     private val campaigns: com.knk.manyak.push.repository.PushCampaignRepository,
 ) {
+    /** 이프 안내도 알림함과 회원별 유효 기한의 발송 요청을 회차 전체로 커밋한다. */
+    @Transactional
+    fun recordCreditExpiry(
+        inboxTargets: List<com.knk.manyak.credit.repository.CreditExpiryTarget>,
+        pushTargets: List<com.knk.manyak.credit.repository.CreditExpiryTarget>,
+        data: Map<String, String>, occurrence: String, outbox: ScheduledPushOutboxWriter?,
+    ): NotificationRound {
+        val now = clock.instant()
+        val type = NotificationType.CREDIT_EXPIRY_REMINDER
+        for (target in inboxTargets) {
+            val user = users.findById(target.userId).orElseThrow()
+            store.insert(UserNotification(userId = user.id, messageKey = "credit-expiry:${user.publicId}:$occurrence",
+                type = type, title = data.getValue("title"), body = data.getValue("body"),
+                deepLink = data.getValue("deepLink"), createdAt = now))
+        }
+        val targetIds = pushTargets.map { it.userId }
+        val sent = outbox?.record(targetIds, data, "credit-expiry", occurrence, kind = "SERVICE",
+            expiresAtByUserId = pushTargets.associate { it.userId to it.expiresAt })
+        return NotificationRound(targetIds, sent)
+    }
+
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     fun record(
         data: Map<String, String>, scenario: String, occurrence: String,
         outbox: ScheduledPushOutboxWriter?, expiresAt: Instant? = null, kind: String = "MARKETING",
+        inboxBody: String = data.getValue("body"),
+        inboxTitle: String = data.getValue("title"),
         onTargetsSelected: (Int) -> Unit = {},
     ): NotificationRound {
         val targetIds = when (scenario) {
@@ -44,7 +67,8 @@ class ScheduledNotificationWriter(
             storyId != null -> "/stories/$storyId"
             else -> null
         }
-        store.insertScheduled(NotificationContent(type, data.getValue("title"), data.getValue("body"),
+        // 광고 표기와 수신거부 안내는 전송용이다. 알림함에는 원문 제목과 본문을 저장한다.
+        store.insertScheduled(NotificationContent(type, inboxTitle, inboxBody,
             inboxDeepLink(base, path, type, data["campaignId"]), storyId, noticeId, data["noticeTag"]?.let(com.knk.manyak.notice.entity.NoticeTag::valueOf)), scenario, occurrence, clock.instant())
         val sent = outbox?.record(targetIds, data, scenario, occurrence, expiresAt, kind)
         // 요청이 실제 기록된 회차만 갱신한다. 로컬은 발송 전 회차 커밋에 포함하며 실패하면 함께 롤백한다.

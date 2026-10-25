@@ -25,6 +25,8 @@ class AdminReadService(
     private val users: UserRepository,
     private val wallet: CreditWalletService,
     private val audits: AdminAuditService,
+    private val storyRepository: com.knk.manyak.story.repository.StoryRepository,
+    private val edit: com.knk.manyak.story.service.StoryEditService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     fun summary(): AdminDashboardSummaryResponse {
@@ -102,6 +104,11 @@ class AdminReadService(
         val story = content.stories(AdminStoriesRequest(), AdminPagination(1, 1, "s.created_at desc"), official.officialUserId(), storyId).items.firstOrNull() ?: notFound()
         val recent = content.chats(AdminChatsRequest().apply { this.storyId = storyId }, AdminPagination(1, 5, "c.created_at desc")).items
         return AdminStoryDetailResponse(story, content.retention(storyId), recent)
+    }
+    /** 4-2-7. 소유자 검사 없이 현재 저장값 수정 폼을 쓴다(소유자 ID를 그대로 넘겨 소유권 게이트를 통과). 접속 기록 없음. */
+    fun storySettings(storyId: UUID): AdminStorySettingsResponse {
+        val story = storyRepository.findByPublicIdAndDeletedAtIsNull(storyId) ?: notFound()
+        return AdminStorySettingsResponse(edit.getEditForm(storyId.toString(), story.userId))
     }
     fun chats(request: AdminChatsRequest): AdminPageResponse<AdminChatResponse> {
         if (request.startedAs != null && request.startedAs !in setOf("GUEST", "MEMBER")) badAdminQuery("채팅 시작 구분이 올바르지 않습니다.")

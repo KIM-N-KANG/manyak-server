@@ -135,7 +135,7 @@ abstract class CampaignStoryIntegrationTests {
             data.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(1)
             assertThat(data.single()).doesNotContainKeys("storyId", "deepLink")
-                .containsEntry("type", "PROMOTION").containsEntry("body", "지금 만나보세요")
+                .containsEntry("type", "PROMOTION").containsEntry("body", "지금 만나보세요\n수신거부: 마이 > 알림 설정")
             client.get().uri("$root/$campaignId").header("Authorization", "Bearer $token").exchange()
                 .expectStatus().isOk.expectBody().jsonPath("$.storyId").isEqualTo(story.publicId.toString())
         }

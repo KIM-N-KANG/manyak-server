@@ -6,6 +6,10 @@ import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.Size
+import com.knk.manyak.image.service.ImageModerationStatus
+import com.knk.manyak.story.dto.StoryEditFormResponse
+import com.knk.manyak.story.entity.StoryVisibility
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
@@ -140,3 +144,53 @@ data class AdminChartPoint(
 data class AdminChartLink(val list: String, val params: Map<String, String>)
 
 internal data class AdminDashboardRange(val from: java.time.LocalDate, val to: java.time.LocalDate)
+
+/**
+ * ADMIN 4-2-7 스토리 설정. STORY 수정 폼의 현재 저장값에서 submission과 이미지 objectKey를 뺀 구조다.
+ * 공용 응답 DTO와 달리 모든 필드가 항상 실린다는 것을 OpenAPI에 required로 내려고 관리자 전용 타입을 둔다
+ * (`AdminStorySettings` 접두 스키마는 OpenApiConfig가 전 필드를 required로 표시).
+ */
+@Schema(description = "스토리 설정(현재 저장값 원문, 이미지 전부와 검수 상태)")
+data class AdminStorySettingsResponse(
+    val title: String,
+    val oneLineIntro: String?,
+    val description: String?,
+    val protagonistName: String?,
+    val genres: List<String>,
+    val storySettings: AdminStorySettingsText,
+    val startSettings: List<AdminStorySettingsStart>,
+    val mainEvents: List<AdminStorySettingsMainEvent>,
+    val visibility: StoryVisibility,
+    val thumbnailUrl: String?,
+    val thumbnailModerationStatus: ImageModerationStatus,
+    val characters: List<AdminStorySettingsCharacter>,
+) {
+    constructor(form: StoryEditFormResponse) : this(
+        form.title, form.oneLineIntro, form.description, form.protagonistName, form.genres,
+        form.storySettings.let { AdminStorySettingsText(it.worldSetting, it.characterSetting, it.userRoleSetting, it.ruleSetting) },
+        form.startSettings.map { start ->
+            AdminStorySettingsStart(start.id, start.name, start.prologue, start.startSituation, start.suggestedInputs, start.endings.map {
+                AdminStorySettingsEnding(it.name, AdminStorySettingsRequirement(it.requirement.minTurns, it.requirement.achievementCondition), it.epilogue)
+            })
+        },
+        form.mainEvents.map { AdminStorySettingsMainEvent(it.name, it.description, it.keySentence, it.sortOrder) },
+        form.visibility, form.thumbnailUrl, form.thumbnailModerationStatus,
+        // 현재 저장값 조립이라 인물과 이미지 공개 식별자는 항상 있다.
+        form.characters.map { character ->
+            AdminStorySettingsCharacter(requireNotNull(character.id), character.name, character.description, character.images.map {
+                AdminStorySettingsImage(requireNotNull(it.id), it.imageName, it.imageUrl, it.moderationStatus)
+            })
+        },
+    )
+}
+
+data class AdminStorySettingsText(val worldSetting: String?, val characterSetting: String?, val userRoleSetting: String?, val ruleSetting: String?)
+data class AdminStorySettingsStart(
+    val id: String, val name: String, val prologue: String?, val startSituation: String?,
+    val suggestedInputs: List<String>, val endings: List<AdminStorySettingsEnding>,
+)
+data class AdminStorySettingsEnding(val name: String, val requirement: AdminStorySettingsRequirement, val epilogue: String)
+data class AdminStorySettingsRequirement(val minTurns: Int, val achievementCondition: String)
+data class AdminStorySettingsMainEvent(val name: String, val description: String, val keySentence: String, val sortOrder: Int)
+data class AdminStorySettingsCharacter(val id: String, val name: String, val description: String?, val images: List<AdminStorySettingsImage>)
+data class AdminStorySettingsImage(val id: String, val imageName: String, val imageUrl: String, val moderationStatus: ImageModerationStatus)

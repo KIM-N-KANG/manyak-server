@@ -31,6 +31,8 @@ class ScheduledPushOutboxIntegrationTests {
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var templateRows: PushMessageTemplateRepository
+    @Autowired private lateinit var templateService: PushMessageTemplateService
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var writer: ScheduledPushOutboxWriter
     @Autowired private lateinit var promotion: PromotionPushService
@@ -60,12 +62,15 @@ class ScheduledPushOutboxIntegrationTests {
         val result = attendance.sendReminders()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
+        assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java))
+            .containsOnly("출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?")
         messages.forEach {
             assertThat(it.messageId).isEqualTo("attendance:${it.recipientId}:${it.data["date"]}")
             assertThat(it.expiresAt).isEqualTo(LocalDate.parse(it.data.getValue("date"))
                 .plusDays(1).atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant())
             assertThat(it.kind).isEqualTo("MARKETING")
             assertThat(it.type).isEqualTo("ATTENDANCE_REMINDER")
+            assertThat(it.data["body"]).isEqualTo("출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?\n수신거부: 마이 > 알림 설정")
             assertThat(it.data["deepLink"]).isEqualTo("https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder")
             assertThat(it.requestId).isEqualTo("unknown")
             assertThat(it.sessionId).isEqualTo("unknown")
@@ -84,11 +89,91 @@ class ScheduledPushOutboxIntegrationTests {
             assertThat(it.messageId).isEqualTo("promotion:${campaign.publicId}:${it.recipientId}")
             assertThat(it.kind).isEqualTo("MARKETING")
             assertThat(it.type).isEqualTo("PROMOTION")
+            assertThat(it.data["title"]).isEqualTo("(광고) 새 소식")
+            assertThat(it.data["body"]).isEqualTo("확인해 보세요\n수신거부: 마이 > 알림 설정")
             assertThat(it.data).doesNotContainKey("deepLink")
         }
         assertThat(campaigns.findById(campaign.id).orElseThrow().skippedCount).isNull()
         assertThat(campaigns.findById(campaign.id).orElseThrow().deepLinkIncluded).isFalse()
         verifyNoInteractions(sender)
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["", " \n\t"])
+    fun `원격 캠페인도 이미 붙은 광고 표기와 안내를 중복하지 않는다`(suffix: String) {
+        val body = "캠페인 본문\n수신거부: 마이 > 알림 설정$suffix"
+        val campaign = campaigns.save(PushCampaign(title = "(광고) 소식", body = body, scheduledAt = Instant.EPOCH))
+        assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
+        assertThat(messages).hasSize(3)
+        messages.forEach {
+            assertThat(it.data["title"]).isEqualTo("(광고) 소식")
+            assertThat(it.data["body"]).isEqualTo(body)
+        }
+        val saved = campaigns.findById(campaign.id).orElseThrow()
+        assertThat(saved.body).isEqualTo(body)
+        saved.status = PushCampaignStatus.SCHEDULED
+        campaigns.saveAndFlush(saved)
+        messages.clear()
+        assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)
+        assertThat(messages).hasSize(3)
+        assertThat(messages.map { it.data["body"] }).containsOnly(body)
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `300자 본문은 알림함에 원문으로 저장하고 두 푸시 모드에만 안내를 붙인다`(remote: Boolean) {
+        val body = "가".repeat(300)
+        val campaign = campaigns.save(PushCampaign(title = "소식", body = body, scheduledAt = Instant.EPOCH))
+        val day = Instant.parse("2026-10-17T00:00:00Z")
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(day, ZoneOffset.UTC),
+            if (remote) writer else null, notifications = notifications)
+        assertThat(service.sendDue(day).single().sent).isEqualTo(3)
+        val expected = "$body\n수신거부: 마이 > 알림 설정"
+        assertThat(expected).hasSize(317)
+        assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java)).containsOnly(body)
+        assertThat(campaigns.findById(campaign.id).orElseThrow().body).isEqualTo(body)
+        if (remote) {
+            assertThat(messages).hasSize(3)
+            assertThat(messages.map { it.data["body"] }).containsOnly(expected)
+            verifyNoInteractions(sender)
+        } else users.findAll().forEach { user ->
+            verify(sender).sendToUser(user.id, mapOf("type" to "PROMOTION", "campaignId" to campaign.publicId.toString(),
+                "title" to "(광고) 소식", "body" to expected), com.google.firebase.messaging.AndroidConfig.Priority.NORMAL,
+                messageId = "promotion:${campaign.publicId}:${user.publicId}")
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
+    fun `300자 출석 오버라이드는 내역에 원문 제목과 본문을 저장하고 두 푸시 모드에서 온전히 전송한다`(remote: Boolean) {
+        val body = "가".repeat(300)
+        templateRows.saveAndFlush(PushMessageTemplate(templateKey = "attendance_reminder", title = "출석 원문", body = body,
+            effectiveFrom = Instant.EPOCH, effectiveUntil = null))
+        templateService.refresh()
+        try {
+            val day = Instant.parse("2026-10-17T00:00:00Z")
+            val service = AttendanceReminderService(users, templateService, sender, Clock.fixed(day, ZoneOffset.UTC),
+                outbox = if (remote) writer else null, notifications = notifications)
+            assertThat(service.sendReminders().sent).isEqualTo(3)
+            assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java)).containsOnly(body)
+            assertThat(jdbc.queryForList("SELECT title FROM user_notifications", String::class.java)).containsOnly("출석 원문")
+            val expected = "$body\n수신거부: 마이 > 알림 설정"
+            assertThat(expected).hasSize(317)
+            if (remote) {
+                assertThat(messages).hasSize(3)
+                assertThat(messages.map { it.data["body"] }).containsOnly(expected)
+                verifyNoInteractions(sender)
+            } else users.findAll().forEach { user ->
+                verify(sender).sendToUser(user.id, mapOf("type" to "ATTENDANCE_REMINDER", "date" to "2026-10-17",
+                    "title" to "(광고) 출석 원문", "body" to expected,
+                    "deepLink" to "https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder"),
+                    com.google.firebase.messaging.AndroidConfig.Priority.NORMAL,
+                    expiresAt = Instant.parse("2026-10-17T15:00:00Z"), messageId = "attendance:${user.publicId}:2026-10-17")
+            }
+        } finally {
+            templateRows.deleteAll()
+            templateService.refresh()
+        }
     }
 
     @Test fun `회차의 딥링크 기록은 재실행에서 참을 거짓으로 바꾸지 않는다`() {
@@ -168,6 +253,7 @@ class ScheduledPushOutboxIntegrationTests {
                 assertThat(message.data["noticeId"]).isEqualTo(notice.publicId.toString())
                 assertThat(message.data["deepLink"]).isEqualTo("https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=${type.lowercase()}")
                 assertThat(message.data["title"]).isEqualTo(if (type == "NOTICE") "공지 제목" else "(광고) 공지 제목")
+                assertThat(message.data["body"]).isEqualTo(if (type == "NOTICE") "공지 알림" else "공지 알림\n수신거부: 마이 > 알림 설정")
                 assertThat(message.requestId).isEqualTo("unknown")
                 assertThat(message.sessionId).isEqualTo("unknown")
             }

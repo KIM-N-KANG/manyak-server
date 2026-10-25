@@ -23,6 +23,7 @@ class ScheduledPushOutboxWriter(
         occurrence: String,
         expiresAt: Instant? = null,
         kind: String = "MARKETING",
+        expiresAtByUserId: Map<Long, Instant> = emptyMap(),
     ): Int {
         val now = clock.instant()
         return targetIds.sumOf { userId ->
@@ -30,6 +31,7 @@ class ScheduledPushOutboxWriter(
             val recipientId = users.findById(userId).orElseThrow().publicId.toString()
             val messageId = when (scenario) {
                 "attendance" -> "attendance:$recipientId:$occurrence"
+                "credit-expiry" -> "credit-expiry:$recipientId:$occurrence"
                 "promotion" -> "promotion:$occurrence:$recipientId"
                 "notice" -> "notice:$occurrence:$recipientId"
                 else -> error("Unknown scheduled push scenario: $scenario")
@@ -40,7 +42,7 @@ class ScheduledPushOutboxWriter(
                 kind = kind,
                 type = data.getValue("type"),
                 data = data,
-                expiresAt = expiresAt,
+                expiresAt = expiresAtByUserId[userId] ?: expiresAt,
                 requestId = "unknown",
                 sessionId = "unknown",
             ), now)

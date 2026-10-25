@@ -35,7 +35,11 @@ class AdminAnalyticsUnavailableIntegrationTests {
         client.get().uri(path).header("Authorization", "Bearer ${jwt.issueAdminToken(ordinary.publicId)}").exchange().expectStatus().isForbidden
         client.get().uri(path).header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.asOf").isEmpty.jsonPath("$.measuredFrom").isEmpty.jsonPath("$.activityFrom").isEmpty
-            .jsonPath("$.pendingDates.length()").isEqualTo(0).jsonPath("$.activityTypes.length()").isEqualTo(3)
+            .jsonPath("$.pendingDates.length()").isEqualTo(0).jsonPath("$.activityTypes.length()").isEqualTo(4)
+            .jsonPath("$.activityTypes[3].type").isEqualTo("CREDIT_EXPIRY_REMINDER")
+            .jsonPath("$.activityTypes[3].openState").isEqualTo("BEFORE_MEASUREMENT")
+            .jsonPath("$.activityTypes[3].pushOpens").isEmpty
+            .jsonPath("$.activityTypes[3].pushOpenRate").isEmpty
             .jsonPath("$.serviceTypes").doesNotExist()
         for (q in listOf("days=90", "days=7&from=2026-10-20&to=2026-10-21", "from=2026-10-20")) {
             client.get().uri("$path?$q").header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isBadRequest

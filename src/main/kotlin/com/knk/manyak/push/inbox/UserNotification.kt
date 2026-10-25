@@ -11,6 +11,7 @@ enum class NotificationType(val category: NotificationCategory) {
     STORY_MODERATION_COMPLETED(NotificationCategory.ACTIVITY),
     NOTICE(NotificationCategory.NEWS),
     ATTENDANCE_REMINDER(NotificationCategory.ACTIVITY),
+    CREDIT_EXPIRY_REMINDER(NotificationCategory.ACTIVITY),
     PROMOTION(NotificationCategory.NEWS),
 }
 

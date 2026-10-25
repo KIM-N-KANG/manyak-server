@@ -375,6 +375,48 @@ Authorization: Bearer {{adminToken}}
     });
 %}
 
+### 스토리 설정 — 위 목록에 데이터가 있어야 함. 현재 저장값 원문, 이미지 전부와 검수 상태, 접속 기록 없음
+# 초안·비공개·게스트·오리지널 모두 대상이다. {username}은 치환하지 않고 승인 전 제출본은 반영하지 않는다.
+GET {{baseUrl}}/api/v1/admin/stories/{{adminStoryId}}/settings
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리 설정 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        const keys = ["title", "oneLineIntro", "description", "protagonistName", "genres", "storySettings", "startSettings",
+            "mainEvents", "visibility", "thumbnailUrl", "thumbnailModerationStatus", "characters"];
+        client.assert(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(keys.slice().sort()), `필드 actual=${JSON.stringify(Object.keys(b))}`);
+        client.assert(["worldSetting", "characterSetting", "userRoleSetting", "ruleSetting"].every(k => k in b.storySettings), "통글 4필드가 항상 있어야 합니다");
+        client.assert(["APPROVED", "PENDING", "REJECTED"].includes(b.thumbnailModerationStatus), `표지 검수 상태 actual=${b.thumbnailModerationStatus}`);
+        client.assert(b.mainEvents.every((e, i, rows) => i === 0 || rows[i - 1].sortOrder <= e.sortOrder), "주요 사건은 sortOrder 순서");
+        client.assert(b.characters.every(c => typeof c.id === "string" && c.images.every(i => typeof i.id === "string" &&
+            !("objectKey" in i) && ["APPROVED", "PENDING", "REJECTED"].includes(i.moderationStatus))), "인물·이미지 ID와 검수 상태, objectKey 없음");
+    });
+%}
+
+### 스토리 설정 UUID 형식 오류 400
+GET {{baseUrl}}/api/v1/admin/stories/not-a-uuid/settings
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("UUID 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
+
+### 없는 스토리 설정 404 — 삭제된 스토리도 404
+GET {{baseUrl}}/api/v1/admin/stories/00000000-0000-4000-8000-000000000000/settings
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("스토리 없음", () => client.assert(response.status === 404 && response.body.code === "NOT_FOUND", `actual=${response.status}`)); %}
+
+### 스토리 설정 무토큰 401
+GET {{baseUrl}}/api/v1/admin/stories/00000000-0000-4000-8000-000000000000/settings
+
+> {% client.test("관리자 인증 필수", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 자유 조회 — 실제 스토리 공개 ID를 넣어 설정 원문과 이미지를 눈으로 확인
+GET {{baseUrl}}/api/v1/admin/stories/replace-with-story-public-id/settings
+Authorization: Bearer {{adminToken}}
+
+
 ### 채팅방 목록 — 메시지 원문 없음
 GET {{baseUrl}}/api/v1/admin/chats?size=20&sort=turnCount&order=desc
 Authorization: Bearer {{adminToken}}
