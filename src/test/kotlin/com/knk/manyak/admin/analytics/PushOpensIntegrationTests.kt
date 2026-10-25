@@ -53,7 +53,12 @@ class PushOpensIntegrationTests {
             status = PushCampaignStatus.SENT, startedAt = Instant.parse("2026-10-22T00:00:00Z"), deepLinkIncluded = true))
         jdbc.update("""INSERT INTO push_delivery_results(message_id,campaign_id,type,kind,user_id,outcome,reason,delivered_devices,failed_devices,completed_at)
             VALUES ('notice-fixture',?,'PROMOTION','MARKETING',?,'DELIVERED','fixture',1,0,'2026-10-22T01:00:00Z')""", campaign.id, admin.id)
-        server.enqueue(MockResponse().setBody("""{"data":{"xValues":["2026-10-22","2026-10-23"],"seriesLabels":[[0,"${campaign.publicId}"],[0,"attendance_reminder"]],"series":[[1,2],[0,2]]}}"""))
+        for (date in listOf("2026-10-22", "2026-10-23")) {
+            jdbc.update("""INSERT INTO push_delivery_results(message_id,type,kind,user_id,outcome,reason,delivered_devices,failed_devices,completed_at)
+                VALUES (?,'CREDIT_EXPIRY_REMINDER','SERVICE',?,'DELIVERED','fixture',1,0,?)""",
+                "credit-expiry-fixture:$date", admin.id, Instant.parse("${date}T01:00:00Z"))
+        }
+        server.enqueue(MockResponse().setBody("""{"data":{"xValues":["2026-10-22","2026-10-23"],"seriesLabels":[[0,"${campaign.publicId}"],[0,"attendance_reminder"],[0,"credit_expiry_reminder"]],"series":[[1,2],[0,2],[1,2]]}}"""))
         val token = jwt.issueAdminToken(admin.publicId)
         fun get() = client.get().uri("/api/v1/admin/campaigns/push-opens?from=2026-10-22&to=2026-10-23")
             .header("Authorization", "Bearer $token").exchange()
@@ -67,9 +72,14 @@ class PushOpensIntegrationTests {
         assertThat(item["pushOpens"].asLong()).isEqualTo(3)
         assertThat(item["pushOpenRate"].asDouble()).isEqualTo(3.0)
         assertThat(body["activityFrom"].asText()).isEqualTo("2026-10-22")
-        assertThat(body["activityTypes"].size()).isEqualTo(3)
+        assertThat(body["activityTypes"].size()).isEqualTo(4)
         assertThat(body["activityTypes"][2]["pushOpens"].asLong()).isEqualTo(2)
         assertThat(body["activityTypes"][2]["pushOpenRate"].isNull).isTrue()
+        val expiry = body["activityTypes"].single { it["type"].asText() == "CREDIT_EXPIRY_REMINDER" }
+        assertThat(expiry["deliveredMembers"].asLong()).isEqualTo(2)
+        assertThat(expiry["openState"].asText()).isEqualTo("MEASURED")
+        assertThat(expiry["pushOpens"].asLong()).isEqualTo(3)
+        assertThat(expiry["pushOpenRate"].asDouble()).isEqualTo(1.5)
         assertThat(body["pendingDates"].size()).isZero()
         assertThat(body["asOf"].isString).isTrue()
         get().expectStatus().isOk

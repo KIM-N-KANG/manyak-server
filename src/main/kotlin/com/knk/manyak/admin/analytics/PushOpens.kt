@@ -29,7 +29,7 @@ class PushOpensService(private val delivery: PushDeliveryService, private val sn
         val measured = settings.measuredFrom
         val activityFrom = measured?.let { maxOf(range.from, it) }?.takeIf { it <= range.to }
         val campaigns = delivery.campaignReach(range.from, range.to)
-        val types = listOf(PushDeliveryType.STORY_COMPLETED, PushDeliveryType.STORY_MODERATION_COMPLETED, PushDeliveryType.ATTENDANCE_REMINDER)
+        val types = listOf(PushDeliveryType.STORY_COMPLETED, PushDeliveryType.STORY_MODERATION_COMPLETED, PushDeliveryType.ATTENDANCE_REMINDER, PushDeliveryType.CREDIT_EXPIRY_REMINDER)
         val reaches = delivery.activityReach(activityFrom ?: range.from, range.to, types).groupBy { it.type }
         val opens = mutableMapOf<String, Long>()
         var asOf: Instant? = null
