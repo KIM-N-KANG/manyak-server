@@ -200,6 +200,24 @@ class FcmPushSenderTest {
     }
 
     @Test
+    fun `광고 재전달도 Android 데이터와 웹 본문에 같은 줄바꿈과 안내를 보존한다`() {
+        val web = token(2, "web").apply { platform = PushPlatform.WEB }
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android"), web))
+        val body = "출석하세요\n수신거부: 마이 > 알림 설정"
+        val data = mapOf("type" to "ATTENDANCE_REMINDER", "title" to "(광고) 출석", "body" to body)
+        repeat(2) { sender.sendToUser(7L, data, AndroidConfig.Priority.NORMAL) }
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging, times(4)).send(captor.capture())
+        captor.allValues.forEach { message ->
+            assertThat(dataOf(message)["body"]).isEqualTo(body)
+            fieldOf(message, "webpushConfig")?.let { config ->
+                assertThat((fieldOf(config, "notification") as Map<*, *>)["body"]).isEqualTo(body)
+            }
+        }
+        assertThat(captor.allValues.count { fieldOf(it, "webpushConfig") != null }).isEqualTo(2)
+    }
+
+    @Test
     fun `WEB 스토리 완성은 고정 제목과 스토리 본문을 표시하고 원본 데이터를 유지한다`() {
         val web = token(1, "web").apply { platform = PushPlatform.valueOf("WEB") }
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(web))

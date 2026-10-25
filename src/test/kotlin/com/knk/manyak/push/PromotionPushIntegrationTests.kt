@@ -134,7 +134,7 @@ class PromotionPushIntegrationTests {
             "type" to "PROMOTION",
             "campaignId" to campaign.publicId.toString(),
             "title" to "(광고) 새 오리지널 스토리가 나왔어요",
-            "body" to "이번 주 신작 5편을 지금 만나보세요.",
+            "body" to "이번 주 신작 5편을 지금 만나보세요.\n수신거부: 마이 > 알림 설정",
         )
         verify(fcmPushSender).sendToUser(first.id, expected, NORMAL, messageId = "promotion:${campaign.publicId}:${first.publicId}")
         verify(fcmPushSender).sendToUser(second.id, expected, NORMAL, messageId = "promotion:${campaign.publicId}:${second.publicId}")

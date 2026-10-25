@@ -81,12 +81,12 @@ class PromotionPushService(
         var targets = 0
         var sent = 0
         return try {
-            // 문구는 회차 시작에 한 번만 조립한다. (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
+            // 문구는 회차 시작에 한 번만 조립한다. 광고 표기와 수신거부 안내는 서버가 붙인다.
             val data = mutableMapOf(
                 "type" to if (campaign.kind == PushKind.SERVICE) "NOTICE" else TYPE_PROMOTION,
                 "campaignId" to campaign.publicId.toString(),
                 "title" to if (campaign.kind == PushKind.SERVICE) campaign.title else withAdPrefix(campaign.title),
-                "body" to campaign.body,
+                "body" to if (campaign.kind == PushKind.SERVICE) campaign.body else withAdOptOutNotice(campaign.body),
             )
             campaign.noticeId?.let { id ->
                 val publicId = requireNotNull(pushCampaignRepository.findNoticePublicId(id)) { "공지 참조가 없습니다." }
@@ -97,7 +97,7 @@ class PromotionPushService(
             val deliveryData = withStoryDestination(campaign, data)
             val round = notifications.record(deliveryData,
                 if (campaign.kind == PushKind.SERVICE) "notice" else "promotion", campaign.publicId.toString(),
-                outbox, kind = campaign.kind.name, onTargetsSelected = { targets = it })
+                outbox, kind = campaign.kind.name, inboxBody = campaign.body, inboxTitle = campaign.title, onTargetsSelected = { targets = it })
             if (round.recordedPushes != null) {
                 sent = round.recordedPushes
             } else round.pushTargetIds.forEach { userId ->

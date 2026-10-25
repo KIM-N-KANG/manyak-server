@@ -136,7 +136,7 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(row["message_key"]).isEqualTo("attendance:${user.publicId}:$date")
         assertThat(row["type"]).isEqualTo("ATTENDANCE_REMINDER")
         assertThat(row["category"]).isEqualTo("ACTIVITY")
-        assertThat(row["title"].toString()).startsWith("(광고) ")
+        assertThat(row["title"]).isEqualTo("이프 250이 도착했어요 🍃")
         assertThat(row["deep_link"].toString()).contains("?tab=free&utm_source=inbox&utm_medium=inbox")
     }
 
@@ -150,7 +150,7 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(rows()).hasSize(3)
         assertThat(rows().filter { it["type"] == "NOTICE" }.map { it["user_id"] }).containsExactlyInAnyOrder(user.id, noConsent.id)
         val adRow = rows().single { it["type"] == "PROMOTION" }
-        assertThat(adRow["title"]).isEqualTo("(광고) 홍보")
+        assertThat(adRow["title"]).isEqualTo("홍보")
         assertThat(adRow["deep_link"]).isNull()
         assertThat(rows().map { it["category"] }).containsOnly("NEWS")
         listOf(service, ad).forEach { it.status = PushCampaignStatus.SCHEDULED; campaigns.saveAndFlush(it) }
@@ -286,7 +286,7 @@ abstract class NotificationRecordingIntegrationTests {
     }
 
 
-    @Test fun `PROMOTION 공지는 게시로 만든 캠페인에서 동의자만 태그와 광고 제목을 기록한다`() {
+    @Test fun `PROMOTION 공지는 게시로 만든 캠페인에서 동의자만 태그와 원문 제목을 기록한다`() {
         member(marketing = false)
         val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.PROMOTION)
         promotion.sendDue(Instant.now())
@@ -295,7 +295,7 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(row["category"]).isEqualTo("NEWS")
         assertThat(row["notice_tag"]).isEqualTo("PROMOTION")
         assertThat(row["notice_public_id"]).isEqualTo(notice.noticeId)
-        assertThat(row["title"]).isEqualTo("(광고) 알림 제목")
+        assertThat(row["title"]).isEqualTo("알림 제목")
         assertThat(row["body"]).isEqualTo("직접 쓴 알림 본문\n줄바꿈")
     }
 
