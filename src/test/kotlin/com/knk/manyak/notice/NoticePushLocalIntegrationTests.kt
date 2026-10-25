@@ -66,7 +66,7 @@ class NoticePushLocalIntegrationTests {
             .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=notice")
         assertThat(sent.single().first).isEqualTo(target.id)
         assertThat(sent.single().second).containsEntry("type", "NOTICE").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("noticeTag", "UPDATE").containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
+            .containsEntry("body", "내용").containsEntry("noticeTag", "UPDATE").containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
     }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = ["이벤트", "(광고) 이벤트"])
@@ -83,12 +83,12 @@ class NoticePushLocalIntegrationTests {
         assertThat(jdbc.queryForList("SELECT deep_link FROM user_notifications", String::class.java))
             .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=promotion")
         assertThat(sent.single().first).isEqualTo(target.id)
-        assertThat(jdbc.queryForList("SELECT title FROM user_notifications", String::class.java)).containsOnly("(광고) 이벤트")
+        assertThat(jdbc.queryForList("SELECT title FROM user_notifications", String::class.java)).containsOnly(title)
         assertThat(notices.findById(notice.id).orElseThrow().title).isEqualTo(title)
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())
-            .containsEntry("noticeTag", "EVENT").containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
+            .containsEntry("body", "내용\n수신거부: 마이 > 알림 설정").containsEntry("noticeTag", "EVENT").containsEntry("title", "(광고) 이벤트").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=promotion")
     }
-    @Test fun `게시로 만든 다섯 태그의 푸시와 내역은 직접 입력한 문구와 광고 접두를 사용한다`() {
+    @Test fun `게시로 만든 다섯 태그는 푸시만 광고 문구를 조립하고 내역에 원문을 저장한다`() {
         val target = user("알림 문구 수신", marketing = true, night = true)
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?,CURRENT_TIMESTAMP)", target.id)
         org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "notice-text-test")
@@ -105,9 +105,10 @@ class NoticePushLocalIntegrationTests {
                 val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications)
                 assertThat(service.sendDue(at).single().sent).isEqualTo(1)
                 val expectedTitle = if (tag.pushKind == PushKind.MARKETING) "(광고) $notificationTitle" else notificationTitle
-                assertThat(sent.single().second).containsEntry("title", expectedTitle).containsEntry("body", notificationBody)
+                val expectedBody = if (tag.pushKind == PushKind.MARKETING) "$notificationBody\n수신거부: 마이 > 알림 설정" else notificationBody
+                assertThat(sent.single().second).containsEntry("title", expectedTitle).containsEntry("body", expectedBody)
                 val row = jdbc.queryForMap("SELECT title,body FROM user_notifications WHERE notice_public_id=?", notice.noticeId)
-                assertThat(row["title"]).isEqualTo(expectedTitle); assertThat(row["body"]).isEqualTo(notificationBody)
+                assertThat(row["title"]).isEqualTo(notificationTitle); assertThat(row["body"]).isEqualTo(notificationBody)
                 assertThat(notices.findByPublicId(notice.noticeId)!!.title).isEqualTo("원문 제목 ${tag.name}")
                 assertThat(campaigns.findAll().single { it.noticeId == notices.findByPublicId(notice.noticeId)!!.id }.title).isEqualTo(notificationTitle)
             }

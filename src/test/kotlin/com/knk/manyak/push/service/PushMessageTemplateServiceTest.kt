@@ -93,6 +93,19 @@ class PushMessageTemplateServiceTest {
         assertThat(withAdPrefix("(광고) 출석하세요")).isEqualTo("(광고) 출석하세요")
     }
 
+    @Test
+    fun `본문 끝 안내는 줄바꿈 하나로 붙이고 끝 공백을 제외해 중복 판정한다`() {
+        val notice = "수신거부: 마이 > 알림 설정"
+        assertThat(withAdOptOutNotice("출석하세요")).isEqualTo("출석하세요\n$notice")
+        for (suffix in listOf("", " ", "\n\t")) {
+            val body = "출석하세요\n$notice$suffix"
+            assertThat(withAdOptOutNotice(body)).isEqualTo(body)
+            assertThat(withAdOptOutNotice(withAdOptOutNotice(body))).isEqualTo(body)
+        }
+        // 안내가 중간에만 있으면 본문 끝에도 안내가 필요하다.
+        assertThat(withAdOptOutNotice("$notice\n추가 소식")).isEqualTo("$notice\n추가 소식\n$notice")
+    }
+
     private companion object {
         const val DEFAULT_TITLE = "기본 제목"
         const val DEFAULT_BODY = "기본 본문"

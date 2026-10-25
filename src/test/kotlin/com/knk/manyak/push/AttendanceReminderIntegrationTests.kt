@@ -53,10 +53,12 @@ class AttendanceReminderIntegrationTests {
 
     @MockitoBean private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
 
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
+    @Autowired private lateinit var templates: com.knk.manyak.push.repository.PushMessageTemplateRepository
     @Autowired private lateinit var pushMessageTemplateService: PushMessageTemplateService
     @Autowired private lateinit var structuredLogger: StructuredLogger
     @Autowired private lateinit var redisTemplate: StringRedisTemplate
@@ -74,6 +76,7 @@ class AttendanceReminderIntegrationTests {
     fun setUp() {
         clock = atHour(15)
         databaseCleaner.cleanAll()
+        pushMessageTemplateService.refresh()
         redisTemplate.keys("push:attendance-reminder:*").orEmpty().let { if (it.isNotEmpty()) redisTemplate.delete(it) }
         reset(fcmPushSender)
     }
@@ -137,13 +140,41 @@ class AttendanceReminderIntegrationTests {
                 "date" to today().toString(),
                 "deepLink" to "https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder",
                 "title" to "(광고) 이프 250이 도착했어요 🍃",
-                "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?",
+                "body" to "출석하고 받아 가세요. 오늘은 어떤 스토리를 시작해 볼까요?\n수신거부: 마이 > 알림 설정",
             ),
             NORMAL,
             null,
             today().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant(),
             messageId = "attendance:${member.publicId}:${today()}",
         )
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["이벤트 본문", "이벤트 본문\n수신거부: 마이 > 알림 설정", "이벤트 본문\n수신거부: 마이 > 알림 설정 \n\t"])
+    fun `오버라이드 본문에 안내를 붙이고 이미 있으면 끝 공백과 관계없이 중복하지 않는다`(body: String) {
+        val member = eligibleMember()
+        templates.saveAndFlush(com.knk.manyak.push.entity.PushMessageTemplate(
+            templateKey = "attendance_reminder", title = "(광고) 이벤트", body = body,
+            effectiveFrom = Instant.EPOCH, effectiveUntil = null,
+        ))
+        pushMessageTemplateService.refresh()
+        try {
+            attendanceReminderService.sendReminders()
+            assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java)).containsOnly(body)
+            val expectedBody = if (body.trimEnd().endsWith("수신거부: 마이 > 알림 설정")) body
+                else "$body\n수신거부: 마이 > 알림 설정"
+            verify(fcmPushSender).sendToUser(
+                member.id, mapOf(
+                    "type" to "ATTENDANCE_REMINDER", "date" to today().toString(),
+                    "title" to "(광고) 이벤트", "body" to expectedBody,
+                    "deepLink" to "https://manyak.app/my/credits?tab=free&utm_source=push&utm_medium=push&utm_campaign=attendance_reminder&utm_content=attendance_reminder",
+                ), NORMAL, null, today().plusDays(1).atStartOfDay(SEOUL_ZONE).toInstant(),
+                messageId = "attendance:${member.publicId}:${today()}",
+            )
+        } finally {
+            templates.deleteAll()
+            pushMessageTemplateService.refresh()
+        }
     }
 
     @Test

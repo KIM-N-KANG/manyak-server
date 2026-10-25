@@ -169,3 +169,20 @@ Authorization: Bearer {{deletedAccessToken}}
 ### 17. 자유 조회
 GET {{baseUrl}}/api/v1/users/me/notifications?category=ACTIVITY&limit=50
 Authorization: Bearer {{accessToken}}
+
+### 18. 광고 알림 내역은 원문 제목·본문 — 새 캠페인 회차 실행 후 사용
+# 광고 수신에 동의한 활성 회원으로 조회합니다.
+# http/admin/campaign.http의 4번 요청에서 scheduledAt을 null로 바꿔 즉시 예약하고 회차가 끝날 때까지 기다립니다.
+# 원문은 title="테스트 이벤트", body="테스트 안내 본문"을 사용합니다. 이 검증은 해당 캠페인을 취소하기 전에 실행합니다.
+# 푸시는 제목 앞 (광고), 본문 끝 줄바꿈과 수신거부 안내를 포함하며 알림함은 아래 원문을 반환합니다.
+GET {{baseUrl}}/api/v1/users/me/notifications?limit=50
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("광고 알림 내역의 원문 보존", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const n = response.body.items.find(n => n.type === "PROMOTION" && n.title === "테스트 이벤트");
+        client.assert(n, "테스트 이벤트 캠페인을 즉시 예약한 뒤 회차 실행을 확인하세요.");
+        client.assert(n.body === "테스트 안내 본문", `expected=테스트 안내 본문 actual=${n.body}`);
+    });
+%}

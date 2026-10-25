@@ -37,13 +37,13 @@ class AttendanceReminderService(
         val data = mapOf(
             "type" to TYPE_ATTENDANCE_REMINDER,
             "date" to today.toString(),
-            // (광고) 표기는 서버가 붙인다(DB 값에 맡기지 않는다).
+            // 광고 표기와 수신거부 안내는 서버가 붙인다(DB 값에 맡기지 않는다).
             "title" to withAdPrefix(text.title),
-            "body" to text.body,
+            "body" to withAdOptOutNotice(text.body),
             "deepLink" to pushDeepLink(webBaseUrl, "/my/credits?tab=free", TYPE_ATTENDANCE_REMINDER),
         )
 
-        val round = notifications.record(data, "attendance", today.toString(), outbox, expiry)
+        val round = notifications.record(data, "attendance", today.toString(), outbox, expiry, inboxBody = text.body, inboxTitle = text.title)
         val targetIds = round.pushTargetIds
         round.recordedPushes?.let { return AttendanceReminderResult(targetIds.size, it) }
 
