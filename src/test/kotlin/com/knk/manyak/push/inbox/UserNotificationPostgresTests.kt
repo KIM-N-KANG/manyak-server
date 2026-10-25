@@ -37,6 +37,7 @@ class UserNotificationPostgresTests {
             INSERT INTO push_campaigns(id, notice_id) VALUES (1, 1), (2, NULL)""")
         jdbc.execute(File("src/main/resources/db/migration/V111__create_user_notifications.sql").readText())
         jdbc.execute(File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText())
+        jdbc.execute(File("src/main/resources/db/migration/V114__credit_expiry_notification_type.sql").readText())
         store = UserNotificationStore(jdbc)
     }
     @AfterAll fun stop() { pg.stop() }
@@ -45,6 +46,18 @@ class UserNotificationPostgresTests {
         jdbc.update("DELETE FROM credit_transactions")
         jdbc.update("DELETE FROM push_outbox")
         jdbc.update("INSERT INTO users VALUES (1, ?, 'ACTIVE', ?, NULL)", UUID.randomUUID(), java.sql.Timestamp.from(now))
+    }
+
+    @Test fun `V114는 이프 안내 ACTIVITY를 허용하고 모르는 type은 계속 거부한다`() {
+        tx.executeWithoutResult {
+            store.insert(UserNotification(userId = 1, messageKey = "credit-expiry:member:2026-10-25",
+                type = NotificationType.CREDIT_EXPIRY_REMINDER, title = "이프 소멸 예정 안내", body = "곧 소멸되는 이프가 있어요"))
+        }
+        assertThat(jdbc.queryForObject("SELECT type FROM user_notifications", String::class.java)).isEqualTo("CREDIT_EXPIRY_REMINDER")
+        assertThat(jdbc.queryForObject("SELECT category FROM user_notifications", String::class.java)).isEqualTo("ACTIVITY")
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            jdbc.update("UPDATE user_notifications SET type='UNKNOWN'")
+        }.isInstanceOf(org.springframework.dao.DataIntegrityViolationException::class.java)
     }
 
     @Test fun `태그 없던 기존 공지 캠페인은 V111 후 연결 공지 태그를 갖는다`() {

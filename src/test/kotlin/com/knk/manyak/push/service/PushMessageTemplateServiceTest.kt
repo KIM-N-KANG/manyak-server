@@ -21,7 +21,7 @@ class PushMessageTemplateServiceTest {
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
 
     private fun service(): PushMessageTemplateService =
-        PushMessageTemplateService(repository, DEFAULT_TITLE, DEFAULT_BODY, clock).also { it.refresh() }
+        PushMessageTemplateService(repository, DEFAULT_TITLE, DEFAULT_BODY, clock, "이프 소멸 예정 안내", "곧 소멸되는 이프가 있어요").also { it.refresh() }
 
     private fun template(title: String, body: String, from: Instant, until: Instant?) =
         PushMessageTemplate(

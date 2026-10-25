@@ -59,6 +59,14 @@ class PushDeliveryIntegrationTests {
     private fun stats(query: String = "from=2026-10-20&to=2026-10-21") = client.get()
         .uri("/api/v1/admin/push/delivery-stats?$query").header("Authorization", "Bearer $token").exchange()
 
+    @Test fun `이프 소멸 안내 결과를 SERVICE로 수용하고 관리자 종류 필터로 조회한다`() {
+        report(body("credit-expiry:recipient:2026-10-25", type = "CREDIT_EXPIRY_REMINDER")).expectStatus().isNoContent
+        stats("from=2026-10-21&to=2026-10-21&type=CREDIT_EXPIRY_REMINDER").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].type").isEqualTo("CREDIT_EXPIRY_REMINDER")
+            .jsonPath("$.items[0].kind").isEqualTo("SERVICE")
+    }
+
     @Test fun `도달 미도달 폐기와 없는 회원을 보존하고 재보고는 첫 행을 유지한다`() {
         report(body("a")).expectStatus().isNoContent
         report(body("a", delivered = 9)).expectStatus().isNoContent
