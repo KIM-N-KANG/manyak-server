@@ -352,12 +352,12 @@ Authorization: Bearer {{adminToken}}
     });
 %}
 
-### 스토리 목록 — 팀 제외 없음, 비공개 포함, 공통 페이지
+### 스토리 목록 — 팀 제외 없음, 비공개 포함, 삭제 제외, 공통 페이지
 GET {{baseUrl}}/api/v1/admin/stories?size=20&sort=totalTurns&order=desc
 Authorization: Bearer {{adminToken}}
 
 > {%
-    client.test("스토리 목록", () => client.assert(response.status === 200 && Array.isArray(response.body.items), `actual=${response.status}`));
+    client.test("스토리 목록", () => client.assert(response.status === 200 && Array.isArray(response.body.items) && response.body.items.every(s => s.deletedAt === null), `actual=${JSON.stringify(response.body)}`));
     if (response.status === 200 && response.body.items.length) client.global.set("adminStoryId", response.body.items[0].storyId);
 %}
 
@@ -371,7 +371,8 @@ Authorization: Bearer {{adminToken}}
         const thresholds = [1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30, 50];
         client.assert(JSON.stringify(response.body.retention.map(p => p.turn)) === JSON.stringify(thresholds), `기준 턴 actual=${JSON.stringify(response.body.retention)}`);
         response.body.retention.forEach(p => client.assert(p.rate >= 0 && p.rate <= 1, `도달률 actual=${JSON.stringify(p)}`));
-        client.assert(response.body.recentChats.length <= 5, "최근 채팅은 최대 5개입니다");
+        client.assert(response.body.deletedAt === null, `기본 목록에서 고른 스토리 actual=${response.body.deletedAt}`);
+        client.assert(response.body.recentChats.length <= 5 && response.body.recentChats.every(c => c.deletedAt === null), "최근 채팅은 삭제되지 않은 최대 5개입니다");
     });
 %}
 
@@ -385,7 +386,7 @@ Authorization: Bearer {{adminToken}}
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
         const b = response.body;
         const keys = ["title", "oneLineIntro", "description", "protagonistName", "genres", "storySettings", "startSettings",
-            "mainEvents", "visibility", "thumbnailUrl", "thumbnailModerationStatus", "characters"];
+            "mainEvents", "visibility", "thumbnailUrl", "thumbnailModerationStatus", "characters", "deletedAt"];
         client.assert(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(keys.slice().sort()), `필드 actual=${JSON.stringify(Object.keys(b))}`);
         client.assert(["worldSetting", "characterSetting", "userRoleSetting", "ruleSetting"].every(k => k in b.storySettings), "통글 4필드가 항상 있어야 합니다");
         client.assert(["APPROVED", "PENDING", "REJECTED"].includes(b.thumbnailModerationStatus), `표지 검수 상태 actual=${b.thumbnailModerationStatus}`);
@@ -401,7 +402,7 @@ Authorization: Bearer {{adminToken}}
 
 > {% client.test("UUID 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
 
-### 없는 스토리 설정 404 — 삭제된 스토리도 404
+### 없는 스토리 설정 404 — 삭제된 스토리는 200
 GET {{baseUrl}}/api/v1/admin/stories/00000000-0000-4000-8000-000000000000/settings
 Authorization: Bearer {{adminToken}}
 
@@ -424,7 +425,7 @@ Authorization: Bearer {{adminToken}}
 > {%
     client.test("채팅방 목록", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.items.every(c => !("messages" in c) && !("persona" in c) && !("summary" in c)), "원문 필드가 없어야 합니다");
+        client.assert(response.body.items.every(c => c.deletedAt === null && !("messages" in c) && !("persona" in c) && !("summary" in c)), "원문 필드가 없어야 합니다");
     });
     if (response.status === 200 && response.body.items.length) client.global.set("adminChatId", response.body.items[0].chatId);
 %}
@@ -620,3 +621,121 @@ client.test("이미지 호출 채팅 필터", () => {
     client.assert(Array.isArray(response.body.items), "페이지 items");
 });
 %}
+
+
+### 삭제 필터 검증 준비 — 로컬 DB에 삭제된 스토리·채팅을 각각 한 건 이상 준비
+# 아래 only 목록 응답에서 공개 ID와 삭제 시각을 저장한다. 삭제 데이터가 없으면 준비 어서션이 실패한다.
+# 관리자 조회만 실행하며 삭제 API는 호출하지 않는다. 위 관리자 로그인을 먼저 실행한다.
+GET {{baseUrl}}/api/v1/admin/stories?deleted=only&size=1
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 스토리 준비", () => {
+        client.assert(response.status === 200 && response.body.items.length === 1, `삭제 스토리 1건 이상 필요 actual=${JSON.stringify(response.body)}`);
+        client.assert(typeof response.body.items[0].deletedAt === "string", `삭제 시각 actual=${JSON.stringify(response.body.items[0])}`);
+    });
+    if (response.status === 200 && response.body.items.length) {
+        client.global.set("adminDeletedStoryId", response.body.items[0].storyId);
+        client.global.set("adminDeletedStoryAt", response.body.items[0].deletedAt);
+    }
+%}
+
+### 삭제 포함 스토리 검색 — 다른 필터와 AND
+GET {{baseUrl}}/api/v1/admin/stories?deleted=include&q={{adminDeletedStoryId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 포함 검색", () => client.assert(response.status === 200 && response.body.totalElements === 1 &&
+        response.body.items[0].deletedAt === client.global.get("adminDeletedStoryAt"), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제 스토리 상세 — 집계는 삭제되지 않은 채팅만
+GET {{baseUrl}}/api/v1/admin/stories/{{adminDeletedStoryId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 스토리 상세", () => client.assert(response.status === 200 &&
+        response.body.deletedAt === client.global.get("adminDeletedStoryAt") && response.body.recentChats.every(c => c.deletedAt === null), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제 스토리 설정 — 현재 저장값과 이미지 유지
+GET {{baseUrl}}/api/v1/admin/stories/{{adminDeletedStoryId}}/settings
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 스토리 설정", () => client.assert(response.status === 200 &&
+        response.body.deletedAt === client.global.get("adminDeletedStoryAt") && !("submission" in response.body), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제된 스토리의 채팅 범위 목록 — 채팅 자신의 삭제 여부만 판정
+GET {{baseUrl}}/api/v1/admin/chats?storyId={{adminDeletedStoryId}}&deleted=include
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("스토리 범위 목록", () => client.assert(response.status === 200 &&
+        response.body.items.every(c => c.story.storyId === client.global.get("adminDeletedStoryId") && "deletedAt" in c), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제 채팅 준비 — 공개 ID와 삭제 시각 저장
+GET {{baseUrl}}/api/v1/admin/chats?deleted=only&size=1
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 채팅 준비", () => client.assert(response.status === 200 && response.body.items.length === 1 &&
+        typeof response.body.items[0].deletedAt === "string", `삭제 채팅 1건 이상 필요 actual=${JSON.stringify(response.body)}`));
+    if (response.status === 200 && response.body.items.length) {
+        client.global.set("adminDeletedChatId", response.body.items[0].chatId);
+        client.global.set("adminDeletedChatAt", response.body.items[0].deletedAt);
+    }
+%}
+
+### 삭제 포함 채팅 검색
+GET {{baseUrl}}/api/v1/admin/chats?deleted=include&q={{adminDeletedChatId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 채팅 검색", () => client.assert(response.status === 200 && response.body.totalElements === 1 &&
+        response.body.items[0].deletedAt === client.global.get("adminDeletedChatAt"), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제 채팅 상세 — 원문 없음
+GET {{baseUrl}}/api/v1/admin/chats/{{adminDeletedChatId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("삭제 채팅 상세", () => client.assert(response.status === 200 &&
+        response.body.deletedAt === client.global.get("adminDeletedChatAt") &&
+        ["messages", "summary", "suggestedInputs", "persona"].every(k => !(k in response.body)), `actual=${JSON.stringify(response.body)}`));
+%}
+
+### 삭제 필터 오류 — stories deleted=all 400
+GET {{baseUrl}}/api/v1/admin/stories?deleted=all
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("삭제 필터 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
+
+### 삭제 필터 오류 — stories deleted=exclude 400
+GET {{baseUrl}}/api/v1/admin/stories?deleted=exclude
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("삭제 필터 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
+
+### 삭제 필터 오류 — chats deleted=INCLUDE 400
+GET {{baseUrl}}/api/v1/admin/chats?deleted=INCLUDE
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("삭제 필터 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
+
+### 삭제 필터 오류 — chats deleted=exclude 400
+GET {{baseUrl}}/api/v1/admin/chats?deleted=exclude
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("삭제 필터 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status}`)); %}
+
+### 회원 범위 자유 조회 — 실제 회원 공개 ID로 교체
+GET {{baseUrl}}/api/v1/admin/stories?memberId=replace-with-member-public-id&deleted=only
+Authorization: Bearer {{adminToken}}
+
+### 회원 채팅 범위 자유 조회 — 실제 회원 공개 ID로 교체
+GET {{baseUrl}}/api/v1/admin/chats?memberId=replace-with-member-public-id&deleted=include
+Authorization: Bearer {{adminToken}}

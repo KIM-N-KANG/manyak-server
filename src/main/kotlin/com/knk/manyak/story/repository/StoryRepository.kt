@@ -38,6 +38,9 @@ interface StoryRepository : JpaRepository<Story, Long> {
     // 삭제된 스토리 제외라 KNK-257(삭제 스토리 채팅 생성 차단)도 이 조회로 함께 해결된다.
     fun findByPublicIdAndDeletedAtIsNull(publicId: UUID): Story?
 
+    // 관리자 스토리 설정(ADMIN 4-2-7) 전용. 삭제된 스토리도 찾는다. 공개 소비자는 쓰지 않는다.
+    fun findByPublicId(publicId: UUID): Story?
+
     /**
      * 스토리 행을 비관적 쓰기 락으로 조회한다(KNK-418). 자식 리소스 전체 교체(주요 사건 교체 등)를 스토리 단위로
      * 직렬화해, 동시 교체가 delete 후 같은 sort_order로 동시 insert하다 유니크 위반(500)이 나는 것을 막는다.

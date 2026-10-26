@@ -48,6 +48,7 @@ class AdminStoriesRequest : AdminAiRequest() {
     var chatTo: String? = null
     var creationFrom: String? = null
     var creationTo: String? = null
+    var deleted: String? = null
 }
 class AdminChatsRequest : AdminAiRequest() {
     var storyId: UUID? = null
@@ -56,6 +57,7 @@ class AdminChatsRequest : AdminAiRequest() {
     @field:Min(0) @field:Max(12) var turnBucket: Int? = null
     var hasFirstMessage: Boolean? = null
     var turnDate: String? = null
+    var deleted: String? = null
 }
 class AdminChartsRequest {
     @field:io.swagger.v3.oas.annotations.media.Schema(type = "integer", allowableValues = ["7", "30", "90"])
@@ -88,23 +90,23 @@ data class AdminStorySummary(val storyId: UUID, val title: String, val genre: St
 data class AdminStoryListResponse(
     val storyId: UUID, val title: String, val genre: String, val description: String?, val scope: String,
     val visibility: String, val moderationStatus: String, val tags: List<String>, val supportingCharacterCount: Long?,
-    val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant,
+    val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant, val deletedAt: Instant?,
 )
 data class AdminStoryDetailResponse(
     val storyId: UUID, val title: String, val genre: String, val description: String?, val scope: String,
     val visibility: String, val moderationStatus: String, val tags: List<String>, val supportingCharacterCount: Long?,
-    val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant,
+    val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant, val deletedAt: Instant?,
     val retention: List<AdminRetention>, val recentChats: List<AdminChatResponse>,
 ) {
     constructor(story: AdminStoryListResponse, retention: List<AdminRetention>, recentChats: List<AdminChatResponse>) : this(
         story.storyId, story.title, story.genre, story.description, story.scope, story.visibility, story.moderationStatus,
-        story.tags, story.supportingCharacterCount, story.owner, story.chatCount, story.totalTurns, story.createdAt, retention, recentChats)
+        story.tags, story.supportingCharacterCount, story.owner, story.chatCount, story.totalTurns, story.createdAt, story.deletedAt, retention, recentChats)
 }
 
 data class AdminRetention(val turn: Int, val rate: Double)
 data class AdminChatResponse(
     val chatId: UUID, val story: AdminStorySummary, val member: AdminMemberSummary?, val startedAs: String,
-    val turnCount: Int, val startedAt: Instant, val lastActiveAt: Instant, val creditsSpent: Long, val firstMessageSeconds: Long?,
+    val turnCount: Int, val startedAt: Instant, val lastActiveAt: Instant, val creditsSpent: Long, val firstMessageSeconds: Long?, val deletedAt: Instant?,
 )
 data class AdminTransactionResponse(val amount: Long, val reason: String, val balanceAfter: Long, val createdAt: Instant)
 data class AdminAttendanceResponse(val date: LocalDate, val creditAmount: Long)
@@ -164,8 +166,9 @@ data class AdminStorySettingsResponse(
     val thumbnailUrl: String?,
     val thumbnailModerationStatus: ImageModerationStatus,
     val characters: List<AdminStorySettingsCharacter>,
+    val deletedAt: Instant?,
 ) {
-    constructor(form: StoryEditFormResponse) : this(
+    constructor(form: StoryEditFormResponse, deletedAt: Instant?) : this(
         form.title, form.oneLineIntro, form.description, form.protagonistName, form.genres,
         form.storySettings.let { AdminStorySettingsText(it.worldSetting, it.characterSetting, it.userRoleSetting, it.ruleSetting) },
         form.startSettings.map { start ->
@@ -181,6 +184,7 @@ data class AdminStorySettingsResponse(
                 AdminStorySettingsImage(requireNotNull(it.id), it.imageName, it.imageUrl, it.moderationStatus)
             })
         },
+        deletedAt,
     )
 }
 

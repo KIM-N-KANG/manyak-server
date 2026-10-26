@@ -47,6 +47,8 @@ internal class AdminQuery {
         ai.params.forEach { (key, value) -> sql = sql.replace(":$key", ":ai_$key"); params["ai_$key"] = value }
         add("EXISTS (SELECT 1 FROM ai_call_logs al WHERE $sql)")
     }
+    /** 스토리와 채팅 목록 삭제 필터(4-1-5). 없으면 제외, include는 포함, only는 삭제된 행만. 값은 서비스가 검증한다. */
+    fun deleted(column: String, value: String?) { if (value != "include") add("$column IS ${if (value == "only") "NOT " else ""}NULL") }
     fun where() = conditions.joinToString(" AND ").ifEmpty { "1=1" }
     companion object {
         /** KST는 DST가 없어 고정 오프셋 에포크 일수로 날짜를 묶는다. AT TIME ZONE 뒤 DATE 캐스트는 DB 세션 시간대에 좌우된다(H2·UTC 세션). */
