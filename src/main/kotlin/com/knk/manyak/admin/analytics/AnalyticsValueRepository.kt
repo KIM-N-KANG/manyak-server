@@ -48,6 +48,9 @@ class AnalyticsValueRepository(private val jdbc: NamedParameterJdbcTemplate, pri
     fun finalizeDaily(def: AnalyticsDefinition, date: LocalDate, value: AnalyticsValue, now: Instant) {
         jdbc.update("UPDATE admin_analytics_daily_values SET finalized_at=:now WHERE metric=:metric AND params_hash=:hash AND metric_date=:date AND finalized_at IS NULL AND fetched_at=:fetched", key(def) + mapOf("date" to date, "now" to now.atOffset(ZoneOffset.UTC), "fetched" to value.fetchedAt.atOffset(ZoneOffset.UTC)))
     }
+    fun unfinalizeDaily(def: AnalyticsDefinition, date: LocalDate, value: AnalyticsValue) {
+        jdbc.update("UPDATE admin_analytics_daily_values SET finalized_at=NULL WHERE metric=:metric AND params_hash=:hash AND metric_date=:date AND fetched_at=:fetched AND finalized_at=:finalized", key(def) + mapOf("date" to date, "fetched" to value.fetchedAt.atOffset(ZoneOffset.UTC), "finalized" to value.finalizedAt?.atOffset(ZoneOffset.UTC)))
+    }
     fun finalizeRange(def: AnalyticsDefinition, from: LocalDate, to: LocalDate, value: AnalyticsValue, now: Instant) {
         jdbc.update("UPDATE admin_analytics_range_values SET finalized_at=:now WHERE metric=:metric AND params_hash=:hash AND range_from=:from AND range_to=:to AND finalized_at IS NULL AND fetched_at=:fetched", key(def) + mapOf("from" to from, "to" to to, "now" to now.atOffset(ZoneOffset.UTC), "fetched" to value.fetchedAt.atOffset(ZoneOffset.UTC)))
     }

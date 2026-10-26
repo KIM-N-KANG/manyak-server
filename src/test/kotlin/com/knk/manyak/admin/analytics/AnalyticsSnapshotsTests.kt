@@ -72,8 +72,8 @@ class AnalyticsSnapshotsTests {
         assertThat(server.requestCount).isZero(); assertThat(result.value(all)).isNull(); assertThat(result.value(ads)).isNull()
         assertThat(fixture.budget.reserve(100)).isTrue()
     }
-    @Test fun `리텐션은 31개 구간이 모두 완료되어야 고정하고 미완료는 하루 한 번만 갱신한다`() {
-        fun array(complete: Boolean) = fixture.mapper.valueToTree<JsonNode>(List(31) { mapOf("count" to 5, "outof" to 20, "incomplete" to !complete) })
+    @Test fun `리텐션은 32개 구간이 모두 완료되어야 고정하고 미완료는 하루 한 번만 갱신한다`() {
+        fun array(complete: Boolean) = fixture.mapper.valueToTree<JsonNode>(List(32) { i -> mapOf("count" to if (i == 0) 20 else 5, "outof" to 20, "incomplete" to (i > 0 && !complete)) })
         val def = AnalyticsDefinition("retention_test", "/api/2/retention", emptyList(), 8, fixture.mapper)
         val retention = DailyAnalyticsMetric(def, true) { _, range -> range.dates().associateWith { array(false) } }
         fixture.store.saveDaily(def, mapOf(day.minusDays(40) to AnalyticsValue(array(true), now), day.minusDays(10) to AnalyticsValue(array(false), now)))
@@ -84,6 +84,51 @@ class AnalyticsSnapshotsTests {
         fixture.snapshots.load("/retention", AnalyticsRange(day.minusDays(10), day.minusDays(10)), listOf(retention)); assertThat(server.requestCount).isEqualTo(1)
         assertThat(fixture.store.daily(def, day.minusDays(40), day.minusDays(40)).values.single().finalizedAt).isNotNull()
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = [31, 32])
+    fun `D30이 없거나 미완료면 D-32도 확정하지 않고 하루 한 번 갱신한다`(size: Int) {
+        val points = fixture.mapper.valueToTree<JsonNode>(List(size) { i -> mapOf("count" to if (i == 0) 20 else 5, "outof" to 20, "incomplete" to (i == 31)) })
+        val def = AnalyticsDefinition("d30", "/api/2/retention", emptyList(), 8, fixture.mapper)
+        val retention = DailyAnalyticsMetric(def, true) { _, range -> range.dates().associateWith { points } }
+        val date = day.minusDays(32); val range = AnalyticsRange(date, date)
+        fixture.store.saveDaily(def, mapOf(date to AnalyticsValue(points, now)))
+        fixture.snapshots.load("/retention", range, listOf(retention))
+        assertThat(fixture.store.daily(def, date, date)[date]!!.finalizedAt).isNull()
+        assertThat(server.requestCount).isZero()
+        fixture.clock.at = now.plusSeconds(86400)
+        fixture.snapshots.load("/retention", range, listOf(retention))
+        fixture.snapshots.load("/retention", range, listOf(retention))
+        assertThat(server.requestCount).isEqualTo(1)
+        assertThat(fixture.store.daily(def, date, date)[date]!!.finalizedAt).isNull()
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource("31,false", "32,false", "31,true", "32,true")
+    fun `잘못 확정된 행은 화면과 배치 읽기에서 확정을 풀고 받은 날짜에 따라 재수집한다`(size: Int, batchRead: Boolean) {
+        val invalid = fixture.mapper.valueToTree<JsonNode>(List(size) { i -> mapOf("count" to if (i == 0) 20 else 5, "outof" to 20, "incomplete" to (i == 31)) })
+        val complete = fixture.mapper.valueToTree<JsonNode>(List(32) { i -> mapOf("count" to if (i == 0) 20 else 9, "outof" to 20, "incomplete" to false) })
+        val def = AnalyticsDefinition("wrong_final", "/api/2/retention", emptyList(), 8, fixture.mapper)
+        val retention = DailyAnalyticsMetric(def, true) { _, range -> range.dates().associateWith { complete } }
+        val yesterday = day.minusDays(40); val today = day.minusDays(41); val range = AnalyticsRange(today, yesterday)
+        fixture.store.saveDaily(def, mapOf(yesterday to AnalyticsValue(invalid, now.minusSeconds(86400), now), today to AnalyticsValue(invalid, now, now)))
+        if (batchRead) {
+            assertThat(fixture.snapshots.missingDates(retention, range)).containsExactly(yesterday)
+            assertThat(fixture.store.daily(def, today, yesterday).values).allMatch { it.finalizedAt == null }
+        }
+        fixture.snapshots.load("/retention", range, listOf(retention))
+        var rows = fixture.store.daily(def, today, yesterday)
+        assertThat(rows[today]!!.finalizedAt).isNull()
+        assertThat(rows[today]!!.value).isEqualTo(invalid)
+        assertThat(rows[yesterday]!!.value).isEqualTo(complete)
+        assertThat(rows[yesterday]!!.finalizedAt).isNotNull()
+        assertThat(server.requestCount).isEqualTo(1)
+        fixture.clock.at = now.plusSeconds(86400)
+        fixture.snapshots.load("/retention", range, listOf(retention))
+        rows = fixture.store.daily(def, today, yesterday)
+        assertThat(rows.values).allMatch { it.finalizedAt != null && it.value == complete }
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
     @Test fun `정의 JSON 객체 키 순서는 해시를 바꾸지 않고 코호트 변경은 새 키다`() {
         fun def(json: String) = AnalyticsDefinition("same", "/api/2/users", listOf("s" to json, "m" to "active"), 2, fixture.mapper)
         val first = def("[{\"prop\":\"userdata_cohort\",\"op\":\"is not\",\"values\":[\"team\"]}]")

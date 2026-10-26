@@ -1,5 +1,6 @@
 package com.knk.manyak.admin.analytics
 
+import com.knk.manyak.admin.dto.AdminDateRange
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
@@ -26,7 +27,7 @@ class AdminMetricsTests {
                 val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
-                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionValues?.get(date) ?: List(10) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==7)) }) })))
+                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionValues?.get(date) ?: List(32) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==8)) }) })))
                     path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     else -> {
@@ -71,7 +72,7 @@ class AdminMetricsTests {
         assertThat(fixture.budget.reserve(3)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         assertThatThrownBy { service.activity(range("2025-10-22","2026-10-23")) }.hasMessageContaining("기간")
     }
-    @Test fun `리텐션은 인덱스1과 가중 평균을 쓰고 incomplete와 미종료일은 null이다`() {
+    @Test fun `리텐션은 인덱스2와 가중 평균을 쓰고 incomplete와 미종료일은 null이다`() {
         val value = service.retention(range("2026-10-19","2026-10-22"))
         assertThat(value.platforms.map { it.platform }).containsExactly("all","web","android")
         val all=value.platforms.first(); assertThat(all.cohorts.first().d1).isEqualTo(0.25); assertThat(all.cohorts.last().d1).isNull()
@@ -84,16 +85,17 @@ class AdminMetricsTests {
         assertThatThrownBy { service.retention(AnalyticsRangeQuery().apply { days="30" }) }.isInstanceOf(RuntimeException::class.java)
         assertThatThrownBy { service.retention(range("2026-10-22","2026-10-23")) }.isInstanceOf(RuntimeException::class.java)
     }
-    @Test fun `리텐션 인덱스 1부터 7과 30을 순서대로 응답하고 분모 0과 미완료 및 없는 인덱스는 null이다`() {
-        val date = LocalDate.parse("2026-10-01")
-        retentionValues = mapOf(date to List(10) { day ->
-            mapOf("count" to when (day) { 0 -> 20; in 1..5 -> 6 - day; else -> 0 },
-                "outof" to if (day == 6) 0 else 20, "incomplete" to (day == 7))
+    @Test fun `리텐션 인덱스 2부터 8과 31을 순서대로 응답하고 분모 0과 미완료 및 없는 인덱스는 null이다`() {
+        val date = fixture.clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(20)
+        retentionValues = mapOf(date to List(11) { day ->
+            mapOf("count" to when (day) { 0 -> 20; 1 -> 19; in 2..6 -> 7 - day; else -> 0 },
+                "outof" to if (day == 7) 0 else 20, "incomplete" to (day == 8))
         })
         val value = mapper.readTree(mapper.writeValueAsString(service.retention(range(date.toString(), date.toString()))))
         val fields = listOf("d1", "d2", "d3", "d4", "d5", "d6", "d7", "d30")
         for (platform in value["platforms"]) {
             val cohort = platform["cohorts"][0]
+            assertThat(cohort["users"].asLong()).isEqualTo(20)
             assertThat(cohort.properties().map { it.key }).containsExactlyElementsOf(listOf("date", "users") + fields)
             assertThat(platform["summary"].properties().map { it.key }).containsExactlyElementsOf(fields)
             for (body in listOf(cohort, platform["summary"])) {
@@ -106,11 +108,35 @@ class AdminMetricsTests {
         assertThat(requests).hasSize(3)
     }
 
+    @Test fun `D1은 Day 0 인덱스1이 아니라 인덱스2이며 짧은 배열 경계도 null이다`() {
+        val date = fixture.clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(10)
+        retentionValues = mapOf(date to listOf(200, 199, 30).map { mapOf("count" to it, "outof" to 200, "incomplete" to false) })
+        val value = service.retention(range(date.toString(), date.toString()))
+        assertThat(mapper.writeValueAsString(value)).doesNotContain("0.995")
+        for (platform in value.platforms) {
+            assertThat(platform.cohorts.single().users).isEqualTo(200)
+            assertThat(platform.cohorts.single().d1).isEqualTo(0.15)
+            assertThat(platform.cohorts.single().d2).isNull()
+            assertThat(platform.summary.d1).isEqualTo(0.15)
+            assertThat(platform.summary.d2).isNull()
+        }
+    }
+
+    @Test fun `완료된 코호트의 D7과 D30은 인덱스8과31을 읽는다`() {
+        val date = fixture.clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(40)
+        retentionValues = mapOf(date to List(32) { i -> mapOf("count" to if (i == 0) 200 else i, "outof" to 200, "incomplete" to false) })
+        for (platform in service.retention(range(date.toString(), date.toString())).platforms) {
+            assertThat(platform.cohorts.single().d7).isEqualTo(8.0 / 200)
+            assertThat(platform.cohorts.single().d30).isEqualTo(31.0 / 200)
+            assertThat(platform.summary.d30).isEqualTo(31.0 / 200)
+        }
+    }
+
     @Test fun `리텐션 D3 요약은 관찰 날짜가 끝난 코호트만 분모로 가중한다`() {
         fixture.clock.at = Instant.parse("2026-10-26T03:00:00Z")
         retentionValues = (21..23).associate { day ->
-            LocalDate.of(2026, 10, day) to List(10) { index ->
-                mapOf("count" to if (index == 3) when (day) { 21 -> 1; 22 -> 9; else -> 5 } else 0,
+            LocalDate.of(2026, 10, day) to List(32) { index ->
+                mapOf("count" to if (index == 0) when (day) { 21 -> 10; 22 -> 30; else -> 5 } else if (index == 4) when (day) { 21 -> 1; 22 -> 9; else -> 5 } else 0,
                     "outof" to when (day) { 21 -> 10; 22 -> 30; else -> 5 }, "incomplete" to false)
             }
         }
