@@ -14,6 +14,7 @@ class AdminMetricsTests {
     private lateinit var service: AdminMetricsService
     private val requests = java.util.concurrent.CopyOnWriteArrayList<RecordedRequest>()
     private var broken = false
+    private var retentionValues: Map<LocalDate, List<Map<String, Any>>>? = null
     @BeforeEach fun setup() {
         server = MockWebServer(); server.start()
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(Instant.parse("2026-10-23T03:00:00Z")))
@@ -25,7 +26,7 @@ class AdminMetricsTests {
                 val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
-                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to List(10) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==7)) } })))
+                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionValues?.get(date) ?: List(10) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==7)) }) })))
                     path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     else -> {
@@ -82,6 +83,48 @@ class AdminMetricsTests {
         service.retention(range("2026-10-19","2026-10-22")); assertThat(requests).hasSize(3)
         assertThatThrownBy { service.retention(AnalyticsRangeQuery().apply { days="30" }) }.isInstanceOf(RuntimeException::class.java)
         assertThatThrownBy { service.retention(range("2026-10-22","2026-10-23")) }.isInstanceOf(RuntimeException::class.java)
+    }
+    @Test fun `리텐션 인덱스 1부터 7과 30을 순서대로 응답하고 분모 0과 미완료 및 없는 인덱스는 null이다`() {
+        val date = LocalDate.parse("2026-10-01")
+        retentionValues = mapOf(date to List(10) { day ->
+            mapOf("count" to when (day) { 0 -> 20; in 1..5 -> 6 - day; else -> 0 },
+                "outof" to if (day == 6) 0 else 20, "incomplete" to (day == 7))
+        })
+        val value = mapper.readTree(mapper.writeValueAsString(service.retention(range(date.toString(), date.toString()))))
+        val fields = listOf("d1", "d2", "d3", "d4", "d5", "d6", "d7", "d30")
+        for (platform in value["platforms"]) {
+            val cohort = platform["cohorts"][0]
+            assertThat(cohort.properties().map { it.key }).containsExactlyElementsOf(listOf("date", "users") + fields)
+            assertThat(platform["summary"].properties().map { it.key }).containsExactlyElementsOf(fields)
+            for (body in listOf(cohort, platform["summary"])) {
+                for ((day, expected) in listOf(0.25, 0.2, 0.15, 0.1, 0.05).withIndex()) {
+                    assertThat(body["d${day + 1}"].asDouble()).isEqualTo(expected)
+                }
+                for (field in listOf("d6", "d7", "d30")) assertThat(body[field].isNull).describedAs(field).isTrue()
+            }
+        }
+        assertThat(requests).hasSize(3)
+    }
+
+    @Test fun `리텐션 D3 요약은 관찰 날짜가 끝난 코호트만 분모로 가중한다`() {
+        fixture.clock.at = Instant.parse("2026-10-26T03:00:00Z")
+        retentionValues = (21..23).associate { day ->
+            LocalDate.of(2026, 10, day) to List(10) { index ->
+                mapOf("count" to if (index == 3) when (day) { 21 -> 1; 22 -> 9; else -> 5 } else 0,
+                    "outof" to when (day) { 21 -> 10; 22 -> 30; else -> 5 }, "incomplete" to false)
+            }
+        }
+        val value = mapper.readTree(mapper.writeValueAsString(service.retention(range("2026-10-21", "2026-10-23"))))
+        for (platform in value["platforms"]) {
+            assertThat(platform["cohorts"][0]["d3"].asDouble()).isEqualTo(0.1)
+            assertThat(platform["cohorts"][1]["d3"].asDouble()).isEqualTo(0.3)
+            assertThat(platform["cohorts"][2]["d3"].isNull).isTrue()
+            assertThat(platform["summary"]["d3"].asDouble()).isEqualTo(0.25)
+            assertThat(platform["summary"]["d6"].isNull).isTrue()
+        }
+        assertThat(requests).hasSize(3)
+        service.retention(range("2026-10-21", "2026-10-23"))
+        assertThat(requests).hasSize(3)
     }
     @Test fun `세션은 평균 길이만 세 조건으로 받고 저장된 날은 다시 받지 않는다`() {
         val value=service.sessions(AnalyticsRangeQuery())
