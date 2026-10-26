@@ -20,6 +20,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -46,6 +47,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @Import(GatedChatTurnAiClientConfig::class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatCharacterImageIntegrationTests {
+
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
     @Autowired private lateinit var aiLogs: com.knk.manyak.global.observability.aicall.AiCallLogRepository
     @Autowired private lateinit var imageRecorder: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder
@@ -346,8 +349,8 @@ class ChatCharacterImageIntegrationTests {
         return character
     }
 
-    private fun stream(chat: StoryChat, userInput: String): String =
-        restTestClient.post()
+    private fun stream(chat: StoryChat, userInput: String): String {
+        val body = restTestClient.post()
             .uri("/api/v1/chats/${chat.publicId}/turns/stream")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -359,4 +362,7 @@ class ChatCharacterImageIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chat.publicId.toString())
+        return body
+    }
 }

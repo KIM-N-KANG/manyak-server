@@ -61,6 +61,22 @@ class AnalyticsValuesPostgresTests {
         store.saveDaily(definition, mapOf(date.plusDays(1) to value(3)))
         assertThat(store.daily(definition, date, date.plusDays(1))).hasSize(2)
     }
+    @Test fun `PostgreSQL 확정 해제는 읽은 행만 풀어 재수집 저장을 허용하고 새 확정 행은 보호한다`() {
+        val def = AnalyticsDefinition("pg_retention_reopen", "/api/2/retention", emptyList(), 8, mapper)
+        val old = value(1, now, now)
+        store.saveDaily(def, mapOf(date to old))
+        store.unfinalizeDaily(def, date, old)
+        assertThat(store.daily(def, date, date).getValue(date).finalizedAt).isNull()
+        val updated = value(2, now.plusSeconds(5), now.plusSeconds(5))
+        store.saveDaily(def, mapOf(date to updated))
+        store.unfinalizeDaily(def, date, old) // 다른 태스크가 받은 새 값은 풀지 않는다.
+        store.unfinalizeDaily(def, date, updated.copy(finalizedAt = now)) // 받은 시각이 같아도 새 확정 시각을 보호한다.
+        val row = store.daily(def, date, date).getValue(date)
+        assertThat(row).isEqualTo(updated)
+        store.saveDaily(def, mapOf(date to value(999, now.plusSeconds(10))))
+        assertThat(store.daily(def, date, date).getValue(date)).isEqualTo(updated)
+    }
+
     @Test fun `PostgreSQL 범위 upsert도 확정 행 보호 조건을 원자적으로 적용한다`() {
         val from = date.minusDays(2)
         store.saveRange(definition, from, date, value(4))

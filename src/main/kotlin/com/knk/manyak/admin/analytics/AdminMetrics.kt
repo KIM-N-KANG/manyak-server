@@ -51,7 +51,7 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
         val platforms = metrics.mapIndexed { i, metric ->
             fun point(date: LocalDate, day: Int): tools.jackson.databind.JsonNode? {
                 val array = result.value(metric, date)!!.value
-                return if (!date.plusDays(day.toLong()).isBefore(today) || array.size() <= day || array[day]["incomplete"].asBoolean()) null else array[day]
+                return if (!date.plusDays(day.toLong()).isBefore(today) || array.size() <= day + 1 || array[day + 1]["incomplete"].asBoolean()) null else array[day + 1]
             }
             fun ratio(date: LocalDate, day: Int): Double? = point(date, day)?.let { if (it["outof"].asLong() == 0L) null else it["count"].asDouble() / it["outof"].asDouble() }
             fun weighted(day: Int): Double? {

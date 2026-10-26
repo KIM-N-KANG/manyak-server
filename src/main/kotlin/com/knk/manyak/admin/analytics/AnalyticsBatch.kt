@@ -37,7 +37,7 @@ class AnalyticsBatchRunner(private val catalog: AnalyticsBatchCatalog, private v
     private data class Work(val entry: AnalyticsBatchMetric, val range: AnalyticsRange)
     private fun work(entries: List<AnalyticsBatchMetric>, today: LocalDate, nightly: Boolean): List<Work> = entries.mapNotNull { entry ->
         val to = today.minusDays(if (nightly) 1 else 2)
-        val from = if (!nightly) entry.start else maxOf(entry.start, today.minusDays(if (entry.metric.retention) 31 else 1))
+        val from = if (!nightly) entry.start else maxOf(entry.start, today.minusDays(if (entry.metric.retention) 33 else 1))
         if (from > to) null else Work(entry, AnalyticsRange(from, to))
     }.filter { snapshots.missingDates(it.entry.metric, it.range).isNotEmpty() }
 

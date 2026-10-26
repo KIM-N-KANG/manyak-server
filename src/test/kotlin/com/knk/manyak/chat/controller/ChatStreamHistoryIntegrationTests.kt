@@ -30,6 +30,7 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -64,6 +65,8 @@ import java.util.concurrent.atomic.AtomicReference
     ],
 )
 class ChatStreamHistoryIntegrationTests {
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
+
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
 
     /** 전달받은 [ChatTurnAiRequest]를 캡처하고 정상 결과를 반환하는 가짜 AI 클라이언트. */
@@ -446,8 +449,8 @@ class ChatStreamHistoryIntegrationTests {
             .isZero()
     }
 
-    private fun regenerate(chatId: String, turnId: Long): String =
-        restTestClient.post()
+    private fun regenerate(chatId: String, turnId: Long): String {
+        val body = restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/regenerate/stream")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -459,6 +462,9 @@ class ChatStreamHistoryIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("재생성 스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chatId)
+        return body
+    }
 
 
     @Autowired private lateinit var submissions: com.knk.manyak.story.submission.StorySubmissionService
@@ -503,8 +509,8 @@ class ChatStreamHistoryIntegrationTests {
         checkIsolation()
     }
 
-    private fun stream(chatId: String, userInput: String): String =
-        restTestClient.post()
+    private fun stream(chatId: String, userInput: String): String {
+        val body = restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -516,4 +522,7 @@ class ChatStreamHistoryIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chatId)
+        return body
+    }
 }

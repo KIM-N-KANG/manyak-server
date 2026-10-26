@@ -44,9 +44,17 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
     private fun today() = clock.instant().atZone(AdminDateRange.KST).toLocalDate()
     private fun rangeKey(metric: RangeAnalyticsMetric) = metric.definition.hash + ":" + metric.range.from + ":" + metric.range.to
-    private fun completeRetention(value: JsonNode) = value.isArray && value.size() >= 31 && (0..30).all { value[it]["incomplete"]?.isBoolean == true && !value[it]["incomplete"].asBoolean() }
-    private fun finalDaily(metric: DailyAnalyticsMetric, date: LocalDate, value: AnalyticsValue): Boolean = value.finalizedAt != null ||
-        if (metric.retention) completeRetention(value.value) else date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
+    private fun completeRetention(value: JsonNode) = value.isArray && value.size() >= 32 && (0..31).all { value[it]["incomplete"]?.isBoolean == true && !value[it]["incomplete"].asBoolean() }
+    private fun finalDaily(metric: DailyAnalyticsMetric, date: LocalDate, value: AnalyticsValue): Boolean =
+        if (metric.retention) completeRetention(value.value) else value.finalizedAt != null || date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
+    private fun dailyValues(metric: DailyAnalyticsMetric, from: LocalDate, to: LocalDate): Map<LocalDate, AnalyticsValue> =
+        store.daily(metric.definition, from, to).mapValues { (date, value) ->
+            if (metric.retention && value.finalizedAt != null && !completeRetention(value.value)) {
+                // 이전 태스크의 옛 판정도 읽을 때 풀어 기존 upsert가 새 응답을 저장할 수 있게 한다.
+                store.unfinalizeDaily(metric.definition, date, value)
+                value.copy(finalizedAt = null)
+            } else value
+        }
     private fun freshDaily(metric: DailyAnalyticsMetric, date: LocalDate, value: AnalyticsValue?): Boolean {
         value ?: return false
         if (finalDaily(metric, date, value)) return true
@@ -61,7 +69,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
 
     /** 배치도 화면과 같은 확정일·어제·리텐션 유효 판정을 쓴다. */
     fun missingDates(metric: DailyAnalyticsMetric, range: AnalyticsRange): List<LocalDate> {
-        val values = store.daily(metric.definition, range.from, range.to)
+        val values = dailyValues(metric, range.from, range.to)
         values.forEach { (date, value) ->
             if (value.finalizedAt == null && finalDaily(metric, date, value)) {
                 try { store.finalizeDaily(metric.definition, date, value, clock.instant()) }
@@ -77,7 +85,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         val dailySpecs = (metrics + extraDaily.map { it.first }).distinctBy { it.definition.hash }
         val daily = dailySpecs.associate { metric ->
             val dates = range.dates() + extraDaily.filter { it.first.definition.hash == metric.definition.hash }.map { it.second }
-            metric.definition.hash to store.daily(metric.definition, dates.min(), dates.max()).toMutableMap()
+            metric.definition.hash to dailyValues(metric, dates.min(), dates.max()).toMutableMap()
         }.toMutableMap()
         val ranges = rangeMetrics.mapNotNull { metric -> store.range(metric.definition, metric.range.from, metric.range.to)?.let { rangeKey(metric) to it } }.toMap().toMutableMap()
         var finalized = 0
@@ -149,7 +157,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                     catch (failure: Exception) { storeFailure(metric.definition.metric, failure); ranges[rangeKey(metric)] = raw }
                 }
                 for ((metric, selected) in plan.daily) {
-                    val current = store.daily(metric.definition, selected.min(), selected.max())
+                    val current = dailyValues(metric, selected.min(), selected.max())
                     daily[metric.definition.hash]!!.putAll(current)
                     val stillMissing = selected.filter { !freshDaily(metric, it, current[it]) }
                     val groups = mutableListOf<MutableList<LocalDate>>()
@@ -158,7 +166,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                     }
                     for (group in groups) {
                         // 직전 구간을 받는 사이 다른 태스크가 저장했을 수 있다. 구간을 다시 분할한다.
-                        val latest = store.daily(metric.definition, group.min(), group.max())
+                        val latest = dailyValues(metric, group.min(), group.max())
                         daily[metric.definition.hash]!!.putAll(latest)
                         val gaps = group.filter { !freshDaily(metric, it, latest[it]) }
                         val contiguous = mutableListOf<MutableList<LocalDate>>()
@@ -171,7 +179,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                             }
                             val rows = values.mapValues { (date, value) -> AnalyticsValue(value, clock.instant()).let { if (finalDaily(metric, date, it)) it.copy(finalizedAt = clock.instant()) else it } }
                             val spent = interval.days * metric.definition.perDay; reservation.succeeded(spent); cost += spent; fetchedDates += interval.dates()
-                            try { store.saveDaily(metric.definition, rows); daily[metric.definition.hash]!!.putAll(store.daily(metric.definition, interval.from, interval.to)); finalized += rows.values.count { it.finalizedAt != null } }
+                            try { store.saveDaily(metric.definition, rows); daily[metric.definition.hash]!!.putAll(dailyValues(metric, interval.from, interval.to)); finalized += rows.values.count { it.finalizedAt != null } }
                             catch (failure: Exception) { storeFailure(metric.definition.metric, failure); daily[metric.definition.hash]!!.putAll(rows) }
                         }
                     }

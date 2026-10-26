@@ -17,6 +17,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -32,6 +33,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatStreamControllerIntegrationTests {
+
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -236,8 +239,8 @@ class ChatStreamControllerIntegrationTests {
             .jsonPath("$[0].turnCount").isEqualTo(expected)
     }
 
-    private fun stream(chatId: String, userInput: String): String =
-        restTestClient.post()
+    private fun stream(chatId: String, userInput: String): String {
+        val body = restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -249,6 +252,9 @@ class ChatStreamControllerIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chatId)
+        return body
+    }
 
     @Test
     fun `비동기 채팅 턴 이벤트가 request_id를 MDC로 전파받아 기록된다`() {
