@@ -135,6 +135,16 @@ class AdminMetricsIntegrationTests {
         val retention=body("/users/retention?$period")
         assertThat(retention["platforms"][0]["cohorts"][0]["d1"].asDouble()).isEqualTo(0.25)
         assertThat(retention["platforms"][0]["cohorts"][0]["d7"].isNull).isTrue()
+        for (platform in retention["platforms"]) {
+            for (field in listOf("d2", "d3", "d4", "d5", "d6")) {
+                assertThat(platform["cohorts"][0].has(field)).describedAs(field).isTrue()
+                assertThat(platform["summary"].has(field)).describedAs(field).isTrue()
+            }
+            assertThat(platform["cohorts"][0]["d2"].asDouble()).isEqualTo(0.25)
+            assertThat(platform["cohorts"][0]["d3"].asDouble()).isEqualTo(0.25)
+            assertThat(platform["cohorts"][0]["d4"].isNull).isTrue()
+            assertThat(platform["summary"]["d3"].asDouble()).isEqualTo(0.25)
+        }
         assertThat(body("/users/sessions?$period")["daily"][0]["averageSessionSeconds"]["web"].asDouble()).isEqualTo(4.5)
         assertThat(body("/quality/client?$period&platform=android")["platform"].asText()).isEqualTo("android")
         for ((name,steps) in listOf("web-first-visit" to 6,"android-first-visit" to 2,"story-creation" to 4,"story-detail-chat" to 7,"guest-limit-login" to 3)) {
