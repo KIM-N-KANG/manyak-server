@@ -154,7 +154,7 @@ class AdminStorySettingsIntegrationTests {
         val original = json(client.get().uri("/api/v1/admin/originals/${story.publicId}").header("Authorization", "Bearer $token")
             .exchange().expectStatus().isOk) as ObjectNode
         original["characters"].forEach { character -> character["images"].forEach { (it as ObjectNode).remove("objectKey") } }
-        body.properties().forEach { (key, value) -> assertThat(original[key]).describedAs(key).isEqualTo(value) }
+        body.properties().filter { it.key != "deletedAt" }.forEach { (key, value) -> assertThat(original[key]).describedAs(key).isEqualTo(value) }
     }
 
     @Test fun `소유자 없는 게스트 스토리도 조회한다`() {
@@ -179,14 +179,28 @@ class AdminStorySettingsIntegrationTests {
         assertThat(body.has("submission")).isFalse()
         assertThat(body["characters"][0]["images"].toList().map { it.has("objectKey") }).containsOnly(false)
         assertThat(body.properties().map { it.key }).containsExactlyInAnyOrder("title", "oneLineIntro", "description", "protagonistName",
-            "genres", "storySettings", "startSettings", "mainEvents", "visibility", "thumbnailUrl", "thumbnailModerationStatus", "characters")
+            "genres", "storySettings", "startSettings", "mainEvents", "visibility", "thumbnailUrl", "thumbnailModerationStatus", "characters", "deletedAt")
         assertThat(body["characters"][0].properties().map { it.key }).containsExactlyInAnyOrder("id", "name", "description", "images")
         assertThat(body["characters"][0]["images"][0].properties().map { it.key }).containsExactlyInAnyOrder("id", "imageName", "imageUrl", "moderationStatus")
     }
 
-    @Test fun `삭제됐거나 없는 스토리는 404이고 UUID가 아니면 400이다`() {
-        val deleted = stories.save(Story(userId = owner.id, title = "삭제", deletedAt = Instant.now()))
-        for (id in listOf(deleted.publicId, UUID.randomUUID())) assertThat(json(settingsOf(id).expectStatus().isNotFound)["code"].asText()).isEqualTo("NOT_FOUND")
+    @Test fun `삭제된 스토리 설정은 삭제 전 저장값과 삭제 시각을 돌려준다`() {
+        val story = full()
+        val before = ok(story) as ObjectNode
+        val deletedAt = Instant.parse("2026-10-26T01:00:00Z")
+        jdbc.update("UPDATE stories SET deleted_at = ? WHERE id = ?", java.sql.Timestamp.from(deletedAt), story.id)
+        val after = ok(story) as ObjectNode
+        assertThat(before["deletedAt"].isNull).isTrue()
+        assertThat(after["deletedAt"].asText()).isEqualTo(deletedAt.toString())
+        assertThat(after.deepCopy().apply { remove("deletedAt") }).isEqualTo(before.deepCopy().apply { remove("deletedAt") })
+        val ownerToken = tokens.issueAccessToken(owner.publicId)
+        for (path in listOf("/api/v1/stories/${story.publicId}", "/api/v1/stories/${story.publicId}/edit")) {
+            client.get().uri(path).header("Authorization", "Bearer $ownerToken").exchange().expectStatus().isNotFound
+        }
+    }
+
+    @Test fun `없는 스토리는 404이고 UUID가 아니면 400이다`() {
+        assertThat(json(settingsOf(UUID.randomUUID()).expectStatus().isNotFound)["code"].asText()).isEqualTo("NOT_FOUND")
         assertThat(json(settingsOf("not-a-uuid").expectStatus().isBadRequest)["code"].asText()).isEqualTo("BAD_REQUEST")
     }
 
@@ -217,7 +231,7 @@ class AdminStorySettingsIntegrationTests {
                 assertThat(types.contains("null")).describedAs("$name.$property nullable").isEqualTo(property in nullable)
             }
         }
-        check(ref, setOf("oneLineIntro", "description", "protagonistName", "thumbnailUrl"))
+        check(ref, setOf("oneLineIntro", "description", "protagonistName", "thumbnailUrl", "deletedAt"))
         val props = schemas[ref]["properties"]
         fun item(property: String, node: JsonNode = props) = node[property]["items"]["\$ref"].asText().substringAfterLast('/')
         val character = item("characters")

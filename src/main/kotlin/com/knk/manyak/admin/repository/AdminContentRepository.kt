@@ -15,7 +15,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
 
     fun stories(request: AdminStoriesRequest, page: AdminPagination, officialId: Long?, storyId: UUID? = null): AdminPageResponse<AdminStoryListResponse> {
         val q = AdminQuery()
-        q.add("s.deleted_at IS NULL"); q.equal("s.public_id", storyId); q.equal("u.public_id", request.memberId)
+        q.deleted("s.deleted_at", request.deleted); q.equal("s.public_id", storyId); q.equal("u.public_id", request.memberId)
         q.equal("s.visibility", request.visibility)
         request.scope?.let {
             q.add(if (officialId == null) { if (it == "original") "1=0" else "1=1" }
@@ -36,7 +36,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val turns = "(SELECT COALESCE(SUM(c.current_turn),0) FROM story_chats c WHERE $chatCondition)"
         if (request.chatFrom != null || request.chatTo != null) q.add("$count > 0")
         val from = "FROM stories s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id $session"
-        val result = jdbc.adminPage("""s.public_id, s.title, s.genre, s.description, s.visibility, s.created_at, s.user_id AS owner_internal_id,
+        val result = jdbc.adminPage("""s.public_id, s.title, s.genre, s.description, s.visibility, s.created_at, s.deleted_at, s.user_id AS owner_internal_id,
             CASE WHEN $held THEN 'HELD' ELSE 'APPROVED' END AS moderation_status,
             CASE WHEN cs.id IS NULL THEN NULL ELSE $supporting END AS supporting_count,
             $count AS chat_count, $turns AS total_turns, $MEMBER_COLUMNS""", from, q,
@@ -45,7 +45,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
                 AdminStoryListResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), (rs.getString("genre") ?: ""), rs.getString("description"),
                     if (officialId != null && rs.longOrNull("owner_internal_id") == officialId) "original" else "user",
                     rs.getString("visibility"), rs.getString("moderation_status"), emptyList(), rs.longOrNull("supporting_count"), owner,
-                    rs.getLong("chat_count"), rs.getLong("total_turns"), rs.instant("created_at")!!)
+                    rs.getLong("chat_count"), rs.getLong("total_turns"), rs.instant("created_at")!!, rs.instant("deleted_at"))
             })
         if (result.items.isEmpty()) return result
         val tags = jdbc.query("""SELECT s.public_id, t.name FROM stories s $session
@@ -69,7 +69,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         AND t.ref_type IN ('CHAT','CHAT_TURN','CHAT_IMAGE') AND t.amount<0 AND CAST(t.reason AS VARCHAR) IN ('CHAT_TURN','CHAT_IMAGE'))"""
     fun chats(request: AdminChatsRequest, page: AdminPagination, chatId: UUID? = null): AdminPageResponse<AdminChatResponse> {
         val q = AdminQuery()
-        q.add("c.deleted_at IS NULL"); q.equal("c.public_id", chatId); q.equal("s.public_id", request.storyId); q.equal("u.public_id", request.memberId)
+        q.deleted("c.deleted_at", request.deleted); q.equal("c.public_id", chatId); q.equal("s.public_id", request.storyId); q.equal("u.public_id", request.memberId)
         request.startedAs?.let { q.add("c.user_id IS ${if (it == "MEMBER") "NOT " else ""}NULL") }
         request.turnBucket?.let { val range = AdminQuery.turnBounds[it]; q.add("c.current_turn BETWEEN ${range.first} AND ${range.last}") }
         request.hasFirstMessage?.let { q.add(if (it) "$firstSeconds <= 900" else "($firstSeconds IS NULL OR $firstSeconds > 900)") }
@@ -82,14 +82,14 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         q.range("c.created_at", request.from, request.to)
         q.search(request.normalizedQuery(), listOf("c.public_id"), listOf("s.title", "u.nickname"))
         q.ai(request, "al.chat_id=c.public_id")
-        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.created_at, c.updated_at,
+        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.created_at, c.updated_at, c.deleted_at,
             $credits AS credits_spent, $firstSeconds AS first_seconds, $MEMBER_COLUMNS""",
             "FROM story_chats c JOIN stories s ON s.id=c.story_id LEFT JOIN users u ON u.id=c.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
             q, page, "c.public_id", RowMapper { rs: ResultSet, _ ->
                 val member = memberSummary(rs)
                 AdminChatResponse(rs.getObject("public_id", UUID::class.java), AdminStorySummary(rs.getObject("story_public_id", UUID::class.java), rs.getString("title"), (rs.getString("genre") ?: "")),
                     member, if (member == null) "GUEST" else "MEMBER", rs.getInt("current_turn"), rs.instant("created_at")!!, rs.instant("updated_at")!!,
-                    rs.getLong("credits_spent"), rs.longOrNull("first_seconds"))
+                    rs.getLong("credits_spent"), rs.longOrNull("first_seconds"), rs.instant("deleted_at"))
             })
     }
 }
