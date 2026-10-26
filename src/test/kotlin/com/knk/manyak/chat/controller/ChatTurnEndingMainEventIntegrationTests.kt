@@ -34,6 +34,7 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import org.assertj.core.api.Assertions.assertThat
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -47,6 +48,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -116,6 +118,7 @@ class ChatTurnEndingMainEventIntegrationTests {
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var snapshotService: StoryPublicSnapshotService
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
     @Autowired private lateinit var databaseCleaner: com.knk.manyak.support.DatabaseCleaner
 
     private lateinit var story: Story
@@ -197,6 +200,7 @@ class ChatTurnEndingMainEventIntegrationTests {
                 .contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
                 .body("""{"turnId":${turn.id},"realtimeImage":false}""")
                 .exchange().expectStatus().isOk.expectBody(String::class.java)
+            awaitGenerationReleased(chat.publicId.toString())
             judgingAiClient.lastRequest.get()
         }
         assertThat(judgingAiClient.lastTraceLink.get().turnNumber).isEqualTo(1)
@@ -743,7 +747,7 @@ class ChatTurnEndingMainEventIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)
         authorization?.let { spec.header("Authorization", it) }
-        return spec
+        val body = spec
             .body("""{"userInput":"$userInput"}""")
             .exchange()
             .expectStatus().isOk
@@ -751,6 +755,14 @@ class ChatTurnEndingMainEventIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        awaitGenerationReleased(chatId)
+        return body
+    }
+
+    private fun awaitGenerationReleased(chatId: String) {
+        // completed 수신은 워커 finally의 생성 키 해제까지 보장하지 않는다(CHAT 5-2-6).
+        await().alias("채팅 $chatId 생성 키 해제").atMost(Duration.ofSeconds(10))
+            .until { generationStore.get(chatId) == null }
     }
     @Autowired private lateinit var settings: com.knk.manyak.story.repository.StorySettingRepository
     @Autowired private lateinit var chatService: com.knk.manyak.chat.service.ChatService
@@ -786,6 +798,7 @@ class ChatTurnEndingMainEventIntegrationTests {
         restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/regenerate/stream")
             .header("X-Manyak-Device-Id", "test-device").contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
             .body("""{"turnId":${turn.id},"realtimeImage":false}""").exchange().expectStatus().isOk.expectBody(String::class.java)
+        awaitGenerationReleased(chat.publicId.toString())
         assertThat(judgingAiClient.lastRequest.get().storySettings.protagonistName).isEqualTo("민우")
         assertThat(storyChatRepository.findById(chat.id).orElseThrow().reachedEndingNameSnapshot).isNull()
 
