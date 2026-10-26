@@ -114,7 +114,7 @@ class AdminMetricsIntegrationTests {
                 val from=LocalDate.parse(u.queryParameter("start"),format); val to=LocalDate.parse(u.queryParameter("end"),format)
                 val dates=from.datesUntil(to.plusDays(1)).toList()
                 val data: Any=when {
-                    u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { it.toString() to List(31) { day -> mapOf("count" to if(day==0) 20 else 5,"outof" to 20,"incomplete" to false) } })))
+                    u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { it.toString() to List(32) { day -> mapOf("count" to if(day==0) 20 else if(day==1) 19 else 5,"outof" to 20,"incomplete" to false) } })))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 30-it }))
                     u.encodedPath.endsWith("/users") -> mapOf("series" to listOf(listOf(100)))
                     else -> mapOf("xValues" to dates.map { it.toString() },"series" to listOf(List(dates.size) { if(u.queryParameter("m")=="average" || u.encodedPath.endsWith("/average")) 4.5 else 10 }), "seriesCollapsed" to listOf(listOf(mapOf("value" to 100))))

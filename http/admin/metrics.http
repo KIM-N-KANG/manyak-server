@@ -44,6 +44,11 @@ client.test("사용자 활동 응답", () => {
 %}
 
 ### 리텐션 — D1부터 D7까지와 D30, 날짜별 분모로 가중한 요약
+# Amplitude 배열: 0=코호트 전체 인원(users), 1=Day 0, n+1=Day n. d1은 Day 1(인덱스 2)이다.
+# 배포 뒤 all을 같은 조건(New User→Any Active, N-Day, 국내, Asia/Seoul)의 원본 차트와 대조한다.
+# 코호트 users와 Day 1을 비교한다. 저장 원본은 유지되므로 과거 코호트도 즉시 새 인덱스로 읽는다.
+# 배포 다음 날 backfill done 뒤, 서비스 시작일 이후 users_retention 확정 행은 32칸 이상이며
+# 인덱스 0~31에 incomplete가 없어야 한다. 잘못 확정된 행은 읽을 때 확정을 풀고 하루 한 번 재수집한다.
 GET {{baseUrl}}/api/v1/admin/users/retention?days=7
 Authorization: Bearer {{adminToken}}
 

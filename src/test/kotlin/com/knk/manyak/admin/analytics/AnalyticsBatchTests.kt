@@ -70,15 +70,30 @@ class AnalyticsBatchTests {
         assertThat(requested).containsExactly(AnalyticsRange(LocalDate.parse("2026-07-21"), LocalDate.parse("2026-07-31")), AnalyticsRange(start, LocalDate.parse("2026-07-19")))
         assertThat(fixture.snapshots.missingDates(m, AnalyticsRange(start, day.minusDays(2)))).isEmpty()
     }
-    @Test fun `리텐션은 최근31일 미확정 코호트만 받고 오늘 받은 불완전 값도 다시 받지 않는다`() {
+    @Test fun `리텐션은 최근33일 미확정 코호트만 받고 오늘 받은 불완전 값도 다시 받지 않는다`() {
         val m = metric(retention = true); val runner = runner(listOf(m), day.minusDays(40))
         save(m, AnalyticsRange(day.minusDays(10), day.minusDays(10)))
         save(m, AnalyticsRange(day.minusDays(5), day.minusDays(5)), false)
         val result = runner.run()!!
-        assertThat(result.phase).isEqualTo("nightly"); assertThat(result.fetchedDays).isEqualTo(29)
-        assertThat(requested.flatMap { it.dates() }).doesNotContain(day, day.minusDays(32), day.minusDays(10), day.minusDays(5))
-        assertThat(fixture.snapshots.missingDates(m, AnalyticsRange(day.minusDays(31), day.minusDays(1)))).isEmpty()
+        assertThat(result.phase).isEqualTo("nightly"); assertThat(result.fetchedDays).isEqualTo(31)
+        assertThat(requested.flatMap { it.dates() }).doesNotContain(day, day.minusDays(34), day.minusDays(10), day.minusDays(5))
+        assertThat(fixture.snapshots.missingDates(m, AnalyticsRange(day.minusDays(33), day.minusDays(1)))).isEmpty()
     }
+    @Test fun `새벽은 D-33까지 받고 잘못 확정된 D-34는 다음 초기 백필에서 받는다`() {
+        val complete = fixture.mapper.valueToTree<JsonNode>(List(32) { i -> mapOf("count" to if (i == 0) 20 else 5, "outof" to 20, "incomplete" to false) })
+        val invalid = fixture.mapper.valueToTree<JsonNode>(List(31) { i -> mapOf("count" to if (i == 0) 20 else 5, "outof" to 20, "incomplete" to false) })
+        val m = DailyAnalyticsMetric(metric().definition, true) { _, range -> range.dates().associateWith { complete } }
+        fixture.store.saveDaily(m.definition, AnalyticsRange(day.minusDays(32), day.minusDays(1)).dates().associateWith { AnalyticsValue(complete, clock.instant(), clock.instant()) })
+        fixture.store.saveDaily(m.definition, listOf(33L, 34L).associate { day.minusDays(it) to AnalyticsValue(invalid, clock.instant().minusSeconds(86400), clock.instant()) })
+        val runner = runner(listOf(m), day.minusDays(34))
+        assertThat(runner.run()!!.phase).isEqualTo("nightly")
+        assertThat(requested).containsExactly(AnalyticsRange(day.minusDays(33), day.minusDays(33)))
+        clock.at = clock.at.plusSeconds(300)
+        assertThat(runner.run()!!.phase).isEqualTo("backfill")
+        assertThat(requested).containsExactly(AnalyticsRange(day.minusDays(33), day.minusDays(33)), AnalyticsRange(day.minusDays(34), day.minusDays(34)))
+        assertThat(runner.run()).isNull()
+    }
+
     @Test fun `500은 다음 키를 계속 처리하고 429는 그 실행을 끝내며 실패 비용은 반환한다`() {
         val ms = listOf(metric("first"), metric("second")); val runner = runner(ms)
         // enqueue 대신 응답을 순서대로 주는 dispatcher
@@ -145,28 +160,30 @@ class AnalyticsBatchTests {
             assertThat(fixture.budget.reserve(200)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         } finally { pool.shutdownNow() }
     }
-    @Test fun `실제 기본 지표 정의 전체를 목 응답으로 받아 세 슬롯 안에 새벽 작업을 완료한다`() {
+    @Test fun `실제 기본 지표 정의 전체를 목 응답으로 받아 네 슬롯 안에 새벽 작업을 완료한다`() {
         val queries = AnalyticsQueryFactory(fixture.mapper); val defs = MetricDefinitions(queries, fixture.mapper)
         val settings = CampaignSettings(listOf(CampaignDefinition("campaign-key", "진행", "actual-campaign", day.minusDays(1))),
             mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val policy = AnalyticsBatchPolicy()
-        val catalog = DefaultAnalyticsBatchCatalog(fixture.service, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy)
+        val dashboard = AdminAnalyticsService(fixture.snapshots, AmplitudeDashboardProperties(teamCohortId = "team"), fixture.mapper, clock)
+        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy)
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
             if (r.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(r)
             val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
             val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
-            val points = List(31) { mapOf("count" to 1, "outof" to 2, "incomplete" to true) }
+            val points = List(32) { i -> mapOf("count" to if (i == 0) 2 else 1, "outof" to 2, "incomplete" to (i == 31)) }
             return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(mapOf("values" to AnalyticsRange(from, to).dates().associate { it.toString() to points }))))))
         } }
-        val results = (1..3).map { val result = runner.run()!!; clock.at = clock.at.plusSeconds(300); result }
+        val results = (1..4).map { val result = runner.run()!!; clock.at = clock.at.plusSeconds(300); result }
         assertThat(results.map { it.phase }).containsOnly("nightly")
-        assertThat(results.take(2).map { it.reason }).containsOnly("budget_share")
+        assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
+        assertThat(results.sumOf { it.cost }).isEqualTo(907)
         catalog.metrics().forEach { entry ->
-            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 31 else 1)), day.minusDays(1))
+            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()
         }
         val requests = (0 until server.requestCount).map { server.takeRequest().requestUrl!! }

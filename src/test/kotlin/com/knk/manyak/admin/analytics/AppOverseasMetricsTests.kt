@@ -34,8 +34,8 @@ class AppOverseasMetricsTests {
                 val e = u.queryParameter("e")?.let { fixture.mapper.readTree(it) }
                 val group = condition(e ?: u.queryParameter("se")?.let { fixture.mapper.readTree(it) })
                 val data: Any = when {
-                    u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { date -> date.toString() to List(10) { i ->
-                        mapOf("count" to (if (group == "legacy_all") 5 else if (group == "android") 1 else 4), "outof" to (if (group == "legacy_all") 20 else if (group == "android") 5 else 15), "incomplete" to (group == "android" && i == 7))
+                    u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { date -> date.toString() to List(32) { i ->
+                        mapOf("count" to (if (i == 0) { if (group == "legacy_all") 20 else if (group == "android") 5 else 15 } else if (group == "legacy_all") 5 else if (group == "android") 1 else 4), "outof" to (if (group == "legacy_all") 20 else if (group == "android") 5 else 15), "incomplete" to (group == "android" && i == 8))
                     } })))
                     u.encodedPath.endsWith("/average") -> mapOf("xValues" to dates.map { "${it}T00:00:00" }, "series" to listOf(dates.map { 12.5 }))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 1 }))
@@ -189,14 +189,14 @@ class AppOverseasMetricsTests {
         }
         assertThat(definitions.sessions().map { it.definition.hash }).containsExactlyElementsOf(oldSessions)
     }
-    @Test fun `새벽 카탈로그는 네 기능 조건을 중복 없이 포함하고 하루 115와 리텐션 744다`() {
+    @Test fun `새벽 카탈로그는 네 기능 조건을 중복 없이 포함하고 하루 115와 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
         val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
         assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(115)
-        assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*31).isEqualTo(744)
+        assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
         assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") }).hasSize(48)
         assertThat(entries.map { it.metric.definition.metric }).noneMatch { it.contains("mau") || it.contains("push_opens") || it.startsWith("conversion_") }
     }
@@ -241,8 +241,8 @@ class AppOverseasMetricsTests {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requests += request
                 val group = condition(event(request,"se"))
-                val points = List(31) { i -> mapOf("outof" to if(group=="android") 0 else 1,
-                    "count" to if(group=="legacy_all" || (group=="web" && i==0)) 1 else 0,"incomplete" to false) }
+                val points = List(32) { i -> mapOf("outof" to if(group=="android") 0 else 1,
+                    "count" to if(group=="legacy_all" || (group=="web" && i<=1)) 1 else 0,"incomplete" to false) }
                 return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(mapOf("values" to mapOf("2026-10-19" to points)))))))
             }
         }
