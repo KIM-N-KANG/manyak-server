@@ -452,11 +452,119 @@ class AdminReadApiIntegrationTests {
         assertThat(chatGenre.isNull).isFalse()
         assertThat(genre.asText()).isEmpty()
         assertThat(chatGenre.asText()).isEmpty()
-        val deleted = storyRepository.save(com.knk.manyak.story.entity.Story(title = "삭제", deletedAt = now))
-        get("/stories/${deleted.publicId}").expectStatus().isNotFound
+        get("/stories/${UUID.randomUUID()}").expectStatus().isNotFound
+        get("/chats/${UUID.randomUUID()}").expectStatus().isNotFound
         for (path in listOf("/stories/bad", "/chats/bad", "/chats?startedAs=BOT", "/stories?from=2026-13-01")) {
             get(path).expectStatus().isBadRequest
         }
+    }
+
+    private fun ids(path: String) = json(get(path).expectStatus().isOk)["items"].toList().map { it[if (path.startsWith("/chats")) "chatId" else "storyId"].asText() }
+
+    @Test fun `스토리 삭제 필터는 없으면 제외하고 include는 함께 only는 삭제된 스토리만 싣는다`() {
+        val live = (1..2).map { story(title = "유지 $it") }
+        val removed = storyRepository.save(com.knk.manyak.story.entity.Story(title = "삭제", deletedAt = now))
+        assertThat(ids("/stories")).containsExactlyInAnyOrderElementsOf(live.map { it.publicId.toString() })
+        assertThat(ids("/stories?deleted=include")).hasSize(3)
+        assertThat(ids("/stories?deleted=only")).containsExactly(removed.publicId.toString())
+        val items = json(get("/stories?deleted=include").expectStatus().isOk)["items"].associateBy { it["storyId"].asText() }
+        assertThat(items.getValue(removed.publicId.toString())["deletedAt"].asText()).isEqualTo(now.toString())
+        for (story in live) assertThat(items.getValue(story.publicId.toString())["deletedAt"].isNull).isTrue()
+    }
+
+    @Test fun `회원 범위 스토리 목록에도 삭제 필터를 적용한다`() {
+        val a = member("회원 A")
+        val other = member("다른 회원")
+        val removed = storyRepository.save(com.knk.manyak.story.entity.Story(userId = a.id, title = "A 삭제", deletedAt = now))
+        story(a, "A 유지")
+        storyRepository.save(com.knk.manyak.story.entity.Story(userId = other.id, title = "다른 삭제", deletedAt = now))
+        assertThat(ids("/stories?memberId=${a.publicId}&deleted=only")).containsExactly(removed.publicId.toString())
+    }
+
+    @Test fun `삭제 필터 값이 include나 only가 아니면 400이다`() {
+        for (path in listOf("/stories?deleted=all", "/stories?deleted=exclude", "/chats?deleted=INCLUDE", "/chats?deleted=exclude")) {
+            assertThat(json(get(path).expectStatus().isBadRequest)["code"].asText()).describedAs(path).isEqualTo("BAD_REQUEST")
+        }
+    }
+
+    @Test fun `삭제된 스토리 상세는 삭제 시각과 함께 응답한다`() {
+        val removed = storyRepository.save(com.knk.manyak.story.entity.Story(title = "삭제", deletedAt = now))
+        assertThat(json(get("/stories/${removed.publicId}").expectStatus().isOk)["deletedAt"].asText()).isEqualTo(now.toString())
+    }
+
+    @Test fun `삭제된 스토리의 집계는 그 스토리의 삭제되지 않은 채팅으로 정한다`() {
+        val removed = story(title = "삭제 집계")
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        val live = listOf(chat(removed, turns = 3), chat(removed, turns = 5, created = midnight.plusSeconds(1)))
+        chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = removed.id, currentTurn = 10, deletedAt = now))
+        val item = json(get("/stories?deleted=include").expectStatus().isOk)["items"][0]
+        val detail = json(get("/stories/${removed.publicId}").expectStatus().isOk)
+        for (body in listOf(item, detail)) {
+            assertThat(body["chatCount"].asLong()).isEqualTo(2)
+            assertThat(body["totalTurns"].asLong()).isEqualTo(8)
+        }
+        assertThat(detail["retention"].toList().map { it["rate"].asDouble() })
+            .containsExactly(1.0, 1.0, 1.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        assertThat(detail["recentChats"].toList().map { it["chatId"].asText() }).containsExactlyInAnyOrderElementsOf(live.map { it.publicId.toString() })
+    }
+
+    @Test fun `채팅 삭제 필터는 채팅의 삭제 시각으로 판정한다`() {
+        val live = story(title = "유지")
+        val removedStory = story(title = "삭제 스토리")
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removedStory.id)
+        val kept = listOf(chat(live), chat(live), chat(removedStory))
+        val removed = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = live.id, deletedAt = now))
+        assertThat(ids("/chats")).containsExactlyInAnyOrderElementsOf(kept.map { it.publicId.toString() })
+        assertThat(ids("/chats?deleted=include")).hasSize(4)
+        assertThat(ids("/chats?deleted=only")).containsExactly(removed.publicId.toString())
+        val items = json(get("/chats?deleted=include").expectStatus().isOk)["items"].associateBy { it["chatId"].asText() }
+        assertThat(items.getValue(removed.publicId.toString())["deletedAt"].asText()).isEqualTo(now.toString())
+        for (chat in kept) assertThat(items.getValue(chat.publicId.toString())["deletedAt"].isNull).isTrue()
+    }
+
+    @Test fun `스토리 범위 채팅 목록에도 삭제 필터를 적용한다`() {
+        val s = story(title = "범위")
+        chat(s)
+        chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s.id, deletedAt = now))
+        chat(story(title = "다른 스토리"))
+        assertThat(ids("/chats?storyId=${s.publicId}&deleted=include")).hasSize(2)
+    }
+
+    @Test fun `삭제된 채팅 상세는 삭제 시각과 함께 원문 없이 응답한다`() {
+        val removed = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = story().id, deletedAt = now))
+        message(removed, 30)
+        val body = json(get("/chats/${removed.publicId}").expectStatus().isOk)
+        assertThat(body["deletedAt"].asText()).isEqualTo(now.toString())
+        for (field in listOf("messages", "summary", "suggestedInputs", "persona")) assertThat(body.has(field)).describedAs(field).isFalse()
+    }
+
+    @Test fun `회원 범위 채팅 목록에도 삭제 필터를 적용한다`() {
+        val owner = member("대상 회원")
+        val other = member("다른 회원")
+        val s = story()
+        val kept = chat(s, owner)
+        val removed = chat(s, owner)
+        val unrelated = chat(s, other)
+        for (c in listOf(removed, unrelated)) jdbc.update("UPDATE story_chats SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), c.id)
+        val scope = "/chats?memberId=${owner.publicId}"
+        assertThat(ids(scope)).containsExactly(kept.publicId.toString())
+        assertThat(ids("$scope&deleted=include")).containsExactlyInAnyOrder(kept.publicId.toString(), removed.publicId.toString())
+        assertThat(ids("$scope&deleted=only")).containsExactly(removed.publicId.toString())
+    }
+
+    @Test fun `차트 막대 링크는 삭제 필터를 넣지 않아 삭제된 채팅을 뺀 목록을 연다`() {
+        val s = story()
+        val kept = listOf(chat(s, turns = 3), chat(s, turns = 3))
+        val removed = chat(s, turns = 3)
+        jdbc.update("UPDATE story_chats SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        val body = json(get("/dashboard/charts?days=7").expectStatus().isOk)
+        for (distribution in body["distributions"]) for (point in distribution["points"]) {
+            assertThat(point["link"]["params"].has("deleted")).describedAs(distribution["chartId"].asText()).isFalse()
+        }
+        val p = body["distributions"].first { it["chartId"].asText() == "turns" }["points"][3]["link"]["params"]
+        val page = json(get("/chats?turnBucket=${p["turnBucket"].asText()}&from=${p["from"].asText()}&to=${p["to"].asText()}").expectStatus().isOk)
+        assertThat(page["totalElements"].asLong()).isEqualTo(2)
+        assertThat(page["items"].toList().map { it["chatId"].asText() }).containsExactlyInAnyOrderElementsOf(kept.map { it.publicId.toString() })
     }
 
     private fun credit(user: User, amount: Long, reason: String, at: Instant = now) {
@@ -1017,7 +1125,7 @@ class AdminReadApiIntegrationTests {
         assertThat(json(get("/stories?moderationStatus=APPROVED").expectStatus().isOk)["items"][0]["storyId"].asText()).isEqualTo(other.publicId.toString())
         for (q in listOf("대상", "소유자", target.publicId.toString())) assertThat(json(get("/stories?q=$q").expectStatus().isOk)["items"].size()).isGreaterThan(0)
         val deleted = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = target.id, deletedAt = now))
-        get("/chats/${deleted.publicId}").expectStatus().isNotFound
+        assertThat(json(get("/chats/${deleted.publicId}").expectStatus().isOk)["deletedAt"].asText()).isEqualTo(now.toString())
         assertThat(json(get("/chats?storyId=${target.publicId}").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(8)
     }
     @Autowired private lateinit var submissionRepository: com.knk.manyak.story.submission.StorySubmissionRepository

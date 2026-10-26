@@ -12,8 +12,8 @@ data class PlatformCounts(val all: Long, val web: Long, val android: Long, val u
 data class PlatformDecimals(val all: Double?, val web: Double?, val android: Double?, val unknown: Double? = null)
 data class ActivityDay(val date: LocalDate, val activeUsers: PlatformCounts, val newVisitors: PlatformCounts, val cumulativeNewVisitors: PlatformCounts, val messagesPerUser: PlatformDecimals)
 data class ActivityResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val monthlyActiveUsers: Long?, val daily: List<ActivityDay>, val pendingDates: List<LocalDate>)
-data class RetentionRates(val d1: Double?, val d7: Double?, val d30: Double?)
-data class RetentionCohort(val date: LocalDate, val users: Long, val d1: Double?, val d7: Double?, val d30: Double?)
+data class RetentionRates(val d1: Double?, val d2: Double?, val d3: Double?, val d4: Double?, val d5: Double?, val d6: Double?, val d7: Double?, val d30: Double?)
+data class RetentionCohort(val date: LocalDate, val users: Long, val d1: Double?, val d2: Double?, val d3: Double?, val d4: Double?, val d5: Double?, val d6: Double?, val d7: Double?, val d30: Double?)
 data class RetentionPlatform(val platform: String, val cohorts: List<RetentionCohort>, val summary: RetentionRates)
 data class RetentionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platforms: List<RetentionPlatform>, val pendingDates: List<LocalDate>)
 data class SessionDay(val date: LocalDate, val averageSessionSeconds: PlatformDecimals)
@@ -58,8 +58,8 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
                 val points = dates.mapNotNull { point(it, day) }; val denominator = points.sumOf { it["outof"].asLong() }
                 return if (denominator == 0L) null else points.sumOf { it["count"].asLong() }.toDouble() / denominator
             }
-            RetentionPlatform(listOf("all", "web", "android")[i], dates.map { date -> RetentionCohort(date, result.value(metric, date)!!.value[0]["outof"].asLong(), ratio(date, 1), ratio(date, 7), ratio(date, 30)) },
-                RetentionRates(weighted(1), weighted(7), weighted(30)))
+            RetentionPlatform(listOf("all", "web", "android")[i], dates.map { date -> RetentionCohort(date, result.value(metric, date)!!.value[0]["outof"].asLong(), ratio(date, 1), ratio(date, 2), ratio(date, 3), ratio(date, 4), ratio(date, 5), ratio(date, 6), ratio(date, 7), ratio(date, 30)) },
+                RetentionRates(weighted(1), weighted(2), weighted(3), weighted(4), weighted(5), weighted(6), weighted(7), weighted(30)))
         }
         return RetentionResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, platforms, result.pendingDates())
     }

@@ -73,6 +73,10 @@ class StoryEditService(
         return buildEditForm(story)
     }
 
+    /** 관리자 스토리 설정(ADMIN 4-2-7) 전용. 호출자가 찾은 스토리(삭제 포함)의 현재 저장값 조립만 재사용한다. 소유권과 삭제 게이트 없음. */
+    @Transactional(readOnly = true)
+    fun getCurrentForm(story: Story): StoryEditFormResponse = buildEditForm(story)
+
     /** 부분 갱신: 보낸(non-null) 필드만 교체하고 나머지는 유지한다. 리스트는 보내면 전체 교체다. */
     @Transactional
     fun updateStory(storyId: String, userId: Long?, request: UpdateStoryRequest, approvedImageUrls: Map<String, String> = emptyMap()): StoryEditFormResponse {

@@ -98,32 +98,35 @@ class AdminReadService(
         if (request.genre != null && (request.genre!!.isBlank() || request.genre!!.length > 30 || request.genre!!.contains(","))) badAdminQuery("장르가 올바르지 않습니다.")
         request.validateAi(setOf("storyline_generation", "story_completion"))
         AdminDateRange.of(request.creationFrom, request.creationTo)
+        validateDeleted(request.deleted)
         return content.stories(request, request.pagination(mapOf("createdAt" to "s.created_at", "chatCount" to "chat_count", "totalTurns" to "total_turns"), "createdAt"), official.officialUserId())
     }
     fun story(storyId: UUID): AdminStoryDetailResponse {
-        val story = content.stories(AdminStoriesRequest(), AdminPagination(1, 1, "s.created_at desc"), official.officialUserId(), storyId).items.firstOrNull() ?: notFound()
+        val story = content.stories(AdminStoriesRequest().apply { deleted = "include" }, AdminPagination(1, 1, "s.created_at desc"), official.officialUserId(), storyId).items.firstOrNull() ?: notFound()
         val recent = content.chats(AdminChatsRequest().apply { this.storyId = storyId }, AdminPagination(1, 5, "c.created_at desc")).items
         return AdminStoryDetailResponse(story, content.retention(storyId), recent)
     }
-    /** 4-2-7. 소유자 검사 없이 현재 저장값 수정 폼을 쓴다(소유자 ID를 그대로 넘겨 소유권 게이트를 통과). 접속 기록 없음. */
+    /** 4-2-7. 삭제 여부와 소유자 검사 없이 현재 저장값 수정 폼 조립을 쓴다. 접속 기록 없음. */
     fun storySettings(storyId: UUID): AdminStorySettingsResponse {
-        val story = storyRepository.findByPublicIdAndDeletedAtIsNull(storyId) ?: notFound()
-        return AdminStorySettingsResponse(edit.getEditForm(storyId.toString(), story.userId))
+        val story = storyRepository.findByPublicId(storyId) ?: notFound()
+        return AdminStorySettingsResponse(edit.getCurrentForm(story), story.deletedAt)
     }
     fun chats(request: AdminChatsRequest): AdminPageResponse<AdminChatResponse> {
         if (request.startedAs != null && request.startedAs !in setOf("GUEST", "MEMBER")) badAdminQuery("채팅 시작 구분이 올바르지 않습니다.")
         request.validateAi(setOf("chat_response", "choice_generation", "chat_image"))
         AdminDateRange.of(request.turnDate, request.turnDate)
+        validateDeleted(request.deleted)
         return content.chats(request, request.pagination(mapOf("startedAt" to "c.created_at", "lastActiveAt" to "c.updated_at",
             "turnCount" to "c.current_turn", "creditsSpent" to "credits_spent"), "startedAt"))
     }
-    fun chat(chatId: UUID): AdminChatResponse = content.chats(AdminChatsRequest(), AdminPagination(1, 1, "c.created_at desc"), chatId).items.firstOrNull() ?: notFound()
+    fun chat(chatId: UUID): AdminChatResponse = content.chats(AdminChatsRequest().apply { deleted = "include" }, AdminPagination(1, 1, "c.created_at desc"), chatId).items.firstOrNull() ?: notFound()
 
     fun auditLogs(request: AdminAuditLogsRequest): AdminPageResponse<AdminAuditLogResponse> {
         if (request.targetId != null && request.targetType == null) badAdminQuery("targetId는 targetType과 함께 지정해야 합니다.")
         return reads.auditLogs(request, request.pagination(mapOf("createdAt" to "l.created_at", "category" to "l.category", "action" to "l.action",
             "targetType" to "l.target_type", "admin" to "u.nickname"), "createdAt"))
     }
+    private fun validateDeleted(value: String?) { if (value != null && value !in setOf("include", "only")) badAdminQuery("삭제 필터가 올바르지 않습니다.") }
     private fun requireMember(id: UUID) = users.findByPublicId(id) ?: notFound()
     private fun notFound(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다.")
 }
