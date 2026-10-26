@@ -576,6 +576,8 @@ class ChatTurnStreamCancellationIntegrationTests {
         java.util.UUID.fromString(id)
         assertThat(generation["startedAt"].asString()).endsWith("Z")
         worker.task.run()
+        // SSE timeout 0은 MockMvc 기본 결과 대기에서도 0ms가 된다. 별도 수신 스레드 완료를 기다린다.
+        started.getAsyncResult(10_000)
         val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(started)).andReturn().response
         assertThat(response.contentAsString).contains("event:started", id, "event:completed")
         val done = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}")).andReturn()
