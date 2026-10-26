@@ -25,6 +25,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -46,6 +47,8 @@ import org.springframework.test.web.servlet.client.RestTestClient
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatRegenerateControllerIntegrationTests {
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
+
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
     @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
 
@@ -341,8 +344,8 @@ class ChatRegenerateControllerIntegrationTests {
         assertThat(transactionRepository.findAll().count { it.reason == CreditReason.CHAT_TURN }).isZero()
     }
 
-    private fun regenerate(chatId: String, turnId: Long): String =
-        restTestClient.post()
+    private fun regenerate(chatId: String, turnId: Long): String {
+        val body = restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/regenerate/stream")
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -354,6 +357,9 @@ class ChatRegenerateControllerIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chatId)
+        return body
+    }
 
     @Autowired
     private lateinit var b13GuestTrialLimitService: com.knk.manyak.credit.service.GuestTrialLimitService

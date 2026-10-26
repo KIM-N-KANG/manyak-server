@@ -14,6 +14,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -39,6 +40,8 @@ import java.time.Instant
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatTurnChoiceSelectionIntegrationTests {
+
+    @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -314,7 +317,7 @@ class ChatTurnChoiceSelectionIntegrationTests {
             sourceTurnId?.let { add(""""sourceTurnId":$it""") }
             choiceOrder?.let { add(""""choiceOrder":$it""") }
         }
-        return restTestClient.post()
+        val body = restTestClient.post()
             .uri("/api/v1/chats/$chatPublicId/turns/stream")
             .header(DEVICE_ID_HEADER, "test-device")
             .contentType(MediaType.APPLICATION_JSON)
@@ -326,6 +329,8 @@ class ChatTurnChoiceSelectionIntegrationTests {
             .returnResult()
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
+        generationStore.awaitGenerationReleased(chatPublicId)
+        return body
     }
 
     /** 테스트 본문에 개행·따옴표가 들어가므로 JSON 문자열로 escape한다. */
