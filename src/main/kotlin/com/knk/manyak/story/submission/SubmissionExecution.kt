@@ -85,6 +85,7 @@ class SubmissionTransactions(
     private val entityManager: EntityManager,
     private val images: SubmissionImages,
     private val retries: SubmissionRetryPolicy,
+    private val takedowns: com.knk.manyak.story.service.StoryTakedownStateService,
 ) {
     @Transactional
     fun start(id: Long, attempt: Int): SubmissionWork? {
@@ -126,7 +127,9 @@ class SubmissionTransactions(
                     val kept = approvedForm.path("characters").path(index).path("images").mapNotNull { it.path("id").takeUnless { id -> id.isNull || id.isMissingNode }?.asText() }.toSet()
                     character.copy(images = character.images?.filter { it.id == null || it.id in kept })
                 })
+                val cleared = takedowns.clear(story)
                 edit.updateStory(story.publicId.toString(), row.userId, effective, approvedUrls)
+                if (cleared) events.publishEvent(StoryTakedownCleared(story.publicId, row.publicId, story.visibility))
             }
             entityManager.flush()
             decide(row, SubmissionStatus.APPROVED, emptyList(), null)

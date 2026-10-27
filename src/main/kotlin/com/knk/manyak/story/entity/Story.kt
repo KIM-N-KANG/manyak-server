@@ -72,6 +72,16 @@ class Story(
     @Column(nullable = false, length = 20)
     var visibility: StoryVisibility = StoryVisibility.PUBLIC,
 
+    @Column(name = "taken_down_at")
+    var takenDownAt: Instant? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "takedown_reason", length = 30)
+    var takedownReason: StoryTakedownReason? = null,
+
+    @Column(name = "takedown_reason_detail", length = 100)
+    var takedownReasonDetail: String? = null,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 

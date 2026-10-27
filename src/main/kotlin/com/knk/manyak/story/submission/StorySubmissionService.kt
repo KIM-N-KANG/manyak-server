@@ -45,7 +45,8 @@ class StorySubmissionService(
         requireMember(userId)
         val story = ownedStory(storyId, userId, true)
         requireNoPending(story.id)
-        if (request.visibility != null && request.copy(visibility = null) == UpdateStoryRequest()) {
+        if (request.visibility != null && request.copy(visibility = null) == UpdateStoryRequest() &&
+            !(story.takenDownAt != null && request.visibility == com.knk.manyak.story.entity.StoryVisibility.PUBLIC)) {
             edit.updateStory(storyId, userId, request)
             return editForm(storyId, userId)
         }

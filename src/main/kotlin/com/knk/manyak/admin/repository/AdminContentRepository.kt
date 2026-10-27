@@ -36,7 +36,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val turns = "(SELECT COALESCE(SUM(c.current_turn),0) FROM story_chats c WHERE $chatCondition)"
         if (request.chatFrom != null || request.chatTo != null) q.add("$count > 0")
         val from = "FROM stories s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id $session"
-        val result = jdbc.adminPage("""s.public_id, s.title, s.genre, s.description, s.visibility, s.created_at, s.deleted_at, s.user_id AS owner_internal_id,
+        val result = jdbc.adminPage("""s.public_id, s.title, s.genre, s.description, s.visibility, s.created_at, s.deleted_at, s.taken_down_at, s.takedown_reason, s.takedown_reason_detail, s.user_id AS owner_internal_id,
             CASE WHEN $held THEN 'HELD' ELSE 'APPROVED' END AS moderation_status,
             CASE WHEN cs.id IS NULL THEN NULL ELSE $supporting END AS supporting_count,
             $count AS chat_count, $turns AS total_turns, $MEMBER_COLUMNS""", from, q,
@@ -45,7 +45,8 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
                 AdminStoryListResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), (rs.getString("genre") ?: ""), rs.getString("description"),
                     if (officialId != null && rs.longOrNull("owner_internal_id") == officialId) "original" else "user",
                     rs.getString("visibility"), rs.getString("moderation_status"), emptyList(), rs.longOrNull("supporting_count"), owner,
-                    rs.getLong("chat_count"), rs.getLong("total_turns"), rs.instant("created_at")!!, rs.instant("deleted_at"))
+                    rs.getLong("chat_count"), rs.getLong("total_turns"), rs.instant("created_at")!!, rs.instant("deleted_at"),
+                    rs.instant("taken_down_at"), rs.getString("takedown_reason"), rs.getString("takedown_reason_detail"))
             })
         if (result.items.isEmpty()) return result
         val tags = jdbc.query("""SELECT s.public_id, t.name FROM stories s $session

@@ -83,6 +83,9 @@ erDiagram
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
   text protagonist_name
+  timestamp_with_time_zone taken_down_at
+  varchar_30_ takedown_reason
+  varchar_100_ takedown_reason_detail
 }
 ```
 

@@ -17,7 +17,13 @@ import java.util.UUID
 @RestController
 @RequestMapping("/api/v1/admin/moderation")
 @SecurityRequirement(name = "bearerAuth")
-class AdminModerationController(private val service: AdminModerationService) {
+class AdminModerationController(private val service: AdminModerationService, private val takedowns: StoryTakedownService) {
+    @PostMapping("/stories/{storyId}/takedown")
+    fun takedown(@PathVariable storyId: UUID, @RequestBody body: StoryTakedownRequest, request: HttpServletRequest) =
+        com.knk.manyak.auth.consent.SocialAuthPrivacyFilter.safely {
+            takedowns.takeDown(AdminRequester.userId(request), storyId, body)
+        }
+
     @GetMapping("/holds")
     fun holds(@Valid @ModelAttribute query: AdminHoldListRequest) = service.holds(query)
 

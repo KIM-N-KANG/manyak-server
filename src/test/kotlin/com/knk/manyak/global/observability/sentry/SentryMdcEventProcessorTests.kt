@@ -104,6 +104,25 @@ class SentryMdcEventProcessorTests {
         }
     }
 
+    @Test
+    fun `공개 중단 event와 transaction은 메모와 입력 사유를 수집하지 않는다`() {
+        fun request() = io.sentry.protocol.Request().apply {
+            url = "/api/v1/admin/moderation/stories/not-a-uuid/takedown"
+            data = "private memo and reason detail"
+            queryString = "memo=private"
+        }
+        val event = SentryEvent().apply { this.request = request() }
+        val transaction = io.sentry.protocol.SentryTransaction(
+            "test", 1.0, 2.0, emptyList(), emptyMap(), io.sentry.protocol.TransactionInfo("url"),
+        ).apply { this.request = request() }
+        processor.process(event, Hint())
+        processor.process(transaction, Hint())
+        for (r in listOf(event.request!!, transaction.request!!)) {
+            assertNull(r.data)
+            assertNull(r.queryString)
+        }
+    }
+
     private fun assertRequestPolicy(url: String, scrub: Boolean, method: String? = null) {
         fun request() = io.sentry.protocol.Request().apply {
             this.url = url

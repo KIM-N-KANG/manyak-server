@@ -1,0 +1,149 @@
+# 관리자 스토리 공개 중단. IntelliJ HTTP Client에서 위에서부터 실행한다.
+# 준비: Postgres·Redis·AI를 기동하고 ./gradlew bootRun. 알림 서비스 새 유형을 먼저 배포한다.
+# 아래 준비 요청으로 회원 스토리를 접수하고 AI 승인 뒤 조회 요청을 실행한다.
+# 관리자 로그인 토큰과 소유자 앱 토큰을 각각 설정한다. 게스트·공식 계정 스토리는 대상이 아니다.
+@baseUrl = http://localhost:8080
+@adminToken = replace-with-admin-token
+@ownerToken = replace-with-owner-access-token
+@rolelessAdminToken = replace-with-roleless-admin-token
+@manualStoryId = replace-with-member-story-uuid
+
+### 서버 확인
+GET {{baseUrl}}/actuator/health
+
+### 준비: 회원 스토리 검수 접수
+POST {{baseUrl}}/api/v1/stories/general
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "title":"달빛 아래의 약속", "oneLineIntro":"왕국의 비밀을 찾아가는 여정", "genres":["판타지"], "visibility":"PUBLIC",
+  "storySettings":{"worldSetting":"왕국", "characterSetting":"기사", "userRoleSetting":"여행자", "ruleSetting":"서로의 약속을 지킨다"},
+  "startSettings":[{"name":"첫날", "prologue":"성문이 열린다", "startSituation":"성문 앞", "suggestedInputs":["주변을 본다","문을 연다","말을 건다"], "endings":[]}]
+}
+
+> {%
+client.test("준비 스토리 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("takedownPreparationId", response.body.submissionId);
+%}
+
+### 준비: AI 승인 알림 뒤 실행. PENDING이면 알림을 기다렸다가 다시 조회한다
+GET {{baseUrl}}/api/v1/stories/submissions/{{takedownPreparationId}}
+Authorization: Bearer {{ownerToken}}
+
+> {%
+client.test("준비 스토리 승인", () => {
+  client.assert(response.status === 200 && response.body.status === "APPROVED", `승인 필요 actual=${response.body.status}`);
+});
+if (response.body.status === "APPROVED") client.global.set("takedownTargetId", response.body.storyId);
+%}
+
+### 사전 조회: 원래 공개 범위와 표시 확인
+GET {{baseUrl}}/api/v1/admin/stories/{{takedownTargetId}}
+Authorization: Bearer {{adminToken}}
+
+### 공개 중단: 내부 메모는 응답·소유자 알림에 실리지 않는다
+POST {{baseUrl}}/api/v1/admin/moderation/stories/{{takedownTargetId}}/takedown
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reasonCode":"ETC","reasonDetail":"실존 인물 비방","memo":"신고 내용 확인"}
+
+> {%
+client.test("비공개 전환과 사유 기록", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.visibility === "PRIVATE", "PRIVATE이어야 합니다");
+  client.assert(response.body.takedownReason === "ETC", "기타 사유 분류");
+  client.assert(response.body.takedownReasonDetail === "실존 인물 비방", "입력 사유");
+  client.assert(response.body.takenDownAt !== null, "중단 시각");
+  client.assert(!Object.prototype.hasOwnProperty.call(response.body, "memo"), "메모 비노출");
+});
+client.global.set("takenDownStoryId", response.body.storyId);
+%}
+
+### 중복 중단은 409
+POST {{baseUrl}}/api/v1/admin/moderation/stories/{{takenDownStoryId}}/takedown
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reasonCode":"COPYRIGHT_INFRINGEMENT"}
+
+> {% client.test("중복 거절", () => client.assert(response.status === 409, `actual=${response.status}`)); %}
+
+### 알림 설정·토큰 유무와 무관한 활동 내역 확인
+GET {{baseUrl}}/api/v1/users/me/notifications?category=ACTIVITY
+Authorization: Bearer {{ownerToken}}
+
+> {%
+client.test("공개 제한 내역", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.items.some(n => n.type === "STORY_TAKEN_DOWN" && n.storyId === client.global.get("takenDownStoryId")), "활동 내역 필요");
+});
+%}
+
+### 소유자의 공개 범위 단독 변경도 202 검수 접수 (즉시 공개되지 않음)
+PATCH {{baseUrl}}/api/v1/stories/{{takenDownStoryId}}
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{"visibility":"PUBLIC"}
+
+> {%
+client.test("재검수 접수", () => client.assert(response.status === 202, `actual=${response.status}`));
+client.global.set("takedownSubmissionId", response.body.submissionId);
+%}
+
+### AI 검수 완료 후 실행: 승인되어야 공개 중단 표시가 지워진다
+GET {{baseUrl}}/api/v1/stories/submissions/{{takedownSubmissionId}}
+Authorization: Bearer {{ownerToken}}
+
+### 승인 후 관리자 상세: 승인 결과와 세 컬럼 해제를 확인
+GET {{baseUrl}}/api/v1/admin/stories/{{takenDownStoryId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("승인 뒤 표시 해제", () => {
+  client.assert(response.status === 200, `actual=${response.status}`);
+  client.assert(response.body.visibility === "PUBLIC", "승인이 완료된 뒤 실행하세요");
+  client.assert(response.body.takenDownAt === null && response.body.takedownReason === null && response.body.takedownReasonDetail === null, "표시 전체 해제");
+});
+%}
+
+### 입력 사유 누락은 400
+POST {{baseUrl}}/api/v1/admin/moderation/stories/{{takedownTargetId}}/takedown
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reasonCode":"ETC"}
+
+> {% client.test("기타 입력 사유 필요", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 없는 스토리는 404
+POST {{baseUrl}}/api/v1/admin/moderation/stories/00000000-0000-0000-0000-000000000000/takedown
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reasonCode":"HATE_SPEECH"}
+
+> {% client.test("부재", () => client.assert(response.status === 404, `actual=${response.status}`)); %}
+
+### 인증 없음은 401
+POST {{baseUrl}}/api/v1/admin/moderation/stories/{{takedownTargetId}}/takedown
+Content-Type: application/json
+
+{"reasonCode":"SEXUAL_CONTENT"}
+
+> {% client.test("인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 관리자 표식은 있지만 역할이 없으면 403
+POST {{baseUrl}}/api/v1/admin/moderation/stories/{{takedownTargetId}}/takedown
+Authorization: Bearer {{rolelessAdminToken}}
+Content-Type: application/json
+
+{"reasonCode":"SEXUAL_CONTENT"}
+
+> {% client.test("역할 필요", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
+
+### 자유 조회: 실제 UUID로 바꿔 감사 작업 이름과 사유 및 내부 메모를 확인한다
+GET {{baseUrl}}/api/v1/admin/audit-logs?action=STORY_TAKEN_DOWN&targetType=STORY&targetId={{manualStoryId}}
+Authorization: Bearer {{adminToken}}
