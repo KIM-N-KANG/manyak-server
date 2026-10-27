@@ -67,6 +67,9 @@ interface StorySubmissionRepository : JpaRepository<StorySubmission, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from StorySubmission s where s.id = :id")
     fun lockById(id: Long): StorySubmission?
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from StorySubmission s where s.storyId = :storyId and s.status = com.knk.manyak.story.submission.SubmissionStatus.PENDING")
+    fun lockPendingForStory(storyId: Long): List<StorySubmission>
     fun existsByStoryIdAndStatus(storyId: Long, status: SubmissionStatus): Boolean
     fun findFirstByStoryIdAndStatusNotOrderByCreatedAtDescIdDesc(storyId: Long, status: SubmissionStatus): StorySubmission?
     fun findByUserIdAndStatusNotOrderByCreatedAtDescIdDesc(userId: Long, status: SubmissionStatus, pageable: Pageable): List<StorySubmission>

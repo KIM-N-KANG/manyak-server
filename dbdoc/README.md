@@ -9,7 +9,7 @@
 | [public.story_creation_session_tags](public.story_creation_session_tags.md) | 5 |  | BASE TABLE |
 | [public.story_creation_storylines](public.story_creation_storylines.md) | 6 |  | BASE TABLE |
 | [public.story_creation_storyline_recommended_infos](public.story_creation_storyline_recommended_infos.md) | 5 |  | BASE TABLE |
-| [public.stories](public.stories.md) | 16 |  | BASE TABLE |
+| [public.stories](public.stories.md) | 19 |  | BASE TABLE |
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
@@ -204,6 +204,9 @@ erDiagram
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
   text protagonist_name
+  timestamp_with_time_zone taken_down_at
+  varchar_30_ takedown_reason
+  varchar_100_ takedown_reason_detail
 }
 "public.story_settings" {
   bigint id

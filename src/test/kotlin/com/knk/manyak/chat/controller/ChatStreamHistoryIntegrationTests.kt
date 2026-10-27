@@ -65,6 +65,12 @@ import java.util.concurrent.atomic.AtomicReference
     ],
 )
 class ChatStreamHistoryIntegrationTests {
+    @Autowired private lateinit var wallet: com.knk.manyak.credit.service.CreditWalletService
+
+    @Autowired private lateinit var jwt: com.knk.manyak.auth.jwt.JwtTokenProvider
+
+    @Autowired private lateinit var takedowns: com.knk.manyak.story.submission.StoryTakedownService
+
     @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
@@ -254,6 +260,33 @@ class ChatStreamHistoryIntegrationTests {
 
         // 화면에서 막아놓은 개작 내용이 생성 결과를 통해 새어 나가면 안 된다.
         assertThat(capturingAiClient.lastRequest.get().startSettings.prologue).isEqualTo("원래 프롤로그")
+    }
+
+    @Test
+    fun `관리자 공개 중단 뒤 다른 회원 채팅은 마지막 공개본으로 계속하고 상세와 새 채팅은 막는다`() {
+        val (story, _) = seedChatOnPublicStory()
+        val reader = userRepository.save(User(nickname = "다른 회원"))
+        val auth = "Bearer ${jwt.issueAccessToken(reader.publicId)}"
+        wallet.reward(reader.id, 1000, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "takedown-reader")
+        restTestClient.post().uri("/api/v1/chats").header("Authorization", auth)
+            .contentType(MediaType.APPLICATION_JSON).body("""{"storyId":"${story.publicId}"}""")
+            .exchange().expectStatus().isCreated
+        val chat = storyChatRepository.findAll().single { it.userId == reader.id }
+        val admin = userRepository.save(User(nickname = "관리자"))
+        jdbcTemplate.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", admin.id)
+        org.slf4j.MDC.put("request_id", "chat-takedown-test")
+        try {
+            takedowns.takeDown(admin.id, story.publicId,
+                com.knk.manyak.story.submission.StoryTakedownRequest(com.knk.manyak.story.entity.StoryTakedownReason.HATE_SPEECH))
+        } finally { org.slf4j.MDC.remove("request_id") }
+        changePrologue(story, "공개 중단 뒤 비공개 수정")
+        stream(chat.publicId.toString(), "다음 행동을 한다.", auth)
+        assertThat(capturingAiClient.lastRequest.get().startSettings.prologue).isEqualTo("원래 프롤로그")
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", auth).exchange().expectStatus().isNotFound
+        restTestClient.post().uri("/api/v1/chats").header("Authorization", auth)
+            .contentType(MediaType.APPLICATION_JSON).body("""{"storyId":"${story.publicId}"}""")
+            .exchange().expectStatus().isNotFound
     }
 
     @Test
@@ -509,9 +542,10 @@ class ChatStreamHistoryIntegrationTests {
         checkIsolation()
     }
 
-    private fun stream(chatId: String, userInput: String): String {
+    private fun stream(chatId: String, userInput: String, auth: String? = null): String {
         val body = restTestClient.post()
             .uri("/api/v1/chats/$chatId/turns/stream")
+            .also { spec -> auth?.let { spec.header("Authorization", it) } }
             .header("X-Manyak-Device-Id", "test-device")
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.TEXT_EVENT_STREAM)

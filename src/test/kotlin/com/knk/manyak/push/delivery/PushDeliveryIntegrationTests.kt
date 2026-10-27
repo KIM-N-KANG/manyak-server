@@ -59,6 +59,14 @@ class PushDeliveryIntegrationTests {
     private fun stats(query: String = "from=2026-10-20&to=2026-10-21") = client.get()
         .uri("/api/v1/admin/push/delivery-stats?$query").header("Authorization", "Bearer $token").exchange()
 
+    @Test fun `공개 중단 발송 결과를 SERVICE로 기록하고 종류 통계로 조회한다`() {
+        report(body("story-taken-down:story:1793066400000", type = "STORY_TAKEN_DOWN")).expectStatus().isNoContent
+        stats("from=2026-10-21&to=2026-10-21&type=STORY_TAKEN_DOWN").expectStatus().isOk.expectBody()
+            .jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].type").isEqualTo("STORY_TAKEN_DOWN")
+            .jsonPath("$.items[0].kind").isEqualTo("SERVICE")
+    }
+
     @Test fun `이프 만료 안내 결과를 SERVICE로 수용하고 관리자 종류 필터로 조회한다`() {
         report(body("credit-expiry:recipient:2026-10-25", type = "CREDIT_EXPIRY_REMINDER")).expectStatus().isNoContent
         stats("from=2026-10-21&to=2026-10-21&type=CREDIT_EXPIRY_REMINDER").expectStatus().isOk.expectBody()

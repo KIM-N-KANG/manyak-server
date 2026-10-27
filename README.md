@@ -161,3 +161,13 @@ brew install tbls          # 최초 1회
 - `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY`: 기본 `곧 만료되는 이프가 있어요`
 
 관리자 `/api/v1/admin/push/templates/credit_expiry_reminder`의 GET/PUT/DELETE로 문구를 조회·변경·기본값 복원합니다. 금액·수량이나 충전·이용 권유 문구를 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
+
+### 관리자 스토리 공개 중단
+
+관리자 토큰으로 `POST /api/v1/admin/moderation/stories/{storyId}/takedown`을 호출합니다. 사유 분류 `reasonCode`는 `SEXUAL_CONTENT`, `COPYRIGHT_INFRINGEMENT`, `HATE_SPEECH`, `ETC`이며 기타일 때만 `reasonDetail`(1~100자)이 필수입니다. 선택 메모 `memo`(1~500자)는 감사 로그에만 남깁니다.
+
+공개 중단은 스토리를 비공개로 바꾸고 대기·보류 중 수정 제출본을 `STORY_TAKEN_DOWN` 실패로 끝냅니다. 이후 소유자의 수정이 검수를 통과하면 중단 표시를 지웁니다. 중단 상태에서 공개 범위만 PUBLIC으로 바꿔도 즉시 공개하지 않고 202 검수 접수로 응답합니다.
+
+탈퇴하지 않은 소유자에게는 같은 트랜잭션에서 활동 알림 내역을 기록합니다. 푸시는 SERVICE 설정을 따릅니다. **알림 서비스의 `STORY_TAKEN_DOWN` 허용을 서버보다 먼저 배포**해야 합니다. 수동 검증은 [공개 중단 요청](http/admin/story-takedown.http)을 따릅니다.
+
+공개 중단 알림의 제목 부분은 이름 토큰 치환 후 코드포인트 기준 100자까지 사용합니다. 넘으면 앞 99자와 `…`로 줄이며 서로게이트 쌍을 보존합니다. 내역·푸시 본문에 같은 규칙을 적용하고 저장된 스토리 제목은 유지합니다.

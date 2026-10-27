@@ -20,6 +20,9 @@
 | thumbnail_image_url | text |  | true |  |  |  |
 | thumbnail_moderation_status | varchar(20) | 'APPROVED'::character varying | false |  |  |  |
 | protagonist_name | text |  | true |  |  |  |
+| taken_down_at | timestamp with time zone |  | true |  |  |  |
+| takedown_reason | varchar(30) |  | true |  |  |  |
+| takedown_reason_detail | varchar(100) |  | true |  |  |  |
 
 ## Constraints
 
@@ -29,6 +32,9 @@
 | ck_stories_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying])::text[]))) |
 | ck_stories_thumbnail_moderation | CHECK | CHECK (((thumbnail_moderation_status)::text = ANY ((ARRAY['APPROVED'::character varying, 'PENDING'::character varying, 'REJECTED'::character varying])::text[]))) |
 | ck_stories_visibility | CHECK | CHECK (((visibility)::text = ANY ((ARRAY['PUBLIC'::character varying, 'PRIVATE'::character varying])::text[]))) |
+| stories_takedown_detail_check | CHECK | CHECK ((((NOT ((takedown_reason)::text IS DISTINCT FROM 'ETC'::text)) AND (takedown_reason_detail IS NOT NULL) AND (length(TRIM(BOTH FROM takedown_reason_detail)) > 0)) OR (((takedown_reason)::text IS DISTINCT FROM 'ETC'::text) AND (takedown_reason_detail IS NULL)))) |
+| stories_takedown_reason_check | CHECK | CHECK (((takedown_reason)::text = ANY ((ARRAY['SEXUAL_CONTENT'::character varying, 'COPYRIGHT_INFRINGEMENT'::character varying, 'HATE_SPEECH'::character varying, 'ETC'::character varying])::text[]))) |
+| stories_takedown_state_check | CHECK | CHECK ((((taken_down_at IS NULL) AND (takedown_reason IS NULL)) OR ((taken_down_at IS NOT NULL) AND (takedown_reason IS NOT NULL) AND ((visibility)::text = 'PRIVATE'::text)))) |
 | stories_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_stories_public_id | UNIQUE | UNIQUE (public_id) |
 | fk_stories_thumbnail_image_key | FOREIGN KEY | FOREIGN KEY (thumbnail_image_key) REFERENCES image_presets(image_key) |
@@ -79,6 +85,9 @@ erDiagram
   text thumbnail_image_url
   varchar_20_ thumbnail_moderation_status
   text protagonist_name
+  timestamp_with_time_zone taken_down_at
+  varchar_30_ takedown_reason
+  varchar_100_ takedown_reason_detail
 }
 "public.story_settings" {
   bigint id
