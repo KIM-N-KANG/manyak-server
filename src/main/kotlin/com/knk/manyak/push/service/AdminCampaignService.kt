@@ -42,7 +42,7 @@ class AdminCampaignService(
         val now = clock.instant()
         if (request.scheduledAt?.isBefore(now) == true) badRequest("예약 시각은 현재 이후여야 합니다.")
         val story = request.storyId?.let { publicId ->
-            stories.findByPublicIdAndDeletedAtIsNull(publicId)?.takeIf { it.isPubliclyVisible() }
+            stories.findByPublicIdAndDeletedAtIsNull(publicId)?.takeIf { it.isPubliclyListed() }
                 ?: badRequest("이동 대상은 공개 스토리여야 합니다.")
         }
         val row = campaigns.save(PushCampaign(title = request.title, body = request.body,

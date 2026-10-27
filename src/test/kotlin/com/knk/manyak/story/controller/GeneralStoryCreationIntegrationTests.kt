@@ -198,7 +198,7 @@ class GeneralStoryCreationIntegrationTests {
 
     @Test
     fun `회원이 visibility PUBLIC로 등록하면 익명 조회가 허용된다`() {
-        // 공개는 회원만 지정할 수 있다(게스트 PUBLIC은 400 — 아래 케이스).
+        // 일반 제작은 공개 범위와 무관하게 회원 전용이다(게스트는 아래 케이스처럼 401).
         val member = userRepository.save(User(nickname = "공개작가", status = UserStatus.ACTIVE))
 
         restTestClient.post()
