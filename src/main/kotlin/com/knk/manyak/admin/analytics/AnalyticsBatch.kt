@@ -18,10 +18,13 @@ fun interface AnalyticsBatchCatalog { fun metrics(): List<AnalyticsBatchMetric> 
 @Component
 @EnableConfigurationProperties(AnalyticsBatchPolicy::class)
 class DefaultAnalyticsBatchCatalog(private val dashboard: AdminAnalyticsService, private val definitions: MetricDefinitions,
-    private val campaigns: CampaignAnalyticsService, private val settings: CampaignSettings, private val policy: AnalyticsBatchPolicy) : AnalyticsBatchCatalog {
+    private val campaigns: CampaignAnalyticsService, private val settings: CampaignSettings, private val policy: AnalyticsBatchPolicy,
+    private val reads: AdminMetricReadRepository) : AnalyticsBatchCatalog {
     override fun metrics(): List<AnalyticsBatchMetric> {
+        // 턴 도달률과 채팅 옵션은 segment all만 미리 받는다. 모델 코드는 실행 시점의 chat_models다.
         val common = dashboard.dailyMetrics() + definitions.activity() + definitions.sessions() +
-            listOf("all", "web", "android").flatMap { definitions.quality(it) } + definitions.retention()
+            listOf("all", "web", "android").flatMap { definitions.quality(it) } + definitions.retention() +
+            definitions.signupPlatforms() + definitions.turnReach("all") + definitions.chatOptions("all", reads.modelCodes())
         return (common.map { AnalyticsBatchMetric(it, policy.backfillStart) } + settings.items.filter { it.endDate == null }.flatMap { campaign ->
             campaigns.trendMetrics(campaign.campaign).map { AnalyticsBatchMetric(it, maxOf(policy.backfillStart, campaign.startDate)) }
         }).groupBy { it.key }.values.map { entries -> entries.minBy { it.start } }

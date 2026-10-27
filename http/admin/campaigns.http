@@ -32,7 +32,10 @@ client.test("추이와 세그먼트 계산", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   client.assert(response.body.daily.every(d => d.newVisitors.nonAds === d.newVisitors.all - d.newVisitors.ads && d.signups.nonAds === d.signups.all - d.signups.ads), "전체에서 광고를 빼야 합니다");
   client.assert(Array.isArray(response.body.pendingDates), "미수신 날짜 목록이 있어야 합니다");
+  // signups는 Web 가입만, Android 가입은 광고 구분 없이 androidSignups로 따로 준다.
+  client.assert(response.body.daily.every(d => Number.isInteger(d.androidSignups)), `Android 가입 actual=${JSON.stringify(response.body.daily[0])}`);
   const t = response.body.totals;
+  client.assert(t.androidSignups === response.body.daily.reduce((a, d) => a + d.androidSignups, 0), `Android 가입 합계 actual=${t.androidSignups}`);
   client.assert(t.adsShare === (t.newVisitors.all === 0 ? null : t.newVisitors.ads / t.newVisitors.all), "광고 비중은 0~1이고 분모 0은 null입니다");
 });
 %}

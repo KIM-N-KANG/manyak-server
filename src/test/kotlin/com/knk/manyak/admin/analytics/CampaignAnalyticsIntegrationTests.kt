@@ -73,8 +73,8 @@ class CampaignAnalyticsIntegrationTests {
                             else -> 10L
                         }
                     }
-                    CampaignEvents.GOOGLE -> if (ads) 2L else 3L
-                    CampaignEvents.KAKAO -> 1L
+                    CampaignEvents.GOOGLE -> if (filters.toString().contains("Android")) 5L else if (ads) 2L else 3L
+                    CampaignEvents.KAKAO -> if (filters.toString().contains("Android")) 2L else 1L
                     CampaignEvents.GENERATE -> 40L
                     CampaignEvents.COMPLETE -> 17L
                     else -> 231L
@@ -101,24 +101,27 @@ class CampaignAnalyticsIntegrationTests {
         assertThat(trends["daily"][0]["newVisitorsBySource"]["instagram"].asLong()).isEqualTo(2)
         assertThat(trends["daily"][0]["signups"]["all"].asLong()).isEqualTo(4)
         assertThat(trends["daily"][1]["cumulativeSignups"]["all"].asLong()).isEqualTo(8)
+        assertThat(trends["daily"][0]["androidSignups"].asLong()).isEqualTo(7); assertThat(trends["totals"]["androidSignups"].asLong()).isEqualTo(14)
         assertThat(trends["totals"]["activeUsersAverage"].asDouble()).isEqualTo(150.0)
         assertThat(trends["totals"]["adsShare"].asDouble()).isEqualTo(0.7)
         assertThat(trends["totals"]["storylineRequests"].asLong()).isEqualTo(80)
-        assertThat(requests).hasSize(14)
+        assertThat(requests).hasSize(16)
         assertThat(body("/campaigns/analytics?$range")).isEqualTo(trends)
         for ((index, request) in requests.withIndex()) {
             val url = request.requestUrl!!; val filters = mapper.readTree(url.queryParameter("e")!!)["filters"]
             assertThat(url.queryParameter("s")).isNull()
             assertThat(filters.toString()).contains("country", "South Korea", "(none)").doesNotContain("userdata_cohort")
-            assertThat(filters.toString().contains("platform")).isEqualTo(index !in 7..10)
+            // Android 가입 2회만 platform Android이고 나머지 14회는 platform Web이다.
+            assertThat(filters.toString()).contains("platform").contains(if (index in 11..12) "\"Android\"" else "\"Web\"")
+            if (index in 11..12) assertThat(filters.toString()).contains("is_new_user").doesNotContain("initial_utm_campaign")
             assertThat(url.queryParameter("i")).isEqualTo("1")
             assertThat(request.getHeader("Authorization")).isEqualTo("Basic " + java.util.Base64.getEncoder().encodeToString("mock-api:mock-secret".toByteArray()))
             if (index in 7..10) assertThat(mapper.readTree(url.queryParameter("e")!!).toString()).contains("is_new_user", "true")
         }
-        body("/campaigns/analytics?$range&campaign=TEST_2026"); assertThat(requests).hasSize(21)
+        body("/campaigns/analytics?$range&campaign=TEST_2026"); assertThat(requests).hasSize(23)
         val creation = body("/campaigns/funnels/creation")
         assertThat(creation["steps"].size()).isEqualTo(6); assertThat(creation["steps"][0]["users"]["nonAds"].asLong()).isEqualTo(20)
-        assertThat(requests).hasSize(23)
+        assertThat(requests).hasSize(25)
         for (request in requests.takeLast(2)) {
             assertThat(request.requestUrl!!.queryParameterValues("e")).hasSize(6)
             assertThat(request.requestUrl!!.queryParameter("cs")).isEqualTo("86400")

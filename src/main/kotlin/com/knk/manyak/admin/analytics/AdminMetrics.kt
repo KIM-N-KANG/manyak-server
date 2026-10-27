@@ -6,7 +6,10 @@ import org.springframework.stereotype.Service
 import java.time.*
 import java.util.UUID
 
-class PlatformMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null }
+class SegmentRangeQuery : AnalyticsRangeQuery() { var segment: String? = null }
+class PlatformMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null; var segment: String? = null }
+/** 전체, 게스트(user_id 없음), 회원(user_id 있음). 기본 all. */
+fun analyticsSegment(value: String?) = (value ?: "all").also { if (it !in setOf("all", "guest", "member")) badAdminQuery("segment가 올바르지 않습니다.") }
 class ConversionMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null; var storyId: UUID? = null }
 data class PlatformCounts(val all: Long, val web: Long, val android: Long, val unknown: Long)
 data class PlatformDecimals(val all: Double?, val web: Double?, val android: Double?, val unknown: Double? = null)
@@ -17,9 +20,9 @@ data class RetentionCohort(val date: LocalDate, val users: Long, val d1: Double?
 data class RetentionPlatform(val platform: String, val cohorts: List<RetentionCohort>, val summary: RetentionRates)
 data class RetentionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platforms: List<RetentionPlatform>, val pendingDates: List<LocalDate>)
 data class SessionDay(val date: LocalDate, val averageSessionSeconds: PlatformDecimals)
-data class SessionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val daily: List<SessionDay>, val pendingDates: List<LocalDate>)
+data class SessionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val segment: String, val daily: List<SessionDay>, val pendingDates: List<LocalDate>)
 data class QualityDay(val date: LocalDate, val messagesByInputMode: Map<String, Long>, val streamErrors: Long, val streamErrorRate: Double?, val users: Map<String, Long>)
-data class QualityResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platform: String, val daily: List<QualityDay>, val pendingDates: List<LocalDate>)
+data class QualityResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platform: String, val segment: String, val daily: List<QualityDay>, val pendingDates: List<LocalDate>)
 data class ConversionStep(val event: String, val turnNumber: Int?, val users: Long)
 data class ConversionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val funnel: String, val platform: String, val storyId: UUID?, val steps: List<ConversionStep>)
 
@@ -63,18 +66,18 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
         }
         return RetentionResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, platforms, result.pendingDates())
     }
-    fun sessions(query: AnalyticsRangeQuery): SessionResponse {
-        val range = query.range(clock, default = 14, allowed = setOf(7, 14)); val metrics = definitions.sessions()
+    fun sessions(query: SegmentRangeQuery): SessionResponse {
+        val range = query.range(clock, default = 14, allowed = setOf(7, 14)); val segment = analyticsSegment(query.segment); val metrics = definitions.sessions(segment)
         val result = snapshots.load("users/sessions", range, metrics); val dates = ready(result)
-        return SessionResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, dates.map { date ->
+        return SessionResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, segment, dates.map { date ->
             val values = metrics.map { result.value(it, date)!!.value.asDouble() }; SessionDay(date, PlatformDecimals(values[0], values[1], values[2]))
         }, result.pendingDates())
     }
     fun quality(query: PlatformMetricsQuery): QualityResponse {
         val platform = query.platform ?: "all"; if (platform !in setOf("all", "web", "android")) badAdminQuery("platform이 올바르지 않습니다.")
-        val range = query.range(clock); val metrics = definitions.quality(platform)
+        val segment = analyticsSegment(query.segment); val range = query.range(clock); val metrics = definitions.quality(platform, segment)
         val result = snapshots.load("quality/client", range, metrics); val dates = ready(result)
-        return QualityResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, platform, dates.map { date ->
+        return QualityResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, platform, segment, dates.map { date ->
             // 구성 조회 하나라도 없으면 readyDates에서 제외한다. 빠진 묶음을 0으로 간주하지 않는다.
             val v = (0 until 12).map { index -> metrics.indices.filter { it % 12 == index }.fold(0L) { sum, i -> Math.addExact(sum, result.value(metrics[i], date)!!.value.asLong()) } }
             QualityDay(date, linkedMapOf("choice" to v[1], "plain" to v[2], "block" to v[3], "unknown" to v[0] - v[1] - v[2] - v[3]), v[4],
