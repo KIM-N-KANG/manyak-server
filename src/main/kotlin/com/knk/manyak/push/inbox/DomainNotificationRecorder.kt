@@ -2,6 +2,7 @@ package com.knk.manyak.push.inbox
 
 import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.submission.StoryModerationCompleted
+import com.knk.manyak.story.submission.StoryTakenDown
 import com.knk.manyak.story.submission.pushData
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -28,6 +29,16 @@ class DomainNotificationRecorder(
             type = type, title = "스토리가 완성됐어요", body = event.title,
             deepLink = inboxDeepLink(base, "/stories/${event.storyPublicId}", type),
             storyPublicId = UUID.fromString(event.storyPublicId), createdAt = clock.instant()))
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun takenDown(event: StoryTakenDown) {
+        val type = NotificationType.STORY_TAKEN_DOWN
+        val data = event.pushData(base)
+        store.insert(UserNotification(userId = event.userId, messageKey = event.messageId,
+            type = type, title = data.getValue("title"), body = data.getValue("body"),
+            deepLink = inboxDeepLink(base, "/studio", type), storyPublicId = event.storyId,
+            createdAt = clock.instant()))
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

@@ -4,10 +4,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class InboxDeepLinkTests {
-    @Test fun `여섯 종류의 분류는 정본 대응을 따른다`() {
+    @Test fun `모든 종류의 분류는 정본 대응을 따른다`() {
         assertThat(NotificationType.entries.associateWith { it.category }).containsExactlyInAnyOrderEntriesOf(mapOf(
             NotificationType.STORY_COMPLETED to NotificationCategory.ACTIVITY,
             NotificationType.STORY_MODERATION_COMPLETED to NotificationCategory.ACTIVITY,
+            NotificationType.STORY_TAKEN_DOWN to NotificationCategory.ACTIVITY,
             NotificationType.ATTENDANCE_REMINDER to NotificationCategory.ACTIVITY,
             NotificationType.CREDIT_EXPIRY_REMINDER to NotificationCategory.ACTIVITY,
             NotificationType.NOTICE to NotificationCategory.NEWS,

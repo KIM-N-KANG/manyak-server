@@ -30,6 +30,7 @@ enum class AdminAuditAction(val category: AdminAuditCategory, val targetType: Ad
     ORIGINAL_CREATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
     ORIGINAL_UPDATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
     ORIGINAL_THUMBNAIL_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
+    STORY_TAKEN_DOWN(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
     SUBMISSION_HOLD_RELEASED(AdminAuditCategory.CHANGE, AdminAuditTargetType.SUBMISSION),
 }
 

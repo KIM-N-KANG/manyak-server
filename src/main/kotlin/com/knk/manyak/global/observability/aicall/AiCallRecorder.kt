@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability.aicall
 
+import com.knk.manyak.story.client.StoryContentRejectedException
 import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.global.observability.StructuredLogger
 import io.micrometer.core.instrument.MeterRegistry
@@ -31,6 +32,7 @@ class AiCallRecorder(
     /**
      * [block]을 실행하며 호출 이력을 적재한다. 성공 시 결과와 적재 id를 반환하고,
      * 실패 시 FAILED로 적재한 뒤 원래 예외를 그대로 전파한다.
+     * AI 내용 거절은 계약대로 응답한 호출이므로 SUCCEEDED로 기록하고 예외는 그대로 전파한다.
      *
      * @param errorCode 실패 예외를 error_code로 매핑한다. 기본은 예외 클래스 이름.
      *  도메인 오류 코드를 가진 호출부(예: ChatTurnAiException.code)는 직접 넘긴다.
@@ -62,6 +64,15 @@ class AiCallRecorder(
             logEvent(EVENT_COMPLETED, context, log.id, OUTCOME_SUCCESS, durationNanos)
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
+            if (throwable is StoryContentRejectedException) {
+                val durationNanos = System.nanoTime() - startNanos
+                log.markSucceeded(latencyMs = durationNanos / 1_000_000)
+                repository.save(log)
+                recordDuration(context, OUTCOME_SUCCESS, durationNanos)
+                Sentry.addBreadcrumb("ai_call succeeded: ${context.feature.value}", "ai")
+                logEvent(EVENT_COMPLETED, context, log.id, OUTCOME_SUCCESS, durationNanos)
+                throw throwable
+            }
             // error_code도 컬럼 길이로 자른다. 자르지 않으면 긴 코드(예: 긴 ChatTurnAiException.code)에서
             // save가 length 위반을 던져 원래 AI 예외를 가리고 구조화 에러 relay가 깨진다.
             val durationNanos = System.nanoTime() - startNanos

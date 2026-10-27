@@ -132,7 +132,7 @@ class PromotionPushService(
         // 공지 캠페인의 이동 목적지는 기존 공지 링크를 유지한다.
         if (campaign.kind != PushKind.MARKETING || campaign.noticeId != null) return data
         val storyId = campaign.storyId ?: return data
-        val story = stories.findByIdAndDeletedAtIsNull(storyId)?.takeIf { it.isPubliclyVisible() } ?: return data
+        val story = stories.findByIdAndDeletedAtIsNull(storyId)?.takeIf { it.isPubliclyListed() } ?: return data
         return data + mapOf("storyId" to story.publicId.toString(),
             "deepLink" to pushDeepLink(webBaseUrl, "/stories/${story.publicId}", TYPE_PROMOTION, campaign.publicId.toString()))
     }

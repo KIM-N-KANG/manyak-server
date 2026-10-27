@@ -19,6 +19,9 @@ class CodedResponseStatusException(
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    /** AI 내용 거절(422): 입력 내용을 고쳐 새 요청으로 생성해야 한다. */
+    const val CONTENT_REJECTED = "CONTENT_REJECTED"
+
     const val ADMIN_ACCOUNT_PROTECTED = "ADMIN_ACCOUNT_PROTECTED"
     const val IDEMPOTENCY_KEY_CONFLICT = "IDEMPOTENCY_KEY_CONFLICT"
     const val CHAT_TURN_IN_PROGRESS = "CHAT_TURN_IN_PROGRESS"
@@ -83,12 +86,6 @@ object ApiErrorCodes {
      * 야간 동의는 광고 동의의 확장이라, 광고를 끈 채 야간만 켠 상태는 발송 판정에서 의미가 없다.
      */
     const val NIGHT_PUSH_REQUIRES_MARKETING = "NIGHT_PUSH_REQUIRES_MARKETING"
-
-    /**
-     * 스토리 공개 지정(400): 게스트(소유자 없음)는 스토리를 PUBLIC으로 만들 수 없다(KNK-149).
-     * 조용히 PRIVATE으로 낮추지 않고 거부한다 — 고른 값을 서버가 뒤집으면 "공개했는데 왜 안 보이냐"가 된다.
-     */
-    const val GUEST_CANNOT_PUBLISH = "GUEST_CANNOT_PUBLISH"
 
     /**
      * 계정 연동(403): 이미 연동된 provider로의 재인증에 실패했다(KNK-739).

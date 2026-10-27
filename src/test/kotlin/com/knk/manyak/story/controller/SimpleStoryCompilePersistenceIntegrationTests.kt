@@ -251,6 +251,49 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         databaseCleaner.cleanAll()
     }
 
+    @Autowired private lateinit var users: com.knk.manyak.auth.repository.UserRepository
+    @Autowired private lateinit var jwt: com.knk.manyak.auth.jwt.JwtTokenProvider
+    @Autowired private lateinit var snapshots: com.knk.manyak.story.repository.StoryPublicSnapshotRepository
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource("true,", "false,", "true,PRIVATE", "false,PRIVATE")
+    fun `회원과 게스트의 공개 범위 생략과 PRIVATE는 비공개로 저장하고 공개 스냅샷을 만들지 않는다`(member: Boolean, visibility: String?) {
+        val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "비공개제작자")).publicId) else null
+        postSimpleStory(persistStorylineWithGenre("로맨스"), visibility, token).expectStatus().isCreated
+        val story = storyRepository.findAll().single()
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
+        assertThat(snapshots.existsById(story.id)).isFalse()
+    }
+
+    @Test
+    fun `회원 공개 완성은 공개로 저장하고 공개 스냅샷을 만든다`() {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "공개제작자"))
+        postSimpleStory(persistStorylineWithGenre("로맨스"), "PUBLIC", jwt.issueAccessToken(user.publicId))
+            .expectStatus().isCreated
+        val story = storyRepository.findAll().single()
+        assertThat(story.userId).isEqualTo(user.id)
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(snapshots.findById(story.id).orElseThrow().snapshot.title).isEqualTo(story.title)
+    }
+
+    @Test
+    fun `게스트도 공개 완성을 요청하고 공개 스냅샷을 만든다`() {
+        postSimpleStory(persistStorylineWithGenre("로맨스"), "PUBLIC").expectStatus().isCreated
+        val story = storyRepository.findAll().single()
+        assertThat(story.userId).isNull()
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(snapshots.existsById(story.id)).isTrue()
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `허용하지 않는 공개 범위는 AI 호출과 저장 전에 400이다`(member: Boolean) {
+        val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "무효범위제작자")).publicId) else null
+        postSimpleStory(persistStorylineWithGenre("로맨스"), "INVALID", token).expectStatus().isBadRequest
+        assertThat(capturedRequest).isNull()
+        assertThat(storyRepository.count()).isZero()
+    }
+
     @Test
     fun `컴파일은 스토리 장르로 로어북을 선별해 요청에 싣고 story_lorebooks에 연결 저장한다`() {
         // 활성 로맨스 2개(선별 대상), 다른 장르 1개·비활성 1개(제외 대상).
@@ -886,13 +929,14 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         )
     }
 
-    private fun postSimpleStory(storyline: StoryCreationStoryline): RestTestClient.ResponseSpec =
+    private fun postSimpleStory(storyline: StoryCreationStoryline, visibility: String? = null, token: String? = null): RestTestClient.ResponseSpec =
         restTestClient.post()
             .uri("/api/v1/stories/simple")
             .header("X-Manyak-Device-Id", "test-device")
+            .headers { if (token != null) it.setBearerAuth(token) }
             .contentType(MediaType.APPLICATION_JSON)
             .body(
-                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]}""",
+                """{"requestId":"${java.util.UUID.randomUUID()}","simpleCreationId":${storyline.creationSession.id},"storylineId":${storyline.id},"additionalInfos":[]${visibility?.let { ",\"visibility\":\"$it\"" }.orEmpty()}}""",
             )
             .exchange()
     @Test fun `컴파일 기본 이름은 trim하고 원문 토큰을 저장한다`() {

@@ -64,6 +64,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         // true면 createStorylines가 예외를 던져 스토리라인 생성 실패(→ FAILED)를 강제한다.
         @Volatile
         var failStorylines = false
+        var storylineException: RuntimeException? = null
     }
 
     @TestConfiguration
@@ -73,6 +74,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
                 createStorylinesCalls.incrementAndGet()
+                storylineException?.let { throw it }
                 if (failStorylines) {
                     throw IllegalStateException("AI 스토리라인 생성 강제 실패")
                 }
@@ -119,6 +121,46 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
     @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
     @Autowired private lateinit var wallets: com.knk.manyak.credit.service.CreditWalletService
+
+    @Test
+    fun `스토리라인 내용 거절은 422와 rejected 지표를 남기고 게스트 횟수를 복원한다`() {
+        val id = UUID.randomUUID()
+        val genre = seedGenreTag()
+        storylineException = com.knk.manyak.story.client.StoryContentRejectedException(
+            "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", IllegalStateException("AI 422"),
+        )
+        val beforeRejected = meterRegistry.find("manyak.storyline.creation.result").tag("outcome", "rejected").counter()?.count() ?: 0.0
+        val beforeFailure = meterRegistry.find("manyak.storyline.creation.result").tag("outcome", "failure").counter()?.count() ?: 0.0
+        val counter = GuestTrialLimitService.Counter.STORYLINE_GENERATION
+        val beforeUsed = guestTrialLimitService.usage(null, deviceA, counter).used
+
+        postStorylines(id, genre.id, deviceA).expectStatus().isEqualTo(422).expectBody()
+            .jsonPath("$.status").isEqualTo(422)
+            .jsonPath("$.code").isEqualTo("CONTENT_REJECTED")
+            .jsonPath("$.message").isEqualTo(storylineException!!.message)
+
+        assertThat(requestRepository.findByRequestId(id)!!.status).isEqualTo(StoryCreationRequestStatus.FAILED)
+        assertThat(sessionRepository.findAll()).isEmpty()
+        assertThat(storylineRepository.findAll()).isEmpty()
+        assertThat(guestTrialLimitService.usage(null, deviceA, counter).used).isEqualTo(beforeUsed)
+        assertThat(meterRegistry.find("manyak.storyline.creation.result").tag("outcome", "rejected").counter()!!.count())
+            .isEqualTo(beforeRejected + 1)
+        assertThat(meterRegistry.find("manyak.storyline.creation.result").tag("outcome", "failure").counter()?.count() ?: 0.0)
+            .isEqualTo(beforeFailure)
+    }
+
+    @Test
+    fun `스토리라인 스키마 위반 422는 502로 유지한다`() {
+        storylineException = org.springframework.web.client.HttpClientErrorException.create(
+            org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT, "schema", org.springframework.http.HttpHeaders.EMPTY,
+            """{"detail":[]}""".toByteArray(), Charsets.UTF_8,
+        )
+        val id = UUID.randomUUID()
+        postStorylines(id, seedGenreTag().id, deviceA).expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+        assertThat(requestRepository.findByRequestId(id)!!.status).isEqualTo(StoryCreationRequestStatus.FAILED)
+        assertThat(sessionRepository.findAll()).isEmpty()
+    }
 
     @Test fun `간편 완성은 요청 행 기록 때 초안을 삭제해 생성 실패에도 복원하지 않는다`() {
         val owner = userRepository.save(User(nickname = "제작자"))
@@ -175,6 +217,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         createStorylinesCalls.set(0)
         compileStoryCalls.set(0)
         failStorylines = false
+        storylineException = null
         databaseCleaner.cleanAll()
     }
 

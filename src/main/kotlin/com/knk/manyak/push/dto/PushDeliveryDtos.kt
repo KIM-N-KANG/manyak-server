@@ -7,7 +7,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-enum class PushDeliveryType { STORY_COMPLETED, STORY_MODERATION_COMPLETED, ATTENDANCE_REMINDER, CREDIT_EXPIRY_REMINDER, PROMOTION, NOTICE }
+enum class PushDeliveryType { STORY_COMPLETED, STORY_MODERATION_COMPLETED, STORY_TAKEN_DOWN, ATTENDANCE_REMINDER, CREDIT_EXPIRY_REMINDER, PROMOTION, NOTICE }
 enum class PushDeliveryOutcome { DELIVERED, UNDELIVERED, DISCARDED }
 
 data class PushDeliveryReportRequest(

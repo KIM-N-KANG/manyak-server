@@ -8,6 +8,10 @@ import org.springframework.core.io.ClassPathResource
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 
+/** 배치 카탈로그가 읽는 chat_models 코드만 고정한다. */
+fun modelCodeReads(vararg codes: String = arrayOf("AURORA", "LITE")) = object : AdminMetricReadRepository(NamedParameterJdbcTemplate(DriverManagerDataSource())) {
+    override fun modelCodes() = codes.toList()
+}
 class MutableAnalyticsClock(@Volatile var at: Instant) : Clock() {
     override fun instant() = at
     override fun getZone(): ZoneId = ZoneOffset.UTC

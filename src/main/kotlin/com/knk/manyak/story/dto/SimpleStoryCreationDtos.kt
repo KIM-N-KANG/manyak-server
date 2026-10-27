@@ -3,6 +3,7 @@ package com.knk.manyak.story.dto
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
@@ -281,6 +282,13 @@ data class CreateSimpleStoryRequest(
 
     @field:Schema(description = "활성 화풍 코드. 누락·null이면 ANIME. 미등록·비활성·빈 문자열은 400. NONE도 기존 제작가 유지", example = "ANIME", nullable = true)
     val artStyle: String? = null,
+
+    @field:Schema(
+        description = "공개 범위. PUBLIC 또는 PRIVATE이며 생략하면 PRIVATE. 게스트도 PUBLIC을 지정할 수 있고, 회원 계정으로 이관된 뒤 공개 목록과 검색에 실립니다.",
+        example = "PRIVATE",
+        defaultValue = "PRIVATE",
+    )
+    val visibility: StoryVisibility = StoryVisibility.PRIVATE,
 
     // AI trace 연결용 통과 필드(KNK-751). 서버는 판단하지 않고 전달만 하며, 없으면 헤더를 생략한다.
     @field:Schema(

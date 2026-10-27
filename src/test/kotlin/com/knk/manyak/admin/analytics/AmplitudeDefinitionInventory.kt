@@ -48,6 +48,15 @@ internal class AmplitudeDefinitionInventory {
         definitions.activity().forEach { daily(it, "users/activity") }; listOf("all", "android", "android_overseas").forEach { interval(definitions.mau(date, it), "users/activity:MAU") }
         definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.retention().forEach { daily(it, "users/retention") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
+        definitions.signupPlatforms().forEach { daily(it, "users/signups") }
+        for (segment in listOf("guest", "member")) {
+            definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }
+            for (platform in listOf("all", "web", "android")) definitions.quality(platform, segment).forEach { daily(it, "quality/$platform:$segment") }
+        }
+        for (segment in listOf("all", "guest", "member")) {
+            definitions.turnReach(segment).forEach { daily(it, "conversion/turn-reach:$segment") }
+            definitions.chatOptions(segment, listOf("AURORA", "LITE")).forEach { daily(it, "quality/chat-options:$segment") }
+        }
         for (item in items) {
             campaigns.trendMetrics(item.campaign).forEach { daily(it, "campaign:" + item.key) }
             capture { campaigns.creation(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
@@ -61,6 +70,6 @@ internal class AmplitudeDefinitionInventory {
                 metrics.funnel(name, ConversionMetricsQuery().apply { from=date.toString(); to=date.toString(); this.platform=platform; storyId=story })
             }
         }
-        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy()).metrics().forEach { daily(it.metric, "batch") }
+        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy(), modelCodeReads()).metrics().forEach { daily(it.metric, "batch") }
     }
 }

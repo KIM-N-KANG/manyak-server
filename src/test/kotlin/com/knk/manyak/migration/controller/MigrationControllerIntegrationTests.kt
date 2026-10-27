@@ -31,6 +31,7 @@ import java.util.UUID
  * - 이관은 계정당 1회(≥1건 MIGRATED 시 잠금): 이후 호출은 평가 없이 migrationClosed=true로 닫힌다(스펙 §4-3-5).
  * - 형식 오류·상한 초과 → 400.
  */
+@org.springframework.context.annotation.Import(MigrationIndexEventTestConfig::class)
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -45,9 +46,87 @@ class MigrationControllerIntegrationTests {
     @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
+    @Autowired private lateinit var documents: com.knk.manyak.search.service.StorySearchDocumentReader
+    @Autowired private lateinit var indexRequests: IndexRequests
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private lateinit var indexer: com.knk.manyak.search.service.StorySearchIndexer
+
+    class IndexRequests {
+        val ids = mutableListOf<Long>()
+        var fail = false
+
+        @org.springframework.context.event.EventListener
+        fun onIndex(event: com.knk.manyak.search.event.StoryIndexRequestedEvent) {
+            ids += event.storyId
+            if (fail) throw IllegalStateException("재색인 이벤트 발행 실패")
+        }
+    }
+
+    @Test
+    fun `게스트 공개 비공개 스토리는 이관 후 공개만 목록과 검색에 노출된다`() {
+        val me = saveUser("이관회원")
+        val public = storyRepository.save(Story(title = "게스트 공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC))
+        val private = storyRepository.save(Story(title = "게스트 비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+        restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.items.length()").isEqualTo(0)
+        assertThat(documents.read(public.id)!!.visible).isFalse()
+        assertThat(documents.read(private.id)!!.visible).isFalse()
+
+        restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(public.publicId, private.publicId).map { it.toString() }))
+            .exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+            .jsonPath("$.stories[1].status").isEqualTo("MIGRATED")
+
+        restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(public.publicId.toString())
+        assertThat(documents.read(public.id)!!.visible).isTrue()
+        assertThat(documents.read(private.id)!!.visible).isFalse()
+        assertThat(indexRequests.ids).containsExactly(public.id, private.id)
+    }
+
+    @Test
+    fun `커밋 후 비동기 색인 처리 실패도 이관 응답과 소유권을 유지한다`() {
+        val me = saveUser("색인실패회원")
+        val story = saveStory(null)
+        org.mockito.Mockito.doThrow(IllegalStateException("검색 저장소 장애")).`when`(indexer).index(story.id)
+
+        restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(story.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+
+        org.mockito.Mockito.verify(indexer, org.mockito.Mockito.timeout(3000)).index(story.id)
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(userRepository.findById(me.id).orElseThrow().migratedAt).isNotNull()
+    }
+
+    @Test
+    fun `재색인 이벤트 발행 실패도 이관 응답과 커밋을 유지하고 다음 스토리를 처리한다`() {
+        val me = saveUser("실패격리회원")
+        val first = saveStory(null)
+        val second = saveStory(null)
+        indexRequests.fail = true
+        restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(first.publicId, second.publicId).map { it.toString() }))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+            .jsonPath("$.stories[1].status").isEqualTo("MIGRATED")
+        assertThat(storyRepository.findById(first.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(storyRepository.findById(second.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(userRepository.findById(me.id).orElseThrow().migratedAt).isNotNull()
+        assertThat(indexRequests.ids).containsExactly(first.id, second.id)
+    }
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        indexRequests.ids.clear()
+        indexRequests.fail = false
     }
 
     private fun saveUser(nickname: String): User =
@@ -298,4 +377,11 @@ class MigrationControllerIntegrationTests {
             .jsonPath("$.stories").isEmpty
             .jsonPath("$.chats").isEmpty
     }
+}
+
+
+@org.springframework.boot.test.context.TestConfiguration
+class MigrationIndexEventTestConfig {
+    @org.springframework.context.annotation.Bean
+    fun indexRequests() = MigrationControllerIntegrationTests.IndexRequests()
 }

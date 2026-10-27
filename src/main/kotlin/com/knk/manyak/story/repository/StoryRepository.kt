@@ -49,6 +49,10 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query("SELECT s FROM Story s WHERE s.publicId = :publicId AND s.deletedAt IS NULL")
     fun findByPublicIdAndDeletedAtIsNullForUpdate(@Param("publicId") publicId: UUID): Story?
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Story s WHERE s.publicId = :publicId")
+    fun findByPublicIdForUpdate(publicId: UUID): Story?
+
     // 검색 게이트와 오래된 색인 복구에 사용한다. 삭제된 행도 읽어 내부 id로 visible=false 재색인한다.
     fun findAllByPublicIdIn(publicIds: Collection<UUID>): List<Story>
 

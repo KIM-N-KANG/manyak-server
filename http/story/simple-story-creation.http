@@ -620,7 +620,7 @@ Accept: application/json
     });
 %}
 
-### 7. 최종 스토리 생성 및 저장
+### 7. 최종 스토리 생성 및 저장 — visibility 생략 시 PRIVATE
 # 2번 요청을 먼저 실행해 simpleCreationId/storylineId 변수가 설정돼 있어야 합니다.
 # 선택한 스토리라인 + 추가 정보를 AI(/api/v1/story/compile)에 보내 최종 스토리를 생성·저장하고 본문까지 반환합니다.
 POST {{baseUrl}}/api/v1/stories/simple
@@ -655,6 +655,17 @@ Accept: application/json
     if (response.status === 201 && response.body.id) {
         client.global.set("createdStoryId", response.body.id);
     }
+%}
+
+### 7-visibility. 공개 범위 생략 저장값 확인
+GET {{baseUrl}}/api/v1/stories/{{createdStoryId}}
+Accept: application/json
+
+> {%
+    client.test("공개 범위 생략은 PRIVATE", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.visibility === "PRIVATE", `expected=PRIVATE actual=${response.body.visibility}`);
+    });
 %}
 
 ### 7-1. [KNK-520] 생성된 스토리 상세에 컴파일 산출물(주요 사건·엔딩·로어북)이 반영됐는지 확인
@@ -1343,5 +1354,193 @@ Accept: application/json
 > {%
     client.test("완성 단계 부모 연결이 실패해도 생성은 성공한다", () => {
         client.assert(response.status === 201, `expected=201 actual=${response.status} body=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### [KNK-1865] 스토리라인 내용 거절 — AI 422 문자열 detail 응답 조건에서 실행
+# 실 AI의 안전 필터 판정은 입력·모델에 따라 달라 재현을 보장하지 않습니다.
+# 로컬 AI 대역이 POST /api/v1/story/storylines에 아래 본문과 HTTP 422를 반환하도록 설정한 뒤 실행합니다.
+# {"detail":"입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다."}
+# 기대: 422 CONTENT_REJECTED, 게스트 횟수 복원, 요청 FAILED, 진행 미저장.
+# detail 배열/파싱 불가/빈 본문의 422 및 그 밖의 AI 오류는 502 BAD_GATEWAY입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {}
+}
+
+> {%
+    client.test("스토리라인 내용 거절을 구분한다", () => {
+        client.assert(response.status === 422, `expected=422 actual=${response.status}`);
+        client.assert(response.body.code === "CONTENT_REJECTED", `actual=${response.body.code}`);
+        client.assert(response.body.message === "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", `actual=${response.body.message}`);
+    });
+%}
+
+### [KNK-1865] 완성 내용 거절 — 미완성 진행을 준비한 뒤 AI 컴파일 422 조건에서 실행
+# 2번 스토리라인 생성으로 simpleCreationId·storylineId를 준비하고 완성 요청은 실행하지 않습니다.
+# 로컬 AI 대역이 POST /api/v1/story/compile에 위 문자열 detail과 HTTP 422를 반환하도록 설정합니다.
+# 기대: 422 CONTENT_REJECTED, 회원 이프 환불 또는 회원/게스트 체험 횟수 복원, 요청 FAILED, 스토리 미저장.
+# 같은 입력은 다시 거절될 수 있으므로 입력을 고쳐 새 requestId로 요청합니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": []
+}
+
+> {%
+    client.test("완성 내용 거절을 구분한다", () => {
+        client.assert(response.status === 422, `expected=422 actual=${response.status}`);
+        client.assert(response.body.code === "CONTENT_REJECTED", `actual=${response.body.code}`);
+        client.assert(response.body.message === "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", `actual=${response.body.message}`);
+    });
+%}
+
+
+### KNK-1875 공개 범위 검증 안내
+# 회원 PUBLIC: auth-login-google.http로 전역 accessToken을 설정합니다.
+# 아래는 케이스마다 새 진행을 만들므로 위에서부터 순서대로 실행합니다.
+# 게스트는 별도 deviceId를 사용하고, 회원은 체험 잔여 또는 이프가 필요합니다.
+
+### 회원 PUBLIC 준비 — 새 스토리라인
+< {%
+    client.global.set("memberPublicDeviceId", "visibility-memberPublic-" + Date.now());
+%}
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{memberPublicDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {"name": "아린", "gender": "FEMALE", "featureTagIds": [], "customTags": []},
+  "supportingCharacters": []
+}
+
+> {%
+    client.test("회원 PUBLIC 진행 준비", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+    });
+    if (response.status === 201) {
+        client.global.set("memberPublicCreationId", response.body.simpleCreationId);
+        client.global.set("memberPublicStorylineId", response.body.storylines[0].id);
+    }
+%}
+
+### 회원 PUBLIC 완성 — PUBLIC 저장, 공개 스냅샷 생성
+POST {{baseUrl}}/api/v1/stories/simple
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{memberPublicDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{memberPublicCreationId}},
+  "storylineId": {{memberPublicStorylineId}},
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("회원 PUBLIC 완성 성공", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(Boolean(response.body.id), "스토리 UUID가 없습니다.");
+    });
+    if (response.status === 201) client.global.set("memberPublicStoryId", response.body.id);
+%}
+
+### 회원 PUBLIC 저장값 확인 — 상세의 visibility는 PUBLIC
+GET {{baseUrl}}/api/v1/stories/{{memberPublicStoryId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+> {%
+    client.test("회원 PUBLIC 공개 범위 저장", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.visibility === "PUBLIC", `expected=PUBLIC actual=${response.body.visibility}`);
+    });
+%}
+
+### 게스트 PUBLIC 준비 — 새 스토리라인
+< {%
+    client.global.set("guestPublicDeviceId", "visibility-guestPublic-" + Date.now());
+%}
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{guestPublicDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {"name": "아린", "gender": "FEMALE", "featureTagIds": [], "customTags": []},
+  "supportingCharacters": []
+}
+
+> {%
+    client.test("게스트 PUBLIC 진행 준비", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+    });
+    if (response.status === 201) {
+        client.global.set("guestPublicCreationId", response.body.simpleCreationId);
+        client.global.set("guestPublicStorylineId", response.body.storylines[0].id);
+    }
+%}
+
+### 게스트 PUBLIC 완성 — PUBLIC 저장, 공개 스냅샷 생성
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{guestPublicDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{guestPublicCreationId}},
+  "storylineId": {{guestPublicStorylineId}},
+  "visibility": "PUBLIC"
+}
+
+> {%
+    client.test("게스트 PUBLIC 완성 성공", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(Boolean(response.body.id), "스토리 UUID가 없습니다.");
+    });
+    if (response.status === 201) client.global.set("guestPublicStoryId", response.body.id);
+%}
+
+### 게스트 PUBLIC 저장값 확인 — 상세의 visibility는 PUBLIC
+GET {{baseUrl}}/api/v1/stories/{{guestPublicStoryId}}
+Accept: application/json
+
+> {%
+    client.test("게스트 PUBLIC 공개 범위 저장", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.visibility === "PUBLIC", `expected=PUBLIC actual=${response.body.visibility}`);
+    });
+%}
+
+
+### 허용하지 않는 공개 범위 — 완성된 진행이어도 역직렬화 단계에서 400
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{guestPublicDeviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{guestPublicCreationId}},
+  "storylineId": {{guestPublicStorylineId}},
+  "visibility": "INVALID"
+}
+
+> {%
+    client.test("잘못된 visibility는 400", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
     });
 %}

@@ -51,7 +51,8 @@ class SentryMdcEventProcessor : EventProcessor {
         }
         val url = request.url ?: return
         val path = try { URI(url).path } catch (_: URISyntaxException) { return } ?: return
-        if (path == "/api/v1/admin/notices" || path.startsWith("/api/v1/admin/notices/")) {
+        if (path == "/api/v1/admin/notices" || path.startsWith("/api/v1/admin/notices/") ||
+            Regex("/api/v1/admin/moderation/stories/[^/]+/takedown").matches(path)) {
             request.data = null
             request.queryString = null
             return

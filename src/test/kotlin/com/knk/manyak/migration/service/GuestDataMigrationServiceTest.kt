@@ -47,10 +47,11 @@ class GuestDataMigrationServiceTest {
         mock(com.knk.manyak.story.repository.StoryEndingRepository::class.java)
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
         mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
+    private val events = mock(org.springframework.context.ApplicationEventPublisher::class.java)
     private val service =
         GuestDataMigrationService(
             storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
-            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics,
+            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events,
         )
 
     private val userId = 10L
@@ -70,6 +71,29 @@ class GuestDataMigrationServiceTest {
 
     private fun chat(publicId: UUID, ownerId: Long?) =
         StoryChat(publicId = publicId, userId = ownerId, storyId = 1L)
+
+    @Test
+    fun `공개 범위와 무관하게 MIGRATED 스토리에만 재색인을 요청한다`() {
+        val public = Story(id = 71, userId = null, title = "공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        val private = Story(id = 72, userId = null, title = "비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
+        val mine = story(UUID.randomUUID(), userId)
+        val other = story(UUID.randomUUID(), otherUserId)
+        val missing = UUID.randomUUID()
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection()))
+            .thenReturn(listOf(public, private, mine, other))
+        `when`(storyRepository.claimByPublicId(public.publicId, userId)).thenReturn(1)
+        `when`(storyRepository.claimByPublicId(private.publicId, userId)).thenReturn(1)
+
+        val result = service.migrate(userId, MigrationRequest(storyIds =
+            listOf(public.publicId, private.publicId, mine.publicId, other.publicId, missing, public.publicId).map { it.toString() }))
+
+        assertThat(result.stories.map { it.status }).containsExactly(
+            MigrationStatus.MIGRATED, MigrationStatus.MIGRATED, MigrationStatus.ALREADY_OWNED,
+            MigrationStatus.CONFLICT, MigrationStatus.NOT_FOUND, MigrationStatus.ALREADY_OWNED)
+        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(71))
+        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(72))
+        org.mockito.Mockito.verifyNoMoreInteractions(events)
+    }
 
     @Test
     fun `게스트 스토리는 원자적 클레임에 성공하면 MIGRATED다`() {

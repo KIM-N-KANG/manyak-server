@@ -59,7 +59,7 @@ class AdminChatsRequest : AdminAiRequest() {
     var turnDate: String? = null
     var deleted: String? = null
 }
-class AdminChartsRequest {
+open class AdminChartsRequest {
     @field:io.swagger.v3.oas.annotations.media.Schema(type = "integer", allowableValues = ["7", "30", "90"])
     var days: String? = null
     var from: String? = null
@@ -91,16 +91,18 @@ data class AdminStoryListResponse(
     val storyId: UUID, val title: String, val genre: String, val description: String?, val scope: String,
     val visibility: String, val moderationStatus: String, val tags: List<String>, val supportingCharacterCount: Long?,
     val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant, val deletedAt: Instant?,
+    val takenDownAt: Instant? = null, val takedownReason: String? = null, val takedownReasonDetail: String? = null,
 )
 data class AdminStoryDetailResponse(
     val storyId: UUID, val title: String, val genre: String, val description: String?, val scope: String,
     val visibility: String, val moderationStatus: String, val tags: List<String>, val supportingCharacterCount: Long?,
     val owner: AdminMemberSummary?, val chatCount: Long, val totalTurns: Long, val createdAt: Instant, val deletedAt: Instant?,
+    val takenDownAt: Instant? = null, val takedownReason: String? = null, val takedownReasonDetail: String? = null,
     val retention: List<AdminRetention>, val recentChats: List<AdminChatResponse>,
 ) {
     constructor(story: AdminStoryListResponse, retention: List<AdminRetention>, recentChats: List<AdminChatResponse>) : this(
         story.storyId, story.title, story.genre, story.description, story.scope, story.visibility, story.moderationStatus,
-        story.tags, story.supportingCharacterCount, story.owner, story.chatCount, story.totalTurns, story.createdAt, story.deletedAt, retention, recentChats)
+        story.tags, story.supportingCharacterCount, story.owner, story.chatCount, story.totalTurns, story.createdAt, story.deletedAt, story.takenDownAt, story.takedownReason, story.takedownReasonDetail, retention, recentChats)
 }
 
 data class AdminRetention(val turn: Int, val rate: Double)

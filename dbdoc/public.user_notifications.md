@@ -25,7 +25,7 @@
 | ---- | ---- | ---------- |
 | user_notifications_category_check | CHECK | CHECK (((category)::text = ANY ((ARRAY['NEWS'::character varying, 'ACTIVITY'::character varying])::text[]))) |
 | user_notifications_notice_tag_check | CHECK | CHECK (((notice_tag)::text = ANY ((ARRAY['SERVICE'::character varying, 'UPDATE'::character varying, 'MAINTENANCE'::character varying, 'EVENT'::character varying, 'PROMOTION'::character varying])::text[]))) |
-| user_notifications_type_check | CHECK | CHECK (((type)::text = ANY ((ARRAY['STORY_COMPLETED'::character varying, 'STORY_MODERATION_COMPLETED'::character varying, 'NOTICE'::character varying, 'ATTENDANCE_REMINDER'::character varying, 'CREDIT_EXPIRY_REMINDER'::character varying, 'PROMOTION'::character varying])::text[]))) |
+| user_notifications_type_check | CHECK | CHECK (((type)::text = ANY ((ARRAY['STORY_COMPLETED'::character varying, 'STORY_MODERATION_COMPLETED'::character varying, 'STORY_TAKEN_DOWN'::character varying, 'NOTICE'::character varying, 'ATTENDANCE_REMINDER'::character varying, 'CREDIT_EXPIRY_REMINDER'::character varying, 'PROMOTION'::character varying])::text[]))) |
 | user_notifications_user_id_fkey | FOREIGN KEY | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE |
 | user_notifications_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | user_notifications_public_id_key | UNIQUE | UNIQUE (public_id) |

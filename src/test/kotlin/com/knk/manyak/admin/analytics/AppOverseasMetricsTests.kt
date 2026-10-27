@@ -189,16 +189,20 @@ class AppOverseasMetricsTests {
         }
         assertThat(definitions.sessions().map { it.definition.hash }).containsExactlyElementsOf(oldSessions)
     }
-    @Test fun `새벽 카탈로그는 네 기능 조건을 중복 없이 포함하고 하루 115와 리텐션 792다`() {
+    @Test fun `새벽 카탈로그는 네 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 171과 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
-        val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy()).metrics()
+        val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy(),modelCodeReads()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
-        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(115)
+        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(171)
         assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
-        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") }).hasSize(48)
-        assertThat(entries.map { it.metric.definition.metric }).noneMatch { it.contains("mau") || it.contains("push_opens") || it.startsWith("conversion_") }
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(48)
+        // 분석 지표 10, 사용자 활동 11, 세션 32, 기능 사용 48, 캠페인 추이 16, 신규 가입자 플랫폼 6, 턴 도달률 플랫폼 36, 모델 둘의 채팅 옵션 플랫폼 12
+        assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(6)
+        assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(36)
+        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(12)
+        assertThat(entries.map { it.metric.definition.metric }).noneMatch { it.contains("mau") || it.contains("push_opens") || (it.startsWith("conversion_") && it != "conversion_turn_reach") }
     }
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource("true,false,2,2", "false,true,1,2", "true,true,2,3")

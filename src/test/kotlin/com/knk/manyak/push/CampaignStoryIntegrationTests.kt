@@ -107,6 +107,7 @@ abstract class CampaignStoryIntegrationTests {
         val rejected = listOf(
             Story(title = "소유자 비공개", userId = admin.id, visibility = StoryVisibility.PRIVATE),
             Story(title = "게스트 비공개", visibility = StoryVisibility.PRIVATE),
+            Story(title = "게스트 공개", visibility = StoryVisibility.PUBLIC),
             Story(title = "초안", userId = admin.id, status = StoryStatus.DRAFT),
             Story(title = "삭제", userId = admin.id, deletedAt = Instant.now()),
         ).map { stories.saveAndFlush(it).publicId.toString() } + listOf(UUID.randomUUID().toString(), "bad", "123")
@@ -139,6 +140,14 @@ abstract class CampaignStoryIntegrationTests {
             client.get().uri("$root/$campaignId").header("Authorization", "Bearer $token").exchange()
                 .expectStatus().isOk.expectBody().jsonPath("$.storyId").isEqualTo(story.publicId.toString())
         }
+    }
+
+    @Test fun `게스트 소유 공개 스토리는 발송 시 이동 정보를 제외한다`() {
+        val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = admin.id))
+        create(story)
+        jdbc.update("UPDATE stories SET user_id=NULL WHERE id=?", story.id)
+        assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(1)
+        assertThat(data.single()).doesNotContainKeys("storyId", "deepLink")
     }
 
     @Test fun `이동 대상 없는 예약은 storyId null을 반환하고 링크 없이 발송한다`() {
