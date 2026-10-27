@@ -59,7 +59,7 @@ class AdminChatsRequest : AdminAiRequest() {
     var turnDate: String? = null
     var deleted: String? = null
 }
-class AdminChartsRequest {
+open class AdminChartsRequest {
     @field:io.swagger.v3.oas.annotations.media.Schema(type = "integer", allowableValues = ["7", "30", "90"])
     var days: String? = null
     var from: String? = null

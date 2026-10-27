@@ -29,7 +29,9 @@ class AdminMetricsPostgresTests {
             val jdbc=JdbcTemplate(ds)
             val member=jdbc.queryForObject("INSERT INTO users(nickname,created_at,migrated_at) VALUES ('member','2026-10-20T15:00:00Z','2026-10-20T16:00:00Z') RETURNING id",Long::class.java)!!
             val team=jdbc.queryForObject("INSERT INTO users(nickname,created_at) VALUES ('team','2026-10-20T15:00:00Z') RETURNING id",Long::class.java)!!
-            jdbc.update("INSERT INTO users(nickname,created_at,status) VALUES ('before','2026-10-20T14:59:59.999Z','DELETED'),('end','2026-10-21T15:00:00Z','ACTIVE')")
+            val before=jdbc.queryForObject("INSERT INTO users(nickname,created_at,status) VALUES ('before','2026-10-20T14:59:59.999Z','DELETED') RETURNING id",Long::class.java)!!
+            jdbc.update("INSERT INTO users(nickname,created_at,status) VALUES ('end','2026-10-21T15:00:00Z','ACTIVE'),('rejoined-old','2026-10-20T14:00:00Z','DELETED'),('rejoined-old-today','2026-10-20T16:00:00Z','DELETED')")
+            jdbc.update("INSERT INTO social_accounts(user_id,provider,provider_user_id,connected_at,deleted_at) VALUES (?,'KAKAO','before','2026-10-20T14:59:59.999Z','2026-10-20T15:00:00Z')",before)
             val teamBefore=jdbc.queryForObject("INSERT INTO users(nickname,created_at) VALUES ('team-before','2026-10-20T14:59:59.999Z') RETURNING id",Long::class.java)!!
             jdbc.update("INSERT INTO social_accounts(user_id,provider,provider_user_id,connected_at) VALUES (?,'GOOGLE','g','2026-10-20T15:00:00Z'),(?,'KAKAO','k','2026-10-20T15:00:01Z')",member,member)
             val story=jdbc.queryForObject("INSERT INTO stories(user_id,title,genre) VALUES (?,'story','판타지') RETURNING id",Long::class.java,member)!!
@@ -38,9 +40,11 @@ class AdminMetricsPostgresTests {
             jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,model,status,input_token_count,output_token_count,story_id,created_at) VALUES ('a','test','chat_response','priced','SUCCEEDED',2000,1000,?,'2026-10-20T15:00:00Z'),('b','test','chat_response',NULL,'SUCCEEDED',NULL,NULL,?,'2026-10-20T15:00:00Z'),('c','test','story_completion','unknown','SUCCEEDED',1,1,?,'2026-10-20T15:00:00Z')",teamStory,teamStory,teamStory)
             val clock = Clock.fixed(Instant.parse("2026-10-23T03:00:00Z"), ZoneOffset.UTC)
             val repository = AdminMetricReadRepository(NamedParameterJdbcTemplate(ds))
-            val service = AdminMetricReadService(repository, AdminDashboardProperties(listOf(team, teamBefore)), clock)
             val mapper = JsonMapper.builder().addModule(kotlinModule()).build()
             val store = AnalyticsValueRepository(NamedParameterJdbcTemplate(ds), mapper, DataSourceTransactionManager(ds))
+            val budget = AmplitudeBudget(clock)
+            val service = AdminMetricReadService(repository, AdminDashboardProperties(listOf(team, teamBefore)), MetricDefinitions(AnalyticsQueryFactory(mapper), mapper),
+                AnalyticsSnapshots(store, AmplitudeRestClient(AmplitudeDashboardProperties(), mapper, budget), budget, mapper, clock), clock)
             val props = AdminLangfuseProperties(langfuse.url("/").toString(), "public", "secret", "prod")
             val snapshots = LangfuseCostSnapshots(store, LangfuseMetricsClient(props, mapper), props, mapper, clock)
             val costs = AdminAiCostService(repository, snapshots, AdminAiCostProperties(traceFeatures = mapOf("채팅 턴" to "chat_response", "스토리 컴파일" to "story_completion")), clock)
@@ -49,11 +53,15 @@ class AdminMetricsPostgresTests {
                 {"time_dimension":"2026-10-21T00:00:00Z","traceName":"스토리 컴파일","providedModelName":"unknown","sum_totalCost":0,"sum_totalTokens":"2"}
             ]}"""))
             val q=AdminChartsRequest().apply { from="2026-10-21"; to="2026-10-21" }
-            assertThat(service.signups(q).daily.single().signups).isEqualTo(SignupCounts(1,1,0,0))
+            // 연동 행이 없는 회원(재가입 예전 계정)은 빼고 탈퇴 tombstone 연동 행은 행으로 센다.
+            assertThat(service.signups(q).daily.single().signups).isEqualTo(SignupCounts(1,1,0))
             assertThat(service.signups(q).daily.single().cumulativeSignups).isEqualTo(2)
-            assertThat(service.reach(q).segments[0].chats).isEqualTo(2)
-            assertThat(service.reach(q).guestToMember).isEqualTo(GuestConversion(1,1,1.0))
-            assertThat(service.options(q).daily.single().withPersona).isEqualTo(1)
+            assertThat(service.signups(q).pendingDates).containsExactly(LocalDate.parse("2026-10-21"))
+            val segmented=AdminSegmentRequest().apply { from="2026-10-21"; to="2026-10-21" }
+            assertThat(service.reach(segmented).segments[0].chats).isEqualTo(2)
+            assertThat(service.reach(segmented).guestToMember).isEqualTo(GuestConversion(1,1,1.0))
+            assertThat(service.options(segmented).daily.single().withPersona).isEqualTo(1)
+            assertThat(repository.modelCodes()).containsExactly("AURORA", "LITE")
             val cost=costs.aiCost(q)
             assertThat(cost.totals.costKrw).isEqualByComparingTo("5.6"); assertThat(cost.totals.costPerTurnKrw).isEqualByComparingTo("2.8")
             assertThat(cost.daily.single().byFeature.single { it.model==null }.callsWithoutTokens).isEqualTo(1)

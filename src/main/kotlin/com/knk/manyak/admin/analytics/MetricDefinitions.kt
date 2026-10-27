@@ -65,6 +65,22 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         }
         range.dates().associateWith { requireNotNull(values[it]) }
     }
+    /** 가입, 턴 도달, 채팅 옵션의 플랫폼 값은 국내 조건 안의 세 조회(web, android, unknown 순)이고 전체는 그 합이다. */
+    val splitPlatforms = listOf("web", "android", "unknown")
+    /** 플랫폼마다 구글, 카카오 순서다. */
+    fun signupPlatforms(): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> listOf(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO).map { event ->
+        queries.daily("users_signup_platform", AdminMetricEvents.event(event, filters(platform) + AdminMetricEvents.filter("is_new_user", listOf("true"))))
+    } }
+    private fun savedTurns(metric: String, platform: String, segment: String, filter: Map<String, Any>) = queries.daily(metric, AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
+        filters(platform) + AdminMetricEvents.filter("is_regenerated", listOf("false")) + filter + AdminMetricEvents.segment(segment)), "totals")
+    /** 플랫폼마다 기준 턴 오름차순이다. 한 턴의 성공 이벤트는 한 번이라 합계가 그 턴을 저장한 채팅 수다. */
+    fun turnReach(segment: String): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds.map { turn ->
+        savedTurns("conversion_turn_reach", platform, segment, AdminMetricEvents.filter("turn_number", listOf(turn.toString())))
+    } }
+    /** 플랫폼마다 default, persona 클릭 6개 뒤에 모델마다 세 플랫폼의 턴 수가 온다. 모델 코드마다 저장 키가 따로다. */
+    fun chatOptions(segment: String, models: List<String>): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> listOf("default", "persona").map {
+        queries.daily("quality_chat_starts", AdminMetricEvents.event(AdminMetricEvents.CHAT_START, filters(platform) + AdminMetricEvents.filter("persona_type", listOf(it)) + AdminMetricEvents.segment(segment)), "totals")
+    } } + models.flatMap { model -> splitPlatforms.map { platform -> savedTurns("quality_model_turns", platform, segment, AdminMetricEvents.filter("model_code", listOf(model))) } }
     val qualityEvents = linkedMapOf("chatLoadError" to "client_chat_loadError_shown", "storyListLoadError" to "client_storyList_loadError_shown",
         "storyCompleteError" to "client_storyCreate_completeError_shown", "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
         "attendanceClicked" to "client_creditCharge_attendanceButton_clicked", "inviteSucceeded" to "client_invite_codeInput_succeeded")

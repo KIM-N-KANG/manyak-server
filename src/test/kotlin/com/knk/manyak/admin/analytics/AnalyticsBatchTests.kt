@@ -118,8 +118,9 @@ class AnalyticsBatchTests {
             CampaignDefinition("ended", "종료", "past", day.minusDays(9), day.minusDays(2))), mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val service = CampaignAnalyticsService(campaigns, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), clock)
         val policy = AnalyticsBatchPolicy()
-        val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy).metrics()
-        val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention()
+        val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads()).metrics()
+        val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
+            defs.signupPlatforms() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
         assertThat(entries.map { it.key }).containsAll(expected.map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
         val common = expected.map { it.definition.metric + ":" + it.definition.hash }.toSet()
@@ -127,6 +128,9 @@ class AnalyticsBatchTests {
         val ended = service.trendMetrics("past").map { it.definition.hash }.toSet() - service.trendMetrics("ads").map { it.definition.hash }.toSet()
         assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(ended)
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
+        // segment guest, member는 화면 요청에서만 받는다.
+        val segmented = listOf("guest", "member").flatMap { defs.turnReach(it) + defs.chatOptions(it, listOf("AURORA", "LITE")) }.map { it.definition.hash }
+        assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(segmented)
     }
 
     @Test fun `배치 300점은 전체 500점 안의 몫이고 실패 예약은 양쪽에서 반환한다`() {
@@ -166,7 +170,7 @@ class AnalyticsBatchTests {
             mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val policy = AnalyticsBatchPolicy()
         val dashboard = AdminAnalyticsService(fixture.snapshots, AmplitudeDashboardProperties(teamCohortId = "team"), fixture.mapper, clock)
-        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy)
+        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads())
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
@@ -181,7 +185,7 @@ class AnalyticsBatchTests {
         assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(907)
+        assertThat(results.sumOf { it.cost }).isEqualTo(963)
         catalog.metrics().forEach { entry ->
             val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()

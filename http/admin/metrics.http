@@ -16,6 +16,8 @@
 # 앞 요청이 예산을 썼다면 다음 카드는 partial/503일 수 있다. 200 전체 검증은 5분 뒤 재실행한다.
 # 일별 준비 중 날짜는 pendingDates이며 60초 뒤 같은 요청으로 이어 받는다. 기간은 KST 양끝 포함.
 # 신규 가입자·턴 도달·채팅 옵션은 팀 계정 제외, AI 비용은 팀 계정도 포함한다.
+# 세 DB 지표의 플랫폼 값(signupsByPlatform, platforms, chatStarts 등)은 Amplitude라 팀 계정을 포함하고 국내 조건의 Web+Android+불명 합이다.
+# 플랫폼 값을 못 받은 날짜는 그 값만 null이고 pendingDates에 든다. DB 값은 Amplitude 장애와 무관하게 200이다.
 # AI 비용: MANYAK_ADMIN_LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY/ENVIRONMENT 네 값을 서버에 주입한다.
 # 개발 기본값은 비어 있으므로 AI 비용만 503이다. 키는 이 파일에 적지 않는다.
 # 모델 단가는 Langfuse 모델 설정에서 관리한다. 환율·장당 원가·추적 매핑은 manyak.admin.ai-cost다.
@@ -114,7 +116,13 @@ Authorization: Bearer {{adminToken}}
 client.test("신규 가입자와 서비스 시작부터 누계", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   const b = response.body;
-  client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao + d.signups.other), "계약 필드 확인");
+  // 연동 행이 없는 재가입 예전 계정은 빠지므로 total은 google과 kakao의 합이고 other는 없다.
+  client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao && !("other" in d.signups)), "계약 필드 확인");
+  client.assert(Array.isArray(b.pendingDates) && b.daily.every(d => b.pendingDates.includes(d.date) === (d.signupsByPlatform === null)), "준비 중 날짜만 플랫폼 null");
+  b.daily.filter(d => d.signupsByPlatform).forEach(d => {
+    const p = d.signupsByPlatform;
+    client.assert(p.all === p.web + p.android + p.unknown, `플랫폼 합 actual=${JSON.stringify(p)}`);
+  });
   b.daily.forEach((d, i) => {
     client.assert(d.cumulativeSignups >= d.signups.total, `범위 시작 전 가입 포함 actual=${JSON.stringify(d)}`);
     if (i > 0) client.assert(d.cumulativeSignups === b.daily[i - 1].cumulativeSignups + d.signups.total, `일별 누계 actual=${JSON.stringify(d)}`);
@@ -124,7 +132,8 @@ client.test("신규 가입자와 서비스 시작부터 누계", () => {
 %}
 
 ### 신규 가입자 요청 직후 요약 비교 — 가입자 데이터가 고정된 로컬 환경에서 순서대로 실행
-# days=7은 오늘 포함. 두 요청 사이 가입/팀 제외 설정 변경이 없을 때 마지막 누계와 요약이 같다.
+# days=7은 오늘 포함. 누계는 연동 행이 없는 재가입 예전 계정을 빼므로 요약 members.total 이하다.
+# 두 값의 차이는 SELECT COUNT(*) FROM users u WHERE NOT EXISTS (SELECT 1 FROM social_accounts a WHERE a.user_id=u.id) (팀 계정 제외)와 같다.
 GET {{baseUrl}}/api/v1/admin/dashboard/summary
 Authorization: Bearer {{adminToken}}
 
@@ -133,7 +142,7 @@ client.test("마지막 가입 누계와 요약 일치", () => {
   client.assert(response.status === 200, `actual=${response.status}`);
   const m = response.body.members;
   client.assert(m.total === m.active + m.withdrawn, `actual=${JSON.stringify(m)}`);
-  client.assert(m.total === Number(client.global.get("membersSignupLastTotal")), `요약=${m.total}, 가입 누계=${client.global.get("membersSignupLastTotal")}`);
+  client.assert(m.total >= Number(client.global.get("membersSignupLastTotal")), `요약=${m.total}, 가입 누계=${client.global.get("membersSignupLastTotal")}`);
 });
 %}
 
@@ -151,8 +160,38 @@ client.test("턴 도달률의 열두 기준 턴과 비율", () => {
     client.assert(JSON.stringify(s.reached.map(p => p.turn)) === JSON.stringify(thresholds), `기준 턴 actual=${JSON.stringify(s.reached)}`);
     s.reached.forEach(p => client.assert(p.rate === (s.chats === 0 ? 0 : p.chats / s.chats), `도달률 actual=${JSON.stringify(p)}`));
   });
+  client.assert(b.segment === "all" && Array.isArray(b.pendingDates), `segment 기본값 actual=${b.segment}`);
+  // 플랫폼 도달은 턴 저장일 기준 성공 이벤트 수이고 분모가 1턴 수라 1을 넘을 수 있다. 준비된 날짜가 없으면 null.
+  if (b.platforms !== null) {
+    client.assert(b.platforms.map(p => p.platform).join(",") === "all,web,android,unknown", "네 플랫폼 순서");
+    b.platforms.forEach(p => {
+      client.assert(p.chats === p.reached[0].chats && JSON.stringify(p.reached.map(r => r.turn)) === JSON.stringify(thresholds), `플랫폼 기준 턴 actual=${JSON.stringify(p)}`);
+      p.reached.forEach(r => client.assert(r.rate === (p.chats === 0 ? 0 : r.chats / p.chats), `플랫폼 도달률 actual=${JSON.stringify(r)}`));
+    });
+    const sum = ["web", "android", "unknown"].reduce((a, k) => a + b.platforms.find(p => p.platform === k).chats, 0);
+    client.assert(b.platforms[0].chats === sum, `전체는 세 플랫폼 합 actual=${b.platforms[0].chats}/${sum}`);
+  }
+  client.global.set("turnReachSegments", JSON.stringify(b.segments));
 });
 %}
+
+### 턴 도달률 회원만 — 위 요청 다음에 실행. segment는 platforms만 거르고 DB segments는 그대로다.
+# 게스트는 이벤트에 user_id가 없는 턴, 회원은 있는 턴(턴을 만든 때의 로그인 상태). 기본 범위 30일 첫 조회는 하루 36이라 여러 5분에 걸쳐 채워진다.
+GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?days=7&segment=member
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("회원 플랫폼 도달과 같은 DB 구간", () => {
+  client.assert(response.status === 200 && response.body.segment === "member", `actual=${response.status}`);
+  client.assert(JSON.stringify(response.body.segments) === client.global.get("turnReachSegments"), "DB segments는 segment와 무관");
+});
+%}
+
+### 400 — 허용하지 않는 segment
+GET {{baseUrl}}/api/v1/admin/conversion/turn-reach?segment=visitor
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("segment 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 채팅 옵션 — Amplitude 장애와 무관하게 동작
 # byModel은 채팅의 현재 선택 모델, turnsByModel은 메시지에 기록된 청구 모델이다.
@@ -168,7 +207,15 @@ client.test("채팅 옵션과 모델별 턴 수", () => {
   b.daily.forEach(d => {
     client.assert(d.turnsByModel !== null && typeof d.turnsByModel === "object" && !Array.isArray(d.turnsByModel), `모델별 턴 actual=${JSON.stringify(d)}`);
     Object.values(d.turnsByModel).forEach(n => client.assert(Number.isInteger(n) && n > 0, `턴 없는 모델은 키 없음 actual=${n}`));
+    // 플랫폼 값 셋은 Amplitude. 준비 중 날짜는 셋 다 null이고 platformTurnsByModel은 chat_models의 모든 코드를 키로 둔다.
+    const pending = b.pendingDates.includes(d.date);
+    ["chatStarts", "personaChatStarts", "platformTurnsByModel"].forEach(k => client.assert((d[k] === null) === pending, `${k} 준비 상태 actual=${JSON.stringify(d[k])}`));
+    if (!pending) {
+      client.assert(d.personaChatStarts.all <= d.chatStarts.all && d.chatStarts.all === d.chatStarts.web + d.chatStarts.android + d.chatStarts.unknown, `클릭 합 actual=${JSON.stringify(d.chatStarts)}`);
+      client.assert(!("UNRECORDED" in d.platformTurnsByModel), "플랫폼 모델 턴에는 UNRECORDED 없음");
+    }
   });
+  client.assert(b.segment === "all", `segment 기본값 actual=${b.segment}`);
   client.global.set("adminOptionsFrom", b.from);
   client.global.set("adminOptionsTo", b.to);
   client.global.set("adminTurnsByDate", JSON.stringify(Object.fromEntries(b.daily.map(d => [d.date, Object.values(d.turnsByModel).reduce((a, n) => a + n, 0)]))));

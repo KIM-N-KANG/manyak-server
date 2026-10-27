@@ -49,6 +49,8 @@ class AdminMetricsIntegrationTests {
     private val mapper = ObjectMapper()
     @BeforeEach fun prepareLangfuse() {
         (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(120)
+        // DB 지표도 Amplitude 플랫폼 값을 부른다. 기본 대기열 대역은 응답을 기다리며 막히므로 실패로 바로 돌려준다.
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         langfuse.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest) = MockResponse().setBody("{\"data\":[]}")
         }
@@ -96,7 +98,15 @@ class AdminMetricsIntegrationTests {
             client.get().uri("/api/v1/admin$path").exchange().expectStatus().isUnauthorized
             client.get().uri("/api/v1/admin$path").header("Authorization", "Bearer ${jwt.issueAdminToken(ordinary.publicId)}").exchange().expectStatus().isForbidden
             val response = client.get().uri("/api/v1/admin$path").header("Authorization", "Bearer $token").exchange()
-            if (path in db) response.expectStatus().isOk else response.expectStatus().isEqualTo(503)
+            if (path !in db) { response.expectStatus().isEqualTo(503); continue }
+            // DB 값은 그대로 응답하고 Amplitude 플랫폼 값만 준비 중이다.
+            val body = mapper.readTree(response.expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+            assertThat(body["pendingDates"].size()).isEqualTo(30); assertThat(body["platformAsOf"].isNull).isTrue()
+            when (path) {
+                "/users/signups" -> { assertThat(body["daily"][0]["signupsByPlatform"].isNull).isTrue(); assertThat(body["daily"][0]["signups"].has("other")).isFalse() }
+                "/conversion/turn-reach" -> { assertThat(body["platforms"].isNull).isTrue(); assertThat(body["segments"].size()).isEqualTo(3); assertThat(body["segment"].asText()).isEqualTo("all") }
+                else -> for (field in listOf("chatStarts", "personaChatStarts", "platformTurnsByModel")) assertThat(body["daily"][0][field].isNull).isTrue()
+            }
         }
         val charts = mapper.readTree(client.get().uri("/api/v1/admin/dashboard/charts?days=7").header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
         val categories = charts["distributions"].toList().associate { it["chartId"].asText() to it["category"].asText() }
@@ -157,7 +167,8 @@ class AdminMetricsIntegrationTests {
         }
         for(path in listOf("/users/activity?days=90","/users/retention?days=30","/users/retention?from=2026-10-23&to=2026-10-23","/users/sessions?days=30","/quality/client?days=90","/quality/client?platform=unknown",
             "/conversion/funnels/unknown","/conversion/funnels/web-first-visit?platform=web","/conversion/funnels/android-first-visit?platform=android","/conversion/funnels/story-creation?storyId=00000000-0000-4000-8000-000000000001",
-            "/conversion/funnels/story-detail-chat?storyId=bad","/conversion/funnels/story-creation?platform=all","/conversion/funnels/story-creation?from=2026-09-20&to=2026-10-21")) get(path).expectStatus().isBadRequest
+            "/conversion/funnels/story-detail-chat?storyId=bad","/conversion/funnels/story-creation?platform=all","/conversion/funnels/story-creation?from=2026-09-20&to=2026-10-21",
+            "/conversion/turn-reach?segment=visitor","/quality/chat-options?segment=visitor","/conversion/turn-reach?segment=")) get(path).expectStatus().isBadRequest
         for(path in listOf("/users/signups","/quality/chat-options","/quality/ai-cost","/conversion/turn-reach")) get("$path?from=2025-10-23&to=2026-10-23").expectStatus().isOk
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs",Long::class.java)).isZero()
     }
@@ -167,8 +178,9 @@ class AdminMetricsIntegrationTests {
         val start = Instant.parse("2026-10-20T15:00:00Z")
         val end = start.plusSeconds(86400)
         fun user(name: String, at: Instant = start, migrated: Instant? = null) = users.save(User(nickname=name, createdAt=at, migratedAt=migrated))
-        val a=user("구글", migrated=start.plusSeconds(100)); val b=user("카카오"); user("연동없음")
-        user("이전",start.minusMillis(1)); user("다음",end)
+        val a=user("구글", migrated=start.plusSeconds(100)); val b=user("카카오"); user("연동없음", migrated=start.plusSeconds(100))
+        val before=user("이전",start.minusMillis(1)); user("연동없는 이전",start.minusMillis(1)); user("다음",end)
+        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=before.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="before",connectedAt=start.minusMillis(1)))
         socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.entity.SocialProvider.GOOGLE,providerUserId="g",connectedAt=start))
         socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="kg",connectedAt=start.plusSeconds(1)))
         socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=b.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="k",connectedAt=start))
@@ -179,12 +191,14 @@ class AdminMetricsIntegrationTests {
         chat(a.id,100,deleted=start); chat(null,100,at=end)
         val q=com.knk.manyak.admin.dto.AdminChartsRequest().apply { from="2026-10-21"; to="2026-10-21" }
         val signup=reads.signups(q).daily.single()
-        assertThat(signup.signups).isEqualTo(SignupCounts(3,1,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(4)
-        val reach=reads.reach(q)
+        // 연동 행이 없는 회원(재가입 예전 계정)은 가입 수, 누계, 게스트 이관에서 모두 빠진다.
+        assertThat(signup.signups).isEqualTo(SignupCounts(2,1,1)); assertThat(signup.migratedFromGuest).isEqualTo(1); assertThat(signup.cumulativeSignups).isEqualTo(3)
+        val segmented=com.knk.manyak.admin.analytics.AdminSegmentRequest().apply { from="2026-10-21"; to="2026-10-21" }
+        val reach=reads.reach(segmented)
         assertThat(reach.segments[0].chats).isEqualTo(4); assertThat(reach.segments[0].reached.map { it.rate }).containsExactly(0.75,0.75,0.75,0.75,0.75,0.5,0.5,0.5,0.25,0.25,0.0,0.0)
         assertThat(reach.segments[1].chats).isEqualTo(2); assertThat(reach.segments[2].chats).isEqualTo(2)
         assertThat(reach.guestToMember).isEqualTo(GuestConversion(1,1,1.0))
-        val options=reads.options(q).daily.single()
+        val options=reads.options(segmented).daily.single()
         assertThat(options.chats).isEqualTo(4); assertThat(options.withPersona).isEqualTo(1); assertThat(options.byModel).containsExactlyInAnyOrderEntriesOf(mapOf("LITE" to 3L,"AURORA" to 1L))
         fun ai(feature: String, model: String?, input: Int?, output: Int?, status: String="SUCCEEDED", at: Instant=start) {
             jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,model,status,input_token_count,output_token_count,created_at,retry_count) VALUES ('fixture','test',?,?,?,?,?,?,0)",feature,model,status,input,output,java.sql.Timestamp.from(at))
@@ -207,9 +221,9 @@ class AdminMetricsIntegrationTests {
         assertThat(combined.totals.costPerTurnKrw).isEqualByComparingTo("1.75")
         assertThat(combined.totals.costPerStoryKrw).isEqualByComparingTo("3.5")
         prepareLangfuse()
-        q.from="2026-10-19"; q.to="2026-10-20"
-        assertThat(reads.options(q).daily).hasSize(2); assertThat(reads.options(q).daily.sumOf { it.chats }).isZero()
-        assertThat(reads.reach(q).segments.all { it.reached.all { p -> p.rate==0.0 } }).isTrue()
+        q.from="2026-10-19"; q.to="2026-10-20"; segmented.from=q.from; segmented.to=q.to
+        assertThat(reads.options(segmented).daily).hasSize(2); assertThat(reads.options(segmented).daily.sumOf { it.chats }).isZero()
+        assertThat(reads.reach(segmented).segments.all { it.reached.all { p -> p.rate==0.0 } }).isTrue()
         assertThat(costs.aiCost(q).totals.costPerTurnKrw).isNull()
     }
 

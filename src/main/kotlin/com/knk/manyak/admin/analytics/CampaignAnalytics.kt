@@ -17,8 +17,8 @@ class StoryCampaignQuery : CampaignQuery() { var storyId: UUID? = null }
 data class CampaignSegments(val all: Long, val ads: Long, val nonAds: Long = all - ads)
 data class CampaignSources(val ads: Long, val instagram: Long, val threads: Long, val dcinside: Long, val other: Long)
 data class CampaignDay(val date: LocalDate, val activeUsers: Long, val newVisitors: CampaignSegments, val newVisitorsBySource: CampaignSources,
-    val signups: CampaignSegments, val cumulativeSignups: CampaignSegments, val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long)
-data class CampaignTotals(val activeUsersAverage: Double, val newVisitors: CampaignSegments, val signups: CampaignSegments, val adsShare: Double?,
+    val signups: CampaignSegments, val cumulativeSignups: CampaignSegments, val androidSignups: Long, val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long)
+data class CampaignTotals(val activeUsersAverage: Double, val newVisitors: CampaignSegments, val signups: CampaignSegments, val androidSignups: Long, val adsShare: Double?,
     val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long)
 data class CampaignAnalyticsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val daily: List<CampaignDay>, val totals: CampaignTotals, val pendingDates: List<LocalDate>)
 data class CampaignFunnelStep(val event: String, val users: CampaignSegments)
@@ -66,11 +66,15 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
             metrics += metric("source_$group", "_new", common + ads(campaign, "is not") +
                 CampaignEvents.filter("gp:initial_utm_source", values, "user", if (group == "other") "is not" else "is"))
         }
-        for ((provider, name) in listOf("google" to CampaignEvents.GOOGLE, "kakao" to CampaignEvents.KAKAO)) {
-            val filters = CampaignEvents.common(false) + CampaignEvents.filter("is_new_user", listOf("true"))
+        val signups = listOf("google" to CampaignEvents.GOOGLE, "kakao" to CampaignEvents.KAKAO)
+        for ((provider, name) in signups) {
+            val filters = common + CampaignEvents.filter("is_new_user", listOf("true"))
             metrics += metric("signup_${provider}_all", name, filters)
             metrics += metric("signup_${provider}_ads", name, filters + ads(campaign))
         }
+        // Android 앱 이벤트에는 첫 유입 UTM이 없어 광고 구분 없이 센다.
+        for ((provider, name) in signups) metrics += metric("signup_${provider}_android", name,
+            CampaignEvents.common(false) + CampaignEvents.filter("platform", listOf("Android"), "user") + CampaignEvents.filter("is_new_user", listOf("true")))
         for ((id, name) in listOf("storyline" to CampaignEvents.GENERATE, "completion" to CampaignEvents.COMPLETE, "messages" to CampaignEvents.MESSAGE)) metrics += metric(id, name, aggregation = "totals")
         return metrics
     }
@@ -85,11 +89,11 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
                 val signups = CampaignSegments(Math.addExact(v[7], v[9]), Math.addExact(v[8], v[10]))
                 cumulativeAll = Math.addExact(cumulativeAll, signups.all); cumulativeAds = Math.addExact(cumulativeAds, signups.ads)
                 CampaignDay(date, v[0], CampaignSegments(v[1], v[2]), CampaignSources(v[2], v[3], v[4], v[5], v[6]), signups,
-                    CampaignSegments(cumulativeAll, cumulativeAds), v[11], v[12], v[13])
+                    CampaignSegments(cumulativeAll, cumulativeAds), Math.addExact(v[11], v[12]), v[13], v[14], v[15])
             }
             fun sum(select: (CampaignDay) -> Long) = daily.fold(0L) { total, row -> Math.addExact(total, select(row)) }
             val visitors = CampaignSegments(sum { it.newVisitors.all }, sum { it.newVisitors.ads })
-            val totals = CampaignTotals(daily.map { it.activeUsers.toDouble() }.average(), visitors, CampaignSegments(sum { it.signups.all }, sum { it.signups.ads }),
+            val totals = CampaignTotals(daily.map { it.activeUsers.toDouble() }.average(), visitors, CampaignSegments(sum { it.signups.all }, sum { it.signups.ads }), sum { it.androidSignups },
                 if (visitors.all == 0L) null else visitors.ads.toDouble() / visitors.all, sum { it.storylineRequests }, sum { it.completionRequests }, sum { it.chatMessages })
             CampaignAnalyticsResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, campaign, daily, totals, result.pendingDates())
         }
