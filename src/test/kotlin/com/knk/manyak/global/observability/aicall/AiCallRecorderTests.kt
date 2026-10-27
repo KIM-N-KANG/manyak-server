@@ -48,6 +48,21 @@ class AiCallRecorderTests {
     }
 
     @Test
+    fun `내용 거절은 성공 기록과 지표를 남기고 원래 예외를 전파한다`() {
+        val rejected = com.knk.manyak.story.client.StoryContentRejectedException("거절", IllegalStateException())
+        val thrown = assertFailsWith<com.knk.manyak.story.client.StoryContentRejectedException> {
+            recorder.record<String>(AiCallContext(AiCallFeature.STORY_COMPLETION)) { throw rejected }
+        }
+        kotlin.test.assertSame(rejected, thrown)
+        val log = repository.findAll().single()
+        assertEquals(AiCallStatus.SUCCEEDED, log.status)
+        assertNull(log.errorCode)
+        assertNotNull(log.completedAt)
+        assertEquals(1L, meterRegistry.get("manyak.ai.call.duration").tag("outcome", "success").timer().count())
+        assertNull(meterRegistry.find("manyak.ai.call.duration").tag("outcome", "failure").timer())
+    }
+
+    @Test
     fun `성공 시 SUCCEEDED로 적재하고 결과와 log id를 반환한다`() {
         MDC.put(MdcKeys.REQUEST_ID, "req_abc")
         MDC.put(MdcKeys.SESSION_ID, "sess_1")

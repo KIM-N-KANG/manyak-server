@@ -1345,3 +1345,51 @@ Accept: application/json
         client.assert(response.status === 201, `expected=201 actual=${response.status} body=${JSON.stringify(response.body)}`);
     });
 %}
+
+### [KNK-1865] 스토리라인 내용 거절 — AI 422 문자열 detail 응답 조건에서 실행
+# 실 AI의 안전 필터 판정은 입력·모델에 따라 달라 재현을 보장하지 않습니다.
+# 로컬 AI 대역이 POST /api/v1/story/storylines에 아래 본문과 HTTP 422를 반환하도록 설정한 뒤 실행합니다.
+# {"detail":"입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다."}
+# 기대: 422 CONTENT_REJECTED, 게스트 횟수 복원, 요청 FAILED, 진행 미저장.
+# detail 배열/파싱 불가/빈 본문의 422 및 그 밖의 AI 오류는 502 BAD_GATEWAY입니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}],
+  "protagonist": {}
+}
+
+> {%
+    client.test("스토리라인 내용 거절을 구분한다", () => {
+        client.assert(response.status === 422, `expected=422 actual=${response.status}`);
+        client.assert(response.body.code === "CONTENT_REJECTED", `actual=${response.body.code}`);
+        client.assert(response.body.message === "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", `actual=${response.body.message}`);
+    });
+%}
+
+### [KNK-1865] 완성 내용 거절 — 미완성 진행을 준비한 뒤 AI 컴파일 422 조건에서 실행
+# 2번 스토리라인 생성으로 simpleCreationId·storylineId를 준비하고 완성 요청은 실행하지 않습니다.
+# 로컬 AI 대역이 POST /api/v1/story/compile에 위 문자열 detail과 HTTP 422를 반환하도록 설정합니다.
+# 기대: 422 CONTENT_REJECTED, 회원 이프 환불 또는 회원/게스트 체험 횟수 복원, 요청 FAILED, 스토리 미저장.
+# 같은 입력은 다시 거절될 수 있으므로 입력을 고쳐 새 requestId로 요청합니다.
+POST {{baseUrl}}/api/v1/stories/simple
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "simpleCreationId": {{simpleCreationId}},
+  "storylineId": {{storylineId}},
+  "additionalInfos": []
+}
+
+> {%
+    client.test("완성 내용 거절을 구분한다", () => {
+        client.assert(response.status === 422, `expected=422 actual=${response.status}`);
+        client.assert(response.body.code === "CONTENT_REJECTED", `actual=${response.body.code}`);
+        client.assert(response.body.message === "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", `actual=${response.body.message}`);
+    });
+%}

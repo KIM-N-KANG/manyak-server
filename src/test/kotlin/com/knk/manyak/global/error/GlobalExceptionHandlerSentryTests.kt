@@ -47,6 +47,15 @@ class GlobalExceptionHandlerSentryTests {
     private fun request() = MockHttpServletRequest("POST", "/api/v1/stories/simple")
 
     @Test
+    fun `AI 내용 거절 422는 Sentry로 보내지 않는다`() {
+        handler.handleResponseStatusException(
+            CodedResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "CONTENT_REJECTED", "내용 거절", IllegalStateException()),
+            request(),
+        )
+        assertThat(captured).isEmpty()
+    }
+
+    @Test
     fun `일반 예외(500)는 endpoint·method·status_code tag와 함께 캡처한다`() {
         handler.handleException(RuntimeException("boom"), request())
 

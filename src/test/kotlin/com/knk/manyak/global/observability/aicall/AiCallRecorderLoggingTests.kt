@@ -68,6 +68,16 @@ class AiCallRecorderLoggingTests {
         }
 
     @Test
+    fun `내용 거절의 완료 로그 outcome은 success다`() {
+        assertFailsWith<com.knk.manyak.story.client.StoryContentRejectedException> {
+            recorder.record<String>(AiCallContext(AiCallFeature.STORYLINE_GENERATION)) {
+                throw com.knk.manyak.story.client.StoryContentRejectedException("거절", IllegalStateException())
+            }
+        }
+        assertThat(eventsByName()["ai_call_completed"]!!["outcome"]).isEqualTo("success")
+    }
+
+    @Test
     fun `AI 호출 성공이면 시작과 완료를 각각 남긴다`() {
         recorder.record(AiCallContext(AiCallFeature.STORYLINE_GENERATION)) { "ok" }
 

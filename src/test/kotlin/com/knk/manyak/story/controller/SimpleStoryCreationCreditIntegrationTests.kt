@@ -62,8 +62,78 @@ class SimpleStoryCreationCreditIntegrationTests {
         // true면 compileStory가 예외를 던져 compile 실패(→ 환불)를 강제한다.
         @Volatile
         var failCompile = false
+        var compileException: RuntimeException? = null
         var lastCompileRequest: AiStoryCompileRequest? = null
         var skipImages = false
+    }
+
+    @Test
+    fun `내용 거절은 422와 원문을 반환하고 회원 이프를 전액 환불한다`() {
+        val user = saveUser()
+        creditWalletService.reward(user.id, seedBalance, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val storyline = persistStorylineOwnedBy(user.id)
+        val requestId = java.util.UUID.randomUUID()
+        compileException = contentRejection()
+        val beforeRejected = creationCount("rejected")
+        val beforeFailure = creationCount("failure")
+
+        postSimpleStory(storyline, "Bearer ${validToken(user)}", requestId = requestId)
+            .expectStatus().isEqualTo(422).expectBody()
+            .jsonPath("$.status").isEqualTo(422)
+            .jsonPath("$.code").isEqualTo("CONTENT_REJECTED")
+            .jsonPath("$.message").isEqualTo(compileException!!.message)
+
+        assertThat(creditWalletService.balanceOf(user.id)).isEqualTo(seedBalance)
+        assertThat(creditTransactionRepository.findAll().filter { it.reason == CreditReason.REFUND }.single().amount)
+            .isEqualTo(storyCreationCost)
+        assertFailedWithoutStory(requestId)
+        assertThat(creationCount("rejected")).isEqualTo(beforeRejected + 1)
+        assertThat(creationCount("failure")).isEqualTo(beforeFailure)
+    }
+
+    @Test
+    fun `내용 거절은 게스트와 회원 체험 횟수를 복원한다`() {
+        compileException = contentRejection()
+        val counter = com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION
+        val guestId = java.util.UUID.randomUUID()
+        val beforeGuest = b13GuestTrialLimitService.usage(null, "test-device", counter).used
+        postSimpleStory(persistStoryline(), null, requestId = guestId).expectStatus().isEqualTo(422)
+        assertThat(b13GuestTrialLimitService.usage(null, "test-device", counter).used).isEqualTo(beforeGuest)
+        assertFailedWithoutStory(guestId)
+
+        val member = userRepository.save(User(nickname = "체험회원", status = UserStatus.ACTIVE))
+        val memberId = java.util.UUID.randomUUID()
+        val beforeMember = b13GuestTrialLimitService.usage(member.id, null, counter).used
+        postSimpleStory(persistStorylineOwnedBy(member.id), "Bearer ${validToken(member)}", requestId = memberId)
+            .expectStatus().isEqualTo(422)
+        assertThat(b13GuestTrialLimitService.usage(member.id, null, counter).used).isEqualTo(beforeMember)
+        assertThat(creditTransactionRepository.findAll()).isEmpty()
+        assertFailedWithoutStory(memberId)
+    }
+
+    @Test
+    fun `스키마 위반 422는 502로 반환하고 요청을 실패 처리한다`() {
+        compileException = org.springframework.web.client.HttpClientErrorException.create(
+            org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT, "schema", org.springframework.http.HttpHeaders.EMPTY,
+            """{"detail":[{"type":"missing","loc":["body"],"msg":"required"}]}""".toByteArray(), Charsets.UTF_8,
+        )
+        val id = java.util.UUID.randomUUID()
+        postSimpleStory(persistStoryline(), null, requestId = id).expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+        assertFailedWithoutStory(id)
+    }
+
+    private fun contentRejection() = com.knk.manyak.story.client.StoryContentRejectedException(
+        "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다.", IllegalStateException("AI 422"),
+    )
+
+    private fun creationCount(outcome: String): Long =
+        meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0
+
+    private fun assertFailedWithoutStory(id: java.util.UUID) {
+        assertThat(requests.findByRequestId(id)!!.status)
+            .isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.FAILED)
+        assertThat(storyRepository.findAll()).isEmpty()
     }
 
     @TestConfiguration
@@ -77,6 +147,7 @@ class SimpleStoryCreationCreditIntegrationTests {
             override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 compileStoryCalls.incrementAndGet()
                 lastCompileRequest = request
+                compileException?.let { throw it }
                 if (failCompile) {
                     throw IllegalStateException("AI compile 강제 실패")
                 }
@@ -133,6 +204,7 @@ class SimpleStoryCreationCreditIntegrationTests {
     fun setUp() {
         compileStoryCalls.set(0)
         failCompile = false
+        compileException = null
         lastCompileRequest = null
         skipImages = false
         databaseCleaner.cleanAll()
