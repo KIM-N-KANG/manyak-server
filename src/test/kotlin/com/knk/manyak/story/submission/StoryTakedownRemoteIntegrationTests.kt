@@ -19,6 +19,10 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.provider.CsvSource
+import com.knk.manyak.auth.entity.UserStatus
+import org.springframework.test.context.event.RecordApplicationEvents
+import org.springframework.test.context.event.ApplicationEvents
 import org.mockito.Mockito.*
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
@@ -30,8 +34,10 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
+@RecordApplicationEvents
 @SpringBootTest(properties = ["manyak.push.mode=remote"])
 class StoryTakedownRemoteIntegrationTests {
+    @Autowired lateinit var events: ApplicationEvents
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
@@ -167,6 +173,66 @@ class StoryTakedownRemoteIntegrationTests {
             val cleared = appender.list.filter { it.formattedMessage.contains("event_name=story_takedown_cleared") }
             assertThat(cleared).hasSize(1)
             assertThat(cleared.single().formattedMessage).contains(story.publicId.toString(), row.publicId.toString(), "visibility=PRIVATE")
+        } finally { logger.detachAppender(appender); appender.stop() }
+    }
+    @ParameterizedTest
+    @CsvSource(
+        "ACTIVE,PUBLIC,true", "ACTIVE,PUBLIC,false", "ACTIVE,PRIVATE,true", "ACTIVE,PRIVATE,false",
+        "SUSPENDED,PUBLIC,true", "SUSPENDED,PUBLIC,false", "SUSPENDED,PRIVATE,true", "SUSPENDED,PRIVATE,false",
+        "DELETED,PUBLIC,true", "DELETED,PUBLIC,false", "DELETED,PRIVATE,true", "DELETED,PRIVATE,false",
+    )
+    fun `ETC 로그는 소유자와 대기 제출본별 전체 값과 이벤트 수를 기록하고 원문은 제외한다`(
+        status: UserStatus, visibility: StoryVisibility, pending: Boolean,
+    ) {
+        val detail = "PRIVATE_DETAIL_MARKER_입력사유"
+        val memo = "PRIVATE_MEMO_MARKER_관리메모"
+        val owner = users.findById(story.userId!!).orElseThrow()
+        owner.status = status
+        users.save(owner)
+        story.visibility = visibility
+        stories.save(story)
+        val row = if (pending) submissions.save(StorySubmission(userId = owner.id, storyId = story.id,
+            kind = SubmissionKind.UPDATE, payload = "{}")) else null
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.observability.StructuredLogger::class.java) as ch.qos.logback.classic.Logger
+        val appender = object : ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>() {
+            override fun append(event: ch.qos.logback.classic.spi.ILoggingEvent) {
+                event.prepareForDeferredProcessing()
+                super.append(event)
+            }
+        }.apply { start() }
+        logger.addAppender(appender)
+        try {
+            take(StoryTakedownRequest(StoryTakedownReason.ETC, detail, memo))
+            val notified = status != UserStatus.DELETED
+            val logs = appender.list.filter { it.formattedMessage.contains("event_name=story_taken_down") }
+            assertThat(logs).hasSize(1)
+            val expected = linkedMapOf("event_name" to "story_taken_down", "story_public_id" to story.publicId,
+                "reason_code" to "ETC", "previous_visibility" to visibility.name,
+                "failed_submission_public_id" to row?.publicId, "notified" to notified)
+            assertThat(logs.single().formattedMessage).isEqualTo(expected.toString())
+            appender.list.forEach { log ->
+                assertThat(log.formattedMessage).doesNotContain(detail, memo, story.title)
+                assertThat(log.argumentArray.orEmpty().joinToString()).doesNotContain(detail, memo, story.title)
+                assertThat(log.throwableProxy).isNull()
+            }
+            assertThat(events.stream(StoryTakenDownRecorded::class.java).toList()).containsExactly(
+                StoryTakenDownRecorded(story.publicId, StoryTakedownReason.ETC, visibility, row?.publicId, notified))
+            val notifications = events.stream(StoryTakenDown::class.java).toList()
+            assertThat(notifications).hasSize(if (notified) 1 else 0)
+            if (notified) {
+                val event = notifications.single()
+                assertThat(event.userId).isEqualTo(owner.id)
+                assertThat(event.storyId).isEqualTo(story.publicId)
+                assertThat(event.reasonCode).isEqualTo(StoryTakedownReason.ETC)
+                assertThat(event.reasonDetail).isEqualTo(detail)
+                assertThat(event.reason).isEqualTo(detail)
+                verify(outbox, times(1)).insert(anyMessage(), anyInstant())
+            } else verifyNoInteractions(outbox)
+            assertThat(count("admin_audit_logs")).isEqualTo(1)
+            assertThat(count("user_notifications")).isEqualTo(if (notified) 1L else 0L)
+            assertThat(jdbc.queryForObject("SELECT after_state FROM admin_audit_logs", String::class.java))
+                .contains(detail, memo)
+            if (row != null) assertThat(submissions.findById(row.id).orElseThrow().status).isEqualTo(SubmissionStatus.FAILED)
         } finally { logger.detachAppender(appender); appender.stop() }
     }
     private fun anyMessage() = any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")

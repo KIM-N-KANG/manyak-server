@@ -150,8 +150,9 @@ class GlobalExceptionHandler {
         exception: HttpMessageNotReadableException,
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
-        if (request.servletPath.startsWith("/api/v1/auth/") || request.servletPath == "/api/v1/admin/auth/login/google") {
-            // DTO 파싱은 인증 서비스의 보호 구간보다 먼저 실행된다. 파서 메시지에는 토큰 원문이 포함될 수 있다.
+        if (request.servletPath.startsWith("/api/v1/auth/") || request.servletPath == "/api/v1/admin/auth/login/google" ||
+            Regex("/api/v1/admin/moderation/stories/[^/]+/takedown").matches(request.servletPath)) {
+            // DTO 파싱은 서비스의 보호 구간보다 먼저 실행된다. 파서 메시지에는 토큰·사유·메모 원문이 포함될 수 있다.
             log.debug(
                 "Malformed request body: path={}, error_type={}, request_id={}",
                 request.servletPath, exception.javaClass.simpleName, MDC.get(MdcKeys.REQUEST_ID),

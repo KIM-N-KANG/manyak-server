@@ -71,6 +71,40 @@ class StoryTakedownIntegrationTests {
         take(s.publicId, auth = jwt.issueAdminToken(owner.publicId)).expectStatus().isForbidden
         assertThat(count("admin_audit_logs")).isZero()
     }
+    @Test fun `공개 중단 JSON 파싱 실패 DEBUG 로그는 사유와 메모 원문을 남기지 않는다`() {
+        val uri = "/api/v1/admin/moderation/stories/${story().publicId}/takedown"
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.error.GlobalExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val previous = logger.level
+        val appender = object : ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>() {
+            override fun append(event: ch.qos.logback.classic.spi.ILoggingEvent) {
+                event.prepareForDeferredProcessing()
+                super.append(event)
+            }
+        }.apply { start() }
+        logger.level = ch.qos.logback.classic.Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            val detail = "PRIVATE_DETAIL_MARKER"
+            val memo = "PRIVATE_MEMO_MARKER"
+            for (body in listOf(
+                """{"reasonCode":"ETC","reasonDetail":$detail,"memo":"$memo"}""",
+                """{"reasonCode":"ETC","reasonDetail":"$detail","memo":$memo}""",
+            )) {
+                appender.list.clear()
+                client.post().uri(uri).header("Authorization", "Bearer $token")
+                    .header("X-Manyak-Request-Id", "req-takedown-json").header("Content-Type", "application/json")
+                    .body(body).exchange().expectStatus().isBadRequest.expectBody().jsonPath("$.details").isEmpty()
+                val log = appender.list.single()
+                assertThat(log.level).isEqualTo(ch.qos.logback.classic.Level.DEBUG)
+                assertThat(log.formattedMessage).isEqualTo(
+                    "Malformed request body: path=$uri, error_type=HttpMessageNotReadableException, request_id=req-takedown-json")
+                assertThat(log.message).doesNotContain(detail, memo)
+                assertThat(log.argumentArray.map { it.toString() }.joinToString()).doesNotContain(detail, memo)
+                assertThat(log.argumentArray.orEmpty().toList()).noneMatch { it is Throwable }
+                assertThat(log.throwableProxy).isNull()
+            }
+        } finally { logger.detachAppender(appender); logger.level = previous; appender.stop() }
+    }
     @Test fun `공개 스토리의 스냅샷과 감사 및 알림 내역을 함께 기록한다`() {
         val s = story()
         val body = json(take(s.publicId).expectStatus().isOk)
