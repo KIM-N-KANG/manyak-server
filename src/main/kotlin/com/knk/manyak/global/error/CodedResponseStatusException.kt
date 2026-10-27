@@ -19,6 +19,9 @@ class CodedResponseStatusException(
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */
 object ApiErrorCodes {
+    /** AI 내용 거절(422): 입력 내용을 고쳐 새 요청으로 생성해야 한다. */
+    const val CONTENT_REJECTED = "CONTENT_REJECTED"
+
     const val ADMIN_ACCOUNT_PROTECTED = "ADMIN_ACCOUNT_PROTECTED"
     const val IDEMPOTENCY_KEY_CONFLICT = "IDEMPOTENCY_KEY_CONFLICT"
     const val CHAT_TURN_IN_PROGRESS = "CHAT_TURN_IN_PROGRESS"

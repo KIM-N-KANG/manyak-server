@@ -28,6 +28,42 @@ class RestStoryAiClientTests {
     }
 
     @Test
+    fun `두 AI 호출은 문자열 detail 422만 내용 거절로 구분한다`() {
+        var status = 422
+        var body = ""
+        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+            createContext("/api/v1/story/") { exchange ->
+                exchange.requestBody.readBytes()
+                val bytes = body.toByteArray(Charsets.UTF_8)
+                exchange.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
+                exchange.sendResponseHeaders(status, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+            start()
+        }
+        val client = RestStoryAiClient("http://localhost:${requireNotNull(server).address.port}")
+        val calls = listOf<() -> Any>(
+            { client.createStorylines(AiStorylinesRequest(listOf("판타지"), AiCharacter())) },
+            { client.compileStory(AiStoryCompileRequest(listOf("판타지"), AiCharacter(), selectedStoryline = "전개", additionalInfo = "")) },
+        )
+        val message = "입력 내용이 안전 정책에 맞지 않아 생성할 수 없습니다."
+        calls.forEach { call ->
+            body = """{"detail":"$message"}"""
+            val rejected = assertFailsWith<StoryContentRejectedException> { call() }
+            assertEquals(message, rejected.message)
+            assertTrue(rejected.cause is org.springframework.web.client.RestClientResponseException)
+            for (invalid in listOf("""{"detail":[{"type":"missing","loc":["body"],"msg":"required"}]}""", "invalid json", "{}", """{"detail":null}""", """{"detail":123}""", "")) {
+                body = invalid
+                assertFailsWith<org.springframework.web.client.RestClientResponseException> { call() }
+            }
+            status = 502
+            body = """{"detail":"$message"}"""
+            assertFailsWith<org.springframework.web.client.RestClientResponseException> { call() }
+            status = 422
+        }
+    }
+
+    @Test
     fun `AI 서버에 JSON body와 content type을 전달한다`() {
         var capturedContentType: String? = null
         var capturedUpgrade: String? = null

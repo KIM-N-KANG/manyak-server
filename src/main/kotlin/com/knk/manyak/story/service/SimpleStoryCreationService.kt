@@ -29,6 +29,7 @@ import com.knk.manyak.story.client.AiLorebookItem
 import com.knk.manyak.story.client.AiStoryCompileRequest
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiThumbnailImage
+import com.knk.manyak.story.client.StoryContentRejectedException
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
@@ -431,7 +432,7 @@ class SimpleStoryCreationService(
                 .map { it.toAiCharacter() },
         )
 
-        // AI 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([storylineOutcomeOf]).
+        // AI 진입 신호. 이 지점을 지난 뒤의 실패는 AI 내용 거절을 제외하고 실제 생성 실패다([storylineOutcomeOf]).
         onAiCallStarted()
         val recorded = try {
             aiCallRecorder.record(
@@ -447,6 +448,11 @@ class SimpleStoryCreationService(
                 creationId = null,
                 errorType = AnalyticsErrorType.fromThrowable(exception),
             )
+            if (exception is StoryContentRejectedException) {
+                throw CodedResponseStatusException(
+                    HttpStatus.UNPROCESSABLE_CONTENT, ApiErrorCodes.CONTENT_REJECTED, requireNotNull(exception.message), exception,
+                )
+            }
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리라인 생성 요청에 실패했습니다.", exception)
         }
 
@@ -676,8 +682,8 @@ class SimpleStoryCreationService(
      * outcome 태그는 3값이다(KNK-784):
      *   - `success`  : 실제로 생성·저장까지 끝난 호출
      *   - `failure`  : 생성을 시도하다 깨진 호출 — AI compile 실패(502·타임아웃)·응답 검증 실패·저장 경합. 수 초~180초.
-     *   - `rejected` : 생성 시도 **이전에** 거부된 4xx — 세션 없음(404)·소유권(403)·이미 생성됨(409)·태그 오류(400)·
-     *                  크레딧 부족과 게스트 한도(402). DB 조회 몇 번으로 끝나는 밀리초 경로다.
+     *   - `rejected` : AI 내용 거절 또는 생성 시도 **이전에** 거부된 4xx — 세션 없음(404)·소유권(403)·이미 생성됨(409)·태그 오류(400)·
+     *                  크레딧 부족과 게스트 한도(402). 내용 거절 이외에는 DB 조회 몇 번으로 끝난다.
      *
      * 4xx를 failure에서 떼는 이유: 두 갈래를 한 히스토그램에 섞으면 거부 비중에 따라 실패 p95가 요동치고,
      * 거부가 늘수록 p95가 **낮아져** AI가 실제로 느려지는데 지표는 개선된 것처럼 보이는 역전이 생긴다.
@@ -709,13 +715,14 @@ class SimpleStoryCreationService(
      * [compileAndPersist]가 `findByIdForUpdate`로 잠금을 잡은 뒤 STORY_CREATED를 보고 409(또는 세션 소실 시 404)를 던진다.
      * 이건 AI 호출을 이미 마친 수 초~180초짜리 **실제 생성 실패**라, 밀리초 거부와 같은 시계열에 넣으면 안 된다.
      *
-     * 그래서 compile 진입 여부([compileStarted])를 먼저 본다.
-     * - compile이 시작됐으면 상태 코드와 무관하게 failure다.
+     * AI 내용 거절은 진입 뒤에도 rejected다. 그 외에는 compile 진입 여부([compileStarted])를 먼저 본다.
+     * - AI 내용 거절을 제외하고 compile이 시작됐으면 상태 코드와 무관하게 failure다.
      * - 시작 전이면 4xx `ResponseStatusException`이 rejected다. 402 크레딧·게스트 한도를 던지는
      *   `CodedResponseStatusException`도 `ResponseStatusException` 하위라 함께 걸린다(별도 분기 불필요).
      * - 그 외(5xx·비 HTTP 예외)는 failure다.
      */
     private fun creationOutcomeOf(exception: Exception, compileStarted: Boolean): String = when {
+        exception is CodedResponseStatusException && exception.errorCode == ApiErrorCodes.CONTENT_REJECTED -> OUTCOME_REJECTED
         compileStarted -> OUTCOME_FAILURE
         exception is ResponseStatusException && exception.statusCode.is4xxClientError -> OUTCOME_REJECTED
         else -> OUTCOME_FAILURE
@@ -727,7 +734,7 @@ class SimpleStoryCreationService(
      * outcome 태그 값은 완성 타이머([recordCreationDuration])와 같은 3값이다:
      *   - `success`  : 스토리라인 생성·저장까지 끝난 호출
      *   - `failure`  : AI 호출에 진입한 뒤 깨진 호출 — AI 실패(502)·타임아웃·저장 실패
-     *   - `rejected` : AI 호출 **이전에** 거부된 4xx — 게스트 한도 소진(402)·사용할 수 없는 태그 ID(400) 등
+     *   - `rejected` : AI 내용 거절 또는 AI 호출 **이전에** 거부된 4xx — 게스트 한도 소진(402)·사용할 수 없는 태그 ID(400) 등
      *
      * **Timer가 아니라 Counter인 이유**: 스토리라인 생성은 AI 호출 1회가 유스케이스의 거의 전부라 소요가
      * `manyak.ai.call.duration{feature="storyline_generation"}`과 사실상 겹친다. 반면 결과 분포는 그쪽에 없다 —
@@ -754,11 +761,12 @@ class SimpleStoryCreationService(
      *
      * 완성 경로([creationOutcomeOf])와 같은 이유로 **HTTP 상태만으로는 가를 수 없다** — AI 호출 이후 단계(저장)에서
      * 나는 4xx를 밀리초 거부로 오분류하면, 수십 초를 쓴 실패가 rejected로 새어 실패율을 낮춰 보이게 한다.
-     * 그래서 AI 진입 여부([aiCallStarted])를 먼저 본다.
+     * AI 내용 거절만 진입 뒤에도 rejected이고, 그 외에는 AI 진입 여부([aiCallStarted])를 먼저 본다.
      *
      * 여기서 `Throwable`을 받는 것은 호출부가 `Throwable`을 잡기 때문이다(게스트 한도 복원이 Error에도 돌아야 한다).
      */
     private fun storylineOutcomeOf(throwable: Throwable, aiCallStarted: Boolean): String = when {
+        throwable is CodedResponseStatusException && throwable.errorCode == ApiErrorCodes.CONTENT_REJECTED -> OUTCOME_REJECTED
         aiCallStarted -> OUTCOME_FAILURE
         throwable is ResponseStatusException && throwable.statusCode.is4xxClientError -> OUTCOME_REJECTED
         else -> OUTCOME_FAILURE
@@ -1060,7 +1068,7 @@ class SimpleStoryCreationService(
         requestId: UUID,
         // Langfuse trace 연결 식별자(KNK-751). 위 requestId(완성 단계)와 달리 creation_id는 스토리라인 단계 값이다.
         traceLink: AiTraceLink,
-        // compile 진입 신호. 이 지점을 지난 뒤의 실패는 상태 코드와 무관하게 실제 생성 실패다([creationOutcomeOf]).
+        // compile 진입 신호. 이 지점을 지난 뒤의 실패는 AI 내용 거절을 제외하고 실제 생성 실패다([creationOutcomeOf]).
         onCompileStarted: () -> Unit,
     ): StoryCreationOutcome {
         onCompileStarted()
@@ -1072,6 +1080,11 @@ class SimpleStoryCreationService(
                 storyAiClient.compileStory(aiRequest, traceLink)
             }
         } catch (exception: Exception) {
+            if (exception is StoryContentRejectedException) {
+                throw CodedResponseStatusException(
+                    HttpStatus.UNPROCESSABLE_CONTENT, ApiErrorCodes.CONTENT_REJECTED, requireNotNull(exception.message), exception,
+                )
+            }
             throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI 스토리 생성 요청에 실패했습니다.", exception)
         }
         val aiResponse = recorded.result

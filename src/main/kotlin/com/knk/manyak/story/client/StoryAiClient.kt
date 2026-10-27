@@ -13,6 +13,8 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.stereotype.Component
 import io.micrometer.observation.ObservationRegistry
 import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestClientResponseException
+import tools.jackson.databind.json.JsonMapper
 import java.net.URI
 import java.time.Duration
 
@@ -281,28 +283,48 @@ class RestStoryAiClient(
     private val compileRestClient = buildRestClient(observationRegistry, connectTimeout, compileReadTimeout)
 
     override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
-        storylineRestClient
-            .post()
-            .uri("/api/v1/story/storylines")
-            .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
-            .contentType(MediaType.APPLICATION_JSON)
-            .accept(MediaType.APPLICATION_JSON)
-            .body(request)
-            .retrieve()
-            .body(AiStorylinesResponse::class.java)
-            ?: throw IllegalStateException("AI storylines response body is empty")
+        withContentRejection {
+            storylineRestClient
+                .post()
+                .uri("/api/v1/story/storylines")
+                .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(AiStorylinesResponse::class.java)
+                ?: throw IllegalStateException("AI storylines response body is empty")
+        }
 
     override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse =
-        compileRestClient
-            .post()
-            .uri("/api/v1/story/compile")
-            .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
-            .contentType(MediaType.APPLICATION_JSON)
-            .accept(MediaType.APPLICATION_JSON)
-            .body(request)
-            .retrieve()
-            .body(AiStoryCompileResponse::class.java)
-            ?: throw IllegalStateException("AI story compile response body is empty")
+        withContentRejection {
+            compileRestClient
+                .post()
+                .uri("/api/v1/story/compile")
+                .headers { headers -> traceLink.toHeaders().forEach { (name, value) -> headers.set(name, value) } }
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(AiStoryCompileResponse::class.java)
+                ?: throw IllegalStateException("AI story compile response body is empty")
+        }
+
+
+    private val errorMapper = JsonMapper.builder().build()
+
+    /** 스키마 위반(배열 detail)과 파싱 불가 본문은 원래 HTTP 예외를 유지한다. */
+    private fun <T> withContentRejection(block: () -> T): T = try {
+        block()
+    } catch (exception: RestClientResponseException) {
+        if (exception.statusCode.value() == 422) {
+            val detail = runCatching { errorMapper.readTree(exception.responseBodyAsByteArray)?.get("detail") }.getOrNull()
+            if (detail != null && detail.isString) {
+                throw StoryContentRejectedException(detail.stringValue(), exception)
+            }
+        }
+        throw exception
+    }
 
     private fun buildRestClient(observationRegistry: ObservationRegistry, connectTimeout: Duration, readTimeout: Duration): RestClient =
         RestClient
