@@ -51,7 +51,7 @@ class AdminMetricsTests {
         }
     }
     @AfterEach fun stop() { server.shutdown() }
-    private fun range(from: String, to: String) = AnalyticsRangeQuery().apply { this.from=from; this.to=to }
+    private fun range(from: String, to: String) = SegmentRangeQuery().apply { this.from=from; this.to=to }
     @Test fun `활동은 전체와 플랫폼을 따로 조회하고 MAU를 우선 예약한다`() {
         val value = service.activity(range("2026-10-15", "2026-10-21"))
         assertThat(value.monthlyActiveUsers).isEqualTo(219)
@@ -153,12 +153,38 @@ class AdminMetricsTests {
         assertThat(requests).hasSize(3)
     }
     @Test fun `세션은 평균 길이만 세 조건으로 받고 저장된 날은 다시 받지 않는다`() {
-        val value=service.sessions(AnalyticsRangeQuery())
+        val value=service.sessions(SegmentRangeQuery())
         assertThat(value.daily).hasSize(14); assertThat(value.daily.first().averageSessionSeconds).isEqualTo(PlatformDecimals(123.75,123.75,123.75))
         assertThat(requests).hasSize(3); requests.forEach { assertThat(it.requestUrl!!.encodedPath).isEqualTo("/api/2/sessions/average"); assertThat(it.requestUrl!!.queryParameter("s")).contains("country") }
         assertThat(mapper.readTree(requests[0].requestUrl!!.queryParameter("s")!!).size()).isEqualTo(1)
         assertThat(mapper.readTree(requests[1].requestUrl!!.queryParameter("s")!!).size()).isEqualTo(2)
         assertThat(fixture.budget.reserve(52)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+    }
+    @Test fun `세션 segment는 세그먼트 조건에 user_id를 더해 따로 저장하고 하루 44를 쓴다`() {
+        val q=range("2026-10-17","2026-10-23").let { r -> SegmentRangeQuery().apply { from=r.from; to=r.to; segment="member" } }
+        val member=service.sessions(q)
+        assertThat(member.segment).isEqualTo("member"); assertThat(requests).hasSize(3)
+        requests.forEach { assertThat(mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last().toString()).isEqualTo("{\"prop\":\"user_id\",\"op\":\"is not\",\"values\":[\"(none)\"]}") }
+        assertThat(fixture.budget.reserve(500-308)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        fixture.clock.at=fixture.clock.at.plusSeconds(300); requests.clear()
+        service.sessions(SegmentRangeQuery().apply { from=q.from; to=q.to; segment="guest" })
+        assertThat(requests).hasSize(3).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last()["op"].asText()=="is" }
+        requests.clear(); assertThat(service.sessions(SegmentRangeQuery().apply { from=q.from; to=q.to }).segment).isEqualTo("all")
+        assertThat(requests).hasSize(3).allMatch { !it.requestUrl!!.queryParameter("s")!!.contains("user_id") }
+        assertThatThrownBy { service.sessions(SegmentRangeQuery().apply { segment="visitor" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+    }
+    @Test fun `기능 사용 segment는 user_id 필터를 더하고 게스트는 앱 해외 로그인 묶음을 0으로 둔다`() {
+        fun q(segment: String?) = PlatformMetricsQuery().apply { from="2026-10-23"; to="2026-10-23"; platform="all"; this.segment=segment }
+        val all=service.quality(q(null)); assertThat(all.segment).isEqualTo("all"); assertThat(requests).hasSize(36)
+        requests.clear(); val guest=service.quality(q("guest"))
+        assertThat(guest.segment).isEqualTo("guest"); assertThat(requests).hasSize(24)
+        assertThat(requests).allMatch { val f=mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().filter { x -> x["subprop_key"].asText()=="user_id" }
+            f.size==1 && f[0]["subprop_op"].asText()=="is" && f[0]["subprop_value"][0].asText()=="(none)" }
+        assertThat(guest.daily.single().messagesByInputMode["unknown"]).isEqualTo(4); assertThat(all.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
+        requests.clear(); val member=service.quality(q("member"))
+        assertThat(requests).hasSize(24).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().single { x -> x["subprop_key"].asText()=="user_id" }["subprop_op"].asText()=="is not" }
+        assertThat(member.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
+        assertThatThrownBy { service.quality(q("visitor")) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
     @Test fun `세션 60일은 최근15일 뒤 5분후 다음15일을 받는다`() {
         val q=range("2026-08-25","2026-10-23")
@@ -193,8 +219,8 @@ class AdminMetricsTests {
     }
     @Test fun `새 세션 조회 실패는 저장소가 없으면 사용 불가이고 비용은 반환된다`() {
         broken=true
-        assertThatThrownBy { service.sessions(AnalyticsRangeQuery()) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-        assertThat(requests).hasSize(1); service.runCatching { sessions(AnalyticsRangeQuery()) }; assertThat(requests).hasSize(1)
+        assertThatThrownBy { service.sessions(SegmentRangeQuery()) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).hasSize(1); service.runCatching { sessions(SegmentRangeQuery()) }; assertThat(requests).hasSize(1)
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
     @Test fun `서로 다른 지표도 공용 예산을 나눠 쓰고 준비된 날짜만 반환한다`() {

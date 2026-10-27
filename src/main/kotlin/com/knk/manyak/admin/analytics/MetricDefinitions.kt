@@ -49,10 +49,12 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
             result
         } }
     }
-    fun sessions(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
-        val conditions = listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))) + if (platform == "all") emptyList() else
-            listOf(AdminMetricEvents.condition("platform", listOf(if (platform == "web") "Web" else "Android")))
-        val def = AnalyticsDefinition("users_session_average", "/api/2/sessions/average", listOf("i" to "1", "s" to mapper.writeValueAsString(conditions)), if (platform == "all") 8 else 12, mapper)
+    /** 세션 조회는 이벤트 필터를 받지 않아 게스트와 회원도 세그먼트 조건으로 건다. 조건 하나마다 하루 비용 4가 는다. */
+    fun sessions(segment: String = "all"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
+        val conditions = listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))) + (if (platform == "all") emptyList() else
+            listOf(AdminMetricEvents.condition("platform", listOf(if (platform == "web") "Web" else "Android")))) + when (segment) {
+            "guest" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"))); "member" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"), "is not")); else -> emptyList() }
+        val def = AnalyticsDefinition("users_session_average", "/api/2/sessions/average", listOf("i" to "1", "s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
         DailyAnalyticsMetric(def) { data, range -> decimalSeries(data, range) }
     }
     private fun decimalSeries(data: JsonNode, range: AnalyticsRange): Map<LocalDate, JsonNode> = AmplitudeResults.parse {
@@ -84,13 +86,14 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     val qualityEvents = linkedMapOf("chatLoadError" to "client_chat_loadError_shown", "storyListLoadError" to "client_storyList_loadError_shown",
         "storyCompleteError" to "client_storyCreate_completeError_shown", "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
         "attendanceClicked" to "client_creditCharge_attendanceButton_clicked", "inviteSucceeded" to "client_invite_codeInput_succeeded")
-    fun quality(platform: String): List<DailyAnalyticsMetric> = when (platform) {
+    /** 게스트는 회원만 담는 앱·해외 로그인 묶음을 조회하지 않고, 회원은 그 묶음에 이미 user_id 조건이 있어 all과 같은 조회를 쓴다. */
+    fun quality(platform: String, segment: String = "all"): List<DailyAnalyticsMetric> = when (platform) {
         "all" -> listOf("all", "android", "android_overseas")
         "android" -> listOf("android", "android_overseas")
         else -> listOf(platform)
-    }.flatMap { qualityGroup(it) }
-    private fun qualityGroup(platform: String): List<DailyAnalyticsMetric> {
-        val filters = filters(platform)
+    }.filter { segment != "guest" || it != "android_overseas" }.flatMap { qualityGroup(it, if (it == "android_overseas") "all" else segment) }
+    private fun qualityGroup(platform: String, segment: String): List<DailyAnalyticsMetric> {
+        val filters = filters(platform) + AdminMetricEvents.segment(segment)
         val all = queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters), "totals")
         val modes = listOf("choice", "plain", "block").map { queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters + AdminMetricEvents.filter("input_mode", listOf(it))), "totals") }
         val errors = queries.daily("quality_stream_errors", AdminMetricEvents.event("client_chat_streamError_shown", filters), "totals")

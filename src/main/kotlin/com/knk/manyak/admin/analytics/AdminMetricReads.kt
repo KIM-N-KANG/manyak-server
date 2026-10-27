@@ -3,7 +3,6 @@ package com.knk.manyak.admin.analytics
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.AdminChartsRequest
 import com.knk.manyak.admin.dto.AdminDateRange
-import com.knk.manyak.admin.dto.badAdminQuery
 import com.knk.manyak.admin.repository.AdminQuery
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
@@ -96,14 +95,17 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         }
         fun day(date: LocalDate, groups: List<List<DailyAnalyticsMetric>>) = if (date in ready) counts(groups, listOf(date)) else null
     }
-    private fun segment(query: AdminSegmentRequest) = (query.segment ?: "all").also { if (it !in setOf("all", "guest", "member")) badAdminQuery("segment가 올바르지 않습니다.") }
+    private fun segment(query: AdminSegmentRequest) = analyticsSegment(query.segment)
+    // 대시보드 분석 지표처럼 5초 안에 못 받은 플랫폼 값은 준비 중으로 두고 DB 값을 바로 응답한다.
+    private fun platformValues(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>) =
+        PlatformValues(snapshots.load(endpoint, range, metrics, timeout = Duration.ofSeconds(5)))
     private fun range(query: AdminChartsRequest) = query.resolve(clock).let { AnalyticsRange(it.from, it.to) }
     private fun Map<String, Any?>.n(key: String) = (this[key] as Number?)?.toLong() ?: 0L
     private fun Map<String, Any?>.date() = LocalDate.ofEpochDay(n("metric_day"))
     fun signups(query: AdminChartsRequest): SignupResponse {
         val range = range(query); val rows = repository.signups(range, dashboard.excludedUserIds).associateBy { it.date() }
         var cumulative = repository.signupsBefore(range, dashboard.excludedUserIds)
-        val metrics = definitions.signupPlatforms(); val platform = PlatformValues(snapshots.load("users/signups", range, metrics))
+        val metrics = definitions.signupPlatforms(); val platform = platformValues("users/signups", range, metrics)
         return SignupResponse(clock.instant(), range.from, range.to, platform.asOf, platform.pending, range.dates().map { date ->
             val row = rows[date] ?: emptyMap(); val total = row.n("total"); cumulative = Math.addExact(cumulative, total)
             SignupDay(date, SignupCounts(total, row.n("google"), row.n("kakao")), cumulative, row.n("migrated"), platform.day(date, metrics.chunked(2)))
@@ -117,7 +119,7 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
             ReachSegment(segment, count, AdminQuery.turnReachThresholds.map { turn -> val n = group.sumOf { it.n("turn_$turn") }; ReachPoint(turn, n, ratio(n, count)) })
         }
         val five = rows.sumOf { it.n("migrated_5") }; val six = rows.sumOf { it.n("migrated_6") }
-        val metrics = definitions.turnReach(segment); val platform = PlatformValues(snapshots.load("conversion/turn-reach", range, metrics))
+        val metrics = definitions.turnReach(segment); val platform = platformValues("conversion/turn-reach", range, metrics)
         // 기준 턴마다 플랫폼 묶음. 분모는 1턴 성공 이벤트 수라 범위 전에 시작한 채팅 때문에 1을 넘을 수 있다.
         val byTurn = AdminQuery.turnReachThresholds.indices.map { i -> platform.counts(metrics.chunked(AdminQuery.turnReachThresholds.size).map { listOf(it[i]) }) }
         val platforms = if (platform.ready.isEmpty()) null else listOf("all", "web", "android", "unknown").map { name ->
@@ -131,7 +133,7 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         val range = range(query); val segment = segment(query); val groups = repository.options(range, dashboard.excludedUserIds).groupBy { it.date() }
         val turns = repository.turnsByModel(range, dashboard.excludedUserIds).groupBy { it.date() }
         val models = repository.modelCodes(); val metrics = definitions.chatOptions(segment, models)
-        val platform = PlatformValues(snapshots.load("quality/chat-options", range, metrics))
+        val platform = platformValues("quality/chat-options", range, metrics)
         val starts = metrics.take(6).chunked(2); val modelTurns = models.zip(metrics.drop(6).chunked(3))
         return ChatOptionResponse(clock.instant(), range.from, range.to, segment, platform.asOf, platform.pending, range.dates().map { date ->
             val rows = groups[date].orEmpty()

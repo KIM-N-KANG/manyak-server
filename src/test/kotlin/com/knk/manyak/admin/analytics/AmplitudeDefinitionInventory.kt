@@ -49,6 +49,10 @@ internal class AmplitudeDefinitionInventory {
         definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.retention().forEach { daily(it, "users/retention") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
         definitions.signupPlatforms().forEach { daily(it, "users/signups") }
+        for (segment in listOf("guest", "member")) {
+            definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }
+            for (platform in listOf("all", "web", "android")) definitions.quality(platform, segment).forEach { daily(it, "quality/$platform:$segment") }
+        }
         for (segment in listOf("all", "guest", "member")) {
             definitions.turnReach(segment).forEach { daily(it, "conversion/turn-reach:$segment") }
             definitions.chatOptions(segment, listOf("AURORA", "LITE")).forEach { daily(it, "quality/chat-options:$segment") }

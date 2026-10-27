@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*
 class AdminMetricsController(private val metrics: AdminMetricsService, private val reads: AdminMetricReadService, private val costs: AdminAiCostService) {
     @GetMapping("/users/activity") fun activity(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.activity(query)
     @GetMapping("/users/retention") fun retention(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.retention(query)
-    @GetMapping("/users/sessions") fun sessions(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.sessions(query)
+    @GetMapping("/users/sessions") fun sessions(@ParameterObject @ModelAttribute query: SegmentRangeQuery) = metrics.sessions(query)
     @GetMapping("/users/signups") fun signups(@ParameterObject @ModelAttribute query: AdminChartsRequest) = reads.signups(query)
     @GetMapping("/conversion/funnels/{funnel}") fun funnel(@PathVariable funnel: String, @ParameterObject @ModelAttribute query: ConversionMetricsQuery) = metrics.funnel(funnel, query)
     @GetMapping("/conversion/turn-reach") fun reach(@ParameterObject @ModelAttribute query: AdminSegmentRequest) = reads.reach(query)

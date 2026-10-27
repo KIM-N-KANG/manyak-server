@@ -18,6 +18,7 @@
 # 신규 가입자·턴 도달·채팅 옵션은 팀 계정 제외, AI 비용은 팀 계정도 포함한다.
 # 세 DB 지표의 플랫폼 값(signupsByPlatform, platforms, chatStarts 등)은 Amplitude라 팀 계정을 포함하고 국내 조건의 Web+Android+불명 합이다.
 # 플랫폼 값을 못 받은 날짜는 그 값만 null이고 pendingDates에 든다. DB 값은 Amplitude 장애와 무관하게 200이다.
+# 플랫폼 조회는 차례 대기를 포함해 5초 한도라 넘기면 받은 값만 저장하고 DB 값을 바로 준다(그 키 60초 쿨다운).
 # AI 비용: MANYAK_ADMIN_LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY/ENVIRONMENT 네 값을 서버에 주입한다.
 # 개발 기본값은 비어 있으므로 AI 비용만 503이다. 키는 이 파일에 적지 않는다.
 # 모델 단가는 Langfuse 모델 설정에서 관리한다. 환율·장당 원가·추적 매핑은 manyak.admin.ai-cost다.
@@ -107,6 +108,34 @@ client.test("기능 사용과 안정성 응답", () => {
   } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
 });
 %}
+
+### 기능 사용 게스트만 — user_id 없는 이벤트. 게스트는 앱·해외 로그인 묶음을 조회하지 않고 0(all 24회)
+GET {{baseUrl}}/api/v1/admin/quality/client?platform=all&segment=guest&days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("기능 사용 게스트", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.segment === "guest" && response.body.platform === "all", `actual=${JSON.stringify([response.body.segment, response.body.platform])}`);
+});
+%}
+
+### 평균 세션 길이 회원만 — 세그먼트 s에 user_id is not (none)을 더해 하루 44(all 32), 14일 첫 조회는 준비 중 날짜가 남을 수 있음
+GET {{baseUrl}}/api/v1/admin/users/sessions?days=7&segment=member
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("세션 회원", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.segment === "member" && Array.isArray(response.body.pendingDates), `actual=${response.body.segment}`);
+});
+%}
+
+### 400 — 세션과 기능 사용의 허용하지 않는 segment
+GET {{baseUrl}}/api/v1/admin/users/sessions?segment=visitor
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("segment 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 신규 가입자 — Amplitude 장애와 무관하게 동작
 GET {{baseUrl}}/api/v1/admin/users/signups?days=7

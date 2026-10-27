@@ -90,6 +90,26 @@ class AdminMetricPlatformTests {
         assertThat(output.out).contains("admin_analytics_fetch_failed reason=http_error")
     }
 
+    @Test fun `플랫폼 조회가 5초를 넘기면 받은 값만 저장하고 DB 값은 바로 주며 그 키는 쿨다운이다`(output: CapturedOutput) {
+        val delegate = server.dispatcher
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(2, java.util.concurrent.TimeUnit.SECONDS) }
+        fun timed(call: () -> Unit) { val started = System.nanoTime(); call(); assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofMillis(5800)) }
+        val day = com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-23"; to = "2026-10-23" }
+        lateinit var signup: SignupResponse
+        timed { signup = service().signups(day) }
+        assertThat(signup.daily.single().signups.total).isEqualTo(2); assertThat(signup.daily.single().signupsByPlatform).isNull()
+        assertThat(signup.pendingDates).containsExactly(LocalDate.parse("2026-10-23"))
+        assertThat(output.out).contains("admin_analytics_fetch_failed reason=timeout")
+        val stored = MetricDefinitions(AnalyticsQueryFactory(fixture.mapper), fixture.mapper).signupPlatforms().count { fixture.store.daily(it.definition, LocalDate.parse("2026-10-23"), LocalDate.parse("2026-10-23")).isNotEmpty() }
+        assertThat(stored).isEqualTo(2)
+        val sent = server.requestCount
+        timed { assertThat(service().signups(day).pendingDates).hasSize(1) }
+        assertThat(server.requestCount).isEqualTo(sent) // 60초 쿨다운
+        val q = request("2026-10-23", "2026-10-23")
+        timed { val r = service().reach(q); assertThat(r.platforms).isNull(); assertThat(r.pendingDates).hasSize(1); assertThat(r.segments).hasSize(3) }
+        timed { val r = service().options(q); assertThat(r.daily.single().chatStarts).isNull(); assertThat(r.pendingDates).hasSize(1) }
+    }
+
     @Test fun `턴 도달률 플랫폼은 재생성 아닌 성공 이벤트의 기준 턴 합계 36회다`() {
         service().reach(request("2026-10-17", "2026-10-23"))
         assertThat(requests).hasSize(36)

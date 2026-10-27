@@ -157,6 +157,8 @@ class AdminMetricsIntegrationTests {
         }
         assertThat(body("/users/sessions?$period")["daily"][0]["averageSessionSeconds"]["web"].asDouble()).isEqualTo(4.5)
         assertThat(body("/quality/client?$period&platform=android")["platform"].asText()).isEqualTo("android")
+        assertThat(body("/quality/client?$period&platform=web&segment=guest")["segment"].asText()).isEqualTo("guest")
+        assertThat(body("/users/sessions?$period&segment=member")["segment"].asText()).isEqualTo("member")
         for ((name,steps) in listOf("web-first-visit" to 6,"android-first-visit" to 2,"story-creation" to 4,"story-detail-chat" to 7,"guest-limit-login" to 3)) {
             val result=body("/conversion/funnels/$name?from=2026-10-21&to=2026-10-21")
             assertThat(result["steps"].size()).isEqualTo(steps)
@@ -168,7 +170,8 @@ class AdminMetricsIntegrationTests {
         for(path in listOf("/users/activity?days=90","/users/retention?days=30","/users/retention?from=2026-10-23&to=2026-10-23","/users/sessions?days=30","/quality/client?days=90","/quality/client?platform=unknown",
             "/conversion/funnels/unknown","/conversion/funnels/web-first-visit?platform=web","/conversion/funnels/android-first-visit?platform=android","/conversion/funnels/story-creation?storyId=00000000-0000-4000-8000-000000000001",
             "/conversion/funnels/story-detail-chat?storyId=bad","/conversion/funnels/story-creation?platform=all","/conversion/funnels/story-creation?from=2026-09-20&to=2026-10-21",
-            "/conversion/turn-reach?segment=visitor","/quality/chat-options?segment=visitor","/conversion/turn-reach?segment=")) get(path).expectStatus().isBadRequest
+            "/conversion/turn-reach?segment=visitor","/quality/chat-options?segment=visitor","/conversion/turn-reach?segment=",
+            "/users/sessions?segment=visitor","/quality/client?segment=visitor")) get(path).expectStatus().isBadRequest
         for(path in listOf("/users/signups","/quality/chat-options","/quality/ai-cost","/conversion/turn-reach")) get("$path?from=2025-10-23&to=2026-10-23").expectStatus().isOk
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs",Long::class.java)).isZero()
     }
