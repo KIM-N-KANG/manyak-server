@@ -902,6 +902,7 @@ class SimpleStoryCreationService(
             compileAndPersist(
                 session,
                 attributedUserId,
+                request.visibility,
                 selectedStoryline,
                 genreTags,
                 selectedLorebooks,
@@ -1059,6 +1060,7 @@ class SimpleStoryCreationService(
         session: StoryCreationSession,
         // finalize에서 이미 소유권을 반영해 확정한 귀속 사용자(익명 세션을 로그인 사용자가 claim한 경우 그 사용자). 게스트면 null.
         attributedUserId: Long?,
+        visibility: StoryVisibility,
         selectedStoryline: StoryCreationStoryline,
         genreTags: List<StoryCreationTag>,
         // compile 요청에 실어 보낸 선별 로어북. 저장 성공 시 story_lorebooks에 연결한다(전달분과 저장분 일치).
@@ -1137,8 +1139,8 @@ class SimpleStoryCreationService(
                         genre = genre,
                         // 컴파일 표지 업로드가 성공하면 URL을 저장하고, 실패하면 표지 없이 등록한다.
                         thumbnailImageUrl = uploadedThumbnail?.url,
-                        // 제작 스토리 기본 공개 범위는 PRIVATE다(KNK-464 팀 결정). 공개는 제작 시 선택으로 전환한다.
-                        visibility = StoryVisibility.PRIVATE,
+                        // 선택한 공개 범위를 그대로 저장한다. 생략한 요청은 DTO 기본값 PRIVATE이다.
+                        visibility = visibility,
                     ),
                 )
                 storySettingRepository.save(
@@ -1228,8 +1230,8 @@ class SimpleStoryCreationService(
 
                 persistStoryCharacters(story, appearancesByName, imagesByName.keys, uploadedImages, descriptionsByName)
 
-                // 스토리 저장 경로는 모두 "마지막 공개 버전" 스냅샷을 갱신한다(KNK-1065). 간편 제작은 항상
-                // PRIVATE로 등록하므로 지금은 no-op이지만, 기본 공개 범위가 바뀌면 이 한 줄이 없는 쪽이 유출이다.
+                // PUBLIC으로 완성하면 게스트도 저장 트랜잭션에서 마지막 공개 스냅샷을 만든다.
+                // 검색 문서의 목록 노출 여부는 회원 소유 여부까지 확인한다.
                 storyPublicSnapshotService.refresh(story)
                 eventPublisher.publishEvent(StoryIndexRequestedEvent(story.id))
 

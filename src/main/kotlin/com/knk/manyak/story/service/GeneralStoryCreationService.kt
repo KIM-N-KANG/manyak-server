@@ -57,15 +57,13 @@ class GeneralStoryCreationService(
 ) {
 
     /**
-     * 인증 선택(간편 제작과 동일 — 유효 토큰이면 [userId] 귀속, 익명이면 null). 응답은 간편 제작과 동일한
+     * 회원 전용 검수 제출본이 승인되면 호출한다. 응답은 간편 제작과 동일한
      * `{id, title, oneLineIntro, description, genres, startSetting}`이다.
      */
     @Transactional
     fun createGeneralStory(request: CreateGeneralStoryRequest, userId: Long?, approvedImageUrls: Map<String, String> = emptyMap()): SimpleStoryCreateResponse {
         protagonistNames.validate(request)
         suspensionGuard.requireActive(userId) // 정지 계정 소모·쓰기 차단(스펙 §4-5 B20, KNK-499).
-        // 게스트는 공개(PUBLIC)를 지정할 수 없다(KNK-149). 조용히 PRIVATE으로 낮추지 않고 400으로 거부한다.
-        requireOwnerCanPublish(ownerUserId = userId, requested = request.visibility)
         // 이미지는 회원만 올린다(KNK-1390). 키 검증은 스토리를 만들기 **전에** 끝낸다 — 잘못된 키로 만든
         // 스토리가 롤백에 기대 남지 않게, 그리고 S3 왕복을 저장 이전으로 모아 두기 위해서다.
         val uploaderPublicId = resolveUploaderPublicId(request, userId)

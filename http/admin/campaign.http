@@ -501,3 +501,18 @@ Content-Type: application/json
 ### 이프 안내 자유 조회
 GET {{baseUrl}}/api/v1/admin/push/templates/credit_expiry_reminder
 Authorization: Bearer {{adminToken}}
+
+### KNK-1875 게스트 소유 PUBLIC 스토리는 프로모션 이동 대상으로 예약할 수 없다
+# story/simple-story-creation.http의 '게스트 PUBLIC' 준비·완성을 먼저 실행해
+# guestPublicStoryId를 저장한다. 회원 계정으로 이관하기 전에 실행한다.
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"게스트 공개 대상 거절","body":"본문","storyId":"{{guestPublicStoryId}}","reason":"게스트 공개 스토리 제외 검증"}
+
+> {%
+    client.test("게스트 공개 스토리 예약은 400", () => {
+        client.assert(response.status === 400, `expected=400 actual=${response.status}`);
+    });
+%}

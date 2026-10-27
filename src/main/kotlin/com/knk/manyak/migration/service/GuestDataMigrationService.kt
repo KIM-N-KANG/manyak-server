@@ -15,6 +15,9 @@ import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import org.springframework.context.ApplicationEventPublisher
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -47,7 +50,10 @@ class GuestDataMigrationService(
     // 이름 스냅샷이 비어 있는 채팅(롤링 배포 창에 구버전이 만든 행)의 이름을 라이브 엔딩에서 해소한다.
     private val storyEndingRepository: StoryEndingRepository,
     private val serverAnalytics: ServerAnalytics,
+    private val events: ApplicationEventPublisher,
 ) {
+
+    private val log = LoggerFactory.getLogger(javaClass)
 
     private companion object {
         // 이관 시도(성공 0건 포함) 계정당 상한(스펙 §4-3-5 B19, 2026-07-08 결정: 5).
@@ -146,7 +152,16 @@ class GuestDataMigrationService(
             )
             if (status == MigrationStatus.MIGRATED) {
                 // 스토리를 새로 클레임했으면 연결된 생성 세션 소유권도 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
-                storyCreationSessionRepository.claimByStoryId(storyByPublicId.getValue(id).id, userId)
+                val storyId = storyByPublicId.getValue(id).id
+                storyCreationSessionRepository.claimByStoryId(storyId, userId)
+                // 닉네임 변경과 동일하게 트랜잭션 안에서 발행하고 커밋 후 비동기로 다시 읽는다.
+                // PUBLIC/PRIVATE 모두 요청해야 이후 공개 전환과 경합해도 검색 문서가 누락되지 않는다.
+                try {
+                    events.publishEvent(StoryIndexRequestedEvent(storyId))
+                } catch (ex: Exception) {
+                    // 재색인 요청 실패는 소유권 이관과 나머지 항목 처리를 실패시키지 않는다.
+                    log.warn("이관 스토리 재색인 요청 실패 (error={})", ex.javaClass.simpleName)
+                }
             }
             MigrationResult(id.toString(), status)
         }
