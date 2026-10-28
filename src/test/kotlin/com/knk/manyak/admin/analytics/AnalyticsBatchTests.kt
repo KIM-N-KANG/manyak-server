@@ -119,7 +119,7 @@ class AnalyticsBatchTests {
         val service = CampaignAnalyticsService(campaigns, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), clock)
         val policy = AnalyticsBatchPolicy()
         val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads()).metrics()
-        val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
+        val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + defs.sessionLengths() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
             defs.signupPlatforms() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
         assertThat(entries.map { it.key }).containsAll(expected.map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
@@ -129,7 +129,9 @@ class AnalyticsBatchTests {
         assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(ended)
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
         // segment guest, member는 화면 요청에서만 받는다.
-        val segmented = listOf("guest", "member").flatMap { defs.turnReach(it) + defs.chatOptions(it, listOf("AURORA", "LITE")) }.map { it.definition.hash }
+        // 리텐션 가입자와 채팅 시작자도 화면 요청에서만 받는다.
+        val segmented = (listOf("guest", "member").flatMap { defs.turnReach(it) + defs.chatOptions(it, listOf("AURORA", "LITE")) + defs.sessionLengths(it) } +
+            defs.retention("signup") + defs.retention("first-chat")).map { it.definition.hash }
         assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(segmented)
     }
 
@@ -174,6 +176,8 @@ class AnalyticsBatchTests {
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
+            if (r.requestUrl!!.encodedPath == "/api/2/sessions/length") return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(List(9) { 1 }),
+                "xValues" to defs.sessionLengthBounds.zipWithNext { a, b -> "${a}s-${b}s" }))))
             if (r.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(r)
             val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
             val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
@@ -185,13 +189,13 @@ class AnalyticsBatchTests {
         assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(963)
+        assertThat(results.sumOf { it.cost }).isEqualTo(991)
         catalog.metrics().forEach { entry ->
             val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()
         }
         val requests = (0 until server.requestCount).map { server.takeRequest().requestUrl!! }
-        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average").doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average", "/api/2/sessions/length").doesNotContain("/api/2/users", "/api/2/funnels")
         val campaignQueries = requests.mapNotNull { it.queryParameter("e") }.filter { it.contains("initial_utm_campaign") }
         assertThat(campaignQueries).isNotEmpty().allMatch { it.contains("actual-campaign") && !it.contains("campaign-key") }
     }

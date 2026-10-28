@@ -73,9 +73,77 @@ client.test("리텐션 응답", () => {
     }
     // 관찰 날짜가 끝나지 않았거나 값 없음·집계 중·분모 0이면 null이다.
     // 요약은 해당 날짜 지표를 계산할 수 있는 코호트의 분모로 가중하며 단순 평균이 아니다.
+    client.assert(b.cohort === "visitor", `cohort 생략은 방문자 actual=${b.cohort}`);
   } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
 });
 %}
+
+### 리텐션 가입자 — 플랫폼마다 구글과 카카오 로그인 성공(is_new_user true)을 따로 조회해 6회, 하루 48(7일 336)
+# 배포 뒤 all을 가입 이벤트 is_new_user 참 → Any Active, N-Day, 국내 조건의 Amplitude 차트 두 개(구글, 카카오)의 합과 대조한다.
+GET {{baseUrl}}/api/v1/admin/users/retention?days=7&cohort=signup
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("리텐션 가입자", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.cohort === "signup" && response.body.platforms.length === 3, `actual=${response.body.cohort}`);
+});
+%}
+
+### 리텐션 채팅 시작자 — 턴 1이고 재생성 아닌 AI 응답 성공을 시작 이벤트로 3회, 하루 24
+GET {{baseUrl}}/api/v1/admin/users/retention?days=7&cohort=first-chat
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("리텐션 채팅 시작자", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.cohort === "first-chat", `actual=${response.body.cohort}`);
+});
+%}
+
+### 400 — 허용하지 않는 cohort
+GET {{baseUrl}}/api/v1/admin/users/retention?cohort=member
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("cohort 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 세션 길이 분포 — 날짜마다 전체, Web, Android 3회, 하루 32(all), 평균 세션 길이와 저장과 쿨다운이 따로
+# 배포 뒤 확정일 하루의 구간별 세션 수를 같은 조건(국내, 회원은 user_id 있음 세그먼트)의 Amplitude 세션 길이 차트와 대조한다.
+GET {{baseUrl}}/api/v1/admin/users/session-lengths?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("세션 길이 분포 응답", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  const b = response.body;
+  if (response.status === 200) {
+    client.assert(b.segment === "all" && Array.isArray(b.pendingDates), "적용 segment와 준비 중 날짜");
+    client.assert(b.bins.length === 9 && b.bins[0].fromSeconds === 0 && b.bins[8].toSeconds === 86400, `구간 actual=${JSON.stringify(b.bins)}`);
+    client.assert(b.platforms.map(p => p.platform).join(",") === "all,web,android", "플랫폼 순서");
+    for (const p of b.platforms) {
+      client.assert(p.sessions.length === 9 && p.sessions.reduce((a, c) => a + c, 0) === p.totalSessions, `합 actual=${JSON.stringify(p)}`);
+      client.assert(p.totalSessions === 0 ? p.medianBin === null : (p.medianBin >= 0 && p.medianBin < 9), `중앙값 구간 actual=${p.medianBin}`);
+    }
+  } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
+});
+%}
+
+### 세션 길이 분포 회원만 — s에 user_id is not (none), 하루 44
+GET {{baseUrl}}/api/v1/admin/users/session-lengths?days=7&segment=member
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("세션 길이 회원", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.segment === "member", `actual=${response.body.segment}`);
+});
+%}
+
+### 400 — 세션 길이 분포의 허용하지 않는 segment
+GET {{baseUrl}}/api/v1/admin/users/session-lengths?segment=visitor
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("segment 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 평균 세션 길이
 GET {{baseUrl}}/api/v1/admin/users/sessions?days=14
@@ -92,7 +160,9 @@ client.test("평균 세션 길이 응답", () => {
 });
 %}
 
-# 기능 사용: web=12회, android=국내+해외 로그인 24회, all=Android 외+앱 둘 36회. 일별 비용도 12/24/36.
+# 기능 사용: web=11회, android=국내+해외 로그인 22회, all=Android 외+앱 둘 33회. 일별 비용도 11/22/33.
+# 간편 제작 오류 사용자 수(storyCompleteError)는 빠지고 서버 DB storyCompletion(범위의 모든 날짜, platform·segment 무관)이 붙는다.
+# 운영 대조: 날짜마다 requests와 failed가 story_creation_requests(stage STORY_COMPLETION, 팀 계정 제외) 집계와 같다.
 ### 기능 사용과 안정성
 GET {{baseUrl}}/api/v1/admin/quality/client?platform=web&days=7
 Authorization: Bearer {{adminToken}}
@@ -105,11 +175,14 @@ client.test("기능 사용과 안정성 응답", () => {
     client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
     client.assert(b.platform === "web", "적용 플랫폼");
     for (const d of b.daily) client.assert(d.streamErrorRate === null || d.streamErrorRate >= 0, "오류율은 1을 넘을 수 있음");
+    for (const d of b.daily) client.assert(!("storyCompleteError" in d.users), "간편 제작 오류 사용자 수 제거");
+    client.assert(b.storyCompletion.length === 7, `실패율은 범위의 모든 날짜 actual=${b.storyCompletion.length}`);
+    for (const c of b.storyCompletion) client.assert(c.failed <= c.requests && (c.requests === 0 ? c.failureRate === null : c.failureRate === c.failed / c.requests), `실패율 actual=${JSON.stringify(c)}`);
   } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
 });
 %}
 
-### 기능 사용 게스트만 — user_id 없는 이벤트. 게스트는 앱·해외 로그인 묶음을 조회하지 않고 0(all 24회)
+### 기능 사용 게스트만 — user_id 없는 이벤트. 게스트는 앱·해외 로그인 묶음을 조회하지 않고 0(all 22회)
 GET {{baseUrl}}/api/v1/admin/quality/client?platform=all&segment=guest&days=7
 Authorization: Bearer {{adminToken}}
 
@@ -372,11 +445,11 @@ Authorization: Bearer {{adminToken}}
 > {% client.test("AI 비용 기간 상한", () => { client.assert(response.status === 400, `actual=${response.status}`); }); %}
 
 
-### 전환 퍼널 web-first-visit
+### 전환 퍼널 web-first-visit — 캠페인 간편 제작 퍼널과 같은 6단계, 신규 사용자 기준(n=new)
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-first-visit?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("web-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 6, "단계 수"); }); %}
+> {% client.test("web-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 6 && response.body.steps[0].event === "client_storyList_viewed", "단계 수와 1단계"); }); %}
 
 ### 전환 퍼널 android-first-visit
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-first-visit?days=7

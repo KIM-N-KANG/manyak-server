@@ -77,6 +77,13 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
         AND feature IN ('chat_response','choice_generation','chat_image','storyline_generation','story_completion')
         GROUP BY ${day("created_at")}, feature, model ORDER BY metric_day, feature, model
         """, params(range, emptyList()))
+    // 실패 뒤 같은 request_id로 다시 실행하면 같은 행이 바뀌므로 지금 상태로 센다. 진행 중은 빼고 게스트 행은 포함한다.
+    fun storyCompletions(range: AnalyticsRange, excluded: List<Long>): List<Map<String, Any?>> = jdbc.queryForList("""
+        SELECT ${day("r.created_at")} AS metric_day,
+        SUM(CASE WHEN r.status='COMPLETED' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN r.status='FAILED' THEN 1 ELSE 0 END) AS failed
+        FROM story_creation_requests r WHERE r.stage='STORY_COMPLETION' AND r.status IN ('COMPLETED','FAILED') AND r.created_at>=:start AND r.created_at<:end ${exclude("r.user_id", excluded)}
+        GROUP BY ${day("r.created_at")} ORDER BY metric_day
+        """, params(range, excluded))
     fun modelCodes(): List<String> = jdbc.queryForList("SELECT code FROM chat_models ORDER BY code", emptyMap<String, Any>(), String::class.java)
 }
 

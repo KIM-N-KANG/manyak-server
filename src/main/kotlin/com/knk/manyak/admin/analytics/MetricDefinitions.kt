@@ -25,12 +25,25 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         } }
     }
 
-    fun retention(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
+    /**
+     * 플랫폼(all, web, android) 순서다. 가입자(signup)는 플랫폼마다 구글, 카카오 두 조회라 6개다.
+     * 시작 이벤트가 해시에 들어가 시작 집단마다 저장 키가 따로이고 방문자(visitor)의 해시는 그대로다.
+     */
+    fun retention(cohort: String = "visitor"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").flatMap { platform ->
         // 리텐션 전체는 평균·코호트처럼 국내 사용자 전체 한 조회를 유지한다.
         val filters = if (platform == "all") AdminMetricEvents.common(false) else filters(platform)
-        val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(AdminMetricEvents.event("_new", filters)),
+        when (cohort) {
+            "visitor" -> listOf(AdminMetricEvents.event("_new", filters))
+            "signup" -> listOf(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO).map { AdminMetricEvents.event(it, filters + AdminMetricEvents.filter("is_new_user", listOf("true"))) }
+            "first-chat" -> listOf(AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
+                filters + AdminMetricEvents.filter("turn_number", listOf("1")) + AdminMetricEvents.filter("is_regenerated", listOf("false"))))
+            else -> error("Invalid cohort")
+        }.map { retentionMetric(it, filters) }
+    }
+    private fun retentionMetric(start: Map<String, Any>, filters: List<Map<String, Any>>): DailyAnalyticsMetric {
+        val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(start),
             "re" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters)), "i" to "1"), 8, mapper)
-        DailyAnalyticsMetric(def, retention = true) { data, range -> AmplitudeResults.parse {
+        return DailyAnalyticsMetric(def, retention = true) { data, range -> AmplitudeResults.parse {
             val series = data["series"]; require(series != null && series.isArray && series.size() == 1)
             val values = series[0]["values"]; require(values != null && values.isObject)
             val result = linkedMapOf<LocalDate, JsonNode>()
@@ -50,12 +63,28 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         } }
     }
     /** 세션 조회는 이벤트 필터를 받지 않아 게스트와 회원도 세그먼트 조건으로 건다. 조건 하나마다 하루 비용 4가 는다. */
+    private fun sessionConditions(platform: String, segment: String) = listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))) + (if (platform == "all") emptyList() else
+        listOf(AdminMetricEvents.condition("platform", listOf(if (platform == "web") "Web" else "Android")))) + when (segment) {
+        "guest" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"))); "member" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"), "is not")); else -> emptyList() }
     fun sessions(segment: String = "all"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
-        val conditions = listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))) + (if (platform == "all") emptyList() else
-            listOf(AdminMetricEvents.condition("platform", listOf(if (platform == "web") "Web" else "Android")))) + when (segment) {
-            "guest" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"))); "member" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"), "is not")); else -> emptyList() }
+        val conditions = sessionConditions(platform, segment)
         val def = AnalyticsDefinition("users_session_average", "/api/2/sessions/average", listOf("i" to "1", "s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
         DailyAnalyticsMetric(def) { data, range -> decimalSeries(data, range) }
+    }
+    /** Amplitude 기본 세션 길이 구간 경계(초). 구간 매개변수를 보내지 않으면 이 9구간이다. */
+    val sessionLengthBounds = listOf(0, 3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
+    /** 응답이 범위 전체의 합이라 날짜마다 따로 조회해 날짜별 9칸 배열로 저장한다. 조건과 비용은 평균 세션 길이와 같다. */
+    fun sessionLengths(segment: String = "all"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
+        val conditions = sessionConditions(platform, segment)
+        val def = AnalyticsDefinition("users_session_length", "/api/2/sessions/length", listOf("s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
+        DailyAnalyticsMetric(def, perDate = true) { data, range -> AmplitudeResults.parse {
+            require(range.days == 1)
+            val labels = data["xValues"]; val series = data["series"]?.let { if (it.isArray && it.size() == 1 && it[0].isArray) it[0] else it }
+            // 구간 이름 형식(초 `0s-3s`, 밀리초 `0 - 3000`)은 확인되지 않아 개수만 본다. 경계는 응답이 아니라 기본 구간 상수다.
+            val bins = sessionLengthBounds.size - 1
+            require(labels != null && labels.isArray && labels.size() == bins && series != null && series.isArray && series.size() == bins)
+            mapOf(range.from to mapper.valueToTree<JsonNode>(series.toList().map { AmplitudeResults.number(it) }))
+        } }
     }
     private fun decimalSeries(data: JsonNode, range: AnalyticsRange): Map<LocalDate, JsonNode> = AmplitudeResults.parse {
         val x = data["xValues"]; val series = data["series"]
@@ -84,7 +113,7 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         queries.daily("quality_chat_starts", AdminMetricEvents.event(AdminMetricEvents.CHAT_START, filters(platform) + AdminMetricEvents.filter("persona_type", listOf(it)) + AdminMetricEvents.segment(segment)), "totals")
     } } + models.flatMap { model -> splitPlatforms.map { platform -> savedTurns("quality_model_turns", platform, segment, AdminMetricEvents.filter("model_code", listOf(model))) } }
     val qualityEvents = linkedMapOf("chatLoadError" to "client_chat_loadError_shown", "storyListLoadError" to "client_storyList_loadError_shown",
-        "storyCompleteError" to "client_storyCreate_completeError_shown", "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
+        "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
         "attendanceClicked" to "client_creditCharge_attendanceButton_clicked", "inviteSucceeded" to "client_invite_codeInput_succeeded")
     /** 게스트는 회원만 담는 앱·해외 로그인 묶음을 조회하지 않고, 회원은 그 묶음에 이미 user_id 조건이 있어 all과 같은 조회를 쓴다. */
     fun quality(platform: String, segment: String = "all"): List<DailyAnalyticsMetric> = when (platform) {

@@ -14,7 +14,8 @@ data class AnalyticsRange(val from: LocalDate, val to: LocalDate) {
     val days: Int get() = Math.toIntExact(ChronoUnit.DAYS.between(from, to) + 1)
     fun dates() = (0 until days).map { from.plusDays(it.toLong()) }
 }
-class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false,
+/** [perDate]면 응답이 범위 전체의 합이라 연속 날짜를 한 구간으로 묶지 않고 날짜마다 조회한다. */
+class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false, val perDate: Boolean = false,
     val decode: (JsonNode, AnalyticsRange) -> Map<LocalDate, JsonNode>)
 class RangeAnalyticsMetric(val definition: AnalyticsDefinition, val range: AnalyticsRange, val decode: (JsonNode) -> JsonNode)
 class AnalyticsRefreshProgress {
@@ -199,7 +200,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                             daily[metric.definition.hash]!!.putAll(latest)
                             val gaps = group.filter { !freshDaily(metric, it, latest[it]) }
                             val contiguous = mutableListOf<MutableList<LocalDate>>()
-                            gaps.forEach { date -> if (contiguous.isEmpty() || contiguous.last().last().minusDays(1) != date) contiguous.add(mutableListOf(date)) else contiguous.last().add(date) }
+                            gaps.forEach { date -> if (contiguous.isEmpty() || metric.perDate || contiguous.last().last().minusDays(1) != date) contiguous.add(mutableListOf(date)) else contiguous.last().add(date) }
                             for (gap in contiguous) {
                                 val interval = AnalyticsRange(gap.min(), gap.max())
                                 fetchingMetric = metric.definition.metric

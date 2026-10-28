@@ -8,7 +8,8 @@ object AdminMetricEvents {
     const val KAKAO = "server_login_kakaoLogin_processed_succeeded"
     const val CHAT_SUCCEEDED = "server_chat_aiMessage_processed_succeeded"
     const val CHAT_START = "client_storyDetail_chatStartButton_clicked"
-    val creation = listOf("client_onboarding_viewed", "client_onboarding_createButton_clicked", GENERATE,
+    /** 웹 첫 접속과 캠페인 간편 제작 퍼널. 홈 진입은 재방문자도 남겨 신규 사용자 기준(n=new)으로 센다. */
+    val creation = listOf("client_storyList_viewed", "client_storyCreate_viewed", GENERATE,
         "client_storyCreate_storylineOption_selected", COMPLETE, MESSAGE)
     fun filter(key: String, values: List<String>, type: String = "event", op: String = "is") = mapOf("subprop_type" to type, "subprop_key" to key, "subprop_op" to op, "subprop_value" to values)
     fun event(name: String, filters: List<Map<String, Any>> = emptyList()): Map<String, Any> =
