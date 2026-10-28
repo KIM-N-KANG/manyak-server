@@ -79,11 +79,22 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         val def = AnalyticsDefinition("users_session_length", "/api/2/sessions/length", listOf("s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
         DailyAnalyticsMetric(def, perDate = true) { data, range -> AmplitudeResults.parse {
             require(range.days == 1)
-            val labels = data["xValues"]; val series = data["series"]?.let { if (it.isArray && it.size() == 1 && it[0].isArray) it[0] else it }
-            // 구간 이름 형식(초 `0s-3s`, 밀리초 `0 - 3000`)은 확인되지 않아 개수만 본다. 경계는 응답이 아니라 기본 구간 상수다.
-            val bins = sessionLengthBounds.size - 1
-            require(labels != null && labels.isArray && labels.size() == bins && series != null && series.isArray && series.size() == bins)
-            mapOf(range.from to mapper.valueToTree<JsonNode>(series.toList().map { AmplitudeResults.number(it) }))
+            val labels = data["xValues"]; val series = data["series"]
+            require(labels != null && labels.isArray && series != null && series.isArray)
+            require(series.isEmpty || (series.size() == 1 && series[0].isArray))
+            val values = if (series.isEmpty) emptyList() else series[0].toList()
+            require(labels.size() == values.size)
+            // Amplitude는 세션이 없는 구간을 생략하므로 응답 경계로 위치를 찾고 빠진 구간은 0으로 둔다.
+            val bounds = sessionLengthBounds.zipWithNext()
+            val counts = MutableList(bounds.size) { 0L }; val seen = mutableSetOf<Int>()
+            labels.forEachIndexed { i, label ->
+                require(label.isString)
+                val match = requireNotNull(Regex("([0-9]+)s-([0-9]+)s").matchEntire(label.asText()))
+                val bin = bounds.indexOf(match.groupValues[1].toInt() to match.groupValues[2].toInt())
+                require(bin >= 0 && seen.add(bin))
+                counts[bin] = AmplitudeResults.number(values[i])
+            }
+            mapOf(range.from to mapper.valueToTree<JsonNode>(counts))
         } }
     }
     private fun decimalSeries(data: JsonNode, range: AnalyticsRange): Map<LocalDate, JsonNode> = AmplitudeResults.parse {

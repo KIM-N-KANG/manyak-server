@@ -192,6 +192,29 @@ class AdminMetricsIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs",Long::class.java)).isZero()
     }
 
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings = ["full", "sparse", "empty"])
+    fun `세션 길이 HTTP는 실측 응답을 9구간으로 저장하고 빈 날짜도 준비 완료로 응답한다`(shape: String) {
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "관리자")); jdbc.update("INSERT INTO admin_accounts(user_id,granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
+        val response = javaClass.getResource("/amplitude/session-length-$shape.json")!!.readText()
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setBody(response) }
+        val expected = when (shape) { "full" -> listOf(105L,35,39,14,34,31,16,4,2); "sparse" -> listOf(8L,8,4,4,7,4,1,0,0); else -> List(9) { 0L } }
+        val date = LocalDate.parse("2026-10-20")
+        val body = mapper.readTree(client.get().uri("/api/v1/admin/users/session-lengths?from=$date&to=$date")
+            .header("Authorization", "Bearer ${jwt.issueAdminToken(admin.publicId)}").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+        assertThat(body["pendingDates"].isEmpty).isTrue(); assertThat(body["bins"].size()).isEqualTo(9)
+        body["platforms"].forEach {
+            assertThat(it["sessions"].toList().map { n -> n.asLong() }).isEqualTo(expected)
+            assertThat(it["totalSessions"].asLong()).isEqualTo(expected.sum())
+            if (shape == "empty") assertThat(it["medianBin"].isNull).isTrue()
+            else assertThat(it["medianBin"].asInt()).isEqualTo(if (shape == "full") 1 else 2)
+        }
+        definitions.sessionLengths().forEach {
+            val stored = analyticsValues.daily(it.definition, date, date)[date]!!
+            assertThat(stored.value.toList().map { n -> n.asLong() }).isEqualTo(expected); assertThat(stored.finalizedAt).isNotNull()
+        }
+    }
+
     @Autowired private lateinit var metricReads: AdminMetricReadRepository
     @Autowired private lateinit var definitions: MetricDefinitions
     @Autowired private lateinit var analyticsValues: AnalyticsValueRepository
