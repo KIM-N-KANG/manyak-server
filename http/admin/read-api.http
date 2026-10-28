@@ -182,7 +182,7 @@ GET {{baseUrl}}/api/v1/admin/members?q=등대&page=1&size=20
 Authorization: Bearer {{adminToken}}
 
 
-### 차트 — 7일, 분포 8종, 빈 날짜는 0
+### 차트 — 7일, 분포 9종, 빈 날짜는 0
 # 아래 막대·목록 수 비교는 MANYAK_ADMIN_DASHBOARD_EXCLUDED_USER_IDS를 빈 값으로 기동한 환경에서 실행한다.
 # 채팅 분포는 삭제된 스토리에 남은 미삭제 채팅도 포함한다. 장르별 평균 턴 수는 삭제 스토리를 제외한다.
 # 비교 중 데이터가 바뀌지 않는 로컬 fixture를 사용한다.
@@ -193,15 +193,16 @@ Authorization: Bearer {{adminToken}}
 > {%
     client.test("차트 계약", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
-        client.assert(response.body.daily.length === 7 && response.body.distributions.length === 8, "7일과 8개 차트가 필요합니다");
+        client.assert(response.body.daily.length === 7 && response.body.distributions.length === 9, "7일과 9개 차트가 필요합니다");
         const terms = [
             ["genre-depth", "장르별 평균 턴 수", "턴"],
             ["turns", "턴 수 분포", "개"],
-            ["started-as", "게스트와 회원 비율", "%"],
+            ["started-as", "채팅 소유자 게스트와 회원", "%"],
             ["member-chats", "회원별 채팅 생성 횟수", "명"],
             ["first-message", "첫 사용자 입력까지 걸린 시간", "초"],
             ["ai-latency", "기능별 AI 평균 호출 시간", "초"],
             ["ai-success", "기능별 AI 성공률", "%"],
+            ["creation-mode", "제작 방식별 스토리 수", "개"],
             ["characters", "간편 제작별 입력 주변 인물 수", "건"]
         ];
         response.body.distributions.forEach((chart, i) => {
@@ -223,9 +224,20 @@ Authorization: Bearer {{adminToken}}
                 client.assert(previous.value > p.value || (previous.value === p.value && previous.label < p.label), `장르 정렬 actual=${JSON.stringify(genres)}`);
             }
         });
-        response.body.distributions.filter(c => c.chartId !== "genre-depth").forEach(c => c.points.forEach(p => {
-            client.assert(!("chats" in p) && !("totalTurns" in p), `장르 전용 필드 actual=${JSON.stringify(p)}`);
+        response.body.distributions.filter(c => !["genre-depth", "started-as"].includes(c.chartId)).forEach(c => c.points.forEach(p => {
+            client.assert(!("chats" in p) && !("totalTurns" in p) && !("users" in p), `장르·소유자 전용 필드 actual=${JSON.stringify(p)}`);
         }));
+        // 채팅 소유자: 비율은 채팅 수 기준, users는 회원이면 소유 회원 수, 게스트면 AI 호출 기기 해시 수다.
+        const owners = response.body.distributions.find(c => c.chartId === "started-as");
+        client.assert(owners.description.includes("이관") && owners.description.includes("기기"), `소유자 설명 actual=${owners.description}`);
+        const ownerChats = owners.points.reduce((sum, p) => sum + p.chats, 0);
+        owners.points.forEach(p => {
+            client.assert(Number.isInteger(p.chats) && Number.isInteger(p.users) && p.users <= p.chats && !("totalTurns" in p), `소유자 필드 actual=${JSON.stringify(p)}`);
+            if (ownerChats > 0) client.assert(Math.abs(p.value - Math.round(10000 * p.chats / ownerChats) / 100) < 0.01, `소유자 비율 actual=${JSON.stringify(p)}`);
+        });
+        const modes = response.body.distributions.find(c => c.chartId === "creation-mode");
+        client.assert(modes.category === "content" && JSON.stringify(modes.points.map(p => [p.label, p.link.list, p.link.params.creationMode])) ===
+            JSON.stringify([["일반 제작", "stories", "GENERAL"], ["간편 제작", "stories", "SIMPLE"]]), `제작 방식 actual=${JSON.stringify(modes)}`);
         const turns = response.body.distributions[1].points;
         const turnLabels = ["0", "1", "2", "3", "4", "5", "6", "7~9", "10~14", "15~19", "20~29", "30~49", "50+"];
         client.assert(JSON.stringify(turns.map(p => p.label)) === JSON.stringify(turnLabels), "턴 구간 13개가 필요합니다");
@@ -234,7 +246,7 @@ Authorization: Bearer {{adminToken}}
         client.assert(link.list === "chats" && link.params.turnBucket === "1", `actual=${JSON.stringify(link)}`);
     });
     if (response.status === 200) {
-        for (const [chartId, prefix] of [["turns", "adminTurnDrill"], ["member-chats", "adminMemberDrill"], ["characters", "adminCharactersDrill"]]) {
+        for (const [chartId, prefix] of [["turns", "adminTurnDrill"], ["member-chats", "adminMemberDrill"], ["characters", "adminCharactersDrill"], ["creation-mode", "adminCreationModeDrill"]]) {
             const points = response.body.distributions.find(d => d.chartId === chartId).points;
             const point = points.find(p => p.value > 0) || points[0];
             const query = Object.entries(point.link.params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
@@ -337,6 +349,24 @@ Authorization: Bearer {{adminToken}}
         client.assert(response.body.totalElements === Number(client.global.get("adminCharactersDrillCount")), `actual=${response.body.totalElements}`);
     });
 %}
+
+### 제작 방식 막대의 링크 목록 — 미삭제 스토리를 스토리 생성일로, 완성 제작 세션이 있으면 SIMPLE
+# 차트는 팀 계정 제외를 적용하고 목록은 적용하지 않으므로 제외 목록이 빈 환경에서 비교한다.
+GET {{baseUrl}}/api/v1/admin/{{adminCreationModeDrillPath}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("제작 방식 막대와 스토리 목록 총계 일치", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        client.assert(response.body.totalElements === Number(client.global.get("adminCreationModeDrillCount")), `actual=${response.body.totalElements}`);
+    });
+%}
+
+### 제작 방식 소문자는 400
+GET {{baseUrl}}/api/v1/admin/stories?creationMode=simple
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("creationMode는 SIMPLE·GENERAL만", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
 ### 장르 깊이의 링크 목록 — 앞 차트에 장르가 있고 해당 스토리가 100개 이하인 고정 fixture에서 실행
 GET {{baseUrl}}/api/v1/admin/{{adminGenreDrillPath}}

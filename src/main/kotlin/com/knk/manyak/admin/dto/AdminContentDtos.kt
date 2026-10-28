@@ -44,6 +44,7 @@ class AdminStoriesRequest : AdminAiRequest() {
     var moderationStatus: String? = null
     var memberId: UUID? = null
     @field:Min(0) @field:Max(5) var supportingCharacterCount: Int? = null
+    var creationMode: String? = null
     var chatFrom: String? = null
     var chatTo: String? = null
     var creationFrom: String? = null
@@ -135,7 +136,7 @@ data class AdminDistribution(val chartId: String, val title: String, val descrip
     val category: String = when (chartId) {
         "started-as", "member-chats" -> "users"
         "genre-depth", "turns", "first-message" -> "engagement"
-        "characters" -> "content"
+        "creation-mode", "characters" -> "content"
         "ai-latency", "ai-success" -> "ai-quality"
         else -> error("Unknown distribution: $chartId")
     }
@@ -144,6 +145,7 @@ data class AdminChartPoint(
     val label: String, val value: Double, val link: AdminChartLink,
     @get:JsonInclude(JsonInclude.Include.NON_NULL) val chats: Long? = null,
     @get:JsonInclude(JsonInclude.Include.NON_NULL) val totalTurns: Long? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val users: Long? = null,
 )
 data class AdminChartLink(val list: String, val params: Map<String, String>)
 
