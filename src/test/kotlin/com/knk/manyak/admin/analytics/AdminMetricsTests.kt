@@ -19,6 +19,7 @@ class AdminMetricsTests {
     private var retentionBySe: ((String, LocalDate) -> List<Map<String, Any>>?)? = null
     private var lengthValues: Map<LocalDate, List<Int>> = emptyMap()
     private var lengthXValues = listOf("0s-3s", "3s-10s", "10s-30s", "30s-60s", "60s-180s", "180s-600s", "600s-1800s", "1800s-3600s", "3600s-86400s")
+    private var lengthResponse: String? = null
     private var lengthBroken = false
     @BeforeEach fun setup() {
         server = MockWebServer(); server.start()
@@ -35,7 +36,7 @@ class AdminMetricsTests {
                     path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     path.endsWith("/sessions/length") -> if (lengthBroken) return MockResponse().setResponseCode(500)
-                        else mapOf("series" to listOf(lengthValues[from] ?: List(9) { 1 }), "xValues" to lengthXValues)
+                        else lengthResponse?.let { mapper.readTree(it)["data"] } ?: mapOf("series" to listOf(lengthValues[from] ?: List(9) { 1 }), "xValues" to lengthXValues)
                     else -> {
                         val event = url.queryParameter("e")?.let { mapper.readTree(it) }; val filters = event?.get("filters")?.toList().orEmpty()
                         val platformFilter = filters.firstOrNull { it["subprop_key"].asText()=="platform" }
@@ -323,21 +324,43 @@ class AdminMetricsTests {
         assertThat(all(d.plusDays(2), d.plusDays(2)).medianBin).isEqualTo(0)
         val empty = all(d.plusDays(3), d.plusDays(3)); assertThat(empty.totalSessions).isZero(); assertThat(empty.medianBin).isNull()
     }
-    @Test fun `세션 길이 구간 수가 9가 아니면 저장하지 않는다`() {
-        for (bins in listOf(lengthXValues + "86400s-90000s", lengthXValues.dropLast(1))) {
-            lengthXValues = bins; requests.clear(); fixture.clock.at = fixture.clock.at.plusSeconds(300)
-            lengthValues = mapOf(LocalDate.parse("2026-10-20") to List(bins.size) { 1 })
-            assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { from = "2026-10-20"; to = "2026-10-20" }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-            assertThat(requests).hasSize(1)
-            MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessionLengths().forEach { assertThat(fixture.store.daily(it.definition, LocalDate.parse("2026-10-20"), LocalDate.parse("2026-10-20"))).isEmpty() }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings = ["full", "sparse", "empty"])
+    fun `세션 길이 실측 응답은 누락 구간을 0으로 저장하고 준비된 날짜로 응답한다`(shape: String) {
+        lengthResponse = javaClass.getResource("/amplitude/session-length-$shape.json")!!.readText()
+        val expected = when (shape) { "full" -> listOf(105L,35,39,14,34,31,16,4,2); "sparse" -> listOf(8L,8,4,4,7,4,1,0,0); else -> List(9) { 0L } }
+        val date = LocalDate.parse("2026-10-20")
+        val value = service.sessionLengths(range(date.toString(), date.toString()))
+        assertThat(value.pendingDates).isEmpty()
+        value.platforms.forEach { platform ->
+            assertThat(platform.sessions).isEqualTo(expected); assertThat(platform.totalSessions).isEqualTo(expected.sum())
+            assertThat(platform.medianBin).isEqualTo(if (shape == "empty") null else if (shape == "full") 1 else 2)
+        }
+        MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessionLengths().forEach {
+            assertThat(fixture.store.daily(it.definition, date, date)[date]!!.value.toList().map { it.asLong() }).isEqualTo(expected)
         }
     }
-    @Test fun `세션 길이 구간 이름이 밀리초 경계여도 9구간이면 기본 구간 상수로 응답한다`() {
-        lengthXValues = listOf("0 - 3000", "3000 - 10000", "10000 - 30000", "30000 - 60000", "60000 - 180000", "180000 - 600000", "600000 - 1800000", "1800000 - 3600000", "3600000 - 86400000")
-        lengthValues = mapOf(LocalDate.parse("2026-10-20") to listOf(5, 1, 1, 1, 1, 1, 0, 0, 0))
-        val value = service.sessionLengths(SegmentRangeQuery().apply { from = "2026-10-20"; to = "2026-10-20" })
-        assertThat(value.bins.map { it.toSeconds }).containsExactly(3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
-        assertThat(value.platforms.first().sessions).containsExactly(5, 1, 1, 1, 1, 1, 0, 0, 0); assertThat(value.platforms.first().medianBin).isEqualTo(0)
+    @Test fun `세션 길이는 구간 이름으로 순서를 맞추고 중간 누락을 0으로 채운다`() {
+        lengthXValues = listOf("600s-1800s", "3s-10s")
+        lengthValues = mapOf(LocalDate.parse("2026-10-20") to listOf(4, 2))
+        val value = service.sessionLengths(range("2026-10-20", "2026-10-20"))
+        assertThat(value.platforms.first().sessions).containsExactly(0,2,0,0,0,0,4,0,0)
+    }
+    @Test fun `세션 길이의 잘못된 경계 중복 길이와 값은 형식 오류로 저장하지 않는다`() {
+        val invalid = listOf(
+            listOf("0s-4s") to listOf(1), listOf("0s-3s", "0s-3s") to listOf(1,2),
+            listOf("0s-3s", "3s-10s") to listOf(1), (lengthXValues + "86400s-90000s") to List(10) { 1 },
+            listOf("0 - 3000") to listOf(1), listOf("0s-3s") to listOf(-1), listOf("0s-3s") to listOf(1.5),
+            listOf("0s-3s") to listOf("1"), emptyList<String>() to listOf(1))
+        val date = LocalDate.parse("2026-10-20"); val defs = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper)
+        for ((labels, values) in invalid) {
+            val data = mapper.valueToTree<tools.jackson.databind.JsonNode>(mapOf("xValues" to labels, "series" to listOf(values)))
+            assertThatThrownBy { defs.sessionLengths().first().decode(data, AnalyticsRange(date, date)) }
+                .isInstanceOfSatisfying(AmplitudeFetchFailure::class.java) { assertThat(it.reason).isEqualTo(AnalyticsFailureReason.parse_error) }
+            lengthResponse = mapper.writeValueAsString(mapOf("data" to data)); requests.clear(); fixture.clock.at = fixture.clock.at.plusSeconds(300)
+            assertThatThrownBy { service.sessionLengths(range(date.toString(), date.toString())) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+            assertThat(requests).hasSize(1)
+            defs.sessionLengths().forEach { assertThat(fixture.store.daily(it.definition, date, date)).isEmpty() }
+        }
     }
     @Test fun `세션 길이 조회 실패는 평균 세션 길이와 쿨다운을 공유하지 않는다`() {
         lengthBroken = true
