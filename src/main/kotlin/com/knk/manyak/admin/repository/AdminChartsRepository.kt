@@ -41,7 +41,11 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
         val bucket = "CASE " + AdminQuery.turnBounds.mapIndexed { i, r -> "WHEN c.current_turn BETWEEN ${r.first} AND ${r.last} THEN $i" }.joinToString(" ") + " END"
         val turns = query("SELECT $bucket AS bucket, COUNT(*) AS n $chats GROUP BY $bucket")
-        val started = query("SELECT CASE WHEN c.user_id IS NULL THEN 'GUEST' ELSE 'MEMBER' END AS label, COUNT(*) AS n $chats GROUP BY CASE WHEN c.user_id IS NULL THEN 'GUEST' ELSE 'MEMBER' END")
+        // 게스트 채팅에만 AI 호출 기록을 붙여 기기 해시를 센다. 호출 시각은 보지 않고, 해시 없는 기록은 COUNT DISTINCT가 뺀다.
+        val ownerType = "CASE WHEN c.user_id IS NULL THEN 'GUEST' ELSE 'MEMBER' END"
+        val started = query("""SELECT $ownerType AS label, COUNT(DISTINCT c.id) AS n,
+            COUNT(DISTINCT CASE WHEN c.user_id IS NULL THEN al.device_id_hash ELSE CAST(c.user_id AS VARCHAR) END) AS users
+            ${chats.replace("WHERE", "LEFT JOIN ai_call_logs al ON c.user_id IS NULL AND al.chat_id=c.public_id WHERE")} GROUP BY $ownerType""")
         val memberCase = "CASE WHEN n=1 THEN 0 WHEN n=2 THEN 1 WHEN n<=4 THEN 2 WHEN n<=9 THEN 3 ELSE 4 END"
         val members = query("SELECT $memberCase AS bucket, COUNT(*) AS n FROM (SELECT c.user_id, COUNT(*) AS n $chats AND c.user_id IS NOT NULL GROUP BY c.user_id) t GROUP BY $memberCase")
         val waitsFrom = """FROM (SELECT c.id, c.created_at $chats) c
@@ -72,7 +76,11 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
             AND cs.id=(SELECT MAX(x.id) FROM story_creation_sessions x WHERE x.story_id=cs.story_id AND x.status='STORY_CREATED')
             AND ${during("cs.created_at")} AND ${owner("cs.user_id", sessionExcluded)} GROUP BY cs.id
             ) t GROUP BY n""", sessionParams)
-        return listOf(genre, turns, started, members, waits, latency, success, characters)
+        // 제작 방식은 스토리 목록과 같은 판정(완성 세션 유무)이며 요약과 같은 제외 목록을 쓴다.
+        val creationMode = query("""SELECT label, COUNT(*) AS n FROM (SELECT CASE WHEN EXISTS (SELECT 1 FROM story_creation_sessions x
+            WHERE x.story_id=s.id AND x.status='STORY_CREATED') THEN 'SIMPLE' ELSE 'GENERAL' END AS label FROM stories s
+            WHERE s.deleted_at IS NULL AND ${during("s.created_at")} AND ${owner("s.user_id", excluded)}) t GROUP BY label""")
+        return listOf(genre, turns, started, members, waits, latency, success, characters, creationMode)
     }
     private fun params(from: Instant, now: Instant, excluded: List<Long>): Map<String, Any> =
         mapOf("from" to from.atOffset(ZoneOffset.UTC), "now" to now.atOffset(ZoneOffset.UTC)) + if (excluded.isEmpty()) emptyMap() else mapOf("excluded" to excluded)

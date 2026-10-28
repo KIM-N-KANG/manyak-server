@@ -110,7 +110,7 @@ class AdminMetricsIntegrationTests {
         }
         val charts = mapper.readTree(client.get().uri("/api/v1/admin/dashboard/charts?days=7").header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
         val categories = charts["distributions"].toList().associate { it["chartId"].asText() to it["category"].asText() }
-        assertThat(categories).containsAllEntriesOf(mapOf("started-as" to "users", "member-chats" to "users", "genre-depth" to "engagement", "turns" to "engagement", "first-message" to "engagement", "characters" to "content", "ai-latency" to "ai-quality", "ai-success" to "ai-quality"))
+        assertThat(categories).containsAllEntriesOf(mapOf("started-as" to "users", "member-chats" to "users", "genre-depth" to "engagement", "turns" to "engagement", "first-message" to "engagement", "creation-mode" to "content", "characters" to "content", "ai-latency" to "ai-quality", "ai-success" to "ai-quality"))
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
     }
 

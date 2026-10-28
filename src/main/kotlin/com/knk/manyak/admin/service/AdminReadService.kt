@@ -95,6 +95,7 @@ class AdminReadService(
         if (request.scope != null && request.scope !in setOf("original", "user")) badAdminQuery("스토리 범위가 올바르지 않습니다.")
         if (request.visibility != null && request.visibility !in setOf("PUBLIC", "PRIVATE")) badAdminQuery("공개 범위가 올바르지 않습니다.")
         if (request.moderationStatus != null && request.moderationStatus !in setOf("HELD", "APPROVED")) badAdminQuery("검수 상태가 올바르지 않습니다.")
+        if (request.creationMode != null && request.creationMode !in setOf("SIMPLE", "GENERAL")) badAdminQuery("제작 방식이 올바르지 않습니다.")
         if (request.genre != null && (request.genre!!.isBlank() || request.genre!!.length > 30 || request.genre!!.contains(","))) badAdminQuery("장르가 올바르지 않습니다.")
         request.validateAi(setOf("storyline_generation", "story_completion"))
         AdminDateRange.of(request.creationFrom, request.creationTo)
