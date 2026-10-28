@@ -91,7 +91,9 @@ class AdminAnalyticsTests {
     @Test fun `오늘은 10분마다 어제는 하루 한 번만 다시 받고 확정 날짜는 받지 않는다`() {
         dispatcher(); fixture.service.dashboard(7)
         fixture.clock.at = now.plusSeconds(599); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(5)
-        fixture.clock.at = now.plusSeconds(600); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(10)
+        // 갱신을 기다리지 않고 만료된 오늘 값으로 응답한 뒤 백그라운드 갱신이 오늘 날짜만 다시 조회한다.
+        fixture.clock.at = now.plusSeconds(600); assertThat(fixture.service.dashboard(7).asOf).isEqualTo(now)
+        fixture.executor.await(); assertThat(server.requestCount).isEqualTo(10)
         repeat(5) { server.takeRequest() }
         repeat(5) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261022"); assertThat(url.queryParameter("end")).isEqualTo("20261022") }
         fixture.clock.at = now.plusSeconds(86400)
@@ -153,18 +155,37 @@ class AdminAnalyticsTests {
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
     @Test fun `단일 갱신 중 다른 요청은 기다리지 않고 저장 값으로 응답한다`() {
-        dispatcher(); val previous = fixture.service.dashboard(7); fixture.clock.at = now.plusSeconds(600)
+        dispatcher(); val previous = fixture.service.dashboard(7); fixture.clock.at = now.plusSeconds(600); val calls = server.requestCount
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
             entered.countDown(); release.await(3, TimeUnit.SECONDS)
             return MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[20]]}}")
         } }
-        val pool = Executors.newSingleThreadExecutor()
         try {
-            val job = pool.submit<AdminAnalyticsResponse> { fixture.service.dashboard(7) }; assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue()
-            assertThat(fixture.service.dashboard(7)).isEqualTo(previous)
-            release.countDown(); assertThat(job.get(2, TimeUnit.SECONDS).todayActiveUsers).isEqualTo(DashboardPlatformCounts(60, 20, 40))
-        } finally { release.countDown(); pool.shutdownNow() }
+            // 갱신을 시작한 요청을 포함해 3건 모두 기다리지 않고 만료된 저장 값으로 응답한다.
+            assertThat(fixture.service.dashboard(7)).isEqualTo(previous); assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue()
+            repeat(2) { assertThat(fixture.service.dashboard(7)).isEqualTo(previous) }
+        } finally { release.countDown() }
+        fixture.executor.await()
+        assertThat(server.requestCount - calls).isEqualTo(5)
+        assertThat(fixture.service.dashboard(7).todayActiveUsers).isEqualTo(DashboardPlatformCounts(60, 20, 40))
+    }
+    @Test fun `오늘 값이 만료된 상태의 대역 500은 기다리지 않고 만료 값으로 응답하고 백그라운드 실패는 쿨다운을 건다`() {
+        val logger = org.slf4j.LoggerFactory.getLogger(AnalyticsSnapshots::class.java) as ch.qos.logback.classic.Logger
+        val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        dispatcher(); val previous = fixture.service.dashboard(7); val calls = server.requestCount
+        fixture.clock.at = now.plusSeconds(600)
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        logger.addAppender(events)
+        try {
+            val stale = fixture.service.dashboard(7)
+            assertThat(stale.asOf).isEqualTo(now); assertThat(stale.todayActiveUsers).isEqualTo(previous.todayActiveUsers)
+            fixture.executor.await()
+            assertThat(events.list.map { it.formattedMessage }).anyMatch { it.startsWith("admin_analytics_fetch_failed reason=http_error") }
+            val failed = server.requestCount
+            fixture.clock.at = now.plusSeconds(630); fixture.service.dashboard(7); fixture.executor.await()
+            assertThat(server.requestCount).isEqualTo(failed).isGreaterThan(calls)
+        } finally { logger.detachAppender(events); events.stop() }
     }
     @Test fun `키가 없어도 저장 값은 반환하고 잘못된 기간은 HTTP 전에 거절한다`() {
         dispatcher(); fixture.service.dashboard(7)

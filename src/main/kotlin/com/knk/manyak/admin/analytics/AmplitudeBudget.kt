@@ -9,6 +9,8 @@ class AnalyticsPolicy(
     val budgetWindowSeconds: Long = 300, val budgetCost: Int = 500,
     val currentTtlSeconds: Long = 600, val historicalTtlSeconds: Long = 86400, val cooldownSeconds: Long = 60,
     val requestTimeoutSeconds: Long = 10, val refreshTimeoutSeconds: Long = 60,
+    /** 저장 값이 없을 때 요청이 백그라운드 갱신을 기다리는 최대 시간. 관리자 웹 서버 측 처리기의 15초 안에 든다. */
+    val requestWaitSeconds: Long = 10,
 )
 
 

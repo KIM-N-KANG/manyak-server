@@ -141,6 +141,7 @@ manyak:
       cooldown-seconds: 60
       request-timeout-seconds: 10
       refresh-timeout-seconds: 60
+      request-wait-seconds: 10
     campaigns:
       source-groups:
         instagram: [ig]

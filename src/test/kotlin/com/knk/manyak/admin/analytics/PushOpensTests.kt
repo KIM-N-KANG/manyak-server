@@ -187,7 +187,8 @@ class PushOpensTests {
                 return MockResponse().setResponseCode(500).setBody("{}")
             }
         }
-        assertThat(service.read(query())).isEqualTo(cached)
+        // 만료 값으로 바로 응답하고 실패한 백그라운드 갱신의 쿨다운 동안 다시 부르지 않는다.
+        assertThat(service.read(query())).isEqualTo(cached); fixture.executor.await()
         assertThat(service.read(query())).isEqualTo(cached)
         assertThat(requests).hasSize(3)
     }
