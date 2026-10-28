@@ -1,8 +1,12 @@
 package com.knk.manyak.chat.service
 
-import com.knk.manyak.chat.entity.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryMessage
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 
 class ChatHistoryContextTests {
     private fun messages() = (1..12).flatMap { turn ->
@@ -41,6 +45,36 @@ class ChatHistoryContextTests {
         val context = ChatHistoryContext.of(StoryChat(storyId = 1, summary = "레거시 값"), messages(), true, 13)
         assertThat(context.summary).isEmpty()
         assertThat(context.history).hasSize(24)
+    }
+
+    @ParameterizedTest
+    @CsvSource("12,13,24", "12,12,22", "16,17,24", "16,16,22", "0,1,24")
+    fun `요약 끝 턴이 실제 응답 수보다 크면 요청은 요약 없이 해당 범위 원문을 보낸다`(currentTurn: Int, targetTurn: Int, expectedMessages: Int) {
+        val context = ChatHistoryContext.of(StoryChat(storyId = 1, currentTurn = currentTurn, summary = "범위가 잘못된 요약", summaryThroughTurn = 14), messages(), true, targetTurn)
+        assertThat(context.summary).isEmpty()
+        assertThat(context.history).hasSize(expectedMessages)
+        assertThat(context.history.first().content).isEqualTo("u1")
+    }
+
+    @Test
+    fun `요청 끝 턴이 실제 응답 수를 넘어도 존재하는 원문까지만 보낸다`() {
+        val context = ChatHistoryContext.of(StoryChat(storyId = 1, summary = "요약", summaryThroughTurn = 10), messages(), true, 20)
+        assertThat(context.summary).isEqualTo("요약")
+        assertThat(context.history).hasSize(4)
+    }
+
+    @Test
+    fun `응답이 없는 채팅의 잘못된 요약 범위도 빈 원문으로 처리한다`() {
+        val context = ChatHistoryContext.of(StoryChat(storyId = 1, summary = "잘못된 요약", summaryThroughTurn = 1), emptyList(), true, 3)
+        assertThat(context.summary).isEmpty()
+        assertThat(context.history).isEmpty()
+    }
+
+    @Test
+    fun `요약 끝 턴이 실제 응답 수와 같으면 요약을 유지한다`() {
+        val context = ChatHistoryContext.of(StoryChat(storyId = 1, summary = "요약", summaryThroughTurn = 12), messages(), true, 13)
+        assertThat(context.summary).isEqualTo("요약")
+        assertThat(context.history).isEmpty()
     }
 
     @Test

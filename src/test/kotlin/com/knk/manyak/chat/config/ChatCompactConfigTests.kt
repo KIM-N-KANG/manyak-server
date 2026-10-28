@@ -1,10 +1,12 @@
 package com.knk.manyak.chat.config
 
-import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.slf4j.MDC
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
 
 class ChatCompactConfigTests {
     @Test fun `요약 설정은 양수 간격과 시간 한도를 검증한다`() {
@@ -15,7 +17,7 @@ class ChatCompactConfigTests {
     }
     @Test fun `요약 설정이 잘못되면 비활성 상태에서도 컨텍스트 기동을 거절한다`() {
         for (property in listOf("manyak.chat.compact.interval-turns=0", "manyak.chat.compact.timeout-seconds=0")) {
-            org.springframework.boot.test.context.runner.ApplicationContextRunner()
+            ApplicationContextRunner()
                 .withUserConfiguration(ChatCompactSettings::class.java)
                 .withPropertyValues("manyak.chat.compact.enabled=false", property)
                 .run { context -> assertThat(context).hasFailed() }

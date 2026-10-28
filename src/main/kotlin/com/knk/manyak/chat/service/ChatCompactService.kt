@@ -7,7 +7,6 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.global.observability.aicall.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import org.springframework.beans.factory.annotation.Qualifier
@@ -19,6 +18,9 @@ import org.springframework.transaction.event.TransactionalEventListener
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.UUID
 import java.util.concurrent.Executor
+import com.knk.manyak.global.observability.aicall.AiCallContext
+import com.knk.manyak.global.observability.aicall.AiCallFeature
+import com.knk.manyak.global.observability.aicall.AiCallRecorder
 
 /** 이어쓰기 커밋당 한 번 발행한다. 재생성에서는 발행하지 않는다. */
 data class ChatTurnCommitted(val chatId: Long, val publicId: UUID, val storyId: Long, val through: Int, val storyPublicId: UUID? = null)

@@ -1,13 +1,17 @@
 package com.knk.manyak.chat.migration
 
-import org.assertj.core.api.Assertions.*
 import org.flywaydb.core.Flyway
-import org.junit.jupiter.api.*
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
 
 /** H2 ddl-auto와 별도로 구버전 데이터·구버전 INSERT·CHECK를 실제 PostgreSQL에서 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

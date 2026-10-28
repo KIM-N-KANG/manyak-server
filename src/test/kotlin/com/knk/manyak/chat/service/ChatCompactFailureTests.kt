@@ -1,21 +1,36 @@
 package com.knk.manyak.chat.service
 
-import com.knk.manyak.chat.client.*
 import com.knk.manyak.chat.config.ChatCompactSettings
-import com.knk.manyak.chat.entity.*
-import com.knk.manyak.chat.repository.*
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.global.observability.aicall.*
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.repository.*
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
-import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.*
-import org.springframework.transaction.*
 import org.springframework.transaction.support.SimpleTransactionStatus
-import java.util.*
 import java.util.concurrent.Executor
+import com.knk.manyak.chat.client.ChatCompactAiClient
+import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryMessage
+import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.global.observability.aicall.AiCallLog
+import com.knk.manyak.global.observability.aicall.AiCallLogRepository
+import com.knk.manyak.global.observability.aicall.AiCallRecorder
+import com.knk.manyak.global.observability.aicall.AiCallStatus
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryStartSettingRepository
+import java.util.Optional
+import org.assertj.core.api.Assertions.assertThat
+import org.mockito.Mockito.`when`
+import org.mockito.Mockito.any
+import org.mockito.Mockito.doAnswer
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.TransactionStatus
 
 class ChatCompactFailureTests {
     private class Fixture {

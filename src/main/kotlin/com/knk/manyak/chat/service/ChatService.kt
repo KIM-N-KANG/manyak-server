@@ -5,7 +5,6 @@ import com.knk.manyak.chat.dto.ChangeChatSettingsResponse
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.ChatPersonaResponse
 import com.knk.manyak.user.service.UserPersonaService
-
 import com.knk.manyak.chat.client.ChatCharacterImage
 import com.knk.manyak.chat.client.ChatTurnGenerationDeadlineException
 import com.knk.manyak.chat.client.ChatTurnAiClient
@@ -101,6 +100,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import com.knk.manyak.chat.config.ChatCompactSettings
 
 @Service
 class ChatService(
@@ -129,7 +129,7 @@ class ChatService(
     private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
-    private val compactSettings: com.knk.manyak.chat.config.ChatCompactSettings,
+    private val compactSettings: ChatCompactSettings,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
     private val chatRealtimeImageService: ChatRealtimeImageService,

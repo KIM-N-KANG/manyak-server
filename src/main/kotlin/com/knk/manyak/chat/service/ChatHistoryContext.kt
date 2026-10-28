@@ -10,10 +10,16 @@ import com.knk.manyak.chat.entity.StoryMessage
 internal data class ChatHistoryContext(val summary: String, val history: List<ChatHistoryMessage>) {
     companion object {
         fun of(chat: StoryChat, messages: List<StoryMessage>, enabled: Boolean, targetTurn: Int): ChatHistoryContext {
-            val through = if (enabled && chat.summaryThroughTurn < targetTurn) chat.summaryThroughTurn else 0
+            val responseCount = messages.count { it.role == MessageRole.ASSISTANT }
+            // 요청 경계는 존재하는 응답까지만 잡는다. 재생성·선택지는 실제 마지막 응답을 제외한다.
+            val availableTurns = if (targetTurn <= chat.currentTurn) (responseCount - 1).coerceAtLeast(0) else responseCount
+            val historyThrough = if (chat.summaryThroughTurn > responseCount) {
+                availableTurns
+            } else (targetTurn - 1).coerceIn(0, availableTurns)
+            val through = if (enabled && chat.summaryThroughTurn in 1..historyThrough) chat.summaryThroughTurn else 0
             return ChatHistoryContext(
                 summary = if (through > 0) chat.summary.orEmpty() else "",
-                history = range(messages, through, targetTurn - 1),
+                history = range(messages, through, historyThrough),
             )
         }
 

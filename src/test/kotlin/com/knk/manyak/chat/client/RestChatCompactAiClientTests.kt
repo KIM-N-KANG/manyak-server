@@ -1,15 +1,21 @@
 package com.knk.manyak.chat.client
 
 import com.knk.manyak.chat.config.ChatCompactSettings
-import com.knk.manyak.global.observability.*
-import okhttp3.mockwebserver.*
-import org.assertj.core.api.Assertions.*
-import org.junit.jupiter.api.*
 import org.slf4j.MDC
 import org.springframework.web.reactive.function.client.WebClient
 import tools.jackson.databind.json.JsonMapper
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import com.knk.manyak.global.observability.AiTraceLink
+import com.knk.manyak.global.observability.MdcKeys
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 
 class RestChatCompactAiClientTests {
     private lateinit var server: MockWebServer

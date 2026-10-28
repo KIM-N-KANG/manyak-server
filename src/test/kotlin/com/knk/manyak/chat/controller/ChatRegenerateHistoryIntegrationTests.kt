@@ -29,6 +29,10 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
+import java.time.Instant
+import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 
 /**
  * 재생성(§4-3-9) 시 AI로 보내는 history가 "마지막 턴(USER·ASSISTANT 쌍)을 제외한 1..N-1"인지,
@@ -59,7 +63,7 @@ class ChatRegenerateHistoryIntegrationTests {
         override fun streamTurn(
             request: ChatTurnAiRequest,
             traceLink: AiTraceLink,
-            deadline: java.time.Instant?,
+            deadline: Instant?,
             onCharacterImage: (ChatCharacterImageEvent) -> Unit,
             onToken: (String) -> Unit,
         ): ChatTurnAiResult {
@@ -142,8 +146,8 @@ class ChatRegenerateHistoryIntegrationTests {
         assertThat(captured.summary).isEmpty()
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource(
+    @ParameterizedTest
+    @CsvSource(
         "regenerate,10,18,false", "regenerate,12,2,true",
         "choices,10,18,false", "choices,11,0,true", "continue,11,2,true",
     )
@@ -176,6 +180,40 @@ class ChatRegenerateHistoryIntegrationTests {
             assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a$turns")
             assertThat(storyChatRepository.findById(chat.id).orElseThrow().summaryThroughTurn).isEqualTo(10)
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["continue", "regenerate", "choices"])
+    fun `요약 끝 턴이 원문 응답 수를 넘어도 실제 요청은 원문으로 완료된다`(operation: String) {
+        val story = storyRepository.save(Story(title = "요약 범위 방어", genre = "판타지"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16, summary = "잘못된 요약", summaryThroughTurn = 14))
+        repeat(12) { index ->
+            val turn = index + 1
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
+        }
+        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        when (operation) {
+            "regenerate" -> assertThat(regenerate(chat.publicId.toString(), last.id)).contains("completed")
+            "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")
+                .exchange().expectStatus().isOk
+            else -> {
+                val body = restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/stream")
+                    .header("X-Manyak-Device-Id", "test-device")
+                    .contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+                    .body("""{"userInput":"새 입력","realtimeImage":false}""")
+                    .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+                assertThat(body).contains("completed")
+            }
+        }
+        val captured = capturingAiClient.lastRequest.get()
+        assertThat(captured.summary).isEmpty()
+        val historyTurns = if (operation == "continue") 12 else 11
+        assertThat(captured.history.map { it.content }).containsExactlyElementsOf(
+            (1..historyTurns).flatMap { listOf("u$it", "a$it") })
+        assertThat(captured.userInput).isEqualTo(if (operation == "continue") "새 입력" else "u12")
+        if (operation == "choices") assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a12")
     }
 
     private fun regenerate(chatId: String, turnId: Long): String =

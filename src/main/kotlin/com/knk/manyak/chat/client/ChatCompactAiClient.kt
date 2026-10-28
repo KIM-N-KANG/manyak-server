@@ -9,13 +9,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 fun interface ChatCompactAiClient {
     fun compact(request: ChatCompactAiRequest, traceLink: AiTraceLink): String
 }
 
 data class ChatCompactAiRequest(val summary: String, val history: List<ChatHistoryMessage>)
-@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class ChatCompactAiResponse(val summary: String)
 
 @Component

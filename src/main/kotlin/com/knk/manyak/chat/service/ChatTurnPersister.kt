@@ -2,7 +2,6 @@ package com.knk.manyak.chat.service
 
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-
 import tools.jackson.databind.ObjectMapper
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
@@ -28,6 +27,14 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.text.Normalizer
 import java.time.Instant
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.story.repository.StoryRepository
+import java.util.UUID
+import org.springframework.context.ApplicationEventPublisher
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /**
  * 채팅 턴 완료 시점의 원자적 저장 책임만 가진다.
@@ -38,9 +45,9 @@ import java.time.Instant
  */
 @Component
 class ChatTurnPersister(
-    private val events: org.springframework.context.ApplicationEventPublisher,
-    private val structuredLogger: com.knk.manyak.global.observability.StructuredLogger,
-    private val storyRepository: com.knk.manyak.story.repository.StoryRepository,
+    private val events: ApplicationEventPublisher,
+    private val structuredLogger: StructuredLogger,
+    private val storyRepository: StoryRepository,
     private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -49,7 +56,7 @@ class ChatTurnPersister(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val endingReachRecorder: EndingReachRecorder,
-    private val creditTransactionRepository: com.knk.manyak.credit.repository.CreditTransactionRepository,
+    private val creditTransactionRepository: CreditTransactionRepository,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -79,7 +86,7 @@ class ChatTurnPersister(
         expectedState: GenerationStartState,
         billingModelCode: String,
         creditTransactionId: Long? = null,
-        storyPublicId: java.util.UUID? = null,
+        storyPublicId: UUID? = null,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -422,8 +429,8 @@ class ChatTurnPersister(
             chat.summaryThroughTurn = 0
             // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 재생성은 무효화하지 않았다.
             val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                object : org.springframework.transaction.support.TransactionSynchronization {
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
                     override fun afterCommit() {
                         runCatching { structuredLogger.event("chat_compact_invalidated",
                             "chat_id" to chat.publicId.toString(), "story_id" to storyPublicId?.toString(),
@@ -508,7 +515,7 @@ class ChatTurnPersister(
     private fun verifyCharge(id: Long?) {
         if (id == null) return
         val charge = creditTransactionRepository.findByIdForUpdate(id) ?: error("차감 행이 없습니다: $id")
-        check(charge.reason == com.knk.manyak.credit.entity.CreditReason.CHAT_TURN && charge.amount < 0)
+        check(charge.reason == CreditReason.CHAT_TURN && charge.amount < 0)
         if (creditTransactionRepository.existsByIdempotencyKey("refund:charge:$id")) {
             throw IllegalStateException("이미 환불된 턴의 저장을 취소합니다.")
         }
