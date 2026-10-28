@@ -38,6 +38,9 @@ import java.time.Instant
  */
 @Component
 class ChatTurnPersister(
+    private val events: org.springframework.context.ApplicationEventPublisher,
+    private val structuredLogger: com.knk.manyak.global.observability.StructuredLogger,
+    private val storyRepository: com.knk.manyak.story.repository.StoryRepository,
     private val storyChatRepository: StoryChatRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -76,6 +79,7 @@ class ChatTurnPersister(
         expectedState: GenerationStartState,
         billingModelCode: String,
         creditTransactionId: Long? = null,
+        storyPublicId: java.util.UUID? = null,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -137,6 +141,7 @@ class ChatTurnPersister(
 
         chat.currentTurn += 1
         storyChatRepository.save(chat)
+        events.publishEvent(ChatTurnCommitted(chat.id, chat.publicId, chat.storyId, chat.currentTurn, storyPublicId))
 
         return PersistedTurn(turnId = assistant.id, turnNumber = chat.currentTurn, reachedEnding = reachedEnding)
     }
@@ -411,6 +416,22 @@ class ChatTurnPersister(
 
         // current_turn은 증가시키지 않는다 — 같은 논리 턴의 재생성이다. 대신 regenerated_count를 올려, 유료(CHAT_TURN)
         // 선차감이 완료된 재생성을 크레딧 대사(KNK-448)가 완료 수에 포함하게 한다(성공 재생성의 초과 환불 방지).
+        if (chat.summaryThroughTurn > 0 && chat.currentTurn <= chat.summaryThroughTurn) {
+            val previousThrough = chat.summaryThroughTurn
+            chat.summary = null
+            chat.summaryThroughTurn = 0
+            // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 재생성은 무효화하지 않았다.
+            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                object : org.springframework.transaction.support.TransactionSynchronization {
+                    override fun afterCommit() {
+                        runCatching { structuredLogger.event("chat_compact_invalidated",
+                            "chat_id" to chat.publicId.toString(), "story_id" to storyPublicId?.toString(),
+                            "turn_number" to chat.currentTurn, "summary_through_turn" to previousThrough) }
+                    }
+                },
+            )
+        }
         chat.regeneratedCount += 1
         storyChatRepository.save(chat)
         return PersistedTurn(turnId = lastAssistant.id, turnNumber = chat.currentTurn)

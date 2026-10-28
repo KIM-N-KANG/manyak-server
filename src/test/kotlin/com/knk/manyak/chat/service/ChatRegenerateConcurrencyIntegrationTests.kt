@@ -42,7 +42,7 @@ class ChatRegenerateConcurrencyIntegrationTests {
     @Test
     fun `같은 시작 상태의 동시 재생성은 하나만 저장하고 다른 결과는 폐기한다`() {
         val story = storyRepository.save(Story(title = "동시 재생성 스토리", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1, summary = "기존 요약", summaryThroughTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(
             StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2),
@@ -84,6 +84,8 @@ class ChatRegenerateConcurrencyIntegrationTests {
         // 채팅 락 안에서 같은 ID의 교체 상태도 재확인한다. 한 결과만 반영한다.
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloaded.regeneratedCount).isEqualTo(1)
+        assertThat(reloaded.summary).isNull()
+        assertThat(reloaded.summaryThroughTurn).isZero()
         assertThat(reloaded.currentTurn).isEqualTo(1) // 턴 수는 불변
     }
 }

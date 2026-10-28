@@ -22,6 +22,10 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
     @Query("SELECT c FROM StoryChat c WHERE c.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): StoryChat?
 
+    @Modifying
+    @Query("UPDATE StoryChat c SET c.summary = :summary, c.summaryThroughTurn = :through WHERE c.id = :id")
+    fun updateSummary(id: Long, summary: String, through: Int): Int
+
     // 컬럼 단위 갱신: 턴 진행 시각을 유지하고 이관과 경합해도 소유권 조건을 재검사한다.
     @Modifying
     @Query("UPDATE StoryChat c SET c.modelCode = :model WHERE c.id = :id AND c.deletedAt IS NULL AND ((:userId IS NULL AND c.userId IS NULL) OR c.userId = :userId)")

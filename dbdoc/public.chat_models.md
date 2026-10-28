@@ -72,6 +72,7 @@ erDiagram
   text persona_description_snapshot
   varchar_20_ model_code FK
   boolean long_response
+  integer summary_through_turn
 }
 "public.story_messages" {
   bigint id

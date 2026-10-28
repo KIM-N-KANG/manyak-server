@@ -6,8 +6,6 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.ChatPersonaResponse
 import com.knk.manyak.user.service.UserPersonaService
 
-import com.knk.manyak.chat.client.ChatHistoryMessage
-import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatCharacterImage
 import com.knk.manyak.chat.client.ChatTurnGenerationDeadlineException
 import com.knk.manyak.chat.client.ChatTurnAiClient
@@ -131,6 +129,7 @@ class ChatService(
     private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
+    private val compactSettings: com.knk.manyak.chat.config.ChatCompactSettings,
     private val chatTurnAiClient: ChatTurnAiClient,
     private val chatTurnPersister: ChatTurnPersister,
     private val chatRealtimeImageService: ChatRealtimeImageService,
@@ -760,6 +759,7 @@ class ChatService(
                 persist = { result, chargeId, billingModelCode ->
                     chatTurnPersister.persistTurn(
                         chatId = chat.id,
+                        storyPublicId = aiCall.traceLink.storyId,
                         expectedState = startState,
                         creditTransactionId = chargeId,
                         billingModelCode = billingModelCode,
@@ -838,7 +838,7 @@ class ChatService(
                 val target = resolveRegenerateTarget(chat.id, request.turnId)
                 val state = generationStartState(freshChat)
                 // 재생성은 마지막 턴을 교체하므로 대상 턴 번호는 current_turn 그대로다(+1 아님).
-                Triple(freshChat, state, buildAiRequest(freshChat, target.history, target.userInput, freshChat.currentTurn, isRegenerated = true))
+                Triple(freshChat, state, buildAiRequest(freshChat, target.userInput, freshChat.currentTurn, isRegenerated = true))
             })
             val startState = prepared.second
             val aiCall = prepared.third
@@ -898,29 +898,18 @@ class ChatService(
      */
     fun generateChoices(chatId: String, turnId: Long, userId: Long? = null): ChatChoicesResponse {
         suspensionGuard.requireActive(userId) // 정지 계정의 AI 호출·쓰기 차단(§4-5 B20). 선택지는 무료지만 AI 비용은 발생한다.
-        val chat = resolveChat(chatId)
-        requireChatOwner(chat, userId)
-
-        val story = storyRepository.findById(chat.storyId).orElse(null)
-        // 마지막 턴 검증(0개면 404, 낡은·타 채팅 turnId면 409) + 이번 턴 제외 history·재전송 입력·저장 본문을 함께 확정한다.
-        // 이 검증을 멱등 사전 검사보다 **먼저** 한다 — messageId로 먼저 조회하면 타 채팅의 turnId로 남의 선택지를 받거나
-        // 같은 채팅의 비마지막 턴이 409 대신 200이 될 수 있다(Codex P1 IDOR).
-        val target = resolveRegenerateTarget(chat.id, turnId)
-
-        // 멱등: 검증된 마지막 턴에 이미 선택지가 있으면 AI 없이 반환한다. 최종 방어는 fillChoices의 락 안 재검사.
-        val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(turnId)
-        if (existing.isNotEmpty()) {
-            return ChatChoicesResponse(existing.map { it.choiceText })
-        }
-
-        // 선택지는 이미 저장된 마지막 턴에 붙으므로 대상 턴 번호는 current_turn이다(새 턴을 만들지 않는다).
-        val aiCall = buildAiRequest(
-            chat = chat,
-            history = target.history,
-            userInput = target.userInput,
-            turnNumber = chat.currentTurn,
-            isRegenerated = false,
-        )
+        val prepared = requireNotNull(assemblyTransactionTemplate.execute {
+            val chat = resolveChat(chatId)
+            requireChatOwner(chat, userId)
+            val target = resolveRegenerateTarget(chat.id, turnId)
+            val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(turnId)
+            if (existing.isNotEmpty()) return@execute ChoicesAssembly(chat, target, null, existing.map { it.choiceText })
+            ChoicesAssembly(chat, target, buildAiRequest(chat, target.userInput, chat.currentTurn, isRegenerated = false), null)
+        })
+        prepared.existing?.let { return ChatChoicesResponse(it) }
+        val chat = prepared.chat
+        val target = prepared.target
+        val aiCall = requireNotNull(prepared.aiCall)
 
         val recorded = try {
             aiCallRecorder.record(
@@ -974,30 +963,20 @@ class ChatService(
         // 마지막 턴의 USER 입력(마지막 ASSISTANT 직전 USER). 그대로 재전송한다(AI 서버는 무상태).
         val pairedUser = all.lastOrNull { it.role == MessageRole.USER && it.messageOrder < lastAssistant.messageOrder }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "재생성할 턴의 사용자 입력을 찾을 수 없습니다.")
-        // history: 마지막 턴(USER·ASSISTANT)을 제외한 이전 내역만. SYSTEM은 제외한다.
-        val history = all
-            .filter { it.messageOrder < pairedUser.messageOrder }
-            .mapNotNull { message ->
-                when (message.role) {
-                    MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)
-                    MessageRole.ASSISTANT -> ChatHistoryMessage(ChatMessageRole.ASSISTANT, message.content)
-                    MessageRole.SYSTEM -> null
-                }
-            }
         return RegenerateTarget(
             assistantId = lastAssistant.id,
             userInput = pairedUser.content,
             aiOutput = lastAssistant.content,
-            history = history,
         )
     }
+
+    private data class ChoicesAssembly(val chat: StoryChat, val target: RegenerateTarget, val aiCall: AiTurnCall?, val existing: List<String>?)
 
     private data class RegenerateTarget(
         val assistantId: Long,
         val userInput: String,
         // 마지막 턴의 저장된 AI 본문. 선택지 생성 시 ai_output으로 되싣는다(재생성은 사용하지 않음).
         val aiOutput: String,
-        val history: List<ChatHistoryMessage>,
     )
 
     private fun generationStartState(chat: StoryChat) = GenerationStartState(
@@ -1513,7 +1492,6 @@ class ChatService(
     ): AiTurnCall =
         buildAiRequest(
             chat = chat,
-            history = assembleHistory(chat.id),
             userInput = userInput,
             turnNumber = turnNumber,
             isRegenerated = false,
@@ -1521,15 +1499,14 @@ class ChatService(
         )
 
     /**
-     * 스토리 조립 재료(설정·시작 설정·주요 사건·엔딩·장르)와 주어진 [history]·[userInput]으로 AI 채팅 턴 요청을 조립한다.
-     * 이어쓰기는 전체 내역을, 재생성(§4-3-9)은 마지막 턴을 제외한 내역을 [history]로 넘긴다.
+     * 같은 스냅샷의 요약과 원문 범위를 스토리 조립 재료·[userInput]과 함께 AI 요청으로 구성한다.
+     * 이어쓰기는 완료 턴까지, 재생성·선택지는 대상 턴 앞까지 원문을 싣는다.
      *
      * AI 호출 헤더로 나갈 연결 식별자([AiTraceLink], KNK-751)도 이 안에서 함께 만든다 — 조립과 같은 트랜잭션에서
      * 읽어야 게이트와 다른 시점을 보지 않기 때문이다.
      */
     private fun buildAiRequest(
         chat: StoryChat,
-        history: List<ChatHistoryMessage>,
         userInput: String,
         // 이번 호출이 만들 턴 번호의 **예측치**다(이어쓰기 current_turn + 1, 재생성·선택지는 그 턴 자체인 current_turn).
         // 권위값이 아니며 최종 대조는 ai_call_logs.turn_number가 한다(번호 선점은 하지 않는다 — 실패가 번호를 태우면 안 됨).
@@ -1539,6 +1516,7 @@ class ChatService(
     ): AiTurnCall = assemblyTransactionTemplate.execute {
         // 스토리를 여기서 **다시** 읽는다. 호출부가 읽어둔 값을 쓰면 게이트 판정만 트랜잭션 밖 시점이 되어
         // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
+        val context = ChatHistoryContext.of(chat, storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), compactSettings.enabled, turnNumber)
         val story = storyRepository.findById(chat.storyId).orElse(null)
         // 조립 재료는 생성 결과를 통해 독자에게 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064·1065).
         // 판정 주체는 **턴을 돌리는 사람**이고, 세 진입점(이어쓰기·재생성·선택지)이 모두 앞에서 requireChatOwner로
@@ -1605,9 +1583,9 @@ class ChatService(
                         ).orEmpty(),
                     startSituation = render(startSetting?.startSituation.orEmpty(), chatName),
                 ),
-                history = history,
+                history = context.history,
                 userInput = userInput,
-                summary = "",
+                summary = context.summary,
                 // 인물-이미지 매핑(KNK-943). 이어쓰기·재생성·선택지 생성이 이 조립을 공유하므로 세 경로 모두 같은 매핑을 싣는다.
                 // 스냅샷 대상이 아니다 — story_characters는 전 컬럼이 불변이고 수정 API가 손대지 않아 개작될 수 없다.
                 // 인물 이미지도 나머지 재료와 같은 갈래로 흐른다(PR #273 Codex P1). 라이브 행을 직접 읽으면
@@ -1776,21 +1754,6 @@ class ChatService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-    }
-
-    /**
-     * 채팅의 전체 대화 내역(USER+ASSISTANT)을 시간순으로 조립한다.
-     * SYSTEM 메시지는 AI history에서 제외한다.
-     */
-    private fun assembleHistory(chatId: Long): List<ChatHistoryMessage> {
-        val all = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatId)
-        return all.mapNotNull { message ->
-            when (message.role) {
-                MessageRole.USER -> ChatHistoryMessage(ChatMessageRole.USER, message.content)
-                MessageRole.ASSISTANT -> ChatHistoryMessage(ChatMessageRole.ASSISTANT, message.content)
-                MessageRole.SYSTEM -> null
-            }
-        }
     }
 
     /**

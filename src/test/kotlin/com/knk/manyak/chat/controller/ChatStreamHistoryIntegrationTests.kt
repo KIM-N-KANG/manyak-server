@@ -160,7 +160,7 @@ class ChatStreamHistoryIntegrationTests {
     @Test
     fun `이어쓰기는 최근 N턴이 아니라 세션의 전체 대화 내역을 시간순으로 AI에 전달한다`() {
         val story = storyRepository.save(Story(title = "전체 내역 전송 스토리", genre = "판타지"))
-        val session = storyChatRepository.save(StoryChat(storyId = story.id))
+        val session = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 11))
 
         // SYSTEM 1건(order 1) + 11턴(USER/ASSISTANT, order 2..23) = 23건.
         // 최근 10턴 제한(메시지 20건)으로는 전체가 담기지 않는다.
@@ -193,7 +193,7 @@ class ChatStreamHistoryIntegrationTests {
         assertThat(captured.history).noneMatch { it.content == "시스템 지시문" }
         // 현재 입력은 아직 저장 전이므로 history에 포함되지 않는다.
         assertThat(captured.history).noneMatch { it.content == "다음 행동을 한다." }
-        // 메모리(summary)는 아직 미적용 → 빈 문자열.
+        // 저장한 대화 요약이 없으므로 빈 문자열.
         assertThat(captured.summary).isEmpty()
     }
 

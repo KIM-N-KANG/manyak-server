@@ -28,6 +28,7 @@
 | persona_description_snapshot | text |  | true |  |  |  |
 | model_code | varchar(20) | 'LITE'::character varying | false |  | [public.chat_models](public.chat_models.md) |  |
 | long_response | boolean | false | false |  |  |  |
+| summary_through_turn | integer | 0 | false |  |  |  |
 
 ## Constraints
 
@@ -39,6 +40,7 @@
 | ck_story_chats_persona_pair | CHECK | CHECK (((persona_name_snapshot IS NULL) = (persona_description_snapshot IS NULL))) |
 | ck_story_chats_regenerated_count | CHECK | CHECK ((regenerated_count >= 0)) |
 | ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
+| ck_story_chats_summary_through_turn | CHECK | CHECK ((summary_through_turn >= 0)) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
 | story_chats_pkey | PRIMARY KEY | PRIMARY KEY (id) |
@@ -98,6 +100,7 @@ erDiagram
   text persona_description_snapshot
   varchar_20_ model_code FK
   boolean long_response
+  integer summary_through_turn
 }
 "public.story_messages" {
   bigint id

@@ -197,6 +197,10 @@ manyak:
       audience: manyak-admin
       ttl: PT2H
   chat:
+    compact:
+      enabled: ${MANYAK_CHAT_COMPACT_ENABLED:false}
+      interval-turns: ${MANYAK_CHAT_COMPACT_INTERVAL_TURNS:10}
+      timeout-seconds: ${MANYAK_CHAT_COMPACT_TIMEOUT_SECONDS:300}
     sse-executor:
       concurrency: ${MANYAK_CHAT_SSE_CONCURRENCY:64}
       queue-capacity: ${MANYAK_CHAT_SSE_QUEUE_CAPACITY:100}
