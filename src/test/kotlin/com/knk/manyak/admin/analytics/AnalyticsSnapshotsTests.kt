@@ -29,10 +29,13 @@ class AnalyticsSnapshotsTests {
     }
     @AfterEach fun stop() = server.shutdown()
     private fun number(n: Long, fetched: Instant = now, final: Instant? = null) = AnalyticsValue(fixture.mapper.valueToTree<JsonNode>(n), fetched, final)
+    /** 만료 값은 기다리지 않고 응답하므로 백그라운드 갱신이 끝난 뒤 다음 단계를 확인한다. */
+    private fun load(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>, rangeMetrics: List<RangeAnalyticsMetric> = emptyList()) =
+        fixture.snapshots.load(endpoint, range, metrics, rangeMetrics = rangeMetrics).also { fixture.executor.await() }
     @Test fun `저장된 중간 날짜는 건너뛰고 최근 날짜부터 두 빈 구간만 조회한다`() {
         fixture.store.saveDaily(metric.definition, (4L..10L).associate { day.minusDays(it) to number(3, now.minusSeconds(86400)) })
         val range = AnalyticsRange(day.minusDays(13), day.minusDays(2))
-        val result = fixture.snapshots.load("/test", range, listOf(metric))
+        val result = load("/test", range, listOf(metric))
         assertThat(result.readyDates()).hasSize(12); assertThat(result.pendingDates()).isEmpty()
         assertThat(server.requestCount).isEqualTo(2)
         val first = server.takeRequest().requestUrl!!; val second = server.takeRequest().requestUrl!!
@@ -43,7 +46,7 @@ class AnalyticsSnapshotsTests {
     @Test fun `확정일은 날짜가 끝난 뒤 받은 값만 확정하며 당일 값은 한 번 더 받는다`() {
         val settled = day.minusDays(2); val unfinished = day.minusDays(3)
         fixture.store.saveDaily(metric.definition, mapOf(settled to number(3, now.minusSeconds(86400)), unfinished to number(2, now.minusSeconds(3 * 86400))))
-        fixture.snapshots.load("/test", AnalyticsRange(unfinished, settled), listOf(metric))
+        load("/test", AnalyticsRange(unfinished, settled), listOf(metric))
         assertThat(server.requestCount).isEqualTo(1)
         val stored = fixture.store.daily(metric.definition, unfinished, settled)
         assertThat(stored[settled]!!.value.asLong()).isEqualTo(3); assertThat(stored[unfinished]!!.value.asLong()).isEqualTo(7)
@@ -53,22 +56,22 @@ class AnalyticsSnapshotsTests {
         val range = AnalyticsRange(day.minusDays(5), day.minusDays(3))
         val def = AnalyticsDefinition("range_test", "/api/2/funnels", emptyList(), 12, fixture.mapper)
         val past = RangeAnalyticsMetric(def, range) { fixture.mapper.valueToTree<JsonNode>(10L) }
-        fixture.snapshots.load("/range", range, emptyList(), rangeMetrics = listOf(past))
+        load("/range", range, emptyList(), rangeMetrics = listOf(past))
         fixture.clock.at = now.plusSeconds(23 * 3600)
-        fixture.snapshots.load("/range", range, emptyList(), rangeMetrics = listOf(past)); assertThat(server.requestCount).isEqualTo(1)
+        load("/range", range, emptyList(), rangeMetrics = listOf(past)); assertThat(server.requestCount).isEqualTo(1)
         fixture.clock.at = now
         val currentRange = AnalyticsRange(day.minusDays(1), day)
         val current = RangeAnalyticsMetric(def, currentRange) { fixture.mapper.valueToTree<JsonNode>(10L) }
-        fixture.snapshots.load("/range", currentRange, emptyList(), rangeMetrics = listOf(current))
+        load("/range", currentRange, emptyList(), rangeMetrics = listOf(current))
         fixture.clock.at = now.plusSeconds(600)
-        fixture.snapshots.load("/range", currentRange, emptyList(), rangeMetrics = listOf(current)); assertThat(server.requestCount).isEqualTo(3)
+        load("/range", currentRange, emptyList(), rangeMetrics = listOf(current)); assertThat(server.requestCount).isEqualTo(3)
     }
     @Test fun `범위 지표의 여러 조회는 전체 갱신 비용을 예약할 수 있어야 호출한다`() {
         val range = AnalyticsRange(day.minusDays(6), day)
         fun spec(segment: String) = RangeAnalyticsMetric(AnalyticsDefinition("funnel_" + segment, "/api/2/funnels", listOf("segment" to segment), 12, fixture.mapper), range) { fixture.mapper.valueToTree<JsonNode>(10) }
         val all = spec("all"); val ads = spec("ads")
         assertThat(fixture.budget.reserve(400)).isTrue() // 남은 100은 한 조회 84만 가능하며 전체 168은 불가능하다.
-        val result = fixture.snapshots.load("/range", range, emptyList(), rangeMetrics = listOf(all, ads))
+        val result = load("/range", range, emptyList(), rangeMetrics = listOf(all, ads))
         assertThat(server.requestCount).isZero(); assertThat(result.value(all)).isNull(); assertThat(result.value(ads)).isNull()
         assertThat(fixture.budget.reserve(100)).isTrue()
     }
@@ -77,11 +80,11 @@ class AnalyticsSnapshotsTests {
         val def = AnalyticsDefinition("retention_test", "/api/2/retention", emptyList(), 8, fixture.mapper)
         val retention = DailyAnalyticsMetric(def, true) { _, range -> range.dates().associateWith { array(false) } }
         fixture.store.saveDaily(def, mapOf(day.minusDays(40) to AnalyticsValue(array(true), now), day.minusDays(10) to AnalyticsValue(array(false), now)))
-        fixture.snapshots.load("/retention", AnalyticsRange(day.minusDays(40), day.minusDays(40)), listOf(retention))
-        fixture.snapshots.load("/retention", AnalyticsRange(day.minusDays(10), day.minusDays(10)), listOf(retention)); assertThat(server.requestCount).isZero()
+        load("/retention", AnalyticsRange(day.minusDays(40), day.minusDays(40)), listOf(retention))
+        load("/retention", AnalyticsRange(day.minusDays(10), day.minusDays(10)), listOf(retention)); assertThat(server.requestCount).isZero()
         fixture.clock.at = now.plusSeconds(86400)
-        fixture.snapshots.load("/retention", AnalyticsRange(day.minusDays(40), day.minusDays(40)), listOf(retention))
-        fixture.snapshots.load("/retention", AnalyticsRange(day.minusDays(10), day.minusDays(10)), listOf(retention)); assertThat(server.requestCount).isEqualTo(1)
+        load("/retention", AnalyticsRange(day.minusDays(40), day.minusDays(40)), listOf(retention))
+        load("/retention", AnalyticsRange(day.minusDays(10), day.minusDays(10)), listOf(retention)); assertThat(server.requestCount).isEqualTo(1)
         assertThat(fixture.store.daily(def, day.minusDays(40), day.minusDays(40)).values.single().finalizedAt).isNotNull()
     }
     @org.junit.jupiter.params.ParameterizedTest
@@ -92,12 +95,12 @@ class AnalyticsSnapshotsTests {
         val retention = DailyAnalyticsMetric(def, true) { _, range -> range.dates().associateWith { points } }
         val date = day.minusDays(32); val range = AnalyticsRange(date, date)
         fixture.store.saveDaily(def, mapOf(date to AnalyticsValue(points, now)))
-        fixture.snapshots.load("/retention", range, listOf(retention))
+        load("/retention", range, listOf(retention))
         assertThat(fixture.store.daily(def, date, date)[date]!!.finalizedAt).isNull()
         assertThat(server.requestCount).isZero()
         fixture.clock.at = now.plusSeconds(86400)
-        fixture.snapshots.load("/retention", range, listOf(retention))
-        fixture.snapshots.load("/retention", range, listOf(retention))
+        load("/retention", range, listOf(retention))
+        load("/retention", range, listOf(retention))
         assertThat(server.requestCount).isEqualTo(1)
         assertThat(fixture.store.daily(def, date, date)[date]!!.finalizedAt).isNull()
     }
@@ -115,7 +118,7 @@ class AnalyticsSnapshotsTests {
             assertThat(fixture.snapshots.missingDates(retention, range)).containsExactly(yesterday)
             assertThat(fixture.store.daily(def, today, yesterday).values).allMatch { it.finalizedAt == null }
         }
-        fixture.snapshots.load("/retention", range, listOf(retention))
+        load("/retention", range, listOf(retention))
         var rows = fixture.store.daily(def, today, yesterday)
         assertThat(rows[today]!!.finalizedAt).isNull()
         assertThat(rows[today]!!.value).isEqualTo(invalid)
@@ -123,7 +126,7 @@ class AnalyticsSnapshotsTests {
         assertThat(rows[yesterday]!!.finalizedAt).isNotNull()
         assertThat(server.requestCount).isEqualTo(1)
         fixture.clock.at = now.plusSeconds(86400)
-        fixture.snapshots.load("/retention", range, listOf(retention))
+        load("/retention", range, listOf(retention))
         rows = fixture.store.daily(def, today, yesterday)
         assertThat(rows.values).allMatch { it.finalizedAt != null && it.value == complete }
         assertThat(server.requestCount).isEqualTo(2)
@@ -137,11 +140,18 @@ class AnalyticsSnapshotsTests {
         assertThat(first.hash).isNotEqualTo(def("[{\"prop\":\"userdata_cohort\",\"op\":\"is not\",\"values\":[\"other\"]}]").hash)
         assertThat(first.params).doesNotContain("mock")
     }
-    @Test fun `저장 예외 때 받은 값으로 응답하고 다음 요청에서 다시 받는다`() {
+    @Test fun `저장 예외 때 갱신을 기다린 요청은 받은 값으로 응답하고 다음 요청이 시작한 갱신에서 다시 받는다`() {
+        val logger = org.slf4j.LoggerFactory.getLogger(AnalyticsSnapshots::class.java) as ch.qos.logback.classic.Logger
+        val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
         val date = day.minusDays(3); val rows = mapOf(date to number(7, now, now)); val spy = Mockito.spy(fixture.store)
         Mockito.doThrow(org.springframework.dao.DataAccessResourceFailureException("private SQL")).`when`(spy).saveDaily(metric.definition, rows)
         val snapshots = AnalyticsSnapshots(spy, fixture.client, fixture.budget, fixture.mapper, fixture.clock)
-        assertThat(snapshots.load("/test", AnalyticsRange(date, date), listOf(metric)).value(metric, date)!!.value.asLong()).isEqualTo(7)
+        logger.addAppender(events)
+        try {
+            // 저장 값이 없는 날짜라 요청이 대기 한도 안에 끝난 갱신을 기다린다.
+            assertThat(snapshots.load("/test", AnalyticsRange(date, date), listOf(metric)).value(metric, date)!!.value.asLong()).isEqualTo(7)
+            assertThat(events.list.map { it.formattedMessage }).anyMatch { it.startsWith("admin_analytics_store_failed endpoint=/test") && !it.contains("private SQL") }
+        } finally { logger.detachAppender(events); events.stop() }
         assertThat(fixture.store.daily(metric.definition, date, date)).isEmpty()
         snapshots.load("/test", AnalyticsRange(date, date), listOf(metric)); assertThat(server.requestCount).isEqualTo(2)
     }
@@ -163,7 +173,7 @@ class AnalyticsSnapshotsTests {
         try {
             server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setBody("""{"data":{"private":"secret response"}}""") }
             val range = AnalyticsRange(day,day)
-            val result = fixture.snapshots.load("/test",range,listOf(metric))
+            val result = load("/test",range,listOf(metric))
             assertThat(result.readyDates()).isEmpty()
             assertThat(result.progress.failure?.name).isEqualTo("parse_error")
             val failure = events.list.single { it.formattedMessage.startsWith("admin_analytics_fetch_failed") }
@@ -171,7 +181,7 @@ class AnalyticsSnapshotsTests {
                 .doesNotContain("secret response", "private", "Authorization")
             assertThat(failure.throwableProxy).isNull()
             assertThat(fixture.store.daily(metric.definition,day,day)).isEmpty()
-            fixture.snapshots.load("/test",range,listOf(metric)); assertThat(server.requestCount).isEqualTo(1)
+            load("/test",range,listOf(metric)); assertThat(server.requestCount).isEqualTo(1)
             assertThat(fixture.budget.reserve(500)).isTrue()
         } finally { logger.detachAppender(events); events.stop() }
     }
@@ -182,16 +192,16 @@ class AnalyticsSnapshotsTests {
         logger.addAppender(events)
         try {
             val range = AnalyticsRange(day, day)
-            fixture.snapshots.load("/test", range, listOf(metric))
+            load("/test", range, listOf(metric))
             assertThat(events.list.last().formattedMessage).contains("queries=1", "fetched_days=1", "reused_days=0", "pending_days=0", "cost=1")
             val count = events.list.size
-            fixture.snapshots.load("/test", range, listOf(metric)); assertThat(events.list).hasSize(count)
+            load("/test", range, listOf(metric)); assertThat(events.list).hasSize(count)
             fixture.clock.at = now.plusSeconds(600)
-            fixture.snapshots.load("/test", range, listOf(metric))
+            load("/test", range, listOf(metric))
             assertThat(events.list.last().formattedMessage).contains("reused_days=0")
             fixture.clock.at = now.plusSeconds(1200)
             server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500).setBody("sensitive mock response") }
-            fixture.snapshots.load("/test", range, listOf(metric))
+            load("/test", range, listOf(metric))
             val failure = events.list.last { it.formattedMessage.startsWith("admin_analytics_fetch_failed") }
             assertThat(failure.formattedMessage).contains("reason=http_error", "status=500", "endpoint=/test").doesNotContain("mock", "sensitive")
             assertThat(failure.throwableProxy).isNull()

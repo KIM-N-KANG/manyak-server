@@ -163,13 +163,15 @@ class AdminReadPostgresTests {
         assertThat((point["bucket"] as Number).toInt()).isEqualTo(3)
         assertThat((point["n"] as Number).toLong()).isEqualTo(page.totalElements)
     }
-    @Test fun `실제 PostgreSQL에서 일별 KST 집계와 분포 여덟 쿼리를 실행한다`() {
+    @Test fun `실제 PostgreSQL에서 일별 KST 집계와 분포 아홉 쿼리를 실행한다`() {
         val daily = charts.daily(start, now, emptyList()).values.single()
         assertThat(daily["attendance"]).isEqualTo(1)
         assertThat(daily["turns"]).isEqualTo(1)
         assertThat(daily["revenue"]).isEqualTo(4800)
         val raw = charts.distributions(start, now, emptyList(), null)
-        assertThat(raw).hasSize(8)
+        assertThat(raw).hasSize(9)
+        assertThat(raw[8].associate { it["label"] to (it["n"] as Number).toLong() }).containsKey("SIMPLE")
+        assertThat((raw[2].single { it["label"] == "MEMBER" }["users"] as Number).toLong()).isEqualTo(1)
         assertThat((raw[4].single()["average"] as Number).toDouble()).isEqualTo(30.0)
         assertThat((raw[5].single()["metric_value"] as Number).toDouble()).isEqualTo(1.0)
         assertThat((raw[6].single()["metric_value"] as Number).toDouble()).isEqualTo(100.0)

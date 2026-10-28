@@ -22,14 +22,14 @@ class MdcTaskDecorator : TaskDecorator {
         .build()
 
     override fun decorate(runnable: Runnable): Runnable {
-        val capturedDeviceId = AnalyticsDeviceContext.currentDeviceId()
+        val capturedAnalytics = AnalyticsDeviceContext.capture()
         val captured = MDC.getCopyOfContextMap()
         val snapshot = snapshots.captureAll()
         return Runnable {
             val previous = MDC.getCopyOfContextMap()
             if (captured != null) MDC.setContextMap(captured) else MDC.clear()
             try {
-                AnalyticsDeviceContext.withDeviceId(capturedDeviceId) {
+                AnalyticsDeviceContext.with(capturedAnalytics) {
                     snapshot.setThreadLocals().use { runnable.run() }
                 }
             } finally {

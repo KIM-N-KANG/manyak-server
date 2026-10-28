@@ -43,14 +43,15 @@ internal class AmplitudeDefinitionInventory {
         val settings = CampaignSettings(items, groups)
         val dashboard = AdminAnalyticsService(snapshots, AmplitudeDashboardProperties(), mapper, clock)
         val campaigns = CampaignAnalyticsService(settings, snapshots, queries, clock)
-        val metrics = AdminMetricsService(definitions, snapshots, queries, clock)
+        val metrics = AdminMetricsService(definitions, snapshots, queries, modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), clock)
         dashboard.dailyMetrics().forEach { daily(it, "dashboard + today") }
         definitions.activity().forEach { daily(it, "users/activity") }; listOf("all", "android", "android_overseas").forEach { interval(definitions.mau(date, it), "users/activity:MAU") }
-        definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.retention().forEach { daily(it, "users/retention") }
+        definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.sessionLengths().forEach { daily(it, "users/session-lengths") }
+        for (cohort in listOf("visitor", "signup", "first-chat")) definitions.retention(cohort).forEach { daily(it, "users/retention:$cohort") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
         definitions.signupPlatforms().forEach { daily(it, "users/signups") }
         for (segment in listOf("guest", "member")) {
-            definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }
+            definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }; definitions.sessionLengths(segment).forEach { daily(it, "users/session-lengths:$segment") }
             for (platform in listOf("all", "web", "android")) definitions.quality(platform, segment).forEach { daily(it, "quality/$platform:$segment") }
         }
         for (segment in listOf("all", "guest", "member")) {

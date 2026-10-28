@@ -25,6 +25,8 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         request.moderationStatus?.let { q.add(if (it == "HELD") held else "NOT $held") }
         q.range("s.created_at", request.from, request.to)
         q.range("cs.created_at", request.creationFrom, request.creationTo)
+        // 제작 방식은 스토리를 완성한(STORY_CREATED) 제작 세션 유무다. session 조인이 그 최신 세션을 붙인다.
+        request.creationMode?.let { q.add(if (it == "SIMPLE") "cs.id IS NOT NULL" else "cs.id IS NULL") }
         request.supportingCharacterCount?.let { q.add("cs.id IS NOT NULL AND $supporting=$it") }
         q.search(request.normalizedQuery(), listOf("s.public_id"), listOf("s.title", "u.nickname"))
         q.ai(request, "al.story_id=s.id")

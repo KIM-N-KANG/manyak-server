@@ -413,7 +413,7 @@ class AdminReadApiIntegrationTests {
         for (days in listOf(7, 30, 90)) {
             val body = json(get("/dashboard/charts?days=$days").expectStatus().isOk)
             assertThat(body["daily"].size()).isEqualTo(days)
-            assertThat(body["distributions"].size()).isEqualTo(8)
+            assertThat(body["distributions"].size()).isEqualTo(9)
             val turns = body["distributions"][1]["points"]
             assertThat(turns.size()).isEqualTo(13)
             assertThat(turns[1]["link"]["params"]["turnBucket"].asText()).isEqualTo("1")
@@ -735,11 +735,12 @@ class AdminReadApiIntegrationTests {
         assertThat(dist.toList().map { listOf(it["chartId"].asText(), it["title"].asText(), it["description"].asText(), it["unit"].asText()) }).isEqualTo(listOf(
             listOf("genre-depth", "장르별 평균 턴 수", "채팅 생성일 기준 장르별 평균 현재 턴 수", "턴"),
             listOf("turns", "턴 수 분포", "채팅 생성일을 기준으로 구간별 채팅 수 집계", "개"),
-            listOf("started-as", "게스트와 회원 비율", "현재 소유 회원 여부로 판정한 채팅 비율", "%"),
+            listOf("started-as", "채팅 소유자 게스트와 회원", "채팅 생성일 기준 채팅 수로 나눈 비율, 가입 뒤 이관된 게스트 채팅은 회원, 게스트 사용자 수는 AI 호출을 보낸 기기 수", "%"),
             listOf("member-chats", "회원별 채팅 생성 횟수", "기간에 채팅을 생성한 회원의 생성 횟수 분포", "명"),
             listOf("first-message", "첫 사용자 입력까지 걸린 시간", "채팅 생성일 기준, 900초 초과 1건, 입력 없음 1건 제외", "초"),
             listOf("ai-latency", "기능별 AI 평균 호출 시간", "호출 시간이 기록된 성공 호출의 평균 호출 시간", "초"),
             listOf("ai-success", "기능별 AI 성공률", "완료된 호출 중 성공 비율, 진행 중 제외", "%"),
+            listOf("creation-mode", "제작 방식별 스토리 수", "스토리 생성일 기준 미삭제 스토리 수, 간편 제작은 스토리를 완성한 제작 세션이 있는 스토리", "개"),
             listOf("characters", "간편 제작별 입력 주변 인물 수", "미삭제 스토리의 최신 완료 간편 제작 생성일 기준 직접 입력한 주변 인물 수, 공식 계정 포함", "건"),
         ))
         assertThat(dist[0]["points"].size()).isEqualTo(2)
@@ -862,10 +863,11 @@ class AdminReadApiIntegrationTests {
         assertThat(points.toList().map { it["value"].asDouble() }).containsExactly(465.0, 10.0, 3.0, 3.0, 0.0)
         assertThat(points.toList().map { it["chats"].asLong() }).containsExactly(1L, 6L, 2L, 2L, 1L)
         assertThat(points.toList().map { it["totalTurns"].asLong() }).containsExactly(465L, 60L, 6L, 6L, 0L)
-        charts.filter { it["chartId"].asText() != "genre-depth" }.flatMap { it["points"].toList() }.forEach {
+        charts.filter { it["chartId"].asText() !in setOf("genre-depth", "started-as") }.flatMap { it["points"].toList() }.forEach {
             assertThat(it.has("chats")).isFalse()
             assertThat(it.has("totalTurns")).isFalse()
         }
+        points.forEach { assertThat(it.has("users")).isFalse() }
     }
 
     @Test fun `채팅 필터와 소모는 원문을 읽지 않고 첫 입력과 턴 날짜 및 AI 기록을 따른다`() {
@@ -1028,7 +1030,97 @@ class AdminReadApiIntegrationTests {
         assertThat(links["to"].asText()).isEqualTo("2026-10-20")
         val full = json(get("/dashboard/charts?from=2025-10-21&to=2026-10-21").expectStatus().isOk)
         assertThat(full["daily"].size()).isEqualTo(366)
-        assertThat(full["distributions"][7]["points"][0]["link"]["params"]["creationFrom"].asText()).isEqualTo("2025-10-21")
+        assertThat(full["distributions"][8]["points"][0]["link"]["params"]["creationFrom"].asText()).isEqualTo("2025-10-21")
+    }
+
+    private fun aiLog(chat: com.knk.manyak.chat.entity.StoryChat, device: String?) = aiLogs.save(com.knk.manyak.global.observability.aicall.AiCallLog(
+        requestId = UUID.randomUUID().toString(), callerService = "test", feature = com.knk.manyak.global.observability.aicall.AiCallFeature.CHAT_RESPONSE,
+        chatId = chat.publicId, deviceIdHash = device, status = com.knk.manyak.global.observability.aicall.AiCallStatus.SUCCEEDED, createdAt = now))
+    private fun ownerPoints() = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
+        .first { it["chartId"].asText() == "started-as" }["points"].associateBy { it["label"].asText() }
+
+    @Test fun `채팅 소유자 비율은 채팅 수로 나누고 회원은 소유 회원 수 게스트는 기기 수를 싣는다`() {
+        val story = story()
+        val a = member("회원 A"); val b = member("회원 B")
+        aiLog(chat(story), "device-a")
+        chat(story, a); chat(story, a); chat(story, b)
+        val points = ownerPoints()
+        assertThat(points.keys).containsExactly("게스트", "회원")
+        val guest = points.getValue("게스트"); val members = points.getValue("회원")
+        assertThat(listOf(guest["value"].asDouble(), guest["chats"].asLong(), guest["users"].asLong())).containsExactly(25.0, 1L, 1L)
+        assertThat(listOf(members["value"].asDouble(), members["chats"].asLong(), members["users"].asLong())).containsExactly(75.0, 3L, 2L)
+        assertThat(guest.has("totalTurns")).isFalse()
+    }
+
+    @Test fun `게스트 사용자 수는 그 채팅 AI 호출의 서로 다른 기기 해시이고 해시 없는 기록은 세지 않는다`() {
+        val story = story()
+        repeat(2) { val c = chat(story); aiLog(c, "device-a"); aiLog(c, "device-a") }
+        aiLog(chat(story), "device-b")
+        chat(story)
+        aiLog(chat(story), null)
+        val guest = ownerPoints().getValue("게스트")
+        assertThat(guest["chats"].asLong()).isEqualTo(5)
+        assertThat(guest["users"].asLong()).isEqualTo(2)
+    }
+
+    @Test fun `가입 뒤 이관된 게스트 채팅은 회원 채팅이다`() {
+        val a = member("이관 회원")
+        aiLog(chat(story(), a), "device-before-signup")
+        val points = ownerPoints()
+        assertThat(points.getValue("회원")["chats"].asLong()).isEqualTo(1)
+        assertThat(points.getValue("회원")["users"].asLong()).isEqualTo(1)
+        assertThat(points.getValue("게스트")["chats"].asLong()).isZero()
+        assertThat(points.getValue("게스트")["users"].asLong()).isZero()
+    }
+
+    @Test fun `제작 방식별 스토리 수는 미삭제 스토리를 완성 세션 유무로 나누고 요약 제외 목록을 적용한다`() {
+        val officialMember = member("공식 제외")
+        fun simple(target: com.knk.manyak.story.entity.Story) = target.also {
+            creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = it.id,
+                status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+        }
+        val simples = listOf(simple(story()), simple(story()))
+        val general = story()
+        val removed = simple(story())
+        jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), removed.id)
+        simple(story(officialMember))
+        storyRepository.save(com.knk.manyak.story.entity.Story(title = "범위 밖", createdAt = midnight.minusSeconds(10 * 86400)))
+        org.mockito.Mockito.doReturn(officialMember.id).`when`(official).officialUserId()
+        val service = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
+            com.knk.manyak.admin.config.AdminDashboardProperties(listOf(officialMember.id)), official, java.time.Clock.fixed(now, java.time.ZoneOffset.UTC))
+        val charts = service.charts(7).distributions
+        val index = charts.indexOfFirst { it.chartId == "creation-mode" }
+        assertThat(charts[index + 1].chartId).isEqualTo("characters")
+        val chart = charts[index]
+        assertThat(listOf(chart.category, chart.title, chart.unit)).containsExactly("content", "제작 방식별 스토리 수", "개")
+        assertThat(chart.points.map { it.label to it.value }).containsExactly("일반 제작" to 1.0, "간편 제작" to 2.0)
+        assertThat(chart.points.map { it.link.list }).containsOnly("stories")
+        assertThat(chart.points.map { it.link.params }).containsExactly(
+            mapOf("creationMode" to "GENERAL", "from" to "2026-10-15", "to" to "2026-10-21"),
+            mapOf("creationMode" to "SIMPLE", "from" to "2026-10-15", "to" to "2026-10-21"))
+        // 링크 목록은 팀 계정 제외를 적용하지 않으므로 제외 회원 스토리가 함께 보인다.
+        assertThat(ids("/stories?creationMode=SIMPLE&from=2026-10-15&to=2026-10-21")).hasSize(3).containsAll(simples.map { it.publicId.toString() })
+        assertThat(ids("/stories?creationMode=GENERAL&from=2026-10-15&to=2026-10-21")).containsExactly(general.publicId.toString())
+    }
+
+    @Test fun `스토리 목록 제작 방식 필터는 완성 세션 유무로 나누고 대문자 값만 받는다`() {
+        val simple = story(title = "간편")
+        creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = simple.id,
+            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+        val general = story(title = "일반")
+        creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = general.id,
+            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
+        assertThat(ids("/stories?creationMode=SIMPLE")).containsExactly(simple.publicId.toString())
+        assertThat(ids("/stories?creationMode=GENERAL")).containsExactly(general.publicId.toString())
+        get("/stories?creationMode=simple").expectStatus().isBadRequest
+    }
+
+    @Test fun `분포 차트 9개의 구역은 users 2 engagement 3 content 2 ai-quality 2개다`() {
+        val charts = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"].toList()
+        assertThat(charts.map { it["chartId"].asText() }).containsExactly(
+            "genre-depth", "turns", "started-as", "member-chats", "first-message", "ai-latency", "ai-success", "creation-mode", "characters")
+        assertThat(charts.groupingBy { it["category"].asText() }.eachCount())
+            .isEqualTo(mapOf("engagement" to 3, "users" to 2, "ai-quality" to 2, "content" to 2))
     }
 
     @Test fun `두 대시보드 기간은 양쪽 날짜 필수이고 366일 이내 과거 또는 오늘만 허용한다`() {
@@ -1095,8 +1187,8 @@ class AdminReadApiIntegrationTests {
         assertThat(body["items"][0]["tags"][0].asText()).isEqualTo("판타지")
         val service = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
             com.knk.manyak.admin.config.AdminDashboardProperties(listOf(team.id, excluded.id)), official, java.time.Clock.fixed(now, java.time.ZoneOffset.UTC))
-        assertThat(service.charts(7).distributions[7].points[2].value).isEqualTo(1.0)
-        assertThat(service.charts(7).distributions[7].points[0].value).isZero()
+        assertThat(service.charts(7).distributions[8].points[2].value).isEqualTo(1.0)
+        assertThat(service.charts(7).distributions[8].points[0].value).isZero()
         assertThat(json(get("/stories?scope=user").expectStatus().isOk)["totalElements"].asLong()).isZero()
         org.mockito.Mockito.doReturn(null).`when`(official).officialUserId()
         assertThat(json(get("/stories?scope=original").expectStatus().isOk)["totalElements"].asLong()).isZero()

@@ -55,6 +55,8 @@ class AmplitudeAnalyticsEventPublisher(
             event.userId?.let { put("user_id", it) }
             event.deviceId?.let { put("device_id", it) }
             event.sessionId?.let { put("session_id", it) }
+            event.platform?.let { put("platform", it) }
+            event.appVersion?.let { put("app_version", it) }
             put("insert_id", event.insertId)
             put("time", clock.millis())
             put("event_properties", event.eventProperties)

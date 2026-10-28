@@ -18,6 +18,9 @@ data class AnalyticsEvent(
     val sessionId: Long?,
     val insertId: String,
     val eventProperties: Map<String, Any?>,
+    /** Amplitude 기기 필드. 앱 요청(앱 버전 헤더 있음)이면 `Android`, 그 밖에는 null이라 Amplitude가 아는 플랫폼을 따른다. */
+    val platform: String? = null,
+    val appVersion: String? = null,
 ) {
     // data class의 기본 toString이 원본을 로그나 예외 메시지에 노출하지 않게 한다.
     override fun toString(): String = "AnalyticsEvent(eventType=$eventType, deviceId=[REDACTED])"
