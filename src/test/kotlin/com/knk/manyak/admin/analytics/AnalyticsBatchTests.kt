@@ -166,6 +166,19 @@ class AnalyticsBatchTests {
             assertThat(fixture.budget.reserve(200)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         } finally { pool.shutdownNow() }
     }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings = ["full", "sparse", "empty"])
+    fun `세션 길이 배치는 실측 응답의 누락 구간과 빈 날짜를 저장한다`(shape: String) {
+        val metric = MetricDefinitions(AnalyticsQueryFactory(fixture.mapper), fixture.mapper).sessionLengths().first()
+        val response = javaClass.getResource("/amplitude/session-length-$shape.json")!!.readText()
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setBody(response) }
+        val date = day.minusDays(1)
+        val result = runner(listOf(metric), start = date).run()!!
+        assertThat(result.result).isEqualTo("done"); assertThat(result.fetchedDays).isEqualTo(1)
+        val expected = when (shape) { "full" -> listOf(105L,35,39,14,34,31,16,4,2); "sparse" -> listOf(8L,8,4,4,7,4,1,0,0); else -> List(9) { 0L } }
+        assertThat(fixture.store.daily(metric.definition, date, date)[date]!!.value.toList().map { it.asLong() }).isEqualTo(expected)
+        assertThat(fixture.snapshots.missingDates(metric, AnalyticsRange(date, date))).isEmpty()
+    }
+
     @Test fun `실제 기본 지표 정의 전체를 목 응답으로 받아 네 슬롯 안에 새벽 작업을 완료한다`() {
         val queries = AnalyticsQueryFactory(fixture.mapper); val defs = MetricDefinitions(queries, fixture.mapper)
         val settings = CampaignSettings(listOf(CampaignDefinition("campaign-key", "진행", "actual-campaign", day.minusDays(1))),
