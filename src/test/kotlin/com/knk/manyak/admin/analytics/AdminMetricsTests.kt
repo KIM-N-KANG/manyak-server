@@ -16,10 +16,14 @@ class AdminMetricsTests {
     private val requests = java.util.concurrent.CopyOnWriteArrayList<RecordedRequest>()
     private var broken = false
     private var retentionValues: Map<LocalDate, List<Map<String, Any>>>? = null
+    private var retentionBySe: ((String, LocalDate) -> List<Map<String, Any>>?)? = null
+    private var lengthValues: Map<LocalDate, List<Int>> = emptyMap()
+    private var lengthXValues = listOf("0s-3s", "3s-10s", "10s-30s", "30s-60s", "60s-180s", "180s-600s", "600s-1800s", "1800s-3600s", "3600s-86400s")
+    private var lengthBroken = false
     @BeforeEach fun setup() {
         server = MockWebServer(); server.start()
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(Instant.parse("2026-10-23T03:00:00Z")))
-        service = AdminMetricsService(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper), fixture.snapshots, AnalyticsQueryFactory(mapper), fixture.clock)
+        service = AdminMetricsService(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper), fixture.snapshots, AnalyticsQueryFactory(mapper), modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(r: RecordedRequest): MockResponse {
                 requests += r
@@ -27,9 +31,11 @@ class AdminMetricsTests {
                 val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
-                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionValues?.get(date) ?: List(32) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==8)) }) })))
+                    path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionBySe?.invoke(url.queryParameter("se")!!, date) ?: retentionValues?.get(date) ?: List(32) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==8)) }) })))
                     path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
+                    path.endsWith("/sessions/length") -> if (lengthBroken) return MockResponse().setResponseCode(500)
+                        else mapOf("series" to listOf(lengthValues[from] ?: List(9) { 1 }), "xValues" to lengthXValues)
                     else -> {
                         val event = url.queryParameter("e")?.let { mapper.readTree(it) }; val filters = event?.get("filters")?.toList().orEmpty()
                         val platformFilter = filters.firstOrNull { it["subprop_key"].asText()=="platform" }
@@ -175,14 +181,14 @@ class AdminMetricsTests {
     }
     @Test fun `기능 사용 segment는 user_id 필터를 더하고 게스트는 앱 해외 로그인 묶음을 0으로 둔다`() {
         fun q(segment: String?) = PlatformMetricsQuery().apply { from="2026-10-23"; to="2026-10-23"; platform="all"; this.segment=segment }
-        val all=service.quality(q(null)); assertThat(all.segment).isEqualTo("all"); assertThat(requests).hasSize(36)
+        val all=service.quality(q(null)); assertThat(all.segment).isEqualTo("all"); assertThat(requests).hasSize(33)
         requests.clear(); val guest=service.quality(q("guest"))
-        assertThat(guest.segment).isEqualTo("guest"); assertThat(requests).hasSize(24)
+        assertThat(guest.segment).isEqualTo("guest"); assertThat(requests).hasSize(22)
         assertThat(requests).allMatch { val f=mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().filter { x -> x["subprop_key"].asText()=="user_id" }
             f.size==1 && f[0]["subprop_op"].asText()=="is" && f[0]["subprop_value"][0].asText()=="(none)" }
         assertThat(guest.daily.single().messagesByInputMode["unknown"]).isEqualTo(4); assertThat(all.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
         requests.clear(); val member=service.quality(q("member"))
-        assertThat(requests).hasSize(24).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().single { x -> x["subprop_key"].asText()=="user_id" }["subprop_op"].asText()=="is not" }
+        assertThat(requests).hasSize(22).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().single { x -> x["subprop_key"].asText()=="user_id" }["subprop_op"].asText()=="is not" }
         assertThat(member.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
         assertThatThrownBy { service.quality(q("visitor")) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
@@ -197,8 +203,9 @@ class AdminMetricsTests {
         val q=PlatformMetricsQuery().apply { from="2026-10-20"; to="2026-10-21"; platform="web" }
         val value=service.quality(q)
         assertThat(value.daily.first().streamErrorRate).isEqualTo(1.5); assertThat(value.daily.first().messagesByInputMode["unknown"]).isEqualTo(2)
-        assertThat(value.daily.first().users.keys).containsExactly("chatLoadError","storyListLoadError","storyCompleteError","creditShortage","creditChargeViewed","attendanceClicked","inviteSucceeded")
-        assertThat(requests).hasSize(12)
+        assertThat(value.daily.first().users.keys).containsExactly("chatLoadError","storyListLoadError","creditShortage","creditChargeViewed","attendanceClicked","inviteSucceeded")
+        assertThat(requests).hasSize(11)
+        assertThat(requests).noneMatch { it.requestUrl!!.queryParameter("e")!!.contains("client_storyCreate_completeError_shown") }
         requests.forEach { val u=it.requestUrl!!; assertThat(u.queryParameter("e")).contains("country","platform","Web"); assertThat(u.queryParameter("s")).isNull(); assertThat(u.queryParameter("g")).isNull() }
         assertThat(requests.count { it.requestUrl!!.queryParameter("e")!!.contains("input_mode") }).isEqualTo(3)
         assertThatThrownBy { service.quality(PlatformMetricsQuery().apply { platform="unknown" }) }.isInstanceOf(RuntimeException::class.java)
@@ -226,8 +233,8 @@ class AdminMetricsTests {
     @Test fun `서로 다른 지표도 공용 예산을 나눠 쓰고 준비된 날짜만 반환한다`() {
         service.activity(range("2026-10-15","2026-10-21")) // MAU 90 + 일별 77
         val result=service.quality(PlatformMetricsQuery().apply { from="2026-09-21"; to="2026-10-21" })
-        assertThat(result.daily).hasSize(9); assertThat(result.pendingDates).hasSize(22)
-        assertThat(fixture.budget.reserve(9)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(result.daily).hasSize(10); assertThat(result.pendingDates).hasSize(21)
+        assertThat(fixture.budget.reserve(3)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `MAU 실패도 저장된 일별 활동은 반환하고 MAU만 null이다`() {
         val date=LocalDate.parse("2026-10-21")
@@ -244,8 +251,130 @@ class AdminMetricsTests {
         assertThat(retention.platforms.first().cohorts).hasSize(20); assertThat(retention.pendingDates).hasSize(346)
         fixture.clock.at=fixture.clock.at.plusSeconds(300)
         val quality=service.quality(PlatformMetricsQuery().apply { from="2025-10-23"; to="2026-10-23" })
-        assertThat(quality.daily).hasSize(13); assertThat(quality.pendingDates).hasSize(353)
-        assertThat(fixture.budget.reserve(32)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(quality.daily).hasSize(15); assertThat(quality.pendingDates).hasSize(351)
+        assertThat(fixture.budget.reserve(5)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
 
+    private fun days7() = AnalyticsRangeQuery().apply { days = "7" }
+    private fun point(count: Int, outof: Int, incomplete: Boolean = false) = mapOf<String, Any>("count" to count, "outof" to outof, "incomplete" to incomplete)
+
+    @Test fun `리텐션 가입자는 플랫폼마다 구글과 카카오 로그인 성공을 시작 이벤트로 6회 조회한다`() {
+        assertThat(service.retention(days7(), "signup").cohort).isEqualTo("signup")
+        assertThat(requests).hasSize(6)
+        val starts = requests.map { mapper.readTree(it.requestUrl!!.queryParameter("se")!!) }
+        assertThat(starts.map { it["event_type"].asText() }).containsExactly(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO, AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO, AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO)
+        assertThat(starts).allMatch { it["filters"].any { f -> f["subprop_key"].asText() == "is_new_user" && f["subprop_value"][0].asText() == "true" } && it["filters"].toString().contains("country") }
+        assertThat(requests).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("re")!!)["event_type"].asText() == "_active" }
+        assertThat(fixture.budget.reserve(500 - 336)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+    }
+    @Test fun `가입자는 같은 플랫폼 두 배열을 인덱스마다 더하고 하나라도 incomplete면 null이다`() {
+        val date = fixture.clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(20)
+        retentionBySe = { se, _ -> if (se.contains(AdminMetricEvents.GOOGLE)) listOf(point(3, 3), point(3, 3), point(1, 3), point(1, 3))
+            else listOf(point(2, 2), point(2, 2), point(1, 2), point(0, 2, true)) }
+        for (platform in service.retention(range(date.toString(), date.toString()), "signup").platforms) {
+            val row = platform.cohorts.single()
+            assertThat(row.users).isEqualTo(5); assertThat(row.d1).isEqualTo(0.4); assertThat(row.d2).isNull()
+        }
+    }
+    @Test fun `리텐션 채팅 시작자는 턴 1 재생성 아닌 AI 응답 성공을 시작 이벤트로 3회 조회한다`() {
+        assertThat(service.retention(days7(), "first-chat").cohort).isEqualTo("first-chat")
+        assertThat(requests).hasSize(3)
+        requests.forEach {
+            val start = mapper.readTree(it.requestUrl!!.queryParameter("se")!!)
+            assertThat(start["event_type"].asText()).isEqualTo(AdminMetricEvents.CHAT_SUCCEEDED)
+            val filters = start["filters"].associate { f -> f["subprop_key"].asText() to f["subprop_value"][0].asText() }
+            assertThat(filters).containsEntry("turn_number", "1").containsEntry("is_regenerated", "false")
+            assertThat(mapper.readTree(it.requestUrl!!.queryParameter("re")!!)["event_type"].asText()).isEqualTo("_active")
+        }
+        assertThat(fixture.budget.reserve(500 - 168)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+    }
+    @Test fun `시작 집단마다 저장 키가 따로이고 방문자 키는 cohort 생략과 같다`() {
+        assertThat(service.retention(days7()).cohort).isEqualTo("visitor"); assertThat(requests).hasSize(3)
+        // 방문자 정의 해시가 바뀌면 배포 전 저장된 코호트를 처음부터 다시 받는다.
+        assertThat(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).retention().map { it.definition.hash }).containsExactly(
+            "eba32706edb42ed235ecc29b28ecfbe3aa4ee32ee7af2c25bdd068c093029947", "4ea844084c3d7effc6f985b39c3fdb8170d6fb3d2db357f2893d1aef5f82d260", "4fab200ba533d29409029ed5e174bb1022465555027a71985567bf21a142c858")
+        assertThat(service.retention(days7(), "visitor").cohort).isEqualTo("visitor"); assertThat(requests).hasSize(3)
+        fixture.clock.at = fixture.clock.at.plusSeconds(300)
+        service.retention(days7(), "first-chat"); assertThat(requests).hasSize(6)
+        assertThatThrownBy { service.retention(days7(), "member") }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+    }
+    @Test fun `세션 길이 분포는 날짜마다 세 조건을 따로 조회하고 평균은 부르지 않는다`() {
+        val value = service.sessionLengths(SegmentRangeQuery().apply { days = "7" })
+        assertThat(value.segment).isEqualTo("all")
+        assertThat(requests).hasSize(21).allMatch { it.requestUrl!!.encodedPath == "/api/2/sessions/length" }
+        requests.forEach { val u = it.requestUrl!!
+            assertThat(u.queryParameter("start")).isEqualTo(u.queryParameter("end"))
+            assertThat(u.queryParameterNames).containsExactlyInAnyOrder("s", "start", "end")
+        }
+        val averages = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessions().map { it.definition.parameters.toMap()["s"] }
+        assertThat(requests.map { it.requestUrl!!.queryParameter("s") }.distinct()).containsExactlyInAnyOrderElementsOf(averages)
+        assertThat(fixture.budget.reserve(500 - 224)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(value.bins.map { it.fromSeconds }).containsExactly(0, 3, 10, 30, 60, 180, 600, 1800, 3600)
+        assertThat(value.bins.map { it.toSeconds }).containsExactly(3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
+        assertThat(value.platforms.map { it.platform }).containsExactly("all", "web", "android")
+    }
+    @Test fun `세션 길이는 날짜별 구간 합과 중앙값 구간을 응답한다`() {
+        val d = LocalDate.parse("2026-10-17")
+        fun bins(vararg values: Int) = values.toList() + List(9 - values.size) { 0 }
+        lengthValues = mapOf(d to bins(2, 1, 1), d.plusDays(1) to bins(1, 1, 2, 1), d.plusDays(2) to bins(5, 5), d.plusDays(3) to bins())
+        fun all(from: LocalDate, to: LocalDate) = service.sessionLengths(SegmentRangeQuery().apply { this.from = from.toString(); this.to = to.toString() }).platforms.first()
+        val two = all(d, d.plusDays(1))
+        assertThat(two.sessions).containsExactly(3, 2, 3, 1, 0, 0, 0, 0, 0); assertThat(two.totalSessions).isEqualTo(9); assertThat(two.medianBin).isEqualTo(1)
+        assertThat(all(d.plusDays(2), d.plusDays(2)).medianBin).isEqualTo(0)
+        val empty = all(d.plusDays(3), d.plusDays(3)); assertThat(empty.totalSessions).isZero(); assertThat(empty.medianBin).isNull()
+    }
+    @Test fun `세션 길이 구간 수가 9가 아니면 저장하지 않는다`() {
+        for (bins in listOf(lengthXValues + "86400s-90000s", lengthXValues.dropLast(1))) {
+            lengthXValues = bins; requests.clear(); fixture.clock.at = fixture.clock.at.plusSeconds(300)
+            lengthValues = mapOf(LocalDate.parse("2026-10-20") to List(bins.size) { 1 })
+            assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { from = "2026-10-20"; to = "2026-10-20" }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+            assertThat(requests).hasSize(1)
+            MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessionLengths().forEach { assertThat(fixture.store.daily(it.definition, LocalDate.parse("2026-10-20"), LocalDate.parse("2026-10-20"))).isEmpty() }
+        }
+    }
+    @Test fun `세션 길이 구간 이름이 밀리초 경계여도 9구간이면 기본 구간 상수로 응답한다`() {
+        lengthXValues = listOf("0 - 3000", "3000 - 10000", "10000 - 30000", "30000 - 60000", "60000 - 180000", "180000 - 600000", "600000 - 1800000", "1800000 - 3600000", "3600000 - 86400000")
+        lengthValues = mapOf(LocalDate.parse("2026-10-20") to listOf(5, 1, 1, 1, 1, 1, 0, 0, 0))
+        val value = service.sessionLengths(SegmentRangeQuery().apply { from = "2026-10-20"; to = "2026-10-20" })
+        assertThat(value.bins.map { it.toSeconds }).containsExactly(3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
+        assertThat(value.platforms.first().sessions).containsExactly(5, 1, 1, 1, 1, 1, 0, 0, 0); assertThat(value.platforms.first().medianBin).isEqualTo(0)
+    }
+    @Test fun `세션 길이 조회 실패는 평균 세션 길이와 쿨다운을 공유하지 않는다`() {
+        lengthBroken = true
+        assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { days = "7" }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        requests.clear()
+        assertThat(service.sessions(SegmentRangeQuery().apply { days = "7" }).daily).hasSize(7)
+        assertThat(requests).hasSize(3).allMatch { it.requestUrl!!.encodedPath == "/api/2/sessions/average" }
+    }
+    @Test fun `세션 길이 회원은 세그먼트에 user_id 조건을 더해 따로 저장한다`() {
+        service.sessionLengths(SegmentRangeQuery().apply { days = "7"; segment = "member" })
+        assertThat(requests).hasSize(21).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last().toString() == "{\"prop\":\"user_id\",\"op\":\"is not\",\"values\":[\"(none)\"]}" }
+        assertThat(fixture.budget.reserve(500 - 308)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        val defs = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper)
+        assertThat(defs.sessionLengths("member").map { it.definition.hash }).doesNotContainAnyElementsOf(defs.sessionLengths().map { it.definition.hash })
+        assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { segment = "visitor" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+    }
+    @Test fun `웹 첫 접속 퍼널은 홈 진입과 간편 제작 진입으로 시작하는 신규 사용자 기준이고 다른 퍼널은 활성 사용자다`() {
+        val q = ConversionMetricsQuery().apply { from = "2026-10-21"; to = "2026-10-21" }
+        val web = service.funnel("web-first-visit", q)
+        assertThat(web.steps.map { it.event }.take(2)).containsExactly("client_storyList_viewed", "client_storyCreate_viewed")
+        assertThat(requests.single().requestUrl!!.queryParameter("n")).isEqualTo("new")
+        assertThat(requests.single().requestUrl!!.queryParameterValues("e")).hasSize(6).allMatch { it!!.contains("country") && it.contains("Web") }
+        for (name in listOf("android-first-visit", "story-creation", "story-detail-chat", "guest-limit-login")) {
+            requests.clear(); service.funnel(name, q)
+            assertThat(requests).isNotEmpty.allMatch { it.requestUrl!!.queryParameter("n") == "active" }
+        }
+        assertThat(service.funnel("guest-limit-login", q).steps.map { it.event }.take(2)).containsExactly("client_guestLimitDialog_shown", "client_guestLimitDialog_loginButton_clicked")
+    }
+    @Test fun `기능 사용의 간편 제작 실패율은 범위의 모든 날짜를 DB 값으로 채운다`() {
+        val day = LocalDate.parse("2026-10-21")
+        val reads = object : AdminMetricReadRepository(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(org.springframework.jdbc.datasource.DriverManagerDataSource())) {
+            override fun storyCompletions(range: AnalyticsRange, excluded: List<Long>) = listOf(mapOf<String, Any?>("metric_day" to day.toEpochDay(), "completed" to 3L, "failed" to 2L))
+        }
+        val db = AdminMetricsService(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper), fixture.snapshots, AnalyticsQueryFactory(mapper), reads, com.knk.manyak.admin.config.AdminDashboardProperties(), fixture.clock)
+        val value = db.quality(PlatformMetricsQuery().apply { from = "2026-10-20"; to = "2026-10-21"; platform = "web" })
+        assertThat(value.storyCompletion.map { it.date }).containsExactly(day.minusDays(1), day)
+        assertThat(value.storyCompletion[0]).isEqualTo(StoryCompletionDay(day.minusDays(1), 0, 0, null))
+        assertThat(value.storyCompletion[1]).isEqualTo(StoryCompletionDay(day, 5, 2, 0.4))
+    }
 }

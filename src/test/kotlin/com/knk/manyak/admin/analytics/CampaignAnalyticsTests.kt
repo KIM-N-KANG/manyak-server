@@ -41,6 +41,8 @@ class CampaignAnalyticsTests {
     @Test fun `간편 제작은 20일 비용 480을 예약하고 21일과 days30은 거절한다`() {
         val result = service.creation(query(20))
         assertThat(result.steps).hasSize(6); assertThat(result.steps[0].users.nonAds).isEqualTo(20)
+        assertThat(result.steps.map { it.event }.take(2)).containsExactly("client_storyList_viewed", "client_storyCreate_viewed")
+        assertThat(requests).allMatch { it.requestUrl!!.queryParameter("n") == "new" && it.requestUrl!!.queryParameter("mode") == "ordered" && it.requestUrl!!.queryParameter("cs") == "86400" }
         assertThat(fixture.budget.reserve(20)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         assertThat(server.requestCount).isEqualTo(2)
         assertThatThrownBy { service.creation(query(21)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)

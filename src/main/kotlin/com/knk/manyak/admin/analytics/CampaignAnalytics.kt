@@ -36,8 +36,7 @@ object CampaignEvents {
     const val MESSAGE = "client_chat_messageInput_submitted"
     const val GOOGLE = "server_login_googleLogin_processed_succeeded"
     const val KAKAO = "server_login_kakaoLogin_processed_succeeded"
-    val creation = listOf("client_onboarding_viewed", "client_onboarding_createButton_clicked", GENERATE,
-        "client_storyCreate_storylineOption_selected", COMPLETE, MESSAGE)
+    val creation = AdminMetricEvents.creation
     fun filter(key: String, values: List<String>, type: String = "event", op: String = "is") = mapOf("subprop_type" to type, "subprop_key" to key, "subprop_op" to op, "subprop_value" to values)
     fun event(name: String, filters: List<Map<String, Any>> = emptyList()): Map<String, Any> =
         mapOf("event_type" to name) + if (filters.isEmpty()) emptyMap() else mapOf("filters" to filters)
@@ -100,8 +99,8 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
     }
     fun creation(query: CampaignQuery): CampaignCreationResponse {
         val range = query.range(clock, 20, 7, setOf(7)); val campaign = campaign(query)
-        val all = queries.funnel("campaign_creation_all", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common()) })
-        val ads = queries.funnel("campaign_creation_ads", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common() + ads(campaign)) })
+        val all = queries.funnel("campaign_creation_all", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common()) }, users = "new")
+        val ads = queries.funnel("campaign_creation_ads", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common() + ads(campaign)) }, users = "new")
         val result = snapshots.load("/api/v1/admin/campaigns/funnels/creation", range, emptyList(), rangeMetrics = listOf(all, ads))
         val a = result.value(all) ?: throw AdminAnalyticsUnavailable(); val b = result.value(ads) ?: throw AdminAnalyticsUnavailable()
         return CampaignCreationResponse(result.asOf(listOf(a, b)), range.from, range.to, campaign, CampaignEvents.creation.mapIndexed { i, event ->

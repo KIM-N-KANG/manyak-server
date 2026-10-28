@@ -29,9 +29,10 @@ class AnalyticsQueryFactory(private val mapper: ObjectMapper) {
             "m" to "uniques", "i" to "1", "limit" to "1000"), 25, mapper)
         return DailyAnalyticsMetric(def) { data, range -> AmplitudeResults.dailyGroups(data, range).mapValues { mapper.valueToTree<JsonNode>(it.value) } }
     }
-    fun funnel(metric: String, range: AnalyticsRange, events: List<Map<String, Any>>): RangeAnalyticsMetric {
+    /** [users]는 퍼널 사용자 집합 `n`이다. `new`는 범위 안에 처음 기록된 사용자만 센다. */
+    fun funnel(metric: String, range: AnalyticsRange, events: List<Map<String, Any>>, users: String = "active"): RangeAnalyticsMetric {
         val def = AnalyticsDefinition(metric, "/api/2/funnels", events.map { "e" to mapper.writeValueAsString(it) } +
-            listOf("mode" to "ordered", "cs" to "86400", "n" to "active", "i" to "1"), events.size * 2, mapper)
+            listOf("mode" to "ordered", "cs" to "86400", "n" to users, "i" to "1"), events.size * 2, mapper)
         return RangeAnalyticsMetric(def, range) { mapper.valueToTree(AmplitudeResults.funnel(it, events.size)) }
     }
     fun grouped(metric: String, range: AnalyticsRange, event: Map<String, Any>, extra: List<Pair<String, String>> = emptyList()): RangeAnalyticsMetric {

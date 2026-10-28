@@ -40,11 +40,17 @@ client.test("추이와 세그먼트 계산", () => {
 });
 %}
 
-### 간편 제작 퍼널 — 기본 최근 7일, 최대 20일
+### 간편 제작 퍼널 — 기본 최근 7일, 최대 20일, 신규 사용자 기준(n=new)
+# 1단계 홈 진입 client_storyList_viewed, 2단계 client_storyCreate_viewed. 배포 뒤 New Users 같은 6단계 Amplitude 퍼널 차트와 대조한다.
 GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("간편 제작 6단계", () => client.assert(response.status === 200 && response.body.steps.length === 6, `actual=${response.status}`)); %}
+> {%
+client.test("간편 제작 6단계", () => {
+  client.assert(response.status === 200 && response.body.steps.length === 6, `actual=${response.status}`);
+  client.assert(response.body.steps[0].event === "client_storyList_viewed" && response.body.steps[1].event === "client_storyCreate_viewed", `actual=${JSON.stringify(response.body.steps.map(s => s.event))}`);
+});
+%}
 
 ### 상세 진입 퍼널 — 캠페인 목록의 대상 스토리를 기본 사용
 GET {{baseUrl}}/api/v1/admin/campaigns/funnels/story-detail

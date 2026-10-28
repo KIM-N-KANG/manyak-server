@@ -53,7 +53,7 @@ class RequestCorrelationFilter(
         MDC.put(MdcKeys.SESSION_ID, rawSessionId ?: UNKNOWN)
         MDC.put(MdcKeys.DEVICE_ID_HASH, forwardedDeviceHash ?: rawDeviceId?.let(deviceIdHasher::hash) ?: UNKNOWN)
         try {
-            AnalyticsDeviceContext.withDeviceId(rawDeviceId) {
+            AnalyticsDeviceContext.with(AnalyticsDeviceContext.Values(rawDeviceId, request.getHeader(HEADER_APP_VERSION))) {
                 filterChain.doFilter(request, response)
             }
         } finally {
@@ -99,6 +99,7 @@ class RequestCorrelationFilter(
         const val HEADER_DEVICE_ID = "X-Manyak-Device-Id"
         const val HEADER_SESSION_ID = "X-Manyak-Session-Id"
         const val HEADER_REQUEST_ID = "X-Manyak-Request-Id"
+        const val HEADER_APP_VERSION = "X-Manyak-App-Version"
         const val UNKNOWN = "unknown"
         private val INTERNAL_API_MATCHER = PathPatternRequestMatcher.withDefaults().matcher("/internal/**")
         private val DEVICE_HASH_PATTERN = Regex("device_hash_[0-9a-f]{16}")

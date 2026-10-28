@@ -23,7 +23,7 @@ class AppOverseasMetricsTests {
         server = MockWebServer().apply { start() }
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(Instant.parse("2026-10-23T03:00:00Z")))
         queries = AnalyticsQueryFactory(fixture.mapper); definitions = MetricDefinitions(queries, fixture.mapper)
-        service = AdminMetricsService(definitions, fixture.snapshots, queries, fixture.clock)
+        service = AdminMetricsService(definitions, fixture.snapshots, queries, modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requests += request
@@ -143,7 +143,7 @@ class AppOverseasMetricsTests {
         val q = PlatformMetricsQuery().apply { from="2026-10-17"; to="2026-10-23"; this.platform=platform }
         val value = service.quality(q)
         val groups = when(platform) { "web" -> 1; "android" -> 2; else -> 3 }
-        assertThat(requests).hasSize(groups*12)
+        assertThat(requests).hasSize(groups*11)
         val row = value.daily.first()
         val messages = when(platform) { "web" -> 100; "android" -> 15; else -> 115 }
         val errors = when(platform) { "web" -> 5; "android" -> 2; else -> 7 }
@@ -151,8 +151,8 @@ class AppOverseasMetricsTests {
         assertThat(row.messagesByInputMode["unknown"]).isEqualTo(when(platform) { "web" -> 5L; "android" -> 2L; else -> 7L })
         assertThat(row.users.values).containsOnly(when(platform) { "web" -> 7L; "android" -> 3L; else -> 10L })
         requests.filter { condition(event(it)) == "overseas" }.forEach { assertOverseas(event(it)) }
-        assertThat(requests.count { condition(event(it)) == "overseas" }).isEqualTo(if(platform=="web") 0 else 12)
-        assertThat(fixture.budget.reserve(500-groups*84)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(requests.count { condition(event(it)) == "overseas" }).isEqualTo(if(platform=="web") 0 else 11)
+        assertThat(fixture.budget.reserve(500-groups*77)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `바뀌지 않은 조회는 정의의 metric params hash를 유지한다`() {
         val activity = definitions.activity().map { it.definition }
@@ -189,15 +189,15 @@ class AppOverseasMetricsTests {
         }
         assertThat(definitions.sessions().map { it.definition.hash }).containsExactlyElementsOf(oldSessions)
     }
-    @Test fun `새벽 카탈로그는 네 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 171과 리텐션 792다`() {
+    @Test fun `새벽 카탈로그는 네 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 199와 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
         val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy(),modelCodeReads()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
-        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(171)
+        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(199)
         assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
-        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(48)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(44)
         // 분석 지표 10, 사용자 활동 11, 세션 32, 기능 사용 48, 캠페인 추이 16, 신규 가입자 플랫폼 6, 턴 도달률 플랫폼 36, 모델 둘의 채팅 옵션 플랫폼 12
         assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(6)
         assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(36)
@@ -268,7 +268,7 @@ class AppOverseasMetricsTests {
         val metrics = definitions.quality("all")
         for ((index,metric) in metrics.withIndex()) {
             val zero = fixture.mapper.readTree(metric.definition.parameters.first { it.first=="e" }.second)["filters"].any { it["subprop_key"].asText()=="input_mode" }
-            val dates = if(index<24) listOf(today.minusDays(1),today) else listOf(today.minusDays(1))
+            val dates = if(index<22) listOf(today.minusDays(1),today) else listOf(today.minusDays(1))
             fixture.store.saveDaily(metric.definition,dates.associateWith { AnalyticsValue(fixture.mapper.valueToTree(if(zero)0 else 2),fixture.clock.instant()) })
         }
         val working = server.dispatcher
@@ -285,7 +285,7 @@ class AppOverseasMetricsTests {
         fixture.clock.at=fixture.clock.at.plusSeconds(61); server.dispatcher=working
         val recovered=service.quality(PlatformMetricsQuery().apply { from=today.minusDays(1).toString();to=today.toString() })
         assertThat(recovered.pendingDates).isEmpty(); assertThat(recovered.daily).hasSize(2)
-        assertThat(requests).hasSize(13)
+        assertThat(requests).hasSize(12)
         requests.drop(1).forEach { assertOverseas(event(it)) }
     }
     @ParameterizedTest @ValueSource(booleans=[false,true])
