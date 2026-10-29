@@ -70,6 +70,9 @@ class StoryChat(
     @Column(columnDefinition = "TEXT")
     var summary: String? = null,
 
+    @Column(name = "summary_through_turn", nullable = false)
+    var summaryThroughTurn: Int = 0,
+
     @Column(name = "current_turn", nullable = false)
     var currentTurn: Int = 0,
 

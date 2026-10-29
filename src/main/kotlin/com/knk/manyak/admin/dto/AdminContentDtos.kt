@@ -109,7 +109,7 @@ data class AdminStoryDetailResponse(
 data class AdminRetention(val turn: Int, val rate: Double)
 data class AdminChatResponse(
     val chatId: UUID, val story: AdminStorySummary, val member: AdminMemberSummary?, val startedAs: String,
-    val turnCount: Int, val startedAt: Instant, val lastActiveAt: Instant, val creditsSpent: Long, val firstMessageSeconds: Long?, val deletedAt: Instant?,
+    val turnCount: Int, val summaryThroughTurn: Int, val startedAt: Instant, val lastActiveAt: Instant, val creditsSpent: Long, val firstMessageSeconds: Long?, val deletedAt: Instant?,
 )
 data class AdminTransactionResponse(val amount: Long, val reason: String, val balanceAfter: Long, val createdAt: Instant)
 data class AdminAttendanceResponse(val date: LocalDate, val creditAmount: Long)

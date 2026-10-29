@@ -29,6 +29,10 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
+import java.time.Instant
+import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 
 /**
  * 재생성(§4-3-9) 시 AI로 보내는 history가 "마지막 턴(USER·ASSISTANT 쌍)을 제외한 1..N-1"인지,
@@ -41,6 +45,7 @@ import java.util.concurrent.atomic.AtomicReference
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
     properties = [
+        "manyak.chat.compact.enabled=true",
         "spring.datasource.url=jdbc:h2:mem:manyak-regen-history;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
     ],
 )
@@ -49,11 +54,16 @@ class ChatRegenerateHistoryIntegrationTests {
     class CapturingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
 
-        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
+        val lastAiOutput = AtomicReference<String>()
+        override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult {
+            lastRequest.set(request)
+            lastAiOutput.set(aiOutput)
+            return ChatChoicesResult(listOf("선택1", "선택2", "선택3"))
+        }
         override fun streamTurn(
             request: ChatTurnAiRequest,
             traceLink: AiTraceLink,
-            deadline: java.time.Instant?,
+            deadline: Instant?,
             onCharacterImage: (ChatCharacterImageEvent) -> Unit,
             onToken: (String) -> Unit,
         ): ChatTurnAiResult {
@@ -91,6 +101,8 @@ class ChatRegenerateHistoryIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        capturingAiClient.lastRequest.set(null)
+        capturingAiClient.lastAiOutput.set(null)
     }
 
     @Test
@@ -132,6 +144,76 @@ class ChatRegenerateHistoryIntegrationTests {
         // userInput은 마지막 사용자 입력을 그대로 재전송한다.
         assertThat(captured.userInput).isEqualTo("유저 메시지 3")
         assertThat(captured.summary).isEmpty()
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "regenerate,10,18,false", "regenerate,12,2,true",
+        "choices,10,18,false", "choices,11,0,true", "continue,11,2,true",
+    )
+    fun `요약 경계에 따라 실제 턴 재생성 선택지 AI 요청을 구성한다`(operation: String, turns: Int, historySize: Int, usesSummary: Boolean) {
+        val story = storyRepository.save(Story(title = "요약 요청", genre = "판타지"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = turns, summary = "저장한 요약", summaryThroughTurn = 10))
+        repeat(turns) { index ->
+            val turn = index + 1
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
+        }
+        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        when (operation) {
+            "regenerate" -> regenerate(chat.publicId.toString(), last.id)
+            "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")
+                .exchange().expectStatus().isOk
+            else -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/stream")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+                .body("""{"userInput":"새 입력","realtimeImage":false}""")
+                .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult()
+        }
+        val captured = capturingAiClient.lastRequest.get()
+        assertThat(captured.summary).isEqualTo(if (usesSummary) "저장한 요약" else "")
+        assertThat(captured.history).hasSize(historySize)
+        assertThat(captured.history).noneMatch { it.content == "system" }
+        assertThat(captured.userInput).isEqualTo(if (operation == "continue") "새 입력" else "u$turns")
+        if (operation == "choices") {
+            assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a$turns")
+            assertThat(storyChatRepository.findById(chat.id).orElseThrow().summaryThroughTurn).isEqualTo(10)
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["continue", "regenerate", "choices"])
+    fun `요약 끝 턴이 원문 응답 수를 넘어도 실제 요청은 원문으로 완료된다`(operation: String) {
+        val story = storyRepository.save(Story(title = "요약 범위 방어", genre = "판타지"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16, summary = "잘못된 요약", summaryThroughTurn = 14))
+        repeat(12) { index ->
+            val turn = index + 1
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
+        }
+        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        when (operation) {
+            "regenerate" -> assertThat(regenerate(chat.publicId.toString(), last.id)).contains("completed")
+            "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")
+                .exchange().expectStatus().isOk
+            else -> {
+                val body = restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/stream")
+                    .header("X-Manyak-Device-Id", "test-device")
+                    .contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+                    .body("""{"userInput":"새 입력","realtimeImage":false}""")
+                    .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+                assertThat(body).contains("completed")
+            }
+        }
+        val captured = capturingAiClient.lastRequest.get()
+        assertThat(captured.summary).isEmpty()
+        val historyTurns = if (operation == "continue") 12 else 11
+        assertThat(captured.history.map { it.content }).containsExactlyElementsOf(
+            (1..historyTurns).flatMap { listOf("u$it", "a$it") })
+        assertThat(captured.userInput).isEqualTo(if (operation == "continue") "새 입력" else "u12")
+        if (operation == "choices") assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a12")
     }
 
     private fun regenerate(chatId: String, turnId: Long): String =

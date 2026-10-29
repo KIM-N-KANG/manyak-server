@@ -114,7 +114,7 @@ class AdminReadService(
     }
     fun chats(request: AdminChatsRequest): AdminPageResponse<AdminChatResponse> {
         if (request.startedAs != null && request.startedAs !in setOf("GUEST", "MEMBER")) badAdminQuery("채팅 시작 구분이 올바르지 않습니다.")
-        request.validateAi(setOf("chat_response", "choice_generation", "chat_image"))
+        request.validateAi(setOf("chat_response", "choice_generation", "chat_image", "chat_compact"))
         AdminDateRange.of(request.turnDate, request.turnDate)
         validateDeleted(request.deleted)
         return content.chats(request, request.pagination(mapOf("startedAt" to "c.created_at", "lastActiveAt" to "c.updated_at",

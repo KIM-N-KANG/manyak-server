@@ -261,14 +261,14 @@ class AdminReadApiIntegrationTests {
         assertThat(json(get("/members?q=팀").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
     }
 
-    @Test fun `이미지 AI 차트는 다섯 기능 순서와 완료 분모 및 채팅 목록 링크를 따른다`() {
+    @Test fun `이미지 AI 차트는 여섯 기능 순서와 완료 분모 및 채팅 목록 링크를 따른다`() {
         val story = storyRepository.save(com.knk.manyak.story.entity.Story(title="이미지 차트", userId=admin.id))
         val chat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId=story.id, userId=admin.id))
         for ((i, status) in listOf("SUCCEEDED", "SUCCEEDED", "FAILED", "STARTED").withIndex()) {
             jdbc.update("INSERT INTO ai_call_logs(retry_count,request_id,caller_service,feature,chat_id,status,latency_ms,created_at) VALUES (0,?,'test','chat_image',?,?,?,?)", "image-$i", chat.publicId, status, if(i==0) 1200L else null, java.sql.Timestamp.from(midnight))
         }
         val charts = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
-        val expected = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion")
+        val expected = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion", "chat_compact")
         for (id in listOf("ai-latency", "ai-success")) {
             val points = charts.first { it["chartId"].asText() == id }["points"]
             assertThat(points.toList().map { it["label"].asText() }).containsExactlyElementsOf(expected)
@@ -286,6 +286,81 @@ class AdminReadApiIntegrationTests {
         assertThat(filtered.distributions.first { it.chartId == "ai-latency" }.points[2].value).isEqualTo(1.2)
         assertThat(filtered.distributions.first { it.chartId == "ai-success" }.points[2].value).isEqualTo(66.67)
         assertThat(json(get("/chats?aiFeature=chat_image&aiStatus=FAILED").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(1)
+    }
+
+    @Test fun `대화 요약 AI 지표는 채팅 소유자로 팀을 제외하고 여섯째 막대에서 호출 필터로 연결한다`() {
+        val owner = member("요약 회원"); val team = member("요약 팀")
+        val teamStory = story(team)
+        val normalChat = chat(teamStory, owner)
+        val teamChat = chat(story(owner), team)
+        val failedChat = chat(teamStory, owner)
+        fun log(target: com.knk.manyak.chat.entity.StoryChat, status: String, latency: Long?, at: Instant = now) {
+            jdbc.update("""INSERT INTO ai_call_logs(request_id,caller_service,feature,chat_id,story_id,status,latency_ms,retry_count,created_at)
+                VALUES (?,'test','chat_compact',?,?,?,?,0,?)""", UUID.randomUUID().toString(), target.publicId,
+                target.storyId, status, latency, java.sql.Timestamp.from(at))
+        }
+        log(normalChat, "SUCCEEDED", 20000); log(normalChat, "SUCCEEDED", 40000)
+        log(failedChat, "FAILED", 90000); log(normalChat, "STARTED", 90000)
+        log(teamChat, "SUCCEEDED", 900000)
+        log(normalChat, "SUCCEEDED", 900000, midnight.minusSeconds(864000L))
+        val filtered = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
+            com.knk.manyak.admin.config.AdminDashboardProperties(listOf(team.id)), official,
+            java.time.Clock.fixed(now, java.time.ZoneOffset.UTC)).charts(7)
+        for (id in listOf("ai-latency", "ai-success")) {
+            val points = filtered.distributions.first { it.chartId == id }.points
+            assertThat(points.map { it.label }).containsExactly("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion", "chat_compact")
+            val point = points.last()
+            assertThat(point.value).isEqualTo(if (id == "ai-latency") 30.0 else 66.67)
+            assertThat(point.link.list).isEqualTo("chats")
+            assertThat(point.link.params).containsEntry("aiFeature", "chat_compact")
+                .containsEntry("aiStatus", if (id == "ai-latency") "SUCCEEDED" else "FINISHED")
+                .containsEntry("aiFrom", "2026-10-15").containsEntry("aiTo", "2026-10-21")
+            if (id == "ai-latency") assertThat(point.link.params).containsEntry("hasLatency", "true")
+            else assertThat(point.link.params).doesNotContainKey("hasLatency")
+        }
+        assertThat(ids("/chats?aiFeature=chat_compact&aiStatus=FAILED")).containsExactly(failedChat.publicId.toString())
+        assertThat(ids("/chats?aiFeature=chat_compact&aiStatus=SUCCEEDED&hasLatency=true&aiFrom=2026-10-21&aiTo=2026-10-21"))
+            .containsExactlyInAnyOrder(normalChat.publicId.toString(), teamChat.publicId.toString())
+    }
+
+    @Test fun `대화 요약 성공률은 저장 실패 폐기와 재생성 무효화에 영향받지 않는다`() {
+        val target = chat(story(), turns = 20)
+        // SAVE_FAILED와 REGENERATED는 로그 이벤트뿐이며 세 호출 모두 AI 결과는 SUCCEEDED다.
+        // 저장 후 무효화된 경우도 현재 DB는 summary NULL과 summary_through_turn 0이다.
+        for (status in listOf("SUCCEEDED", "SUCCEEDED", "SUCCEEDED", "FAILED")) {
+            jdbc.update("""INSERT INTO ai_call_logs(request_id,caller_service,feature,chat_id,status,retry_count,created_at)
+                VALUES (?,'test','chat_compact',?,?,0,?)""", UUID.randomUUID().toString(), target.publicId, status, java.sql.Timestamp.from(now))
+        }
+        fun assertSuccessRate() {
+            val distributions = json(get("/dashboard/charts?days=7").expectStatus().isOk)["distributions"]
+            val success = distributions.first { it["chartId"].asText() == "ai-success" }["points"].last()
+            assertThat(success["label"].asText()).isEqualTo("chat_compact")
+            assertThat(success["value"].asDouble()).isEqualTo(75.0)
+        }
+        assertSuccessRate()
+        jdbc.update("UPDATE story_chats SET summary='저장된 요약', summary_through_turn=20 WHERE id=?", target.id)
+        assertSuccessRate()
+        jdbc.update("UPDATE story_chats SET summary=NULL, summary_through_turn=0 WHERE id=?", target.id)
+        assertSuccessRate()
+    }
+
+    @Test fun `채팅 목록과 상세는 저장된 요약 끝 턴만 노출하고 처음과 무효화된 상태는 모두 영이다`() {
+        val source = story()
+        val summarized = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = source.id,
+            currentTurn = 25, summary = "노출하면 안 되는 대화 요약 본문", summaryThroughTurn = 20))
+        val neverSummarized = chat(source)
+        val invalidated = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = source.id,
+            currentTurn = 20, summary = "무효화 전 요약", summaryThroughTurn = 20))
+        jdbc.update("UPDATE story_chats SET summary=NULL, summary_through_turn=0 WHERE id=?", invalidated.id)
+        message(summarized, 30)
+        val expected = mapOf(summarized.publicId.toString() to 20, neverSummarized.publicId.toString() to 0, invalidated.publicId.toString() to 0)
+        val list = json(get("/chats?storyId=${source.publicId}").expectStatus().isOk)["items"]
+        assertThat(list.size()).isEqualTo(3)
+        for (item in list.toList() + expected.keys.map { json(get("/chats/$it").expectStatus().isOk) }) {
+            assertThat(item["summaryThroughTurn"].asInt()).isEqualTo(expected.getValue(item["chatId"].asText()))
+            assertThat(item.properties().map { it.key }).doesNotContain("summary", "messages", "suggestedInputs", "persona")
+            assertThat(item.toString()).doesNotContain("노출하면 안 되는 대화 요약 본문", "무효화 전 요약", "응답에 나오면 안 되는 원문")
+        }
     }
 
     @Test fun `대시보드는 탈퇴 포함 누적과 현재 회원 및 탈퇴 수를 응답한다`() {
@@ -887,7 +962,8 @@ class AdminReadApiIntegrationTests {
         assertThat(body["totalElements"].asLong()).isEqualTo(1)
         assertThat(body["items"][0]["creditsSpent"].asLong()).isEqualTo(45)
         assertThat(body["items"][0]["firstMessageSeconds"].asLong()).isEqualTo(30)
-        assertThat(body.toString()).doesNotContain("응답에 나오면", "suggestedInputs", "summary", "persona")
+        assertThat(body["items"][0].properties().map { it.key }).doesNotContain("suggestedInputs", "summary", "persona")
+        assertThat(body.toString()).doesNotContain("응답에 나오면")
         assertThat(json(get("/chats?hasFirstMessage=false").expectStatus().isOk)["totalElements"].asLong()).isEqualTo(2)
         for (q in listOf("활동", "분포", fast.publicId.toString())) {
             assertThat(json(get("/chats?q=$q").expectStatus().isOk)["totalElements"].asLong()).isGreaterThan(0)

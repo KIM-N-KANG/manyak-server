@@ -85,13 +85,13 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         q.range("c.created_at", request.from, request.to)
         q.search(request.normalizedQuery(), listOf("c.public_id"), listOf("s.title", "u.nickname"))
         q.ai(request, "al.chat_id=c.public_id")
-        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.created_at, c.updated_at, c.deleted_at,
+        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.summary_through_turn, c.created_at, c.updated_at, c.deleted_at,
             $credits AS credits_spent, $firstSeconds AS first_seconds, $MEMBER_COLUMNS""",
             "FROM story_chats c JOIN stories s ON s.id=c.story_id LEFT JOIN users u ON u.id=c.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
             q, page, "c.public_id", RowMapper { rs: ResultSet, _ ->
                 val member = memberSummary(rs)
                 AdminChatResponse(rs.getObject("public_id", UUID::class.java), AdminStorySummary(rs.getObject("story_public_id", UUID::class.java), rs.getString("title"), (rs.getString("genre") ?: "")),
-                    member, if (member == null) "GUEST" else "MEMBER", rs.getInt("current_turn"), rs.instant("created_at")!!, rs.instant("updated_at")!!,
+                    member, if (member == null) "GUEST" else "MEMBER", rs.getInt("current_turn"), rs.getInt("summary_through_turn"), rs.instant("created_at")!!, rs.instant("updated_at")!!,
                     rs.getLong("credits_spent"), rs.longOrNull("first_seconds"), rs.instant("deleted_at"))
             })
     }

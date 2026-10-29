@@ -177,6 +177,7 @@ manyak:
         '[채팅 선택지]': choice_generation
         '[스토리라인 생성]': storyline_generation
         '[스토리 컴파일]': story_completion
+        '[대화 요약]': chat_compact
     langfuse:
       host: ${MANYAK_ADMIN_LANGFUSE_HOST:}
       public-key: ${MANYAK_ADMIN_LANGFUSE_PUBLIC_KEY:}
@@ -197,6 +198,10 @@ manyak:
       audience: manyak-admin
       ttl: PT2H
   chat:
+    compact:
+      enabled: ${MANYAK_CHAT_COMPACT_ENABLED:false}
+      interval-turns: ${MANYAK_CHAT_COMPACT_INTERVAL_TURNS:10}
+      timeout-seconds: ${MANYAK_CHAT_COMPACT_TIMEOUT_SECONDS:300}
     sse-executor:
       concurrency: ${MANYAK_CHAT_SSE_CONCURRENCY:64}
       queue-capacity: ${MANYAK_CHAT_SSE_QUEUE_CAPACITY:100}

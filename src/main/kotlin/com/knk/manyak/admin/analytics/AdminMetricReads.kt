@@ -74,7 +74,7 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
         SUM(CASE WHEN input_token_count IS NULL OR output_token_count IS NULL THEN 1 ELSE 0 END) AS missing,
         SUM(COALESCE(input_token_count,0)) AS input, SUM(COALESCE(output_token_count,0)) AS output
         FROM ai_call_logs WHERE created_at>=:start AND created_at<:end AND status='SUCCEEDED'
-        AND feature IN ('chat_response','choice_generation','chat_image','storyline_generation','story_completion')
+        AND feature IN ('chat_response','choice_generation','chat_image','storyline_generation','story_completion','chat_compact')
         GROUP BY ${day("created_at")}, feature, model ORDER BY metric_day, feature, model
         """, params(range, emptyList()))
     // 실패 뒤 같은 request_id로 다시 실행하면 같은 행이 바뀌므로 지금 상태로 센다. 진행 중은 빼고 게스트 행은 포함한다.

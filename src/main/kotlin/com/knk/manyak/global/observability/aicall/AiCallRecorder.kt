@@ -45,9 +45,11 @@ class AiCallRecorder(
         errorCode: (Throwable) -> String? = { it::class.simpleName },
         onFailure: (aiCallLogId: Long, throwable: Throwable) -> Unit = { _, _ -> },
         meta: (T) -> AiCallMeta? = { null },
+        onStarted: (Long) -> Unit = {},
         block: () -> T,
     ): RecordedAiCall<T> {
         val log = repository.save(started(context))
+        onStarted(log.id)
         Sentry.addBreadcrumb("ai_call started: ${context.feature.value}", "ai")
         logEvent(EVENT_STARTED, context, log.id)
         val startNanos = System.nanoTime()
@@ -134,7 +136,8 @@ class AiCallRecorder(
         sessionId = cleanMdc(MdcKeys.SESSION_ID),
         storyId = context.storyId,
         chatId = context.chatId,
-        // turn_number는 적재 시점엔 비워 두고, persistTurn이 실제 턴을 확정한 뒤 attachTurnNumber로 채운다.
+        turnNumber = context.turnNumber,
+        // 본문·선택지는 저장 뒤 attachTurnNumber로 채운다. 요약은 시작 시 고정한 끝 턴을 기록한다.
     )
 
     private fun cleanMdc(key: String): String? =
@@ -218,6 +221,7 @@ data class AiCallContext(
     val feature: AiCallFeature,
     val storyId: Long? = null,
     val chatId: UUID? = null,
+    val turnNumber: Int? = null,
 )
 
 /** 적재된 호출의 결과와 ai_call_log_id(상관관계 연결용). */
