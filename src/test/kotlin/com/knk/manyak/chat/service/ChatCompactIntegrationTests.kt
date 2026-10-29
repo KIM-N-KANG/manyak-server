@@ -191,12 +191,13 @@ class ChatCompactIntegrationTests {
 
     @Test fun `요약 저장은 메시지와 갱신 시각을 유지하고 호출 기록과 로그를 남긴다`() {
         val chat = fixture()
+        val originalUpdatedAt = reload(chat).updatedAt
         val original = messages.findByChatIdOrderByMessageOrderAsc(chat.id).map { it.id to it.content }
         service.compact(event(chat))
         val saved = reload(chat)
         assertThat(saved.summary).isEqualTo("새 요약")
         assertThat(saved.summaryThroughTurn).isEqualTo(10)
-        assertThat(saved.updatedAt).isEqualTo(chat.updatedAt)
+        assertThat(saved.updatedAt).isEqualTo(originalUpdatedAt)
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id).map { it.id to it.content }).isEqualTo(original)
         val call = calls.findAll().single()
         assertThat(call.feature).isEqualTo(AiCallFeature.CHAT_COMPACT)
