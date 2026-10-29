@@ -249,7 +249,7 @@ import 시 변수 두 개를 고릅니다.
 
 ## 관련
 
-- 운영 구조: [백엔드 Design §2-4 메트릭과 운영 연동](../../knk-harness/docs/platform/BACKEND/OBSERVABILITY.md#2-4-메트릭과-운영-연동)
+- 운영 구조: [백엔드 Design §2-4 메트릭과 운영 연동](../../knk-harness/docs/platform/BACKEND/OBSERVABILITY.md#메트릭과-운영-연동)
 - 수동 검증: `http/common/metrics-prometheus.http`
 - 계측 코드: `AiCallRecorder`, `SimpleStoryCreationService.recordCreationDuration`, `application.yml`의 `management.metrics.distribution`
 
