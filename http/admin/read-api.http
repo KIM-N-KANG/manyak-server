@@ -209,11 +209,15 @@ Authorization: Bearer {{adminToken}}
             client.assert(JSON.stringify([chart.chartId, chart.title, chart.unit]) === JSON.stringify(terms[i]), `차트 용어 actual=${JSON.stringify(chart)}`);
             client.assert(!/채팅방|제작 세션|AI 지연/.test(chart.description), `이전 용어 actual=${chart.description}`);
         });
-        const aiFeatures = ["chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion"];
+        const aiFeatures = ["chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion", "chat_compact"];
         for (const id of ["ai-latency", "ai-success"]) {
             const points = response.body.distributions.find(c => c.chartId === id).points;
             client.assert(JSON.stringify(points.map(p => p.label)) === JSON.stringify(aiFeatures), `AI 기능 순서 actual=${JSON.stringify(points)}`);
             client.assert(points[2].link.list === "chats" && points[2].link.params.aiFeature === "chat_image", "이미지 AI는 채팅 목록으로 연결");
+            const compact = points[5];
+            client.assert(compact.link.list === "chats" && compact.link.params.aiFeature === "chat_compact", `요약 AI 링크 actual=${JSON.stringify(compact)}`);
+            client.assert(compact.link.params.aiStatus === (id === "ai-latency" ? "SUCCEEDED" : "FINISHED"), `요약 AI 상태 actual=${JSON.stringify(compact.link)}`);
+            if (id === "ai-latency") client.assert(compact.link.params.hasLatency === "true", "요약 지연 링크는 지연 값이 있는 성공 호출");
         }
         const genres = response.body.distributions.find(c => c.chartId === "genre-depth").points;
         genres.forEach((p, i) => {
@@ -455,17 +459,42 @@ Authorization: Bearer {{adminToken}}
 > {%
     client.test("채팅방 목록", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
-        client.assert(response.body.items.every(c => c.deletedAt === null && !("messages" in c) && !("persona" in c) && !("summary" in c)), "원문 필드가 없어야 합니다");
+        client.assert(response.body.items.every(c => c.deletedAt === null && ["messages", "persona", "summary", "suggestedInputs"].every(k => !(k in c))), "원문 필드가 없어야 합니다");
+        client.assert(response.body.items.every(c => Number.isInteger(c.summaryThroughTurn) && c.summaryThroughTurn >= 0), `요약 끝 턴 actual=${JSON.stringify(response.body.items)}`);
     });
     if (response.status === 200 && response.body.items.length) client.global.set("adminChatId", response.body.items[0].chatId);
 %}
+
+# 요약을 만든 적 없는 채팅과 재생성으로 요약이 비워진 채팅은 모두 summaryThroughTurn=0.
+# 요약이 저장된 채팅은 저장된 끝 턴(예: 20)이 보이고 summary 본문은 없다.
+
+### 대화 요약 실패 호출 필터 — 실제 실패 기록이 있는 채팅만 확인
+GET {{baseUrl}}/api/v1/admin/chats?aiFeature=chat_compact&aiStatus=FAILED
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("요약 호출 필터 허용", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.items.every(c => Number.isInteger(c.summaryThroughTurn) && !("summary" in c)), `actual=${JSON.stringify(response.body.items)}`);
+    });
+%}
+
+### 잘못된 AI 기능은 거절
+GET {{baseUrl}}/api/v1/admin/chats?aiFeature=unknown
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("AI 기능 검증", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`)); %}
 
 ### 채팅방 상세 — 위 목록에 데이터가 있어야 함
 GET {{baseUrl}}/api/v1/admin/chats/{{adminChatId}}
 Authorization: Bearer {{adminToken}}
 
 > {%
-    client.test("채팅방 상세", () => client.assert(response.status === 200 && !("messages" in response.body), `actual=${JSON.stringify(response.body)}`));
+    client.test("채팅 상세는 요약 끝 턴만 제공", () => {
+        const c = response.body;
+        client.assert(response.status === 200 && ["messages", "summary", "suggestedInputs", "persona"].every(k => !(k in c)), `원문 비노출 actual=${JSON.stringify(c)}`);
+        client.assert(Number.isInteger(c.summaryThroughTurn) && c.summaryThroughTurn >= 0, `요약 끝 턴 actual=${c.summaryThroughTurn}`);
+    });
 %}
 
 ### 회원 거래 내역 — 원장 ID 없음, 각 행 누계, 접속 기록

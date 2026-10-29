@@ -46,13 +46,13 @@ class AdminChartsService(
             }
         }
         val total = raw[2].sumOf { it.number("n") }
-        val aiFeatures = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion")
+        val aiFeatures = listOf("chat_response", "choice_generation", "chat_image", "storyline_generation", "story_completion", "chat_compact")
         fun ai(index: Int, status: String) = aiFeatures.map { feature ->
             val params = mutableMapOf("aiFeature" to feature, "aiStatus" to status)
             if (index == 5) params["hasLatency"] = "true"
             val value = raw[index].firstOrNull { it["label"] == feature }?.number("metric_value") ?: 0.0
             point(feature, if (index == 6) rounded(value) else value,
-                if (feature in aiFeatures.take(3)) "chats" else "stories", params, "ai")
+                if (feature in setOf("chat_response", "choice_generation", "chat_image", "chat_compact")) "chats" else "stories", params, "ai")
         }
         val wait = raw[4].single()
         val charts = listOf(

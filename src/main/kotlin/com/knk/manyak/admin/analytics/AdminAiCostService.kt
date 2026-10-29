@@ -17,7 +17,7 @@ class AdminAiCostProperties(
 ) {
     init {
         require(usdKrwRate.signum() > 0 && chatImageUnitCostKrw.signum() >= 0)
-        require(traceFeatures.values.all { it in setOf("chat_response", "choice_generation", "storyline_generation", "story_completion") })
+        require(traceFeatures.values.all { it in setOf("chat_response", "choice_generation", "storyline_generation", "story_completion", "chat_compact") })
     }
 }
 
@@ -66,7 +66,7 @@ class AdminAiCostService(
         val unpriced = raw.filter { it.model != null }.groupBy { it.model!! }
             .filterValues { entries -> entries.any { it.totalTokens > 0 } && entries.sumOf { it.costUsd }.signum() == 0 }.keys.sorted()
         return AiCostResponse(costs.values.minOfOrNull { it.fetchedAt }, range.from, range.to, "KRW", properties.chatImageUnitCostKrw, daily,
-            AiCostTotals(sum(all) + unmapped.sumOf { it.costKrw }, per(setOf("chat_response", "choice_generation"), "chat_response"),
+            AiCostTotals(sum(all) + unmapped.sumOf { it.costKrw }, per(setOf("chat_response", "choice_generation", "chat_compact"), "chat_response"),
                 per(setOf("storyline_generation", "story_completion"), "story_completion")), unpriced,
             missing.filter { it >= retentionStart }, properties.usdKrwRate, unmapped,
             missing.filter { it < retentionStart }, snapshots.retentionDays, retentionStart)
