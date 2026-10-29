@@ -30,7 +30,6 @@ class StubChatCompactAiClient : ChatCompactAiClient {
 class RestChatCompactAiClient(
     @Qualifier("chatTurnWebClient") private val webClient: WebClient,
     private val settings: ChatCompactSettings,
-    // AI 5-CONTRACT 확정 전 임시
     @Value("\${manyak.ai.chat.compact-path:/api/v1/chat/compact}") private val path: String,
 ) : ChatCompactAiClient {
     override fun compact(request: ChatCompactAiRequest, traceLink: AiTraceLink): String {
