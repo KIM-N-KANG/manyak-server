@@ -186,5 +186,5 @@ UI 화면과 필드 이름이 달라 대조가 필요합니다.
 ## 관련
 
 - 대시보드: [`README.md`](./README.md) · [`PANELS.md`](./PANELS.md)
-- 운영 구조: [백엔드 Design §2-4 메트릭과 운영 연동](../../knk-harness/docs/platform/BACKEND/OBSERVABILITY.md#2-4-메트릭과-운영-연동)
+- 운영 구조: [백엔드 Design §2-1 메트릭과 운영 연동](../../knk-harness/docs/platform/BACKEND/2-OBSERVABILITY.md#2-1-메트릭과-운영-연동)
 - 계측 코드: `AiCallRecorder`, `ChatService.recordChatTurnRefund`
