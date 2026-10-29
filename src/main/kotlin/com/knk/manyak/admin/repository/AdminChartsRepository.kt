@@ -60,7 +60,7 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         // 제작 기능은 로그의 story_id로 소유자를 판정한다. story_id가 없는 제작 호출도 포함한다.
         val ai = """FROM ai_call_logs al LEFT JOIN story_chats c ON c.public_id=al.chat_id LEFT JOIN stories s ON s.id=al.story_id
             WHERE ${during("al.created_at")} AND (
-            (al.feature IN ('chat_response','choice_generation','chat_image') AND c.id IS NOT NULL AND ${owner("c.user_id", excluded)}) OR
+            (al.feature IN ('chat_response','choice_generation','chat_image','chat_compact') AND c.id IS NOT NULL AND ${owner("c.user_id", excluded)}) OR
             (al.feature IN ('storyline_generation','story_completion') AND ${owner("s.user_id", excluded)}))"""
         val latency = query("SELECT al.feature AS label, AVG(al.latency_ms/1000.0) AS metric_value $ai AND al.status='SUCCEEDED' AND al.latency_ms IS NOT NULL GROUP BY al.feature")
         val success = query("""SELECT al.feature AS label, 100.0*SUM(CASE WHEN al.status='SUCCEEDED' THEN 1 ELSE 0 END)/COUNT(*) AS metric_value

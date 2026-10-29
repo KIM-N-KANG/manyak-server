@@ -377,6 +377,17 @@ client.test("AI 비용과 이미지 장당 원가", () => {
   b.daily.filter(d => b.pendingDates.includes(d.date) || b.expiredDates.includes(d.date)).forEach(d => {
     client.assert(d.byFeature.filter(f => f.feature !== "chat_image").every(f => f.costKrw === null), "준비 중·보관 기간 밖 날짜의 Langfuse 금액은 null");
   });
+  const compact = b.daily.flatMap(d => d.byFeature).filter(f => f.feature === "chat_compact");
+  compact.forEach(f => {
+    client.assert(f.inputTokens === 0 && f.outputTokens === 0, `요약은 토큰 수를 기록하지 않음 actual=${JSON.stringify(f)}`);
+    if (f.model === null) client.assert(f.callsWithoutTokens === f.calls, `모델 없는 요약 호출 actual=${JSON.stringify(f)}`);
+    else client.assert(f.calls === 0, `Langfuse 모델 요약 비용 행 actual=${JSON.stringify(f)}`);
+  });
+  client.assert(!b.unmapped.some(f => f.traceName === "대화 요약"), "대화 요약은 chat_compact로 매핑");
+  const ready = b.daily.filter(d => !b.pendingDates.includes(d.date) && !b.expiredDates.includes(d.date)).flatMap(d => d.byFeature);
+  const turns = ready.filter(f => f.feature === "chat_response").reduce((n, f) => n + f.calls, 0);
+  const turnCost = ready.filter(f => ["chat_response", "choice_generation", "chat_compact"].includes(f.feature)).reduce((n, f) => n + (f.costKrw ?? 0), 0);
+  client.assert(turns === 0 ? b.totals.costPerTurnKrw === null : Math.abs(b.totals.costPerTurnKrw - turnCost / turns) < 0.000001, `대화 요약 포함 턴당 원가 actual=${b.totals.costPerTurnKrw}`);
   const total = b.daily.flatMap(d => d.byFeature).reduce((sum, f) => sum + (f.costKrw ?? 0), 0)
     + b.unmapped.reduce((sum, item) => sum + item.costKrw, 0);
   client.assert(Math.abs(total - b.totals.costKrw) < 0.000001, `미매핑 포함 총원가 expected=${total} actual=${b.totals.costKrw}`);
@@ -387,6 +398,8 @@ client.test("AI 비용과 이미지 장당 원가", () => {
   });
 });
 %}
+# 대화 요약 호출 2회(모델·토큰 없음)와 Langfuse claude-x 0.01 USD는 두 행으로 분리된다.
+# 본문 0.004 USD + 선택지 0.001 USD + 요약 0.01 USD / 본문 2회 = 턴당 10.5원.
 # 이미지 성공 수는 총원가에만 포함하고 턴당·스토리당 원가의 분자·분모에서는 제외한다.
 # 기본 단가 48원, 이미지 성공 3·실패 1과 Langfuse 본문 0.004 USD(환율 1400) fixture:
 # 이미지 144원 / 본문 5.6원 / totals 149.6원. 스토리 컴파일 표지·인물 이미지는 Langfuse 비용에 포함.

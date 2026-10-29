@@ -106,6 +106,34 @@ class AdminAiCostIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_daily_values WHERE metric='langfuse_ai_cost'", Long::class.java)).isEqualTo(3)
     }
 
+    @Test fun `대화 요약은 모델 없는 호출과 Langfuse 비용을 분리하고 턴당 원가에 포함한다`() {
+        repeat(2) { call("chat_response", "gpt-x") }
+        call("choice_generation", "gpt-x")
+        repeat(2) { call("chat_compact", null, null, null) }
+        call("chat_compact", null, null, null, status = "FAILED")
+        call("chat_compact", null, null, null, status = "STARTED")
+        respond(mapper.writeValueAsString(mapOf("data" to listOf(
+            row("채팅 턴", "gpt-x", "0.004"), row("채팅 선택지", "gpt-x", "0.001"),
+            row("대화 요약", "claude-x", "0.01"),
+        ))))
+        val result = body("from=2026-10-21&to=2026-10-21")
+        val compact = result["daily"][0]["byFeature"].filter { it["feature"].asText() == "chat_compact" }
+        assertThat(compact).hasSize(2)
+        val calls = compact.single { it["model"].isNull }
+        assertThat(calls["calls"].asInt()).isEqualTo(2)
+        assertThat(calls["callsWithoutTokens"].asInt()).isEqualTo(2)
+        assertThat(calls["inputTokens"].asInt()).isZero()
+        assertThat(calls["outputTokens"].asInt()).isZero()
+        assertThat(calls["costKrw"].isNull).isTrue()
+        val cost = compact.single { it["model"].asText() == "claude-x" }
+        assertThat(cost["calls"].asInt()).isZero()
+        assertThat(cost["costKrw"].asDouble()).isEqualTo(14.0)
+        assertThat(result["unmapped"].size()).isZero()
+        assertThat(result["totals"]["costKrw"].asDouble()).isEqualTo(21.0)
+        assertThat(result["totals"]["costPerTurnKrw"].asDouble()).isEqualTo(10.5)
+        assertThat(result["totals"]["costPerStoryKrw"].isNull).isTrue()
+    }
+
     @Test fun `긴 범위의 만료 날짜에도 DB 호출과 장당 원가를 유지하고 asOf는 가장 이른 수신 시각이다`() {
         respond("{\"data\":[]}")
         call("chat_response", "db-only", time = "2026-07-26T00:00:00Z")

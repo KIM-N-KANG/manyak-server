@@ -21,7 +21,7 @@ class AdminAiCostPropertiesTests {
             val costs = context.getBean(AdminAiCostProperties::class.java)
             assertThat(costs.usdKrwRate).isEqualByComparingTo("1400")
             assertThat(costs.chatImageUnitCostKrw).isEqualByComparingTo("48")
-            assertThat(costs.traceFeatures).containsExactlyInAnyOrderEntriesOf(mapOf("채팅 턴" to "chat_response", "채팅 선택지" to "choice_generation", "스토리라인 생성" to "storyline_generation", "스토리 컴파일" to "story_completion"))
+            assertThat(costs.traceFeatures).containsExactlyInAnyOrderEntriesOf(mapOf("채팅 턴" to "chat_response", "채팅 선택지" to "choice_generation", "스토리라인 생성" to "storyline_generation", "스토리 컴파일" to "story_completion", "대화 요약" to "chat_compact"))
             val langfuse = context.getBean(AdminLangfuseProperties::class.java)
             assertThat(langfuse.configured()).isFalse()
             assertThat(langfuse.requestTimeout).isEqualTo(Duration.ofSeconds(10))
