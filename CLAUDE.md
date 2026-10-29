@@ -10,10 +10,10 @@
 
 ### 스펙 정본
 
-- 하네스 [용어집](../knk-harness/docs/REFERENCE/GLOSSARY.md)과 [도메인 목록](../knk-harness/docs/domain/AGENTS.md)의 BACKEND 명세가 **단일 정본**입니다. 코드와 스펙이 다르면 **코드를 스펙에 맞춥니다**(2026-07-06 결정). 모호하면 구현 전에 사용자에게 확인합니다.
-- 현재 모듈·저장소·동시성·운영 연결은 `../knk-harness/docs/design/2-backend-server-design.md`, 중요한 선택 이유는 `../knk-harness/docs/adr/2-backend-server-adr.md`를 참조합니다.
+- 하네스 [용어집](../knk-harness/docs/reference/GLOSSARY.md)과 [도메인 목록](../knk-harness/docs/domain/AGENTS.md)의 BACKEND 명세가 **단일 정본**입니다. 코드와 스펙이 다르면 **코드를 스펙에 맞춥니다**(2026-07-06 결정). 모호하면 구현 전에 사용자에게 확인합니다.
+- 현재 모듈·저장소·동시성·운영 연결은 `../knk-harness/docs/platform/BACKEND/AGENTS.md`, 중요한 선택 이유는 `../knk-harness/docs/reference/decisions/BACKEND.md`를 참조합니다.
 - 스펙 문서의 "스펙-구현 간극" 표를 포함해 하네스 문서는 이 레포에서 임의 수정하지 않습니다(참조만).
-- 용어는 [용어집](../knk-harness/docs/REFERENCE/GLOSSARY.md) 기준을 따릅니다: 스토리(이야기 아님)·스토리라인·턴(`turnCount`/`turn_number`)·추천 입력(`suggestedInputs`)·`additional_info`·로어북 등. 로어북(장르 공용 용어 사전, 트리거 없음)과 키워드북(트리거 키워드)은 다른 개념이니 혼용하지 않습니다.
+- 용어는 [용어집](../knk-harness/docs/reference/GLOSSARY.md) 기준을 따릅니다: 스토리(이야기 아님)·스토리라인·턴(`turnCount`/`turn_number`)·추천 입력(`suggestedInputs`)·`additional_info`·로어북 등. 로어북(장르 공용 용어 사전, 트리거 없음)과 키워드북(트리거 키워드)은 다른 개념이니 혼용하지 않습니다.
 
 ### 작업 워크플로
 
