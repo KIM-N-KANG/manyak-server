@@ -29,5 +29,5 @@ data class PushDeliveryStatsItem(val date: LocalDate, val type: PushDeliveryType
 data class PushDeliveryStatsResponse(val from: LocalDate, val to: LocalDate, val items: List<PushDeliveryStatsItem>)
 
 data class PushCampaignReach(val campaignId: java.util.UUID, val kind: PushKind, val title: String, val noticeId: java.util.UUID?,
-    val startedAt: java.time.Instant, val deepLinkIncluded: Boolean?, val deliveredMembers: Long)
+    val startedAt: java.time.Instant?, val deepLinkIncluded: Boolean?, val deliveredMembers: Long)
 data class PushActivityReach(val type: PushDeliveryType, val date: java.time.LocalDate, val deliveredMembers: Long)

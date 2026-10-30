@@ -76,6 +76,6 @@ internal class AmplitudeDefinitionInventory {
                 metrics.funnel(name, ConversionMetricsQuery().apply { from=date.toString(); to=date.toString(); this.platform=platform; storyId=story })
             }
         }
-        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy(), modelCodeReads()).metrics().forEach { daily(it.metric, "batch") }
+        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy(), modelCodeReads(), PushOpensService(Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), snapshots, queries, PushOpensSettings(date, date), clock)).metrics().forEach { daily(it.metric, "batch") }
     }
 }

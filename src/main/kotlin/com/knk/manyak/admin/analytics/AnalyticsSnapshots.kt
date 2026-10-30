@@ -26,9 +26,11 @@ class AnalyticsRefreshProgress {
 class AnalyticsSnapshotResult(
     val daily: Map<String, Map<LocalDate, AnalyticsValue>>, val ranges: Map<String, AnalyticsValue>, val metrics: List<DailyAnalyticsMetric>, val range: AnalyticsRange,
     val progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress(),
+    val dailyFrom: Map<String, LocalDate> = emptyMap(),
 ) {
-    fun values(date: LocalDate) = metrics.mapNotNull { daily[it.definition.hash]?.get(date) }
-    fun readyDates() = range.dates().filter { values(it).size == metrics.size }
+    private fun active(date: LocalDate) = metrics.filter { date >= (dailyFrom[it.definition.hash] ?: range.from) }
+    fun values(date: LocalDate) = active(date).mapNotNull { daily[it.definition.hash]?.get(date) }
+    fun readyDates() = range.dates().filter { values(it).size == active(it).size }
     fun pendingDates() = range.dates() - readyDates().toSet()
     fun value(metric: DailyAnalyticsMetric, date: LocalDate) = daily[metric.definition.hash]?.get(date)
     fun value(metric: RangeAnalyticsMetric) = ranges[metric.definition.hash + ":" + metric.range.from + ":" + metric.range.to]
@@ -115,7 +117,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
      * 배치와 백필([backgroundLimit]가 있음)은 백그라운드 갱신을 띄우지 않고 호출한 스레드에서 차례로 갱신한다.
      */
     fun load(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>, extraDaily: List<Pair<DailyAnalyticsMetric, LocalDate>> = emptyList(),
-        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds), backgroundLimit: Int? = null): AnalyticsSnapshotResult {
+        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds), backgroundLimit: Int? = null, dailyFrom: Map<String, LocalDate> = emptyMap()): AnalyticsSnapshotResult {
         val dailySpecs = (metrics + extraDaily.map { it.first }).distinctBy { it.definition.hash }
         fun storeFailure(metric: String, failure: Exception) = log.warn("admin_analytics_store_failed endpoint={} metric={} exception={}", endpoint, metric, failure.javaClass.simpleName)
         /** 읽은 값 가운데 이제 확정할 수 있는 값을 확정하고 확정한 행 수를 돌려준다. */
@@ -135,17 +137,17 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         }
         fun read() = Values(dailySpecs.associate { metric ->
             val dates = range.dates() + extraDaily.filter { it.first.definition.hash == metric.definition.hash }.map { it.second }
-            metric.definition.hash to dailyValues(metric, dates.min(), dates.max()).toMutableMap()
+            metric.definition.hash to dailyValues(metric, maxOf(dates.min(), dailyFrom[metric.definition.hash] ?: dates.min()), dates.max()).toMutableMap()
         }.toMutableMap(), rangeMetrics.mapNotNull { metric -> rangeValue(metric)?.let { rangeKey(metric) to it } }.toMap().toMutableMap())
-        fun result(values: Values, progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress()) = AnalyticsSnapshotResult(values.daily, values.ranges, metrics, range, progress)
-        fun missing(values: Values, metric: DailyAnalyticsMetric, date: LocalDate) = !freshDaily(metric, date, values.daily[metric.definition.hash]?.get(date))
+        fun result(values: Values, progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress()) = AnalyticsSnapshotResult(values.daily, values.ranges, metrics, range, progress, dailyFrom)
+        fun missing(values: Values, metric: DailyAnalyticsMetric, date: LocalDate) = date >= (dailyFrom[metric.definition.hash] ?: range.from) && !freshDaily(metric, date, values.daily[metric.definition.hash]?.get(date))
 
         val stored = read()
         val readFinalized = finalizeReadValues(stored)
         val needs = metrics.any { metric -> range.dates().any { missing(stored, metric, it) } } || extraDaily.any { missing(stored, it.first, it.second) } ||
             rangeMetrics.any { !freshRange(it, stored.ranges[rangeKey(it)]) }
         if (!needs) return result(stored)
-        val key = endpoint + ":" + range.from + ":" + range.to + ":" + dailySpecs.joinToString { it.definition.hash } + ":" + rangeMetrics.joinToString { rangeKey(it) }
+        val key = endpoint + ":" + range.from + ":" + range.to + ":" + dailySpecs.joinToString { it.definition.hash } + ":" + rangeMetrics.joinToString { rangeKey(it) } + ":" + dailyFrom.toSortedMap()
         val state = synchronized(states) {
             states.getOrPut(key) {
                 if (states.size >= 256) states.entries.firstOrNull { !it.value.refreshing.get() }?.key?.let { states.remove(it) }

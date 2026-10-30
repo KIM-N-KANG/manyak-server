@@ -59,6 +59,7 @@ class PushOpensIntegrationTests {
                 "credit-expiry-fixture:$date", admin.id, Instant.parse("${date}T01:00:00Z"))
         }
         server.enqueue(MockResponse().setBody("""{"data":{"xValues":["2026-10-22","2026-10-23"],"seriesLabels":[[0,"${campaign.publicId}"],[0,"attendance_reminder"],[0,"credit_expiry_reminder"]],"series":[[1,2],[0,2],[1,2]]}}"""))
+        server.enqueue(MockResponse().setBody("""{"data":{"xValues":["2026-10-22","2026-10-23"],"seriesLabels":[],"series":[]}}"""))
         val token = jwt.issueAdminToken(admin.publicId)
         fun get() = client.get().uri("/api/v1/admin/campaigns/push-opens?from=2026-10-22&to=2026-10-23")
             .header("Authorization", "Bearer $token").exchange()
@@ -83,8 +84,36 @@ class PushOpensIntegrationTests {
         assertThat(body["pendingDates"].size()).isZero()
         assertThat(body["asOf"].isString).isTrue()
         get().expectStatus().isOk
-        assertThat(server.requestCount).isEqualTo(1)
+        client.get().uri("/api/v1/admin/campaigns/push-opens/${campaign.publicId}").header("Authorization", "Bearer $token").exchange()
+            .expectStatus().isOk.expectBody().jsonPath("$.from").isEqualTo("2026-10-22").jsonPath("$.to").isEqualTo("2026-10-23")
+            .jsonPath("$.pushOpens").isEqualTo(3).jsonPath("$.webPushOpens").isEqualTo(3).jsonPath("$.androidPushOpens").isEmpty()
+            .jsonPath("$.pushOpenRate").isEqualTo(3.0)
+        assertThat(server.requestCount).isEqualTo(2)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_daily_values WHERE metric='push_opens'", Long::class.java)).isEqualTo(2)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
     }
+    @Test fun `캠페인 하나 열람은 선점 전과 링크 없음 부재 및 인증을 구분한다`() {
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "캠페인 열람 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id,granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
+        val token = jwt.issueAdminToken(admin.publicId)
+        val pending = campaigns.saveAndFlush(PushCampaign(title = "예약", body = "본문", scheduledAt = Instant.EPOCH))
+        val noLink = campaigns.saveAndFlush(PushCampaign(title = "링크 없음", body = "본문", scheduledAt = Instant.EPOCH,
+            status = PushCampaignStatus.SENT, startedAt = Instant.parse("2026-10-22T00:00:00Z"), deepLinkIncluded = false))
+        fun get(id: String, auth: String? = token) = client.get().uri("/api/v1/admin/campaigns/push-opens/$id")
+            .apply { auth?.let { header("Authorization", "Bearer $it") } }.exchange()
+        val calls = server.requestCount
+        get(pending.publicId.toString()).expectStatus().isOk.expectBody().jsonPath("$.openState").isEqualTo("PENDING")
+            .jsonPath("$.from").isEmpty().jsonPath("$.to").isEmpty().jsonPath("$.startedAt").isEmpty().jsonPath("$.deliveredMembers").isEqualTo(0)
+            .jsonPath("$.androidMeasuredFrom").isEmpty().jsonPath("$.asOf").isEmpty().jsonPath("$.pendingDates.length()").isEqualTo(0)
+        get(noLink.publicId.toString()).expectStatus().isOk.expectBody().jsonPath("$.openState").isEqualTo("NO_LINK")
+            .jsonPath("$.pushOpens").isEmpty().jsonPath("$.inboxOpens").isEmpty()
+        get(java.util.UUID.randomUUID().toString()).expectStatus().isNotFound
+        get("invalid-uuid").expectStatus().isBadRequest
+        get(pending.publicId.toString(), null).expectStatus().isUnauthorized
+        get(pending.publicId.toString(), jwt.issueAccessToken(admin.publicId)).expectStatus().isUnauthorized
+        assertThat(server.requestCount).isEqualTo(calls)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
+    }
+
 }

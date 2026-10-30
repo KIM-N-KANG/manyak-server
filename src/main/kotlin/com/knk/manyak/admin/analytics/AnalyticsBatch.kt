@@ -19,14 +19,14 @@ fun interface AnalyticsBatchCatalog { fun metrics(): List<AnalyticsBatchMetric> 
 @EnableConfigurationProperties(AnalyticsBatchPolicy::class)
 class DefaultAnalyticsBatchCatalog(private val dashboard: AdminAnalyticsService, private val definitions: MetricDefinitions,
     private val campaigns: CampaignAnalyticsService, private val settings: CampaignSettings, private val policy: AnalyticsBatchPolicy,
-    private val reads: AdminMetricReadRepository) : AnalyticsBatchCatalog {
+    private val reads: AdminMetricReadRepository, private val pushOpens: PushOpensService) : AnalyticsBatchCatalog {
     override fun metrics(): List<AnalyticsBatchMetric> {
         // 턴 도달률과 채팅 옵션은 segment all만 미리 받는다. 모델 코드는 실행 시점의 chat_models다.
         // 리텐션은 방문자 코호트만 미리 받는다.
         val common = dashboard.dailyMetrics() + definitions.activity() + definitions.sessions() + definitions.sessionLengths() +
             listOf("all", "web", "android").flatMap { definitions.quality(it) } + definitions.retention() +
             definitions.signupPlatforms() + listOf(definitions.appActivation()) + campaigns.appTransferMetrics() + definitions.turnReach("all") + definitions.chatOptions("all", reads.modelCodes())
-        return (common.map { AnalyticsBatchMetric(it, policy.backfillStart) } + settings.items.filter { it.endDate == null }.flatMap { campaign ->
+        return (common.map { AnalyticsBatchMetric(it, policy.backfillStart) } + pushOpens.batchMetrics() + settings.items.filter { it.endDate == null }.flatMap { campaign ->
             (campaigns.trendMetrics(campaign.campaign) + campaigns.creativeMetrics(campaign.campaign)).map { AnalyticsBatchMetric(it, maxOf(policy.backfillStart, campaign.startDate)) }
         }).groupBy { it.key }.values.map { entries -> entries.minBy { it.start } }
     }
