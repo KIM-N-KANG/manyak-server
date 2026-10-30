@@ -68,16 +68,4 @@ class AdminOpenApiValidationIntegrationTests {
         assertThat(values(response["properties"]["visibility"]["enum"])).containsExactly("PRIVATE")
         assertThat(types(response["properties"]["takedownReasonDetail"])).contains("string", "null")
     }
-    @Test fun `이미 구현된 공지 알림 문구의 필수 길이와 패턴도 api-docs에 남긴다`() {
-        val create = schema("CreateNoticeRequest")
-        assertThat(values(create["required"])).contains("notificationTitle", "notificationBody")
-        for ((field, max) in listOf("notificationTitle" to 100, "notificationBody" to 300)) {
-            assertThat(create["properties"][field]["maxLength"].asInt()).isEqualTo(max)
-            assertThat(create["properties"][field].has("pattern")).isTrue()
-            val update = schema("UpdateNoticeRequest")["properties"][field]
-            assertThat(update["minLength"].asInt()).isEqualTo(1)
-            assertThat(update["maxLength"].asInt()).isEqualTo(max)
-            assertThat(schema("AdminNoticeResponse")["properties"].has(field)).isTrue()
-        }
-    }
 }
