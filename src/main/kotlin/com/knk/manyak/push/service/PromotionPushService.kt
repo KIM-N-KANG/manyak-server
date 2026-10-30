@@ -27,6 +27,7 @@ data class PromotionPushResult(
     val sent: Int,
     val failed: Boolean = false,
     val kind: PushKind = PushKind.MARKETING,
+    val reason: String? = null,
 )
 
 /** 캠페인을 독립 선점하고, 원격 모드는 회차의 요청을 한 트랜잭션에 기록한다. */
@@ -43,6 +44,7 @@ class PromotionPushService(
     private val structuredLogger: StructuredLogger = StructuredLogger(),
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String = "https://manyak.app",
     private val notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter,
+    private val notices: com.knk.manyak.notice.repository.NoticeRepository,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -81,6 +83,17 @@ class PromotionPushService(
         var targets = 0
         var sent = 0
         return try {
+            campaign.noticeId?.let { id ->
+                val notice = notices.findById(id).orElse(null)
+                if (notice == null || notice.status != com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED) {
+                    return if (finish(campaign, PushCampaignStatus.FAILED, 0, 0, "NOTICE_NOT_PUBLISHED"))
+                        PromotionPushResult(campaign.publicId, 0, 0, failed = true, kind = campaign.kind, reason = "NOTICE_NOT_PUBLISHED") else null
+                }
+                val tag = notice.tag
+                if (pushCampaignRepository.refreshNoticeIfOwned(campaign.id, now, tag.pushKind, tag) == 0) return null
+                campaign.kind = tag.pushKind
+                campaign.noticeTag = tag
+            }
             // 문구는 회차 시작에 한 번만 조립한다. 광고 표기와 수신거부 안내는 서버가 붙인다.
             val data = mutableMapOf(
                 "type" to if (campaign.kind == PushKind.SERVICE) "NOTICE" else TYPE_PROMOTION,
@@ -137,8 +150,8 @@ class PromotionPushService(
             "deepLink" to pushDeepLink(webBaseUrl, "/stories/${story.publicId}", TYPE_PROMOTION, campaign.publicId.toString()))
     }
 
-    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int): Boolean {
-        val updated = pushCampaignRepository.finishIfOwned(campaign.id, campaign.startedAt!!, status, targets, sent, clock.instant())
+    private fun finish(campaign: PushCampaign, status: PushCampaignStatus, targets: Int, sent: Int, reason: String? = null): Boolean {
+        val updated = pushCampaignRepository.finishIfOwned(campaign.id, campaign.startedAt!!, status, targets, sent, clock.instant(), reason)
         if (updated == 0) logger.warn("promotion_push_result_discarded campaignId={} startedAt={}", campaign.publicId, campaign.startedAt)
         return updated == 1
     }

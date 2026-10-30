@@ -40,6 +40,7 @@ Content-Type: application/json
         client.assert(response.status === 201, `expected=201 actual=${response.status}`);
         client.assert(response.body.kind === "MARKETING", `expected=MARKETING actual=${response.body.kind}`);
         client.assert(response.body.status === "SCHEDULED", `expected=SCHEDULED actual=${response.body.status}`);
+        client.assert(response.body.failureReason === null && response.body.noticeId === null, JSON.stringify(response.body));
         client.assert(response.body.storyId === null, `expected=null actual=${response.body.storyId}`);
     });
     if (response.status === 201) client.global.set("campaignId", response.body.campaignId);
