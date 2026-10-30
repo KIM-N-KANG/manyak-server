@@ -54,6 +54,9 @@ class AnalyticsValueRepository(private val jdbc: NamedParameterJdbcTemplate, pri
     fun finalizeRange(def: AnalyticsDefinition, from: LocalDate, to: LocalDate, value: AnalyticsValue, now: Instant) {
         jdbc.update("UPDATE admin_analytics_range_values SET finalized_at=:now WHERE metric=:metric AND params_hash=:hash AND range_from=:from AND range_to=:to AND finalized_at IS NULL AND fetched_at=:fetched", key(def) + mapOf("from" to from, "to" to to, "now" to now.atOffset(ZoneOffset.UTC), "fetched" to value.fetchedAt.atOffset(ZoneOffset.UTC)))
     }
+    fun unfinalizeRange(def: AnalyticsDefinition, from: LocalDate, to: LocalDate, value: AnalyticsValue) {
+        jdbc.update("UPDATE admin_analytics_range_values SET finalized_at=NULL WHERE metric=:metric AND params_hash=:hash AND range_from=:from AND range_to=:to AND fetched_at=:fetched AND finalized_at=:finalized", key(def) + mapOf("from" to from, "to" to to, "fetched" to value.fetchedAt.atOffset(ZoneOffset.UTC), "finalized" to value.finalizedAt?.atOffset(ZoneOffset.UTC)))
+    }
     private fun key(def: AnalyticsDefinition) = mapOf("metric" to def.metric, "hash" to def.hash)
     private fun value(rs: java.sql.ResultSet) = AnalyticsValue(mapper.readTree(rs.getString("value")), rs.getTimestamp("fetched_at").toInstant(), rs.getTimestamp("finalized_at")?.toInstant())
     private fun upsert(kind: String, def: AnalyticsDefinition, dates: Map<String, LocalDate>, value: AnalyticsValue) {

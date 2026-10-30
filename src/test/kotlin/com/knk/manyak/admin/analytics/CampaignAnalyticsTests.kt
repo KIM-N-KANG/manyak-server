@@ -38,17 +38,34 @@ class CampaignAnalyticsTests {
     }
     @AfterEach fun stop() = server.shutdown()
     private fun query(days: Int) = CampaignQuery().apply { from = day.minusDays(days.toLong() - 1).toString(); to = day.toString() }
+    @Test fun `웹 전체 가입 정의는 국내 Web 커스텀 이벤트와 기존 해시를 유지한다`() {
+        val definition = service.trendMetrics("campaign").single { it.definition.metric == "campaign_signup_all" }.definition
+        val event = fixture.mapper.readTree(definition.parameters.single { it.first == "e" }.second)
+        val expected = fixture.mapper.readTree("""{
+            "event_type":"ce:신규 가입 (구글·카카오)",
+            "filters":[
+                {"subprop_type":"user","subprop_key":"country","subprop_op":"is","subprop_value":["South Korea","(none)"]},
+                {"subprop_type":"user","subprop_key":"platform","subprop_op":"is","subprop_value":["Web"]}
+            ]
+        }""")
+        assertThat(event).isEqualTo(expected)
+        assertThat(definition.parameters.toMap()).containsEntry("m", "uniques").containsEntry("i", "1")
+        assertThat(definition.hash).isEqualTo("8e8eae1f98ceaed389535ca6c69d13c9d1036b5460d403b549a2c2451a4ea125")
+        assertThat(requests).isEmpty()
+    }
     @Test fun `간편 제작은 20일 비용 480을 예약하고 21일과 days30은 거절한다`() {
         val result = service.creation(query(20))
         assertThat(result.steps).hasSize(6); assertThat(result.steps[0].users.nonAds).isEqualTo(20)
-        assertThat(result.steps.map { it.event }.take(2)).containsExactly("client_storyList_viewed", "client_storyCreate_viewed")
-        assertThat(requests).allMatch { it.requestUrl!!.queryParameter("n") == "new" && it.requestUrl!!.queryParameter("mode") == "ordered" && it.requestUrl!!.queryParameter("cs") == "86400" }
+        assertThat(result.steps.map { it.event }.take(2)).containsExactly("client_storyCreate_viewed", "client_storyCreate_tagCategory_selected")
+        assertThat(requests).allMatch { it.requestUrl!!.queryParameter("n") == "active" && it.requestUrl!!.queryParameter("mode") == "ordered" && it.requestUrl!!.queryParameter("cs") == "86400" }
         assertThat(fixture.budget.reserve(20)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         assertThat(server.requestCount).isEqualTo(2)
         assertThatThrownBy { service.creation(query(21)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { service.creation(CampaignQuery().apply { days = "30" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         for (r in requests) {
             assertThat(r.requestUrl!!.queryParameter("s")).isNull()
+            val genre = fixture.mapper.readTree(r.requestUrl!!.queryParameterValues("e")[1]!!)["filters"].toString()
+            assertThat(genre).contains("from_category", "GENRE", "direction", "forward")
             r.requestUrl!!.queryParameterValues("e").forEach { raw ->
                 val filters = fixture.mapper.readTree(raw!!)["filters"]
                 assertThat(filters.toString()).contains("country", "platform", "\"user\"")
@@ -100,19 +117,19 @@ class CampaignAnalyticsTests {
     }
     @Test fun `캠페인 매개변수만 달라지면 공통 정의는 재사용하고 광고와 비광고 필터만 다시 받는다`() {
         service.analytics(query(2)); assertThat(server.requestCount).isEqualTo(16)
-        service.analytics(query(2).apply { campaign = "CUSTOM" }); assertThat(server.requestCount).isEqualTo(23)
-        val signup = requests.take(16).filter { r -> r.requestUrl!!.queryParameter("e")!!.contains("is_new_user") }.map { fixture.mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toString() }
-        assertThat(signup).hasSize(6).allMatch { it.contains("country") && it.contains("platform") }
-        assertThat(signup.filter { it.contains("Android") }).hasSize(2).allMatch { !it.contains("initial_utm_campaign") }
-        assertThat(signup.filter { it.contains("\"Web\"") }).hasSize(4)
+        service.analytics(query(2).apply { campaign = "CUSTOM" }); assertThat(server.requestCount).isEqualTo(22)
+        val signup = requests.take(16).filter { r -> r.requestUrl!!.queryParameter("e")!!.contains(AdminMetricEvents.SIGNUP) }.map { fixture.mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toString() }
+        assertThat(signup).hasSize(3).allMatch { it.contains("country") && it.contains("platform") }
+        assertThat(signup.filter { it.contains("Android") }).hasSize(1).allMatch { !it.contains("initial_utm_campaign") }
+        assertThat(signup.filter { it.contains("\"Web\"") }).hasSize(2)
     }
     @Test fun `Android 가입은 광고 구분 없이 따로 세고 Web 가입에 섞지 않는다`() {
         val delegate = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
             val e = fixture.mapper.readTree(r.requestUrl!!.queryParameter("e")!!)
-            if (!e.toString().contains("is_new_user")) return delegate.dispatch(r)
-            val filters = e["filters"].toString(); val google = e["event_type"].asText() == CampaignEvents.GOOGLE
-            val value = when { filters.contains("Android") -> if (google) 5 else 2; filters.contains("initial_utm_campaign") -> if (google) 2 else 1; else -> if (google) 3 else 1 }
+            if (!e.toString().contains(AdminMetricEvents.SIGNUP)) return delegate.dispatch(r)
+            val filters = e["filters"].toString()
+            val value = when { filters.contains("Android") -> 7; filters.contains("initial_utm_campaign") -> 3; else -> 4 }
             return MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\",\"2026-10-23\"],\"series\":[[$value,$value]]}}")
         } }
         val result = service.analytics(query(2))
