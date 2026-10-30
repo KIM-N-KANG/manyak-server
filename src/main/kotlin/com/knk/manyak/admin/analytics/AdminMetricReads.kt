@@ -10,7 +10,10 @@ import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.*
 
-class AdminSegmentRequest : AdminChartsRequest() { var segment: String? = null }
+class AdminSegmentRequest : AdminChartsRequest() {
+    @field:io.swagger.v3.oas.annotations.media.Schema(allowableValues = ["all", "guest", "member"])
+    var segment: String? = null
+}
 data class SignupCounts(val total: Long, val google: Long, val kakao: Long)
 data class SignupDay(val date: LocalDate, val signups: SignupCounts, val cumulativeSignups: Long, val migratedFromGuest: Long, val signupsByPlatform: PlatformCounts?)
 data class SignupResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platformAsOf: Instant?, val pendingDates: List<LocalDate>, val daily: List<SignupDay>)
