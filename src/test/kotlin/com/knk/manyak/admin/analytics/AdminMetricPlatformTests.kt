@@ -55,18 +55,18 @@ class AdminMetricPlatformTests {
     private fun request(from: String, to: String, segment: String? = null) = AdminSegmentRequest().apply { this.from = from; this.to = to; this.segment = segment }
     private fun platform(f: Map<String, String>) = when (f["platform"]) { "is:Web,Android" -> "all"; "is:Web" -> "web"; "is:Android" -> "android"; "is:(none)" -> "unknown"; else -> error("platform 조건 없음 $f") }
 
-    @Test fun `신규 가입자 플랫폼은 가입 이벤트 둘의 국내 전체 웹 앱 조건 6회를 조회한다`() {
-        val values = mapOf(AdminMetricEvents.GOOGLE to mapOf("web" to 3L, "android" to 5L, "all" to 7L), AdminMetricEvents.KAKAO to mapOf("web" to 1L, "android" to 2L, "all" to 3L))
-        daily = { name, f -> values.getValue(name).getValue(platform(f)) }
+    @Test fun `신규 가입자 플랫폼은 가입 커스텀 이벤트의 국내 전체 웹 앱 커스텀 이벤트와 분모 6회를 조회한다`() {
+        val values = mapOf("web" to 4L, "android" to 7L, "all" to 10L)
+        daily = { name, f -> if (name == AdminMetricEvents.SIGNUP) values.getValue(platform(f)) else 100L }
         val result = signups()
         assertThat(requests).hasSize(6)
         for (r in requests) {
             val f = filters(event(r))
-            assertThat(f).containsEntry("is_new_user", "is:true").containsEntry("country", "is:South Korea,(none)").doesNotContainKey("user_id")
+            assertThat(f).doesNotContainKey("is_new_user").containsEntry("country", "is:South Korea,(none)").doesNotContainKey("user_id")
             assertThat(r.requestUrl!!.queryParameter("s")).isNull(); assertThat(r.requestUrl!!.queryParameter("m")).isEqualTo("uniques")
         }
         assertThat(requests.map { platform(filters(event(it))) to event(it)["event_type"].asText() }).containsExactlyInAnyOrderElementsOf(
-            listOf("all", "web", "android").flatMap { p -> listOf(p to AdminMetricEvents.GOOGLE, p to AdminMetricEvents.KAKAO) })
+            listOf("all", "web", "android").flatMap { p -> listOf(p to AdminMetricEvents.SIGNUP, p to "_new") })
         assertThat(result.pendingDates).isEmpty(); assertThat(result.platformAsOf).isNotNull()
         assertThat(result.daily).hasSize(7).allMatch { it.signupsByPlatform == MetricPlatformCounts(10, 4, 7) && it.signups == SignupCounts(2, 1, 1) }
     }
@@ -107,7 +107,7 @@ class AdminMetricPlatformTests {
         assertThat(server.requestCount).isEqualTo(sent) // 60초 쿨다운
         val q = request("2026-10-23", "2026-10-23")
         timed { val r = service().reach(q); assertThat(r.platforms).isNull(); assertThat(r.pendingDates).hasSize(1); assertThat(r.segments).hasSize(3) }
-        timed { val r = service().options(q); assertThat(r.daily.single().chatStarts).isNull(); assertThat(r.pendingDates).hasSize(1) }
+        timed { val r = service().options(q); assertThat(r.daily.single().chatStarters).isNull(); assertThat(r.pendingDates).hasSize(1) }
     }
 
     @Test fun `턴 도달률 플랫폼은 재생성 아닌 성공 이벤트의 기준 턴 합계 36회다`() {
@@ -184,22 +184,29 @@ class AdminMetricPlatformTests {
         assertThat(requests).hasSize(12).allMatch { platform(filters(event(it))) == "android" }
     }
 
-    @Test fun `채팅 옵션 플랫폼은 시작 클릭 4회와 모델마다 두 플랫폼 턴 수를 보낸다`() {
-        val clicks = mapOf("web" to mapOf("default" to 8L, "persona" to 2L), "android" to mapOf("default" to 5L, "persona" to 0L))
+    @Test fun `채팅 옵션 플랫폼은 시작 사용자 12회와 모델마다 두 플랫폼 턴 수를 보낸다`() {
+        val clicks = mapOf("all" to mapOf("all" to 13L, "default" to 12L, "persona" to 2L, "(none)" to 1L),
+            "web" to mapOf("all" to 9L, "default" to 8L, "persona" to 2L, "(none)" to 0L),
+            "android" to mapOf("all" to 5L, "default" to 5L, "persona" to 0L, "(none)" to 1L))
         val turns = mapOf("web" to mapOf("LITE" to 4L, "AURORA" to 1L), "android" to mapOf("LITE" to 3L, "AURORA" to 0L))
-        daily = { name, f -> if (name == AdminMetricEvents.CHAT_START) clicks[platform(f)]?.get(f.getValue("persona_type").removePrefix("is:")) ?: 0L
+        daily = { name, f -> if (name == AdminMetricEvents.CHAT_START) clicks[platform(f)]?.get(f["persona_type"]?.removePrefix("is:") ?: "all") ?: 0L
             else turns[platform(f)]?.get(f.getValue("model_code").removePrefix("is:")) ?: 0L }
         val day = service().options(request("2026-10-23", "2026-10-23")).daily.single()
-        assertThat(requests).hasSize(8)
+        assertThat(requests).hasSize(16)
         val starts = requests.filter { event(it)["event_type"].asText() == AdminMetricEvents.CHAT_START }
         assertThat(starts.map { platform(filters(event(it))) to filters(event(it))["persona_type"] }).containsExactlyInAnyOrderElementsOf(
-            listOf("web", "android").flatMap { p -> listOf(p to "is:default", p to "is:persona") })
+            listOf("all", "web", "android").flatMap { p -> listOf(p to null, p to "is:default", p to "is:persona", p to "is:(none)") })
         val models = requests - starts.toSet()
         assertThat(models).allMatch { event(it)["event_type"].asText() == AdminMetricEvents.CHAT_SUCCEEDED && filters(event(it))["is_regenerated"] == "is:false" }
         assertThat(models.map { platform(filters(event(it))) to filters(event(it))["model_code"] }).containsExactlyInAnyOrderElementsOf(
             listOf("web", "android").flatMap { p -> listOf(p to "is:LITE", p to "is:AURORA") })
-        assertThat(requests).allMatch { it.requestUrl!!.queryParameter("m") == "totals" && !filters(event(it)).containsKey("user_id") }
-        assertThat(day.chatStarts).isEqualTo(MetricPlatformCounts(15, 10, 5)); assertThat(day.personaChatStarts).isEqualTo(MetricPlatformCounts(2, 2, 0))
+        assertThat(starts).allMatch { it.requestUrl!!.queryParameter("m") == "uniques" }
+        assertThat(models).allMatch { it.requestUrl!!.queryParameter("m") == "totals" }
+        assertThat(requests).allMatch { !filters(event(it)).containsKey("user_id") }
+        assertThat(day.chatStarters).isEqualTo(MetricPlatformCounts(13, 9, 5))
+        assertThat(day.chatStartersByPersonaType).isEqualTo(mapOf("default" to MetricPlatformCounts(12, 8, 5), "persona" to MetricPlatformCounts(2, 2, 0), "none" to MetricPlatformCounts(1, 0, 1)))
+        val json = fixture.mapper.valueToTree<JsonNode>(day)
+        assertThat(json.has("chatStarts")).isFalse(); assertThat(json.has("personaChatStarts")).isFalse()
         assertThat(day.platformTurnsByModel).isEqualTo(mapOf("AURORA" to MetricPlatformCounts(1, 1, 0), "LITE" to MetricPlatformCounts(7, 4, 3)))
         repository.models = listOf("AURORA", "LITE", "NOVA"); requests.clear()
         val added = service().options(request("2026-10-23", "2026-10-23")).daily.single()
@@ -213,6 +220,6 @@ class AdminMetricPlatformTests {
         val result = service().options(request("2026-10-22", "2026-10-23"))
         assertThat(result.pendingDates).hasSize(2); assertThat(result.platformAsOf).isNull()
         assertThat(result.daily.last().chats).isEqualTo(3); assertThat(result.daily.last().withPersona).isEqualTo(1); assertThat(result.daily.last().byModel).isEqualTo(mapOf("LITE" to 3L))
-        assertThat(result.daily).allMatch { it.chatStarts == null && it.personaChatStarts == null && it.platformTurnsByModel == null }
+        assertThat(result.daily).allMatch { it.chatStarters == null && it.chatStartersByPersonaType == null && it.platformTurnsByModel == null }
     }
 }

@@ -37,7 +37,7 @@ class AppOverseasMetricsTests {
                     u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { date -> date.toString() to List(32) { i ->
                         mapOf("count" to (if (i == 0) { if (group == "all") 20 else if (group == "android") 5 else 15 } else if (group == "all") 5 else if (group == "android") 1 else 4), "outof" to (if (group == "all") 20 else if (group == "android") 5 else 15), "incomplete" to (group == "android" && i == 8))
                     } })))
-                    u.encodedPath.endsWith("/average") -> mapOf("xValues" to dates.map { "${it}T00:00:00" }, "series" to listOf(dates.map { 12.5 }))
+                    (u.encodedPath.endsWith("/average") || u.encodedPath.endsWith("/peruser")) -> mapOf("xValues" to dates.map { "${it}T00:00:00" }, "series" to listOf(dates.map { 12.5 }))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 1 }))
                     else -> {
                         val event = e!!["event_type"].asText()
@@ -142,7 +142,7 @@ class AppOverseasMetricsTests {
         val q = PlatformMetricsQuery().apply { from="2026-10-17"; to="2026-10-23"; this.platform=platform }
         val value = service.quality(q)
         val groups = 1
-        assertThat(requests).hasSize(groups*11)
+        assertThat(requests).hasSize(groups*15)
         val row = value.daily.first()
         val messages = when(platform) { "web" -> 100; "android" -> 10; else -> 100 }
         val errors = when(platform) { "web" -> 5; "android" -> 1; else -> 5 }
@@ -150,7 +150,7 @@ class AppOverseasMetricsTests {
         assertThat(row.messagesByInputMode["unknown"]).isEqualTo(when(platform) { "web" -> 5L; "android" -> 1L; else -> 5L })
         assertThat(row.users.values).containsOnly(when(platform) { "web" -> 7L; "android" -> 2L; else -> 7L })
         assertThat(requests.count { condition(event(it)) == "overseas" }).isZero()
-        assertThat(fixture.budget.reserve(500-groups*77)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(500-groups*105)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `바뀌지 않은 조회는 정의의 metric params hash를 유지한다`() {
         val activity = definitions.activity().map { it.definition }
@@ -185,22 +185,22 @@ class AppOverseasMetricsTests {
             val s = listOf(AdminMetricEvents.condition("country",listOf("South Korea","(none)"))) + if(p=="all") emptyList() else listOf(AdminMetricEvents.condition("platform",listOf(if(p=="web") "Web" else "Android")))
             AnalyticsDefinition("users_session_average","/api/2/sessions/average",listOf("i" to "1","s" to fixture.mapper.writeValueAsString(s)),if(p=="all")8 else 12,fixture.mapper).hash
         }
-        assertThat(definitions.sessions().drop(1).map { it.definition.hash }).containsExactlyElementsOf(oldSessions.drop(1))
+        assertThat(definitions.sessions().take(3).drop(1).map { it.definition.hash }).containsExactlyElementsOf(oldSessions.drop(1))
         assertThat(definitions.sessions().first().definition.hash).isNotEqualTo(oldSessions.first())
     }
-    @Test fun `새벽 카탈로그는 세 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 181와 리텐션 792다`() {
+    @Test fun `새벽 카탈로그는 세 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 234와 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
         val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy(),modelCodeReads()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
-        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(181)
+        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(234)
         assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
-        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(33)
-        // 분석 지표 12, 사용자 활동 10, 세션 36, 세션 길이 36, 기능 사용 33, 캠페인 추이 16, 가입 플랫폼 6, 턴 도달률 24, 모델 둘의 채팅 옵션 8
-        assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(6)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(45)
+        // 분석 지표 12, 사용자 활동 10, 세션 72, 세션 길이 36, 기능 사용 45, 캠페인 추이 16, 가입 플랫폼 3, 턴 도달률 24, 모델 둘의 채팅 옵션 16
+        assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(3)
         assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(24)
-        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(8)
+        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(16)
         assertThat(entries.map { it.metric.definition.metric }).noneMatch { it.contains("mau") || it.contains("push_opens") || (it.startsWith("conversion_") && it != "conversion_turn_reach") }
     }
     @ParameterizedTest
@@ -284,7 +284,7 @@ class AppOverseasMetricsTests {
         fixture.clock.at=fixture.clock.at.plusSeconds(61); server.dispatcher=working
         val recovered=service.quality(PlatformMetricsQuery().apply { from=today.minusDays(1).toString();to=today.toString() })
         assertThat(recovered.pendingDates).isEmpty(); assertThat(recovered.daily).hasSize(2)
-        assertThat(requests).hasSize(7)
+        assertThat(requests).hasSize(11)
         requests.drop(1).forEach { assertDomestic(event(it)) }
     }
     @ParameterizedTest @ValueSource(booleans=[false,true])

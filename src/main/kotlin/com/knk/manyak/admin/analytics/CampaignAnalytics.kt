@@ -16,10 +16,11 @@ open class CampaignQuery : AnalyticsRangeQuery() { var campaign: String? = null 
 class StoryCampaignQuery : CampaignQuery() { var storyId: UUID? = null }
 data class CampaignSegments(val all: Long, val ads: Long, val nonAds: Long = all - ads)
 data class CampaignSources(val ads: Long, val instagram: Long, val threads: Long, val dcinside: Long, val other: Long)
+data class CampaignDevices(val ios: Long, val android: Long, val other: Long)
 data class CampaignDay(val date: LocalDate, val activeUsers: Long, val newVisitors: CampaignSegments, val newVisitorsBySource: CampaignSources,
-    val signups: CampaignSegments, val cumulativeSignups: CampaignSegments, val androidSignups: Long, val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long)
+    val signups: CampaignSegments, val cumulativeSignups: CampaignSegments, val androidSignups: Long, val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long, val newVisitorsByDevice: CampaignDevices)
 data class CampaignTotals(val activeUsersAverage: Double, val newVisitors: CampaignSegments, val signups: CampaignSegments, val androidSignups: Long, val adsShare: Double?,
-    val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long)
+    val storylineRequests: Long, val completionRequests: Long, val chatMessages: Long, val newVisitorsByDevice: CampaignDevices)
 data class CampaignAnalyticsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val daily: List<CampaignDay>, val totals: CampaignTotals, val pendingDates: List<LocalDate>)
 data class CampaignFunnelStep(val event: String, val users: CampaignSegments)
 data class CampaignCreationResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val steps: List<CampaignFunnelStep>)
@@ -65,16 +66,15 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
             metrics += metric("source_$group", "_new", common + ads(campaign, "is not") +
                 CampaignEvents.filter("gp:initial_utm_source", values, "user", if (group == "other") "is not" else "is"))
         }
-        val signups = listOf("google" to CampaignEvents.GOOGLE, "kakao" to CampaignEvents.KAKAO)
-        for ((provider, name) in signups) {
-            val filters = common + CampaignEvents.filter("is_new_user", listOf("true"))
-            metrics += metric("signup_${provider}_all", name, filters)
-            metrics += metric("signup_${provider}_ads", name, filters + ads(campaign))
-        }
-        // Android 앱 이벤트에는 첫 유입 UTM이 없어 광고 구분 없이 센다.
-        for ((provider, name) in signups) metrics += metric("signup_${provider}_android", name,
-            CampaignEvents.common(false) + CampaignEvents.filter("platform", listOf("Android"), "user") + CampaignEvents.filter("is_new_user", listOf("true")))
+        metrics += metric("signup_all", AdminMetricEvents.SIGNUP)
+        metrics += metric("signup_ads", AdminMetricEvents.SIGNUP, common + ads(campaign))
+        // Android 앱 가입은 광고 구분 없이 센다.
+        metrics += metric("signup_android", AdminMetricEvents.SIGNUP,
+            CampaignEvents.common(false) + CampaignEvents.filter("platform", listOf("Android"), "user"))
         for ((id, name) in listOf("storyline" to CampaignEvents.GENERATE, "completion" to CampaignEvents.COMPLETE, "messages" to CampaignEvents.MESSAGE)) metrics += metric(id, name, aggregation = "totals")
+        metrics += metric("device_ios", "_new", common + CampaignEvents.filter("device_type", listOf("Apple iPhone", "Apple iPad"), "user"))
+        metrics += metric("device_android", "_new", common + CampaignEvents.filter("device_type", listOf("Android"), "user"))
+        metrics += metric("device_other", "_new", common + CampaignEvents.filter("device_type", listOf("Apple iPhone", "Apple iPad", "Android"), "user", "is not"))
         return metrics
     }
     fun analytics(query: CampaignQuery): CampaignAnalyticsResponse {
@@ -85,22 +85,22 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
             var cumulativeAll = 0L; var cumulativeAds = 0L
             val daily = dates.map { date ->
                 val v = metrics.map { result.value(it, date)!!.value.asLong() }
-                val signups = CampaignSegments(Math.addExact(v[7], v[9]), Math.addExact(v[8], v[10]))
+                val signups = CampaignSegments(v[7], v[8])
                 cumulativeAll = Math.addExact(cumulativeAll, signups.all); cumulativeAds = Math.addExact(cumulativeAds, signups.ads)
                 CampaignDay(date, v[0], CampaignSegments(v[1], v[2]), CampaignSources(v[2], v[3], v[4], v[5], v[6]), signups,
-                    CampaignSegments(cumulativeAll, cumulativeAds), Math.addExact(v[11], v[12]), v[13], v[14], v[15])
+                    CampaignSegments(cumulativeAll, cumulativeAds), v[9], v[10], v[11], v[12], CampaignDevices(v[13], v[14], v[15]))
             }
             fun sum(select: (CampaignDay) -> Long) = daily.fold(0L) { total, row -> Math.addExact(total, select(row)) }
             val visitors = CampaignSegments(sum { it.newVisitors.all }, sum { it.newVisitors.ads })
             val totals = CampaignTotals(daily.map { it.activeUsers.toDouble() }.average(), visitors, CampaignSegments(sum { it.signups.all }, sum { it.signups.ads }), sum { it.androidSignups },
-                if (visitors.all == 0L) null else visitors.ads.toDouble() / visitors.all, sum { it.storylineRequests }, sum { it.completionRequests }, sum { it.chatMessages })
+                if (visitors.all == 0L) null else visitors.ads.toDouble() / visitors.all, sum { it.storylineRequests }, sum { it.completionRequests }, sum { it.chatMessages }, CampaignDevices(sum { it.newVisitorsByDevice.ios }, sum { it.newVisitorsByDevice.android }, sum { it.newVisitorsByDevice.other }))
             CampaignAnalyticsResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, campaign, daily, totals, result.pendingDates())
         }
     }
     fun creation(query: CampaignQuery): CampaignCreationResponse {
         val range = query.range(clock, 20, 7, setOf(7)); val campaign = campaign(query)
-        val all = queries.funnel("campaign_creation_all", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common()) }, users = "new")
-        val ads = queries.funnel("campaign_creation_ads", range, CampaignEvents.creation.map { CampaignEvents.event(it, CampaignEvents.common() + ads(campaign)) }, users = "new")
+        val all = queries.funnel("campaign_creation_all", range, CampaignEvents.creation.mapIndexed { i, event -> CampaignEvents.event(event, CampaignEvents.common() + AdminMetricEvents.creationFilters(i)) })
+        val ads = queries.funnel("campaign_creation_ads", range, CampaignEvents.creation.mapIndexed { i, event -> CampaignEvents.event(event, CampaignEvents.common() + ads(campaign) + AdminMetricEvents.creationFilters(i)) })
         val result = snapshots.load("/api/v1/admin/campaigns/funnels/creation", range, emptyList(), rangeMetrics = listOf(all, ads))
         val a = result.value(all) ?: throw AdminAnalyticsUnavailable(); val b = result.value(ads) ?: throw AdminAnalyticsUnavailable()
         return CampaignCreationResponse(result.asOf(listOf(a, b)), range.from, range.to, campaign, CampaignEvents.creation.mapIndexed { i, event ->

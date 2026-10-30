@@ -30,10 +30,10 @@ class AnalyticsQueryFactory(private val mapper: ObjectMapper) {
         return DailyAnalyticsMetric(def) { data, range -> AmplitudeResults.dailyGroups(data, range).mapValues { mapper.valueToTree<JsonNode>(it.value) } }
     }
     /** [users]는 퍼널 사용자 집합 `n`이다. `new`는 범위 안에 처음 기록된 사용자만 센다. */
-    fun funnel(metric: String, range: AnalyticsRange, events: List<Map<String, Any>>, users: String = "active"): RangeAnalyticsMetric {
+    fun funnel(metric: String, range: AnalyticsRange, events: List<Map<String, Any>>, users: String = "active", conversionDays: Long = 1): RangeAnalyticsMetric {
         val def = AnalyticsDefinition(metric, "/api/2/funnels", events.map { "e" to mapper.writeValueAsString(it) } +
-            listOf("mode" to "ordered", "cs" to "86400", "n" to users, "i" to "1"), events.size * 2, mapper)
-        return RangeAnalyticsMetric(def, range) { mapper.valueToTree(AmplitudeResults.funnel(it, events.size)) }
+            listOf("mode" to "ordered", "cs" to (conversionDays * 86400).toString(), "n" to users, "i" to "1"), events.size * 2, mapper)
+        return RangeAnalyticsMetric(def, range, conversionDays) { mapper.valueToTree(AmplitudeResults.funnel(it, events.size)) }
     }
     fun grouped(metric: String, range: AnalyticsRange, event: Map<String, Any>, extra: List<Pair<String, String>> = emptyList()): RangeAnalyticsMetric {
         val def = AnalyticsDefinition(metric, "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(event), "m" to "uniques", "i" to "1", "limit" to "1000") + extra, 25, mapper)

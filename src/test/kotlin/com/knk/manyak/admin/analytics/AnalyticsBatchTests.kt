@@ -121,6 +121,10 @@ class AnalyticsBatchTests {
         val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads()).metrics()
         val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + defs.sessionLengths() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
             defs.signupPlatforms() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
+        assertThat(entries.filter { it.metric.definition.metric == "users_session_peruser" }).hasSize(3)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("campaign_device_") }).hasSize(3)
+        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_ai_responses", "quality_simple_completions", "quality_general_submissions", "quality_core_active") }).hasSize(12)
+        assertThat(entries.map { it.key }).containsAll(defs.newVisitors().map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.key }).containsAll(expected.map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
         val common = expected.map { it.definition.metric + ":" + it.definition.hash }.toSet()
@@ -202,7 +206,7 @@ class AnalyticsBatchTests {
         assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(973)
+        assertThat(results.sumOf { it.cost }).isEqualTo(1026)
         catalog.metrics().forEach { entry ->
             val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()

@@ -16,7 +16,7 @@
 # 앞 요청이 예산을 썼다면 다음 카드는 partial/503일 수 있다. 200 전체 검증은 5분 뒤 재실행한다.
 # 일별 준비 중 날짜는 pendingDates이며 60초 뒤 같은 요청으로 이어 받는다. 기간은 KST 양끝 포함.
 # 신규 가입자·턴 도달·채팅 옵션은 팀 계정 제외, AI 비용은 팀 계정도 포함한다.
-# 세 DB 지표의 플랫폼 값(signupsByPlatform, platforms, chatStarts 등)은 Amplitude라 팀 계정을 포함하고 국내 조건의 all, web, android 세 값이며 unknown은 없다. 가입 all은 전체 조회, 턴 합계 all은 웹과 앱의 합이다.
+# 세 DB 지표의 플랫폼 값(signupsByPlatform, platforms, chatStarters 등)은 Amplitude라 팀 계정을 포함하고 국내 조건의 all, web, android 세 값이며 unknown은 없다. 가입 all은 전체 조회, 턴 합계 all은 웹과 앱의 합이다.
 # 플랫폼 값을 못 받은 날짜는 그 값만 null이고 pendingDates에 든다. DB 값은 Amplitude 장애와 무관하게 200이다.
 # 플랫폼 조회는 차례 대기를 포함해 5초 한도라 넘기면 받은 값만 저장하고 DB 값을 바로 준다(그 키 60초 쿨다운).
 # AI 비용: MANYAK_ADMIN_LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY/ENVIRONMENT 네 값을 서버에 주입한다.
@@ -78,8 +78,8 @@ client.test("리텐션 응답", () => {
 });
 %}
 
-### 리텐션 가입자 · 플랫폼마다 구글과 카카오 로그인 성공(is_new_user true)을 따로 조회해 6회, 하루 48(7일 336)
-# 배포 뒤 all을 가입 이벤트 is_new_user 참 → Any Active, N-Day, 국내 조건의 Amplitude 차트 두 개(구글, 카카오)의 합과 대조한다.
+### 리텐션 가입자 · ce:신규 가입 (구글·카카오) 세 플랫폼 3회, 하루 24(7일 168)
+# 배포 뒤 all을 가입 커스텀 이벤트 → Any Active, N-Day, 국내와 Web/Android OR 조건의 Amplitude 차트과 대조한다.
 GET {{baseUrl}}/api/v1/admin/users/retention?days=7&cohort=signup
 Authorization: Bearer {{adminToken}}
 
@@ -107,7 +107,7 @@ Authorization: Bearer {{adminToken}}
 
 > {% client.test("cohort 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
-### 세션 길이 분포 · 날짜마다 전체, Web, Android 3회, 하루 32(all), 평균 세션 길이와 저장과 쿨다운이 따로
+### 세션 길이 분포 · 날짜마다 전체, Web, Android 3회, 하루 36(all), 평균 세션 길이와 저장과 쿨다운이 따로
 # 배포 뒤 확정일 하루의 구간별 세션 수를 같은 조건(국내, 회원은 user_id 있음 세그먼트)의 Amplitude 세션 길이 차트와 대조한다.
 GET {{baseUrl}}/api/v1/admin/users/session-lengths?days=7
 Authorization: Bearer {{adminToken}}
@@ -120,7 +120,9 @@ client.test("세션 길이 분포 응답", () => {
     client.assert(b.segment === "all" && Array.isArray(b.pendingDates), "적용 segment와 준비 중 날짜");
     client.assert(b.bins.length === 9 && b.bins[0].fromSeconds === 0 && b.bins[8].toSeconds === 86400, `구간 actual=${JSON.stringify(b.bins)}`);
     client.assert(b.platforms.map(p => p.platform).join(",") === "all,web,android", "플랫폼 순서");
+    client.assert(b.daily.length + b.pendingDates.length === 7, "일별 세션 준비 상태");
     for (const p of b.platforms) {
+      client.assert(b.daily.reduce((sum, d) => sum + d.sessions[p.platform], 0) === p.totalSessions, "일별 합과 구간 전체 합 일치");
       client.assert(p.sessions.length === 9 && p.sessions.reduce((a, c) => a + c, 0) === p.totalSessions, `합 actual=${JSON.stringify(p)}`);
       client.assert(p.totalSessions === 0 ? p.medianBin === null : (p.medianBin >= 0 && p.medianBin < 9), `중앙값 구간 actual=${p.medianBin}`);
     }
@@ -128,7 +130,7 @@ client.test("세션 길이 분포 응답", () => {
 });
 %}
 
-### 세션 길이 분포 회원만 · s에 user_id is not (none), 하루 44
+### 세션 길이 분포 회원만 · s에 user_id is not (none), 하루 48
 GET {{baseUrl}}/api/v1/admin/users/session-lengths?days=7&segment=member
 Authorization: Bearer {{adminToken}}
 
@@ -155,12 +157,15 @@ client.test("평균 세션 길이 응답", () => {
   const b = response.body;
   if (response.status === 200) {
     client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
-    for (const d of b.daily) client.assert(d.averageSessionSeconds.unknown === null && typeof d.averageSessionSeconds.web === "number", "세션 평균 초");
+    client.assert(b.daily.length + b.pendingDates.length === 14, "준비된 날짜와 준비 중 날짜 합");
+    for (const d of b.daily) {
+      for (const field of ["averageSessionSeconds", "sessionsPerUser"]) client.assert(d[field].unknown === null && ["all", "web", "android"].every(k => typeof d[field][k] === "number"), `${field} 플랫폼 구조`);
+    }
   } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
 });
 %}
 
-# 기능 사용: web, android, all 각각 11회. all은 전체 조건 하나를 조회한다.
+# 기능 사용: web, android, all 각각 15회. all은 전체 조건 하나를 조회한다.
 # 간편 제작 오류 사용자 수(storyCompleteError)는 빠지고 서버 DB storyCompletion(범위의 모든 날짜, platform·segment 무관)이 붙는다.
 # 운영 대조: 날짜마다 requests와 failed가 story_creation_requests(stage STORY_COMPLETION, 팀 계정 제외) 집계와 같다.
 ### 기능 사용과 안정성
@@ -175,14 +180,21 @@ client.test("기능 사용과 안정성 응답", () => {
     client.assert(Array.isArray(b.pendingDates), "준비 중 날짜 구조");
     client.assert(b.platform === "web", "적용 플랫폼");
     for (const d of b.daily) client.assert(d.streamErrorRate === null || d.streamErrorRate >= 0, "오류율은 1을 넘을 수 있음");
-    for (const d of b.daily) client.assert(!("storyCompleteError" in d.users), "간편 제작 오류 사용자 수 제거");
+    for (const d of b.daily) {
+      client.assert(!("storyCompleteError" in d.users), "간편 제작 오류 사용자 수 제거");
+      const a = d.activity;
+      client.assert(["aiResponses", "simpleCompletions", "generalSubmissions", "coreActiveUsers"].every(k => Number.isInteger(a[k]) && a[k] >= 0), "활동량 정수");
+      const messages = Object.values(d.messagesByInputMode).reduce((sum, n) => sum + n, 0);
+      client.assert(a.messagesPerCoreUser === (a.coreActiveUsers === 0 ? null : messages / a.coreActiveUsers), "핵심 활동 사용자당 메시지");
+      client.assert(a.simpleCompletionsPerCoreUser === (a.coreActiveUsers === 0 ? null : a.simpleCompletions / a.coreActiveUsers), "핵심 활동 사용자당 간편 제작 완료");
+    }
     client.assert(b.storyCompletion.length === 7, `실패율은 범위의 모든 날짜 actual=${b.storyCompletion.length}`);
     for (const c of b.storyCompletion) client.assert(c.failed <= c.requests && (c.requests === 0 ? c.failureRate === null : c.failureRate === c.failed / c.requests), `실패율 actual=${JSON.stringify(c)}`);
   } else client.assert(b.code === "SERVICE_UNAVAILABLE", "표준 사용 불가");
 });
 %}
 
-### 기능 사용 게스트만 · user_id 없는 이벤트. 전체 조건에도 user_id 없음 필터 적용(11회)
+### 기능 사용 게스트만 · user_id 없는 이벤트. 전체 조건에도 user_id 없음 필터 적용(15회)
 GET {{baseUrl}}/api/v1/admin/quality/client?platform=all&segment=guest&days=7
 Authorization: Bearer {{adminToken}}
 
@@ -193,7 +205,7 @@ client.test("기능 사용 게스트", () => {
 });
 %}
 
-### 평균 세션 길이 회원만 · 세그먼트 s에 user_id is not (none)을 더해 하루 44(all 32), 14일 첫 조회는 준비 중 날짜가 남을 수 있음
+### 평균 세션 길이 회원만 · 세그먼트 s에 user_id is not (none)을 더해 하루 96(all 72), 14일 첫 조회는 준비 중 날짜가 남을 수 있음
 GET {{baseUrl}}/api/v1/admin/users/sessions?days=7&segment=member
 Authorization: Bearer {{adminToken}}
 
@@ -221,6 +233,11 @@ client.test("신규 가입자와 서비스 시작부터 누계", () => {
   // 연동 행이 없는 재가입 예전 계정은 빠지므로 total은 google과 kakao의 합이고 other는 없다.
   client.assert(b.daily.length === 7 && b.daily.every(d => d.signups.total === d.signups.google + d.signups.kakao && !("other" in d.signups)), "계약 필드 확인");
   client.assert(Array.isArray(b.pendingDates) && b.daily.every(d => b.pendingDates.includes(d.date) === (d.signupsByPlatform === null)), "준비 중 날짜만 플랫폼 null");
+  for (const d of b.daily) {
+    const pending = b.pendingDates.includes(d.date);
+    ["signupsByPlatform", "newVisitorsByPlatform", "signupRate"].forEach(k => client.assert((d[k] === null) === pending, `${k} 공동 준비 상태`));
+    if (!pending) for (const platform of ["all", "web", "android"]) client.assert(d.signupRate[platform] === (d.newVisitorsByPlatform[platform] === 0 ? null : d.signupsByPlatform[platform] / d.newVisitorsByPlatform[platform]), "가입 전환율, 1 초과 허용");
+  }
   b.daily.filter(d => d.signupsByPlatform).forEach(d => {
     const p = d.signupsByPlatform;
     client.assert(!("unknown" in p) && ["all", "web", "android"].every(k => Number.isInteger(p[k])), `플랫폼 합 actual=${JSON.stringify(p)}`);
@@ -311,9 +328,11 @@ client.test("채팅 옵션과 모델별 턴 수", () => {
     Object.values(d.turnsByModel).forEach(n => client.assert(Number.isInteger(n) && n > 0, `턴 없는 모델은 키 없음 actual=${n}`));
     // 플랫폼 값 셋은 Amplitude. 준비 중 날짜는 셋 다 null이고 platformTurnsByModel은 chat_models의 모든 코드를 키로 둔다.
     const pending = b.pendingDates.includes(d.date);
-    ["chatStarts", "personaChatStarts", "platformTurnsByModel"].forEach(k => client.assert((d[k] === null) === pending, `${k} 준비 상태 actual=${JSON.stringify(d[k])}`));
+    ["chatStarters", "chatStartersByPersonaType", "platformTurnsByModel"].forEach(k => client.assert((d[k] === null) === pending, `${k} 준비 상태 actual=${JSON.stringify(d[k])}`));
     if (!pending) {
-      client.assert(d.personaChatStarts.all <= d.chatStarts.all && d.chatStarts.all === d.chatStarts.web + d.chatStarts.android, `클릭 합 actual=${JSON.stringify(d.chatStarts)}`);
+      client.assert(!("chatStarts" in d) && !("personaChatStarts" in d), "이전 클릭 수 필드 없음");
+      client.assert(["default", "persona", "none"].every(k => d.chatStartersByPersonaType[k] && d.chatStartersByPersonaType[k].all <= d.chatStarters.all), "주인공 종류별 고유 사용자");
+      client.assert(!("unknown" in d.chatStarters), "플랫폼 없음 제외");
       client.assert(!("UNRECORDED" in d.platformTurnsByModel), "플랫폼 모델 턴에는 UNRECORDED 없음");
     }
   });
@@ -462,7 +481,7 @@ Authorization: Bearer {{adminToken}}
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-first-visit?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("web-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 6 && response.body.steps[0].event === "client_storyList_viewed", "단계 수와 1단계"); }); %}
+> {% client.test("web-first-visit", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 6 && response.body.steps[0].event === "client_storyCreate_viewed" && response.body.steps[1].event === "client_storyCreate_tagCategory_selected", "단계 수와 1단계"); }); %}
 
 ### 전환 퍼널 android-first-visit
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-first-visit?days=7
@@ -486,7 +505,7 @@ Authorization: Bearer {{adminToken}}
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/guest-limit-login?days=7
 Authorization: Bearer {{adminToken}}
 
-> {% client.test("guest-limit-login", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 3, "단계 수"); }); %}
+> {% client.test("guest-limit-login", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if(response.status === 200) client.assert(response.body.steps.length === 3 && response.body.steps[2].event === "login_succeeded" && response.body.steps[2].users <= response.body.steps[1].users, "커스텀 로그인 성공과 단계 인원"); }); %}
 
 ### 오류 401
 GET {{baseUrl}}/api/v1/admin/users/activity
@@ -544,3 +563,60 @@ Authorization: Bearer {{rolelessAdminToken}}
 ### 자유 조회 · 스토리 공개 UUID로 한정 (원하는 UUID로 교체)
 GET {{baseUrl}}/api/v1/admin/conversion/funnels/story-detail-chat?platform=android&storyId=cca6358a-0ef3-4709-88d1-100b9faeeca8&days=7
 Authorization: Bearer {{adminToken}}
+
+
+# 퍼널 확정: to가 오늘·어제면 10분, 그 이전이고 전환 창이 남으면 하루 한 번 갱신한다.
+# to + 전환 창(1일, 웹→앱은 30일)이 끝난 뒤 받은 값만 확정한다.
+# 가입은 ce:신규 가입 (구글·카카오), 게스트 한도 로그인은 ce:로그인 성공 (구글·카카오) 한 조회다.
+
+### 신규 사용자 활성화 · 마지막 단계 turn_number >= 5
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/first-visit-activation?days=7&platform=android
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("신규 사용자 활성화", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    const b = response.body;
+    client.assert(b.platform === "android" && b.steps.length === 3, "앱 3단계");
+    client.assert(b.steps[2].minTurnNumber === 5 && b.steps[2].turnNumber === null, "5턴 이상 하한");
+    client.assert(b.steps.every(s => s.platform === null), "공통 플랫폼은 응답 상단에 표시");
+  }
+});
+%}
+
+### 로그인 화면 가입 · 가입 단계는 국내 조건만
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/login-signup?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("로그인 화면 가입", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if (response.status === 200) client.assert(response.body.steps.length === 2 && response.body.steps[1].event === "signup_succeeded", "가입 커스텀 이벤트 단계"); }); %}
+
+### 앱 신규 활성화 · 플랫폼 고정
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-activation?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("앱 신규 활성화", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if (response.status === 200) client.assert(response.body.platform === "android" && response.body.steps.map(s => s.event).join(",") === "_active,signup_succeeded,core_activity", "앱 3단계"); }); %}
+
+### 웹 이용 후 앱 이용 · 30일 창, 플랫폼은 단계마다 표시
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-to-android?days=7
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("웹 이용 후 앱 이용", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if (response.status === 200) client.assert(response.body.platform === null && response.body.steps.map(s => s.platform).join(",") === "web,android", "단계별 플랫폼"); }); %}
+
+### 간편 제작 진입 채팅 · 활성 사용자 기준 앱 6단계
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/creation-entry-chat?days=7&platform=android
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("간편 제작 진입 채팅", () => { client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`); if (response.status === 200) client.assert(response.body.platform === "android" && response.body.steps.length === 6 && response.body.steps[1].event === "client_storyCreate_tagCategory_selected", "6단계와 장르 선택"); }); %}
+
+### 400 · 고정 플랫폼 퍼널은 platform을 받지 않음
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/web-to-android?platform=web
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("플랫폼 쿼리 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 · 앱 신규 활성화 고정 플랫폼
+GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-activation?platform=android
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("앱 고정 플랫폼 쿼리 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}

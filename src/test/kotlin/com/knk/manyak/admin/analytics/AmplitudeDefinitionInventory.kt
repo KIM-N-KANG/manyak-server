@@ -65,8 +65,8 @@ internal class AmplitudeDefinitionInventory {
             capture { campaigns.story(StoryCampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign; storyId=story }) }
         }
         capture { campaigns.sources(AnalyticsRangeQuery().apply { from=date.toString(); to=date.toString() }) }
-        for (name in listOf("web-first-visit", "android-first-visit", "story-creation", "story-detail-chat", "guest-limit-login")) {
-            val platforms = if (name.endsWith("first-visit")) listOf<String?>(null) else listOf("web", "android")
+        for (name in listOf("web-first-visit", "android-first-visit", "first-visit-activation", "login-signup", "android-activation", "web-to-android", "story-creation", "creation-entry-chat", "story-detail-chat", "guest-limit-login")) {
+            val platforms = if (name in setOf("web-first-visit", "android-first-visit", "android-activation", "web-to-android")) listOf<String?>(null) else listOf("web", "android")
             for (platform in platforms) for (story in if (name == "story-detail-chat") listOf(null, UUID.fromString("cca6358a-0ef3-4709-88d1-100b9faeeca8")) else listOf(null)) capture {
                 metrics.funnel(name, ConversionMetricsQuery().apply { from=date.toString(); to=date.toString(); this.platform=platform; storyId=story })
             }

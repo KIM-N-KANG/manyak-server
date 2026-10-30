@@ -15,6 +15,10 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     fun activity(): List<DailyAnalyticsMetric> = platforms.flatMap { platform -> listOf("active", "new").map { event ->
         queries.daily("activity_$event", AdminMetricEvents.event("_$event", filters(platform)))
     } } + listOf("web", "android").map { queries.daily("activity_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters(it)), "average", false) }
+    /** 가입 전환율의 분모는 활동의 신규 방문자와 지표 이름·해시를 공유한다. */
+    fun newVisitors(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
+        queries.daily("activity_new", AdminMetricEvents.event("_new", filters(platform)))
+    }
     fun mau(to: LocalDate, platform: String = "all"): RangeAnalyticsMetric {
         val range = AnalyticsRange(to.minusDays(29), to)
         val def = AnalyticsDefinition("activity_mau", "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters(platform))), "m" to "uniques", "i" to "1"), 1, mapper)
@@ -25,20 +29,17 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         } }
     }
 
-    /**
-     * 플랫폼(all, web, android) 순서다. 가입자(signup)는 플랫폼마다 구글, 카카오 두 조회라 6개다.
-     * 시작 이벤트가 해시에 들어가 시작 집단마다 저장 키가 따로이고 플랫폼 전체는 웹이나 앱 조건을 사용한다.
-     */
-    fun retention(cohort: String = "visitor"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").flatMap { platform ->
-        // 시작과 복귀 모두 같은 플랫폼 조건을 적용한다.
+    /** 전체, 웹, 앱마다 시작 집단 하나를 조회한다. */
+    fun retention(cohort: String = "visitor"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
         val filters = filters(platform)
-        when (cohort) {
-            "visitor" -> listOf(AdminMetricEvents.event("_new", filters))
-            "signup" -> listOf(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO).map { AdminMetricEvents.event(it, filters + AdminMetricEvents.filter("is_new_user", listOf("true"))) }
-            "first-chat" -> listOf(AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
-                filters + AdminMetricEvents.filter("turn_number", listOf("1")) + AdminMetricEvents.filter("is_regenerated", listOf("false"))))
+        val start = when (cohort) {
+            "visitor" -> AdminMetricEvents.event("_new", filters)
+            "signup" -> AdminMetricEvents.event(AdminMetricEvents.SIGNUP, filters)
+            "first-chat" -> AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
+                filters + AdminMetricEvents.filter("turn_number", listOf("1")) + AdminMetricEvents.filter("is_regenerated", listOf("false")))
             else -> error("Invalid cohort")
-        }.map { retentionMetric(it, filters) }
+        }
+        retentionMetric(start, filters)
     }
     private fun retentionMetric(start: Map<String, Any>, filters: List<Map<String, Any>>): DailyAnalyticsMetric {
         val def = AnalyticsDefinition("users_retention", "/api/2/retention", listOf("se" to mapper.writeValueAsString(start),
@@ -66,10 +67,12 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     private fun sessionConditions(platform: String, segment: String) = listOf(AdminMetricEvents.condition("country", listOf("South Korea", "(none)"))) +
         listOf(AdminMetricEvents.condition("platform", when (platform) { "all" -> listOf("Web", "Android"); "web" -> listOf("Web"); else -> listOf("Android") })) + when (segment) {
         "guest" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"))); "member" -> listOf(AdminMetricEvents.condition("user_id", listOf("(none)"), "is not")); else -> emptyList() }
-    fun sessions(segment: String = "all"): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
-        val conditions = sessionConditions(platform, segment)
-        val def = AnalyticsDefinition("users_session_average", "/api/2/sessions/average", listOf("i" to "1", "s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
-        DailyAnalyticsMetric(def) { data, range -> decimalSeries(data, range) }
+    fun sessions(segment: String = "all"): List<DailyAnalyticsMetric> = listOf("average", "peruser").flatMap { kind ->
+        listOf("all", "web", "android").map { platform ->
+            val conditions = sessionConditions(platform, segment)
+            val def = AnalyticsDefinition("users_session_$kind", "/api/2/sessions/$kind", listOf("i" to "1", "s" to mapper.writeValueAsString(conditions)), (conditions.size + 1) * 4, mapper)
+            DailyAnalyticsMetric(def) { data, range -> decimalSeries(data, range) }
+        }
     }
     /** Amplitude 기본 세션 길이 구간 경계(초). 구간 매개변수를 보내지 않으면 이 9구간이다. */
     val sessionLengthBounds = listOf(0, 3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
@@ -109,20 +112,22 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     }
     /** 이벤트 합계는 웹과 앱 두 조회만 받고 전체는 둘의 합이다. */
     val splitPlatforms = listOf("web", "android")
-    /** 플랫폼마다 구글, 카카오 순서다. */
-    fun signupPlatforms(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").flatMap { platform -> listOf(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO).map { event ->
-        queries.daily("users_signup_platform", AdminMetricEvents.event(event, filters(platform) + AdminMetricEvents.filter("is_new_user", listOf("true"))))
-    } }
+    fun signupPlatforms(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
+        queries.daily("users_signup_platform", AdminMetricEvents.event(AdminMetricEvents.SIGNUP, filters(platform)))
+    }
     private fun savedTurns(metric: String, platform: String, segment: String, filter: Map<String, Any>) = queries.daily(metric, AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
         filters(platform) + AdminMetricEvents.filter("is_regenerated", listOf("false")) + filter + AdminMetricEvents.segment(segment)), "totals")
     /** 플랫폼마다 기준 턴 오름차순이다. 한 턴의 성공 이벤트는 한 번이라 합계가 그 턴을 저장한 채팅 수다. */
     fun turnReach(segment: String): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds.map { turn ->
         savedTurns("conversion_turn_reach", platform, segment, AdminMetricEvents.filter("turn_number", listOf(turn.toString())))
     } }
-    /** 플랫폼마다 default, persona 클릭 4개 뒤에 모델마다 두 플랫폼의 턴 수가 온다. 모델 코드마다 저장 키가 따로다. */
-    fun chatOptions(segment: String, models: List<String>): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> listOf("default", "persona").map {
-        queries.daily("quality_chat_starts", AdminMetricEvents.event(AdminMetricEvents.CHAT_START, filters(platform) + AdminMetricEvents.filter("persona_type", listOf(it)) + AdminMetricEvents.segment(segment)), "totals")
-    } } + models.flatMap { model -> splitPlatforms.map { platform -> savedTurns("quality_model_turns", platform, segment, AdminMetricEvents.filter("model_code", listOf(model))) } }
+    /** 플랫폼마다 전체, default, persona, none 고유 사용자 12개 뒤에 모델별 웹과 앱 턴 수가 온다. */
+    fun chatOptions(segment: String, models: List<String>): List<DailyAnalyticsMetric> = listOf("all", "web", "android").flatMap { platform ->
+        listOf(null, "default", "persona", "(none)").map { persona ->
+            queries.daily("quality_chat_starters", AdminMetricEvents.event(AdminMetricEvents.CHAT_START,
+                filters(platform) + (persona?.let { listOf(AdminMetricEvents.filter("persona_type", listOf(it))) } ?: emptyList()) + AdminMetricEvents.segment(segment)))
+        }
+    } + models.flatMap { model -> splitPlatforms.map { platform -> savedTurns("quality_model_turns", platform, segment, AdminMetricEvents.filter("model_code", listOf(model))) } }
     val qualityEvents = linkedMapOf("chatLoadError" to "client_chat_loadError_shown", "storyListLoadError" to "client_storyList_loadError_shown",
         "creditShortage" to "client_creditShortageDialog_shown", "creditChargeViewed" to "client_creditCharge_viewed",
         "attendanceClicked" to "client_creditCharge_attendanceButton_clicked", "inviteSucceeded" to "client_invite_codeInput_succeeded")
@@ -132,6 +137,10 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
         val all = queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters), "totals")
         val modes = listOf("choice", "plain", "block").map { queries.daily("quality_messages", AdminMetricEvents.event(AdminMetricEvents.MESSAGE, filters + AdminMetricEvents.filter("input_mode", listOf(it))), "totals") }
         val errors = queries.daily("quality_stream_errors", AdminMetricEvents.event("client_chat_streamError_shown", filters), "totals")
-        return listOf(all) + modes + errors + qualityEvents.map { (key, event) -> queries.daily("quality_$key", AdminMetricEvents.event(event, filters)) }
+        return listOf(all) + modes + errors + qualityEvents.map { (key, event) -> queries.daily("quality_$key", AdminMetricEvents.event(event, filters)) } + listOf(
+            queries.daily("quality_ai_responses", AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED, filters + AdminMetricEvents.filter("is_regenerated", listOf("false"))), "totals"),
+            queries.daily("quality_simple_completions", AdminMetricEvents.event("client_storyCreate_completed", filters), "totals"),
+            queries.daily("quality_general_submissions", AdminMetricEvents.event("client_generalCreate_completed", filters), "totals"),
+            queries.daily("quality_core_active", AdminMetricEvents.event(AdminMetricEvents.CORE_ACTIVITY, filters)))
     }
 }
