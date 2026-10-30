@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 class TrialController(private val trials: GuestTrialLimitService) {
-    @Operation(summary = "체험 사용량·한도 조회", description = "인증 선택. 게스트는 X-Manyak-Device-Id 필수. 회원 스토리라인 limit은 null(무제한).")
+    @Operation(summary = "체험 사용량·한도 조회", description = "인증 선택. 게스트는 X-Manyak-Device-Id 필수. 회원 스토리라인과 LITE 무료 프로모션 진행 중 회원 chatTurn의 limit은 null(무제한).")
     @GetMapping("/api/v1/users/me/trials")
     fun getTrials(
         @CurrentUserId userId: Long?,

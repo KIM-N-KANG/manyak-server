@@ -23,7 +23,7 @@ class GuestTrialLimitServiceRedisFallbackTest {
         `when`(factory.connection).thenThrow(RedisConnectionFailureException("redis down"))
         val template = StringRedisTemplate(factory)
         template.afterPropertiesSet()
-        return GuestTrialLimitService(template, mock(DeviceIdHasher::class.java), 5, 1, 5)
+        return GuestTrialLimitService(template, mock(DeviceIdHasher::class.java), mock(com.knk.manyak.chat.service.ChatModelService::class.java), 5, 1, 5)
     }
 
     @Test

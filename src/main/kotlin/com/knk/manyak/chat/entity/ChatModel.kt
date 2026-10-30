@@ -16,9 +16,18 @@ class ChatModel(
     @Column(name = "sort_order", nullable = false) var sortOrder: Int,
     @Column(name = "is_active", nullable = false) var isActive: Boolean = true,
     @Column(name = "is_default", nullable = false) var isDefault: Boolean = false,
+    @Column(name = "promo_turn_cost") var promoTurnCost: Long? = null,
+    @Column(name = "promo_starts_at") var promoStartsAt: Instant? = null,
+    @Column(name = "promo_ends_at") var promoEndsAt: Instant? = null,
     @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false) var updatedAt: Instant = Instant.now(),
 ) {
+    fun promotionActiveAt(now: Instant): Boolean =
+        promoTurnCost != null && promoStartsAt?.let { !now.isBefore(it) } == true &&
+            promoEndsAt?.let { now.isBefore(it) } == true
+
+    fun appliedTurnCost(now: Instant): Long = if (promotionActiveAt(now)) promoTurnCost!! else turnCost
+
     @PreUpdate
     fun updateTimestamp() { updatedAt = Instant.now() }
 }
