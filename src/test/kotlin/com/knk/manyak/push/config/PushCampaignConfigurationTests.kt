@@ -1,6 +1,7 @@
 package com.knk.manyak.push.config
 
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.service.FcmPushSender
@@ -24,6 +25,7 @@ class PushCampaignConfigurationTests {
         .withBean(UserRepository::class.java, { mock(UserRepository::class.java) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
         .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
+        .withBean(NoticeRepository::class.java, { mock(NoticeRepository::class.java) })
         .withBean(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java, { mock(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java) })
         .withPropertyValues("manyak.push.promotion.enabled=false")
 

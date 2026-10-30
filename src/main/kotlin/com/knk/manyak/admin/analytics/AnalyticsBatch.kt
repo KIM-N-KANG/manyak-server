@@ -19,15 +19,15 @@ fun interface AnalyticsBatchCatalog { fun metrics(): List<AnalyticsBatchMetric> 
 @EnableConfigurationProperties(AnalyticsBatchPolicy::class)
 class DefaultAnalyticsBatchCatalog(private val dashboard: AdminAnalyticsService, private val definitions: MetricDefinitions,
     private val campaigns: CampaignAnalyticsService, private val settings: CampaignSettings, private val policy: AnalyticsBatchPolicy,
-    private val reads: AdminMetricReadRepository) : AnalyticsBatchCatalog {
+    private val reads: AdminMetricReadRepository, private val pushOpens: PushOpensService) : AnalyticsBatchCatalog {
     override fun metrics(): List<AnalyticsBatchMetric> {
         // 턴 도달률과 채팅 옵션은 segment all만 미리 받는다. 모델 코드는 실행 시점의 chat_models다.
         // 리텐션은 방문자 코호트만 미리 받는다.
         val common = dashboard.dailyMetrics() + definitions.activity() + definitions.sessions() + definitions.sessionLengths() +
             listOf("all", "web", "android").flatMap { definitions.quality(it) } + definitions.retention() +
-            definitions.signupPlatforms() + definitions.turnReach("all") + definitions.chatOptions("all", reads.modelCodes())
-        return (common.map { AnalyticsBatchMetric(it, policy.backfillStart) } + settings.items.filter { it.endDate == null }.flatMap { campaign ->
-            campaigns.trendMetrics(campaign.campaign).map { AnalyticsBatchMetric(it, maxOf(policy.backfillStart, campaign.startDate)) }
+            definitions.signupPlatforms() + listOf(definitions.appActivation()) + campaigns.appTransferMetrics() + definitions.turnReach("all") + definitions.chatOptions("all", reads.modelCodes())
+        return (common.map { AnalyticsBatchMetric(it, policy.backfillStart) } + pushOpens.batchMetrics() + settings.items.filter { it.endDate == null }.flatMap { campaign ->
+            (campaigns.trendMetrics(campaign.campaign) + campaigns.creativeMetrics(campaign.campaign)).map { AnalyticsBatchMetric(it, maxOf(policy.backfillStart, campaign.startDate)) }
         }).groupBy { it.key }.values.map { entries -> entries.minBy { it.start } }
     }
 }
@@ -41,7 +41,7 @@ class AnalyticsBatchRunner(private val catalog: AnalyticsBatchCatalog, private v
     private data class Work(val entry: AnalyticsBatchMetric, val range: AnalyticsRange)
     private fun work(entries: List<AnalyticsBatchMetric>, today: LocalDate, nightly: Boolean): List<Work> = entries.mapNotNull { entry ->
         val to = today.minusDays(if (nightly) 1 else 2)
-        val from = if (!nightly) entry.start else maxOf(entry.start, today.minusDays(if (entry.metric.retention) 33 else 1))
+        val from = if (!nightly) entry.start else maxOf(entry.start, today.minusDays(if (entry.metric.retention) 33L else 1L + entry.metric.finalizationDelayDays))
         if (from > to) null else Work(entry, AnalyticsRange(from, to))
     }.filter { snapshots.missingDates(it.entry.metric, it.range).isNotEmpty() }
 

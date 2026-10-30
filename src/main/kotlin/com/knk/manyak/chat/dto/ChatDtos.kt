@@ -404,7 +404,9 @@ data class ChatStreamErrorEvent(
 data class ChatPersonaResponse(val name: String)
 
 
-@Schema(description = "노출 중인 채팅 모델과 턴 가격. 회원 턴 체험은 LITE에만 적용")
+data class ChatModelPromotionResponse(val turnCost: Long, val endsAt: java.time.Instant)
+
+@Schema(description = "노출 중인 채팅 모델과 정가. 회원에게만 진행 중인 promotion 제공")
 data class ChatModelResponse(
     val code: String,
     val name: String,
@@ -412,6 +414,7 @@ data class ChatModelResponse(
     // springdoc이 is 접두를 벗겨 default로 문서화하므로 런타임과 같은 와이어 필드명을 JsonProperty로 고정한다(isOwner와 동일).
     @get:JsonProperty("isDefault")
     val isDefault: Boolean,
+    val promotion: ChatModelPromotionResponse? = null,
 )
 @Schema(description = "채팅 설정 변경. model과 longResponse 중 하나 이상 필수, null은 거절", minProperties = 1)
 class ChangeChatSettingsRequest {

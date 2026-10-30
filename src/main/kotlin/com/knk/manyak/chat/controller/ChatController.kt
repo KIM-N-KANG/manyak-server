@@ -54,9 +54,9 @@ class ChatController(
     private val chatService: ChatService,
 ) {
 
-    @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 턴 가격을 노출 순서로 반환합니다. 회원 턴 체험은 LITE에만 적용됩니다. 인증은 선택입니다.")
+    @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 정가를 노출 순서로 반환합니다. 회원에게만 진행 중인 promotion을 제공합니다. 회원 턴 체험은 적용 가격이 양수인 LITE에만 적용됩니다. 인증은 선택입니다.")
     @GetMapping("/chats/models")
-    fun getModels(): List<ChatModelResponse> = chatService.getModels()
+    fun getModels(@CurrentUserId userId: Long?): List<ChatModelResponse> = chatService.getModels(userId)
 
     @Operation(summary = "채팅 설정 변경", description = "model과 longResponse 중 보낸 필드만 변경합니다. 하나 이상 필수이며 null은 거절합니다. 진행 중 턴은 시작 시 모델, 가격, 출력 분량을 유지합니다.")
     @PatchMapping("/chats/{chatId}")

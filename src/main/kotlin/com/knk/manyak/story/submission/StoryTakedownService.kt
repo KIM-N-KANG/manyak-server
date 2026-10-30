@@ -12,6 +12,7 @@ import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.service.StoryTakedownStateService
 import com.knk.manyak.story.service.UsernameTokenRenderer
 import jakarta.persistence.EntityManager
+import io.swagger.v3.oas.annotations.media.Schema
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -22,7 +23,14 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
-data class StoryTakedownRequest(val reasonCode: StoryTakedownReason, val reasonDetail: String? = null, val memo: String? = null) {
+data class StoryTakedownRequest(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val reasonCode: StoryTakedownReason,
+    @field:Schema(minLength = 1, maxLength = 100, pattern = "(?sU).*\\S.*", description = "ETC일 때 필수이며 다른 사유에서는 생략 또는 null")
+    val reasonDetail: String? = null,
+    @field:Schema(minLength = 1, maxLength = 500, pattern = "(?sU).*\\S.*")
+    val memo: String? = null,
+) {
     fun validate() {
         val invalidMemo = memo != null && (memo.isBlank() || memo.length > 500)
         val invalidDetail = if (reasonCode == StoryTakedownReason.ETC)
@@ -32,8 +40,13 @@ data class StoryTakedownRequest(val reasonCode: StoryTakedownReason, val reasonD
         }
     }
 }
-data class StoryTakedownResponse(val storyId: UUID, val visibility: StoryVisibility, val takedownReason: StoryTakedownReason,
-    val takedownReasonDetail: String?, val takenDownAt: Instant)
+data class StoryTakedownResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) val storyId: UUID,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = ["PRIVATE"]) val visibility: StoryVisibility,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) val takedownReason: StoryTakedownReason,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) val takedownReasonDetail: String?,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED) val takenDownAt: Instant,
+)
 data class StoryTakenDown(val userId: Long, val storyId: UUID, val title: String, val reasonCode: StoryTakedownReason,
     val reasonDetail: String?, val takenDownAt: Instant) {
     val messageId: String get() = "story-taken-down:$storyId:${takenDownAt.toEpochMilli()}"

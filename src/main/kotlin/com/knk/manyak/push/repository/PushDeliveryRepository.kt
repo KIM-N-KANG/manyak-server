@@ -62,6 +62,12 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
             Timestamp.from(from.atStartOfDay(zone).toInstant()),Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()))
     }
 
+    fun campaignReach(publicId: UUID): PushCampaignReach? = jdbc.query("""SELECT c.public_id,c.kind,c.title,n.public_id AS notice_id,c.started_at,c.deep_link_included,
+        CASE WHEN c.started_at IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM push_delivery_results r WHERE r.campaign_id=c.id AND r.delivered_devices>0) END AS reached
+        FROM push_campaigns c LEFT JOIN notices n ON n.id=c.notice_id WHERE c.public_id=?""",
+        { rs, _ -> PushCampaignReach(rs.getObject("public_id",UUID::class.java),PushKind.valueOf(rs.getString("kind")),rs.getString("title"),
+            rs.getObject("notice_id",UUID::class.java),rs.getTimestamp("started_at")?.toInstant(),rs.getObject("deep_link_included") as Boolean?,rs.getLong("reached")) }, publicId).singleOrNull()
+
     fun activityReach(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushActivityReach> {
         if (types.isEmpty()) return emptyList()
         val zone = ZoneId.of("Asia/Seoul")

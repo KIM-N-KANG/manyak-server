@@ -143,6 +143,9 @@ erDiagram
   boolean is_default
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint promo_turn_cost
+  timestamp_with_time_zone promo_starts_at
+  timestamp_with_time_zone promo_ends_at
 }
 ```
 

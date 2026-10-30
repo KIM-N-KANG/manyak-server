@@ -62,6 +62,88 @@ class ChatModelSelectionIntegrationTests {
         .map { it.arguments[0] as com.knk.manyak.global.observability.analytics.AnalyticsEvent }
         .filter { it.eventType.endsWith(type) }
 
+    private fun promotion(code: String = "LITE", cost: Long? = 0, start: java.time.Instant = java.time.Instant.now().minusSeconds(60), end: java.time.Instant = java.time.Instant.now().plusSeconds(3600)) {
+        jdbc.update("UPDATE chat_models SET promo_turn_cost = ?, promo_starts_at = ?, promo_ends_at = ? WHERE code = ?",
+            cost, if (cost == null) null else java.time.OffsetDateTime.ofInstant(start, java.time.ZoneOffset.UTC),
+            if (cost == null) null else java.time.OffsetDateTime.ofInstant(end, java.time.ZoneOffset.UTC), code)
+    }
+
+    @Test fun `무료 프로모션은 체험 잔여와 소진 모두 원장 없이 이어쓰기와 재생성을 허용한다`() {
+        promotion()
+        for (exhaust in listOf(false, true)) {
+            val user = member(exhaust = exhaust, balance = 1)
+            wallet.deduct(user.id, 1, CreditReason.CHAT_TURN)
+            val chat = chat(user)
+            service.changeSettings(chat.publicId.toString(), "LITE", user.id)
+            val used = trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("무료", realtimeImage = false), user.id)
+            waitForTurn(chat)
+            await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
+            assertThat(first.creditTransactionId).isNull()
+            service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
+            await().atMost(Duration.ofSeconds(10)).until { chats.findById(chat.id).orElseThrow().regeneratedCount == 1 && service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            assertThat(messages.findById(first.id).orElseThrow().creditTransactionId).isNull()
+            assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(used)
+            assertThat(wallet.balanceOf(user.id)).isZero()
+            assertThat(transactions.findAll().count { it.userId == user.id && it.refType == "CHAT_TURN" }).isZero()
+        }
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            assertThat(events("aiMessage_processed_succeeded").map { it.eventProperties["turn_cost"] }).hasSize(4).containsOnly(0L)
+            assertThat(logs.list.any { it.formattedMessage.contains("event_name=ai_response_saved") && it.formattedMessage.contains("turn_cost=0") }).isTrue()
+        }
+        val guest = chat(null)
+        service.streamChatTurn(guest.publicId.toString(), ContinueChatRequest("게스트", realtimeImage = false), deviceId = "promo-guest")
+        waitForTurn(guest)
+        assertThat(trials.usage(null, "promo-guest", GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(1)
+    }
+
+    @Test fun `양수 프로모션은 라이트 체험을 먼저 쓰고 소진 뒤 할인 가격과 오로라 할인 가격을 차감한다`() {
+        promotion(cost = 10)
+        promotion("AURORA", 30)
+        for ((model, exhaust, expected) in listOf(Triple("LITE", false, 0L), Triple("LITE", true, 10L), Triple("AURORA", false, 30L))) {
+            val user = member(exhaust = exhaust)
+            val chat = chat(user)
+            service.changeSettings(chat.publicId.toString(), model, user.id)
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("할인", realtimeImage = false), user.id)
+            waitForTurn(chat)
+            assertThat(wallet.balanceOf(user.id)).isEqualTo(1000 - expected)
+            assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(if (exhaust) 5 else if (model == "LITE") 1 else 0)
+        }
+    }
+
+    @Test fun `턴 중 무료 프로모션 종료와 설정은 이미 확정한 가격을 바꾸지 않는다`() {
+        for (freeAtStart in listOf(true, false)) {
+            val user = member()
+            val chat = chat(user)
+            service.changeSettings(chat.publicId.toString(), "LITE", user.id)
+            promotion(cost = if (freeAtStart) 0 else null)
+            GatedChatTurnAiClientConfig.reset()
+            GatedChatTurnAiClientConfig.gatedInput = "프로모션 경계"
+            service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("프로모션 경계", realtimeImage = false), user.id)
+            assertThat(GatedChatTurnAiClientConfig.entered.await(10, TimeUnit.SECONDS)).isTrue()
+            if (freeAtStart) promotion(end = java.time.Instant.now().minusSeconds(1)) else promotion()
+            GatedChatTurnAiClientConfig.gate.countDown()
+            waitForTurn(chat)
+            await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            assertThat(wallet.balanceOf(user.id)).isEqualTo(if (freeAtStart) 1000 else 980)
+            val id = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId
+            if (freeAtStart) assertThat(id).isNull() else assertThat(transactions.findById(id!!).orElseThrow().amount).isEqualTo(-20)
+        }
+    }
+
+    @Test fun `무료 프로모션 턴 실패는 체험 복원과 환불을 만들지 않는다`() {
+        promotion()
+        val user = member(exhaust = false)
+        val chat = chat(user)
+        service.changeSettings(chat.publicId.toString(), "LITE", user.id)
+        GatedChatTurnAiClientConfig.turnFailure = IllegalStateException("promotion failure")
+        service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("실패", realtimeImage = false), user.id)
+        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isZero()
+        assertThat(transactions.findAll().map { it.reason }).containsExactly(CreditReason.SIGNUP_REWARD)
+    }
+
     @Test fun `AI 실패 이벤트는 설정 변경 전의 긴 출력 분량을 기록하고 성공 이벤트는 없다`() {
         val user = member()
         val chat = chat(user)

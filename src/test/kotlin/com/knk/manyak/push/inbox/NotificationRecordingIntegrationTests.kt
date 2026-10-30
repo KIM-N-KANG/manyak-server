@@ -286,7 +286,7 @@ abstract class NotificationRecordingIntegrationTests {
     }
 
 
-    @Test fun `PROMOTION 공지는 게시로 만든 캠페인에서 동의자만 태그와 원문 제목을 기록한다`() {
+    @Test fun `PROMOTION 공지는 연결한 캠페인에서 동의자만 태그와 원문 제목을 기록한다`() {
         member(marketing = false)
         val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.PROMOTION)
         promotion.sendDue(Instant.now())
@@ -320,7 +320,7 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(notices.findByPublicId(notice.noticeId)!!.status.name).isEqualTo("PUBLISHED")
         assertThat(campaigns.findAll().single().status).isEqualTo(PushCampaignStatus.CANCELED)
         noticeService.unpublish(user.id, notice.noticeId, "해제")
-        assertThat(noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("재게시")).notified).isFalse()
+        assertThat(noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("재게시")).status.name).isEqualTo("PUBLISHED")
         promotion.sendDue(Instant.now())
         assertThat(campaigns.findAll()).hasSize(1)
         assertThat(rows()).isEmpty()
@@ -341,8 +341,11 @@ abstract class NotificationRecordingIntegrationTests {
 
     private fun publishNotice(tag: com.knk.manyak.notice.entity.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", user.id)
-        val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest(title = "원문 제목", body = "본문", tag = tag, notificationTitle = "알림 제목", notificationBody = "직접 쓴 알림 본문\n줄바꿈", reason = "작성"))
-        return noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))
+        val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest(title = "원문 제목", body = "본문", tag = tag, reason = "작성"))
+        val published = noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))
+        campaignService.create(user.id, com.knk.manyak.push.dto.AdminCampaignRequest(title = "알림 제목",
+            body = "직접 쓴 알림 본문\n줄바꿈", noticeId = notice.noticeId, reason = "연결"))
+        return published
     }
 
     private fun creationRequest(owner: Long?): CreateSimpleStoryRequest {

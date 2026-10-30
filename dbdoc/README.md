@@ -44,7 +44,7 @@
 | [public.device_push_tokens](public.device_push_tokens.md) | 6 |  | BASE TABLE |
 | [public.push_message_templates](public.push_message_templates.md) | 7 |  | BASE TABLE |
 | [public.story_character_images](public.story_character_images.md) | 8 |  | BASE TABLE |
-| [public.push_campaigns](public.push_campaigns.md) | 17 |  | BASE TABLE |
+| [public.push_campaigns](public.push_campaigns.md) | 18 |  | BASE TABLE |
 | [public.credit_orders](public.credit_orders.md) | 14 |  | BASE TABLE |
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
@@ -60,7 +60,7 @@
 | [public.credit_admin_adjustments](public.credit_admin_adjustments.md) | 13 |  | BASE TABLE |
 | [public.push_delivery_results](public.push_delivery_results.md) | 11 |  | BASE TABLE |
 | [public.notices](public.notices.md) | 13 | 공지 초안과 게시. 알림 요청한 공지는 삭제하지 않는다 | BASE TABLE |
-| [public.chat_models](public.chat_models.md) | 8 |  | BASE TABLE |
+| [public.chat_models](public.chat_models.md) | 11 |  | BASE TABLE |
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
 | [public.user_notifications](public.user_notifications.md) | 14 |  | BASE TABLE |
@@ -122,7 +122,7 @@ erDiagram
 "public.device_push_tokens" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
 "public.story_character_images" }o--|| "public.story_characters" : "FOREIGN KEY (character_id) REFERENCES story_characters(id) ON DELETE CASCADE"
 "public.push_campaigns" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id)"
-"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
+"public.push_campaigns" }o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 "public.credit_orders" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
 "public.credit_orders" }o--o| "public.credit_transactions" : "FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id)"
 "public.user_consents" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id)"
@@ -582,6 +582,7 @@ erDiagram
   bigint story_id FK
   varchar_16_ notice_tag
   boolean deep_link_included
+  varchar_40_ failure_reason
 }
 "public.credit_orders" {
   bigint id
@@ -760,6 +761,9 @@ erDiagram
   boolean is_default
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint promo_turn_cost
+  timestamp_with_time_zone promo_starts_at
+  timestamp_with_time_zone promo_ends_at
 }
 "public.admin_analytics_daily_values" {
   bigint id

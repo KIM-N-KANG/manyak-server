@@ -1,0 +1,149 @@
+# 채팅 모델 프로모션 검증 (IntelliJ HTTP Client)
+# 준비: docker compose up -d postgres redis 후 ./gradlew bootRun.
+# auth.http에서 관리자 로그인으로 adminToken 저장. accessToken은 별도 회원의 앱 토큰.
+# 위에서부터 실행. 로컬 LITE 프로모션을 덮어쓴 뒤 해제하므로 테스트 환경에서 실행한다.
+@baseUrl = http://localhost:8080
+
+### 1. 헬스 체크와 이번 검증 기간 준비
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.global.set("promotionStartsAt", new Date(Date.now() - 60000).toISOString());
+    client.global.set("promotionEndsAt", new Date(Date.now() + 3600000).toISOString());
+%}
+
+### 2. 관리자 모델 전체 조회
+GET {{baseUrl}}/api/v1/admin/chat-models
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("모델 전체 목록", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(Array.isArray(response.body.items), `items 배열 필요 actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 3. 무료 프로모션 설정 (1번 기간 사용)
+PUT {{baseUrl}}/api/v1/admin/chat-models/LITE/promotion
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"turnCost":0,"startsAt":"{{promotionStartsAt}}","endsAt":"{{promotionEndsAt}}","reason":"로컬 무료 프로모션 검증"}
+
+> {%
+    client.test("즉시 무료 프로모션", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.turnCost === 20, `정가 expected=20 actual=${response.body.turnCost}`);
+        client.assert(response.body.promotion.status === "ACTIVE", `expected=ACTIVE actual=${response.body.promotion.status}`);
+        client.assert(response.body.promotion.turnCost === 0, `expected=0 actual=${response.body.promotion.turnCost}`);
+    });
+%}
+
+### 4. 회원 모델 목록 (정가 유지와 프로모션)
+GET {{baseUrl}}/api/v1/chats/models
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("회원 프로모션 노출", () => {
+        const lite = response.body.find(m => m.code === "LITE");
+        client.assert(response.status === 200 && lite.turnCost === 20 && lite.promotion.turnCost === 0,
+            `정가 20과 무료 프로모션 필요 actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 5. 회원 체험 사용량 (카운터를 저장해 해제 후 대조)
+GET {{baseUrl}}/api/v1/users/me/trials
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("무료 기간 회원 한도 무제한", () => {
+        client.assert(response.status === 200 && response.body.chatTurn.limit === null,
+            `expected=null actual=${JSON.stringify(response.body)}`);
+    });
+    client.global.set("promotionTrialUsed", response.body.chatTurn.used);
+%}
+
+### 6. 게스트 모델 목록은 프로모션 숨김
+GET {{baseUrl}}/api/v1/chats/models
+
+> {%
+    client.test("게스트 프로모션 없음", () => {
+        client.assert(response.status === 200 && response.body.every(m => m.promotion === null),
+            `프로모션 null 필요 actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 7. 게스트 체험 한도 유지
+GET {{baseUrl}}/api/v1/users/me/trials
+X-Manyak-Device-Id: local-promotion-verification
+
+> {%
+    client.test("게스트 기존 한도", () => {
+        client.assert(response.status === 200 && response.body.chatTurn.limit === 5,
+            `expected=5 actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 8. 400 범위 위반
+PUT {{baseUrl}}/api/v1/admin/chat-models/LITE/promotion
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"turnCost":10001,"startsAt":"{{promotionStartsAt}}","endsAt":"{{promotionEndsAt}}","reason":"범위 검증"}
+
+> {% client.test("400 BAD_REQUEST", () => { client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `actual=${response.status} ${JSON.stringify(response.body)}`); }); %}
+
+### 9. 404 없는 코드
+PUT {{baseUrl}}/api/v1/admin/chat-models/MISSING/promotion
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"turnCost":0,"startsAt":"{{promotionStartsAt}}","endsAt":"{{promotionEndsAt}}","reason":"없는 코드 검증"}
+
+> {% client.test("404 NOT_FOUND", () => { client.assert(response.status === 404 && response.body.code === "NOT_FOUND", `actual=${response.status} ${JSON.stringify(response.body)}`); }); %}
+
+### 10. 401 앱 토큰으로 관리자 접근 (관리자 표식 없음)
+GET {{baseUrl}}/api/v1/admin/chat-models
+Authorization: Bearer {{accessToken}}
+
+> {% client.test("401", () => { client.assert(response.status === 401, `expected=401 actual=${response.status}`); }); %}
+
+### 11. 401 미인증 관리자 접근
+GET {{baseUrl}}/api/v1/admin/chat-models
+
+> {% client.test("401", () => { client.assert(response.status === 401, `expected=401 actual=${response.status}`); }); %}
+
+### 12. 프로모션 해제
+DELETE {{baseUrl}}/api/v1/admin/chat-models/LITE/promotion
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"로컬 검증 종료"}
+
+> {% client.test("해제", () => { client.assert(response.status === 200 && response.body.promotion === null, `expected=200/null actual=${response.status} ${JSON.stringify(response.body)}`); }); %}
+
+### 13. 해제 후 체험 한도와 카운터 유지 (5번 이후 별도 턴을 생성하지 않은 경우)
+GET {{baseUrl}}/api/v1/users/me/trials
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("기존 한도와 사용량", () => {
+        client.assert(response.status === 200 && response.body.chatTurn.limit === 5,
+            `expected=5 actual=${JSON.stringify(response.body)}`);
+        client.assert(response.body.chatTurn.used === client.global.get("promotionTrialUsed"),
+            `used expected=${client.global.get("promotionTrialUsed")} actual=${response.body.chatTurn.used}`);
+    });
+%}
+
+### 14. 404 프로모션 없는 모델 해제
+DELETE {{baseUrl}}/api/v1/admin/chat-models/LITE/promotion
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"중복 해제 검증"}
+
+> {% client.test("404 NOT_FOUND", () => { client.assert(response.status === 404 && response.body.code === "NOT_FOUND", `actual=${response.status} ${JSON.stringify(response.body)}`); }); %}
+
+### 자유 조회: 어서션 없이 현재 관리자 모델 상태 확인
+GET {{baseUrl}}/api/v1/admin/chat-models
+Authorization: Bearer {{adminToken}}

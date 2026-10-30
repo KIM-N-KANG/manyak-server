@@ -29,6 +29,7 @@ class AdminCampaignService(
     private val deliveries: CampaignDeliverySummaryRepository,
     private val campaignList: AdminCampaignListRepository,
     private val stories: StoryRepository,
+    private val notices: com.knk.manyak.notice.service.NoticeService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     @Transactional(readOnly = true)
@@ -41,15 +42,19 @@ class AdminCampaignService(
     fun create(adminUserId: Long, request: AdminCampaignRequest): AdminCampaignResponse {
         val now = clock.instant()
         if (request.scheduledAt?.isBefore(now) == true) badRequest("예약 시각은 현재 이후여야 합니다.")
+        if (request.storyId != null && request.noticeId != null) badRequest("이동 대상은 스토리와 공지 중 하나만 지정하세요.")
+        val notice = request.noticeId?.let { notices.connectNotification(it) ?: badRequest("게시된 공지만 연결할 수 있습니다.") }
         val story = request.storyId?.let { publicId ->
             stories.findByPublicIdAndDeletedAtIsNull(publicId)?.takeIf { it.isPubliclyListed() }
                 ?: badRequest("이동 대상은 공개 스토리여야 합니다.")
         }
         val row = campaigns.save(PushCampaign(title = request.title, body = request.body,
-            scheduledAt = request.scheduledAt ?: now, createdAt = now, storyId = story?.id))
+            scheduledAt = request.scheduledAt ?: now, createdAt = now, storyId = story?.id, noticeId = notice?.id,
+            noticeTag = notice?.tag, kind = notice?.tag?.pushKind ?: PushKind.MARKETING))
         val response = response(row)
         audit.recordChange(adminUserId, AdminAuditAction.PUSH_CAMPAIGN_CREATED, row.publicId.toString(), request.reason,
-            after = mapper.valueToTree(response))
+            after = mapper.valueToTree(mapOf("kind" to row.kind, "title" to row.title, "body" to row.body,
+                "scheduledAt" to row.scheduledAt, "status" to row.status, "storyId" to response.storyId, "noticeId" to response.noticeId)))
         return response
     }
 
@@ -63,10 +68,11 @@ class AdminCampaignService(
 
     private fun transition(adminUserId: Long, id: UUID, reason: String, expected: PushCampaignStatus,
         next: PushCampaignStatus, action: AdminAuditAction): AdminCampaignResponse {
-        find(id)
+        val scheduledAt = find(id).scheduledAt
         if (campaigns.changeStatus(id, expected, next) == 0) throw ResponseStatusException(HttpStatus.CONFLICT, "변경할 수 없는 캠페인 상태입니다.")
         audit.recordChange(adminUserId, action, id.toString(), reason,
-            mapper.createObjectNode().put("status", expected.name), mapper.createObjectNode().put("status", next.name))
+            mapper.valueToTree(mapOf("status" to expected, "scheduledAt" to scheduledAt)),
+            mapper.valueToTree(mapOf("status" to next, "scheduledAt" to scheduledAt)))
         return response(find(id))
     }
 
@@ -81,7 +87,7 @@ class AdminCampaignService(
     private fun find(id: UUID) = campaigns.findByPublicId(id) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "캠페인이 없습니다.")
     private fun response(row: PushCampaign, summary: CampaignDeliverySummary = deliveries.summaries(listOf(row.id))[row.id] ?: CampaignDeliverySummary()) = AdminCampaignResponse(row.publicId, row.kind, row.title, row.body,
         row.scheduledAt, row.status, targetCount = row.targetCount, sentCount = row.sentCount,
-        startedAt = row.startedAt, finishedAt = row.finishedAt, createdAt = row.createdAt,
+        failureReason = row.failureReason, startedAt = row.startedAt, finishedAt = row.finishedAt, createdAt = row.createdAt,
         noticeId = row.noticeId?.let(campaigns::findNoticePublicId),
         storyId = row.storyId?.let { stories.findById(it).orElse(null)?.publicId },
         deliveredMembers = summary.deliveredMembers, deliveredDevices = summary.deliveredDevices, failedDevices = summary.failedDevices)

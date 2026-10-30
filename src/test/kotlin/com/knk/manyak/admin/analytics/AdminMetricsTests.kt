@@ -33,7 +33,7 @@ class AdminMetricsTests {
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
                     path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionBySe?.invoke(url.queryParameter("se")!!, date) ?: retentionValues?.get(date) ?: List(32) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==8)) }) })))
-                    path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); val kakao = events.last()!!.contains(AdminMetricEvents.KAKAO); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,if (kakao) 2 else 5) else List(events.size) { 20-it })) }
+                    path.endsWith("/funnels") -> { val events = url.queryParameterValues("e"); listOf(mapOf("cumulativeRaw" to if (events.size==3) listOf(10,6,5) else List(events.size) { 20-it })) }
                     path.endsWith("/users") -> mapOf("series" to listOf(listOf(73)), "xValues" to listOf(from.toString()))
                     path.endsWith("/sessions/length") -> if (lengthBroken) return MockResponse().setResponseCode(500)
                         else lengthResponse?.let { mapper.readTree(it)["data"] } ?: mapOf("series" to listOf(lengthValues[from] ?: List(9) { 1 }), "xValues" to lengthXValues)
@@ -44,6 +44,7 @@ class AdminMetricsTests {
                         val name = event?.get("event_type")?.asText()
                         val value: Number = when {
                             path.endsWith("/average") -> 123.75
+                            path.endsWith("/peruser") -> 1.8
                             url.queryParameter("m")=="average" -> 4.5
                             name=="_active" -> if(filters.any { it["subprop_key"].asText()=="user_id" }) 1 else when(platform) { "Web" -> 10; "Android" -> 2; "(none)" -> 2; "nonAndroid" -> 11; else -> 13 }
                             name==AdminMetricEvents.MESSAGE -> if (filters.any { it["subprop_key"].asText()=="input_mode" }) 0 else 2
@@ -61,22 +62,22 @@ class AdminMetricsTests {
     private fun range(from: String, to: String) = SegmentRangeQuery().apply { this.from=from; this.to=to }
     @Test fun `활동은 전체와 플랫폼을 따로 조회하고 MAU를 우선 예약한다`() {
         val value = service.activity(range("2026-10-15", "2026-10-21"))
-        assertThat(value.monthlyActiveUsers).isEqualTo(219)
-        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(14,10,3,2))
+        assertThat(value.monthlyActiveUsers).isEqualTo(73)
+        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(10,10,2,2))
         assertThat(value.daily.first().messagesPerUser).isEqualTo(PlatformDecimals(null,4.5,4.5))
-        assertThat(value.daily.last().cumulativeNewVisitors).isEqualTo(PlatformCounts(14,7,7,7))
-        assertThat(requests).hasSize(14)
+        assertThat(value.daily.last().cumulativeNewVisitors).isEqualTo(PlatformCounts(7,7,7,7))
+        assertThat(requests).hasSize(11)
         val first = requests.first().requestUrl!!
         assertThat(first.encodedPath).isEqualTo("/api/2/events/segmentation"); assertThat(first.queryParameter("start")).isEqualTo("20260922"); assertThat(first.queryParameter("end")).isEqualTo("20261021")
         assertThat(first.queryParameter("s")).isNull(); assertThat(first.queryParameter("e")).contains("_active", "country"); assertThat(first.queryParameter("i")).isEqualTo("1")
-        requests.drop(3).forEach { assertThat(it.requestUrl!!.queryParameter("s")).isNull(); assertThat(it.requestUrl!!.queryParameter("g")).isNull() }
-        assertThat(fixture.budget.reserve(333)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        requests.drop(1).forEach { assertThat(it.requestUrl!!.queryParameter("s")).isNull(); assertThat(it.requestUrl!!.queryParameter("g")).isNull() }
+        assertThat(fixture.budget.reserve(400)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         val count=requests.size; service.activity(range("2026-10-15","2026-10-21")); assertThat(requests).hasSize(count)
     }
-    @Test fun `활동 366일은 MAU 90을 먼저 받고 최근 37일을 준비한다`() {
+    @Test fun `활동 366일은 MAU 30을 먼저 받고 최근 47일을 준비한다`() {
         val value = service.activity(range("2025-10-23","2026-10-23"))
-        assertThat(value.daily).hasSize(37); assertThat(value.pendingDates).hasSize(329); assertThat(value.monthlyActiveUsers).isEqualTo(219)
-        assertThat(fixture.budget.reserve(3)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(value.daily).hasSize(47); assertThat(value.pendingDates).hasSize(319); assertThat(value.monthlyActiveUsers).isEqualTo(73)
+        assertThat(fixture.budget.reserve(1)).isFalse()
         assertThatThrownBy { service.activity(range("2025-10-22","2026-10-23")) }.hasMessageContaining("기간")
     }
     @Test fun `리텐션은 인덱스2와 가중 평균을 쓰고 incomplete와 미종료일은 null이다`() {
@@ -159,62 +160,63 @@ class AdminMetricsTests {
         service.retention(range("2026-10-21", "2026-10-23"))
         assertThat(requests).hasSize(3)
     }
-    @Test fun `세션은 평균 길이만 세 조건으로 받고 저장된 날은 다시 받지 않는다`() {
+    @Test fun `세션은 평균 길이와 사용자당 세션을 여섯 조건으로 받고 저장된 날은 다시 받지 않는다`() {
         val value=service.sessions(SegmentRangeQuery())
-        assertThat(value.daily).hasSize(14); assertThat(value.daily.first().averageSessionSeconds).isEqualTo(PlatformDecimals(123.75,123.75,123.75))
-        assertThat(requests).hasSize(3); requests.forEach { assertThat(it.requestUrl!!.encodedPath).isEqualTo("/api/2/sessions/average"); assertThat(it.requestUrl!!.queryParameter("s")).contains("country") }
-        assertThat(mapper.readTree(requests[0].requestUrl!!.queryParameter("s")!!).size()).isEqualTo(1)
+        assertThat(value.daily).hasSize(6); assertThat(value.daily.first().averageSessionSeconds).isEqualTo(PlatformDecimals(123.75,123.75,123.75))
+        assertThat(requests).hasSize(6); requests.forEach { assertThat(it.requestUrl!!.encodedPath).isIn("/api/2/sessions/average", "/api/2/sessions/peruser"); assertThat(it.requestUrl!!.queryParameter("s")).contains("country") }
+        assertThat(mapper.readTree(requests[0].requestUrl!!.queryParameter("s")!!).size()).isEqualTo(2)
         assertThat(mapper.readTree(requests[1].requestUrl!!.queryParameter("s")!!).size()).isEqualTo(2)
-        assertThat(fixture.budget.reserve(52)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(68)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
-    @Test fun `세션 segment는 세그먼트 조건에 user_id를 더해 따로 저장하고 하루 44를 쓴다`() {
+    @Test fun `세션 segment는 세그먼트 조건에 user_id를 더해 따로 저장하고 하루 96를 쓴다`() {
         val q=range("2026-10-17","2026-10-23").let { r -> SegmentRangeQuery().apply { from=r.from; to=r.to; segment="member" } }
         val member=service.sessions(q)
-        assertThat(member.segment).isEqualTo("member"); assertThat(requests).hasSize(3)
+        assertThat(member.segment).isEqualTo("member"); assertThat(requests).hasSize(6)
         requests.forEach { assertThat(mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last().toString()).isEqualTo("{\"prop\":\"user_id\",\"op\":\"is not\",\"values\":[\"(none)\"]}") }
-        assertThat(fixture.budget.reserve(500-308)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(500-480)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         fixture.clock.at=fixture.clock.at.plusSeconds(300); requests.clear()
         service.sessions(SegmentRangeQuery().apply { from=q.from; to=q.to; segment="guest" })
-        assertThat(requests).hasSize(3).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last()["op"].asText()=="is" }
+        assertThat(requests).hasSize(6).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last()["op"].asText()=="is" }
+        fixture.clock.at=fixture.clock.at.plusSeconds(300)
         requests.clear(); assertThat(service.sessions(SegmentRangeQuery().apply { from=q.from; to=q.to }).segment).isEqualTo("all")
-        assertThat(requests).hasSize(3).allMatch { !it.requestUrl!!.queryParameter("s")!!.contains("user_id") }
+        assertThat(requests).hasSize(6).allMatch { !it.requestUrl!!.queryParameter("s")!!.contains("user_id") }
         assertThatThrownBy { service.sessions(SegmentRangeQuery().apply { segment="visitor" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
-    @Test fun `기능 사용 segment는 user_id 필터를 더하고 게스트는 앱 해외 로그인 묶음을 0으로 둔다`() {
+    @Test fun `기능 사용 segment는 전체 조건에 user_id 필터를 더한다`() {
         fun q(segment: String?) = PlatformMetricsQuery().apply { from="2026-10-23"; to="2026-10-23"; platform="all"; this.segment=segment }
-        val all=service.quality(q(null)); assertThat(all.segment).isEqualTo("all"); assertThat(requests).hasSize(33)
+        val all=service.quality(q(null)); assertThat(all.segment).isEqualTo("all"); assertThat(requests).hasSize(15)
         requests.clear(); val guest=service.quality(q("guest"))
-        assertThat(guest.segment).isEqualTo("guest"); assertThat(requests).hasSize(22)
+        assertThat(guest.segment).isEqualTo("guest"); assertThat(requests).hasSize(15)
         assertThat(requests).allMatch { val f=mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().filter { x -> x["subprop_key"].asText()=="user_id" }
             f.size==1 && f[0]["subprop_op"].asText()=="is" && f[0]["subprop_value"][0].asText()=="(none)" }
-        assertThat(guest.daily.single().messagesByInputMode["unknown"]).isEqualTo(4); assertThat(all.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
+        assertThat(guest.daily.single().messagesByInputMode["unknown"]).isEqualTo(2); assertThat(all.daily.single().messagesByInputMode["unknown"]).isEqualTo(2)
         requests.clear(); val member=service.quality(q("member"))
-        assertThat(requests).hasSize(22).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().single { x -> x["subprop_key"].asText()=="user_id" }["subprop_op"].asText()=="is not" }
-        assertThat(member.daily.single().messagesByInputMode["unknown"]).isEqualTo(6)
+        assertThat(requests).hasSize(15).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("e")!!)["filters"].toList().single { x -> x["subprop_key"].asText()=="user_id" }["subprop_op"].asText()=="is not" }
+        assertThat(member.daily.single().messagesByInputMode["unknown"]).isEqualTo(2)
         assertThatThrownBy { service.quality(q("visitor")) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
-    @Test fun `세션 60일은 최근15일 뒤 5분후 다음15일을 받는다`() {
+    @Test fun `세션 60일은 최근6일 뒤 5분후 다음6일을 받는다`() {
         val q=range("2026-08-25","2026-10-23")
-        val a=service.sessions(q); assertThat(a.daily).hasSize(15); assertThat(a.pendingDates).hasSize(45)
+        val a=service.sessions(q); assertThat(a.daily).hasSize(6); assertThat(a.pendingDates).hasSize(54)
         val count=requests.size; service.sessions(q); assertThat(requests).hasSize(count)
         fixture.clock.at=fixture.clock.at.plusSeconds(300)
-        val b=service.sessions(q); assertThat(b.daily).hasSize(30); assertThat(b.pendingDates).hasSize(30)
+        val b=service.sessions(q); assertThat(b.daily).hasSize(12); assertThat(b.pendingDates).hasSize(48)
     }
     @Test fun `기능 지표는 입력방식을 따로 받고 단순 오류율 1초과를 보존한다`() {
         val q=PlatformMetricsQuery().apply { from="2026-10-20"; to="2026-10-21"; platform="web" }
         val value=service.quality(q)
         assertThat(value.daily.first().streamErrorRate).isEqualTo(1.5); assertThat(value.daily.first().messagesByInputMode["unknown"]).isEqualTo(2)
         assertThat(value.daily.first().users.keys).containsExactly("chatLoadError","storyListLoadError","creditShortage","creditChargeViewed","attendanceClicked","inviteSucceeded")
-        assertThat(requests).hasSize(11)
+        assertThat(requests).hasSize(15)
         assertThat(requests).noneMatch { it.requestUrl!!.queryParameter("e")!!.contains("client_storyCreate_completeError_shown") }
         requests.forEach { val u=it.requestUrl!!; assertThat(u.queryParameter("e")).contains("country","platform","Web"); assertThat(u.queryParameter("s")).isNull(); assertThat(u.queryParameter("g")).isNull() }
         assertThat(requests.count { it.requestUrl!!.queryParameter("e")!!.contains("input_mode") }).isEqualTo(3)
         assertThatThrownBy { service.quality(PlatformMetricsQuery().apply { platform="unknown" }) }.isInstanceOf(RuntimeException::class.java)
     }
-    @Test fun `퍼널의 플랫폼 스토리와 턴 조건 및 중복 로그인 합을 보존한다`() {
+    @Test fun `퍼널의 플랫폼 스토리와 턴 조건 및 로그인 커스텀 이벤트를 사용한다`() {
         val q=ConversionMetricsQuery().apply { from="2026-10-21"; to="2026-10-21" }
         val login=service.funnel("guest-limit-login",q)
-        assertThat(login.steps[1].users).isEqualTo(6); assertThat(login.steps[2].users).isEqualTo(7); assertThat(login.steps[2].event).isEqualTo("login_succeeded")
+        assertThat(login.steps[1].users).isEqualTo(6); assertThat(login.steps[2].users).isEqualTo(5); assertThat(login.steps[2].event).isEqualTo("login_succeeded")
         val id=java.util.UUID.randomUUID(); q.storyId=id; q.platform="android"
         val story=service.funnel("story-detail-chat",q)
         assertThat(story.steps.last().turnNumber).isEqualTo(5)
@@ -232,10 +234,10 @@ class AdminMetricsTests {
         assertThat(fixture.budget.reserve(500)).isTrue()
     }
     @Test fun `서로 다른 지표도 공용 예산을 나눠 쓰고 준비된 날짜만 반환한다`() {
-        service.activity(range("2026-10-15","2026-10-21")) // MAU 90 + 일별 77
+        service.activity(range("2026-10-15","2026-10-21")) // MAU 30 + 일별 70
         val result=service.quality(PlatformMetricsQuery().apply { from="2026-09-21"; to="2026-10-21" })
-        assertThat(result.daily).hasSize(10); assertThat(result.pendingDates).hasSize(21)
-        assertThat(fixture.budget.reserve(3)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(result.daily).hasSize(26); assertThat(result.pendingDates).hasSize(5)
+        assertThat(fixture.budget.reserve(10)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `MAU 실패도 저장된 일별 활동은 반환하고 MAU만 null이다`() {
         val date=LocalDate.parse("2026-10-21")
@@ -252,26 +254,25 @@ class AdminMetricsTests {
         assertThat(retention.platforms.first().cohorts).hasSize(20); assertThat(retention.pendingDates).hasSize(346)
         fixture.clock.at=fixture.clock.at.plusSeconds(300)
         val quality=service.quality(PlatformMetricsQuery().apply { from="2025-10-23"; to="2026-10-23" })
-        assertThat(quality.daily).hasSize(15); assertThat(quality.pendingDates).hasSize(351)
+        assertThat(quality.daily).hasSize(33); assertThat(quality.pendingDates).hasSize(333)
         assertThat(fixture.budget.reserve(5)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
 
     private fun days7() = AnalyticsRangeQuery().apply { days = "7" }
     private fun point(count: Int, outof: Int, incomplete: Boolean = false) = mapOf<String, Any>("count" to count, "outof" to outof, "incomplete" to incomplete)
 
-    @Test fun `리텐션 가입자는 플랫폼마다 구글과 카카오 로그인 성공을 시작 이벤트로 6회 조회한다`() {
+    @Test fun `리텐션 가입자는 커스텀 이벤트 하나씩 세 플랫폼으로 조회한다`() {
         assertThat(service.retention(days7(), "signup").cohort).isEqualTo("signup")
-        assertThat(requests).hasSize(6)
+        assertThat(requests).hasSize(3)
         val starts = requests.map { mapper.readTree(it.requestUrl!!.queryParameter("se")!!) }
-        assertThat(starts.map { it["event_type"].asText() }).containsExactly(AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO, AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO, AdminMetricEvents.GOOGLE, AdminMetricEvents.KAKAO)
-        assertThat(starts).allMatch { it["filters"].any { f -> f["subprop_key"].asText() == "is_new_user" && f["subprop_value"][0].asText() == "true" } && it["filters"].toString().contains("country") }
+        assertThat(starts.map { it["event_type"].asText() }).containsOnly(AdminMetricEvents.SIGNUP)
+        assertThat(starts).allMatch { !it["filters"].toString().contains("is_new_user") && it["filters"].toString().contains("country") }
         assertThat(requests).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("re")!!)["event_type"].asText() == "_active" }
-        assertThat(fixture.budget.reserve(500 - 336)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(500 - 168)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
-    @Test fun `가입자는 같은 플랫폼 두 배열을 인덱스마다 더하고 하나라도 incomplete면 null이다`() {
+    @Test fun `가입자 커스텀 이벤트 배열을 그대로 쓰고 incomplete면 null이다`() {
         val date = fixture.clock.instant().atZone(AdminDateRange.KST).toLocalDate().minusDays(20)
-        retentionBySe = { se, _ -> if (se.contains(AdminMetricEvents.GOOGLE)) listOf(point(3, 3), point(3, 3), point(1, 3), point(1, 3))
-            else listOf(point(2, 2), point(2, 2), point(1, 2), point(0, 2, true)) }
+        retentionBySe = { _, _ -> listOf(point(5, 5), point(5, 5), point(2, 5), point(1, 5, true)) }
         for (platform in service.retention(range(date.toString(), date.toString()), "signup").platforms) {
             val row = platform.cohorts.single()
             assertThat(row.users).isEqualTo(5); assertThat(row.d1).isEqualTo(0.4); assertThat(row.d2).isNull()
@@ -291,9 +292,9 @@ class AdminMetricsTests {
     }
     @Test fun `시작 집단마다 저장 키가 따로이고 방문자 키는 cohort 생략과 같다`() {
         assertThat(service.retention(days7()).cohort).isEqualTo("visitor"); assertThat(requests).hasSize(3)
-        // 방문자 정의 해시가 바뀌면 배포 전 저장된 코호트를 처음부터 다시 받는다.
-        assertThat(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).retention().map { it.definition.hash }).containsExactly(
-            "eba32706edb42ed235ecc29b28ecfbe3aa4ee32ee7af2c25bdd068c093029947", "4ea844084c3d7effc6f985b39c3fdb8170d6fb3d2db357f2893d1aef5f82d260", "4fab200ba533d29409029ed5e174bb1022465555027a71985567bf21a142c858")
+        // 결정 46으로 전체 해시만 바뀌며 웹과 앱 저장 키는 유지한다.
+        assertThat(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).retention().drop(1).map { it.definition.hash }).containsExactly(
+            "4ea844084c3d7effc6f985b39c3fdb8170d6fb3d2db357f2893d1aef5f82d260", "4fab200ba533d29409029ed5e174bb1022465555027a71985567bf21a142c858")
         assertThat(service.retention(days7(), "visitor").cohort).isEqualTo("visitor"); assertThat(requests).hasSize(3)
         fixture.clock.at = fixture.clock.at.plusSeconds(300)
         service.retention(days7(), "first-chat"); assertThat(requests).hasSize(6)
@@ -307,9 +308,9 @@ class AdminMetricsTests {
             assertThat(u.queryParameter("start")).isEqualTo(u.queryParameter("end"))
             assertThat(u.queryParameterNames).containsExactlyInAnyOrder("s", "start", "end")
         }
-        val averages = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessions().map { it.definition.parameters.toMap()["s"] }
+        val averages = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper).sessions().take(3).map { it.definition.parameters.toMap()["s"] }
         assertThat(requests.map { it.requestUrl!!.queryParameter("s") }.distinct()).containsExactlyInAnyOrderElementsOf(averages)
-        assertThat(fixture.budget.reserve(500 - 224)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(500 - 252)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         assertThat(value.bins.map { it.fromSeconds }).containsExactly(0, 3, 10, 30, 60, 180, 600, 1800, 3600)
         assertThat(value.bins.map { it.toSeconds }).containsExactly(3, 10, 30, 60, 180, 600, 1800, 3600, 86400)
         assertThat(value.platforms.map { it.platform }).containsExactly("all", "web", "android")
@@ -366,21 +367,21 @@ class AdminMetricsTests {
         lengthBroken = true
         assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { days = "7" }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         requests.clear()
-        assertThat(service.sessions(SegmentRangeQuery().apply { days = "7" }).daily).hasSize(7)
-        assertThat(requests).hasSize(3).allMatch { it.requestUrl!!.encodedPath == "/api/2/sessions/average" }
+        assertThat(service.sessions(SegmentRangeQuery().apply { days = "7" }).daily).hasSize(6)
+        assertThat(requests).hasSize(6).allMatch { it.requestUrl!!.encodedPath in setOf("/api/2/sessions/average", "/api/2/sessions/peruser") }
     }
     @Test fun `세션 길이 회원은 세그먼트에 user_id 조건을 더해 따로 저장한다`() {
         service.sessionLengths(SegmentRangeQuery().apply { days = "7"; segment = "member" })
         assertThat(requests).hasSize(21).allMatch { mapper.readTree(it.requestUrl!!.queryParameter("s")!!).toList().last().toString() == "{\"prop\":\"user_id\",\"op\":\"is not\",\"values\":[\"(none)\"]}" }
-        assertThat(fixture.budget.reserve(500 - 308)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(500 - 336)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
         val defs = MetricDefinitions(AnalyticsQueryFactory(mapper), mapper)
         assertThat(defs.sessionLengths("member").map { it.definition.hash }).doesNotContainAnyElementsOf(defs.sessionLengths().map { it.definition.hash })
         assertThatThrownBy { service.sessionLengths(SegmentRangeQuery().apply { segment = "visitor" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
-    @Test fun `웹 첫 접속 퍼널은 홈 진입과 간편 제작 진입으로 시작하는 신규 사용자 기준이고 다른 퍼널은 활성 사용자다`() {
+    @Test fun `웹 첫 접속 퍼널은 간편 제작 진입과 장르 선택으로 시작하는 신규 사용자 기준이고 다른 퍼널은 활성 사용자다`() {
         val q = ConversionMetricsQuery().apply { from = "2026-10-21"; to = "2026-10-21" }
         val web = service.funnel("web-first-visit", q)
-        assertThat(web.steps.map { it.event }.take(2)).containsExactly("client_storyList_viewed", "client_storyCreate_viewed")
+        assertThat(web.steps.map { it.event }.take(2)).containsExactly("client_storyCreate_viewed", "client_storyCreate_tagCategory_selected")
         assertThat(requests.single().requestUrl!!.queryParameter("n")).isEqualTo("new")
         assertThat(requests.single().requestUrl!!.queryParameterValues("e")).hasSize(6).allMatch { it!!.contains("country") && it.contains("Web") }
         for (name in listOf("android-first-visit", "story-creation", "story-detail-chat", "guest-limit-login")) {

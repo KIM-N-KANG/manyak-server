@@ -49,7 +49,7 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
     implementation("io.sentry:sentry-spring-boot-4:8.43.1")
-    // 메트릭은 OTLP push로 Grafana Cloud에 보낸다(스펙 §4-7). prometheus 레지스트리는 로컬에서
+    // 메트릭은 OTLP push로 OTel Collector를 거쳐 AMP에 보낸다(스펙 §4-7). prometheus 레지스트리는 로컬에서
     // /actuator/prometheus로 export 내용을 눈으로 확인하는 용도이며 운영에서는 export를 끈다.
     // 스타터가 runtime으로만 넘겨 OtlpInstanceIdentityTests 등 컴파일 참조가 안 된다. 메트릭 레지스트리는 명시한다.
     implementation("io.micrometer:micrometer-registry-otlp")

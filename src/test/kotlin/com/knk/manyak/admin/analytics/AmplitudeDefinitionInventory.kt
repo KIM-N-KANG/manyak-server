@@ -45,10 +45,12 @@ internal class AmplitudeDefinitionInventory {
         val campaigns = CampaignAnalyticsService(settings, snapshots, queries, clock)
         val metrics = AdminMetricsService(definitions, snapshots, queries, modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), clock)
         dashboard.dailyMetrics().forEach { daily(it, "dashboard + today") }
-        definitions.activity().forEach { daily(it, "users/activity") }; listOf("all", "android", "android_overseas").forEach { interval(definitions.mau(date, it), "users/activity:MAU") }
+        definitions.activity().forEach { daily(it, "users/activity") }; interval(definitions.mau(date), "users/activity:MAU")
         definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.sessionLengths().forEach { daily(it, "users/session-lengths") }
         for (cohort in listOf("visitor", "signup", "first-chat")) definitions.retention(cohort).forEach { daily(it, "users/retention:$cohort") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
+        daily(definitions.appActivation(), "users/app-activation")
+        campaigns.appTransferMetrics().forEach { daily(it, "campaigns/app-transfer") }
         definitions.signupPlatforms().forEach { daily(it, "users/signups") }
         for (segment in listOf("guest", "member")) {
             definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }; definitions.sessionLengths(segment).forEach { daily(it, "users/session-lengths:$segment") }
@@ -59,18 +61,21 @@ internal class AmplitudeDefinitionInventory {
             definitions.chatOptions(segment, listOf("AURORA", "LITE")).forEach { daily(it, "quality/chat-options:$segment") }
         }
         for (item in items) {
+            campaigns.creativeMetrics(item.campaign).forEach { daily(it, "campaigns/creatives:" + item.key) }
+            capture { campaigns.activation(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
+            capture { campaigns.reach(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
             campaigns.trendMetrics(item.campaign).forEach { daily(it, "campaign:" + item.key) }
             capture { campaigns.creation(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
             val story = item.storyId ?: UUID.fromString("cca6358a-0ef3-4709-88d1-100b9faeeca8")
             capture { campaigns.story(StoryCampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign; storyId=story }) }
         }
         capture { campaigns.sources(AnalyticsRangeQuery().apply { from=date.toString(); to=date.toString() }) }
-        for (name in listOf("web-first-visit", "android-first-visit", "story-creation", "story-detail-chat", "guest-limit-login")) {
-            val platforms = if (name.endsWith("first-visit")) listOf<String?>(null) else listOf("web", "android")
+        for (name in listOf("web-first-visit", "android-first-visit", "first-visit-activation", "login-signup", "android-activation", "web-to-android", "story-creation", "creation-entry-chat", "story-detail-chat", "guest-limit-login")) {
+            val platforms = if (name in setOf("web-first-visit", "android-first-visit", "android-activation", "web-to-android")) listOf<String?>(null) else listOf("web", "android")
             for (platform in platforms) for (story in if (name == "story-detail-chat") listOf(null, UUID.fromString("cca6358a-0ef3-4709-88d1-100b9faeeca8")) else listOf(null)) capture {
                 metrics.funnel(name, ConversionMetricsQuery().apply { from=date.toString(); to=date.toString(); this.platform=platform; storyId=story })
             }
         }
-        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy(), modelCodeReads()).metrics().forEach { daily(it.metric, "batch") }
+        DefaultAnalyticsBatchCatalog(dashboard, definitions, campaigns, settings, AnalyticsBatchPolicy(), modelCodeReads(), PushOpensService(Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), snapshots, queries, PushOpensSettings(date, date), clock)).metrics().forEach { daily(it.metric, "batch") }
     }
 }

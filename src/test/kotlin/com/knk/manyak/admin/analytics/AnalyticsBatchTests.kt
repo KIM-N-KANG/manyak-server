@@ -118,14 +118,20 @@ class AnalyticsBatchTests {
             CampaignDefinition("ended", "종료", "past", day.minusDays(9), day.minusDays(2))), mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val service = CampaignAnalyticsService(campaigns, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), clock)
         val policy = AnalyticsBatchPolicy()
-        val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads()).metrics()
+        val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads(), org.mockito.Mockito.mock(PushOpensService::class.java)).metrics()
         val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + defs.sessionLengths() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
-            defs.signupPlatforms() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
+            defs.signupPlatforms() + listOf(defs.appActivation()) + service.appTransferMetrics() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
+        assertThat(entries.filter { it.metric.definition.metric == "users_session_peruser" }).hasSize(3)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("campaign_device_") }).hasSize(3)
+        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_ai_responses", "quality_simple_completions", "quality_general_submissions", "quality_core_active") }).hasSize(12)
+        assertThat(entries.map { it.key }).containsAll(defs.newVisitors().map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.key }).containsAll(expected.map { it.definition.metric + ":" + it.definition.hash })
-        assertThat(entries.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(entries.filter { it.metric.definition.metric != "users_app_activation" }.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(entries.single { it.metric.definition.metric == "users_app_activation" }.metric.finalizationDelayDays).isEqualTo(1)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("campaign_creative_") }).hasSize(2)
         val common = expected.map { it.definition.metric + ":" + it.definition.hash }.toSet()
         assertThat(entries.filter { it.key !in common }).allMatch { it.start == day.minusDays(1) }
-        val ended = service.trendMetrics("past").map { it.definition.hash }.toSet() - service.trendMetrics("ads").map { it.definition.hash }.toSet()
+        val ended = (service.trendMetrics("past") + service.creativeMetrics("past")).map { it.definition.hash }.toSet() - (service.trendMetrics("ads") + service.creativeMetrics("ads")).map { it.definition.hash }.toSet()
         assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(ended)
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
         // segment guest, member는 화면 요청에서만 받는다.
@@ -179,36 +185,43 @@ class AnalyticsBatchTests {
         assertThat(fixture.snapshots.missingDates(metric, AnalyticsRange(date, date))).isEmpty()
     }
 
-    @Test fun `실제 기본 지표 정의 전체를 목 응답으로 받아 네 슬롯 안에 새벽 작업을 완료한다`() {
+    @Test fun `실제 기본 지표와 웹 앱 열람을 다섯 슬롯 안에 미리 받는다`() {
         val queries = AnalyticsQueryFactory(fixture.mapper); val defs = MetricDefinitions(queries, fixture.mapper)
         val settings = CampaignSettings(listOf(CampaignDefinition("campaign-key", "진행", "actual-campaign", day.minusDays(1))),
             mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val policy = AnalyticsBatchPolicy()
         val dashboard = AdminAnalyticsService(fixture.snapshots, AmplitudeDashboardProperties(teamCohortId = "team"), fixture.mapper, clock)
-        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads())
+        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads(), PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, queries, PushOpensSettings(day.minusDays(5), day.minusDays(3)), clock))
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
             if (r.requestUrl!!.encodedPath == "/api/2/sessions/length") return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(List(9) { 1 }),
                 "xValues" to defs.sessionLengthBounds.zipWithNext { a, b -> "${a}s-${b}s" }))))
+            if (r.requestUrl!!.encodedPath == "/api/2/funnels") return MockResponse().setBody("""{"data":[{"cumulativeRaw":[20,6]}]}""")
+            if (r.requestUrl!!.queryParameter("g") != null || r.requestUrl!!.queryParameter("e")?.contains("utm_campaign") == true) {
+                val start = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
+                val end = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
+                val dates = AnalyticsRange(start, end).dates()
+                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "seriesLabels" to listOf(listOf(0, "source")), "series" to listOf(dates.map { 1 })))))
+            }
             if (r.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(r)
             val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
             val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
             val points = List(32) { i -> mapOf("count" to if (i == 0) 2 else 1, "outof" to 2, "incomplete" to (i == 31)) }
             return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(mapOf("values" to AnalyticsRange(from, to).dates().associate { it.toString() to points }))))))
         } }
-        val results = (1..4).map { val result = runner.run()!!; clock.at = clock.at.plusSeconds(300); result }
+        val results = (1..5).map { val result = runner.run()!!; clock.at = clock.at.plusSeconds(300); result }
         assertThat(results.map { it.phase }).containsOnly("nightly")
-        assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
+        assertThat(results.take(4).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(991)
+        assertThat(results.sumOf { it.cost }).isEqualTo(1212)
         catalog.metrics().forEach { entry ->
-            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
+            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33L else 1L + entry.metric.finalizationDelayDays)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()
         }
         val requests = (0 until server.requestCount).map { server.takeRequest().requestUrl!! }
-        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average", "/api/2/sessions/length").doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average", "/api/2/sessions/length", "/api/2/funnels").doesNotContain("/api/2/users")
         val campaignQueries = requests.mapNotNull { it.queryParameter("e") }.filter { it.contains("initial_utm_campaign") }
         assertThat(campaignQueries).isNotEmpty().allMatch { it.contains("actual-campaign") && !it.contains("campaign-key") }
     }
@@ -219,6 +232,32 @@ class AnalyticsBatchTests {
         val result = AnalyticsBatchRunner(catalog, missing.snapshots, AnalyticsBatchPolicy(), clock).run()!!
         assertThat(result.reason).isEqualTo("no_credentials"); assertThat(result.result).isEqualTo("failed")
         assertThat(result.keys).isEqualTo(1); assertThat(result.cost).isZero(); assertThat(server.requestCount).isZero()
+    }
+
+    @Test fun `열람 배치는 각 측정 시작일부터 백필하며 빈 플랫폼과 미래 시작일은 조회하지 않는다`() {
+        val service = PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots,
+            AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(day.minusDays(4), day.plusDays(1)), clock)
+        val entries = service.batchMetrics()
+        assertThat(entries).hasSize(4)
+        assertThat(entries.sumOf { it.metric.definition.perDay }).isEqualTo(100)
+        assertThat(entries.map { it.start }).containsExactly(day.minusDays(4), day.minusDays(4), day.plusDays(1), day.plusDays(1))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val url = request.requestUrl!!
+                val range = AnalyticsRange(LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE), LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE))
+                requested += range
+                assertThat(url.queryParameter("e")).doesNotContain("client_notification_opened")
+                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to range.dates().map { it.toString() }, "seriesLabels" to emptyList<String>(), "series" to emptyList<String>()))))
+            }
+        }
+        val runner = AnalyticsBatchRunner(AnalyticsBatchCatalog { entries }, fixture.snapshots, AnalyticsBatchPolicy(), clock)
+        assertThat(runner.run()!!.cost).isEqualTo(50)
+        clock.at = clock.at.plusSeconds(300)
+        assertThat(runner.run()!!.cost).isEqualTo(150)
+        assertThat(requested.flatMap { it.dates() }).allMatch { it >= day.minusDays(4) && it < day }
+        assertThat(runner.run()).isNull()
+        val empty = PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(), clock)
+        assertThat(empty.batchMetrics()).isEmpty()
     }
 
 }

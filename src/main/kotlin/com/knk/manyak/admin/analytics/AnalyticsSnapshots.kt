@@ -15,9 +15,9 @@ data class AnalyticsRange(val from: LocalDate, val to: LocalDate) {
     fun dates() = (0 until days).map { from.plusDays(it.toLong()) }
 }
 /** [perDate]면 응답이 범위 전체의 합이라 연속 날짜를 한 구간으로 묶지 않고 날짜마다 조회한다. */
-class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false, val perDate: Boolean = false,
+class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false, val perDate: Boolean = false, val finalizationDelayDays: Long = 0,
     val decode: (JsonNode, AnalyticsRange) -> Map<LocalDate, JsonNode>)
-class RangeAnalyticsMetric(val definition: AnalyticsDefinition, val range: AnalyticsRange, val decode: (JsonNode) -> JsonNode)
+class RangeAnalyticsMetric(val definition: AnalyticsDefinition, val range: AnalyticsRange, val conversionDays: Long = 0, val decode: (JsonNode) -> JsonNode)
 class AnalyticsRefreshProgress {
     var cost: Int = 0; internal set
     var fetchedDays: Int = 0; internal set
@@ -26,9 +26,11 @@ class AnalyticsRefreshProgress {
 class AnalyticsSnapshotResult(
     val daily: Map<String, Map<LocalDate, AnalyticsValue>>, val ranges: Map<String, AnalyticsValue>, val metrics: List<DailyAnalyticsMetric>, val range: AnalyticsRange,
     val progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress(),
+    val dailyFrom: Map<String, LocalDate> = emptyMap(),
 ) {
-    fun values(date: LocalDate) = metrics.mapNotNull { daily[it.definition.hash]?.get(date) }
-    fun readyDates() = range.dates().filter { values(it).size == metrics.size }
+    private fun active(date: LocalDate) = metrics.filter { date >= (dailyFrom[it.definition.hash] ?: range.from) }
+    fun values(date: LocalDate) = active(date).mapNotNull { daily[it.definition.hash]?.get(date) }
+    fun readyDates() = range.dates().filter { values(it).size == active(it).size }
     fun pendingDates() = range.dates() - readyDates().toSet()
     fun value(metric: DailyAnalyticsMetric, date: LocalDate) = daily[metric.definition.hash]?.get(date)
     fun value(metric: RangeAnalyticsMetric) = ranges[metric.definition.hash + ":" + metric.range.from + ":" + metric.range.to]
@@ -55,10 +57,12 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
     private fun rangeKey(metric: RangeAnalyticsMetric) = metric.definition.hash + ":" + metric.range.from + ":" + metric.range.to
     private fun completeRetention(value: JsonNode) = value.isArray && value.size() >= 32 && (0..31).all { value[it]["incomplete"]?.isBoolean == true && !value[it]["incomplete"].asBoolean() }
     private fun finalDaily(metric: DailyAnalyticsMetric, date: LocalDate, value: AnalyticsValue): Boolean =
-        if (metric.retention) completeRetention(value.value) else value.finalizedAt != null || date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
+        if (metric.retention) completeRetention(value.value)
+        else if (metric.finalizationDelayDays > 0) date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date.plusDays(metric.finalizationDelayDays)
+        else value.finalizedAt != null || date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
     private fun dailyValues(metric: DailyAnalyticsMetric, from: LocalDate, to: LocalDate): Map<LocalDate, AnalyticsValue> =
         store.daily(metric.definition, from, to).mapValues { (date, value) ->
-            if (metric.retention && value.finalizedAt != null && !completeRetention(value.value)) {
+            if (value.finalizedAt != null && (metric.retention || metric.finalizationDelayDays > 0) && !finalDaily(metric, date, value)) {
                 // 이전 태스크의 옛 판정도 읽을 때 풀어 기존 upsert가 새 응답을 저장할 수 있게 한다.
                 store.unfinalizeDaily(metric.definition, date, value)
                 value.copy(finalizedAt = null)
@@ -71,10 +75,24 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         return if (metric.retention || date == today().minusDays(1)) fetched == today()
         else date == today() && fetched == today() && clock.instant().isBefore(value.fetchedAt.plusSeconds(policy.currentTtlSeconds))
     }
-    private fun finalRange(metric: RangeAnalyticsMetric, value: AnalyticsValue) = value.finalizedAt != null ||
-        metric.range.to <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > metric.range.to
-    private fun freshRange(metric: RangeAnalyticsMetric, value: AnalyticsValue?) = value != null &&
-        (finalRange(metric, value) || clock.instant().isBefore(value.fetchedAt.plusSeconds(policy.currentTtlSeconds)))
+    private fun finalRange(metric: RangeAnalyticsMetric, value: AnalyticsValue): Boolean {
+        val fetched = value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate()
+        return if (metric.conversionDays > 0) metric.range.to <= today().minusDays(2) && fetched > metric.range.to.plusDays(metric.conversionDays)
+        else value.finalizedAt != null || metric.range.to <= today().minusDays(2) && fetched > metric.range.to
+    }
+    private fun rangeValue(metric: RangeAnalyticsMetric): AnalyticsValue? = store.range(metric.definition, metric.range.from, metric.range.to)?.let { value ->
+        if (metric.conversionDays > 0 && value.finalizedAt != null && !finalRange(metric, value)) {
+            store.unfinalizeRange(metric.definition, metric.range.from, metric.range.to, value)
+            value.copy(finalizedAt = null)
+        } else value
+    }
+    private fun freshRange(metric: RangeAnalyticsMetric, value: AnalyticsValue?): Boolean {
+        value ?: return false
+        if (finalRange(metric, value)) return true
+        return if (metric.conversionDays > 0 && metric.range.to <= today().minusDays(2))
+            value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() == today()
+        else clock.instant().isBefore(value.fetchedAt.plusSeconds(policy.currentTtlSeconds))
+    }
 
     /** 배치도 화면과 같은 확정일·어제·리텐션 유효 판정을 쓴다. */
     fun missingDates(metric: DailyAnalyticsMetric, range: AnalyticsRange): List<LocalDate> {
@@ -99,7 +117,7 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
      * 배치와 백필([backgroundLimit]가 있음)은 백그라운드 갱신을 띄우지 않고 호출한 스레드에서 차례로 갱신한다.
      */
     fun load(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>, extraDaily: List<Pair<DailyAnalyticsMetric, LocalDate>> = emptyList(),
-        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds), backgroundLimit: Int? = null): AnalyticsSnapshotResult {
+        rangeMetrics: List<RangeAnalyticsMetric> = emptyList(), timeout: Duration = Duration.ofSeconds(policy.refreshTimeoutSeconds), backgroundLimit: Int? = null, dailyFrom: Map<String, LocalDate> = emptyMap()): AnalyticsSnapshotResult {
         val dailySpecs = (metrics + extraDaily.map { it.first }).distinctBy { it.definition.hash }
         fun storeFailure(metric: String, failure: Exception) = log.warn("admin_analytics_store_failed endpoint={} metric={} exception={}", endpoint, metric, failure.javaClass.simpleName)
         /** 읽은 값 가운데 이제 확정할 수 있는 값을 확정하고 확정한 행 수를 돌려준다. */
@@ -119,17 +137,17 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
         }
         fun read() = Values(dailySpecs.associate { metric ->
             val dates = range.dates() + extraDaily.filter { it.first.definition.hash == metric.definition.hash }.map { it.second }
-            metric.definition.hash to dailyValues(metric, dates.min(), dates.max()).toMutableMap()
-        }.toMutableMap(), rangeMetrics.mapNotNull { metric -> store.range(metric.definition, metric.range.from, metric.range.to)?.let { rangeKey(metric) to it } }.toMap().toMutableMap())
-        fun result(values: Values, progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress()) = AnalyticsSnapshotResult(values.daily, values.ranges, metrics, range, progress)
-        fun missing(values: Values, metric: DailyAnalyticsMetric, date: LocalDate) = !freshDaily(metric, date, values.daily[metric.definition.hash]?.get(date))
+            metric.definition.hash to dailyValues(metric, maxOf(dates.min(), dailyFrom[metric.definition.hash] ?: dates.min()), dates.max()).toMutableMap()
+        }.toMutableMap(), rangeMetrics.mapNotNull { metric -> rangeValue(metric)?.let { rangeKey(metric) to it } }.toMap().toMutableMap())
+        fun result(values: Values, progress: AnalyticsRefreshProgress = AnalyticsRefreshProgress()) = AnalyticsSnapshotResult(values.daily, values.ranges, metrics, range, progress, dailyFrom)
+        fun missing(values: Values, metric: DailyAnalyticsMetric, date: LocalDate) = date >= (dailyFrom[metric.definition.hash] ?: range.from) && !freshDaily(metric, date, values.daily[metric.definition.hash]?.get(date))
 
         val stored = read()
         val readFinalized = finalizeReadValues(stored)
         val needs = metrics.any { metric -> range.dates().any { missing(stored, metric, it) } } || extraDaily.any { missing(stored, it.first, it.second) } ||
             rangeMetrics.any { !freshRange(it, stored.ranges[rangeKey(it)]) }
         if (!needs) return result(stored)
-        val key = endpoint + ":" + range.from + ":" + range.to + ":" + dailySpecs.joinToString { it.definition.hash } + ":" + rangeMetrics.joinToString { rangeKey(it) }
+        val key = endpoint + ":" + range.from + ":" + range.to + ":" + dailySpecs.joinToString { it.definition.hash } + ":" + rangeMetrics.joinToString { rangeKey(it) } + ":" + dailyFrom.toSortedMap()
         val state = synchronized(states) {
             states.getOrPut(key) {
                 if (states.size >= 256) states.entries.firstOrNull { !it.value.refreshing.get() }?.key?.let { states.remove(it) }
@@ -177,13 +195,13 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                 reservation.use {
                     if (plan.daily.isEmpty() && plan.ranges.isEmpty()) throw AmplitudeFetchFailure(AnalyticsFailureReason.budget_exceeded)
                     for (metric in plan.ranges) {
-                        val current = store.range(metric.definition, metric.range.from, metric.range.to)
+                        val current = rangeValue(metric)
                         if (freshRange(metric, current)) { ranges[rangeKey(metric)] = current!!; continue }
                         fetchingMetric = metric.definition.metric
                         val value = client.fetchDecoded(metric.definition, metric.range, deadline, onSend = { sent++ }) { metric.decode(it) }
                         val raw = AnalyticsValue(value, clock.instant()).let { if (finalRange(metric, it)) it.copy(finalizedAt = clock.instant()) else it }
                         val spent = metric.range.days * metric.definition.perDay; reservation.succeeded(spent); cost += spent; fetchedRange = true
-                        try { store.saveRange(metric.definition, metric.range.from, metric.range.to, raw); ranges[rangeKey(metric)] = store.range(metric.definition, metric.range.from, metric.range.to) ?: raw; if (raw.finalizedAt != null) finalized++ }
+                        try { store.saveRange(metric.definition, metric.range.from, metric.range.to, raw); ranges[rangeKey(metric)] = rangeValue(metric) ?: raw; if (raw.finalizedAt != null) finalized++ }
                         catch (failure: Exception) { storeFailure(metric.definition.metric, failure); ranges[rangeKey(metric)] = raw }
                     }
                     for ((metric, selected) in plan.daily) {

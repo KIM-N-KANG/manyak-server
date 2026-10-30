@@ -10,9 +10,13 @@ import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.*
 
-class AdminSegmentRequest : AdminChartsRequest() { var segment: String? = null }
+class AdminSegmentRequest : AdminChartsRequest() {
+    @field:io.swagger.v3.oas.annotations.media.Schema(allowableValues = ["all", "guest", "member"])
+    var segment: String? = null
+}
+data class MetricPlatformRates(val all: Double?, val web: Double?, val android: Double?)
 data class SignupCounts(val total: Long, val google: Long, val kakao: Long)
-data class SignupDay(val date: LocalDate, val signups: SignupCounts, val cumulativeSignups: Long, val migratedFromGuest: Long, val signupsByPlatform: PlatformCounts?)
+data class SignupDay(val date: LocalDate, val signups: SignupCounts, val cumulativeSignups: Long, val migratedFromGuest: Long, val signupsByPlatform: MetricPlatformCounts?, val newVisitorsByPlatform: MetricPlatformCounts?, val signupRate: MetricPlatformRates?)
 data class SignupResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val platformAsOf: Instant?, val pendingDates: List<LocalDate>, val daily: List<SignupDay>)
 data class ReachPoint(val turn: Int, val chats: Long, val rate: Double)
 data class ReachSegment(val segment: String, val chats: Long, val reached: List<ReachPoint>)
@@ -21,7 +25,7 @@ data class PlatformReach(val platform: String, val chats: Long, val reached: Lis
 data class TurnReachResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val segment: String, val platformAsOf: Instant?, val pendingDates: List<LocalDate>,
     val segments: List<ReachSegment>, val guestToMember: GuestConversion, val platforms: List<PlatformReach>?)
 data class ChatOptionDay(val date: LocalDate, val chats: Long, val withPersona: Long, val byModel: Map<String, Long>, val turnsByModel: Map<String, Long>,
-    val chatStarts: PlatformCounts?, val personaChatStarts: PlatformCounts?, val platformTurnsByModel: Map<String, PlatformCounts>?)
+    val chatStarters: MetricPlatformCounts?, val chatStartersByPersonaType: Map<String, MetricPlatformCounts>?, val platformTurnsByModel: Map<String, MetricPlatformCounts>?)
 data class ChatOptionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val segment: String, val platformAsOf: Instant?, val pendingDates: List<LocalDate>, val daily: List<ChatOptionDay>)
 data class AiCostItem(val feature: String, val model: String?, val calls: Long, val callsWithoutTokens: Long, val inputTokens: Long, val outputTokens: Long, val costKrw: BigDecimal?)
 data class AiCostDay(val date: LocalDate, val byFeature: List<AiCostItem>)
@@ -95,10 +99,11 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         val ready = result.readyDates()
         val asOf = if (ready.isEmpty()) null else result.asOf(ready.flatMap { result.values(it) })
         val pending = result.pendingDates()
-        /** web, android, unknown 세 묶음을 날짜들에서 더하고 전체는 그 합이다. */
-        fun counts(groups: List<List<DailyAnalyticsMetric>>, dates: List<LocalDate> = ready): PlatformCounts {
-            val (web, android, unknown) = groups.map { group -> dates.fold(0L) { sum, date -> group.fold(sum) { s, m -> Math.addExact(s, result.value(m, date)!!.value.asLong()) } } }
-            return PlatformCounts(Math.addExact(Math.addExact(web, android), unknown), web, android, unknown)
+        /** 이벤트 합계는 두 플랫폼의 합, 고유 사용자는 전체 조건 조회 값이다. */
+        fun counts(groups: List<List<DailyAnalyticsMetric>>, dates: List<LocalDate> = ready): MetricPlatformCounts {
+            val values = groups.map { group -> dates.fold(0L) { sum, date -> group.fold(sum) { s, m -> Math.addExact(s, result.value(m, date)!!.value.asLong()) } } }
+            return if (values.size == 3) MetricPlatformCounts(values[0], values[1], values[2])
+                else MetricPlatformCounts(Math.addExact(values[0], values[1]), values[0], values[1])
         }
         fun day(date: LocalDate, groups: List<List<DailyAnalyticsMetric>>) = if (date in ready) counts(groups, listOf(date)) else null
     }
@@ -112,10 +117,13 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
     fun signups(query: AdminChartsRequest): SignupResponse {
         val range = range(query); val rows = repository.signups(range, dashboard.excludedUserIds).associateBy { it.date() }
         var cumulative = repository.signupsBefore(range, dashboard.excludedUserIds)
-        val metrics = definitions.signupPlatforms(); val platform = platformValues("users/signups", range, metrics)
+        val metrics = definitions.signupPlatforms(); val visitors = definitions.newVisitors(); val platform = platformValues("users/signups", range, metrics + visitors)
         return SignupResponse(clock.instant(), range.from, range.to, platform.asOf, platform.pending, range.dates().map { date ->
             val row = rows[date] ?: emptyMap(); val total = row.n("total"); cumulative = Math.addExact(cumulative, total)
-            SignupDay(date, SignupCounts(total, row.n("google"), row.n("kakao")), cumulative, row.n("migrated"), platform.day(date, metrics.chunked(2)))
+            val signups = platform.day(date, metrics.map { listOf(it) }); val newVisitors = platform.day(date, visitors.map { listOf(it) })
+            fun rate(n: Long, d: Long) = if (d == 0L) null else n.toDouble() / d
+            val rates = if (signups == null || newVisitors == null) null else MetricPlatformRates(rate(signups.all, newVisitors.all), rate(signups.web, newVisitors.web), rate(signups.android, newVisitors.android))
+            SignupDay(date, SignupCounts(total, row.n("google"), row.n("kakao")), cumulative, row.n("migrated"), signups, newVisitors, rates)
         })
     }
     fun reach(query: AdminSegmentRequest): TurnReachResponse {
@@ -129,8 +137,8 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         val metrics = definitions.turnReach(segment); val platform = platformValues("conversion/turn-reach", range, metrics)
         // 기준 턴마다 플랫폼 묶음. 분모는 1턴 성공 이벤트 수라 범위 전에 시작한 채팅 때문에 1을 넘을 수 있다.
         val byTurn = AdminQuery.turnReachThresholds.indices.map { i -> platform.counts(metrics.chunked(AdminQuery.turnReachThresholds.size).map { listOf(it[i]) }) }
-        val platforms = if (platform.ready.isEmpty()) null else listOf("all", "web", "android", "unknown").map { name ->
-            fun pick(c: PlatformCounts) = when (name) { "all" -> c.all; "web" -> c.web; "android" -> c.android; else -> c.unknown }
+        val platforms = if (platform.ready.isEmpty()) null else listOf("all", "web", "android").map { name ->
+            fun pick(c: MetricPlatformCounts) = when (name) { "all" -> c.all; "web" -> c.web; "android" -> c.android; else -> error("Invalid platform") }
             val chats = pick(byTurn[AdminQuery.turnReachThresholds.indexOf(1)])
             PlatformReach(name, chats, AdminQuery.turnReachThresholds.mapIndexed { i, turn -> val n = pick(byTurn[i]); ReachPoint(turn, n, ratio(n, chats)) })
         }
@@ -141,13 +149,14 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         val turns = repository.turnsByModel(range, dashboard.excludedUserIds).groupBy { it.date() }
         val models = repository.modelCodes(); val metrics = definitions.chatOptions(segment, models)
         val platform = platformValues("quality/chat-options", range, metrics)
-        val starts = metrics.take(6).chunked(2); val modelTurns = models.zip(metrics.drop(6).chunked(3))
+        val starts = metrics.take(12).chunked(4); val modelTurns = models.zip(metrics.drop(12).chunked(2))
         return ChatOptionResponse(clock.instant(), range.from, range.to, segment, platform.asOf, platform.pending, range.dates().map { date ->
             val rows = groups[date].orEmpty()
             ChatOptionDay(date, rows.sumOf { it.n("chats") }, rows.sumOf { it.n("persona") },
                 rows.associate { it["model"].toString() to it.n("chats") },
                 turns[date].orEmpty().associate { it["model"].toString() to it.n("turns") },
-                platform.day(date, starts), platform.day(date, starts.map { listOf(it[1]) }),
+                platform.day(date, starts.map { listOf(it[0]) }),
+                if (date in platform.ready) listOf("default", "persona", "none").mapIndexed { i, name -> name to platform.counts(starts.map { listOf(it[i + 1]) }, listOf(date)) }.toMap() else null,
                 if (date in platform.ready) modelTurns.associate { (code, group) -> code to platform.counts(group.map { listOf(it) }, listOf(date)) } else null)
         })
     }
