@@ -17,15 +17,17 @@
 | finished_at | timestamp with time zone |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | kind | varchar(16) | 'MARKETING'::character varying | false |  |  | 서비스 알림 또는 광고 알림. 기존 캠페인은 광고 종류 |
-| notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 공지당 한 번의 알림 요청. 공지 알림이 아니면 NULL |
+| notice_id | bigint |  | true |  | [public.notices](public.notices.md) | 캠페인에 연결한 공지. 같은 공지에 여러 캠페인 허용 |
 | story_id | bigint |  | true |  | [public.stories](public.stories.md) | 프로모션 이동 대상 스토리. 없으면 NULL |
 | notice_tag | varchar(16) |  | true |  |  |  |
 | deep_link_included | boolean |  | true |  |  |  |
+| failure_reason | varchar(40) |  | true |  |  | 발송 없이 실패한 사유. 재실행하면 NULL |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
+| ck_push_campaigns_failure_reason | CHECK | CHECK (((failure_reason)::text = 'NOTICE_NOT_PUBLISHED'::text)) |
 | ck_push_campaigns_kind | CHECK | CHECK (((kind)::text = ANY ((ARRAY['SERVICE'::character varying, 'MARKETING'::character varying])::text[]))) |
 | ck_push_campaigns_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['SCHEDULED'::character varying, 'SENDING'::character varying, 'SENT'::character varying, 'CANCELED'::character varying, 'FAILED'::character varying])::text[]))) |
 | push_campaigns_notice_tag_check | CHECK | CHECK (((notice_tag)::text = ANY ((ARRAY['SERVICE'::character varying, 'UPDATE'::character varying, 'MAINTENANCE'::character varying, 'EVENT'::character varying, 'PROMOTION'::character varying])::text[]))) |
@@ -33,7 +35,6 @@
 | push_campaigns_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | push_campaigns_public_id_key | UNIQUE | UNIQUE (public_id) |
 | push_campaigns_notice_id_fkey | FOREIGN KEY | FOREIGN KEY (notice_id) REFERENCES notices(id) |
-| uq_push_campaigns_notice | UNIQUE | UNIQUE (notice_id) |
 
 ## Indexes
 
@@ -42,7 +43,6 @@
 | push_campaigns_pkey | CREATE UNIQUE INDEX push_campaigns_pkey ON public.push_campaigns USING btree (id) |
 | push_campaigns_public_id_key | CREATE UNIQUE INDEX push_campaigns_public_id_key ON public.push_campaigns USING btree (public_id) |
 | idx_push_campaigns_status_scheduled_at | CREATE INDEX idx_push_campaigns_status_scheduled_at ON public.push_campaigns USING btree (status, scheduled_at) |
-| uq_push_campaigns_notice | CREATE UNIQUE INDEX uq_push_campaigns_notice ON public.push_campaigns USING btree (notice_id) |
 
 ## Relations
 
@@ -50,7 +50,7 @@
 erDiagram
 
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
-"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
+"public.push_campaigns" }o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 "public.push_campaigns" }o--o| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id)"
 
 "public.push_campaigns" {
@@ -71,6 +71,7 @@ erDiagram
   bigint story_id FK
   varchar_16_ notice_tag
   boolean deep_link_included
+  varchar_40_ failure_reason
 }
 "public.push_delivery_results" {
   bigint id

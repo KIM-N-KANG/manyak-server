@@ -76,19 +76,22 @@ class PushCampaign(
     @Column(name = "deep_link_included")
     var deepLinkIncluded: Boolean? = null,
 
+    @Column(name = "failure_reason", length = 40)
+    var failureReason: String? = null,
+
     @Column(name = "finished_at")
     var finishedAt: Instant? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val kind: PushKind = PushKind.MARKETING,
+    var kind: PushKind = PushKind.MARKETING,
 
-    @Column(name = "notice_id", unique = true)
+    @Column(name = "notice_id")
     val noticeId: Long? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "notice_tag", length = 16)
-    val noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+    var noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
 
     /** 이동 대상 스토리의 내부 FK. API와 푸시 데이터에는 스토리 publicId를 사용한다. */
     @Column(name = "story_id")

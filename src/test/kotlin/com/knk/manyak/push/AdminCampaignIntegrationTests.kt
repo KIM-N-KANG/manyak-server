@@ -63,6 +63,59 @@ class AdminCampaignIntegrationTests {
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
 
+    @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
+
+    @Test fun `공지 연결은 태그로 종류를 정하고 첫 시각을 유지하며 감사에 공개 식별자를 남긴다`() {
+        for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
+            val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문", tag = tag,
+                status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = admin.id))
+            val first = create(campaignBody().apply { put("noticeId", notice.publicId.toString()); put("kind", "INVALID") })
+            assertThat(first["kind"].asText()).isEqualTo(tag.pushKind.name)
+            assertThat(first["noticeId"].asText()).isEqualTo(notice.publicId.toString())
+            assertThat(first["failureReason"].isNull).isTrue()
+            val linked = notices.findById(notice.id).orElseThrow()
+            assertThat(linked.notifiedAt).isNotNull()
+            assertThat(linked.updatedAt).isEqualTo(notice.updatedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS))
+            create(campaignBody().apply { put("noticeId", notice.publicId.toString()); put("scheduledAt", Instant.now().plusSeconds(3600).toString()) })
+            assertThat(notices.findById(notice.id).orElseThrow().notifiedAt).isEqualTo(linked.notifiedAt)
+            assertThat(campaigns.findAll().filter { it.noticeId == notice.id }).hasSize(2).allSatisfy {
+                assertThat(it.noticeTag).isEqualTo(tag)
+            }
+            val raw = jdbc.queryForList("SELECT after_state FROM admin_audit_logs WHERE action='PUSH_CAMPAIGN_CREATED' ORDER BY id DESC").first()["after_state"]!!
+            val audit = mapper.readTree(if (raw is ByteArray) String(raw, Charsets.UTF_8) else raw.toString())
+            assertThat(audit["noticeId"].asText()).isEqualTo(notice.publicId.toString())
+            assertThat(audit.properties().map { it.key }).containsExactlyInAnyOrder("kind", "title", "body", "scheduledAt", "status", "storyId", "noticeId")
+        }
+        assertThat(count("admin_audit_logs")).isEqualTo(10)
+    }
+
+    @Test fun `초안 해제 없는 공지와 두 이동 대상은 예약하지 않는다`() {
+        val draft = notices.save(com.knk.manyak.notice.entity.Notice(title = "초안", body = "본문",
+            tag = com.knk.manyak.notice.entity.NoticeTag.SERVICE, createdByUserId = admin.id))
+        for (id in listOf(draft.publicId, UUID.randomUUID()))
+            call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", id.toString()) }).expectStatus().isBadRequest
+        call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", draft.publicId.toString()); put("storyId", UUID.randomUUID().toString()) })
+            .expectStatus().isBadRequest
+        assertThat(campaigns.count()).isZero()
+        assertThat(notices.findById(draft.id).orElseThrow().notifiedAt).isNull()
+        assertThat(create(campaignBody().apply { put("kind", "SERVICE") })["kind"].asText()).isEqualTo("MARKETING")
+    }
+
+    @Test fun `공지 연결 뒤 감사 실패는 캠페인과 첫 알림 시각을 롤백한다`() {
+        val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문",
+            tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED,
+            createdByUserId = admin.id))
+        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.admin.entity.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
+            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = "fixture", requestId = "fixture")
+        org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure"))
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+        call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", notice.publicId.toString()) }).expectStatus().is5xxServerError
+        assertThat(notices.findById(notice.id).orElseThrow().notifiedAt).isNull()
+        assertThat(campaigns.count()).isZero()
+    }
+
     @Test fun `감사 저장 실패는 예약 취소 재실행 문구 변경과 복귀를 모두 롤백한다`() {
         val cancelId = create()["campaignId"].asText()
         val retryId = create()["campaignId"].asText()
@@ -114,10 +167,14 @@ class AdminCampaignIntegrationTests {
 
     @Test fun `실패 재실행은 결과를 유지하고 예약 상태에서 재실행하지 않는다`() {
         val id = create()["campaignId"].asText()
-        jdbc.update("UPDATE push_campaigns SET status='FAILED', target_count=7, sent_count=2, started_at=CURRENT_TIMESTAMP, finished_at=CURRENT_TIMESTAMP WHERE public_id=?", UUID.fromString(id))
+        jdbc.update("UPDATE push_campaigns SET status='FAILED', failure_reason='NOTICE_NOT_PUBLISHED', target_count=7, sent_count=2, started_at=CURRENT_TIMESTAMP, finished_at=CURRENT_TIMESTAMP WHERE public_id=?", UUID.fromString(id))
+        call(HttpMethod.GET, "/campaigns/$id").expectStatus().isOk.expectBody()
+            .jsonPath("$.failureReason").isEqualTo("NOTICE_NOT_PUBLISHED")
+        call(HttpMethod.GET, "/campaigns").expectStatus().isOk.expectBody()
+            .jsonPath("$.items[0].failureReason").isEqualTo("NOTICE_NOT_PUBLISHED")
         call(HttpMethod.POST, "/campaigns/$id/retry", mapOf("reason" to "장애 복구")) .expectStatus().isOk
             .expectBody().jsonPath("$.status").isEqualTo("SCHEDULED").jsonPath("$.targetCount").isEqualTo(7)
-            .jsonPath("$.sentCount").isEqualTo(2).jsonPath("$.startedAt").isNotEmpty().jsonPath("$.finishedAt").isNotEmpty()
+            .jsonPath("$.sentCount").isEqualTo(2).jsonPath("$.failureReason").isEmpty().jsonPath("$.startedAt").isNotEmpty().jsonPath("$.finishedAt").isNotEmpty()
         call(HttpMethod.POST, "/campaigns/$id/retry", mapOf("reason" to "재실행")) .expectStatus().isEqualTo(409)
         assertThat(jdbc.queryForObject("SELECT action FROM admin_audit_logs ORDER BY id DESC LIMIT 1", String::class.java)).isEqualTo("PUSH_CAMPAIGN_RETRIED")
     }

@@ -1,0 +1,159 @@
+# 공지 게시와 알림 예약 분리 검증. 로컬 Postgres·Redis와 서버를 준비한다.
+# http/admin/auth.http에서 adminToken을 저장한 뒤 위에서부터 실행한다.
+# 2099년 예약은 다음 폴링에 발송되지 않는다. 마지막 취소 요청까지 실행한다.
+# 즉시 발송은 별도 검증 환경에서 scheduledAt을 생략하고 실행한다.
+@baseUrl = http://localhost:8080
+
+### 상태
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("상태", () => client.assert(response.status === 200, `actual=${response.status}`));
+%}
+
+### 초안 생성: 예전 알림 문구는 타입과 무관하게 무시한다
+POST {{baseUrl}}/api/v1/admin/notices
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"캠페인 연결 공지","body":"원문 본문","tag":"UPDATE","notificationTitle":[1],"notificationBody":"　","reason":"분리 검증"}
+
+> {%
+    client.test("초안", () => client.assert(response.status === 201 && !("notificationTitle" in response.body) && !("notificationBody" in response.body), JSON.stringify(response.body)));
+    if (response.status === 201) client.global.set("campaignNoticeId", response.body.noticeId);
+%}
+
+### 초안 연결 거절
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{campaignNoticeId}}","title":"알림","body":"본문","reason":"초안 거절"}
+
+> {%
+    client.test("초안 400", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 게시는 알림 시각을 기록하지 않는다
+POST {{baseUrl}}/api/v1/admin/notices/{{campaignNoticeId}}/publish
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"notify":true,"notificationKind":"MARKETING","reason":"게시만 검증"}
+
+> {%
+    client.test("게시", () => client.assert(response.status === 200 && response.body.notifiedAt === null && !("notified" in response.body), JSON.stringify(response.body)));
+%}
+
+### 같은 공지 첫 예약: 요청 kind 무시, 태그 UPDATE는 SERVICE
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{campaignNoticeId}}","kind":"INVALID","title":"직접 쓴 알림 제목","body":"직접 쓴 알림 본문","scheduledAt":"2099-01-01T03:00:00Z","reason":"첫 예약"}
+
+> {%
+    client.test("공지 캠페인", () => client.assert(response.status === 201 && response.body.kind === "SERVICE" && response.body.noticeId === client.global.get("campaignNoticeId") && response.body.failureReason === null, JSON.stringify(response.body)));
+    if (response.status === 201) client.global.set("firstNoticeCampaignId", response.body.campaignId);
+%}
+
+### 첫 연결 시각 저장
+GET {{baseUrl}}/api/v1/admin/notices/{{campaignNoticeId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("첫 연결 시각", () => client.assert(response.status === 200 && response.body.notifiedAt !== null, JSON.stringify(response.body)));
+    if (response.status === 200) client.global.set("firstNoticeNotifiedAt", response.body.notifiedAt);
+%}
+
+### 같은 공지 두 번째 예약도 201
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{campaignNoticeId}}","title":"두 번째 알림","body":"본문","scheduledAt":"2099-01-02T03:00:00Z","reason":"재예약"}
+
+> {%
+    client.test("두 번째 연결", () => client.assert(response.status === 201 && response.body.campaignId !== client.global.get("firstNoticeCampaignId"), JSON.stringify(response.body)));
+    if (response.status === 201) client.global.set("secondNoticeCampaignId", response.body.campaignId);
+%}
+
+### 해제해도 첫 연결 시각 유지
+POST {{baseUrl}}/api/v1/admin/notices/{{campaignNoticeId}}/unpublish
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"해제 검증"}
+
+> {%
+    client.test("시각 보존", () => client.assert(response.status === 200 && response.body.notifiedAt === client.global.get("firstNoticeNotifiedAt"), JSON.stringify(response.body)));
+%}
+
+### 게시 해제된 공지는 새 예약 거절
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{campaignNoticeId}}","title":"거절 확인","body":"본문","reason":"해제 후 예약"}
+
+> {%
+    client.test("해제 400", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 두 이동 대상은 400
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{campaignNoticeId}}","storyId":"00000000-0000-4000-8000-000000000000","title":"거절","body":"본문","reason":"중복 이동 대상"}
+
+> {%
+    client.test("대상 중복", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 미존재 공지는 400
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"noticeId":"00000000-0000-4000-8000-000000000000","title":"거절","body":"본문","reason":"부재 확인"}
+
+> {%
+    client.test("없는 공지", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 자유 조회: 예약은 해제 후에도 SCHEDULED
+GET {{baseUrl}}/api/v1/admin/push/campaigns/{{firstNoticeCampaignId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("예약 유지", () => client.assert(response.status === 200 && response.body.status === "SCHEDULED" && response.body.failureReason === null, JSON.stringify(response.body)));
+%}
+
+# 선점 실패 수동 확인은 검증 환경에서 예약 시각을 가까운 미래로 바꿔 생성하고 게시 해제한다.
+# 폴링 뒤 상세와 목록에 FAILED, failureReason=NOTICE_NOT_PUBLISHED, targetCount=0, sentCount=0을 확인한다.
+# 알림 내역, push_outbox, FCM 발송은 없어야 한다. 재게시 후 /retry 응답은 SCHEDULED와 failureReason=null이다.
+# 태그 변경은 SERVICE로 예약한 공지를 EVENT로 수정한 뒤 선점하여 kind=MARKETING과 notice_tag=EVENT,
+# 광고 동의 대상 및 푸시 광고 표기를 확인한다. 선점 뒤 태그 변경은 이미 발송한 값에 반영되지 않는다.
+
+### 첫 예약 정리
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{firstNoticeCampaignId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"검증 정리"}
+
+> {%
+    client.test("첫 취소", () => client.assert(response.status === 200 && response.body.status === "CANCELED", JSON.stringify(response.body)));
+%}
+
+### 두 번째 예약 정리
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{secondNoticeCampaignId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"reason":"검증 정리"}
+
+> {%
+    client.test("두 번째 취소", () => client.assert(response.status === 200 && response.body.status === "CANCELED", JSON.stringify(response.body)));
+%}
