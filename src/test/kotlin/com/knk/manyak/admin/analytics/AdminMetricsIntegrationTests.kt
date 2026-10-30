@@ -109,7 +109,7 @@ class AdminMetricsIntegrationTests {
             when (path) {
                 "/users/signups" -> { assertThat(body["daily"][0]["signupsByPlatform"].isNull).isTrue(); assertThat(body["daily"][0]["signups"].has("other")).isFalse() }
                 "/conversion/turn-reach" -> { assertThat(body["platforms"].isNull).isTrue(); assertThat(body["segments"].size()).isEqualTo(3); assertThat(body["segment"].asText()).isEqualTo("all") }
-                else -> for (field in listOf("chatStarts", "personaChatStarts", "platformTurnsByModel")) assertThat(body["daily"][0][field].isNull).isTrue()
+                else -> for (field in listOf("chatStarters", "chatStartersByPersonaType", "platformTurnsByModel")) assertThat(body["daily"][0][field].isNull).isTrue()
             }
         }
         val charts = mapper.readTree(client.get().uri("/api/v1/admin/dashboard/charts?days=7").header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
@@ -144,7 +144,7 @@ class AdminMetricsIntegrationTests {
         }
         val period="from=2026-10-19&to=2026-10-21"
         val activity=body("/users/activity?$period")
-        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(300)
+        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(100)
         assertThat(activity["daily"][0]["activeUsers"]["unknown"].asLong()).isEqualTo(10)
         assertThat(activity["daily"][0]["messagesPerUser"]["all"].isNull).isTrue()
         val retention=body("/users/retention?$period")
@@ -160,31 +160,57 @@ class AdminMetricsIntegrationTests {
             assertThat(platform["cohorts"][0]["d4"].isNull).isTrue()
             assertThat(platform["summary"]["d3"].asDouble()).isEqualTo(0.25)
         }
-        assertThat(body("/users/sessions?$period")["daily"][0]["averageSessionSeconds"]["web"].asDouble()).isEqualTo(4.5)
+        val sessions = body("/users/sessions?$period")["daily"][0]
+        assertThat(sessions["averageSessionSeconds"]["web"].asDouble()).isEqualTo(4.5)
+        assertThat(sessions["sessionsPerUser"]["web"].asDouble()).isEqualTo(10.0)
+        assertThat(sessions["sessionsPerUser"]["unknown"].isNull).isTrue()
         assertThat(body("/quality/client?$period&platform=android")["platform"].asText()).isEqualTo("android")
         assertThat(body("/quality/client?$period&platform=web&segment=guest")["segment"].asText()).isEqualTo("guest")
         assertThat(body("/users/sessions?$period&segment=member")["segment"].asText()).isEqualTo("member")
         assertThat(retention["cohort"].asText()).isEqualTo("visitor")
-        assertThat(body("/users/retention?$period&cohort=signup")["platforms"][0]["cohorts"][0]["users"].asLong()).isEqualTo(40)
+        assertThat(body("/users/retention?$period&cohort=signup")["platforms"][0]["cohorts"][0]["users"].asLong()).isEqualTo(20)
         assertThat(body("/users/retention?$period&cohort=first-chat")["cohort"].asText()).isEqualTo("first-chat")
         val lengths=body("/users/session-lengths?$period&segment=member")
         assertThat(lengths["segment"].asText()).isEqualTo("member"); assertThat(lengths["bins"].size()).isEqualTo(9)
         assertThat(lengths["platforms"][0]["sessions"].toList().map { it.asLong() }).containsExactly(12,6,3,3,3,3,0,0,0)
         assertThat(lengths["platforms"][0]["totalSessions"].asLong()).isEqualTo(30); assertThat(lengths["platforms"][0]["medianBin"].asInt()).isEqualTo(1)
+        assertThat(lengths["daily"][0]["sessions"]["all"].asLong()).isEqualTo(10)
+        assertThat(lengths["daily"].size() + lengths["pendingDates"].size()).isEqualTo(3)
         val quality=body("/quality/client?$period")
+        assertThat(quality["daily"][0]["activity"]["coreActiveUsers"].asLong()).isEqualTo(10)
+        assertThat(quality["daily"][0]["activity"]["messagesPerCoreUser"].asDouble()).isEqualTo(1.0)
         assertThat(quality["daily"][0]["users"].has("storyCompleteError")).isFalse()
         assertThat(quality["storyCompletion"].toList().map { it["date"].asText() }).containsExactly("2026-10-19","2026-10-20","2026-10-21")
         assertThat(quality["storyCompletion"][0]["failureRate"].isNull).isTrue()
-        for ((name,steps) in listOf("web-first-visit" to 6,"android-first-visit" to 2,"story-creation" to 4,"story-detail-chat" to 7,"guest-limit-login" to 3)) {
+        val signupDay = body("/users/signups?$period")["daily"][0]
+        assertThat(signupDay["newVisitorsByPlatform"]["all"].asLong()).isEqualTo(10)
+        assertThat(signupDay["signupRate"]["all"].asDouble()).isEqualTo(1.0)
+        assertThat(signupDay["signupRate"].has("unknown")).isFalse()
+        val signups = signupDay["signupsByPlatform"]
+        assertThat(signups.has("unknown")).isFalse()
+        assertThat(signups["all"].asLong()).isEqualTo(10)
+        val reach = body("/conversion/turn-reach?$period")["platforms"]
+        assertThat(reach.toList().map { it["platform"].asText() }).containsExactly("all", "web", "android")
+        val options = body("/quality/chat-options?$period")["daily"][0]
+        assertThat(options["chatStarters"].has("unknown")).isFalse()
+        for (counts in options["chatStartersByPersonaType"]) assertThat(counts.has("unknown")).isFalse()
+        assertThat(options.has("chatStarts")).isFalse(); assertThat(options.has("personaChatStarts")).isFalse()
+        for (turns in options["platformTurnsByModel"]) assertThat(turns.has("unknown")).isFalse()
+        for ((name,steps) in listOf("web-first-visit" to 6,"android-first-visit" to 2,"story-creation" to 4,"story-detail-chat" to 7,"guest-limit-login" to 3,"first-visit-activation" to 3,"login-signup" to 2,"android-activation" to 3,"web-to-android" to 2,"creation-entry-chat" to 6)) {
             val result=body("/conversion/funnels/$name?from=2026-10-21&to=2026-10-21")
             assertThat(result["steps"].size()).isEqualTo(steps)
-            assertThat(result["platform"].asText()).isEqualTo(if(name=="android-first-visit") "android" else "web")
+            if (name == "web-to-android") {
+                assertThat(result["platform"].isNull).isTrue()
+                assertThat(result["steps"].toList().map { it["platform"].asText() }).containsExactly("web", "android")
+            } else assertThat(result["platform"].asText()).isEqualTo(if(name in setOf("android-first-visit", "android-activation")) "android" else "web")
+            assertThat(result["steps"].toList()).allMatch { it.has("minTurnNumber") && it.has("platform") }
+            if (name == "first-visit-activation") assertThat(result["steps"][2]["minTurnNumber"].asInt()).isEqualTo(5)
         }
         for(path in listOf("/users/activity","/users/retention","/users/sessions","/users/signups","/quality/client","/quality/chat-options","/quality/ai-cost","/conversion/turn-reach")) {
             for(query in listOf("from=2026-10-21","from=2026-02-30&to=2026-10-21","from=2026-10-22&to=2026-10-21","from=2025-10-21&to=2026-10-23","days=7&$period")) get("$path?$query").expectStatus().isBadRequest
         }
         for(path in listOf("/users/activity?days=90","/users/retention?days=30","/users/retention?from=2026-10-23&to=2026-10-23","/users/sessions?days=30","/quality/client?days=90","/quality/client?platform=unknown",
-            "/conversion/funnels/unknown","/conversion/funnels/web-first-visit?platform=web","/conversion/funnels/android-first-visit?platform=android","/conversion/funnels/story-creation?storyId=00000000-0000-4000-8000-000000000001",
+            "/conversion/funnels/android-activation?platform=web","/conversion/funnels/web-to-android?platform=android","/conversion/funnels/unknown","/conversion/funnels/web-first-visit?platform=web","/conversion/funnels/android-first-visit?platform=android","/conversion/funnels/story-creation?storyId=00000000-0000-4000-8000-000000000001",
             "/conversion/funnels/story-detail-chat?storyId=bad","/conversion/funnels/story-creation?platform=all","/conversion/funnels/story-creation?from=2026-09-20&to=2026-10-21",
             "/conversion/turn-reach?segment=visitor","/quality/chat-options?segment=visitor","/conversion/turn-reach?segment=",
             "/users/sessions?segment=visitor","/quality/client?segment=visitor","/users/retention?cohort=member","/users/session-lengths?segment=visitor","/users/session-lengths?days=30")) get(path).expectStatus().isBadRequest

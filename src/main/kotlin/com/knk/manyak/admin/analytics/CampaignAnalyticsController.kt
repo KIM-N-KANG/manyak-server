@@ -16,6 +16,10 @@ class CampaignAnalyticsController(private val service: CampaignAnalyticsService,
     @GetMapping("/analytics") fun analytics(@ParameterObject @ModelAttribute query: CampaignQuery) = service.analytics(query)
     @GetMapping("/funnels/creation") fun creation(@ParameterObject @ModelAttribute query: CampaignQuery) = service.creation(query)
     @GetMapping("/funnels/story-detail") fun story(@ParameterObject @ModelAttribute query: StoryCampaignQuery) = service.story(query)
+    @GetMapping("/funnels/activation") fun activation(@ParameterObject @ModelAttribute query: CampaignQuery) = service.activation(query)
+    @GetMapping("/reach") fun reach(@ParameterObject @ModelAttribute query: CampaignQuery) = service.reach(query)
+    @GetMapping("/creatives") fun creatives(@ParameterObject @ModelAttribute query: CampaignQuery) = service.creatives(query)
+    @GetMapping("/app-transfer") fun appTransfer(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = service.appTransfer(query)
     @GetMapping("/sources") fun sources(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = service.sources(query)
     @ExceptionHandler(AdminAnalyticsUnavailable::class)
     fun unavailable(request: HttpServletRequest) = ResponseEntity.status(503).body(ApiErrorResponse(

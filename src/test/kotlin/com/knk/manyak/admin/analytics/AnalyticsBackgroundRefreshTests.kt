@@ -54,6 +54,10 @@ class AnalyticsBackgroundRefreshTests {
     private fun storeExpiredToday() = metrics.forEach { fixture.store.saveDaily(it.definition, mapOf(day to number(3, expired))) }
     private fun refreshedLogs() = events.list.filter { it.formattedMessage.startsWith("admin_analytics_refreshed") }
 
+    @Test fun `캠페인 추이는 스펙의 기기 유형 세 조회를 포함한 16개 정의다`() {
+        assertThat(metrics).hasSize(16)
+        assertThat(metrics.count { it.definition.parameters.any { p -> p.first == "e" && p.second.contains("device_type") } }).isEqualTo(3)
+    }
     @Test fun `만료 값 즉시 응답 - 대역을 기다리지 않고 만료된 오늘 값으로 응답한 뒤 백그라운드가 오늘만 갱신한다`() {
         storeExpiredToday()
         gate = CountDownLatch(1)
@@ -62,17 +66,17 @@ class AnalyticsBackgroundRefreshTests {
         assertThat(response.asOf).isEqualTo(expired)
         assertThat(response.daily.single { it.date == day }.activeUsers).isEqualTo(3)
         gate!!.countDown(); fixture.executor.await()
-        assertThat(server.requestCount).isEqualTo(16)
-        repeat(16) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261023"); assertThat(url.queryParameter("end")).isEqualTo("20261023") }
+        assertThat(server.requestCount).isEqualTo(metrics.size)
+        repeat(metrics.size) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261023"); assertThat(url.queryParameter("end")).isEqualTo("20261023") }
         val after = service.analytics(query)
         assertThat(after.asOf).isAfter(expired)
         assertThat(after.daily.single { it.date == day }.activeUsers).isEqualTo(1)
-        assertThat(server.requestCount).isEqualTo(16)
+        assertThat(server.requestCount).isEqualTo(metrics.size)
     }
     @Test fun `값 없음 대기 - 저장 값이 없는 날짜는 한도 안에 끝난 갱신을 기다려 그 값으로 응답한다`() {
         delayMillis = 30
         val response = service.analytics(query)
-        assertThat(server.requestCount).isEqualTo(16)
+        assertThat(server.requestCount).isEqualTo(metrics.size)
         assertThat(response.pendingDates).isEmpty()
         assertThat(response.daily.map { it.date }).contains(day)
         assertThat(response.daily.single { it.date == day }.activeUsers).isEqualTo(1)
@@ -87,10 +91,10 @@ class AnalyticsBackgroundRefreshTests {
         assertThat(response.pendingDates).containsExactly(day)
         assertThat(refreshedLogs()).isEmpty()
         fixture.executor.await()
-        assertThat(server.requestCount).isEqualTo(16)
-        assertThat(refreshedLogs()).singleElement().extracting { it.formattedMessage }.asString().contains("queries=16")
+        assertThat(server.requestCount).isEqualTo(metrics.size)
+        assertThat(refreshedLogs()).singleElement().extracting { it.formattedMessage }.asString().contains("queries=${metrics.size}")
         assertThat(service.analytics(query).pendingDates).isEmpty()
-        assertThat(server.requestCount).isEqualTo(16)
+        assertThat(server.requestCount).isEqualTo(metrics.size)
     }
     @Test fun `갱신 중 동시 요청 - 다른 요청은 갱신을 시작하지도 기다리지도 않는다`() {
         delayMillis = 200
@@ -105,7 +109,7 @@ class AnalyticsBackgroundRefreshTests {
         }
         assertThat(first.get(10, TimeUnit.SECONDS).pendingDates).containsExactly(day)
         fixture.executor.await()
-        assertThat(server.requestCount).isEqualTo(16)
+        assertThat(server.requestCount).isEqualTo(metrics.size)
     }
     @Test fun `실행기 거부 - 표식을 풀고 저장 값으로 응답하며 쿨다운을 걸지 않는다`() {
         storeExpiredToday()
@@ -116,7 +120,7 @@ class AnalyticsBackgroundRefreshTests {
         fixture.executor.rejecting = false
         service.analytics(query)
         fixture.executor.await()
-        assertThat(server.requestCount).isEqualTo(16)
+        assertThat(server.requestCount).isEqualTo(metrics.size)
     }
     @Test fun `요청 대기 기본값은 10초다`() {
         assertThat(AnalyticsPolicy().requestWaitSeconds).isEqualTo(10)

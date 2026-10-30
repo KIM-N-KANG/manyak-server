@@ -35,16 +35,16 @@ class AppOverseasMetricsTests {
                 val group = condition(e ?: u.queryParameter("se")?.let { fixture.mapper.readTree(it) })
                 val data: Any = when {
                     u.encodedPath.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to dates.associate { date -> date.toString() to List(32) { i ->
-                        mapOf("count" to (if (i == 0) { if (group == "legacy_all") 20 else if (group == "android") 5 else 15 } else if (group == "legacy_all") 5 else if (group == "android") 1 else 4), "outof" to (if (group == "legacy_all") 20 else if (group == "android") 5 else 15), "incomplete" to (group == "android" && i == 8))
+                        mapOf("count" to (if (i == 0) { if (group == "all") 20 else if (group == "android") 5 else 15 } else if (group == "all") 5 else if (group == "android") 1 else 4), "outof" to (if (group == "all") 20 else if (group == "android") 5 else 15), "incomplete" to (group == "android" && i == 8))
                     } })))
-                    u.encodedPath.endsWith("/average") -> mapOf("xValues" to dates.map { "${it}T00:00:00" }, "series" to listOf(dates.map { 12.5 }))
+                    (u.encodedPath.endsWith("/average") || u.encodedPath.endsWith("/peruser")) -> mapOf("xValues" to dates.map { "${it}T00:00:00" }, "series" to listOf(dates.map { 12.5 }))
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 1 }))
                     else -> {
                         val event = e!!["event_type"].asText()
                         val value: Number = when {
                             u.queryParameter("m") == "average" -> 4.5
-                            event == "_active" -> if (dashboardValues) when (group) { "web" -> 200; "android" -> 18; "overseas" -> 2; else -> 999 } else when (group) { "all" -> 11; "web" -> 10; "android" -> 2; "overseas" -> 1; "unknown" -> 2; else -> 999 }
-                            event == "_new" -> if (dashboardValues) when (group) { "web" -> 30; "android" -> 4; else -> 999 } else when (group) { "android" -> 1; else -> 5 }
+                            event == "_active" -> if (dashboardValues) when (group) { "all" -> 210; "web" -> 200; "android" -> 18; else -> 999 } else when (group) { "all" -> 11; "web" -> 10; "android" -> 2; "overseas" -> 1; "unknown" -> 2; else -> 999 }
+                            event == "_new" -> if (dashboardValues) when (group) { "all" -> 32; "web" -> 30; "android" -> 4; else -> 999 } else when (group) { "android" -> 1; else -> 5 }
                             else -> {
                                 val mode = e["filters"].firstOrNull { it["subprop_key"].asText() == "input_mode" }?.get("subprop_value")?.get(0)?.asText()
                                 val values = when (group) { "android" -> listOf(10,6,2,1,1,2); "overseas" -> listOf(5,3,1,0,1,1); else -> listOf(100,60,25,10,5,7) }
@@ -66,7 +66,7 @@ class AppOverseasMetricsTests {
         return when {
             fs.any { it["subprop_key"].asText() == "user_id" } -> "overseas"
             p == null -> "legacy_all"
-            p["subprop_op"].asText() == "is not" -> "all"
+            p["subprop_value"].size() == 2 -> "all"
             else -> when (p["subprop_value"][0].asText()) { "Web" -> "web"; "Android" -> "android"; "(none)" -> "unknown"; else -> error("unexpected platform") }
         }
     }
@@ -74,59 +74,58 @@ class AppOverseasMetricsTests {
     private fun event(request: RecordedRequest, key: String = "e") = fixture.mapper.readTree(request.requestUrl!!.queryParameter(key)!!)
     private fun legacyFilters(platform: String) = listOf(AdminMetricEvents.filter("country", listOf("South Korea", "(none)"), "user")) +
         if (platform == "all") emptyList() else listOf(AdminMetricEvents.filter("platform", listOf(when(platform) { "web" -> "Web"; "android" -> "Android"; else -> "(none)" }), "user"))
-    private fun assertOverseas(e: JsonNode) {
-        assertThat(e["filters"].filter { it["subprop_type"].asText() == "user" }).containsExactly(
-            fixture.mapper.readTree("""{"subprop_type":"user","subprop_key":"country","subprop_op":"is not","subprop_value":["South Korea","(none)"]}"""),
-            fixture.mapper.readTree("""{"subprop_type":"user","subprop_key":"platform","subprop_op":"is","subprop_value":["Android"]}"""),
-            fixture.mapper.readTree("""{"subprop_type":"user","subprop_key":"user_id","subprop_op":"is not","subprop_value":["(none)"]}""")
-        )
+    private fun assertDomestic(e: JsonNode) {
+        val country = e["filters"].first { it["subprop_key"].asText() == "country" }
+        assertThat(country["subprop_op"].asText()).isEqualTo("is")
+        assertThat(country["subprop_value"].toList().map { it.asText() }).containsExactly("South Korea", "(none)")
     }
-    @Test fun `개요는 활성 세 조건 신규 두 조건을 받아 합계 220과 34를 계산한다`() {
+    @Test fun `개요는 전체 웹 앱을 각각 조회해 중복 제거한 전체를 반환한다`() {
         dashboardValues = true
         val value = fixture.service.dashboard(7)
-        assertThat(requests).hasSize(5)
-        assertThat(value.daily.first().activeUsers).isEqualTo(DashboardPlatformCounts(220,200,20))
-        assertThat(value.daily.first().newUsers).isEqualTo(DashboardPlatformCounts(34,30,4))
+        assertThat(requests).hasSize(6)
+        assertThat(value.daily.first().activeUsers).isEqualTo(DashboardPlatformCounts(210,200,18))
+        assertThat(value.daily.first().newUsers).isEqualTo(DashboardPlatformCounts(32,30,4))
         assertThat(value.todayActiveUsers).isEqualTo(value.daily.last().activeUsers)
-        assertThat(requests.map { condition(event(it)) }).containsExactly("web","android","overseas","web","android")
-        assertOverseas(event(requests[2]))
+        assertThat(requests.map { condition(event(it)) }).containsExactly("all","web","android","all","web","android")
+        assertDomestic(event(requests[2]))
         assertThat(requests[2].requestUrl!!.queryParameter("s")).isNull()
-        assertThat(fixture.budget.reserve(465)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(458)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
-    @Test fun `이전 국내 웹과 앱 저장값은 해시가 같아 외국 로그인 앱만 새로 받는다`() {
-        for (name in listOf("active", "new")) for (platforms in listOf(listOf("Web","Android"),listOf("Web"),listOf("Android"))) {
-            val filters = listOf(AdminMetricEvents.filter("country",listOf("South Korea","(none)"),"user"),AdminMetricEvents.filter("platform",platforms,"user"))
-            val metric = queries.daily("dashboard_$name",AdminMetricEvents.event("_$name",filters))
-            fixture.store.saveDaily(metric.definition,AnalyticsRange(today.minusDays(6),today).dates().associateWith {
-                AnalyticsValue(fixture.mapper.valueToTree(8),fixture.clock.instant(),fixture.clock.instant())
+    @Test fun `이전 웹 앱 저장값은 재사용하고 전체 조건만 새로 받는다`() {
+        for (name in listOf("active", "new")) for (platform in listOf("web", "android")) {
+            val metric = queries.daily("dashboard_$name", AdminMetricEvents.event("_$name", legacyFilters(platform)))
+            fixture.store.saveDaily(metric.definition, AnalyticsRange(today.minusDays(6), today).dates().associateWith {
+                AnalyticsValue(fixture.mapper.valueToTree(8), fixture.clock.instant(), fixture.clock.instant())
             })
         }
         val value = fixture.service.dashboard(7)
-        assertThat(requests).hasSize(1); assertOverseas(event(requests.single()))
-        assertThat(value.todayActiveUsers).isEqualTo(DashboardPlatformCounts(17,8,9))
-        assertThat(value.daily.first().newUsers).isEqualTo(DashboardPlatformCounts(16,8,8))
-        assertThat(fixture.service.dashboard(7)).isEqualTo(value); assertThat(requests).hasSize(1)
+        assertThat(requests).hasSize(2)
+        assertThat(requests.map { condition(event(it)) }).containsOnly("all")
+        assertThat(value.todayActiveUsers).isEqualTo(DashboardPlatformCounts(11,8,8))
+        assertThat(value.daily.first().newUsers).isEqualTo(DashboardPlatformCounts(5,8,8))
+        assertThat(fixture.service.dashboard(7)).isEqualTo(value)
+        assertThat(requests).hasSize(2)
     }
-    @Test fun `활동 14회와 MAU 90 비용 및 겹치는 플랫폼을 단순 합과 구분한다`() {
+    @Test fun `활동 11회와 MAU 30 비용 및 겹치는 플랫폼을 단순 합과 구분한다`() {
         val q = range(today.minusDays(8),today.minusDays(2))
         val value = service.activity(q)
-        assertThat(requests).hasSize(14)
-        assertThat(value.monthlyActiveUsers).isEqualTo(1200)
-        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(14,10,3,2))
-        assertThat(value.daily.first().newVisitors).isEqualTo(PlatformCounts(6,5,1,5))
-        assertThat(value.daily.last().cumulativeNewVisitors.all).isEqualTo(42)
+        assertThat(requests).hasSize(11)
+        assertThat(value.monthlyActiveUsers).isEqualTo(1100)
+        assertThat(value.daily.first().activeUsers).isEqualTo(PlatformCounts(11,10,2,2))
+        assertThat(value.daily.first().newVisitors).isEqualTo(PlatformCounts(5,5,1,5))
+        assertThat(value.daily.last().cumulativeNewVisitors.all).isEqualTo(35)
         assertThat(value.daily.first().messagesPerUser).isEqualTo(PlatformDecimals(null,4.5,4.5))
-        val mau = requests.take(3)
-        assertThat(mau.map { condition(event(it)) }).containsExactly("all","android","overseas")
+        val mau = requests.take(1)
+        assertThat(mau.map { condition(event(it)) }).containsExactly("all")
         mau.forEach { assertThat(it.requestUrl!!.queryParameter("start")).isEqualTo("20260922"); assertThat(it.requestUrl!!.queryParameter("end")).isEqualTo("20261021") }
         val overseas = requests.filter { condition(event(it)) == "overseas" }
-        assertThat(overseas).hasSize(2); overseas.forEach { assertOverseas(event(it)); assertThat(event(it)["event_type"].asText()).isEqualTo("_active") }
-        assertThat(fixture.budget.reserve(333)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
-        assertThat(service.activity(q)).isEqualTo(value); assertThat(requests).hasSize(14)
-        assertThat(service.activity(range(today.minusDays(6),today.minusDays(2))).monthlyActiveUsers).isEqualTo(1200)
-        assertThat(requests).hasSize(14)
+        assertThat(overseas).isEmpty()
+        assertThat(fixture.budget.reserve(400)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(service.activity(q)).isEqualTo(value); assertThat(requests).hasSize(11)
+        assertThat(service.activity(range(today.minusDays(6),today.minusDays(2))).monthlyActiveUsers).isEqualTo(1100)
+        assertThat(requests).hasSize(11)
     }
-    @Test fun `리텐션 전체는 플랫폼 제한 없는 국내 조회를 유지하고 미완료는 null이다`() {
+    @Test fun `리텐션 전체는 웹이나 앱 국내 조회를 사용하고 미완료는 null이다`() {
         val value = service.retention(range(today.minusDays(4),today.minusDays(4)))
         assertThat(requests).hasSize(3)
         val all = value.platforms.first()
@@ -134,7 +133,7 @@ class AppOverseasMetricsTests {
         assertThat(all.cohorts.single().d1).isEqualTo(0.25)
         assertThat(all.summary.d1).isEqualTo(0.25)
         assertThat(all.cohorts.single().d7).isNull(); assertThat(all.cohorts.single().d30).isNull()
-        assertThat(requests.map { condition(event(it,"se")) }).containsExactly("legacy_all","web","android")
+        assertThat(requests.map { condition(event(it,"se")) }).containsExactly("all","web","android")
         requests.forEach { assertThat(it.requestUrl!!.toString()).doesNotContain("user_id"); assertThat(it.requestUrl!!.queryParameter("s")).isNull() }
         assertThat(fixture.budget.reserve(476)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
@@ -142,17 +141,16 @@ class AppOverseasMetricsTests {
     fun `기능 지표는 조건 묶음마다 수집하고 합한 뒤 잔여 입력 방식과 오류율을 계산한다`(platform: String) {
         val q = PlatformMetricsQuery().apply { from="2026-10-17"; to="2026-10-23"; this.platform=platform }
         val value = service.quality(q)
-        val groups = when(platform) { "web" -> 1; "android" -> 2; else -> 3 }
-        assertThat(requests).hasSize(groups*11)
+        val groups = 1
+        assertThat(requests).hasSize(groups*15)
         val row = value.daily.first()
-        val messages = when(platform) { "web" -> 100; "android" -> 15; else -> 115 }
-        val errors = when(platform) { "web" -> 5; "android" -> 2; else -> 7 }
+        val messages = when(platform) { "web" -> 100; "android" -> 10; else -> 100 }
+        val errors = when(platform) { "web" -> 5; "android" -> 1; else -> 5 }
         assertThat(row.streamErrors).isEqualTo(errors.toLong()); assertThat(row.streamErrorRate).isEqualTo(errors.toDouble()/messages)
-        assertThat(row.messagesByInputMode["unknown"]).isEqualTo(when(platform) { "web" -> 5L; "android" -> 2L; else -> 7L })
-        assertThat(row.users.values).containsOnly(when(platform) { "web" -> 7L; "android" -> 3L; else -> 10L })
-        requests.filter { condition(event(it)) == "overseas" }.forEach { assertOverseas(event(it)) }
-        assertThat(requests.count { condition(event(it)) == "overseas" }).isEqualTo(if(platform=="web") 0 else 11)
-        assertThat(fixture.budget.reserve(500-groups*77)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(row.messagesByInputMode["unknown"]).isEqualTo(when(platform) { "web" -> 5L; "android" -> 1L; else -> 5L })
+        assertThat(row.users.values).containsOnly(when(platform) { "web" -> 7L; "android" -> 2L; else -> 7L })
+        assertThat(requests.count { condition(event(it)) == "overseas" }).isZero()
+        assertThat(fixture.budget.reserve(500-groups*105)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @Test fun `바뀌지 않은 조회는 정의의 metric params hash를 유지한다`() {
         val activity = definitions.activity().map { it.definition }
@@ -172,8 +170,8 @@ class AppOverseasMetricsTests {
         val oldRetentionAll = AnalyticsDefinition("users_retention","/api/2/retention", listOf(
             "se" to fixture.mapper.writeValueAsString(AdminMetricEvents.event("_new", legacyFilters("all"))),
             "re" to fixture.mapper.writeValueAsString(AdminMetricEvents.event("_active", legacyFilters("all"))), "i" to "1"),8,fixture.mapper)
-        assertThat(definitions.retention().first().definition.params).isEqualTo(oldRetentionAll.params)
-        assertThat(definitions.retention().first().definition.hash).isEqualTo(oldRetentionAll.hash)
+        assertThat(definitions.retention().first().definition.params).isNotEqualTo(oldRetentionAll.params)
+        assertThat(definitions.retention().first().definition.hash).isNotEqualTo(oldRetentionAll.hash)
         val cohort = fixture.mapper.writeValueAsString(listOf(mapOf("prop" to "userdata_cohort", "op" to "is not", "values" to listOf("team"))))
         val dashboard = AdminAnalyticsService(fixture.snapshots,AmplitudeDashboardProperties(teamCohortId="team"),fixture.mapper,fixture.clock)
         for(platform in listOf("web","android")) for(name in listOf("active","new")) {
@@ -187,26 +185,27 @@ class AppOverseasMetricsTests {
             val s = listOf(AdminMetricEvents.condition("country",listOf("South Korea","(none)"))) + if(p=="all") emptyList() else listOf(AdminMetricEvents.condition("platform",listOf(if(p=="web") "Web" else "Android")))
             AnalyticsDefinition("users_session_average","/api/2/sessions/average",listOf("i" to "1","s" to fixture.mapper.writeValueAsString(s)),if(p=="all")8 else 12,fixture.mapper).hash
         }
-        assertThat(definitions.sessions().map { it.definition.hash }).containsExactlyElementsOf(oldSessions)
+        assertThat(definitions.sessions().take(3).drop(1).map { it.definition.hash }).containsExactlyElementsOf(oldSessions.drop(1))
+        assertThat(definitions.sessions().first().definition.hash).isNotEqualTo(oldSessions.first())
     }
-    @Test fun `새벽 카탈로그는 네 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 199와 리텐션 792다`() {
+    @Test fun `새벽 카탈로그는 세 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 316와 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
         val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy(),modelCodeReads()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
-        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(199)
+        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(316)
         assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
-        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(44)
-        // 분석 지표 10, 사용자 활동 11, 세션 32, 기능 사용 48, 캠페인 추이 16, 신규 가입자 플랫폼 6, 턴 도달률 플랫폼 36, 모델 둘의 채팅 옵션 플랫폼 12
-        assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(6)
-        assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(36)
-        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starts", "quality_model_turns") }).hasSize(12)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(45)
+        // 기존 일별 234 + 광고 소재 50 + 앱 유입 28 + 앱 활성 한 날짜 4. 실제 새벽은 앱 활성 두 날짜라 320이다.
+        assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(3)
+        assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(24)
+        assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(16)
         assertThat(entries.map { it.metric.definition.metric }).noneMatch { it.contains("mau") || it.contains("push_opens") || (it.startsWith("conversion_") && it != "conversion_turn_reach") }
     }
     @ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource("true,false,2,2", "false,true,1,2", "true,true,2,3")
-    fun `같은 회원이 국내 해외 앱과 웹 조건을 넘나들면 조건별로 세고 해외 비로그인은 제외한다`(domesticApp: Boolean, web: Boolean, expectedAndroid: Long, expectedAll: Long) {
+    @org.junit.jupiter.params.provider.CsvSource("true,false,1,1", "false,true,0,1", "true,true,1,1")
+    fun `같은 회원이 웹 앱을 함께 써도 전체는 한 번이고 해외는 제외한다`(domesticApp: Boolean, web: Boolean, expectedAndroid: Long, expectedAll: Long) {
         val rows = listOf(
             mapOf("id" to "member-a", "date" to "2026-10-22", "country" to "South Korea", "platform" to "Android", "user_id" to "a"),
             mapOf("id" to "member-a", "date" to "2026-10-23", "country" to "South Korea", "platform" to "Android", "user_id" to "a"),
@@ -240,13 +239,13 @@ class AppOverseasMetricsTests {
         assertThat(dashboard.todayActiveUsers).isEqualTo(DashboardPlatformCounts(expectedAll,if(web)1 else 0,expectedAndroid))
         assertThat(dashboard.daily.last().newUsers).isEqualTo(DashboardPlatformCounts(0,0,0))
     }
-    @Test fun `웹에서 처음 방문하고 앱으로 복귀해도 플랫폼 제한 없는 전체 리텐션은 복귀로 센다`() {
+    @Test fun `웹에서 처음 방문하고 앱으로 복귀해도 웹이나 앱 전체 리텐션은 복귀로 센다`() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requests += request
                 val group = condition(event(request,"se"))
                 val points = List(32) { i -> mapOf("outof" to if(group=="android") 0 else 1,
-                    "count" to if(group=="legacy_all" || (group=="web" && i<=1)) 1 else 0,"incomplete" to false) }
+                    "count" to if(group=="all" || (group=="web" && i<=1)) 1 else 0,"incomplete" to false) }
                 return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(mapOf("values" to mapOf("2026-10-19" to points)))))))
             }
         }
@@ -254,7 +253,7 @@ class AppOverseasMetricsTests {
         assertThat(value.platforms[0].cohorts.single().d1).isEqualTo(1.0)
         assertThat(value.platforms[1].cohorts.single().d1).isEqualTo(0.0)
         assertThat(value.platforms[2].cohorts.single().d1).isNull()
-        for (key in listOf("se","re")) assertThat(event(requests.first(),key)["filters"].toString()).doesNotContain("platform","user_id")
+        for (key in listOf("se","re")) assertThat(event(requests.first(),key)["filters"].toString()).contains("platform").doesNotContain("user_id")
     }
     @Test fun `앱 첫 접속 퍼널은 국내 조건만 쓰며 로그인 조건을 넣지 않는다`() {
         service.funnel("android-first-visit",ConversionMetricsQuery().apply { from=today.toString();to=today.toString() })
@@ -268,7 +267,7 @@ class AppOverseasMetricsTests {
         val metrics = definitions.quality("all")
         for ((index,metric) in metrics.withIndex()) {
             val zero = fixture.mapper.readTree(metric.definition.parameters.first { it.first=="e" }.second)["filters"].any { it["subprop_key"].asText()=="input_mode" }
-            val dates = if(index<22) listOf(today.minusDays(1),today) else listOf(today.minusDays(1))
+            val dates = if(index<5) listOf(today.minusDays(1),today) else listOf(today.minusDays(1))
             fixture.store.saveDaily(metric.definition,dates.associateWith { AnalyticsValue(fixture.mapper.valueToTree(if(zero)0 else 2),fixture.clock.instant()) })
         }
         val working = server.dispatcher
@@ -278,40 +277,38 @@ class AppOverseasMetricsTests {
         val value = service.quality(PlatformMetricsQuery().apply { from=today.minusDays(1).toString();to=today.toString() })
         assertThat(value.pendingDates).containsExactly(today)
         assertThat(value.daily.single().date).isEqualTo(today.minusDays(1))
-        assertThat(value.daily.single().users.values).containsOnly(6L)
+        assertThat(value.daily.single().users.values).containsOnly(2L)
         assertThat(requests).hasSize(1)
         assertThat(service.quality(PlatformMetricsQuery().apply { from=today.minusDays(1).toString();to=today.toString() })).isEqualTo(value)
         assertThat(requests).hasSize(1)
         fixture.clock.at=fixture.clock.at.plusSeconds(61); server.dispatcher=working
         val recovered=service.quality(PlatformMetricsQuery().apply { from=today.minusDays(1).toString();to=today.toString() })
         assertThat(recovered.pendingDates).isEmpty(); assertThat(recovered.daily).hasSize(2)
-        assertThat(requests).hasSize(12)
-        requests.drop(1).forEach { assertOverseas(event(it)) }
+        assertThat(requests).hasSize(11)
+        requests.drop(1).forEach { assertDomestic(event(it)) }
     }
     @ParameterizedTest @ValueSource(booleans=[false,true])
-    fun `해외 로그인 조회 실패와 준비된 날짜 없음은 국내 값이 있어도 503이다`(cached: Boolean) {
-        if(cached) fixture.service.dailyMetrics().filter { !it.definition.params.contains("user_id") }.forEach { metric ->
+    fun `전체 조회 실패와 준비된 날짜 없음은 웹 앱 값이 있어도 503이다`(cached: Boolean) {
+        if(cached) fixture.service.dailyMetrics().filter { condition(fixture.mapper.readTree(it.definition.parameters.first { p -> p.first == "e" }.second)) != "all" }.forEach { metric ->
             fixture.store.saveDaily(metric.definition,mapOf(today to AnalyticsValue(fixture.mapper.valueToTree(2),fixture.clock.instant())))
         }
         val working = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
-            return if(condition(event(request))=="overseas") { requests += request; MockResponse().setResponseCode(500) } else working.dispatch(request)
+            return if(condition(event(request))=="all") { requests += request; MockResponse().setResponseCode(500) } else working.dispatch(request)
         } }
         assertThatThrownBy { fixture.service.dashboard(AdminChartsRequest().apply { from=today.toString();to=today.toString() }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
-        val failedCalls=if(cached)1 else 3
-        assertThat(requests).hasSize(failedCalls); assertOverseas(event(requests.last()))
+        val failedCalls=1
+        assertThat(requests).hasSize(failedCalls); assertDomestic(event(requests.last()))
         assertThatThrownBy { fixture.service.dashboard(AdminChartsRequest().apply { from=today.toString();to=today.toString() }) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         fixture.clock.at=fixture.clock.at.plusSeconds(61); server.dispatcher=working
         val recovered=fixture.service.dashboard(AdminChartsRequest().apply { from=today.toString();to=today.toString() })
-        assertThat(recovered.todayActiveUsers).isEqualTo(if(cached) DashboardPlatformCounts(5,2,3) else DashboardPlatformCounts(13,10,3))
-        assertThat(requests).hasSize(if(cached)2 else 6)
-        assertOverseas(event(requests[failedCalls]))
+        assertThat(recovered.todayActiveUsers).isEqualTo(if(cached) DashboardPlatformCounts(11,2,2) else DashboardPlatformCounts(11,10,2))
+        assertThat(requests).hasSize(if(cached)3 else 7)
+        assertDomestic(event(requests[failedCalls]))
     }
-    @Test fun `MAU 구성 조회 실패는 일부 MAU 합과 그 시각을 응답에 쓰지 않는다`() {
+    @Test fun `MAU 조회 실패는 일별 활동만 반환하고 복구 뒤 전체 값을 쓴다`() {
         val now = fixture.clock.instant()
         definitions.activity().forEach { fixture.store.saveDaily(it.definition,mapOf(today to AnalyticsValue(fixture.mapper.valueToTree(0),now))) }
-        val one = definitions.mau(today)
-        fixture.store.saveRange(one.definition,one.range.from,one.range.to,AnalyticsValue(fixture.mapper.valueToTree(1100),now.minusSeconds(30)))
         val working = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request;return MockResponse().setResponseCode(500)
@@ -322,8 +319,8 @@ class AppOverseasMetricsTests {
         assertThat(value.daily).hasSize(1)
         assertThat(requests).hasSize(1)
         fixture.clock.at=fixture.clock.at.plusSeconds(61); server.dispatcher=working
-        assertThat(service.activity(range(today,today)).monthlyActiveUsers).isEqualTo(1200)
-        assertThat(requests).hasSize(3)
+        assertThat(service.activity(range(today,today)).monthlyActiveUsers).isEqualTo(1100)
+        assertThat(requests).hasSize(2)
     }
 
 }
