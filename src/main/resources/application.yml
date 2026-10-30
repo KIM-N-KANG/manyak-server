@@ -103,6 +103,7 @@ manyak:
   admin:
     push-opens:
       measured-from: ${MANYAK_ADMIN_PUSH_OPENS_MEASURED_FROM:}
+      app-measured-from: ${MANYAK_ADMIN_PUSH_OPENS_APP_MEASURED_FROM:}
     infra:
       region: ${AWS_REGION:ap-northeast-2}
       cache-seconds: 60

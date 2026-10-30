@@ -197,6 +197,7 @@ class AdminFoundationIntegrationTests {
             }
         }
         assertThat(targets).containsAll(listOf("/campaigns/funnels/activation", "/campaigns/reach", "/campaigns/creatives", "/campaigns/app-transfer", "/users/app-activation").map { org.springframework.http.HttpMethod.GET to "/api/v1/admin$it" })
+        assertThat(targets).contains(org.springframework.http.HttpMethod.GET to "/api/v1/admin/campaigns/push-opens/00000000-0000-4000-8000-000000000001")
         assertThat(targets).isNotEmpty()
         println("관리자 회귀 대상 핸들러 수: ${targets.size}")
         for ((method, path) in targets) {

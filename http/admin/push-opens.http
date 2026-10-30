@@ -1,9 +1,10 @@
-# 푸시 열람 — ADMIN BACKEND 4-1-24·4-2-35, KNK-1728
+# 알림 열람: ADMIN BACKEND 4-1-24~25·4-2-36·4-2-42, KNK-1927
 # 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken 준비.
 # MANYAK_ADMIN_PUSH_OPENS_MEASURED_FROM은 푸시 UTM 서버를 배포한 KST 날짜(YYYY-MM-DD).
-# 비워 두면 Amplitude 호출 없이 BEFORE_MEASUREMENT. 설정했으면 Amplitude 키와 발송 결과 데이터 필요.
+# MANYAK_ADMIN_PUSH_OPENS_APP_MEASURED_FROM은 앱 v1.7.7의 Play 배포일 KST 날짜. 빈 플랫폼은 조회하지 않는다.
+# 두 설정을 모두 비우면 Amplitude 호출 없이 BEFORE_MEASUREMENT. 설정했으면 Amplitude 키와 발송 결과 데이터가 필요하다.
 # 아래 from/to를 오늘 이하로 조정하고 위에서부터 실행. 실제 서버에서는 Amplitude 예산을 소비할 수 있음.
-# 캠페인은 마지막 started_at이 범위 안인 항목만, activityTypes는 이프 만료 예정 안내를 포함한 고정 4종. 알림함 UTM은 열람에 포함하지 않음.
+# 캠페인은 마지막 started_at이 범위 안인 항목만, activityTypes는 이프 만료 예정 안내를 포함한 고정 4종. 웹과 앱의 푸시 및 알림함 열람을 각각 조회한다. 이프 만료 예정은 알림함 클릭도 push UTM이라 푸시 열람에 포함된다.
 @baseUrl = http://localhost:8080
 @adminToken = PUT_AN_ADMIN_TOKEN_HERE
 @from = 2026-10-18
@@ -16,7 +17,7 @@ GET {{baseUrl}}/actuator/health
     client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`));
 %}
 
-### 1. 기본 최근 7일 — 날짜별 고유 사용자 수의 합, 1 초과 열람률 허용
+### 1. 기본 최근 7일 : 날짜별 고유 사용자 수의 합, 1 초과 열람률 허용
 GET {{baseUrl}}/api/v1/admin/campaigns/push-opens
 Authorization: Bearer {{adminToken}}
 
@@ -30,17 +31,24 @@ Authorization: Bearer {{adminToken}}
         const states = ["MEASURED", "BEFORE_MEASUREMENT", "NO_LINK", "PENDING"];
         b.campaigns.forEach(c => {
             client.assert(states.includes(c.openState), JSON.stringify(c));
-            if (c.openState !== "MEASURED") client.assert(c.pushOpens === null && c.pushOpenRate === null, JSON.stringify(c));
+            if (c.openState !== "MEASURED") client.assert(["pushOpens", "webPushOpens", "androidPushOpens", "inboxOpens", "webInboxOpens", "androidInboxOpens", "pushOpenRate"].every(k => c[k] === null), JSON.stringify(c));
+            else {
+                client.assert(c.pushOpens === (c.webPushOpens || 0) + (c.androidPushOpens || 0), JSON.stringify(c));
+                client.assert(c.inboxOpens === (c.webInboxOpens || 0) + (c.androidInboxOpens || 0), JSON.stringify(c));
+            }
+            client.assert(!("inboxOpenRate" in c), JSON.stringify(c));
             if (c.deliveredMembers === 0) client.assert(c.pushOpenRate === null, JSON.stringify(c));
         });
-        if (b.measuredFrom === null) {
+        client.assert("androidMeasuredFrom" in b, JSON.stringify(b));
+        if (b.campaigns.length) client.global.set("pushOpenCampaignId", b.campaigns[0].campaignId);
+        if (b.measuredFrom === null && b.androidMeasuredFrom === null) {
             client.assert(b.asOf === null && b.activityFrom === null && b.pendingDates.length === 0, JSON.stringify(b));
             client.assert(b.activityTypes.every(t => t.openState === "BEFORE_MEASUREMENT" && t.pushOpens === null), JSON.stringify(b));
         }
     });
 %}
 
-### 2. 명시 범위 — 측정 시작일 이전은 pendingDates에 포함하지 않음
+### 2. 명시 범위 : 측정 시작일 이전은 pendingDates에 포함하지 않음
 GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?from={{from}}&to={{to}}
 Authorization: Bearer {{adminToken}}
 
@@ -48,7 +56,8 @@ Authorization: Bearer {{adminToken}}
     client.test("명시 범위", () => {
         client.assert(response.status === 200, `actual=${response.status}`);
         const b = response.body;
-        if (b.measuredFrom) client.assert(b.pendingDates.every(d => d >= b.measuredFrom), JSON.stringify(b.pendingDates));
+        const starts = [b.measuredFrom, b.androidMeasuredFrom].filter(Boolean).sort();
+        if (starts.length) client.assert(b.pendingDates.every(d => d >= starts[0]), JSON.stringify(b.pendingDates));
     });
 %}
 
@@ -79,6 +88,53 @@ GET {{baseUrl}}/api/v1/admin/campaigns/push-opens
     client.test("인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`));
 %}
 
-### 7. 자유 조회 — 준비 날짜를 조정해 직접 확인
+### 7. 자유 조회 : 준비 날짜를 조정해 직접 확인
 GET {{baseUrl}}/api/v1/admin/campaigns/push-opens?from={{from}}&to={{to}}
 Authorization: Bearer {{adminToken}}
+
+### 8. 캠페인 하나 열람: 위 목록에 캠페인이 있을 때 실행
+# 목록과 같은 저장 값을 쓰고 마지막 startedAt의 KST 날짜부터 최대 366일을 집계한다.
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens/{{pushOpenCampaignId}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("캠페인 열람", () => {
+        const b = response.body;
+        client.assert(response.status === 200 && b.campaignId === client.global.get("pushOpenCampaignId"), JSON.stringify(b));
+        client.assert(Array.isArray(b.pendingDates) && "androidMeasuredFrom" in b, JSON.stringify(b));
+        if (b.startedAt === null) client.assert(b.openState === "PENDING" && b.from === null && b.to === null && b.deliveredMembers === 0, JSON.stringify(b));
+        if (b.openState !== "MEASURED") client.assert(b.asOf === null && b.pendingDates.length === 0 && b.pushOpens === null && b.inboxOpens === null, JSON.stringify(b));
+        else {
+            client.assert(b.pushOpens === (b.webPushOpens || 0) + (b.androidPushOpens || 0), JSON.stringify(b));
+            client.assert(b.inboxOpens === (b.webInboxOpens || 0) + (b.androidInboxOpens || 0), JSON.stringify(b));
+        }
+    });
+%}
+
+### 9. 없는 캠페인 404
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens/00000000-0000-4000-8000-000000000000
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("없는 캠페인", () => client.assert(response.status === 404, `actual=${response.status}`));
+%}
+
+### 10. UUID 형식 오류 400
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens/invalid-uuid
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("잘못된 식별자", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 11. 캠페인 하나도 관리자 인증 필요
+GET {{baseUrl}}/api/v1/admin/campaigns/push-opens/00000000-0000-4000-8000-000000000000
+
+> {%
+    client.test("캠페인 열람 인증", () => client.assert(response.status === 401, `actual=${response.status}`));
+%}
+
+# 실패 수동 검증: 저장 값이 없는 측정 범위에서 Amplitude 자격 증명 없음 또는 실패 응답이면 503이다.
+# 상태 PENDING, NO_LINK, BEFORE_MEASUREMENT인 단건은 자격 증명 없이도 조회하지 않고 200이다.
+# 웹보다 늦은 앱 측정 시작일 전에 시작한 캠페인은 이후 앱 기록이 있어도 앱 값이 null이어야 한다.
+# 새벽 배치 후 같은 날짜를 조회하면 저장 값이 재사용되며 웹의 기존 push_opens 키도 재사용된다.

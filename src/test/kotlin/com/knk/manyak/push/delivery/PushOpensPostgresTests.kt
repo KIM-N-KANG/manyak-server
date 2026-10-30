@@ -72,4 +72,12 @@ class PushOpensPostgresTests {
         assertThat(rows.filter { it.type==PushDeliveryType.ATTENDANCE_REMINDER }.map { it.deliveredMembers }).containsExactly(2,2)
         assertThat(rows.map { it.date }).containsOnly(from,to)
     }
+    @Test fun `캠페인 하나 도달 요약은 기간 요약과 같고 선점 전과 부재를 구분한다`() {
+        assertThat(repository.campaignReach(ids[0])).isEqualTo(repository.campaignReach(from,to).single { it.campaignId == ids[0] })
+        val pending = repository.campaignReach(ids[3])!!
+        assertThat(pending.startedAt).isNull(); assertThat(pending.deepLinkIncluded).isNull()
+        assertThat(pending.deliveredMembers).isZero()
+        assertThat(repository.campaignReach(UUID.randomUUID())).isNull()
+    }
+
 }
