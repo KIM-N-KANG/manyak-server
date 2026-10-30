@@ -68,14 +68,17 @@ class AdminCampaignIntegrationTests {
     @Test fun `공지 연결은 태그로 종류를 정하고 첫 시각을 유지하며 감사에 공개 식별자를 남긴다`() {
         for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
             val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문", tag = tag,
-                status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = admin.id))
+                status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = admin.id,
+                // DB 정밀도에 맞춰 반올림될 수 있는 나노초 값으로 플랫폼 차이를 재현한다.
+                updatedAt = Instant.parse("2026-10-30T01:00:00.123456789Z")))
+            val storedUpdatedAt = notices.findById(notice.id).orElseThrow().updatedAt
             val first = create(campaignBody().apply { put("noticeId", notice.publicId.toString()); put("kind", "INVALID") })
             assertThat(first["kind"].asText()).isEqualTo(tag.pushKind.name)
             assertThat(first["noticeId"].asText()).isEqualTo(notice.publicId.toString())
             assertThat(first["failureReason"].isNull).isTrue()
             val linked = notices.findById(notice.id).orElseThrow()
             assertThat(linked.notifiedAt).isNotNull()
-            assertThat(linked.updatedAt).isEqualTo(notice.updatedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS))
+            assertThat(linked.updatedAt).isEqualTo(storedUpdatedAt)
             create(campaignBody().apply { put("noticeId", notice.publicId.toString()); put("scheduledAt", Instant.now().plusSeconds(3600).toString()) })
             assertThat(notices.findById(notice.id).orElseThrow().notifiedAt).isEqualTo(linked.notifiedAt)
             assertThat(campaigns.findAll().filter { it.noticeId == notice.id }).hasSize(2).allSatisfy {
