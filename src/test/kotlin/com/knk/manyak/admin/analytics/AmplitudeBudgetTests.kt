@@ -23,7 +23,7 @@ class AmplitudeBudgetTests {
         } finally { pool.shutdownNow() }
     }
     @ParameterizedTest @ValueSource(booleans = [true, false])
-    fun `코호트 포함 긴 조회는 최근 50일 또는 49일과 별도 오늘 값의 비용만 예약한다`(includesToday: Boolean) {
+    fun `코호트 포함 긴 조회는 최근 41일과 별도 오늘 값의 비용만 예약한다`(includesToday: Boolean) {
         MockWebServer().use { server ->
             server.start(); val mapper = ObjectMapper(); val clock = MutableAnalyticsClock(now)
             val fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", "team", server.url("/").toString()), clock)
@@ -35,8 +35,8 @@ class AmplitudeBudgetTests {
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 1 })))))
             } }
             val result = fixture.service.dashboard(com.knk.manyak.admin.dto.AdminChartsRequest().apply { this.from = from.toString(); this.to = to.toString() })
-            assertThat(result.daily).hasSize(if (includesToday) 50 else 49)
-            if (!includesToday) assertThat(fixture.budget.reserve(4)).isTrue()
+            assertThat(result.daily).hasSize(41)
+            assertThat(fixture.budget.reserve(if (includesToday) 8 else 2)).isTrue()
             assertThat(fixture.budget.reserve(1)).isFalse()
         }
     }
@@ -60,9 +60,9 @@ class AmplitudeBudgetTests {
             clock.at = now.plusSeconds(59); assertThatThrownBy { fixture.service.dashboard(7) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
             assertThat(server.requestCount).isZero()
             val today = LocalDate.parse("2026-10-22"); val mapper = ObjectMapper()
-            repeat(5) { server.enqueue(MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to List(7) { today.minusDays(6).plusDays(it.toLong()).toString() }, "series" to listOf(List(7) { 1 })))))) }
-            clock.at = now.plusSeconds(60); assertThat(fixture.service.dashboard(7).todayActiveUsers).isEqualTo(DashboardPlatformCounts(3, 1, 2))
-            assertThat(server.requestCount).isEqualTo(5)
+            repeat(6) { server.enqueue(MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to List(7) { today.minusDays(6).plusDays(it.toLong()).toString() }, "series" to listOf(List(7) { 1 })))))) }
+            clock.at = now.plusSeconds(60); assertThat(fixture.service.dashboard(7).todayActiveUsers).isEqualTo(DashboardPlatformCounts(1, 1, 1))
+            assertThat(server.requestCount).isEqualTo(6)
         }
     }
     @Test fun `독립 클라이언트도 공용 계수기로 외부 호출을 직렬화한다`() {

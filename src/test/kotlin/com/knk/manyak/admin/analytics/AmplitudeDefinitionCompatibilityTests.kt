@@ -25,12 +25,13 @@ class AmplitudeDefinitionCompatibilityTests {
     @Test fun `7월 1일 초기 백필의 평균과 확정 리텐션 구조도 해석한다`() {
         val inventory = AmplitudeDefinitionInventory()
         val responses = responses(inventory)
+        val aliases = inventory.mapper.readTree(ClassPathResource("amplitude/app-overseas-shape-aliases.json").inputStream.bufferedReader().use { it.readText() })
         val date = java.time.LocalDate.parse("2026-07-01")
         val range = AnalyticsRange(date, date)
         val definitions = MetricDefinitions(AnalyticsQueryFactory(inventory.mapper), inventory.mapper)
         for (metric in listOf(definitions.sessions().first(), definitions.retention().first(), definitions.activity().first { it.definition.metric == "activity_messages" })) {
             val key = "historical-" + metric.definition.metric + "-" + metric.definition.hash
-            val result = metric.decode(responses[key]["data"], range)
+            val result = metric.decode((responses[key] ?: aliases[key]?.let { responses[it.asText()] } ?: error("응답 형태 fixture 누락: $key"))["data"], range)
             assertThat(result.keys).containsExactly(date)
         }
     }

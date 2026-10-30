@@ -202,7 +202,7 @@ class AnalyticsBatchTests {
         assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(991)
+        assertThat(results.sumOf { it.cost }).isEqualTo(973)
         catalog.metrics().forEach { entry ->
             val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()

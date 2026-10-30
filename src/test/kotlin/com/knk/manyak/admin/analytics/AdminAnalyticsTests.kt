@@ -32,7 +32,7 @@ class AdminAnalyticsTests {
             }
         }
     }
-    @Test fun `개요 분석은 국내와 해외 로그인 다섯 조회의 합을 반환한다`() {
+    @Test fun `개요 분석은 전체 웹 앱 여섯 조회 값을 반환한다`() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(r: RecordedRequest): MockResponse {
                 val e = r.requestUrl!!.queryParameter("e")?.let { mapper.readTree(it) }
@@ -44,61 +44,61 @@ class AdminAnalyticsTests {
         val response = mapper.valueToTree<tools.jackson.databind.JsonNode>(fixture.service.dashboard(request(today,today)))
         assertThat(response["todayActiveUsers"].isObject).isTrue()
         for (value in listOf(response["todayActiveUsers"], response["daily"][0]["activeUsers"])) {
-            assertThat(value["total"].asLong()).isEqualTo(20); assertThat(value["web"].asLong()).isEqualTo(10); assertThat(value["android"].asLong()).isEqualTo(10)
+            assertThat(value["total"].asLong()).isEqualTo(13); assertThat(value["web"].asLong()).isEqualTo(10); assertThat(value["android"].asLong()).isEqualTo(5)
         }
-        assertThat(response["daily"][0]["newUsers"]["total"].asLong()).isEqualTo(15)
-        assertThat(server.requestCount).isEqualTo(5)
-        repeat(5) {
+        assertThat(response["daily"][0]["newUsers"]["total"].asLong()).isEqualTo(13)
+        assertThat(server.requestCount).isEqualTo(6)
+        repeat(6) {
             val u=server.takeRequest().requestUrl!!
             assertThat(u.encodedPath).isEqualTo("/api/2/events/segmentation"); assertThat(u.queryParameter("m")).isEqualTo("uniques")
             assertThat(u.queryParameter("e")).contains("country","South Korea","(none)","platform"); assertThat(u.queryParameter("s")).contains("userdata_cohort","team")
         }
-        assertThat(fixture.budget.reserve(490)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+        assertThat(fixture.budget.reserve(488)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
     @ParameterizedTest @ValueSource(ints = [30,90])
-    fun `코호트 포함 하루 비용 10으로 30일은 300 90일은 500을 쓴다`(days: Int) {
+    fun `코호트 포함 하루 비용 12로 30일은 360 90일은 500을 쓴다`(days: Int) {
         dispatcher()
         val value = fixture.service.dashboard(days)
-        val ready = minOf(days,50)
+        val ready = minOf(days,41)
         assertThat(value.daily).hasSize(ready); assertThat(value.pendingDates).hasSize(days-ready)
-        if (ready<50) assertThat(fixture.budget.reserve(500-ready*10)).isTrue()
-        assertThat(fixture.budget.reserve(1)).isFalse()
-        assertThat(server.requestCount).isEqualTo(5)
+        if (ready<41) assertThat(fixture.budget.reserve(500-ready*12)).isTrue()
+        assertThat(fixture.budget.reserve(if (ready == 41) 9 else 1)).isFalse()
+        assertThat(server.requestCount).isEqualTo(6)
     }
     @Test fun `요청 범위와 코호트 및 기본 인증을 적용하고 DB 저장 값을 재사용한다`() {
         dispatcher(); val response = fixture.service.dashboard(7)
-        assertThat(response.daily).hasSize(7); assertThat(response.pendingDates).isEmpty(); assertThat(response.todayActiveUsers).isEqualTo(DashboardPlatformCounts(30, 10, 20))
-        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(5)
-        repeat(5) {
+        assertThat(response.daily).hasSize(7); assertThat(response.pendingDates).isEmpty(); assertThat(response.todayActiveUsers).isEqualTo(DashboardPlatformCounts(10, 10, 10))
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(6)
+        repeat(6) {
             val r = server.takeRequest(); assertThat(r.requestUrl!!.queryParameter("start")).isEqualTo("20261016")
             assertThat(r.requestUrl!!.queryParameter("s")).contains("userdata_cohort", "team")
             assertThat(r.getHeader("Authorization")).isEqualTo("Basic bW9jazptb2Nr")
         }
     }
-    @Test fun `366일의 첫 조회는 최근 50일을 받고 예산 회복 뒤 다음 날짜를 이어 받는다`() {
+    @Test fun `366일의 첫 조회는 최근 41일을 받고 예산 회복 뒤 다음 날짜를 이어 받는다`() {
         dispatcher(); val request = request(today.minusDays(365), today)
         val first = fixture.service.dashboard(request)
-        assertThat(first.daily).hasSize(50); assertThat(first.pendingDates).hasSize(316)
-        assertThat(first.daily.first().date).isEqualTo(today.minusDays(49))
-        assertThat(fixture.service.dashboard(request)).isEqualTo(first); assertThat(server.requestCount).isEqualTo(5)
+        assertThat(first.daily).hasSize(41); assertThat(first.pendingDates).hasSize(325)
+        assertThat(first.daily.first().date).isEqualTo(today.minusDays(40))
+        assertThat(fixture.service.dashboard(request)).isEqualTo(first); assertThat(server.requestCount).isEqualTo(6)
         fixture.clock.at = now.plusSeconds(300)
         val next = fixture.service.dashboard(request)
-        assertThat(next.daily).hasSize(100); assertThat(next.pendingDates).hasSize(266)
-        assertThat(server.requestCount).isEqualTo(10)
-        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo("20261022"); repeat(4) { server.takeRequest() }
-        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo(today.minusDays(50).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
+        assertThat(next.daily).hasSize(82); assertThat(next.pendingDates).hasSize(284)
+        assertThat(server.requestCount).isEqualTo(12)
+        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo("20261022"); repeat(5) { server.takeRequest() }
+        assertThat(server.takeRequest().requestUrl!!.queryParameter("end")).isEqualTo(today.minusDays(41).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE))
     }
     @Test fun `오늘은 10분마다 어제는 하루 한 번만 다시 받고 확정 날짜는 받지 않는다`() {
         dispatcher(); fixture.service.dashboard(7)
-        fixture.clock.at = now.plusSeconds(599); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(5)
+        fixture.clock.at = now.plusSeconds(599); fixture.service.dashboard(7); assertThat(server.requestCount).isEqualTo(6)
         // 갱신을 기다리지 않고 만료된 오늘 값으로 응답한 뒤 백그라운드 갱신이 오늘 날짜만 다시 조회한다.
         fixture.clock.at = now.plusSeconds(600); assertThat(fixture.service.dashboard(7).asOf).isEqualTo(now)
-        fixture.executor.await(); assertThat(server.requestCount).isEqualTo(10)
-        repeat(5) { server.takeRequest() }
-        repeat(5) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261022"); assertThat(url.queryParameter("end")).isEqualTo("20261022") }
+        fixture.executor.await(); assertThat(server.requestCount).isEqualTo(12)
+        repeat(6) { server.takeRequest() }
+        repeat(6) { val url = server.takeRequest().requestUrl!!; assertThat(url.queryParameter("start")).isEqualTo("20261022"); assertThat(url.queryParameter("end")).isEqualTo("20261022") }
         fixture.clock.at = now.plusSeconds(86400)
-        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(15) // 어제와 새 오늘 active를 연속 구간 한 번, 어제 new 한 번
-        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(15)
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(18) // 어제와 새 오늘 active를 연속 구간 한 번, 어제 new 한 번
+        fixture.service.dashboard(request(today.minusDays(6), today)); assertThat(server.requestCount).isEqualTo(18)
     }
     @Test fun `배포 뒤 새 서비스도 과거 DB 값을 재사용하고 오늘 값만 별도로 갱신한다`() {
         dispatcher(); val request = request(today.minusDays(10), today.minusDays(2))
@@ -128,9 +128,9 @@ class AdminAnalyticsTests {
         }
         val q = request(today, today)
         val first = fixture.service.dashboard(q)
-        assertThat(first.todayActiveUsers).isNull(); assertThat(first.daily.single().activeUsers).isEqualTo(DashboardPlatformCounts(24, 8, 16))
+        assertThat(first.todayActiveUsers).isNull(); assertThat(first.daily.single().activeUsers).isEqualTo(DashboardPlatformCounts(8, 8, 8))
         val next = fixture.service.dashboard(q)
-        assertThat(next.todayActiveUsers).isEqualTo(DashboardPlatformCounts(24, 8, 16)); assertThat(server.requestCount).isEqualTo(8)
+        assertThat(next.todayActiveUsers).isEqualTo(DashboardPlatformCounts(8, 8, 8)); assertThat(server.requestCount).isEqualTo(9)
     }
     @Test fun `오늘 활성 세 조회 중 하나를 못 받으면 부분 객체 대신 null을 반환한다`() {
         val day = today.minusDays(2)
@@ -167,8 +167,8 @@ class AdminAnalyticsTests {
             repeat(2) { assertThat(fixture.service.dashboard(7)).isEqualTo(previous) }
         } finally { release.countDown() }
         fixture.executor.await()
-        assertThat(server.requestCount - calls).isEqualTo(5)
-        assertThat(fixture.service.dashboard(7).todayActiveUsers).isEqualTo(DashboardPlatformCounts(60, 20, 40))
+        assertThat(server.requestCount - calls).isEqualTo(6)
+        assertThat(fixture.service.dashboard(7).todayActiveUsers).isEqualTo(DashboardPlatformCounts(20, 20, 20))
     }
     @Test fun `오늘 값이 만료된 상태의 대역 500은 기다리지 않고 만료 값으로 응답하고 백그라운드 실패는 쿨다운을 건다`() {
         val logger = org.slf4j.LoggerFactory.getLogger(AnalyticsSnapshots::class.java) as ch.qos.logback.classic.Logger

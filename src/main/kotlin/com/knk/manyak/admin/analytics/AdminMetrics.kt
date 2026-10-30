@@ -12,6 +12,7 @@ class PlatformMetricsQuery : AnalyticsRangeQuery() { var platform: String? = nul
 fun analyticsSegment(value: String?) = (value ?: "all").also { if (it !in setOf("all", "guest", "member")) badAdminQuery("segment가 올바르지 않습니다.") }
 class ConversionMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null; var storyId: UUID? = null }
 data class PlatformCounts(val all: Long, val web: Long, val android: Long, val unknown: Long)
+data class MetricPlatformCounts(val all: Long, val web: Long, val android: Long)
 data class PlatformDecimals(val all: Double?, val web: Double?, val android: Double?, val unknown: Double? = null)
 data class ActivityDay(val date: LocalDate, val activeUsers: PlatformCounts, val newVisitors: PlatformCounts, val cumulativeNewVisitors: PlatformCounts, val messagesPerUser: PlatformDecimals)
 data class ActivityResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val monthlyActiveUsers: Long?, val daily: List<ActivityDay>, val pendingDates: List<LocalDate>)
@@ -37,17 +38,16 @@ class AdminMetricsService(private val definitions: MetricDefinitions, private va
     private val reads: AdminMetricReadRepository, private val dashboard: com.knk.manyak.admin.config.AdminDashboardProperties, private val clock: Clock = Clock.systemUTC()) {
     private fun ready(result: AnalyticsSnapshotResult): List<LocalDate> = result.readyDates().also { if (it.isEmpty()) throw AdminAnalyticsUnavailable() }
     fun activity(query: AnalyticsRangeQuery): ActivityResponse {
-        val range = query.range(clock); val metrics = definitions.activity(); val mau = listOf("all", "android", "android_overseas").map { definitions.mau(range.to, it) }
+        val range = query.range(clock); val metrics = definitions.activity(); val mau = listOf(definitions.mau(range.to))
         val result = snapshots.load("users/activity", range, metrics, rangeMetrics = mau); val dates = ready(result)
         val cumulative = LongArray(4)
         val daily = dates.map { date ->
             fun n(i: Int) = result.value(metrics[i], date)!!.value.asLong()
             fun d(i: Int) = result.value(metrics[i], date)!!.value.asDouble()
-            val android = Math.addExact(n(4), n(8))
-            val new = listOf(Math.addExact(n(1), n(5)), n(3), n(5), n(7))
+            val new = listOf(n(1), n(3), n(5), n(7))
             for (i in 0..3) cumulative[i] = Math.addExact(cumulative[i], new[i])
-            ActivityDay(date, PlatformCounts(Math.addExact(n(0), android), n(2), android, n(6)), PlatformCounts(new[0], new[1], new[2], new[3]),
-                PlatformCounts(cumulative[0], cumulative[1], cumulative[2], cumulative[3]), PlatformDecimals(null, d(9), d(10)))
+            ActivityDay(date, PlatformCounts(n(0), n(2), n(4), n(6)), PlatformCounts(new[0], new[1], new[2], new[3]),
+                PlatformCounts(cumulative[0], cumulative[1], cumulative[2], cumulative[3]), PlatformDecimals(null, d(8), d(9)))
         }
         val monthly = mau.mapNotNull { result.value(it) }.takeIf { it.size == mau.size }
         val monthlyTotal = monthly?.fold(0L) { sum, value -> Math.addExact(sum, value.value.asLong()) }

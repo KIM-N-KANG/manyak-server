@@ -144,7 +144,7 @@ class AdminMetricsIntegrationTests {
         }
         val period="from=2026-10-19&to=2026-10-21"
         val activity=body("/users/activity?$period")
-        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(300)
+        assertThat(activity["monthlyActiveUsers"].asLong()).isEqualTo(100)
         assertThat(activity["daily"][0]["activeUsers"]["unknown"].asLong()).isEqualTo(10)
         assertThat(activity["daily"][0]["messagesPerUser"]["all"].isNull).isTrue()
         val retention=body("/users/retention?$period")
@@ -175,6 +175,14 @@ class AdminMetricsIntegrationTests {
         assertThat(quality["daily"][0]["users"].has("storyCompleteError")).isFalse()
         assertThat(quality["storyCompletion"].toList().map { it["date"].asText() }).containsExactly("2026-10-19","2026-10-20","2026-10-21")
         assertThat(quality["storyCompletion"][0]["failureRate"].isNull).isTrue()
+        val signups = body("/users/signups?$period")["daily"][0]["signupsByPlatform"]
+        assertThat(signups.has("unknown")).isFalse()
+        assertThat(signups["all"].asLong()).isEqualTo(20)
+        val reach = body("/conversion/turn-reach?$period")["platforms"]
+        assertThat(reach.toList().map { it["platform"].asText() }).containsExactly("all", "web", "android")
+        val options = body("/quality/chat-options?$period")["daily"][0]
+        for (field in listOf("chatStarts", "personaChatStarts")) assertThat(options[field].has("unknown")).isFalse()
+        for (turns in options["platformTurnsByModel"]) assertThat(turns.has("unknown")).isFalse()
         for ((name,steps) in listOf("web-first-visit" to 6,"android-first-visit" to 2,"story-creation" to 4,"story-detail-chat" to 7,"guest-limit-login" to 3)) {
             val result=body("/conversion/funnels/$name?from=2026-10-21&to=2026-10-21")
             assertThat(result["steps"].size()).isEqualTo(steps)

@@ -32,14 +32,12 @@ class AdminAnalyticsService(private val snapshots: AnalyticsSnapshots, propertie
         val definition = AnalyticsDefinition("dashboard_$name", "/api/2/events/segmentation", listOf("e" to event, "m" to "uniques", "i" to "1") + cohort, if (cohort.isEmpty()) 1 else 2, mapper)
         return DailyAnalyticsMetric(definition) { data, range -> range.dates().zip(AmplitudeResults.series(data, range).map { mapper.valueToTree<tools.jackson.databind.JsonNode>(it) }).toMap() }
     }
-    private val active = listOf("web", "android", "android_overseas").map { metric("active", it, properties, mapper) }
-    private val new = listOf("web", "android").map { metric("new", it, properties, mapper) }
+    private val active = listOf("all", "web", "android").map { metric("active", it, properties, mapper) }
+    private val new = listOf("all", "web", "android").map { metric("new", it, properties, mapper) }
     fun dailyMetrics(): List<DailyAnalyticsMetric> = active + new
     private fun counts(values: List<AnalyticsValue>): DashboardPlatformCounts {
-        check(values.size in 2..3)
-        val web = values[0].value.asLong()
-        val android = values.drop(1).fold(0L) { sum, value -> Math.addExact(sum, value.value.asLong()) }
-        return DashboardPlatformCounts(Math.addExact(web, android), web, android)
+        check(values.size == 3)
+        return DashboardPlatformCounts(values[0].value.asLong(), values[1].value.asLong(), values[2].value.asLong())
     }
     fun dashboard(request: com.knk.manyak.admin.dto.AdminChartsRequest): AdminAnalyticsResponse {
         val requested = request.resolve(clock); val range = AnalyticsRange(requested.from, requested.to)

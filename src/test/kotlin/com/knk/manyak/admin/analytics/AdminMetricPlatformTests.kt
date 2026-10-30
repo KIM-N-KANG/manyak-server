@@ -34,7 +34,7 @@ class AdminMetricPlatformTests {
         override fun modelCodes() = models
     }
     private fun service(f: AnalyticsTestFixture = fixture) = AdminMetricReadService(repository, AdminDashboardProperties(), MetricDefinitions(AnalyticsQueryFactory(f.mapper), f.mapper), f.snapshots, f.clock)
-    private fun filters(e: JsonNode) = e["filters"].toList().associate { it["subprop_key"].asText() to it["subprop_op"].asText() + ":" + it["subprop_value"][0].asText() }
+    private fun filters(e: JsonNode) = e["filters"].toList().associate { it["subprop_key"].asText() to it["subprop_op"].asText() + ":" + it["subprop_value"].toList().joinToString(",") { v -> v.asText() } }
     private fun event(r: RecordedRequest) = fixture.mapper.readTree(r.requestUrl!!.queryParameter("e")!!)
     @BeforeEach fun setup() {
         server = MockWebServer().apply { start() }
@@ -53,22 +53,22 @@ class AdminMetricPlatformTests {
     @AfterEach fun stop() = server.shutdown()
     private fun signups(days: Int = 7) = service().signups(com.knk.manyak.admin.dto.AdminChartsRequest().apply { this.days = days.toString() })
     private fun request(from: String, to: String, segment: String? = null) = AdminSegmentRequest().apply { this.from = from; this.to = to; this.segment = segment }
-    private fun platform(f: Map<String, String>) = when (f["platform"]) { "is:Web" -> "web"; "is:Android" -> "android"; "is:(none)" -> "unknown"; else -> error("platform 조건 없음 $f") }
+    private fun platform(f: Map<String, String>) = when (f["platform"]) { "is:Web,Android" -> "all"; "is:Web" -> "web"; "is:Android" -> "android"; "is:(none)" -> "unknown"; else -> error("platform 조건 없음 $f") }
 
-    @Test fun `신규 가입자 플랫폼은 가입 이벤트 둘의 국내 세 플랫폼 6회를 더한다`() {
-        val values = mapOf(AdminMetricEvents.GOOGLE to mapOf("web" to 3L, "android" to 5L, "unknown" to 1L), AdminMetricEvents.KAKAO to mapOf("web" to 1L, "android" to 2L, "unknown" to 0L))
+    @Test fun `신규 가입자 플랫폼은 가입 이벤트 둘의 국내 전체 웹 앱 조건 6회를 조회한다`() {
+        val values = mapOf(AdminMetricEvents.GOOGLE to mapOf("web" to 3L, "android" to 5L, "all" to 7L), AdminMetricEvents.KAKAO to mapOf("web" to 1L, "android" to 2L, "all" to 3L))
         daily = { name, f -> values.getValue(name).getValue(platform(f)) }
         val result = signups()
         assertThat(requests).hasSize(6)
         for (r in requests) {
             val f = filters(event(r))
-            assertThat(f).containsEntry("is_new_user", "is:true").containsEntry("country", "is:South Korea").doesNotContainKey("user_id")
+            assertThat(f).containsEntry("is_new_user", "is:true").containsEntry("country", "is:South Korea,(none)").doesNotContainKey("user_id")
             assertThat(r.requestUrl!!.queryParameter("s")).isNull(); assertThat(r.requestUrl!!.queryParameter("m")).isEqualTo("uniques")
         }
         assertThat(requests.map { platform(filters(event(it))) to event(it)["event_type"].asText() }).containsExactlyInAnyOrderElementsOf(
-            listOf("web", "android", "unknown").flatMap { p -> listOf(p to AdminMetricEvents.GOOGLE, p to AdminMetricEvents.KAKAO) })
+            listOf("all", "web", "android").flatMap { p -> listOf(p to AdminMetricEvents.GOOGLE, p to AdminMetricEvents.KAKAO) })
         assertThat(result.pendingDates).isEmpty(); assertThat(result.platformAsOf).isNotNull()
-        assertThat(result.daily).hasSize(7).allMatch { it.signupsByPlatform == PlatformCounts(12, 4, 7, 1) && it.signups == SignupCounts(2, 1, 1) }
+        assertThat(result.daily).hasSize(7).allMatch { it.signupsByPlatform == MetricPlatformCounts(10, 4, 7) && it.signups == SignupCounts(2, 1, 1) }
     }
 
     @Test fun `플랫폼 예산이 3일치만 남으면 DB 값은 7일 모두 주고 나머지 4일은 준비 중이다`() {
@@ -112,7 +112,7 @@ class AdminMetricPlatformTests {
 
     @Test fun `턴 도달률 플랫폼은 재생성 아닌 성공 이벤트의 기준 턴 합계 36회다`() {
         service().reach(request("2026-10-17", "2026-10-23"))
-        assertThat(requests).hasSize(36)
+        assertThat(requests).hasSize(24)
         for (r in requests) {
             val e = event(r); val f = filters(e)
             assertThat(e["event_type"].asText()).isEqualTo(AdminMetricEvents.CHAT_SUCCEEDED); assertThat(r.requestUrl!!.queryParameter("m")).isEqualTo("totals")
@@ -125,25 +125,24 @@ class AdminMetricPlatformTests {
 
     @Test fun `게스트와 회원은 user_id 유무로 거르고 따로 저장하며 다른 값은 400이다`() {
         service().reach(request("2026-10-23", "2026-10-23", "guest"))
-        assertThat(requests).hasSize(36).allMatch { filters(event(it))["user_id"] == "is:(none)" }
+        assertThat(requests).hasSize(24).allMatch { filters(event(it))["user_id"] == "is:(none)" }
         requests.clear(); service().reach(request("2026-10-23", "2026-10-23", "member"))
-        assertThat(requests).hasSize(36).allMatch { filters(event(it))["user_id"] == "is not:(none)" }
+        assertThat(requests).hasSize(24).allMatch { filters(event(it))["user_id"] == "is not:(none)" }
         requests.clear(); service().reach(request("2026-10-23", "2026-10-23"))
-        assertThat(requests).hasSize(36)
+        assertThat(requests).hasSize(24)
         assertThatThrownBy { service().reach(request("2026-10-23", "2026-10-23", "visitor")) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { service().options(request("2026-10-23", "2026-10-23", "visitor")) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
     }
 
-    @Test fun `플랫폼 도달은 준비된 날짜의 합을 1턴 수로 나누고 전체는 세 플랫폼의 합이다`() {
+    @Test fun `플랫폼 도달은 준비된 날짜의 합을 1턴 수로 나누고 전체는 웹과 앱의 합이다`() {
         daily = { _, f -> when (platform(f) to f["turn_number"]) {
             "web" to "is:1" -> 5L; "web" to "is:5" -> 2L; "android" to "is:1" -> 10L; "android" to "is:5" -> 5L; else -> 0L
         } }
         val platforms = service().reach(request("2026-10-22", "2026-10-23")).platforms!!.associateBy { it.platform }
-        assertThat(platforms.keys).containsExactly("all", "web", "android", "unknown")
+        assertThat(platforms.keys).containsExactly("all", "web", "android")
         assertThat(platforms.getValue("web").chats).isEqualTo(10); assertThat(platforms.getValue("web").reached.single { it.turn == 5 }.rate).isEqualTo(0.4)
         assertThat(platforms.getValue("web").reached.single { it.turn == 50 }.chats).isZero()
         assertThat(platforms.getValue("all").chats).isEqualTo(30); assertThat(platforms.getValue("all").reached.single { it.turn == 5 }.chats).isEqualTo(14)
-        assertThat(platforms.getValue("unknown").chats).isZero(); assertThat(platforms.getValue("unknown").reached).allMatch { it.rate == 0.0 }
         assertThat(platforms.values).allMatch { p -> p.reached.map { it.turn } == com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds }
     }
 
@@ -163,27 +162,49 @@ class AdminMetricPlatformTests {
         assertThat(failed.segments).isEqualTo(all.segments); assertThat(failed.guestToMember).isEqualTo(all.guestToMember)
     }
 
-    @Test fun `채팅 옵션 플랫폼은 시작 클릭 6회와 모델마다 세 플랫폼 턴 수를 보낸다`() {
+    @Test fun `앱 도달 조회 실패는 웹 값만으로 전체를 만들지 않고 복구 뒤 이어 받는다`() {
+        daily = { _, _ -> 2L }
+        val working = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(r: RecordedRequest): MockResponse =
+                if (platform(filters(event(r))) == "android") { requests += r; MockResponse().setResponseCode(500) }
+                else working.dispatch(r)
+        }
+        val query = request("2026-10-23", "2026-10-23")
+        val partial = service().reach(query)
+        assertThat(partial.platforms).isNull()
+        assertThat(partial.pendingDates).containsExactly(LocalDate.parse("2026-10-23"))
+        assertThat(requests).hasSize(13)
+        requests.clear()
+        fixture.clock.at = fixture.clock.at.plusSeconds(61)
+        server.dispatcher = working
+        val complete = service().reach(query)
+        assertThat(complete.pendingDates).isEmpty()
+        assertThat(complete.platforms!!.first().chats).isEqualTo(4)
+        assertThat(requests).hasSize(12).allMatch { platform(filters(event(it))) == "android" }
+    }
+
+    @Test fun `채팅 옵션 플랫폼은 시작 클릭 4회와 모델마다 두 플랫폼 턴 수를 보낸다`() {
         val clicks = mapOf("web" to mapOf("default" to 8L, "persona" to 2L), "android" to mapOf("default" to 5L, "persona" to 0L))
         val turns = mapOf("web" to mapOf("LITE" to 4L, "AURORA" to 1L), "android" to mapOf("LITE" to 3L, "AURORA" to 0L))
         daily = { name, f -> if (name == AdminMetricEvents.CHAT_START) clicks[platform(f)]?.get(f.getValue("persona_type").removePrefix("is:")) ?: 0L
             else turns[platform(f)]?.get(f.getValue("model_code").removePrefix("is:")) ?: 0L }
         val day = service().options(request("2026-10-23", "2026-10-23")).daily.single()
-        assertThat(requests).hasSize(12)
+        assertThat(requests).hasSize(8)
         val starts = requests.filter { event(it)["event_type"].asText() == AdminMetricEvents.CHAT_START }
         assertThat(starts.map { platform(filters(event(it))) to filters(event(it))["persona_type"] }).containsExactlyInAnyOrderElementsOf(
-            listOf("web", "android", "unknown").flatMap { p -> listOf(p to "is:default", p to "is:persona") })
+            listOf("web", "android").flatMap { p -> listOf(p to "is:default", p to "is:persona") })
         val models = requests - starts.toSet()
         assertThat(models).allMatch { event(it)["event_type"].asText() == AdminMetricEvents.CHAT_SUCCEEDED && filters(event(it))["is_regenerated"] == "is:false" }
         assertThat(models.map { platform(filters(event(it))) to filters(event(it))["model_code"] }).containsExactlyInAnyOrderElementsOf(
-            listOf("web", "android", "unknown").flatMap { p -> listOf(p to "is:LITE", p to "is:AURORA") })
+            listOf("web", "android").flatMap { p -> listOf(p to "is:LITE", p to "is:AURORA") })
         assertThat(requests).allMatch { it.requestUrl!!.queryParameter("m") == "totals" && !filters(event(it)).containsKey("user_id") }
-        assertThat(day.chatStarts).isEqualTo(PlatformCounts(15, 10, 5, 0)); assertThat(day.personaChatStarts).isEqualTo(PlatformCounts(2, 2, 0, 0))
-        assertThat(day.platformTurnsByModel).isEqualTo(mapOf("AURORA" to PlatformCounts(1, 1, 0, 0), "LITE" to PlatformCounts(7, 4, 3, 0)))
+        assertThat(day.chatStarts).isEqualTo(MetricPlatformCounts(15, 10, 5)); assertThat(day.personaChatStarts).isEqualTo(MetricPlatformCounts(2, 2, 0))
+        assertThat(day.platformTurnsByModel).isEqualTo(mapOf("AURORA" to MetricPlatformCounts(1, 1, 0), "LITE" to MetricPlatformCounts(7, 4, 3)))
         repository.models = listOf("AURORA", "LITE", "NOVA"); requests.clear()
         val added = service().options(request("2026-10-23", "2026-10-23")).daily.single()
-        assertThat(requests).hasSize(3).allMatch { filters(event(it))["model_code"] == "is:NOVA" }
-        assertThat(added.platformTurnsByModel!!.getValue("NOVA")).isEqualTo(PlatformCounts(0, 0, 0, 0))
+        assertThat(requests).hasSize(2).allMatch { filters(event(it))["model_code"] == "is:NOVA" }
+        assertThat(added.platformTurnsByModel!!.getValue("NOVA")).isEqualTo(MetricPlatformCounts(0, 0, 0))
     }
 
     @Test fun `채팅 옵션 대역 장애는 DB 값만 주고 플랫폼 값 셋은 null이다`() {
