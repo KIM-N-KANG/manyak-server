@@ -1,4 +1,4 @@
-### 메트릭 export 수동 검증 (Grafana Cloud OTLP 배선)
+### 메트릭 export 수동 검증 (OTLP export)
 ### IntelliJ HTTP Client 호환.
 ###
 ### 검증 대상: local 프로파일에서 새로 생긴 /actuator/prometheus 노출과 무인증 허용, 그리고
@@ -8,7 +8,7 @@
 ###
 ### [중요] 이 파일은 **local 프로파일 전용**입니다.
 ###   - 운영에는 /actuator/prometheus가 노출되지 않습니다(404). 메트릭은 스크레이프가 아니라 OTLP push로
-###     Grafana Cloud에 나가므로 인바운드 경로가 필요 없고, 노출하면 인증 없이 내부 지표가 공개되기 때문입니다(스펙 §4-7).
+###     OTel Collector로 나가므로 인바운드 경로가 필요 없고, 노출하면 인증 없이 내부 지표가 공개되기 때문입니다(스펙 §4-7).
 ###   - 게이트는 두 겹입니다: (1) actuator 노출 목록 — 운영은 health,info / 로컬만 prometheus 추가,
 ###     (2) SecurityConfig의 무인증 허용 — environment.matchesProfiles("local")일 때만 permitAll.
 ###     그래서 나중에 누가 운영 노출 목록에 prometheus를 더해도 인증 없이 뚫리지는 않습니다.
