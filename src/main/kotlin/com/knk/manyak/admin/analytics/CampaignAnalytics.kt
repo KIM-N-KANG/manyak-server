@@ -78,7 +78,7 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
             metrics += metric("source_$group", "_new", common + ads(campaign, "is not") +
                 CampaignEvents.filter("gp:initial_utm_source", values, "user", if (group == "other") "is not" else "is"))
         }
-        metrics += metric("signup_all", AdminMetricEvents.SIGNUP)
+        metrics += metric("signup_all", AdminMetricEvents.SIGNUP, common)
         metrics += metric("signup_ads", AdminMetricEvents.SIGNUP, common + ads(campaign))
         // Android 앱 가입은 광고 구분 없이 센다.
         metrics += metric("signup_android", AdminMetricEvents.SIGNUP,

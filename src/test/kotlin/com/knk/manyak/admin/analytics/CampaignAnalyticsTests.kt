@@ -38,6 +38,21 @@ class CampaignAnalyticsTests {
     }
     @AfterEach fun stop() = server.shutdown()
     private fun query(days: Int) = CampaignQuery().apply { from = day.minusDays(days.toLong() - 1).toString(); to = day.toString() }
+    @Test fun `웹 전체 가입 정의는 국내 Web 커스텀 이벤트와 기존 해시를 유지한다`() {
+        val definition = service.trendMetrics("campaign").single { it.definition.metric == "campaign_signup_all" }.definition
+        val event = fixture.mapper.readTree(definition.parameters.single { it.first == "e" }.second)
+        val expected = fixture.mapper.readTree("""{
+            "event_type":"ce:신규 가입 (구글·카카오)",
+            "filters":[
+                {"subprop_type":"user","subprop_key":"country","subprop_op":"is","subprop_value":["South Korea","(none)"]},
+                {"subprop_type":"user","subprop_key":"platform","subprop_op":"is","subprop_value":["Web"]}
+            ]
+        }""")
+        assertThat(event).isEqualTo(expected)
+        assertThat(definition.parameters.toMap()).containsEntry("m", "uniques").containsEntry("i", "1")
+        assertThat(definition.hash).isEqualTo("8e8eae1f98ceaed389535ca6c69d13c9d1036b5460d403b549a2c2451a4ea125")
+        assertThat(requests).isEmpty()
+    }
     @Test fun `간편 제작은 20일 비용 480을 예약하고 21일과 days30은 거절한다`() {
         val result = service.creation(query(20))
         assertThat(result.steps).hasSize(6); assertThat(result.steps[0].users.nonAds).isEqualTo(20)
