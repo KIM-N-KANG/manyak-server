@@ -32,8 +32,8 @@ class ChatModelPromotionIntegrationTests {
     private lateinit var memberToken: String
     private lateinit var member: User
     private val root = "/api/v1/admin/chat-models"
-    private val start = Instant.now().minusSeconds(3600).toString()
-    private val end = Instant.now().plusSeconds(3600).toString()
+    private val start = Instant.now().minusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
+    private val end = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
 
     @BeforeEach fun setup() {
         cleaner.cleanAll()
