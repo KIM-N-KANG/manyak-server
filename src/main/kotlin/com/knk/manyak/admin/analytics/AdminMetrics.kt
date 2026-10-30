@@ -3,11 +3,19 @@ package com.knk.manyak.admin.analytics
 import com.knk.manyak.admin.dto.AdminDateRange
 import com.knk.manyak.admin.dto.badAdminQuery
 import org.springframework.stereotype.Service
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.*
 import java.util.UUID
 
-class SegmentRangeQuery : AnalyticsRangeQuery() { var segment: String? = null }
-class PlatformMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null; var segment: String? = null }
+class SegmentRangeQuery : AnalyticsRangeQuery() {
+    @field:Schema(allowableValues = ["all", "guest", "member"])
+    var segment: String? = null
+}
+class PlatformMetricsQuery : AnalyticsRangeQuery() {
+    var platform: String? = null
+    @field:Schema(allowableValues = ["all", "guest", "member"])
+    var segment: String? = null
+}
 /** 전체, 게스트(user_id 없음), 회원(user_id 있음). 기본 all. */
 fun analyticsSegment(value: String?) = (value ?: "all").also { if (it !in setOf("all", "guest", "member")) badAdminQuery("segment가 올바르지 않습니다.") }
 class ConversionMetricsQuery : AnalyticsRangeQuery() { var platform: String? = null; var storyId: UUID? = null }
@@ -19,8 +27,11 @@ data class ActivityResponse(val asOf: Instant, val from: LocalDate, val to: Loca
 data class RetentionRates(val d1: Double?, val d2: Double?, val d3: Double?, val d4: Double?, val d5: Double?, val d6: Double?, val d7: Double?, val d30: Double?)
 data class RetentionCohort(val date: LocalDate, val users: Long, val d1: Double?, val d2: Double?, val d3: Double?, val d4: Double?, val d5: Double?, val d6: Double?, val d7: Double?, val d30: Double?)
 data class RetentionPlatform(val platform: String, val cohorts: List<RetentionCohort>, val summary: RetentionRates)
-class RetentionQuery : AnalyticsRangeQuery() { var cohort: String? = null }
-data class RetentionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val cohort: String, val platforms: List<RetentionPlatform>, val pendingDates: List<LocalDate>)
+class RetentionQuery : AnalyticsRangeQuery() {
+    @field:Schema(allowableValues = ["visitor", "signup", "first-chat"])
+    var cohort: String? = null
+}
+data class RetentionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, @field:Schema(allowableValues = ["visitor", "signup", "first-chat"]) val cohort: String, val platforms: List<RetentionPlatform>, val pendingDates: List<LocalDate>)
 data class SessionDay(val date: LocalDate, val averageSessionSeconds: PlatformDecimals, val sessionsPerUser: PlatformDecimals)
 data class SessionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val segment: String, val daily: List<SessionDay>, val pendingDates: List<LocalDate>)
 data class SessionLengthBin(val fromSeconds: Int, val toSeconds: Int)

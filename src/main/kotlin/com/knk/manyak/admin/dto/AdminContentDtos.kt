@@ -44,11 +44,13 @@ class AdminStoriesRequest : AdminAiRequest() {
     var moderationStatus: String? = null
     var memberId: UUID? = null
     @field:Min(0) @field:Max(5) var supportingCharacterCount: Int? = null
+    @field:Schema(allowableValues = ["GENERAL", "SIMPLE"])
     var creationMode: String? = null
     var chatFrom: String? = null
     var chatTo: String? = null
     var creationFrom: String? = null
     var creationTo: String? = null
+    @field:Schema(allowableValues = ["include", "only"])
     var deleted: String? = null
 }
 class AdminChatsRequest : AdminAiRequest() {
@@ -58,6 +60,7 @@ class AdminChatsRequest : AdminAiRequest() {
     @field:Min(0) @field:Max(12) var turnBucket: Int? = null
     var hasFirstMessage: Boolean? = null
     var turnDate: String? = null
+    @field:Schema(allowableValues = ["include", "only"])
     var deleted: String? = null
 }
 open class AdminChartsRequest {

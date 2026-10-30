@@ -1,6 +1,10 @@
 package com.knk.manyak.global.config
 
 import com.knk.manyak.chat.dto.ChangeChatSettingsRequest
+import com.knk.manyak.story.submission.StoryTakedownRequest
+import io.swagger.v3.oas.models.media.ObjectSchema
+import io.swagger.v3.oas.models.media.Schema
+import io.swagger.v3.oas.models.media.StringSchema
 import org.springdoc.core.customizers.OpenApiCustomizer
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
@@ -56,6 +60,22 @@ class OpenApiConfig {
         api.components?.schemas?.filterKeys { it.startsWith("AdminStorySettings") }?.values?.forEach { schema ->
             schema.required = schema.properties?.keys?.toList()
         }
+    }
+
+    // MODERATION 4-2-10의 조건부 입력 규칙. 서비스 검증은 유지하고 문서에만 oneOf를 더한다.
+    @Bean
+    fun storyTakedownSchema(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        val schema = api.components?.schemas?.get(StoryTakedownRequest::class.java.simpleName)
+            ?: return@OpenApiCustomizer
+        val predefined = ObjectSchema()
+            .addProperty("reasonCode", StringSchema()._enum(listOf("SEXUAL_CONTENT", "COPYRIGHT_INFRINGEMENT", "HATE_SPEECH")))
+            .addProperty("reasonDetail", Schema<Any>().types(linkedSetOf("null")))
+            .required(listOf("reasonCode"))
+        val other = ObjectSchema()
+            .addProperty("reasonCode", StringSchema()._enum(listOf("ETC")))
+            .addProperty("reasonDetail", StringSchema().minLength(1).maxLength(100).pattern("(?sU).*\\S.*"))
+            .required(listOf("reasonCode", "reasonDetail"))
+        schema.oneOf = listOf(predefined, other)
     }
 
     companion object {
