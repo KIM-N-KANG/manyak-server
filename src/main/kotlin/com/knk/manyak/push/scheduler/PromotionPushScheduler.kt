@@ -39,6 +39,7 @@ class PromotionPushScheduler(
                     "kind" to result.kind.name,
                     "targets" to result.targets,
                     "sent" to result.sent,
+                    "reason" to result.reason,
                 )
             }
         } catch (exception: Exception) {

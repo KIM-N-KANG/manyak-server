@@ -1,6 +1,6 @@
 # 공지 관리자 API. 로컬 Postgres·Redis 및 서버를 기동하고 관리자 Google 증명으로 로그인한다.
-# 알림 문구는 작성 필수이며 공지 원문과 다르다. 게시 전까지 수정 가능, 게시 후 문구 변경 409(null은 생략).
-# 위에서부터 실행한다. UUID는 응답 핸들러가 저장한다. 게시하면 항상 알림을 요청하므로 로컬 검증 환경에서 실행한다.
+# 공지에는 제목, 본문, 태그만 작성한다. 알림 문구는 캠페인 예약에 입력한다.
+# 위에서부터 실행한다. UUID는 응답 핸들러가 저장한다. 게시는 알림을 만들지 않는다. 미래 캠페인은 검증 후 취소한다.
 @baseUrl = http://localhost:8080
 @googleIdToken = replace-with-local-google-id-token
 
@@ -27,15 +27,12 @@ POST {{baseUrl}}/api/v1/admin/notices
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
 
-{"title":"로컬 검증용 점검 공지","body":"점검 시간을 안내합니다.\n이 공지는 로컬 검증용입니다.","tag":"MAINTENANCE","notificationTitle":"새로운 점검 안내가 도착했어요","notificationBody":"점검 시간과 이용 안내를 확인해 주세요.\n직접 작성한 알림 문구입니다.","reason":"공지 API 검증"}
+{"title":"로컬 검증용 점검 공지","body":"점검 시간을 안내합니다.\n이 공지는 로컬 검증용입니다.","tag":"MAINTENANCE","reason":"공지 API 검증"}
 
 > {%
     client.test("초안 생성", () => client.assert(response.status === 201 && response.body.status === "DRAFT", `actual=${JSON.stringify(response.body)}`));
     if (response.status === 201) client.global.set("noticeId", response.body.noticeId);
-    client.test("직접 입력한 알림 문구", () => {
-        client.assert(response.body.notificationTitle === "새로운 점검 안내가 도착했어요", JSON.stringify(response.body));
-        client.assert(response.body.notificationBody.includes("\n"), JSON.stringify(response.body));
-    });
+    client.test("알림 문구 필드 없음", () => client.assert(!("notificationTitle" in response.body) && !("notificationBody" in response.body), JSON.stringify(response.body)));
 %}
 
 ### 초안 공개 조회는 404
@@ -46,7 +43,7 @@ GET {{baseUrl}}/api/v1/notices/{{noticeId}}
 %}
 
 # q가 UUID 형식이어도 공개 식별자 일치 또는 제목 부분 일치로 검색하며 status 조건과 함께 적용한다.
-### 관리자 목록 — 본문 없음, 번호 페이지, 검색·NULL 후순위
+### 관리자 목록 : 본문 없음, 번호 페이지, 검색·NULL 후순위
 GET {{baseUrl}}/api/v1/admin/notices?q=로컬&sort=notifiedAt&order=desc&page=1&size=20
 Authorization: Bearer {{noticeAdminToken}}
 
@@ -57,7 +54,7 @@ Authorization: Bearer {{noticeAdminToken}}
     });
 %}
 
-### 부분 수정 — 생략한 본문 유지
+### 부분 수정 : 생략한 본문 유지
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -68,7 +65,7 @@ Content-Type: application/json
     client.test("수정", () => client.assert(response.status === 200 && response.body.body.includes("로컬 검증용"), `actual=${JSON.stringify(response.body)}`));
 %}
 
-### 알림 제목만 수정 — 본문과 원문은 유지
+### 예전 알림 문구만 수정하면 유효한 수정 필드가 없어 400
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -76,22 +73,11 @@ Content-Type: application/json
 {"notificationTitle":"점검 전에 확인해 주세요","reason":"알림 제목 수정"}
 
 > {%
-    client.test("게시 전 문구 수정", () => client.assert(response.status === 200 && response.body.notificationTitle === "점검 전에 확인해 주세요" && response.body.title === "수정한 로컬 점검 공지", JSON.stringify(response.body)));
-%}
-
-### 알림 문구 누락 작성 → 400
-POST {{baseUrl}}/api/v1/admin/notices
-Authorization: Bearer {{noticeAdminToken}}
-Content-Type: application/json
-
-{"title":"필수 검사","body":"원문","tag":"SERVICE","reason":"문구 누락 검증"}
-
-> {%
-    client.test("알림 문구 필수", () => client.assert(response.status === 400, `actual=${response.status}`));
+    client.test("유효한 수정 필드 필수", () => client.assert(response.status === 400, JSON.stringify(response.body)));
 %}
 
 # 게시 감사 before/after는 status·publishedAt·notifiedAt만 기록한다. 없는 시각은 null이다.
-### 게시 — 태그에 따라 항상 알림 요청
+### 게시: 알림 시각과 알림 결과 필드 없음
 POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/publish
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -99,10 +85,10 @@ Content-Type: application/json
 {"reason":"게시 검증"}
 
 > {%
-    client.test("게시", () => client.assert(response.status === 200 && response.body.status === "PUBLISHED" && response.body.notified === true, `actual=${JSON.stringify(response.body)}`));
+    client.test("게시", () => client.assert(response.status === 200 && response.body.status === "PUBLISHED" && !("notified" in response.body) && response.body.notifiedAt === null, `actual=${JSON.stringify(response.body)}`));
 %}
 
-### 알림 요청 후 유효한 알림 문구 변경 → 409
+### 예전 알림 문구만 수정하면 게시 후에도 400
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -110,10 +96,10 @@ Content-Type: application/json
 {"notificationBody":"변경 금지","reason":"요청 후 문구 변경 검증"}
 
 > {%
-    client.test("요청 후 문구 잠금", () => client.assert(response.status === 409, `actual=${response.status}`));
+    client.test("유효 필드 없음", () => client.assert(response.status === 400, `actual=${response.status}`));
 %}
 
-### 알림 요청 후에도 문구 형식 검사 400이 먼저
+### 예전 문구만 보내면 값과 무관하게 유효한 수정 필드가 없어 400
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -121,10 +107,10 @@ Content-Type: application/json
 {"notificationBody":"　","reason":"형식 검사 우선"}
 
 > {%
-    client.test("형식 검사 우선", () => client.assert(response.status === 400, `actual=${response.status}`));
+    client.test("유효한 수정 필드 필수", () => client.assert(response.status === 400, `actual=${response.status}`));
 %}
 
-### 알림 문구 null은 생략 — 원문 수정 200, 캠페인 사본 유지
+### 알림 문구 null은 생략 : 원문 수정 200, 캠페인 사본 유지
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -132,10 +118,10 @@ Content-Type: application/json
 {"title":"게시 후 원문 제목 수정","notificationTitle":null,"notificationBody":null,"reason":"원문만 수정"}
 
 > {%
-    client.test("null 문구 생략", () => client.assert(response.status === 200 && response.body.notificationTitle === "점검 전에 확인해 주세요", JSON.stringify(response.body)));
+    client.test("null 문구 생략", () => client.assert(response.status === 200 && !("notificationTitle" in response.body) && response.body.title === "게시 후 원문 제목 수정", JSON.stringify(response.body)));
 %}
 
-### 공개 상세 — 토큰 없이 읽기
+### 공개 상세 : 토큰 없이 읽기
 GET {{baseUrl}}/api/v1/notices/{{noticeId}}
 
 > {%
@@ -156,8 +142,20 @@ Content-Type: application/json
     client.test("중복 게시 거절", () => client.assert(response.status === 409, `actual=${response.status}`));
 %}
 
+### 게시된 공지를 미래 캠페인으로 연결
+POST {{baseUrl}}/api/v1/admin/push/campaigns
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"noticeId":"{{noticeId}}","title":"캠페인 제목","body":"캠페인 본문","scheduledAt":"2099-01-01T03:00:00Z","reason":"공지 연결 검증"}
+
+> {%
+    client.test("공지 연결", () => client.assert(response.status === 201 && response.body.kind === "SERVICE", JSON.stringify(response.body)));
+    if (response.status === 201) client.global.set("noticeCampaignId", response.body.campaignId);
+%}
+
 # 게시 해제 감사에서도 상태와 두 시각을 기록하며, publishedAt·notifiedAt은 유지한다.
-### 게시 해제 — publishedAt 유지
+### 게시 해제 : publishedAt 유지
 POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/unpublish
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -213,11 +211,11 @@ GET {{baseUrl}}/api/v1/admin/notices
     client.test("관리자 인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`));
 %}
 
-### 자유 조회 — SERVICE 알림 검증은 아래 별도 초안으로만 진행한다
+### 자유 조회 : 알림 예약은 http/push/notice-campaign.http 참조
 GET {{baseUrl}}/api/v1/admin/notices?status=PUBLISHED&sort=publishedAt&order=desc
 Authorization: Bearer {{noticeAdminToken}}
 
-### 알림 검증용 별도 초안 — 실제 발송 가능 환경에서만 아래 두 요청 실행
+### 게시 분리 검증용 별도 초안
 POST {{baseUrl}}/api/v1/admin/notices
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -228,7 +226,7 @@ Content-Type: application/json
     if (response.status === 201) client.global.set("notifyNoticeId", response.body.noticeId);
 %}
 
-### 정보성 알림과 게시 — 광고성은 초안의 태그를 EVENT 또는 PROMOTION으로 선택
+### 정보성 공지 게시: 알림은 별도 예약한다
 POST {{baseUrl}}/api/v1/admin/notices/{{notifyNoticeId}}/publish
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -236,10 +234,10 @@ Content-Type: application/json
 {"reason":"공지 알림 검증"}
 
 > {%
-    client.test("첫 알림 요청", () => client.assert(response.status === 200 && response.body.notified === true && response.body.notifiedAt !== null, `actual=${JSON.stringify(response.body)}`));
+    client.test("게시만 수행", () => client.assert(response.status === 200 && !("notified" in response.body) && response.body.notifiedAt === null, `actual=${JSON.stringify(response.body)}`));
 %}
 
-### 태그만 수정 — 본문과 제목 유지, 기존 캠페인 사본 유지
+### 태그만 수정 : 본문과 제목 유지, 기존 캠페인 사본 유지
 PATCH {{baseUrl}}/api/v1/admin/notices/{{noticeId}}
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -250,7 +248,7 @@ Content-Type: application/json
     client.test("태그 수정", () => client.assert(response.status === 200 && response.body.tag === "EVENT", `actual=${JSON.stringify(response.body)}`));
 %}
 
-### 재게시 — 구 필드는 무시하며 기존 알림을 중복 요청하지 않음
+### 재게시 : 구 필드는 무시하며 기존 알림을 중복 요청하지 않음
 POST {{baseUrl}}/api/v1/admin/notices/{{noticeId}}/publish
 Authorization: Bearer {{noticeAdminToken}}
 Content-Type: application/json
@@ -258,7 +256,7 @@ Content-Type: application/json
 {"notify":false,"notificationKind":"UNKNOWN","reason":"호환 검증"}
 
 > {%
-    client.test("재게시 알림 멱등", () => client.assert(response.status === 200 && response.body.notified === false, `actual=${JSON.stringify(response.body)}`));
+    client.test("재게시 알림 멱등", () => client.assert(response.status === 200 && !("notified" in response.body) && response.body.notifiedAt !== null, `actual=${JSON.stringify(response.body)}`));
 %}
 
 ### 태그 누락 400
@@ -281,4 +279,15 @@ Content-Type: application/json
 
 > {%
     client.test("태그 검증", () => client.assert(response.status === 400, `actual=${response.status}`));
+%}
+
+### 검증용 미래 캠페인 취소
+POST {{baseUrl}}/api/v1/admin/push/campaigns/{{noticeCampaignId}}/cancel
+Authorization: Bearer {{noticeAdminToken}}
+Content-Type: application/json
+
+{"reason":"수동 검증 정리"}
+
+> {%
+    client.test("캠페인 취소", () => client.assert(response.status === 200 && response.body.status === "CANCELED", JSON.stringify(response.body)));
 %}

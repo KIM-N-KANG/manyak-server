@@ -24,6 +24,9 @@ class NoticeNotificationTextPostgresTests {
         val owner = jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'관리자') RETURNING id", Long::class.java, UUID.randomUUID())!!
         jdbc.update("""INSERT INTO notices(public_id,title,body,tag,created_by_user_id,updated_at)
             VALUES (?,'기존 제목','기존 본문','SERVICE',?,CURRENT_TIMESTAMP)""", oldId, owner)
+        jdbc.update("UPDATE notices SET notified_at='2026-10-21T01:00:00Z' WHERE public_id=?", oldId)
+        jdbc.update("""INSERT INTO push_campaigns(public_id,title,body,scheduled_at,status,kind,notice_id,notice_tag)
+            SELECT gen_random_uuid(),'기존 알림','본문',CURRENT_TIMESTAMP,'SCHEDULED','SERVICE',id,'SERVICE' FROM notices WHERE public_id=?""", oldId)
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
     }
     @AfterAll fun stop() { pg.stop() }
@@ -52,4 +55,26 @@ class NoticeNotificationTextPostgresTests {
         assertThat(jdbc.update("UPDATE notices SET notification_title='제목',notification_body='본문' WHERE public_id=?", id)).isEqualTo(1)
         assertThat(jdbc.update("UPDATE notices SET notification_title=NULL,notification_body=NULL WHERE public_id=?", id)).isEqualTo(1)
     }
+    @Test fun `V117은 기존 연결과 첫 시각을 보존하고 같은 공지 캠페인을 여러 건 허용한다`() {
+        val before = jdbc.queryForObject("SELECT COUNT(*) FROM push_campaigns WHERE notice_id=(SELECT id FROM notices WHERE public_id=?)", Long::class.java, oldId)!!
+        assertThat(before).isGreaterThanOrEqualTo(1)
+        jdbc.update("""INSERT INTO push_campaigns(public_id,title,body,scheduled_at,status,kind,notice_id,notice_tag)
+            SELECT gen_random_uuid(),'새 알림','본문',CURRENT_TIMESTAMP,'SCHEDULED','SERVICE',id,'SERVICE' FROM notices WHERE public_id=?""", oldId)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM push_campaigns WHERE notice_id=(SELECT id FROM notices WHERE public_id=?)", Long::class.java, oldId)).isEqualTo(before + 1)
+        assertThat(jdbc.queryForObject("SELECT notified_at FROM notices WHERE public_id=?", java.time.OffsetDateTime::class.java, oldId)!!.toInstant())
+            .isEqualTo(java.time.Instant.parse("2026-10-21T01:00:00Z"))
+    }
+    @Test fun `V117의 실패 사유는 nullable varchar 40이며 허용값만 저장한다`() {
+        val column = jdbc.queryForMap("""SELECT character_maximum_length,is_nullable,column_default FROM information_schema.columns
+            WHERE table_name='push_campaigns' AND column_name='failure_reason'""")
+        assertThat((column["character_maximum_length"] as Number).toInt()).isEqualTo(40)
+        assertThat(column["is_nullable"]).isEqualTo("YES"); assertThat(column["column_default"]).isNull()
+        val id = jdbc.queryForObject("SELECT MIN(id) FROM push_campaigns", Long::class.java)!!
+        assertThat(jdbc.update("UPDATE push_campaigns SET failure_reason='NOTICE_NOT_PUBLISHED' WHERE id=?", id)).isEqualTo(1)
+        val failure = catchThrowable { jdbc.update("UPDATE push_campaigns SET failure_reason='OTHER' WHERE id=?", id) }
+        assertThat(failure).isNotNull()
+        assertThat(generateSequence(failure) { it.cause }.filterIsInstance<SQLException>().first().sqlState).isEqualTo("23514")
+        assertThat(jdbc.update("UPDATE push_campaigns SET failure_reason=NULL WHERE id=?", id)).isEqualTo(1)
+    }
+
 }
