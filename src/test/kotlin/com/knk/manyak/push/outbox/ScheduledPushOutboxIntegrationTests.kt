@@ -81,7 +81,7 @@ class ScheduledPushOutboxIntegrationTests {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications)
+        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = notices)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
@@ -126,7 +126,7 @@ class ScheduledPushOutboxIntegrationTests {
         val campaign = campaigns.save(PushCampaign(title = "소식", body = body, scheduledAt = Instant.EPOCH))
         val day = Instant.parse("2026-10-17T00:00:00Z")
         val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(day, ZoneOffset.UTC),
-            if (remote) writer else null, notifications = notifications)
+            if (remote) writer else null, notifications = notifications, notices = notices)
         assertThat(service.sendDue(day).single().sent).isEqualTo(3)
         val expected = "$body\n수신거부: 마이 > 알림 설정"
         assertThat(expected).hasSize(317)
@@ -237,7 +237,7 @@ class ScheduledPushOutboxIntegrationTests {
         val serviceOnly = users.save(User(nickname = "서비스만", servicePushEnabled = true))
         tokens.save(DevicePushToken(userId = serviceOnly.id, token = "service-only", platform = PushPlatform.ANDROID))
         for (kind in listOf(com.knk.manyak.push.dto.PushKind.SERVICE, com.knk.manyak.push.dto.PushKind.MARKETING)) {
-            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.entity.NoticeTag.UPDATE else com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = all.first().id))
+            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.entity.NoticeTag.UPDATE else com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = all.first().id, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED))
             val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id, noticeTag = notice.tag))
             messages.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)

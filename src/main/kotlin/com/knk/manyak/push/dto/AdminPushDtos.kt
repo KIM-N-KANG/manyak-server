@@ -13,12 +13,14 @@ class AdminCampaignListRequest : AdminSearchRequest() {
     var kind: PushKind? = null
 }
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(value = ["kind"])
 data class AdminCampaignRequest(
     @field:NotBlank @field:Size(max = 100) val title: String,
     @field:NotBlank @field:Size(max = 300) val body: String,
     val scheduledAt: Instant? = null,
     @field:NotBlank @field:Size(max = 500) val reason: String,
     val storyId: UUID? = null,
+    val noticeId: UUID? = null,
 )
 data class AdminPushReasonRequest(@field:NotBlank @field:Size(max = 500) val reason: String)
 data class AdminCampaignResponse(
@@ -28,6 +30,7 @@ data class AdminCampaignResponse(
     val startedAt: Instant?, val finishedAt: Instant?, val createdAt: Instant,
     val deliveredMembers: Long = 0, val deliveredDevices: Long = 0, val failedDevices: Long = 0,
     val storyId: UUID? = null,
+    val failureReason: String? = null,
 )
 data class AdminCampaignPageResponse(
     val items: List<AdminCampaignResponse>, val page: Int, val size: Int, val totalElements: Long, val totalPages: Int,

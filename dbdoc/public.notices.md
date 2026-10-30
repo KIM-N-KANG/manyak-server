@@ -50,7 +50,7 @@
 ```mermaid
 erDiagram
 
-"public.push_campaigns" |o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
+"public.push_campaigns" }o--o| "public.notices" : "FOREIGN KEY (notice_id) REFERENCES notices(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 
 "public.notices" {
@@ -86,6 +86,7 @@ erDiagram
   bigint story_id FK
   varchar_16_ notice_tag
   boolean deep_link_included
+  varchar_40_ failure_reason
 }
 "public.users" {
   bigint id

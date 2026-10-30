@@ -48,18 +48,27 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
     fun claim(@Param("id") id: Long, @Param("startedAt") startedAt: Instant): Int
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("""UPDATE PushCampaign c SET c.status = :next
+    @Query("""UPDATE PushCampaign c SET c.status = :next, c.failureReason = NULL
         WHERE c.publicId = :publicId AND c.status = :expected""")
     fun changeStatus(publicId: UUID, expected: PushCampaignStatus, next: PushCampaignStatus): Int
 
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""UPDATE PushCampaign c SET c.status = :status, c.targetCount = :targets,
-        c.sentCount = :sent, c.finishedAt = :finishedAt
+        c.sentCount = :sent, c.finishedAt = :finishedAt, c.failureReason = :failureReason
         WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
           AND c.startedAt = :startedAt""")
     fun finishIfOwned(id: Long, startedAt: Instant, status: PushCampaignStatus,
-        targets: Int?, sent: Int?, finishedAt: Instant): Int
+        targets: Int?, sent: Int?, finishedAt: Instant, failureReason: String? = null): Int
+    /** 이전 회차가 TTL 실패와 재선점 뒤 현재 회차의 태그를 덮어쓰지 못하게 한다. */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""UPDATE PushCampaign c SET c.kind = :kind, c.noticeTag = :tag
+        WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
+          AND c.startedAt = :startedAt""")
+    fun refreshNoticeIfOwned(id: Long, startedAt: Instant, kind: com.knk.manyak.push.dto.PushKind,
+        tag: com.knk.manyak.notice.entity.NoticeTag): Int
+
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""UPDATE PushCampaign c SET c.deepLinkIncluded =

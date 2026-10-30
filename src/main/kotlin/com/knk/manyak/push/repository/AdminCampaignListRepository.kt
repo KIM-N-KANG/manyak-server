@@ -52,7 +52,7 @@ class AdminCampaignListRepository(private val jdbc: NamedParameterJdbcTemplate) 
                 AdminCampaignResponse(
                     campaignId = rs.getObject("public_id", UUID::class.java), kind = PushKind.valueOf(rs.getString("kind")),
                     title = rs.getString("title"), body = rs.getString("body"), scheduledAt = rs.instant("scheduled_at")!!,
-                    status = PushCampaignStatus.valueOf(rs.getString("status")),
+                    status = PushCampaignStatus.valueOf(rs.getString("status")), failureReason = rs.getString("failure_reason"),
                     noticeId = rs.getObject("notice_public_id", UUID::class.java), storyId = rs.getObject("story_public_id", UUID::class.java),
                     targetCount = rs.longOrNull("target_count")?.toInt(), sentCount = rs.longOrNull("sent_count")?.toInt(),
                     startedAt = rs.instant("started_at"), finishedAt = rs.instant("finished_at"), createdAt = rs.instant("created_at")!!,

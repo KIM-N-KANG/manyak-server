@@ -51,7 +51,7 @@ class PromotionPushCleanupFailureTests {
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {
-            PromotionPushScheduler(PromotionPushService(campaigns, users, sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(users, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java))), StructuredLogger(), clock).run()
+            PromotionPushScheduler(PromotionPushService(campaigns, users, sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(users, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java)), notices = mock(com.knk.manyak.notice.repository.NoticeRepository::class.java)), StructuredLogger(), clock).run()
             verify(campaigns).claim(scheduled.id, now)
             verify(users).findMarketingPushTargetIds()
             verify(campaigns).finishIfOwned(scheduled.id, now, PushCampaignStatus.SENT, 0, 0, now)

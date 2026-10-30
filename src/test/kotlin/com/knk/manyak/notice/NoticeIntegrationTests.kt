@@ -62,10 +62,11 @@ class NoticeIntegrationTests {
         public("/$id").expectStatus().isNotFound
         val changed = json(call(HttpMethod.PATCH, "/$id", mapOf("title" to "고친 제목", "reason" to "수정")).expectStatus().isOk)
         assertThat(changed["body"].asText()).isEqualTo("공지 본문")
-        assertThat(publish(id)["notified"].asBoolean()).isTrue()
+        assertThat(publish(id).has("notified")).isFalse()
         assertThat(json(public("/$id").expectStatus().isOk)["title"].asText()).isEqualTo("고친 제목")
         call(HttpMethod.PATCH, "/$id", mapOf("body" to "공개 수정", "reason" to "수정")).expectStatus().isOk
         assertThat(json(public("/$id").expectStatus().isOk)["body"].asText()).isEqualTo("공개 수정")
+        connect(id)
         val time = unpublish(id)["publishedAt"].asText()
         assertThat(time).isNotBlank()
         public("/$id").expectStatus().isNotFound
@@ -75,12 +76,12 @@ class NoticeIntegrationTests {
         assertThat(count("notices")).isEqualTo(1)
         assertThat(count("push_campaigns")).isEqualTo(1)
         val rows = jdbc.queryForList("SELECT * FROM admin_audit_logs ORDER BY id")
-        assertThat(rows.map { it["action"] }).containsExactly("NOTICE_CREATED", "NOTICE_UPDATED", "NOTICE_PUBLISHED", "NOTICE_UPDATED", "NOTICE_UNPUBLISHED", "NOTICE_CREATED", "NOTICE_DELETED")
-        for (row in rows) {
+        assertThat(rows.map { it["action"] }).containsExactly("NOTICE_CREATED", "NOTICE_UPDATED", "NOTICE_PUBLISHED", "NOTICE_UPDATED", "PUSH_CAMPAIGN_CREATED", "NOTICE_UNPUBLISHED", "NOTICE_CREATED", "NOTICE_DELETED")
+        for (row in rows.filter { it["action"] != "PUSH_CAMPAIGN_CREATED" }) {
             for (name in listOf("before_state", "after_state")) row[name]?.let {
                 val node = mapper.readTree(if (it is ByteArray) String(it, Charsets.UTF_8) else it.toString())
                 val fields = if (row["action"] in setOf("NOTICE_PUBLISHED", "NOTICE_UNPUBLISHED"))
-                    setOf("status", "publishedAt", "notifiedAt") else if (row["action"] == "NOTICE_DELETED") setOf("title", "tag", "status") else setOf("title", "tag", "notificationTitle", "status")
+                    setOf("status", "publishedAt", "notifiedAt") else if (row["action"] == "NOTICE_DELETED") setOf("title", "tag", "status") else setOf("title", "tag", "status")
                 assertThat(node.properties().map { it.key }.toSet()).isEqualTo(fields)
                 assertThat(node.has("body")).isFalse()
             }
@@ -103,9 +104,7 @@ class NoticeIntegrationTests {
             assertThat(audit(id, "NOTICE_PUBLISHED", "before_state")).isEqualTo(state(draft))
             assertThat(audit(id, "NOTICE_PUBLISHED", "after_state")).isEqualTo(state(published))
             assertThat(published["publishedAt"].isString).isTrue()
-            assertThat(published["notifiedAt"].isNull).isFalse()
-            assertThat(java.time.Instant.parse(published["notifiedAt"].asText()))
-                .isEqualTo(java.time.Instant.parse(published["publishedAt"].asText()))
+            assertThat(published["notifiedAt"].isNull).isTrue()
             val unpublished = unpublish(id)
             assertThat(audit(id, "NOTICE_UNPUBLISHED", "before_state")).isEqualTo(state(published))
             assertThat(audit(id, "NOTICE_UNPUBLISHED", "after_state")).isEqualTo(state(unpublished))
@@ -143,29 +142,6 @@ class NoticeIntegrationTests {
             }
         }
     }
-    @Test fun `알림 게시의 캠페인은 종류와 공지 식별자 및 알림 문구를 갖고 재게시해도 한 건이다`() {
-        for (tag in listOf("SERVICE", "UPDATE", "MAINTENANCE", "EVENT", "PROMOTION")) {
-            val kind = if (tag in listOf("EVENT", "PROMOTION")) "MARKETING" else "SERVICE"
-            val id = create("공지 $tag", "시작\r\n" + "가".repeat(400), tag)["noticeId"].asText()
-            val result = publish(id, true, kind)
-            assertThat(result["notified"].asBoolean()).isTrue()
-            assertThat(result["notifiedAt"].isNull).isFalse()
-            val campaign = campaigns.findAll().last()
-            assertThat(campaign.kind.name).isEqualTo(kind)
-            assertThat(campaign.noticeTag!!.name).isEqualTo(tag)
-            assertThat(campaign.title).isEqualTo("알림 제목")
-            assertThat(campaign.body).isEqualTo("알림 본문\n둘째 줄")
-            assertThat(jdbc.queryForObject("SELECT notice_id FROM push_campaigns WHERE id=?", Long::class.java, campaign.id))
-                .isEqualTo(jdbc.queryForObject("SELECT id FROM notices WHERE public_id=?", Long::class.java, UUID.fromString(id)))
-            val detail = json(client.get().uri("/api/v1/admin/push/campaigns/${campaign.publicId}").header("Authorization", "Bearer $token").exchange().expectStatus().isOk)
-            assertThat(detail["noticeId"].asText()).isEqualTo(id)
-            call(HttpMethod.DELETE, "/$id", mapOf("reason" to "삭제")).expectStatus().isEqualTo(409)
-            unpublish(id)
-            call(HttpMethod.DELETE, "/$id", mapOf("reason" to "삭제")).expectStatus().isEqualTo(409)
-            assertThat(publish(id, true, kind)["notified"].asBoolean()).isFalse()
-        }
-        assertThat(count("push_campaigns")).isEqualTo(5)
-    }
     @Test fun `공개 목록은 게시만 커서로 조회하며 토큰과 작성자와 본문을 싣지 않는다`() {
         create("숨김")
         repeat(3) { publish(create("공개 $it")["noticeId"].asText()) }
@@ -187,7 +163,7 @@ class NoticeIntegrationTests {
     }
     @Test fun `관리자 목록은 검색 상태 정렬 NULL 후순위와 번호 페이지를 지원한다`() {
         val one = create("동일 검색")["noticeId"].asText(); val two = create("동일 검색")["noticeId"].asText()
-        publish(one, true)
+        publish(one, true); connect(one)
         for (direction in listOf("asc", "desc")) {
             val body = json(call(HttpMethod.GET, "?q=동일&sort=notifiedAt&order=$direction&size=1").expectStatus().isOk)
             assertThat(body["totalElements"].asLong()).isEqualTo(2)
@@ -218,7 +194,7 @@ class NoticeIntegrationTests {
         call(HttpMethod.GET, "/bad").expectStatus().isBadRequest
         call(HttpMethod.GET, "/${UUID.randomUUID()}").expectStatus().isNotFound
     }
-    @Test fun `동시 게시 요청은 한 건만 게시하고 캠페인도 한 건이다`() {
+    @Test fun `동시 게시 요청은 한 건만 게시하고 캠페인은 만들지 않는다`() {
         val id = create()["noticeId"].asText()
         val ready = CountDownLatch(2); val start = CountDownLatch(1); val pool = Executors.newFixedThreadPool(2)
         try {
@@ -229,10 +205,11 @@ class NoticeIntegrationTests {
             }) }
             check(ready.await(5, TimeUnit.SECONDS)); start.countDown()
             assertThat(tasks.map { it.get(10, TimeUnit.SECONDS) }).containsExactlyInAnyOrder(200, 409)
-            assertThat(count("push_campaigns")).isEqualTo(1)
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs WHERE action='NOTICE_PUBLISHED'", Long::class.java)).isEqualTo(1)
+            assertThat(count("push_campaigns")).isZero()
         } finally { pool.shutdownNow() }
     }
-    @Test fun `감사 저장 실패는 모든 공지 변경과 게시 캠페인을 롤백한다`() {
+    @Test fun `감사 저장 실패는 모든 공지 변경을 롤백한다`() {
         val draft = create()["noticeId"].asText()
         val published = create()["noticeId"].asText(); publish(published)
         val beforeCount = count("admin_audit_logs")
@@ -248,7 +225,7 @@ class NoticeIntegrationTests {
         call(HttpMethod.POST, "/$published/unpublish", mapOf("reason" to "해제")).expectStatus().is5xxServerError
         call(HttpMethod.DELETE, "/$draft", mapOf("reason" to "삭제")).expectStatus().is5xxServerError
         assertThat(count("notices")).isEqualTo(2)
-        assertThat(count("push_campaigns")).isEqualTo(1)
+        assertThat(count("push_campaigns")).isZero()
         assertThat(count("admin_audit_logs")).isEqualTo(beforeCount)
         val row = json(call(HttpMethod.GET, "/$draft").expectStatus().isOk)
         assertThat(row["title"].asText()).isEqualTo("공지 제목")
@@ -272,21 +249,10 @@ class NoticeIntegrationTests {
             val row = json(call(HttpMethod.GET, "/$id").expectStatus().isOk)
             assertThat(row["status"].asText()).isEqualTo(if (status == 200) "PUBLISHED" else "DRAFT")
             assertThat(row["publishedAt"].isNull).isFalse()
-            assertThat(count("push_campaigns")).isEqualTo(1)
+            assertThat(count("push_campaigns")).isZero()
         } finally { pool.shutdownNow() }
     }
 
-    @Test fun `캠페인 저장 실패는 게시와 알림 시각 및 감사 기록을 롤백한다`() {
-        val id = create()["noticeId"].asText()
-        org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("campaign failure"))
-            .`when`(campaigns).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.push.entity.PushCampaign::class.java)
-                ?: com.knk.manyak.push.entity.PushCampaign(title = "", body = "", scheduledAt = java.time.Instant.EPOCH))
-        call(HttpMethod.POST, "/$id/publish", mapOf("notify" to true, "notificationKind" to "SERVICE", "reason" to "게시")).expectStatus().is5xxServerError
-        val notice = json(call(HttpMethod.GET, "/$id").expectStatus().isOk)
-        assertThat(notice["status"].asText()).isEqualTo("DRAFT")
-        assertThat(notice["notifiedAt"].isNull).isTrue()
-        assertThat(count("admin_audit_logs")).isEqualTo(1)
-    }
     @Test fun `공지 OpenAPI는 공개와 관리자 인증을 구분하고 평면 응답을 문서화한다`() {
         val api = json(client.get().uri("/v3/api-docs").exchange().expectStatus().isOk)
         assertThat(api["paths"]["/api/v1/notices"]["get"]["security"]).isNull()
@@ -296,15 +262,8 @@ class NoticeIntegrationTests {
     @Test fun `공지 생성 계약은 태그를 필수로 표시한다`() {
         val api = json(client.get().uri("/v3/api-docs").exchange().expectStatus().isOk)
         val required = api["components"]["schemas"]["CreateNoticeRequest"]["required"]
-        assertThat(required.toString()).contains("\"tag\"", "\"notificationTitle\"", "\"notificationBody\"")
+        assertThat(required.toString()).contains("\"tag\"").doesNotContain("notificationTitle", "notificationBody")
     }
-    @Test fun `알림 없이 게시했던 공지도 첫 알림 요청은 재게시 때 한 번 가능하다`() {
-        val id = create()["noticeId"].asText()
-        jdbc.update("UPDATE notices SET published_at=CURRENT_TIMESTAMP WHERE public_id=?", UUID.fromString(id))
-        assertThat(publish(id, true)["notified"].asBoolean()).isTrue()
-        assertThat(count("push_campaigns")).isEqualTo(1)
-    }
-
     @Test fun `태그는 생성 필수 수정 선택이고 잘못된 값은 400이다`() {
         for (tag in listOf(null, "NOTICE")) {
             val body = mutableMapOf<String, Any>("title" to "제목", "body" to "본문", "reason" to "작성", "notificationTitle" to "알림 제목", "notificationBody" to "알림 본문")
@@ -331,10 +290,10 @@ class NoticeIntegrationTests {
             mapOf("notify" to "invalid", "notificationKind" to listOf("OTHER")))) {
             val id = create()["noticeId"].asText()
             val result = json(call(HttpMethod.POST, "/$id/publish", legacy + ("reason" to "게시")).expectStatus().isOk)
-            assertThat(result["notified"].asBoolean()).isTrue()
-            assertThat(campaigns.findAll().last().kind.name).isEqualTo("SERVICE")
+            assertThat(result.has("notified")).isFalse()
+            assertThat(result["notifiedAt"].isNull).isTrue()
         }
-        assertThat(count("push_campaigns")).isEqualTo(3)
+        assertThat(count("push_campaigns")).isZero()
     }
 
     @Test fun `공개 태그 필터와 커서는 일치하는 게시만 반환하며 원문 제목을 보존한다`() {
@@ -354,18 +313,67 @@ class NoticeIntegrationTests {
         val detail = json(public("/${event["noticeId"].asText()}").expectStatus().isOk)
         assertThat(detail["title"]).isEqualTo(event["title"])
         assertThat(detail["tag"].asText()).isEqualTo("EVENT")
-        assertThat(campaigns.findAll().single { it.noticeTag?.name == "EVENT" }.title).isEqualTo("알림 제목")
+        assertThat(campaigns.findAll()).isEmpty()
     }
 
     @Test fun `게시 후 태그 수정과 재게시는 최초 캠페인 사본을 바꾸지 않는다`() {
         val id = create()["noticeId"].asText()
-        publish(id)
+        publish(id); connect(id)
         call(HttpMethod.PATCH, "/$id", mapOf("tag" to "EVENT", "reason" to "수정")).expectStatus().isOk
         unpublish(id)
-        assertThat(publish(id)["notified"].asBoolean()).isFalse()
+        assertThat(publish(id).has("notified")).isFalse()
         assertThat(campaigns.findAll()).hasSize(1)
         assertThat(campaigns.findAll().single().kind.name).isEqualTo("SERVICE")
         assertThat(campaigns.findAll().single().noticeTag!!.name).isEqualTo("SERVICE")
+    }
+
+    private fun connect(id: String): JsonNode = json(client.post().uri("/api/v1/admin/push/campaigns")
+        .header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON)
+        .body(mapOf("title" to "캠페인 제목", "body" to "캠페인 본문", "noticeId" to id, "reason" to "연결"))
+        .exchange().expectStatus().isCreated)
+
+    @Test fun `예전 알림 문구는 무시하며 유효한 수정 필드가 없으면 거절한다`() {
+        val created = json(call(HttpMethod.POST, body = mapOf("title" to "제목", "body" to "본문", "tag" to "UPDATE",
+            "notificationTitle" to "가".repeat(101), "notificationBody" to "　", "reason" to "작성")).expectStatus().isCreated)
+        val id = created["noticeId"].asText()
+        assertThat(created.has("notificationTitle")).isFalse()
+        assertThat(created.has("notificationBody")).isFalse()
+        call(HttpMethod.PATCH, "/$id", mapOf("notificationTitle" to "무시", "notificationBody" to 123, "reason" to "수정"))
+            .expectStatus().isBadRequest
+        call(HttpMethod.PATCH, "/$id", mapOf("title" to "수정", "notificationTitle" to listOf(1), "reason" to "수정"))
+            .expectStatus().isOk.expectBody().jsonPath("$.title").isEqualTo("수정")
+        val published = publish(id)
+        assertThat(published.has("notified")).isFalse()
+        assertThat(published["notifiedAt"].isNull).isTrue()
+        assertThat(count("push_campaigns")).isZero()
+    }
+
+    @Test fun `문구 없는 기존 초안과 연결 이력이 있는 초안 모두 게시만 한다`() {
+        for (notified in listOf(false, true)) {
+            val id = legacy(notified)
+            val before = json(call(HttpMethod.GET, "/$id").expectStatus().isOk)
+            val result = publish(id)
+            assertThat(result["status"].asText()).isEqualTo("PUBLISHED")
+            assertThat(result["notifiedAt"]).isEqualTo(before["notifiedAt"])
+            assertThat(result.has("notificationTitle")).isFalse()
+            assertThat(count("push_campaigns")).isZero()
+        }
+    }
+
+    @Test fun `캠페인 삽입 실패는 게시 상태를 유지하고 첫 알림 연결 시각을 롤백한다`() {
+        val id = create()["noticeId"].asText(); publish(id)
+        org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("campaign failure"))
+            .`when`(campaigns).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.push.entity.PushCampaign::class.java)
+                ?: com.knk.manyak.push.entity.PushCampaign(title = "", body = "", scheduledAt = java.time.Instant.EPOCH))
+        client.post().uri("/api/v1/admin/push/campaigns").header("Authorization", "Bearer $token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("title" to "실패", "body" to "실패", "noticeId" to id, "reason" to "연결"))
+            .exchange().expectStatus().is5xxServerError
+        val row = json(call(HttpMethod.GET, "/$id").expectStatus().isOk)
+        assertThat(row["status"].asText()).isEqualTo("PUBLISHED")
+        assertThat(row["notifiedAt"].isNull).isTrue()
+        assertThat(count("push_campaigns")).isZero()
+        assertThat(count("admin_audit_logs")).isEqualTo(2)
     }
 
     private fun legacy(notified: Boolean = false): String {
@@ -375,92 +383,6 @@ class NoticeIntegrationTests {
             id, admin.id, if (notified) java.sql.Timestamp.from(java.time.Instant.now()) else null,
             if (notified) java.sql.Timestamp.from(java.time.Instant.now()) else null)
         return id.toString()
-    }
-    @Test fun `알림 문구는 작성 필수이며 길이 공백 누락을 모두 검증한다`() {
-        val valid = mapOf("title" to "원문", "body" to "원문 본문", "tag" to "UPDATE", "reason" to "작성",
-            "notificationTitle" to "새로운 점검 안내가 도착했어요", "notificationBody" to "직접 쓴 본문\n줄바꿈 유지")
-        for (field in listOf("notificationTitle", "notificationBody")) {
-            call(HttpMethod.POST, body = valid - field).expectStatus().isBadRequest
-            for (value in listOf("", " \n\t", "　", "가".repeat(if (field == "notificationTitle") 101 else 301))) {
-                call(HttpMethod.POST, body = valid + (field to value)).expectStatus().isBadRequest
-            }
-        }
-        val created = json(call(HttpMethod.POST, body = valid).expectStatus().isCreated)
-        assertThat(created["notificationTitle"].asText()).isEqualTo(valid["notificationTitle"])
-        assertThat(created["notificationBody"].asText()).isEqualTo(valid["notificationBody"])
-        assertThat(created["tag"].asText()).isEqualTo("UPDATE")
-        val id = created["noticeId"].asText()
-        assertThat(json(call(HttpMethod.GET, "/$id").expectStatus().isOk)["notificationBody"]).isEqualTo(created["notificationBody"])
-        val item = json(call(HttpMethod.GET).expectStatus().isOk)["items"].single()
-        assertThat(item.has("notificationTitle")).isFalse(); assertThat(item.has("notificationBody")).isFalse()
-        val boundary = json(call(HttpMethod.POST, body = valid + mapOf("notificationTitle" to "가".repeat(100), "notificationBody" to "나".repeat(300))).expectStatus().isCreated)
-        assertThat(boundary["notificationTitle"].asText()).hasSize(100)
-        assertThat(boundary["notificationBody"].asText()).hasSize(300)
-    }
-    @Test fun `알림 문구만 부분 수정하고 모두 바꿀 수 있으며 null은 생략이다`() {
-        val original = create(); val id = original["noticeId"].asText()
-        val title = json(call(HttpMethod.PATCH, "/$id", mapOf("notificationTitle" to "고친 알림", "reason" to "수정")).expectStatus().isOk)
-        assertThat(title["notificationTitle"].asText()).isEqualTo("고친 알림")
-        assertThat(title["notificationBody"]).isEqualTo(original["notificationBody"])
-        val body = json(call(HttpMethod.PATCH, "/$id", mapOf("notificationBody" to "고친 본문", "notificationTitle" to null, "reason" to "수정")).expectStatus().isOk)
-        assertThat(body["notificationTitle"]).isEqualTo(title["notificationTitle"])
-        assertThat(body["title"]).isEqualTo(original["title"])
-        val all = json(call(HttpMethod.PATCH, "/$id", mapOf("title" to "새 원문", "body" to "새 본문", "tag" to "EVENT", "notificationTitle" to "새 알림", "notificationBody" to "새 알림 본문", "reason" to "수정")).expectStatus().isOk)
-        assertThat(all["notificationTitle"].asText()).isEqualTo("새 알림")
-        assertThat(all["tag"].asText()).isEqualTo("EVENT")
-        for (field in listOf("notificationTitle", "notificationBody")) for (value in listOf("", "　", "가".repeat(if (field == "notificationTitle") 101 else 301)))
-            call(HttpMethod.PATCH, "/$id", mapOf(field to value, "reason" to "수정")).expectStatus().isBadRequest
-        call(HttpMethod.PATCH, "/$id", mapOf("notificationTitle" to null, "notificationBody" to null, "reason" to "수정")).expectStatus().isBadRequest
-        val audit = jdbc.queryForList("SELECT before_state,after_state FROM admin_audit_logs WHERE action='NOTICE_UPDATED'").last()
-        val node = mapper.readTree((audit["after_state"] as? ByteArray)?.toString(Charsets.UTF_8) ?: audit["after_state"].toString())
-        assertThat(node["notificationTitle"].asText()).isEqualTo("새 알림")
-        assertThat(node.has("notificationBody")).isFalse()
-    }
-    @Test fun `기존 null 문구는 두 필드를 함께 채워야 하고 채우기 전 첫 게시를 거절한다`() {
-        val id = legacy()
-        val detail = json(call(HttpMethod.GET, "/$id").expectStatus().isOk)
-        assertThat(detail.has("notificationTitle")).isTrue(); assertThat(detail["notificationTitle"].isNull).isTrue()
-        assertThat(detail.has("notificationBody")).isTrue(); assertThat(detail["notificationBody"].isNull).isTrue()
-        for (field in listOf("notificationTitle", "notificationBody"))
-            call(HttpMethod.PATCH, "/$id", mapOf(field to "한쪽", "reason" to "수정")).expectStatus().isBadRequest
-        call(HttpMethod.POST, "/$id/publish", mapOf("reason" to "게시")).expectStatus().isEqualTo(409)
-        assertThat(count("push_campaigns")).isZero()
-        assertThat(json(call(HttpMethod.GET, "/$id").expectStatus().isOk)["status"].asText()).isEqualTo("DRAFT")
-        val filled = json(call(HttpMethod.PATCH, "/$id", mapOf("notificationTitle" to "입력한 제목", "notificationBody" to "입력한 본문", "reason" to "수정")).expectStatus().isOk)
-        assertThat(filled["notificationTitle"].asText()).isEqualTo("입력한 제목")
-        assertThat(publish(id)["notified"].asBoolean()).isTrue()
-        assertThat(campaigns.findAll().single().title).isEqualTo("입력한 제목")
-    }
-    @Test fun `문구 없는 기존 공지의 첫 게시도 409이고 이미 요청한 재게시는 허용한다`() {
-        val fresh = legacy()
-        call(HttpMethod.POST, "/$fresh/publish", mapOf("reason" to "게시")).expectStatus().isEqualTo(409)
-        assertThat(count("admin_audit_logs")).isZero()
-        val notified = legacy(true)
-        assertThat(publish(notified)["notified"].asBoolean()).isFalse()
-        assertThat(count("push_campaigns")).isZero()
-        for (field in listOf("notificationTitle", "notificationBody")) {
-            call(HttpMethod.PATCH, "/$notified", mapOf(field to "변경", "reason" to "수정")).expectStatus().isEqualTo(409)
-            call(HttpMethod.PATCH, "/$notified", mapOf(field to "　", "reason" to "수정")).expectStatus().isBadRequest
-            call(HttpMethod.PATCH, "/$notified", mapOf(field to "가".repeat(if (field == "notificationTitle") 101 else 301), "reason" to "수정")).expectStatus().isBadRequest
-        }
-        val changed = json(call(HttpMethod.PATCH, "/$notified", mapOf("title" to "원문만 수정", "notificationTitle" to null, "notificationBody" to null, "reason" to "수정")).expectStatus().isOk)
-        assertThat(changed["title"].asText()).isEqualTo("원문만 수정")
-        assertThat(changed["notificationTitle"].isNull).isTrue()
-        assertThat(changed["notificationBody"].isNull).isTrue()
-    }
-    @Test fun `알림 요청 후 문구 수정은 409이고 원문 수정과 재게시는 캠페인 사본을 유지한다`() {
-        val id = create()["noticeId"].asText(); publish(id)
-        val saved = campaigns.findAll().single()
-        for (field in listOf("notificationTitle", "notificationBody"))
-            call(HttpMethod.PATCH, "/$id", mapOf(field to "금지", "reason" to "수정")).expectStatus().isEqualTo(409)
-        call(HttpMethod.PATCH, "/$id", mapOf("title" to "바뀐 원문", "body" to "바뀐 본문", "tag" to "EVENT", "notificationTitle" to null, "reason" to "수정")).expectStatus().isOk
-        unpublish(id); assertThat(publish(id)["notified"].asBoolean()).isFalse()
-        val after = campaigns.findAll().single()
-        assertThat(after.title).isEqualTo(saved.title); assertThat(after.body).isEqualTo(saved.body)
-        assertThat(after.kind).isEqualTo(saved.kind)
-        val public = json(public("/$id").expectStatus().isOk)
-        assertThat(public["title"].asText()).isEqualTo("바뀐 원문")
-        assertThat(public.has("notificationTitle")).isFalse(); assertThat(public.has("notificationBody")).isFalse()
     }
 
 }

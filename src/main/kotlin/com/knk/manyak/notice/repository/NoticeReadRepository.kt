@@ -22,9 +22,9 @@ class NoticeReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
     private fun item(rs: ResultSet) = AdminNoticeItemResponse(rs.getObject("public_id", UUID::class.java), rs.getString("title"), NoticeTag.valueOf(rs.getString("tag")),
         NoticeStatus.valueOf(rs.getString("status")), rs.getTimestamp("published_at")?.toInstant(), rs.getTimestamp("notified_at")?.toInstant(),
         NoticeAuthorResponse(rs.getObject("author_id", UUID::class.java), rs.getString("nickname")), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant())
-    fun detail(id: UUID): AdminNoticeResponse? = jdbc.query("SELECT $columns,n.body,n.notification_title,n.notification_body $from WHERE n.public_id=:id", mapOf("id" to id),
+    fun detail(id: UUID): AdminNoticeResponse? = jdbc.query("SELECT $columns,n.body $from WHERE n.public_id=:id", mapOf("id" to id),
         RowMapper { rs, _ -> item(rs).let { AdminNoticeResponse(it.noticeId, it.title, it.tag, rs.getString("body"), it.status,
-            it.publishedAt, it.notifiedAt, it.createdBy, it.createdAt, it.updatedAt, rs.getString("notification_title"), rs.getString("notification_body")) } }).firstOrNull()
+            it.publishedAt, it.notifiedAt, it.createdBy, it.createdAt, it.updatedAt) } }).firstOrNull()
     fun list(request: AdminNoticesRequest): AdminNoticePageResponse {
         val fields = mapOf("createdAt" to "n.created_at", "updatedAt" to "n.updated_at", "publishedAt" to "n.published_at", "notifiedAt" to "n.notified_at", "title" to "n.title", "status" to "n.status")
         val column = fields[request.sort] ?: badRequest()
