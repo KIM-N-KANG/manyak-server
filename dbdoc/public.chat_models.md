@@ -12,14 +12,19 @@
 | is_default | boolean | false | false |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
+| promo_turn_cost | bigint |  | true |  |  | 프로모션 기간의 회원 턴당 이프 (0은 무료) |
+| promo_starts_at | timestamp with time zone |  | true |  |  | 프로모션 시작 시각 (포함) |
+| promo_ends_at | timestamp with time zone |  | true |  |  | 프로모션 종료 시각 (제외) |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | chat_models_check | CHECK | CHECK ((is_active OR (NOT is_default))) |
+| chat_models_promo_turn_cost_check | CHECK | CHECK (((promo_turn_cost >= 0) AND (promo_turn_cost <= 10000))) |
 | chat_models_sort_order_check | CHECK | CHECK ((sort_order >= 1)) |
 | chat_models_turn_cost_check | CHECK | CHECK (((turn_cost >= 1) AND (turn_cost <= 10000))) |
+| ck_chat_models_promo | CHECK | CHECK ((((promo_turn_cost IS NULL) AND (promo_starts_at IS NULL) AND (promo_ends_at IS NULL)) OR ((promo_turn_cost IS NOT NULL) AND (promo_starts_at IS NOT NULL) AND (promo_ends_at IS NOT NULL) AND (promo_ends_at > promo_starts_at)))) |
 | chat_models_pkey | PRIMARY KEY | PRIMARY KEY (code) |
 
 ## Indexes
@@ -46,6 +51,9 @@ erDiagram
   boolean is_default
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
+  bigint promo_turn_cost
+  timestamp_with_time_zone promo_starts_at
+  timestamp_with_time_zone promo_ends_at
 }
 "public.story_chats" {
   bigint id

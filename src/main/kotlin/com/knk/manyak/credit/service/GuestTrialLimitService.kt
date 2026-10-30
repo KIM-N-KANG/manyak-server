@@ -1,5 +1,6 @@
 package com.knk.manyak.credit.service
 
+import com.knk.manyak.chat.service.ChatModelService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.DeviceIdHasher
@@ -26,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException
 class GuestTrialLimitService(
     private val redisTemplate: StringRedisTemplate,
     private val deviceIdHasher: DeviceIdHasher,
+    private val chatModels: ChatModelService,
     @param:Value("\${manyak.guest-trial.storyline-generation-limit:5}")
     private val storylineGenerationLimit: Long,
     @param:Value("\${manyak.guest-trial.story-creation-limit:1}")
@@ -162,7 +164,8 @@ class GuestTrialLimitService(
             else keyFor(requireDeviceId(deviceId), counter)
         // 조회 실패를 0으로 위장하면 이미 소진한 체험을 화면에 다시 제공하므로 오류를 전파한다.
         val used = redisTemplate.opsForValue().get(key)?.toLong() ?: 0L
-        return com.knk.manyak.credit.dto.TrialUsage(used, limitFor(counter))
+        val limit = if (userId != null && counter == Counter.CHAT_TURN && chatModels.litePromotionFree()) null else limitFor(counter)
+        return com.knk.manyak.credit.dto.TrialUsage(used, limit)
     }
 
     private fun limitFor(counter: Counter): Long = when (counter) {

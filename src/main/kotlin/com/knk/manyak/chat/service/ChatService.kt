@@ -161,7 +161,7 @@ class ChatService(
 
     private val turnSaveTransactionTemplate = TransactionTemplate(transactionManager)
 
-    fun getModels() = chatModelService.list()
+    fun getModels(userId: Long? = null) = chatModelService.list(userId)
 
     @Transactional
     fun changeSettings(chatId: String, model: String?, userId: Long?, longResponse: Boolean? = null): ChangeChatSettingsResponse {
@@ -1098,7 +1098,7 @@ class ChatService(
             }
         }
         try {
-            memberTrialCovered = userId != null && billingModel.code == "LITE" &&
+            memberTrialCovered = userId != null && billingModel.turnCost > 0 && billingModel.code == "LITE" &&
                 guestTrialLimitService.reserveMember(userId, GuestTrialLimitService.Counter.CHAT_TURN)
             guestDeviceId = guestTrialLimitService.reserveForGuestOrNull(userId, deviceId, GuestTrialLimitService.Counter.CHAT_TURN)
             if (userId == null || memberTrialCovered) billingModel = BillingModel("LITE", 0)
@@ -1106,7 +1106,7 @@ class ChatService(
             imageReservation = chatRealtimeImageService.prepare(realtimeImage, userId, guestDeviceId)
             if (userId != null) {
                 val items = buildList {
-                    if (!memberTrialCovered) add(CreditDeduction(billingModel.turnCost, CreditReason.CHAT_TURN, "CHAT_TURN", chatPk))
+                    if (!memberTrialCovered && billingModel.turnCost > 0) add(CreditDeduction(billingModel.turnCost, CreditReason.CHAT_TURN, "CHAT_TURN", chatPk))
                     if (imageReservation.cost > 0) add(CreditDeduction(imageReservation.cost, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chatPk))
                 }
                 if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions

@@ -7,7 +7,7 @@ import java.time.Instant
 import java.util.UUID
 
 enum class AdminAuditCategory { CHANGE, ACCESS }
-enum class AdminAuditTargetType { MEMBER_QUERY, MEMBER, CREDIT_POLICY, PUSH_CAMPAIGN, PUSH_TEMPLATE, NOTICE, SUBMISSION, STORY }
+enum class AdminAuditTargetType { MEMBER_QUERY, MEMBER, CREDIT_POLICY, CHAT_MODEL, PUSH_CAMPAIGN, PUSH_TEMPLATE, NOTICE, SUBMISSION, STORY }
 enum class AdminAuditAction(val category: AdminAuditCategory, val targetType: AdminAuditTargetType) {
     MEMBER_SEARCHED(AdminAuditCategory.ACCESS, AdminAuditTargetType.MEMBER_QUERY),
     MEMBER_VIEWED(AdminAuditCategory.ACCESS, AdminAuditTargetType.MEMBER),
@@ -15,6 +15,8 @@ enum class AdminAuditAction(val category: AdminAuditCategory, val targetType: Ad
     MEMBER_UNSUSPENDED(AdminAuditCategory.CHANGE, AdminAuditTargetType.MEMBER),
     CREDIT_GRANTED(AdminAuditCategory.CHANGE, AdminAuditTargetType.MEMBER),
     CREDIT_REVOKED(AdminAuditCategory.CHANGE, AdminAuditTargetType.MEMBER),
+    CHAT_MODEL_PROMOTION_UPSERTED(AdminAuditCategory.CHANGE, AdminAuditTargetType.CHAT_MODEL),
+    CHAT_MODEL_PROMOTION_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.CHAT_MODEL),
     CREDIT_POLICY_UPSERTED(AdminAuditCategory.CHANGE, AdminAuditTargetType.CREDIT_POLICY),
     CREDIT_POLICY_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.CREDIT_POLICY),
     PUSH_CAMPAIGN_CREATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.PUSH_CAMPAIGN),
