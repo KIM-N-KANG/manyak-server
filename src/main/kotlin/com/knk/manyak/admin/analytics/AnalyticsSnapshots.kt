@@ -15,7 +15,7 @@ data class AnalyticsRange(val from: LocalDate, val to: LocalDate) {
     fun dates() = (0 until days).map { from.plusDays(it.toLong()) }
 }
 /** [perDate]면 응답이 범위 전체의 합이라 연속 날짜를 한 구간으로 묶지 않고 날짜마다 조회한다. */
-class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false, val perDate: Boolean = false,
+class DailyAnalyticsMetric(val definition: AnalyticsDefinition, val retention: Boolean = false, val perDate: Boolean = false, val finalizationDelayDays: Long = 0,
     val decode: (JsonNode, AnalyticsRange) -> Map<LocalDate, JsonNode>)
 class RangeAnalyticsMetric(val definition: AnalyticsDefinition, val range: AnalyticsRange, val conversionDays: Long = 0, val decode: (JsonNode) -> JsonNode)
 class AnalyticsRefreshProgress {
@@ -55,10 +55,12 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
     private fun rangeKey(metric: RangeAnalyticsMetric) = metric.definition.hash + ":" + metric.range.from + ":" + metric.range.to
     private fun completeRetention(value: JsonNode) = value.isArray && value.size() >= 32 && (0..31).all { value[it]["incomplete"]?.isBoolean == true && !value[it]["incomplete"].asBoolean() }
     private fun finalDaily(metric: DailyAnalyticsMetric, date: LocalDate, value: AnalyticsValue): Boolean =
-        if (metric.retention) completeRetention(value.value) else value.finalizedAt != null || date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
+        if (metric.retention) completeRetention(value.value)
+        else if (metric.finalizationDelayDays > 0) date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date.plusDays(metric.finalizationDelayDays)
+        else value.finalizedAt != null || date <= today().minusDays(2) && value.fetchedAt.atZone(AdminDateRange.KST).toLocalDate() > date
     private fun dailyValues(metric: DailyAnalyticsMetric, from: LocalDate, to: LocalDate): Map<LocalDate, AnalyticsValue> =
         store.daily(metric.definition, from, to).mapValues { (date, value) ->
-            if (metric.retention && value.finalizedAt != null && !completeRetention(value.value)) {
+            if (value.finalizedAt != null && (metric.retention || metric.finalizationDelayDays > 0) && !finalDaily(metric, date, value)) {
                 // 이전 태스크의 옛 판정도 읽을 때 풀어 기존 upsert가 새 응답을 저장할 수 있게 한다.
                 store.unfinalizeDaily(metric.definition, date, value)
                 value.copy(finalizedAt = null)

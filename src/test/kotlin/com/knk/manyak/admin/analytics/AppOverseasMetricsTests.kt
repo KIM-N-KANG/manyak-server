@@ -188,16 +188,16 @@ class AppOverseasMetricsTests {
         assertThat(definitions.sessions().take(3).drop(1).map { it.definition.hash }).containsExactlyElementsOf(oldSessions.drop(1))
         assertThat(definitions.sessions().first().definition.hash).isNotEqualTo(oldSessions.first())
     }
-    @Test fun `새벽 카탈로그는 세 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 234와 리텐션 792다`() {
+    @Test fun `새벽 카탈로그는 세 기능 조건과 플랫폼 지표를 중복 없이 포함하고 하루 316와 리텐션 792다`() {
         val settings = CampaignSettings(listOf(CampaignDefinition("ongoing","진행","campaign",today.minusDays(30))), mapOf("instagram" to listOf("ig"),"threads" to listOf("th"),"dcinside" to listOf("dc")))
         val dashboard = AnalyticsTestFixture(AmplitudeDashboardProperties(teamCohortId="team"),fixture.clock)
         val campaigns = CampaignAnalyticsService(settings,fixture.snapshots,queries,fixture.clock)
         val entries = DefaultAnalyticsBatchCatalog(dashboard.service,definitions,campaigns,settings,AnalyticsBatchPolicy(),modelCodeReads()).metrics()
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
-        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(234)
+        assertThat(entries.filterNot { it.metric.retention }.sumOf { it.metric.definition.perDay }).isEqualTo(316)
         assertThat(entries.filter { it.metric.retention }.sumOf { it.metric.definition.perDay }*33).isEqualTo(792)
         assertThat(entries.filter { it.metric.definition.metric.startsWith("quality_") && it.metric.definition.metric !in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(45)
-        // 분석 지표 12, 사용자 활동 10, 세션 72, 세션 길이 36, 기능 사용 45, 캠페인 추이 16, 가입 플랫폼 3, 턴 도달률 24, 모델 둘의 채팅 옵션 16
+        // 기존 일별 234 + 광고 소재 50 + 앱 유입 28 + 앱 활성 한 날짜 4. 실제 새벽은 앱 활성 두 날짜라 320이다.
         assertThat(entries.filter { it.metric.definition.metric == "users_signup_platform" }).hasSize(3)
         assertThat(entries.filter { it.metric.definition.metric == "conversion_turn_reach" }).hasSize(24)
         assertThat(entries.filter { it.metric.definition.metric in setOf("quality_chat_starters", "quality_model_turns") }).hasSize(16)

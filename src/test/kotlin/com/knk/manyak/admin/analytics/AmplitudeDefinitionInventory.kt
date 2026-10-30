@@ -49,6 +49,8 @@ internal class AmplitudeDefinitionInventory {
         definitions.sessions().forEach { daily(it, "users/sessions") }; definitions.sessionLengths().forEach { daily(it, "users/session-lengths") }
         for (cohort in listOf("visitor", "signup", "first-chat")) definitions.retention(cohort).forEach { daily(it, "users/retention:$cohort") }
         for (platform in listOf("all", "web", "android")) definitions.quality(platform).forEach { daily(it, "quality/$platform") }
+        daily(definitions.appActivation(), "users/app-activation")
+        campaigns.appTransferMetrics().forEach { daily(it, "campaigns/app-transfer") }
         definitions.signupPlatforms().forEach { daily(it, "users/signups") }
         for (segment in listOf("guest", "member")) {
             definitions.sessions(segment).forEach { daily(it, "users/sessions:$segment") }; definitions.sessionLengths(segment).forEach { daily(it, "users/session-lengths:$segment") }
@@ -59,6 +61,9 @@ internal class AmplitudeDefinitionInventory {
             definitions.chatOptions(segment, listOf("AURORA", "LITE")).forEach { daily(it, "quality/chat-options:$segment") }
         }
         for (item in items) {
+            campaigns.creativeMetrics(item.campaign).forEach { daily(it, "campaigns/creatives:" + item.key) }
+            capture { campaigns.activation(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
+            capture { campaigns.reach(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
             campaigns.trendMetrics(item.campaign).forEach { daily(it, "campaign:" + item.key) }
             capture { campaigns.creation(CampaignQuery().apply { from=date.toString(); to=date.toString(); campaign=item.campaign }) }
             val story = item.storyId ?: UUID.fromString("cca6358a-0ef3-4709-88d1-100b9faeeca8")

@@ -35,10 +35,27 @@ data class QualityResponse(val asOf: Instant, val from: LocalDate, val to: Local
 data class ConversionStep(val event: String, val turnNumber: Int?, val users: Long, val minTurnNumber: Int? = null, val platform: String? = null)
 data class ConversionResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val funnel: String, val platform: String?, val storyId: UUID?, val steps: List<ConversionStep>)
 
+data class AppActivationDay(val date: LocalDate, val newUsers: Long, val activeUsers: Long, val activationRate: Double?)
+data class AppActivationTotals(val newUsers: Long, val activeUsers: Long, val activationRate: Double?)
+data class AppActivationResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val pendingDates: List<LocalDate>, val daily: List<AppActivationDay>, val totals: AppActivationTotals)
+
 @Service
 class AdminMetricsService(private val definitions: MetricDefinitions, private val snapshots: AnalyticsSnapshots, private val queries: AnalyticsQueryFactory,
     private val reads: AdminMetricReadRepository, private val dashboard: com.knk.manyak.admin.config.AdminDashboardProperties, private val clock: Clock = Clock.systemUTC()) {
     private fun ready(result: AnalyticsSnapshotResult): List<LocalDate> = result.readyDates().also { if (it.isEmpty()) throw AdminAnalyticsUnavailable() }
+    fun appActivation(query: AnalyticsRangeQuery): AppActivationResponse {
+        val range = query.range(clock); val metric = definitions.appActivation()
+        val result = snapshots.load("users/app-activation", range, listOf(metric)); val dates = ready(result)
+        fun ratio(n: Long, d: Long) = if (d == 0L) null else n.toDouble() / d
+        val daily = dates.map { date ->
+            val values = result.value(metric, date)!!.value
+            val new = values[0].asLong(); val active = values[1].asLong()
+            AppActivationDay(date, new, active, ratio(active, new))
+        }
+        val new = daily.fold(0L) { sum, d -> Math.addExact(sum, d.newUsers) }
+        val active = daily.fold(0L) { sum, d -> Math.addExact(sum, d.activeUsers) }
+        return AppActivationResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, result.pendingDates(), daily, AppActivationTotals(new, active, ratio(active, new)))
+    }
     fun activity(query: AnalyticsRangeQuery): ActivityResponse {
         val range = query.range(clock); val metrics = definitions.activity(); val mau = listOf(definitions.mau(range.to))
         val result = snapshots.load("users/activity", range, metrics, rangeMetrics = mau); val dates = ready(result)

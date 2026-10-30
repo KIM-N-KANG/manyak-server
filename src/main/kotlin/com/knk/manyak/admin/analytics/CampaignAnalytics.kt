@@ -30,6 +30,18 @@ data class CampaignSourceRow(val source: String?, val newVisitors: Long)
 data class CampaignPostRow(val content: String?, val visitors: Long)
 data class CampaignSourceResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val sources: List<CampaignSourceRow>, val posts: List<CampaignPostRow>)
 
+data class CampaignActivationStep(val event: String, val minTurnNumber: Int?, val users: CampaignSegments)
+data class CampaignActivationResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val steps: List<CampaignActivationStep>)
+data class CampaignReachResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val chatUsers: CampaignSegments, val deepChatUsers: CampaignSegments)
+data class CreativeUsers(val content: String?, val users: Long)
+data class CreativeDay(val date: LocalDate, val signups: List<CreativeUsers>, val deepChatUsers: List<CreativeUsers>)
+data class CreativeTotals(val signups: List<CreativeUsers>)
+data class CampaignCreativeResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val campaign: String, val pendingDates: List<LocalDate>, val daily: List<CreativeDay>, val totals: CreativeTotals)
+data class SourceUsers(val source: String?, val users: Long)
+data class AppTransferDay(val date: LocalDate, val bannerShown: Long, val bannerClicked: Long, val bannerClickRate: Double?, val bannerNewUsers: Long, val newUsersBySource: List<SourceUsers>)
+data class AppTransferTotals(val bannerNewUsers: Long, val newUsersBySource: List<SourceUsers>)
+data class AppTransferResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val pendingDates: List<LocalDate>, val daily: List<AppTransferDay>, val totals: AppTransferTotals)
+
 /** 저장된 차트 ID에 의존하지 않는 이벤트 카탈로그. */
 object CampaignEvents {
     const val GENERATE = "client_storyCreate_storyGeneration_requested"
@@ -120,6 +132,74 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
         val result = snapshots.load("/api/v1/admin/campaigns/funnels/story-detail", range, emptyList(), rangeMetrics = listOf(metric))
         val value = result.value(metric) ?: throw AdminAnalyticsUnavailable()
         return CampaignStoryResponse(value.fetchedAt, range.from, range.to, campaign, story, names.mapIndexed { i, name -> StoryCampaignStep(name, if (i >= 2) i - 1 else null, value.value[i].asLong()) })
+    }
+    fun activation(query: CampaignQuery): CampaignActivationResponse {
+        val range = query.range(clock, 31, 7); val campaign = campaign(query)
+        val names = listOf("_active", AdminMetricEvents.MESSAGE, AdminMetricEvents.MESSAGE, AdminMetricEvents.SIGNUP)
+        val metrics = listOf(false, true).map { ad -> queries.funnel("campaign_activation_" + (if (ad) "ads" else "all"), range,
+            names.mapIndexed { i, name -> CampaignEvents.event(name, CampaignEvents.common() + (if (ad) listOf(ads(campaign)) else emptyList()) +
+                if (i == 2) listOf(AdminMetricEvents.filter("turn_number", listOf("5"), op = "greater or equal")) else emptyList()) }, users = "new") }
+        val result = snapshots.load("campaigns/funnels/activation", range, emptyList(), rangeMetrics = metrics)
+        val values = metrics.map { result.value(it) ?: throw AdminAnalyticsUnavailable() }
+        return CampaignActivationResponse(result.asOf(values), range.from, range.to, campaign, names.mapIndexed { i, name ->
+            CampaignActivationStep(if (name == AdminMetricEvents.SIGNUP) "signup_succeeded" else name, if (i == 2) 5 else null,
+                CampaignSegments(values[0].value[i].asLong(), values[1].value[i].asLong()))
+        })
+    }
+    fun reach(query: CampaignQuery): CampaignReachResponse {
+        val range = query.range(clock, 31, 7); val campaign = campaign(query)
+        val metrics = listOf(false, true).flatMap { deep -> listOf(false, true).map { ad ->
+            queries.collapsed("campaign_reach_${deep}_$ad", range, CampaignEvents.event(AdminMetricEvents.MESSAGE,
+                CampaignEvents.common() + (if (ad) listOf(ads(campaign)) else emptyList()) +
+                    if (deep) listOf(AdminMetricEvents.filter("turn_number", listOf("5"), op = "greater or equal")) else emptyList()))
+        } }
+        val result = snapshots.load("campaigns/reach", range, emptyList(), rangeMetrics = metrics)
+        val values = metrics.map { result.value(it) ?: throw AdminAnalyticsUnavailable() }
+        return CampaignReachResponse(result.asOf(values), range.from, range.to, campaign,
+            CampaignSegments(values[0].value.asLong(), values[1].value.asLong()), CampaignSegments(values[2].value.asLong(), values[3].value.asLong()))
+    }
+    fun creativeMetrics(campaign: String): List<DailyAnalyticsMetric> = listOf(AdminMetricEvents.SIGNUP, AdminMetricEvents.MESSAGE).mapIndexed { i, name ->
+        queries.dailyGrouped(if (i == 0) "campaign_creative_signups" else "campaign_creative_deep_chat", CampaignEvents.event(name,
+            CampaignEvents.common() + ads(campaign) + if (i == 1) listOf(AdminMetricEvents.filter("turn_number", listOf("5"), op = "greater or equal")) else emptyList()),
+            listOf("g" to "gp:initial_utm_content"))
+    }
+    private fun groupedUsers(value: tools.jackson.databind.JsonNode): List<Pair<String?, Long>> = value.toList().map { row ->
+        row["labels"][0].let { if (it.isNull) null else it.asText() } to row["value"].asLong()
+    }
+    private fun summedGroups(groups: List<List<Pair<String?, Long>>>): List<Pair<String?, Long>> {
+        val totals = linkedMapOf<String?, Long>()
+        groups.flatten().forEach { (key, n) -> totals[key] = Math.addExact(totals[key] ?: 0L, n) }
+        return totals.toList().sortedByDescending { it.second }
+    }
+    fun creatives(query: CampaignQuery): CampaignCreativeResponse {
+        val range = query.range(clock); val campaign = campaign(query); val metrics = creativeMetrics(campaign)
+        val result = snapshots.load("campaigns/creatives", range, metrics); val dates = result.readyDates()
+        if (dates.isEmpty()) throw AdminAnalyticsUnavailable()
+        fun rows(i: Int, date: LocalDate) = groupedUsers(result.value(metrics[i], date)!!.value).sortedByDescending { it.second }.map { CreativeUsers(it.first, it.second) }
+        val daily = dates.map { CreativeDay(it, rows(0, it), rows(1, it)) }
+        val totals = summedGroups(daily.map { d -> d.signups.map { it.content to it.users } }).map { CreativeUsers(it.first, it.second) }
+        return CampaignCreativeResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, campaign, result.pendingDates(), daily, CreativeTotals(totals))
+    }
+    fun appTransferMetrics(): List<DailyAnalyticsMetric> {
+        val web = CampaignEvents.common() + CampaignEvents.filter("device_type", listOf("Android"), "user")
+        val android = AdminMetricEvents.platformFilters("android")
+        return listOf(queries.daily("app_banner_shown", CampaignEvents.event("client_appBanner_shown", web)),
+            queries.daily("app_banner_clicked", CampaignEvents.event("client_appBanner_actionButton_clicked", web)),
+            queries.daily("app_banner_new", CampaignEvents.event("_new", android + CampaignEvents.filter("gp:initial_utm_medium", listOf("app_banner"), "user"))),
+            queries.dailyGrouped("app_install_sources", CampaignEvents.event("_new", android), listOf("g" to "gp:initial_utm_source")))
+    }
+    fun appTransfer(query: AnalyticsRangeQuery): AppTransferResponse {
+        val range = query.range(clock); val metrics = appTransferMetrics()
+        val result = snapshots.load("campaigns/app-transfer", range, metrics); val dates = result.readyDates()
+        if (dates.isEmpty()) throw AdminAnalyticsUnavailable()
+        val daily = dates.map { date ->
+            fun n(i: Int) = result.value(metrics[i], date)!!.value.asLong()
+            AppTransferDay(date, n(0), n(1), if (n(0) == 0L) null else n(1).toDouble() / n(0), n(2),
+                groupedUsers(result.value(metrics[3], date)!!.value).sortedByDescending { it.second }.map { SourceUsers(it.first, it.second) })
+        }
+        val sources = summedGroups(daily.map { d -> d.newUsersBySource.map { it.source to it.users } }).map { SourceUsers(it.first, it.second) }
+        return AppTransferResponse(result.asOf(dates.flatMap { result.values(it) }), range.from, range.to, result.pendingDates(), daily,
+            AppTransferTotals(daily.fold(0L) { sum, d -> Math.addExact(sum, d.bannerNewUsers) }, sources))
     }
     fun sources(query: AnalyticsRangeQuery): CampaignSourceResponse {
         val range = query.range(clock, 10, 7, setOf(7))

@@ -19,6 +19,9 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     fun newVisitors(): List<DailyAnalyticsMetric> = listOf("all", "web", "android").map { platform ->
         queries.daily("activity_new", AdminMetricEvents.event("_new", filters(platform)))
     }
+    fun appActivation(): DailyAnalyticsMetric = queries.dailyFunnel("users_app_activation", listOf(
+        AdminMetricEvents.event("_active", filters("android")),
+        AdminMetricEvents.event(AdminMetricEvents.CORE_ACTIVITY, AdminMetricEvents.common(false))))
     fun mau(to: LocalDate, platform: String = "all"): RangeAnalyticsMetric {
         val range = AnalyticsRange(to.minusDays(29), to)
         val def = AnalyticsDefinition("activity_mau", "/api/2/events/segmentation", listOf("e" to mapper.writeValueAsString(AdminMetricEvents.event("_active", filters(platform))), "m" to "uniques", "i" to "1"), 1, mapper)

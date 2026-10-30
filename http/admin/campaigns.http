@@ -136,3 +136,98 @@ client.test("부분 응답과 이어 받기", () => {
   }
 });
 %}
+
+### 첫 방문 활성화 · 신규 웹 사용자 4단계, 전체와 광고, 하루 비용 16
+# 전환 창은 1일이며 to 다음 날이 끝난 뒤 받은 값만 확정한다.
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("첫 방문 활성화", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    const steps = response.body.steps;
+    client.assert(steps.map(s => s.event).join(",") === "_active,client_chat_messageInput_submitted,client_chat_messageInput_submitted,signup_succeeded", "4단계 이벤트");
+    client.assert(steps[2].minTurnNumber === 5 && steps[0].minTurnNumber === null, "5턴 이상 하한");
+    steps.forEach(s => client.assert(s.users.nonAds === s.users.all - s.users.ads, "전체에서 광고를 뺀 값"));
+  }
+});
+%}
+
+### 누적 도달 · 일별 합이 아닌 기간 전체 고유 사용자, 하루 비용 4
+GET {{baseUrl}}/api/v1/admin/campaigns/reach?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("누적 도달", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) for (const name of ["chatUsers", "deepChatUsers"]) {
+    const v = response.body[name];
+    client.assert(["all", "ads", "nonAds"].every(k => Number.isInteger(v[k])) && v.nonAds === v.all - v.ads, `${name} 세그먼트`);
+  }
+});
+%}
+
+### 광고 소재 · 광고 유입만, 하루 비용 50, 빈 날짜는 다음 요청에서 이어 받음
+GET {{baseUrl}}/api/v1/admin/campaigns/creatives?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("광고 소재", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    const b = response.body;
+    client.assert(b.daily.length + b.pendingDates.length === 7, "일별 준비 상태");
+    client.assert(!("deepChatUsers" in b.totals), "기간 고유 사용자의 일별 합을 제공하지 않음");
+    for (const rows of [...b.daily.flatMap(d => [d.signups, d.deepChatUsers]), b.totals.signups]) {
+      client.assert(rows.every((r, i) => (r.content === null || typeof r.content === "string") && Number.isInteger(r.users) && (i === 0 || rows[i-1].users >= r.users)), "소재와 사용자 수 내림차순");
+    }
+  }
+});
+%}
+
+### 앱 유입 · 캠페인 값 없음, Android 기기의 웹 배너와 앱 설치 소스, 하루 비용 28
+GET {{baseUrl}}/api/v1/admin/campaigns/app-transfer?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("앱 유입", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    const b = response.body;
+    client.assert(b.daily.length + b.pendingDates.length === 7, "일별 준비 상태");
+    b.daily.forEach(d => client.assert(d.bannerClickRate === (d.bannerShown === 0 ? null : d.bannerClicked / d.bannerShown), "배너 클릭률"));
+    client.assert(b.totals.bannerNewUsers === b.daily.reduce((sum, d) => sum + d.bannerNewUsers, 0), "배너 경유 신규 사용자 일별 합");
+    client.assert(!("bannerShown" in b.totals) && !("bannerClicked" in b.totals), "기간 합이 없는 고유 사용자");
+  }
+});
+%}
+
+### 400 · 첫 방문 활성화 31일 초과
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?from=2026-09-29&to=2026-10-30
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("활성화 기간 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 · 누적 도달 31일 초과
+GET {{baseUrl}}/api/v1/admin/campaigns/reach?from=2026-09-29&to=2026-10-30
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("누적 도달 기간 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 · 광고 소재의 허용하지 않는 days
+GET {{baseUrl}}/api/v1/admin/campaigns/creatives?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("광고 소재 기간 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 400 · 앱 유입의 허용하지 않는 days
+GET {{baseUrl}}/api/v1/admin/campaigns/app-transfer?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("앱 유입 기간 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 401 · 앱 유입 무토큰
+GET {{baseUrl}}/api/v1/admin/campaigns/app-transfer?days=7
+
+> {% client.test("앱 유입 인증", () => client.assert(response.status === 401, `actual=${response.status}`)); %}

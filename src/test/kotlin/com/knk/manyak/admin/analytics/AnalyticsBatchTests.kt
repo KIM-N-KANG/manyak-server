@@ -120,16 +120,18 @@ class AnalyticsBatchTests {
         val policy = AnalyticsBatchPolicy()
         val entries = DefaultAnalyticsBatchCatalog(fixture.service, defs, service, campaigns, policy, modelCodeReads()).metrics()
         val expected = fixture.service.dailyMetrics() + defs.activity() + defs.sessions() + defs.sessionLengths() + listOf("all", "web", "android").flatMap { defs.quality(it) } + defs.retention() +
-            defs.signupPlatforms() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
+            defs.signupPlatforms() + listOf(defs.appActivation()) + service.appTransferMetrics() + defs.turnReach("all") + defs.chatOptions("all", listOf("AURORA", "LITE"))
         assertThat(entries.filter { it.metric.definition.metric == "users_session_peruser" }).hasSize(3)
         assertThat(entries.filter { it.metric.definition.metric.startsWith("campaign_device_") }).hasSize(3)
         assertThat(entries.filter { it.metric.definition.metric in setOf("quality_ai_responses", "quality_simple_completions", "quality_general_submissions", "quality_core_active") }).hasSize(12)
         assertThat(entries.map { it.key }).containsAll(defs.newVisitors().map { it.definition.metric + ":" + it.definition.hash })
         assertThat(entries.map { it.key }).containsAll(expected.map { it.definition.metric + ":" + it.definition.hash })
-        assertThat(entries.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(entries.filter { it.metric.definition.metric != "users_app_activation" }.map { it.metric.definition.path }).doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(entries.single { it.metric.definition.metric == "users_app_activation" }.metric.finalizationDelayDays).isEqualTo(1)
+        assertThat(entries.filter { it.metric.definition.metric.startsWith("campaign_creative_") }).hasSize(2)
         val common = expected.map { it.definition.metric + ":" + it.definition.hash }.toSet()
         assertThat(entries.filter { it.key !in common }).allMatch { it.start == day.minusDays(1) }
-        val ended = service.trendMetrics("past").map { it.definition.hash }.toSet() - service.trendMetrics("ads").map { it.definition.hash }.toSet()
+        val ended = (service.trendMetrics("past") + service.creativeMetrics("past")).map { it.definition.hash }.toSet() - (service.trendMetrics("ads") + service.creativeMetrics("ads")).map { it.definition.hash }.toSet()
         assertThat(entries.map { it.metric.definition.hash }).doesNotContainAnyElementsOf(ended)
         assertThat(entries.map { it.key }).doesNotHaveDuplicates()
         // segment guest, member는 화면 요청에서만 받는다.
@@ -195,6 +197,13 @@ class AnalyticsBatchTests {
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
             if (r.requestUrl!!.encodedPath == "/api/2/sessions/length") return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(List(9) { 1 }),
                 "xValues" to defs.sessionLengthBounds.zipWithNext { a, b -> "${a}s-${b}s" }))))
+            if (r.requestUrl!!.encodedPath == "/api/2/funnels") return MockResponse().setBody("""{"data":[{"cumulativeRaw":[20,6]}]}""")
+            if (r.requestUrl!!.queryParameter("g") != null) {
+                val start = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
+                val end = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
+                val dates = AnalyticsRange(start, end).dates()
+                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "seriesLabels" to listOf(listOf(0, "source")), "series" to listOf(dates.map { 1 })))))
+            }
             if (r.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(r)
             val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
             val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
@@ -206,13 +215,13 @@ class AnalyticsBatchTests {
         assertThat(results.take(3).map { it.reason }).containsOnly("budget_share")
         assertThat(results.last().result).isEqualTo("done")
         assertThat(results).allMatch { it.cost <= 300 }
-        assertThat(results.sumOf { it.cost }).isEqualTo(1026)
+        assertThat(results.sumOf { it.cost }).isEqualTo(1112)
         catalog.metrics().forEach { entry ->
-            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33 else 1)), day.minusDays(1))
+            val range = AnalyticsRange(maxOf(entry.start, day.minusDays(if (entry.metric.retention) 33L else 1L + entry.metric.finalizationDelayDays)), day.minusDays(1))
             assertThat(fixture.snapshots.missingDates(entry.metric, range)).isEmpty()
         }
         val requests = (0 until server.requestCount).map { server.takeRequest().requestUrl!! }
-        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average", "/api/2/sessions/length").doesNotContain("/api/2/users", "/api/2/funnels")
+        assertThat(requests.map { it.encodedPath }).contains("/api/2/events/segmentation", "/api/2/retention", "/api/2/sessions/average", "/api/2/sessions/length", "/api/2/funnels").doesNotContain("/api/2/users")
         val campaignQueries = requests.mapNotNull { it.queryParameter("e") }.filter { it.contains("initial_utm_campaign") }
         assertThat(campaignQueries).isNotEmpty().allMatch { it.contains("actual-campaign") && !it.contains("campaign-key") }
     }

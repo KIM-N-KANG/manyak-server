@@ -620,3 +620,37 @@ GET {{baseUrl}}/api/v1/admin/conversion/funnels/android-activation?platform=andr
 Authorization: Bearer {{adminToken}}
 
 > {% client.test("앱 고정 플랫폼 쿼리 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 앱 신규 활성 사용자 · 날짜별 신규 사용자 퍼널, 하루 비용 4
+# 첫 단계는 국내 Android _active, 다음 단계 ce:핵심 활동에는 국내 조건만 적용한다.
+# 오늘·어제 값은 늘 수 있다. 그 날짜의 다음 날이 끝난 뒤 받은 값만 확정한다.
+# 새벽 배치는 이 지표의 어제·그저께를 함께 받는다.
+GET {{baseUrl}}/api/v1/admin/users/app-activation?days=7
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("앱 신규 활성 사용자", () => {
+  client.assert(response.status === 200 || response.status === 503, `actual=${response.status}`);
+  if (response.status === 200) {
+    const b = response.body;
+    client.assert(b.daily.length + b.pendingDates.length === 7, "일별 준비 상태");
+    for (const row of [...b.daily, b.totals]) {
+      client.assert(row.activeUsers <= row.newUsers && row.activationRate === (row.newUsers === 0 ? null : row.activeUsers / row.newUsers), "신규 활성 사용자와 비율");
+    }
+    client.assert(b.totals.newUsers === b.daily.reduce((sum, d) => sum + d.newUsers, 0), "신규 사용자 합");
+    client.assert(b.totals.activeUsers === b.daily.reduce((sum, d) => sum + d.activeUsers, 0), "신규 활성 사용자 합");
+  }
+});
+%}
+
+### 400 · 앱 신규 활성 사용자의 허용하지 않는 days
+GET {{baseUrl}}/api/v1/admin/users/app-activation?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("앱 활성 기간 검증", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 403 · 역할 없는 관리자 토큰
+GET {{baseUrl}}/api/v1/admin/users/app-activation?days=7
+Authorization: Bearer {{rolelessAdminToken}}
+
+> {% client.test("앱 활성 관리자 권한", () => client.assert(response.status === 403, `actual=${response.status}`)); %}

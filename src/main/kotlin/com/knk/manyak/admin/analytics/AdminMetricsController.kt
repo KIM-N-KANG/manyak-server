@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/v1/admin")
 @SecurityRequirement(name = "bearerAuth")
 class AdminMetricsController(private val metrics: AdminMetricsService, private val reads: AdminMetricReadService, private val costs: AdminAiCostService) {
+    @GetMapping("/users/app-activation") fun appActivation(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.appActivation(query)
     @GetMapping("/users/activity") fun activity(@ParameterObject @ModelAttribute query: AnalyticsRangeQuery) = metrics.activity(query)
     @GetMapping("/users/retention") fun retention(@ParameterObject @ModelAttribute query: RetentionQuery) = metrics.retention(query, query.cohort)
     @GetMapping("/users/sessions") fun sessions(@ParameterObject @ModelAttribute query: SegmentRangeQuery) = metrics.sessions(query)
