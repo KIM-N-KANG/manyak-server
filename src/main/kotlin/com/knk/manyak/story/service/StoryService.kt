@@ -235,7 +235,7 @@ class StoryService(
             genres = story.toGenreNames(),
             hashtags = emptyList(),
             author = resolveAuthor(story.userId),
-            turnCount = storyChatRepository.sumCurrentTurnByStoryId(story.id),
+            turnCount = storyChatRepository.sumTurnCountByStoryId(story.id),
             likeCount = storyLikeRepository.countByStoryId(story.id),
             // 소유 판단은 서버가 내려준다(KNK-1018). 게스트(userId null)는 항상 false — 소유권 게이트(§4-5)와 달리
             // 게스트 스토리의 게스트 요청도 false다(게스트끼리 구분 불가라 메뉴 노출 판단으로 부적합).
@@ -452,7 +452,7 @@ class StoryService(
         if (isEmpty()) {
             return emptyList()
         }
-        val turnCountByStoryId = storyChatRepository.sumCurrentTurnByStoryIds(map { it.id })
+        val turnCountByStoryId = storyChatRepository.sumTurnCountByStoryIds(map { it.id })
             .associate { it.storyId to it.turnCount }
         val likeCountByStoryId = storyLikeRepository.countByStoryIds(map { it.id })
             .associate { it.storyId to it.likeCount }

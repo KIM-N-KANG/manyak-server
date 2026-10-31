@@ -104,7 +104,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
         pageable: Pageable,
     ): List<Story>
 
-    /** 인기순 첫 페이지(KNK-1489). 좋아요 수 가중 합과 미삭제 채팅의 누적 턴 수를 더한다. */
+    /** 인기순 첫 페이지(KNK-1489). 좋아요 수 가중 합과 모든 채팅의 누적 턴 수를 더한다. */
     @Query(
         """
         SELECT s FROM Story s
@@ -114,8 +114,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) DESC, s.publicId DESC
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id)) DESC, s.publicId DESC
         """,
     )
     fun findPublicPopular(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -130,15 +130,15 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) < :score
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id)) < :score
                OR (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) = :score
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id)) = :score
                    AND s.publicId < :publicId))
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id AND c.deletedAt IS NULL)) DESC, s.publicId DESC
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                      WHERE c.storyId = s.id)) DESC, s.publicId DESC
         """,
     )
     fun findPublicPopularAfter(
@@ -189,8 +189,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     ): List<Story>
 
     /**
-     * 공개 스토리 목록 채팅순 첫 페이지(KNK-1398). 1차 키는 누적 턴 수 —
-     * 미삭제 채팅의 `current_turn` 합이라 카드의 `turnCount`와 같은 출처다([StoryChatRepository]).
+     * 공개 스토리 목록 채팅순 첫 페이지(KNK-1398). 1차 키는 누적 턴 수다.
+     * 삭제된 채팅을 포함한 `current_turn + regenerated_count` 합이라 카드의 `turnCount`와 같은 출처다([StoryChatRepository]).
      * 좋아요순과 같은 이유로 비정규화 컬럼을 두지 않고 상관 서브쿼리로 집계한다.
      */
     @Query(
@@ -201,8 +201,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.deletedAt IS NULL
           AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                  WHERE c.storyId = s.id AND c.deletedAt IS NULL) DESC, s.publicId DESC
+        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                  WHERE c.storyId = s.id) DESC, s.publicId DESC
         """,
     )
     fun findPublicChats(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -216,13 +216,13 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.deletedAt IS NULL
           AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND ((SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                WHERE c.storyId = s.id AND c.deletedAt IS NULL) < :turnCount
-               OR ((SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                    WHERE c.storyId = s.id AND c.deletedAt IS NULL) = :turnCount
+          AND ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                WHERE c.storyId = s.id) < :turnCount
+               OR ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                    WHERE c.storyId = s.id) = :turnCount
                    AND s.publicId < :publicId))
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c
-                  WHERE c.storyId = s.id AND c.deletedAt IS NULL) DESC, s.publicId DESC
+        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
+                  WHERE c.storyId = s.id) DESC, s.publicId DESC
         """,
     )
     fun findPublicChatsAfter(
