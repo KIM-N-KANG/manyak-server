@@ -156,19 +156,19 @@ class StoryDetailControllerIntegrationTests {
     }
 
     @Test
-    fun `turnCount는 스토리의 미삭제 채팅 current_turn 합이다`() {
+    fun `turnCount는 삭제된 채팅과 재생성을 포함한 누적 턴 수다`() {
         val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC, status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
         storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
-        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2))
-        // 소프트 삭제된 채팅은 합산에서 제외한다.
-        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 5, deletedAt = Instant.now()))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2, regeneratedCount = 1))
+        // 소프트 삭제된 채팅도 합산한다.
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 4, deletedAt = Instant.now()))
 
         restTestClient.get()
             .uri("/api/v1/stories/${story.publicId}")
             .exchange()
             .expectStatus().isOk
             .expectBody()
-            .jsonPath("$.turnCount").isEqualTo(5)
+            .jsonPath("$.turnCount").isEqualTo(10)
     }
 
     @Test

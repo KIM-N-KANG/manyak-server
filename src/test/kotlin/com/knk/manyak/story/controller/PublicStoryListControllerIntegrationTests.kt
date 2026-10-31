@@ -51,6 +51,7 @@ class PublicStoryListControllerIntegrationTests {
     @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var searchDocuments: com.knk.manyak.search.service.StorySearchDocumentReader
 
     @BeforeEach
     fun setUp() {
@@ -79,12 +80,13 @@ class PublicStoryListControllerIntegrationTests {
         ),
     )
 
-    /** 누적 턴 수를 심는다. [deleted]면 소프트 삭제 채팅이라 합계에서 빠져야 한다. */
-    private fun chat(story: Story, turns: Int, deleted: Boolean = false) {
+    /** 삭제 여부와 무관하게 누적 턴 수에 포함할 채팅을 심는다. */
+    private fun chat(story: Story, turns: Int, deleted: Boolean = false, regenerated: Int = 0) {
         storyChatRepository.save(
             StoryChat(
                 storyId = story.id,
                 currentTurn = turns,
+                regeneratedCount = regenerated,
                 deletedAt = if (deleted) Instant.now() else null,
             ),
         )
@@ -234,7 +236,7 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `chats는 미삭제 채팅의 누적 턴 수 내림차순이고 동률은 publicId 내림차순이다`() {
+    fun `chats는 모든 채팅의 누적 턴 수 내림차순이고 동률은 publicId 내림차순이다`() {
         val author = saveUser()
         val busy = saveStory(author, "많이 논 스토리")
         val mild = saveStory(author, "조금 논 스토리")
@@ -243,7 +245,7 @@ class PublicStoryListControllerIntegrationTests {
         chat(busy, 7)
         chat(busy, 3)
         chat(mild, 4)
-        // 소프트 삭제된 채팅의 턴은 카드 turnCount와 마찬가지로 합계에서 빠진다.
+        // 소프트 삭제된 채팅의 턴도 카드 turnCount와 같이 합산한다.
         chat(mild, 99, deleted = true)
 
         val tiedExpected = listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending()
@@ -252,10 +254,10 @@ class PublicStoryListControllerIntegrationTests {
             .expectStatus().isOk
             .expectBody()
             .jsonPath("$.items.length()").isEqualTo(4)
-            .jsonPath("$.items[0].id").isEqualTo(busy.publicId.toString())
-            .jsonPath("$.items[0].turnCount").isEqualTo(10)
-            .jsonPath("$.items[1].id").isEqualTo(mild.publicId.toString())
-            .jsonPath("$.items[1].turnCount").isEqualTo(4)
+            .jsonPath("$.items[0].id").isEqualTo(mild.publicId.toString())
+            .jsonPath("$.items[0].turnCount").isEqualTo(103)
+            .jsonPath("$.items[1].id").isEqualTo(busy.publicId.toString())
+            .jsonPath("$.items[1].turnCount").isEqualTo(10)
             .jsonPath("$.items[2].id").isEqualTo(tiedExpected[0])
             .jsonPath("$.items[3].id").isEqualTo(tiedExpected[1])
     }
@@ -281,6 +283,51 @@ class PublicStoryListControllerIntegrationTests {
             .jsonPath("$.items.length()").isEqualTo(1)
             .jsonPath("$.items[0].id").isEqualTo(idle.publicId.toString())
             .jsonPath("$.nextCursor").doesNotExist()
+    }
+
+    @Test
+    fun `누적 턴 10은 카드 정렬 점수와 커서 이어 읽기에 동일하게 적용된다`() {
+        val author = saveUser()
+        val target = saveStory(author, "누적 턴 10")
+        chat(target, 3)
+        chat(target, 2, regenerated = 1)
+        chat(target, 4, deleted = true)
+        like(target, 1)
+        val tied = saveStory(author, "같은 점수")
+        chat(tied, 10)
+        like(tied, 1)
+        val lower = saveStory(author, "작은 점수")
+        chat(lower, 9)
+        like(lower, 1)
+        val empty = saveStory(author, "채팅 없음")
+        val expected = listOf(target, tied).map { it.publicId.toString() }.sortedDescending() +
+            listOf(lower.publicId.toString(), empty.publicId.toString())
+
+        restTestClient.post().uri("/api/v1/stories/batch").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(target.publicId.toString(), empty.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$[0].turnCount").isEqualTo(10)
+            .jsonPath("$[1].turnCount").isEqualTo(0)
+        assertEquals(10L, searchDocuments.read(target.id)!!.turnCount)
+        assertEquals(0L, searchDocuments.read(empty.id)!!.turnCount)
+
+        for ((sort, prefix, score) in listOf(Triple("chats", "c", 10), Triple("popular", "s", 20))) {
+            val actual = mutableListOf<String>()
+            var cursor: String? = null
+            repeat(expected.size) { index ->
+                val query = "?sort=$sort&limit=1" + (cursor?.let { "&cursor=$it" } ?: "")
+                val page = ObjectMapper().readTree(get(query).expectStatus().isOk.expectBody().returnResult().responseBody!!)
+                val item = page["items"].single()
+                actual.add(item["id"].asText())
+                if (index < 2) assertEquals(10, item["turnCount"].asInt())
+                cursor = page["nextCursor"].takeUnless { it.isNull }?.asText()
+                if (index < 2) {
+                    assertEquals("$prefix:$score:${item["id"].asText()}", String(Base64.getUrlDecoder().decode(cursor!!)))
+                }
+            }
+            assertEquals(expected, actual)
+            assertNull(cursor)
+        }
     }
 
     @Test
@@ -310,8 +357,8 @@ class PublicStoryListControllerIntegrationTests {
         chat(b, 100, deleted = true)
 
         for ((query, expected) in listOf(
-            "?sort=popular" to listOf(c, a, b),
-            "" to listOf(c, a, b),
+            "?sort=popular" to listOf(b, c, a),
+            "" to listOf(b, c, a),
             "?sort=likes" to listOf(a, c, b),
             "?sort=chats" to listOf(b, c, a),
         )) {
@@ -335,8 +382,8 @@ class PublicStoryListControllerIntegrationTests {
         like(a, 2)
         chat(b, 20)
         chat(zero, 100, deleted = true)
-        val expected = listOf(top.publicId.toString()) +
-            listOf(a, b).map { it.publicId.toString() }.sortedDescending() + zero.publicId.toString()
+        val expected = listOf(zero.publicId.toString(), top.publicId.toString()) +
+            listOf(a, b).map { it.publicId.toString() }.sortedDescending()
         val mapper = ObjectMapper()
 
         for (limit in listOf(1, 2)) {

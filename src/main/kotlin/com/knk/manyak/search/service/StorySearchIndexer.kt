@@ -41,7 +41,7 @@ class StorySearchDocumentReader(
         characterNames = characters.findByStoryIdOrderByIdAsc(story.id).map { it.name },
         thumbnailUrlSm = images.visibleThumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey, story.thumbnailModerationStatus),
         author = story.userId?.let { users.findById(it).orElse(null) }?.let { StorySearchAuthor(nickname = it.nickname) },
-        turnCount = chats.sumCurrentTurnByStoryId(story.id), likeCount = likes.countByStoryId(story.id),
+        turnCount = chats.sumTurnCountByStoryId(story.id), likeCount = likes.countByStoryId(story.id),
         createdAt = story.createdAt.toEpochMilli(),
         visible = story.isPubliclyListed(),
     )

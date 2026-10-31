@@ -125,6 +125,21 @@ class UserContentControllerIntegrationTests {
             .jsonPath("$.length()").isEqualTo(2)
     }
 
+    @Test
+    fun `내 스토리 카드의 누적 턴 수는 삭제된 채팅과 재생성을 포함한다`() {
+        val me = saveUser("me")
+        val story = storyRepository.save(Story(userId = me.id, title = "누적 턴"))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2, regeneratedCount = 1))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 4, deletedAt = Instant.now()))
+
+        restTestClient.get().uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$[0].id").isEqualTo(story.publicId.toString())
+            .jsonPath("$[0].turnCount").isEqualTo(10)
+    }
+
     // ---- 내 채팅 목록 ----
 
     @Test
