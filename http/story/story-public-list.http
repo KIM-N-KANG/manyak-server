@@ -274,7 +274,7 @@ Accept: application/json
 %}
 
 ### 6-1. (정렬) 채팅순 조회 → 200, turnCount 내림차순
-# 누적 턴 수는 미삭제 채팅의 current_turn 합입니다. 턴을 심으려면 chat/chat-turn.http 를 먼저 돌리세요.
+# 누적 턴 수는 삭제된 채팅을 포함한 모든 채팅의 current_turn + regenerated_count 합입니다. 턴을 심으려면 chat/chat-turn.http 를 먼저 돌리세요.
 GET {{baseUrl}}/api/v1/stories?sort=chats&limit=20
 Accept: application/json
 

@@ -72,19 +72,19 @@ interface StoryChatRepository : JpaRepository<StoryChat, Long> {
     @Query("SELECT c.userId FROM StoryChat c WHERE c.publicId = :publicId")
     fun findUserIdByPublicId(@Param("publicId") publicId: UUID): Long?
 
-    // KNK-515: 스토리의 누적 사용자 입력 턴 수(모든 미삭제 채팅의 current_turn 합). 채팅이 없으면 0.
-    @Query("SELECT COALESCE(SUM(c.currentTurn), 0) FROM StoryChat c WHERE c.storyId = :storyId AND c.deletedAt IS NULL")
-    fun sumCurrentTurnByStoryId(@Param("storyId") storyId: Long): Long
+    // 스토리의 누적 턴 수: 삭제된 채팅을 포함한 current_turn + regenerated_count 합. 채팅이 없으면 0.
+    @Query("SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c WHERE c.storyId = :storyId")
+    fun sumTurnCountByStoryId(@Param("storyId") storyId: Long): Long
 
     // 목록 응답용 배치 집계(N+1 방지). 채팅이 없는 스토리는 결과에 빠지므로 호출부가 0으로 보정한다.
     @Query(
-        "SELECT c.storyId AS storyId, COALESCE(SUM(c.currentTurn), 0) AS turnCount " +
-            "FROM StoryChat c WHERE c.storyId IN :storyIds AND c.deletedAt IS NULL GROUP BY c.storyId",
+        "SELECT c.storyId AS storyId, COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) AS turnCount " +
+            "FROM StoryChat c WHERE c.storyId IN :storyIds GROUP BY c.storyId",
     )
-    fun sumCurrentTurnByStoryIds(@Param("storyIds") storyIds: Collection<Long>): List<StoryTurnCountProjection>
+    fun sumTurnCountByStoryIds(@Param("storyIds") storyIds: Collection<Long>): List<StoryTurnCountProjection>
 }
 
-/** 스토리별 누적 사용자 입력 턴 수 배치 집계 결과. */
+/** 스토리별 누적 턴 수 배치 집계 결과. */
 interface StoryTurnCountProjection {
     val storyId: Long
     val turnCount: Long
