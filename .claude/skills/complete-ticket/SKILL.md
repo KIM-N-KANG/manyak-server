@@ -44,12 +44,13 @@ PR이 `dev`(또는 `main`)에 머지된 뒤 남는 뒷정리를 안전하게 끝
 
 Atlassian MCP를 사용합니다. manyak Jira의 cloudId는 `7172bb95-f290-4a32-84b8-6c23f20d9cc0`입니다. 확신이 없으면 `getAccessibleAtlassianResources`로 확인합니다.
 
-1. 사용 가능한 트랜지션을 조회합니다.
+1. 릴리스 티켓이면 릴리스 PR 본문과 티켓의 "코드 외 할 일" 칸을 확인합니다. 끝나지 않은 항목이 있으면 완료 전환을 보류하고 남은 항목을 사용자에게 알립니다.
+2. 사용 가능한 트랜지션을 조회합니다.
    - `getTransitionsForJiraIssue` (issueIdOrKey = `KNK-{번호}`)
-2. 이름이 "완료" 또는 "Done"인 트랜지션을 골라 실행합니다.
+3. 이름이 "완료" 또는 "Done"인 트랜지션을 골라 실행합니다.
    - `transitionJiraIssue` — `transition.id`에 위에서 찾은 완료 트랜지션 id를 넣습니다.
    - 이 보드에서는 완료 트랜지션 id가 보통 `31`이지만, **id를 가정하지 말고 항상 `getTransitionsForJiraIssue` 결과의 이름으로 매칭**합니다(보드 설정이 바뀔 수 있음).
-3. 이미 완료 상태면 중복 트랜지션을 시도하지 않고 그대로 보고합니다.
+4. 이미 완료 상태면 중복 트랜지션을 시도하지 않고 그대로 보고합니다.
 
 ## 3. 작업 시간 기록 (worklog)
 
