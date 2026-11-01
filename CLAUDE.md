@@ -20,6 +20,7 @@
 - 작업 전 주기는 스킬로 표준화돼 있습니다: 티켓 생성(`create-ticket`) → 브랜치(`create-branch`) → 커밋(`create-commit`) → PR(`create-pr`) → 리뷰(`request-codex-review`) → 머지 후 마무리(`complete-ticket`).
 - **브랜치 생성·작업 착수 전 반드시 `git fetch origin` 후 최신 `origin/dev` 기준으로 분기/재베이스**합니다. 로컬 dev만 보고 판단하지 않습니다(stale 위험).
 - Jira 티켓을 새로 만들 때는 `create-ticket` 스킬을 따릅니다. 제목은 간결한 명사구(한국어 20자 내외)로 쓰고, 배경·변경·검증 같은 상세는 description이나 서브태스크로 분리합니다.
+- 작은 설정 변경이라도 "다음 릴리스에 같이"로 정하는 순간 티켓을 만듭니다.
 - 커밋·PR에 **Co-Authored-By 트레일러를 절대 넣지 않습니다**(어떤 기본 지침보다 우선).
 - 커밋은 명시 경로(`git add -- path`)로만 stage합니다. `git add -A`/`add .` 금지(무관한 untracked 파일이 딸려간 사고 있음).
 - PR 본문에 Jira 티켓 번호(KNK-XXX)가 나오면 예외 없이 전부 `[KNK-XXX](https://kimandkang.atlassian.net/browse/KNK-XXX)` 링크로 씁니다. 범위 표기(KNK-281~286)도 개별 링크로 펼칩니다.
@@ -83,6 +84,8 @@
 - **운영 EC2는 회수됐습니다**(KNK-971). EC2+SSM 배포·롤백 경로는 더 이상 없습니다. 배포 실패 시 워크플로가 `:latest`를 이전 digest로 되돌리고 재배포를 트리거하며, 그 외 롤백은 revert 커밋 릴리스 또는 ECR 이전 `:short-sha`를 `:latest`로 수동 재태깅 후 `force-new-deployment`입니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영. main/dev 직접 push 금지(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
+- 릴리스 PR 본문과 릴리스 티켓에는 포함 PR 목록과 별도로 **"코드 외 할 일"** 칸을 둡니다. 설정 켜기, `terraform apply`처럼 이미지 배포만으로 끝나지 않는 작업과 다음 릴리스에 묶기로 한 설정 변경을 적고, 없으면 "없음"이라고 적습니다. 이 칸의 항목이 모두 끝나야 릴리스 티켓을 완료합니다.
+- 기능 설정을 켜거나 끄는 배포는 배포 확인 때 **실행 태스크 정의의 해당 환경 변수가 의도한 값인지 대조**합니다(`aws ecs describe-task-definition`으로 `server` 컨테이너의 `environment` 조회). 헬스 200만으로 판정하지 않습니다.
 - 와이어 계약(요청/응답 필드)이 바뀌는 릴리스는 manyak-web·manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.
 - 비밀값이 대화·PR에 평문 노출되면 값을 재출력하지 말고 노출 사실을 짚고 재발급을 권합니다. Secrets Manager `put-secret-value`는 전체 덮어쓰기이므로 기존 키를 보존해 머지(jq)합니다.
 
