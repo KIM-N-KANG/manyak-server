@@ -41,6 +41,12 @@ docker compose -f docker-compose.observability.yml down
 
 이 스택은 `manyak-observability` 프로젝트로 분리돼 있어 평소 개발용 `docker compose up -d`(postgres·redis)와 서로 간섭하지 않습니다. 보안 플러그인을 끈 **로컬 학습 전용** 구성이므로 그대로 운영에 쓰지 않습니다.
 
+### 대화 요약 결과 지표
+
+`manyak.chat.compact.result` Counter는 `outcome` 태그로 `saved`, `discarded`, `failed`, `disabled`를 집계합니다. 저장·폐기·실패는 기존 `chat_compact_*` 결과 로그와 같은 시점에 1 증가합니다.
+
+`MANYAK_CHAT_COMPACT_ENABLED=false`이면 이어쓰기 커밋의 완료 턴 수가 `MANYAK_CHAT_COMPACT_INTERVAL_TURNS`(기본 10)의 배수일 때만 `disabled`가 1 증가합니다. 재생성과 롤백은 세지 않으며 요약을 요청하지 않습니다. 첫 증가도 감지하도록 기동 시 `disabled` 시계열을 0으로 등록합니다. 지표 전송을 켠 환경에서만 AMP로 전송하며 알림 규칙은 Terraform에서 관리합니다.
+
 ## 환경변수
 
 로컬 실행에도 DB 접속 환경변수가 필요합니다. `.env.example`에 필요한 변수 목록이 정리되어 있습니다.
