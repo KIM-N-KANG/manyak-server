@@ -9,6 +9,8 @@ import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import org.springframework.transaction.PlatformTransactionManager
@@ -36,6 +38,7 @@ class ChatCompactService(
     private val client: ChatCompactAiClient,
     private val recorder: AiCallRecorder,
     private val logger: StructuredLogger,
+    private val meterRegistry: MeterRegistry,
     transactionManager: PlatformTransactionManager,
 ) {
     private val read = ChatService.assemblyTransactionTemplate(transactionManager).apply {
@@ -47,7 +50,11 @@ class ChatCompactService(
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun afterCommit(event: ChatTurnCommitted) {
-        if (!settings.enabled || event.through % settings.intervalTurns != 0) return
+        if (event.through % settings.intervalTurns != 0) return
+        if (!settings.enabled) {
+            recordResult(OUTCOME_DISABLED)
+            return
+        }
         try {
             executor.execute { compact(event) }
         } catch (error: Exception) {
@@ -124,10 +131,26 @@ class ChatCompactService(
         emit("chat_compact_failed", event, story, callId, mapOf("reason" to reason, "error" to error.javaClass.simpleName))
 
     private fun emit(name: String, event: ChatTurnCommitted, story: UUID?, callId: Long?, extra: Map<String, Any?>) {
+        recordResult(name.removePrefix("chat_compact_"))
         runCatching {
             logger.event(name, mapOf("chat_id" to event.publicId.toString(), "story_id" to story?.toString(),
                 "summary_through_turn" to event.through, "ai_call_log_id" to callId) + extra)
         }
+    }
+
+    private fun recordResult(outcome: String) {
+        runCatching {
+            Counter.builder(METRIC_COMPACT_RESULT)
+                .description("대화 요약 결과")
+                .tag("outcome", outcome)
+                .register(meterRegistry)
+                .increment()
+        }
+    }
+
+    companion object {
+        const val METRIC_COMPACT_RESULT = "manyak.chat.compact.result"
+        const val OUTCOME_DISABLED = "disabled"
     }
 
     private data class CompactSnapshot(val request: ChatCompactAiRequest, val regeneratedCount: Int, val traceLink: AiTraceLink)
