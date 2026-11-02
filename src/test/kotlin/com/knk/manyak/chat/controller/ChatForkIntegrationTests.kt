@@ -52,6 +52,7 @@ class ChatForkIntegrationTests {
     @Autowired private lateinit var credits: CreditTransactionRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var adminCharts: com.knk.manyak.admin.repository.AdminChartsRepository
+    @Autowired private lateinit var adminDashboard: com.knk.manyak.admin.repository.AdminDashboardRepository
     @Autowired private lateinit var adminContent: com.knk.manyak.admin.repository.AdminContentRepository
     @Autowired private lateinit var adminEngagement: com.knk.manyak.admin.repository.AdminChatEngagementRepository
     @Autowired private lateinit var generating: com.knk.manyak.chat.service.ChatGenerationStore
@@ -246,8 +247,10 @@ class ChatForkIntegrationTests {
         request(other.chat.publicId.toString(), """{"turnId":${other.turns[0].id}}""").expectStatus().isForbidden
     }
 
-    @Test fun `관리자 누적 턴과 메시지 활동 지표도 복사로 늘어나지 않는다`() {
+    @Test fun `관리자 현재 턴 합은 복사본을 포함하고 생성 응답 수는 복사를 빼고 숨긴 응답을 센다`() {
         val f = fixture()
+        jdbc.update("UPDATE story_messages SET hidden_at=CURRENT_TIMESTAMP WHERE id=?", f.turns.last().id)
+        chats.save(f.chat.apply { currentTurn = 4; hiddenTurnCount = 1 })
         val (_, copy) = fork(f, 3)
         val until = Instant.now().plusSeconds(60)
         assertEquals(5L, adminCharts.daily(Instant.EPOCH, until, emptyList()).values.sumOf { it["turns"] ?: 0L })
@@ -255,21 +258,27 @@ class ChatForkIntegrationTests {
         assertEquals(setOf(f.chat.id), adminEngagement.activity(Instant.EPOCH, until, emptyList()).map { it.chatId }.toSet())
         val rows = adminContent.stories(com.knk.manyak.admin.dto.AdminStoriesRequest(),
             com.knk.manyak.admin.dto.AdminPagination(1, 20, "s.created_at DESC"), null)
-        // 관리자 현재 턴 합계는 재생성을 세지 않는 기존 계약을 유지한다.
-        assertEquals(5L, rows.items.single().totalTurns)
+        // 현재 진행 깊이는 원본 4 + 복사본 3. 생성 응답 수 5와 정의가 다르다.
+        assertEquals(7L, rows.items.single().totalTurns)
+        val before = adminDashboard.summary(until, Instant.EPOCH, emptyList()).chats
+        assertEquals(5L, before.turnsTotal)
+        assertEquals(5L, before.turnsToday)
         messages.save(StoryMessage(chatId = copy.id, role = MessageRole.USER, content = "새 입력", messageOrder = 12))
         messages.save(StoryMessage(chatId = copy.id, role = MessageRole.ASSISTANT, content = "새 응답", messageOrder = 13))
         chats.save(copy.apply { currentTurn++ })
+        val after = adminDashboard.summary(until, Instant.EPOCH, emptyList()).chats
+        assertEquals(6L, after.turnsTotal)
+        assertEquals(6L, after.turnsToday)
         assertEquals(6L, adminCharts.daily(Instant.EPOCH, until, emptyList()).values.sumOf { it["turns"] ?: 0L })
         assertEquals(6L, adminEngagement.turns(Instant.EPOCH, until, emptyList()).values.sum())
         assertEquals(setOf(f.chat.id, copy.id), adminEngagement.activity(Instant.EPOCH, until, emptyList()).map { it.chatId }.toSet())
     }
 
-    @Test fun `복사한 턴은 기존 CHAT 그룹의 완료 수를 늘리지 않는다`() {
+    @Test fun `CHAT 그룹 완료 식은 복사 턴을 별도로 빼지 않는 기존 계약을 따른다`() {
         val f = fixture()
         val (_, copy) = fork(f, 3)
-        assertEquals(0L, credits.findLegacyChatCompletedCount(member.id, copy.id))
+        assertEquals(3L, credits.findLegacyChatCompletedCount(member.id, copy.id))
         chats.save(copy.apply { currentTurn += 1 })
-        assertEquals(1L, credits.findLegacyChatCompletedCount(member.id, copy.id))
+        assertEquals(4L, credits.findLegacyChatCompletedCount(member.id, copy.id))
     }
 }

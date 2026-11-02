@@ -27,7 +27,7 @@ class AdminStoryConsumptionRepository(private val jdbc: NamedParameterJdbcTempla
 
     private fun consumption(excluded: List<Long>) = """WITH consumption AS (
         SELECT s.id,s.public_id,s.title,s.user_id,s.status,s.visibility,s.deleted_at,
-            COUNT(*) AS chats,COUNT(DISTINCT c.user_id) AS players,SUM(CAST(c.current_turn AS BIGINT) + c.hidden_turn_count - c.forked_from_turn) AS turns
+            COUNT(*) AS chats,COUNT(DISTINCT c.user_id) AS players,SUM(CAST(c.current_turn AS BIGINT)) AS turns
         FROM stories s JOIN story_chats c ON c.story_id=s.id
         WHERE c.created_at>=:from AND c.created_at<=:until AND c.deleted_at IS NULL
             AND c.user_id IS NOT NULL AND c.user_id<>s.user_id

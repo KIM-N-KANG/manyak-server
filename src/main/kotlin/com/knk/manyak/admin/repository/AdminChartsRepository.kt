@@ -38,7 +38,7 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val chats = """FROM story_chats c JOIN stories s ON s.id=c.story_id
             WHERE c.deleted_at IS NULL AND ${during("c.created_at")} AND ${owner("c.user_id", excluded)}"""
         fun query(sql: String) = jdbc.queryForList(sql, p)
-        val genre = query("SELECT s.genre AS label, SUM(c.current_turn + c.hidden_turn_count - c.forked_from_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
+        val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
         val bucket = "CASE " + AdminQuery.turnBounds.mapIndexed { i, r -> "WHEN c.current_turn BETWEEN ${r.first} AND ${r.last} THEN $i" }.joinToString(" ") + " END"
         val turns = query("SELECT $bucket AS bucket, COUNT(*) AS n $chats GROUP BY $bucket")
         // 게스트 채팅에만 AI 호출 기록을 붙여 기기 해시를 센다. 호출 시각은 보지 않고, 해시 없는 기록은 COUNT DISTINCT가 뺀다.

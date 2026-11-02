@@ -108,7 +108,6 @@ class CreditReconciliationService(
         when (refType) {
             // 완료 수 = 완료 턴 수 + 숨긴 턴 수 + 완료 재생성 수. 재생성은 current_turn을 올리지
             // 않는 유료 CHAT_TURN charge라, 재생성 완료분을 더하지 않으면 성공한 재생성이 초과 환불된다(KNK-406).
-            // 차감 없이 복사한 턴은 완료 수에서 제외한다. 원본의 차감 연결은 그대로 둔다.
             CHAT_REF_TYPE -> transactionRepository.findLegacyChatCompletedCount(userId, refId)
                 ?.coerceAtLeast(0) ?: NEVER_REFUND
             STORY_REF_TYPE ->

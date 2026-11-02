@@ -25,7 +25,7 @@ class AdminDashboardRepository(private val jdbc: NamedParameterJdbcTemplate) {
             SUM(CASE WHEN status = 'DELETED' THEN 1 ELSE 0 END) AS withdrawn,
             SUM(CASE WHEN ${during("created_at")} THEN 1 ELSE 0 END) AS today""", "FROM users WHERE ${owner("id")}")
         val chats = counts("story_chats", "user_id")
-        val turns = counts("story_messages m JOIN story_chats c ON c.id = m.chat_id", "c.user_id", "m.role = 'ASSISTANT'", "m.created_at")
+        val turns = counts("story_messages m JOIN story_chats c ON c.id = m.chat_id", "c.user_id", "m.role = 'ASSISTANT' AND ${AdminQuery.generatedAssistant()}", "m.created_at")
         val stories = counts("stories", "user_id")
         val grant = "amount > 0 AND CAST(reason AS VARCHAR) IN ('SIGNUP_REWARD', 'INVITE_REWARD', 'ATTENDANCE_REWARD', 'PURCHASE', 'ADMIN_GRANT')"
         val spent = "amount < 0 AND CAST(reason AS VARCHAR) IN ('STORY_CREATION', 'CHAT_TURN', 'CHAT_IMAGE')"
