@@ -7,7 +7,7 @@ import java.time.Instant
 import java.util.UUID
 
 enum class AdminAuditCategory { CHANGE, ACCESS }
-enum class AdminAuditTargetType { MEMBER_QUERY, MEMBER, CREDIT_POLICY, CHAT_MODEL, PUSH_CAMPAIGN, PUSH_TEMPLATE, NOTICE, SUBMISSION, STORY }
+enum class AdminAuditTargetType { MEMBER_QUERY, MEMBER, CREDIT_POLICY, CHAT_MODEL, PUSH_CAMPAIGN, PUSH_TEMPLATE, NOTICE, SUBMISSION, STORY, HOME_SECTION }
 enum class AdminAuditAction(val category: AdminAuditCategory, val targetType: AdminAuditTargetType) {
     MEMBER_SEARCHED(AdminAuditCategory.ACCESS, AdminAuditTargetType.MEMBER_QUERY),
     MEMBER_VIEWED(AdminAuditCategory.ACCESS, AdminAuditTargetType.MEMBER),
@@ -30,6 +30,9 @@ enum class AdminAuditAction(val category: AdminAuditCategory, val targetType: Ad
     NOTICE_UNPUBLISHED(AdminAuditCategory.CHANGE, AdminAuditTargetType.NOTICE),
     NOTICE_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.NOTICE),
     ORIGINAL_CREATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
+    HOME_SECTION_CREATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.HOME_SECTION),
+    HOME_SECTION_UPDATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.HOME_SECTION),
+    HOME_SECTION_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.HOME_SECTION),
     ORIGINAL_UPDATED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
     ORIGINAL_THUMBNAIL_DELETED(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),
     STORY_TAKEN_DOWN(AdminAuditCategory.CHANGE, AdminAuditTargetType.STORY),

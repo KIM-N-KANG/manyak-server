@@ -1,0 +1,29 @@
+### 홈 목록 API. Postgres 기동과 ./gradlew bootRun 후 실행합니다.
+### 관리자 home-sections.http로 활성 섹션을 구성할 수 있습니다.
+### 활성 섹션이 없으면 id가 null인 인기 스토리와 오리지널 스토리 두 섹션을 반환합니다.
+@baseUrl = http://localhost:8080
+
+### 0. 상태 확인
+GET {{baseUrl}}/actuator/health
+
+### 1. 무인증 홈 조회
+GET {{baseUrl}}/api/v1/stories/home
+
+> {%
+client.test("홈 목록과 섹션 상한", () => {
+  client.assert(response.status === 200 && Array.isArray(response.body.sections), `actual=${response.status}`);
+  response.body.sections.forEach(section => {
+    client.assert(Array.isArray(section.items) && section.items.length <= 20, `actual=${JSON.stringify(section)}`);
+    section.items.forEach(story => client.assert(story.status === "PUBLISHED" && story.visibility === "PUBLIC", `actual=${JSON.stringify(story)}`));
+  });
+});
+%}
+
+### 2. 무효 Bearer 토큰도 무시
+GET {{baseUrl}}/api/v1/stories/home
+Authorization: Bearer invalid-token
+
+> {% client.test("무효 토큰 무시", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
+
+### 3. 자유 조회
+GET {{baseUrl}}/api/v1/stories/home
