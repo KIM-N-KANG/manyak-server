@@ -250,6 +250,59 @@ class StorySearchControllerIntegrationTests {
         verifyNoInteractions(indexer)
     }
 
+    @Test
+    fun `게스트 공개 비공개 완성본은 이관 전후 공개만 검색되고 이관 뒤 작성자가 표시된다`() {
+        fun completeGuest(visibility: StoryVisibility): Story {
+            val session = sessions.save(StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED))
+            val storyline = storylines.save(StoryCreationStoryline(creationSession = session, storylineText = "마법 왕국", storylineOrder = 1))
+            val result = client.post().uri("/api/v1/stories/simple")
+                .header("X-Manyak-Device-Id", UUID.randomUUID().toString())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(mapOf("requestId" to UUID.randomUUID().toString(), "simpleCreationId" to session.id,
+                    "storylineId" to storyline.id, "visibility" to visibility.name))
+                .exchange().expectStatus().isCreated
+                .expectBody(SimpleStoryCreateResponse::class.java).returnResult().responseBody!!
+            return stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!.also {
+                assertNull(it.userId)
+                assertEquals(visibility, it.visibility)
+            }
+        }
+
+        val public = completeGuest(StoryVisibility.PUBLIC)
+        val private = completeGuest(StoryVisibility.PRIVATE)
+        assertTrue(reader.read(public.id)!!.visible)
+        assertNull(reader.read(public.id)!!.author)
+        assertFalse(reader.read(private.id)!!.visible)
+        // 같은 게스트 시점의 hit를 이관 뒤에도 반환한다. 비공개 hit가 남아도 DB에서 제외해야 한다.
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(public), staleHit(private))))
+
+        fun search() = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!.items
+
+        val before = search()
+        assertEquals(listOf(public.publicId.toString()), before.map { it.id })
+        assertNull(before.single().author)
+
+        val member = users.save(User(nickname = "이관 검색 작가", status = UserStatus.ACTIVE))
+        client.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${jwt.issueAccessToken(member.publicId)}")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(public.publicId.toString(), private.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+            .jsonPath("$.stories[1].status").isEqualTo("MIGRATED")
+
+        val after = search()
+        assertEquals(listOf(public.publicId.toString()), after.map { it.id })
+        assertEquals(member.nickname, after.single().author!!.nickname)
+        assertNull(after.single().author!!.id)
+        assertTrue(reader.read(public.id)!!.visible)
+        assertEquals(member.nickname, reader.read(public.id)!!.author!!.nickname)
+        assertFalse(reader.read(private.id)!!.visible)
+        assertEquals(StoryVisibility.PRIVATE, stories.findById(private.id).orElseThrow().visibility)
+    }
+
     private fun staleHit(story: Story): Hit<StorySearchDocument> = Hit.Builder<StorySearchDocument>()
         .index("stories-dev").id(story.publicId.toString())
         .source(StorySearchDocument(publicId = story.publicId.toString(), title = story.title, visible = true))
