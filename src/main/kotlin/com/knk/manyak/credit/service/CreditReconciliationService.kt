@@ -106,7 +106,7 @@ class CreditReconciliationService(
     /** 그룹의 완료 수. 판정 불가(리소스 삭제·미지원 refType)는 완료 과다로 처리해 환불하지 않는다(fail-safe). */
     private fun completedCount(userId: Long, refType: String, refId: Long): Long =
         when (refType) {
-            // 완료 수 = 완료 턴 수(current_turn) + 완료 재생성 수(regenerated_count). 재생성은 current_turn을 올리지
+            // 완료 수에서는 차감 없이 복사한 forked_from_turn을 뺀다. 재생성은 current_turn을 올리지
             // 않는 유료 CHAT_TURN charge라, 재생성 완료분을 더하지 않으면 성공한 재생성이 초과 환불된다(KNK-406).
             CHAT_REF_TYPE -> transactionRepository.findLegacyChatCompletedCount(userId, refId)
                 ?.coerceAtLeast(0) ?: NEVER_REFUND

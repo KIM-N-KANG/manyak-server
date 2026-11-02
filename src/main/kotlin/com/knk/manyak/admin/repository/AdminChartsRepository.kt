@@ -22,7 +22,7 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         }
         read("users", "created_at", "id", mapOf("joined" to "COUNT(*)"))
         read("story_chats", "created_at", "user_id", mapOf("chats" to "COUNT(*)"))
-        read("story_messages m JOIN story_chats c ON c.id=m.chat_id", "m.created_at", "c.user_id", mapOf("turns" to "COUNT(*)"), "m.role='ASSISTANT'")
+        read("story_messages m JOIN story_chats c ON c.id=m.chat_id", "m.created_at", "c.user_id", mapOf("turns" to "COUNT(*)"), "m.role='ASSISTANT' AND ${AdminQuery.generatedAssistant()}")
         read("stories", "created_at", "user_id", mapOf("stories" to "COUNT(*)"))
         read("credit_transactions", "created_at", "user_id", mapOf(
             "granted" to "SUM(CASE WHEN ${AdminQuery.GRANTED} THEN amount ELSE 0 END)",
@@ -38,7 +38,7 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
         val chats = """FROM story_chats c JOIN stories s ON s.id=c.story_id
             WHERE c.deleted_at IS NULL AND ${during("c.created_at")} AND ${owner("c.user_id", excluded)}"""
         fun query(sql: String) = jdbc.queryForList(sql, p)
-        val genre = query("SELECT s.genre AS label, SUM(c.current_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
+        val genre = query("SELECT s.genre AS label, SUM(c.current_turn - c.forked_from_turn) AS turns, COUNT(*) AS n $chats AND s.deleted_at IS NULL GROUP BY s.genre ORDER BY s.genre")
         val bucket = "CASE " + AdminQuery.turnBounds.mapIndexed { i, r -> "WHEN c.current_turn BETWEEN ${r.first} AND ${r.last} THEN $i" }.joinToString(" ") + " END"
         val turns = query("SELECT $bucket AS bucket, COUNT(*) AS n $chats GROUP BY $bucket")
         // 게스트 채팅에만 AI 호출 기록을 붙여 기기 해시를 센다. 호출 시각은 보지 않고, 해시 없는 기록은 COUNT DISTINCT가 뺀다.
@@ -48,8 +48,8 @@ class AdminChartsRepository(private val jdbc: NamedParameterJdbcTemplate) {
             ${chats.replace("WHERE", "LEFT JOIN ai_call_logs al ON c.user_id IS NULL AND al.chat_id=c.public_id WHERE")} GROUP BY $ownerType""")
         val memberCase = "CASE WHEN n=1 THEN 0 WHEN n=2 THEN 1 WHEN n<=4 THEN 2 WHEN n<=9 THEN 3 ELSE 4 END"
         val members = query("SELECT $memberCase AS bucket, COUNT(*) AS n FROM (SELECT c.user_id, COUNT(*) AS n $chats AND c.user_id IS NOT NULL GROUP BY c.user_id) t GROUP BY $memberCase")
-        val waitsFrom = """FROM (SELECT c.id, c.created_at $chats) c
-            LEFT JOIN story_messages m ON m.chat_id=c.id AND m.role='USER' GROUP BY c.id, c.created_at"""
+        val waitsFrom = """FROM (SELECT c.id, c.created_at, c.forked_from_turn $chats) c
+            LEFT JOIN story_messages m ON m.chat_id=c.id AND m.role='USER' AND ${AdminQuery.generatedUser()} GROUP BY c.id, c.created_at, c.forked_from_turn"""
         val waits = query("""SELECT AVG(CASE WHEN seconds<=900 THEN seconds END) AS average,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CASE WHEN seconds<=900 THEN seconds END) AS p50,
             PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY CASE WHEN seconds<=900 THEN seconds END) AS p75,

@@ -151,6 +151,7 @@ class SecurityConfig {
                     // 내부 경로는 사용자 인증 대신 InternalSecretAuthenticationFilter가 시크릿을 검증한다.
                     .requestMatchers(INTERNAL_API_MATCHER).permitAll()
                     .requestMatchers(*BEARER_SKIP_MATCHERS).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/fork")).authenticated()
                     .anyRequest().authenticated()
             }
             .addFilterBefore(

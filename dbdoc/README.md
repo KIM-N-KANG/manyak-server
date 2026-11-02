@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 26 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 28 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -83,6 +83,7 @@ erDiagram
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_chats" }o--o| "public.story_chats" : "FOREIGN KEY (forked_from_chat_id) REFERENCES story_chats(id)"
 "public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
 "public.story_chats" }o--|| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
@@ -264,6 +265,8 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  bigint forked_from_chat_id FK
+  integer forked_from_turn
 }
 "public.story_messages" {
   bigint id

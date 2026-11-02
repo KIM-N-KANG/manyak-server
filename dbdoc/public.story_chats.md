@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) [public.story_chat_shares](public.story_chat_shares.md) [public.story_chat_summaries](public.story_chat_summaries.md) |  |  |
+| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_chats](public.story_chats.md) [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) [public.story_chat_shares](public.story_chat_shares.md) [public.story_chat_summaries](public.story_chat_summaries.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | start_setting_id | bigint |  | true |  | [public.story_start_settings](public.story_start_settings.md) |  |
@@ -30,12 +30,15 @@
 | long_response | boolean | false | false |  |  |  |
 | summary_through_turn | integer | 0 | false |  |  |  |
 | revision | integer | 0 | false |  |  |  |
+| forked_from_chat_id | bigint |  | true |  | [public.story_chats](public.story_chats.md) |  |
+| forked_from_turn | integer | 0 | false |  |  |  |
 
 ## Constraints
 
 | Name | Type | Definition |
 | ---- | ---- | ---------- |
 | ck_story_chats_current_turn | CHECK | CHECK ((current_turn >= 0)) |
+| ck_story_chats_forked_from_turn | CHECK | CHECK ((forked_from_turn >= 0)) |
 | ck_story_chats_persona_description_length | CHECK | CHECK (((persona_description_snapshot IS NULL) OR ((char_length(persona_description_snapshot) >= 1) AND (char_length(persona_description_snapshot) <= 1000)))) |
 | ck_story_chats_persona_name_length | CHECK | CHECK (((persona_name_snapshot IS NULL) OR ((char_length(persona_name_snapshot) >= 1) AND (char_length(persona_name_snapshot) <= 20)))) |
 | ck_story_chats_persona_pair | CHECK | CHECK (((persona_name_snapshot IS NULL) = (persona_description_snapshot IS NULL))) |
@@ -45,6 +48,7 @@
 | story_chats_revision_check | CHECK | CHECK ((revision >= 0)) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
+| fk_story_chats_forked_from_chat | FOREIGN KEY | FOREIGN KEY (forked_from_chat_id) REFERENCES story_chats(id) |
 | story_chats_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | uq_story_chats_public_id | UNIQUE | UNIQUE (public_id) |
 | fk_story_chats_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
@@ -68,6 +72,7 @@
 ```mermaid
 erDiagram
 
+"public.story_chats" }o--o| "public.story_chats" : "FOREIGN KEY (forked_from_chat_id) REFERENCES story_chats(id)"
 "public.story_messages" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_chat_main_events" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
@@ -106,6 +111,8 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  bigint forked_from_chat_id FK
+  integer forked_from_turn
 }
 "public.story_messages" {
   bigint id

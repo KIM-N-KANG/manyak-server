@@ -165,7 +165,7 @@ class AdminOriginalService(
     }
     private fun summary(story: Story, chatCount: Long? = null, totalTurns: Long? = null): ObjectNode {
         val owner = users.findById(requireNotNull(story.userId)).orElseThrow()
-        val counts = if (chatCount == null) jdbc.queryForMap("SELECT COUNT(*) AS chats, COALESCE(SUM(current_turn), 0) AS turns FROM story_chats WHERE story_id = ? AND deleted_at IS NULL", story.id) else null
+        val counts = if (chatCount == null) jdbc.queryForMap("SELECT COUNT(*) AS chats, COALESCE(SUM(current_turn - forked_from_turn), 0) AS turns FROM story_chats WHERE story_id = ? AND deleted_at IS NULL", story.id) else null
         return mapper.createObjectNode().put("storyId", story.publicId.toString()).put("title", story.title)
             .put("status", story.status.name).put("visibility", story.visibility.name)
             .put("thumbnailUrl", imageUrls.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey)).put("updatedAt", story.updatedAt.toString())
@@ -195,7 +195,7 @@ class AdminOriginalService(
             args.add("%" + it.lowercase().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"); args.add(it.lowercase()) }
         val total = jdbc.queryForObject("SELECT COUNT(*) FROM stories s WHERE $where", Long::class.java, *args.toTypedArray())!!
         val rows = jdbc.query("""SELECT s.id, COALESCE(c.chats,0) AS chats, COALESCE(c.turns,0) AS turns FROM stories s
-            LEFT JOIN (SELECT story_id, COUNT(*) AS chats, SUM(current_turn) AS turns FROM story_chats WHERE deleted_at IS NULL GROUP BY story_id) c ON c.story_id = s.id
+            LEFT JOIN (SELECT story_id, COUNT(*) AS chats, SUM(current_turn - forked_from_turn) AS turns FROM story_chats WHERE deleted_at IS NULL GROUP BY story_id) c ON c.story_id = s.id
             WHERE $where ORDER BY $sort $order NULLS LAST, s.public_id ASC LIMIT ? OFFSET ?""", { rs, _ -> Triple(rs.getLong("id"), rs.getLong("chats"), rs.getLong("turns")) },
             *(args + listOf(size, (page.toLong() - 1) * size)).toTypedArray())
         val byId = stories.findAllById(rows.map { it.first }).associateBy { it.id }

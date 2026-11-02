@@ -26,7 +26,7 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
 
     // 전체 완료와 CHAT_TURN 연결을 한 SQL 스냅샷에서 계산해 새 턴 저장 사이에 집합이 섞이지 않게 한다.
     @Query("""
-        SELECT CAST(c.currentTurn AS long) + c.regeneratedCount
+        SELECT CAST(c.currentTurn AS long) + c.regeneratedCount - c.forkedFromTurn
           - (SELECT COUNT(m) FROM StoryMessage m, CreditTransaction t
              WHERE m.creditTransactionId = t.id AND m.chatId = c.id AND t.userId = :userId
                AND t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN

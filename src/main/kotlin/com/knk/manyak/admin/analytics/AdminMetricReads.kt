@@ -70,7 +70,7 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
     fun turnsByModel(range: AnalyticsRange, excluded: List<Long>): List<Map<String, Any?>> = jdbc.queryForList("""
         SELECT ${day("m.created_at")} AS metric_day, COALESCE(m.model_code, 'UNRECORDED') AS model, COUNT(*) AS turns
         FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
-        WHERE m.created_at>=:start AND m.created_at<:end AND m.role='ASSISTANT' ${exclude("c.user_id", excluded)}
+        WHERE m.created_at>=:start AND m.created_at<:end AND m.role='ASSISTANT' AND ${AdminQuery.generatedAssistant()} ${exclude("c.user_id", excluded)}
         GROUP BY ${day("m.created_at")}, COALESCE(m.model_code, 'UNRECORDED') ORDER BY metric_day, model
         """, params(range, excluded))
     fun aiCost(range: AnalyticsRange): List<Map<String, Any?>> = jdbc.queryForList("""

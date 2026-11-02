@@ -79,6 +79,8 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  bigint forked_from_chat_id FK
+  integer forked_from_turn
 }
 "public.story_messages" {
   bigint id
