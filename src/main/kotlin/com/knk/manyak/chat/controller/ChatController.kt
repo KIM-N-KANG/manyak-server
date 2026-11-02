@@ -12,6 +12,7 @@ import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
+import com.knk.manyak.chat.dto.EditChatRequest
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
@@ -471,6 +472,35 @@ class ChatController(
         response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
         return try {
             chatService.regenerateChatTurn(chatId = chatId, request = request, userId = userId, deviceId = deviceId)
+        } catch (exception: InsufficientCreditException) {
+            // 선차감은 스트림을 열기 전에 동기로 수행되므로 잔액 부족은 여기로 전파된다. 402로 변환한다(§4-3-7).
+            throw CodedResponseStatusException(
+                HttpStatus.PAYMENT_REQUIRED,
+                ApiErrorCodes.INSUFFICIENT_CREDIT,
+                "이프가 부족합니다.",
+                exception,
+            )
+        }
+    }
+    @Operation(summary = "채팅 입력 수정", description = "대상 턴부터 숨기고 새 입력으로 생성합니다. 엔딩에 도달한 채팅도 허용하며 과금과 체험은 이어쓰기와 같습니다.")
+    @PostMapping(
+        "/chats/{chatId}/turns/edit/stream",
+        produces = [MediaType.TEXT_EVENT_STREAM_VALUE],
+    )
+    fun editChatTurn(
+        @Parameter(description = "채팅 ID(공개 식별자)")
+        @PathVariable chatId: String,
+        @Valid @RequestBody request: EditChatRequest,
+        // optional 인증: 유효 access 토큰이면 로그인 사용자 내부 id, 익명이면 null.
+        @CurrentUserId userId: Long?,
+        // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
+        @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
+        response: HttpServletResponse,
+    ): SseEmitter {
+        // 이어쓰기와 동일하게 SSE 본문 charset을 UTF-8로 고정한다(한글 깨짐 방지).
+        response.contentType = "${MediaType.TEXT_EVENT_STREAM_VALUE};charset=UTF-8"
+        return try {
+            chatService.editChatTurn(chatId = chatId, request = request, userId = userId, deviceId = deviceId)
         } catch (exception: InsufficientCreditException) {
             // 선차감은 스트림을 열기 전에 동기로 수행되므로 잔액 부족은 여기로 전파된다. 402로 변환한다(§4-3-7).
             throw CodedResponseStatusException(

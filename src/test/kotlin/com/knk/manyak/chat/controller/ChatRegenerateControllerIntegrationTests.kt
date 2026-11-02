@@ -205,7 +205,7 @@ class ChatRegenerateControllerIntegrationTests {
             .expectStatus().isEqualTo(409)
 
         // 마지막 응답은 그대로 유지된다.
-        val reloaded = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val reloaded = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
         assertThat(reloaded.content).isEqualTo("원본 응답")
     }
 
