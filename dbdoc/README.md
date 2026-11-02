@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 25 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 26 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -64,6 +64,7 @@
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
 | [public.user_notifications](public.user_notifications.md) | 14 |  | BASE TABLE |
+| [public.story_chat_summaries](public.story_chat_summaries.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -141,6 +142,7 @@ erDiagram
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 "public.user_notifications" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -261,6 +263,7 @@ erDiagram
   varchar_20_ model_code FK
   boolean long_response
   integer summary_through_turn
+  integer revision
 }
 "public.story_messages" {
   bigint id
@@ -801,6 +804,14 @@ erDiagram
   varchar_16_ notice_tag
   timestamp_with_time_zone created_at
   timestamp_with_time_zone read_at
+}
+"public.story_chat_summaries" {
+  bigint id
+  bigint chat_id FK
+  integer through_turn
+  text summary
+  timestamp_with_time_zone invalidated_at
+  timestamp_with_time_zone created_at
 }
 ```
 

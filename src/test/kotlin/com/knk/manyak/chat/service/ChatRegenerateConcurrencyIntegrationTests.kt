@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.entity.StoryChatSummary
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
@@ -30,6 +33,7 @@ class ChatRegenerateConcurrencyIntegrationTests {
 
     @Autowired private lateinit var chatTurnPersister: ChatTurnPersister
     @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var summaries: StoryChatSummaryRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyMessageRepository: StoryMessageRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -42,7 +46,8 @@ class ChatRegenerateConcurrencyIntegrationTests {
     @Test
     fun `같은 시작 상태의 동시 재생성은 하나만 저장하고 다른 결과는 폐기한다`() {
         val story = storyRepository.save(Story(title = "동시 재생성 스토리", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1, summary = "기존 요약", summaryThroughTurn = 1))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 1))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = "기존 요약", throughTurn = 1))
         storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = 1))
         val lastAssistant = storyMessageRepository.save(
             StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "원본 응답", messageOrder = 2),
@@ -84,8 +89,8 @@ class ChatRegenerateConcurrencyIntegrationTests {
         // 채팅 락 안에서 같은 ID의 교체 상태도 재확인한다. 한 결과만 반영한다.
         val reloaded = storyChatRepository.findById(chat.id).orElseThrow()
         assertThat(reloaded.regeneratedCount).isEqualTo(1)
-        assertThat(reloaded.summary).isNull()
-        assertThat(reloaded.summaryThroughTurn).isZero()
+        assertThat(summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.summary).isNull()
+        assertThat((summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0)).isZero()
         assertThat(reloaded.currentTurn).isEqualTo(1) // 턴 수는 불변
     }
 }

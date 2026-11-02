@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.entity.StoryChatSummary
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+
 import com.knk.manyak.chat.config.ChatCompactSettings
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.Story
@@ -37,6 +40,7 @@ class ChatCompactFailureTests {
         val chat = StoryChat(id = 1, storyId = 2, currentTurn = 10)
         val story = Story(id = 2, title = "테스트", genre = "판타지")
         val chats = mock(StoryChatRepository::class.java)
+        val summaries = mock(StoryChatSummaryRepository::class.java)
         val messages = mock(StoryMessageRepository::class.java)
         val stories = mock(StoryRepository::class.java)
         val starts = mock(StoryStartSettingRepository::class.java)
@@ -55,7 +59,6 @@ class ChatCompactFailureTests {
         init {
             `when`(chats.findById(1)).thenReturn(Optional.of(chat))
             `when`(chats.findByIdForUpdate(1)).thenReturn(chat)
-            `when`(chats.updateSummary(1, "요약", 10)).thenReturn(1)
             `when`(stories.findById(2)).thenReturn(Optional.of(story))
             `when`(messages.findByChatIdOrderByMessageOrderAsc(1)).thenReturn((1..10).flatMap { n -> listOf(
                 StoryMessage(chatId = 1, role = MessageRole.USER, content = "u$n", messageOrder = n * 2),
@@ -68,7 +71,7 @@ class ChatCompactFailureTests {
             }.`when`(calls).save(any(AiCallLog::class.java))
         }
         fun service(enabled: Boolean = true, executor: Executor = Executor { it.run() }, interval: Int = 10) = ChatCompactService(
-            ChatCompactSettings(enabled, interval, 300), executor, chats, messages, stories, starts,
+            ChatCompactSettings(enabled, interval, 300), executor, chats, summaries, messages, stories, starts,
             ChatCompactAiClient { _, _ -> callCount++; response() },
             AiCallRecorder(calls, registry, "test", logger), logger, registry, tm,
         )
@@ -88,7 +91,7 @@ class ChatCompactFailureTests {
         val f = Fixture(); f.failWrite = 1; f.run()
         assertThat(f.callCount).isZero()
         assertThat(f.reason()).isEqualTo("CALL_LOG_FAILED")
-        verify(f.chats, never()).updateSummary(1, "요약", 10)
+        verify(f.summaries, never()).saveAndFlush(any(StoryChatSummary::class.java))
     }
     @Test fun `호출 기록 전이 실패면 요약을 저장하지 않는다`() {
         val f = Fixture(); f.failWrite = 2; f.run()
@@ -96,11 +99,11 @@ class ChatCompactFailureTests {
         assertThat(f.reason()).isEqualTo("CALL_LOG_FAILED")
         val last = mockingDetails(f.calls).invocations.filter { it.method.name == "save" }.last().arguments[0] as AiCallLog
         assertThat(last.errorCode).isNull()
-        verify(f.chats, never()).updateSummary(1, "요약", 10)
+        verify(f.summaries, never()).saveAndFlush(any(StoryChatSummary::class.java))
     }
     @Test fun `요약 저장 DB 실패는 성공한 AI 호출 기록을 유지한다`() {
         val f = Fixture()
-        `when`(f.chats.updateSummary(1, "요약", 10)).thenThrow(IllegalStateException("save unavailable"))
+        `when`(f.summaries.saveAndFlush(any(StoryChatSummary::class.java))).thenThrow(IllegalStateException("save unavailable"))
         f.run()
         assertThat(f.reason()).isEqualTo("SAVE_FAILED")
         assertThat(f.writes).isEqualTo(2)
@@ -130,8 +133,8 @@ class ChatCompactFailureTests {
             f.response = {
                 when (reason) {
                     "CHAT_DELETED" -> f.chat.deletedAt = java.time.Instant.now()
-                    "REGENERATED" -> f.chat.regeneratedCount++
-                    "SUPERSEDED" -> f.chat.summaryThroughTurn = 10
+                    "REGENERATED" -> f.chat.revision++
+                    "SUPERSEDED" -> `when`(f.summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(1)).thenReturn(StoryChatSummary(chatId = 1, throughTurn = 10, summary = "다른 요약"))
                 }
                 "요약"
             }

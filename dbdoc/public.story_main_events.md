@@ -74,6 +74,7 @@ erDiagram
   varchar_20_ model_code FK
   boolean long_response
   integer summary_through_turn
+  integer revision
 }
 "public.story_chat_main_events" {
   bigint id
