@@ -184,6 +184,48 @@ class HomeSectionsIntegrationTests {
         }
     }
 
+    @Test fun `숨긴 턴과 재생성 및 삭제 채팅을 포함한 홈 인기순 채팅순은 공개 목록과 같다`() {
+        val hidden = stories.save(Story(title = "숨긴 턴 포함", userId = official.id))
+        val current = stories.save(Story(title = "현재 턴만", userId = official.id))
+        chats.save(StoryChat(storyId = hidden.id, currentTurn = 3, hiddenTurnCount = 3, regeneratedCount = 1, deletedAt = Instant.now()))
+        chats.save(StoryChat(storyId = current.id, currentTurn = 5))
+        likes.save(StoryLike(storyId = hidden.id, userId = actor.id))
+        likes.save(StoryLike(storyId = current.id, userId = actor.id))
+        val expectedIds = listOf(hidden.publicId.toString(), current.publicId.toString())
+        val defaults = home()["sections"]
+        assertThat(ids(defaults[0])).containsExactlyElementsOf(expectedIds)
+        assertThat(ids(defaults[1])).containsExactlyElementsOf(expectedIds)
+        for (sort in listOf("popular", "chats")) {
+            val section = filter(mapOf("sort" to sort, "itemLimit" to 1))
+            val public = mapper.readTree(client.get().uri("/api/v1/stories?sort=$sort&limit=1").exchange()
+                .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+            assertThat(ids(public)).containsExactly(hidden.publicId.toString())
+            val selected = home()["sections"][0]
+            assertThat(selected["items"]).isEqualTo(public["items"])
+            assertThat(selected["items"][0]["turnCount"].asInt()).isEqualTo(7)
+            request(HttpMethod.DELETE, "$path/${section["id"].asText()}", mapOf("reason" to "다음 정렬")).expectStatus().isNoContent
+        }
+    }
+
+    @Test fun `홈 인기순과 채팅순의 같은 누적 값은 public_id 내림차순으로 정렬한다`() {
+        val high = stories.save(Story(title = "높은 UUID", publicId = UUID.fromString("00000000-0000-0000-0000-000000000020")))
+        val low = stories.save(Story(title = "낮은 UUID", publicId = UUID.fromString("00000000-0000-0000-0000-000000000010")))
+        chats.save(StoryChat(storyId = high.id, currentTurn = 1, hiddenTurnCount = 4, regeneratedCount = 1))
+        chats.save(StoryChat(storyId = low.id, currentTurn = 2, hiddenTurnCount = 3, regeneratedCount = 1))
+        likes.save(StoryLike(storyId = high.id, userId = actor.id))
+        likes.save(StoryLike(storyId = low.id, userId = actor.id))
+        for (sort in listOf("popular", "chats")) {
+            val section = filter(mapOf("sort" to sort))
+            val public = mapper.readTree(client.get().uri("/api/v1/stories?sort=$sort").exchange()
+                .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+            assertThat(ids(public)).containsExactly(high.publicId.toString(), low.publicId.toString())
+            val selected = home()["sections"][0]
+            assertThat(selected["items"]).isEqualTo(public["items"])
+            assertThat(selected["items"].toList().map { it["turnCount"].asInt() }).containsExactly(6, 6)
+            request(HttpMethod.DELETE, "$path/${section["id"].asText()}", mapOf("reason" to "다음 정렬")).expectStatus().isNoContent
+        }
+    }
+
     @Test fun `출처별 필수 필드와 한도 및 스토리 존재를 검증한다`() {
         val story = stories.save(Story(title = "유효"))
         val base = mapOf("name" to "섹션", "source" to "FILTER", "sort" to "latest", "reason" to "검증")
