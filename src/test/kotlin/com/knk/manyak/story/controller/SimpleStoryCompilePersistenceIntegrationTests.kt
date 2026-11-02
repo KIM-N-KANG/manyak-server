@@ -256,13 +256,23 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @Autowired private lateinit var snapshots: com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource("true,", "false,", "true,PRIVATE", "false,PRIVATE")
-    fun `회원과 게스트의 공개 범위 생략과 PRIVATE는 비공개로 저장하고 공개 스냅샷을 만들지 않는다`(member: Boolean, visibility: String?) {
+    @org.junit.jupiter.params.provider.CsvSource("true,PRIVATE", "false,PRIVATE")
+    fun `회원과 게스트의 PRIVATE는 비공개로 저장하고 공개 스냅샷을 만들지 않는다`(member: Boolean, visibility: String?) {
         val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "비공개제작자")).publicId) else null
         postSimpleStory(persistStorylineWithGenre("로맨스"), visibility, token).expectStatus().isCreated
         val story = storyRepository.findAll().single()
         assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
         assertThat(snapshots.existsById(story.id)).isFalse()
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `회원과 게스트가 공개 범위를 생략하면 공개로 저장하고 공개 스냅샷을 만든다`(member: Boolean) {
+        val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "기본공개제작자")).publicId) else null
+        postSimpleStory(persistStorylineWithGenre("로맨스"), token = token).expectStatus().isCreated
+        val story = storyRepository.findAll().single()
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(snapshots.existsById(story.id)).isTrue()
     }
 
     @Test

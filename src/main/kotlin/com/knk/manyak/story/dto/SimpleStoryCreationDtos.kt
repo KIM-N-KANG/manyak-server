@@ -284,11 +284,11 @@ data class CreateSimpleStoryRequest(
     val artStyle: String? = null,
 
     @field:Schema(
-        description = "공개 범위. PUBLIC 또는 PRIVATE이며 생략하면 PRIVATE. 게스트도 PUBLIC을 지정할 수 있고, 회원 계정으로 이관된 뒤 공개 목록과 검색에 실립니다.",
-        example = "PRIVATE",
-        defaultValue = "PRIVATE",
+        description = "공개 범위. PUBLIC 또는 PRIVATE이며 생략하면 PUBLIC. 게스트 공개 스토리도 작성자 없이 공개 목록과 검색에 실립니다.",
+        example = "PUBLIC",
+        defaultValue = "PUBLIC",
     )
-    val visibility: StoryVisibility = StoryVisibility.PRIVATE,
+    val visibility: StoryVisibility = StoryVisibility.PUBLIC,
 
     // AI trace 연결용 통과 필드(KNK-751). 서버는 판단하지 않고 전달만 하며, 없으면 헤더를 생략한다.
     @field:Schema(

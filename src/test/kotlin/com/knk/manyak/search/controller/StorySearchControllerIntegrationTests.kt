@@ -217,12 +217,12 @@ class StorySearchControllerIntegrationTests {
     }
 
     @Test
-    fun `삭제 초안 게스트 부재 문서는 숨기고 빈 페이지 커서는 필터 전 hit를 따른다`() {
+    fun `삭제 초안 게스트 비공개 부재 문서는 숨기고 빈 페이지 커서는 필터 전 hit를 따른다`() {
         val user = users.save(User(nickname = "게이트작가", status = UserStatus.ACTIVE))
         val hidden = listOf(
             Story(userId = user.id, title = "삭제 왕국", deletedAt = Instant.now()),
             Story(userId = user.id, title = "초안 왕국", status = StoryStatus.DRAFT),
-            Story(title = "게스트 왕국"),
+            Story(title = "게스트 왕국", visibility = StoryVisibility.PRIVATE),
         ).map(stories::save)
         val missing = Story(title = "없는 왕국")
         val last = staleHit(missing)
@@ -236,6 +236,18 @@ class StorySearchControllerIntegrationTests {
         assertEquals(StorySearchCursor.fromSort(last.sort()).encode("왕국"), body.nextCursor)
         hidden.forEach { verify(indexer).index(it.id) }
         verifyNoMoreInteractions(indexer)
+    }
+
+    @Test
+    fun `게스트 공개 스토리는 검색에 작성자 없이 노출한다`() {
+        val guest = stories.save(Story(title = "게스트 왕국"))
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(guest))))
+        val body = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+        assertEquals(guest.publicId.toString(), body.items.single().id)
+        assertNull(body.items.single().author)
+        verifyNoInteractions(indexer)
     }
 
     private fun staleHit(story: Story): Hit<StorySearchDocument> = Hit.Builder<StorySearchDocument>()
@@ -316,7 +328,7 @@ class StorySearchControllerIntegrationTests {
     }
 
     @Test
-    fun `색인 문서는 초안 비공개 삭제 게스트를 숨기고 인물명을 포함한다`() {
+    fun `색인 문서는 게스트 공개를 노출하고 초안 비공개 삭제를 숨기며 인물명을 포함한다`() {
         val user = users.save(User(nickname = "문서작가", status = UserStatus.ACTIVE))
         val samples = listOf(
             Story(userId = user.id, title = "공개", genre = "판타지, , 로맨스"),
@@ -324,9 +336,11 @@ class StorySearchControllerIntegrationTests {
             Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE),
             Story(userId = user.id, title = "삭제", deletedAt = Instant.now()),
             Story(title = "게스트"),
+            Story(title = "게스트 비공개", visibility = StoryVisibility.PRIVATE),
         ).map(stories::save)
         characters.save(StoryCharacter(story = samples.first(), name = "마법사"))
-        assertEquals(listOf(true, false, false, false, false), samples.map { reader.read(it.id)!!.visible })
+        assertEquals(listOf(true, false, false, false, true, false), samples.map { reader.read(it.id)!!.visible })
+        assertNull(reader.read(samples[4].id)!!.author)
         val document = reader.read(samples.first().id)!!
         assertEquals(listOf("판타지", "로맨스"), document.genres)
         assertEquals(listOf("마법사"), document.characterNames)
@@ -347,7 +361,7 @@ class StorySearchControllerIntegrationTests {
         val result = complete().expectBody(SimpleStoryCreateResponse::class.java).returnResult().responseBody!!
         val story = stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!
         indexed(story.id)
-        assertFalse(reader.read(story.id)!!.visible)
+        assertTrue(reader.read(story.id)!!.visible)
         complete()
         verify(indexer, after(200).never()).index(story.id)
     }

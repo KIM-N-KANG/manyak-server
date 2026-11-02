@@ -63,13 +63,16 @@ class MigrationControllerIntegrationTests {
     }
 
     @Test
-    fun `게스트 공개 비공개 스토리는 이관 후 공개만 목록과 검색에 노출된다`() {
+    fun `게스트 공개 스토리는 이관 전후 노출되고 이관 뒤 작성자가 표시된다`() {
         val me = saveUser("이관회원")
         val public = storyRepository.save(Story(title = "게스트 공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC))
         val private = storyRepository.save(Story(title = "게스트 비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
         restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
-            .expectBody().jsonPath("$.items.length()").isEqualTo(0)
-        assertThat(documents.read(public.id)!!.visible).isFalse()
+            .expectBody().jsonPath("$.items.length()").isEqualTo(1)
+            .jsonPath("$.items[0].id").isEqualTo(public.publicId.toString())
+            .jsonPath("$.items[0].author").isEmpty
+        assertThat(documents.read(public.id)!!.author).isNull()
+        assertThat(documents.read(public.id)!!.visible).isTrue()
         assertThat(documents.read(private.id)!!.visible).isFalse()
 
         restTestClient.post().uri("/api/v1/auth/migrate")
@@ -82,6 +85,8 @@ class MigrationControllerIntegrationTests {
         restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
             .expectBody().jsonPath("$.items.length()").isEqualTo(1)
             .jsonPath("$.items[0].id").isEqualTo(public.publicId.toString())
+            .jsonPath("$.items[0].author.nickname").isEqualTo(me.nickname)
+        assertThat(documents.read(public.id)!!.author!!.nickname).isEqualTo(me.nickname)
         assertThat(documents.read(public.id)!!.visible).isTrue()
         assertThat(documents.read(private.id)!!.visible).isFalse()
         assertThat(indexRequests.ids).containsExactly(public.id, private.id)
