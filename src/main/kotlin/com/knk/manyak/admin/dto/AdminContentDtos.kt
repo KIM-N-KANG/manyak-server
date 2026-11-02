@@ -89,6 +89,7 @@ data class AdminMemberListResponse(
     // isAdmin: springdoc이 is 접두를 벗기지 않도록 와이어 필드명을 고정한다(AdminMemberSummary와 동일).
     val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
+    val turnCount: Long, val periodTurnCount: Long?,
 )
 data class AdminStorySummary(val storyId: UUID, val title: String, val genre: String)
 data class AdminStoryListResponse(

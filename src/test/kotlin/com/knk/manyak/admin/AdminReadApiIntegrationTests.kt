@@ -446,11 +446,74 @@ class AdminReadApiIntegrationTests {
         assertThat(body.has("turnCount")).isTrue()
         assertThat(body["turnCount"].asLong()).isEqualTo(9)
         assertThat(body["periodChatCount"].isNull).isTrue()
-        assertThat(json(get("/members").expectStatus().isOk)["items"].all { !it.has("turnCount") }).isTrue()
+        val listed = json(get("/members").expectStatus().isOk)["items"].single { it["memberId"].asText() == admin.publicId.toString() }
+        assertThat(listed.path("turnCount").asLong()).isEqualTo(body["turnCount"].asLong())
+        assertThat(listed.path("periodTurnCount").isNull).isTrue()
+        assertThat(body.path("periodTurnCount").isNull).isTrue()
         val empty = member("채팅 없는 회원", UserStatus.DELETED)
         val emptyBody = json(get("/members/${empty.publicId}").expectStatus().isOk)
         assertThat(emptyBody.has("turnCount")).isTrue()
         assertThat(emptyBody["turnCount"].asLong()).isZero()
+    }
+
+    private fun memberTurns(owner: User, target: com.knk.manyak.story.entity.Story, count: Int, at: Instant,
+                            deleted: Boolean = false, migrated: Boolean = false) {
+        val room = chatRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryChat(storyId = target.id,
+            userId = if (migrated) null else owner.id, createdAt = at, currentTurn = 99, deletedAt = if (deleted) now else null))
+        repeat(count) { n ->
+            val message = messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
+                role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "활성 응답", messageOrder = n + 1,
+                createdAt = now.plusSeconds(86400))) // 메시지 시각 대신 채팅 생성일로 기간을 거른다.
+            if (n == 0) repeat(2) { version -> versions.saveAndFlush(com.knk.manyak.chat.entity.StoryMessageVersion(
+                messageId = message.id, versionNumber = version + 1, content = "이전 판본", choices = "[]")) }
+        }
+        messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
+            role = com.knk.manyak.chat.entity.MessageRole.USER, content = "사용자 입력", messageOrder = count + 1))
+        if (migrated) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", owner.id, room.id)
+    }
+
+    @Test fun `회원 목록 누적 턴과 기간 턴은 상세와 같은 정의로 삭제 이관 채팅을 포함한다`() {
+        val owner = member("목록턴대상")
+        val target = story(admin)
+        val start = midnight.minusSeconds(86400) // 10-20 KST 자정
+        memberTurns(owner, target, 2, start, deleted = true)
+        memberTurns(owner, target, 3, midnight.minusNanos(1000)) // 10-20 KST 마지막 마이크로초
+        memberTurns(owner, target, 4, midnight, migrated = true) // 기간 밖 10-21
+        val full = json(get("/members?q=${owner.publicId}").expectStatus().isOk)["items"].single()
+        assertThat(full.path("turnCount").asLong()).isEqualTo(9)
+        assertThat(full["chatCount"].asLong()).isEqualTo(2)
+        assertThat(full.path("periodTurnCount").isNull).isTrue()
+        val detail = json(get("/members/${owner.publicId}").expectStatus().isOk)
+        assertThat(detail["turnCount"]).isEqualTo(full["turnCount"])
+        assertThat(detail.path("periodTurnCount").isNull).isTrue()
+        val period = json(get("/members?q=${owner.publicId}&chatFrom=2026-10-20&chatTo=2026-10-20").expectStatus().isOk)["items"].single()
+        assertThat(period.path("turnCount").asLong()).isEqualTo(9)
+        assertThat(period["periodChatCount"].asLong()).isEqualTo(1)
+        assertThat(period.path("periodTurnCount").asLong()).isEqualTo(5)
+        val fromOnly = json(get("/members?q=${owner.publicId}&chatFrom=2026-10-21").expectStatus().isOk)["items"].single()
+        assertThat(fromOnly.path("periodTurnCount").asLong()).isEqualTo(4)
+        val toOnly = json(get("/members?q=${owner.publicId}&chatTo=2026-10-20").expectStatus().isOk)["items"].single()
+        assertThat(toOnly.path("periodTurnCount").asLong()).isEqualTo(5)
+    }
+
+    @Test fun `회원 목록 턴 정렬은 기간과 무관한 누적 기준이고 동률 공개 UUID 및 페이지 경계를 유지한다`() {
+        val target = story(admin)
+        val ids = (1..4).map { UUID.fromString("00000000-0000-4000-8000-${it.toString().padStart(12, '0')}") }
+        val totals = listOf(9, 0, 9, 4)
+        val periods = listOf(1, 0, 2, 4)
+        ids.forEachIndexed { index, id ->
+            val user = member("턴정렬$index", id = id)
+            memberTurns(user, target, periods[index], midnight.minusSeconds(86400))
+            memberTurns(user, target, totals[index] - periods[index], midnight.minusSeconds(172800), deleted = true)
+        }
+        fun page(order: String, number: Int, size: Int = 2) = json(get("/members?q=턴정렬&sort=turnCount&order=$order&page=$number&size=$size&chatFrom=2026-10-20&chatTo=2026-10-20").expectStatus().isOk)
+        val first = page("desc", 1)
+        assertThat(first["totalElements"].asLong()).isEqualTo(4)
+        assertThat(first["items"].toList().map { it["memberId"].asText() }).containsExactly(ids[0].toString(), ids[2].toString())
+        assertThat(first["items"].toList().map { it["turnCount"].asLong() }).containsExactly(9, 9)
+        assertThat(page("desc", 2)["items"].toList().map { it["turnCount"].asLong() }).containsExactly(4, 0)
+        assertThat(page("asc", 1, 4)["items"].toList().map { it["memberId"].asText() }).containsExactly(ids[1].toString(), ids[3].toString(), ids[0].toString(), ids[2].toString())
+        assertThat(page("desc", 3)["items"].size()).isZero()
     }
 
     @Test fun `상세는 로트 기반 잔액과 콘텐츠 수를 응답하고 접속 기록을 남긴다`() {
