@@ -64,10 +64,10 @@
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
 | [public.user_notifications](public.user_notifications.md) | 14 |  | BASE TABLE |
+| [public.story_chat_summaries](public.story_chat_summaries.md) | 6 |  | BASE TABLE |
 | [public.home_sections](public.home_sections.md) | 11 |  | BASE TABLE |
 | [public.home_section_genres](public.home_section_genres.md) | 2 |  | BASE TABLE |
 | [public.home_section_stories](public.home_section_stories.md) | 3 |  | BASE TABLE |
-| [public.story_chat_summaries](public.story_chat_summaries.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -146,10 +146,10 @@ erDiagram
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 "public.user_notifications" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
 "public.home_section_genres" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
 "public.home_section_stories" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.home_section_stories" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
-"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -816,6 +816,14 @@ erDiagram
   timestamp_with_time_zone created_at
   timestamp_with_time_zone read_at
 }
+"public.story_chat_summaries" {
+  bigint id
+  bigint chat_id FK
+  integer through_turn
+  text summary
+  timestamp_with_time_zone invalidated_at
+  timestamp_with_time_zone created_at
+}
 "public.home_sections" {
   bigint id
   uuid public_id
@@ -837,14 +845,6 @@ erDiagram
   bigint section_id FK
   bigint story_id FK
   integer sort_order
-}
-"public.story_chat_summaries" {
-  bigint id
-  bigint chat_id FK
-  integer through_turn
-  text summary
-  timestamp_with_time_zone invalidated_at
-  timestamp_with_time_zone created_at
 }
 ```
 
