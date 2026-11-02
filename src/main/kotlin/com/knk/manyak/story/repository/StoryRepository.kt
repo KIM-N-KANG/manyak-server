@@ -13,6 +13,17 @@ import java.time.Instant
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
+    @Query("""
+        SELECT s.publicId AS publicId, s.thumbnailImageUrl AS thumbnailImageUrl,
+               s.thumbnailImageKey AS thumbnailImageKey, s.thumbnailModerationStatus AS thumbnailModerationStatus
+        FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND (:requesterId IS NULL OR s.userId IS NULL OR s.userId <> :requesterId)
+    """)
+    fun findExploreCandidates(@Param("requesterId") requesterId: Long?): List<StoryExploreCandidate>
+
     // 공개 여부와 무관하게 삭제되지 않은 소유 스토리의 ID를 조회한다.
     @Query(
         """
@@ -77,7 +88,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY s.createdAt DESC, s.publicId DESC
         """,
@@ -91,7 +101,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (s.createdAt < :createdAt OR (s.createdAt = :createdAt AND s.publicId < :publicId))
         ORDER BY s.createdAt DESC, s.publicId DESC
@@ -111,7 +120,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
                    + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
@@ -127,7 +135,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
                    + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
@@ -159,7 +166,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
         """,
@@ -173,7 +179,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) < :likeCount
                OR ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) = :likeCount
@@ -199,7 +204,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
                   WHERE c.storyId = s.id) DESC, s.publicId DESC
@@ -214,7 +218,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
                 WHERE c.storyId = s.id) < :turnCount

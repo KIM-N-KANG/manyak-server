@@ -85,7 +85,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         q.range("c.created_at", request.from, request.to)
         q.search(request.normalizedQuery(), listOf("c.public_id"), listOf("s.title", "u.nickname"))
         q.ai(request, "al.chat_id=c.public_id")
-        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.summary_through_turn, c.created_at, c.updated_at, c.deleted_at,
+        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, COALESCE((SELECT MAX(cs.through_turn) FROM story_chat_summaries cs WHERE cs.chat_id=c.id AND cs.invalidated_at IS NULL), 0) AS summary_through_turn, c.created_at, c.updated_at, c.deleted_at,
             $credits AS credits_spent, $firstSeconds AS first_seconds, $MEMBER_COLUMNS""",
             "FROM story_chats c JOIN stories s ON s.id=c.story_id LEFT JOIN users u ON u.id=c.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
             q, page, "c.public_id", RowMapper { rs: ResultSet, _ ->

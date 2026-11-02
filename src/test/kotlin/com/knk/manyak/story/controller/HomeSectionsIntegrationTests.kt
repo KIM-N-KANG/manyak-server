@@ -51,6 +51,37 @@ class HomeSectionsIntegrationTests {
     private lateinit var token: String
     private val path = "/api/v1/admin/home-sections"
 
+    @Test fun `홈 섹션 OpenAPI는 요청 응답 필드와 필수 여부와 열거값을 노출한다`() {
+        val doc = client.get().uri("/v3/api-docs").exchange().expectStatus().isOk
+            .expectBody(JsonNode::class.java).returnResult().responseBody!!
+        val endpoints = doc["paths"]
+        fun schemaRef(node: JsonNode) = node["content"].first()["schema"]["$" + "ref"].asText()
+        assertThat(schemaRef(endpoints[path]["post"]["requestBody"])).endsWith("/HomeSectionCreateRequest")
+        assertThat(schemaRef(endpoints["$path/{sectionId}"]["patch"]["requestBody"])).endsWith("/HomeSectionUpdateRequest")
+        assertThat(schemaRef(endpoints["$path/{sectionId}"]["delete"]["requestBody"])).endsWith("/HomeSectionDeleteRequest")
+        assertThat(schemaRef(endpoints[path]["get"]["responses"]["200"])).endsWith("/HomeSectionListResponse")
+        assertThat(schemaRef(endpoints[path]["post"]["responses"]["201"])).endsWith("/HomeSectionResponse")
+        assertThat(schemaRef(endpoints["$path/{sectionId}"]["patch"]["responses"]["200"])).endsWith("/HomeSectionResponse")
+        assertThat(schemaRef(endpoints["/api/v1/stories/home"]["get"]["responses"]["200"])).endsWith("/StoryHomeResponse")
+        val schemas = doc["components"]["schemas"]
+        val create = schemas["HomeSectionCreateRequest"]
+        assertThat(create["properties"].propertyNames().toList()).contains("name", "source", "storyIds", "genres", "originalOnly", "sort", "itemLimit", "isActive", "sortOrder", "reason").doesNotContain("raw")
+        assertThat(create["required"].toList().map { it.asText() }).containsExactlyInAnyOrder("name", "source", "reason")
+        assertThat(schemas["HomeSectionUpdateRequest"]["required"].toList().map { it.asText() }).containsExactly("reason")
+        assertThat(schemas["HomeSectionDeleteRequest"]["required"].toList().map { it.asText() }).containsExactly("reason")
+        assertThat(create["properties"]["itemLimit"]["type"].toString()).contains("integer")
+        assertThat(create["properties"]["isActive"]["type"].toString()).contains("boolean")
+        assertThat(create["properties"]["genres"]["items"]["type"].toString()).contains("string")
+        assertThat(schemas["HomeSectionStoryResponse"]["properties"].propertyNames()).contains("isListed").doesNotContain("listed")
+        assertThat(schemas["HomeSectionResponse"]["properties"].propertyNames()).contains("isActive").doesNotContain("active")
+        assertThat(create["properties"]["source"].toString()).contains("MANUAL", "FILTER")
+        assertThat(create["properties"]["sort"].toString()).contains("popular", "latest", "likes", "chats")
+        assertThat(schemas["HomeSectionResponse"]["properties"].propertyNames().toList()).contains("id", "stories", "genres", "sort", "createdAt", "updatedAt")
+        assertThat(schemas["HomeSectionListResponse"]["properties"]["items"]["items"]["$" + "ref"].asText()).endsWith("/HomeSectionResponse")
+        assertThat(schemas["StoryHomeResponse"]["properties"]["sections"]["items"]["$" + "ref"].asText()).endsWith("/StoryHomeSectionResponse")
+        assertThat(schemas["StoryHomeSectionResponse"]["properties"]["items"]["items"]["$" + "ref"].asText()).endsWith("/StorySummaryResponse")
+    }
+
     @BeforeEach fun setup() {
         reset(audits); cleaner.cleanAll()
         actor = users.save(User(nickname = "관리자"))
@@ -178,6 +209,8 @@ class HomeSectionsIntegrationTests {
         val uri = "$path/${s["id"].asText()}"
         request(HttpMethod.PATCH, uri, mapOf("name" to "변경", "isActive" to false, "reason" to "수정")).expectStatus().isOk
             .expectBody().jsonPath("$.genres[0]").isEqualTo("판타지").jsonPath("$.isActive").isEqualTo(false)
+        request(HttpMethod.PATCH, uri, mapOf("isActive" to null, "reason" to "null 거절")).expectStatus().isBadRequest
+        request(HttpMethod.PATCH, uri, mapOf("itemLimit" to "3", "reason" to "타입 거절")).expectStatus().isBadRequest
         request(HttpMethod.PATCH, uri, mapOf("genres" to emptyList<String>(), "reason" to "조건 제거")).expectStatus().isOk.expectBody().jsonPath("$.genres").isEmpty
         request(HttpMethod.PATCH, uri, mapOf("source" to "MANUAL", "reason" to "누락")).expectStatus().isBadRequest
         request(HttpMethod.PATCH, uri, mapOf("source" to "MANUAL", "storyIds" to listOf(story.publicId.toString()), "reason" to "출처 변경"))

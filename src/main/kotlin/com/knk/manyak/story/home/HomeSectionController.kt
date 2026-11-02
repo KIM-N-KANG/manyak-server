@@ -4,7 +4,6 @@ import com.knk.manyak.admin.security.AdminRequester
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
-import tools.jackson.databind.node.ObjectNode
 import java.util.UUID
 
 @RestController
@@ -12,11 +11,11 @@ import java.util.UUID
 class AdminHomeSectionController(private val sections: HomeSectionService) {
     @GetMapping fun list() = sections.list()
     @PostMapping @ResponseStatus(HttpStatus.CREATED)
-    fun create(@RequestBody body: ObjectNode, request: HttpServletRequest) = sections.create(body, AdminRequester.userId(request))
+    fun create(@RequestBody body: HomeSectionCreateRequest, request: HttpServletRequest) = sections.create(body.raw, AdminRequester.userId(request))
     @PatchMapping("/{sectionId}")
-    fun update(@PathVariable sectionId: UUID, @RequestBody body: ObjectNode, request: HttpServletRequest) = sections.update(sectionId, body, AdminRequester.userId(request))
+    fun update(@PathVariable sectionId: UUID, @RequestBody body: HomeSectionUpdateRequest, request: HttpServletRequest) = sections.update(sectionId, body.raw, AdminRequester.userId(request))
     @DeleteMapping("/{sectionId}") @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun delete(@PathVariable sectionId: UUID, @RequestBody body: ObjectNode, request: HttpServletRequest) = sections.delete(sectionId, body, AdminRequester.userId(request))
+    fun delete(@PathVariable sectionId: UUID, @RequestBody body: HomeSectionDeleteRequest, request: HttpServletRequest) = sections.delete(sectionId, body.raw, AdminRequester.userId(request))
 }
 
 @RestController

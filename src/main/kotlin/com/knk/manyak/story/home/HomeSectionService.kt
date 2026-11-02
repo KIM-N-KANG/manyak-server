@@ -30,7 +30,7 @@ class HomeSectionService(
     private val mapper: ObjectMapper,
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    fun home(): Map<String, Any> {
+    fun home(): StoryHomeResponse {
         val active = sections.findByIsActiveTrueOrderBySortOrderAscCreatedAtAscIdAsc()
         val officialId = official.officialUserId()
         data class Selection(val id: String?, val name: String, val ids: List<Long>, val limit: Int)
@@ -44,21 +44,21 @@ class HomeSectionService(
         }
         val byId = stories.findAllById(selections.flatMap { it.ids }.toSet()).filter(::listed).associateBy { it.id }
         val summaries = cards.assembleSummaryCards(byId.values.toList()).associateBy { it.id }
-        return mapOf("sections" to selections.map { selection ->
-            mapOf("id" to selection.id, "name" to selection.name,
-                "items" to selection.ids.mapNotNull { byId[it]?.publicId?.toString()?.let(summaries::get) }.take(selection.limit))
+        return StoryHomeResponse(selections.map { selection ->
+            StoryHomeSectionResponse(selection.id, selection.name,
+                selection.ids.mapNotNull { byId[it]?.publicId?.toString()?.let(summaries::get) }.take(selection.limit))
         })
     }
 
     @Transactional(readOnly = true)
-    fun list(): Map<String, Any> {
+    fun list(): HomeSectionListResponse {
         val all = sections.findAllByOrderBySortOrderAscCreatedAtAscIdAsc()
         val byId = storyMap(all)
-        return mapOf("items" to all.map { response(it, byId) })
+        return HomeSectionListResponse(all.map { response(it, byId) })
     }
 
     @Transactional
-    fun create(body: ObjectNode, actor: Long): ObjectNode {
+    fun create(body: ObjectNode, actor: Long): HomeSectionResponse {
         val reason = reason(body)
         val section = HomeSection(name = string(body, "name", 30), source = source(body),
             sortOrder = integer(body, "sortOrder", 1, Int.MAX_VALUE) ?: nextOrder())
@@ -71,7 +71,7 @@ class HomeSectionService(
     }
 
     @Transactional
-    fun update(id: UUID, body: ObjectNode, actor: Long): ObjectNode {
+    fun update(id: UUID, body: ObjectNode, actor: Long): HomeSectionResponse {
         val section = owned(id)
         val reason = reason(body)
         val before = state(section, storyMap(listOf(section)))
@@ -146,15 +146,17 @@ class HomeSectionService(
             node.set("genres", mapper.valueToTree(section.genres.sorted()))
             node.set("storyIds", mapper.valueToTree(section.stories.sortedBy { it.sortOrder }.mapNotNull { byId[it.storyId]?.publicId?.toString() }))
         }
-    private fun response(section: HomeSection, byId: Map<Long, Story>): ObjectNode = state(section, byId).also { node ->
-        node.remove("storyIds")
-        node.put("id", section.publicId.toString()).put("createdAt", section.createdAt.toString()).put("updatedAt", section.updatedAt.toString())
-        node.set("stories", mapper.valueToTree(section.stories.sortedBy { it.sortOrder }.mapNotNull { entry ->
+    private fun response(section: HomeSection, byId: Map<Long, Story>) = HomeSectionResponse(
+        id = section.publicId.toString(), name = section.name, source = section.source,
+        stories = section.stories.sortedBy { it.sortOrder }.mapNotNull { entry ->
             byId[entry.storyId]?.takeIf { it.deletedAt == null }?.let { story ->
-                mapOf("storyId" to story.publicId.toString(), "title" to story.title, "isListed" to listed(story))
+                HomeSectionStoryResponse(story.publicId.toString(), story.title, listed(story))
             }
-        }))
-    }
+        },
+        genres = section.genres.sorted(), originalOnly = section.originalOnly, sort = section.sortBy?.parameter,
+        itemLimit = section.itemLimit, isActive = section.isActive, sortOrder = section.sortOrder,
+        createdAt = section.createdAt.toString(), updatedAt = section.updatedAt.toString(),
+    )
     private fun listed(story: Story) = story.isPubliclyVisible() && story.deletedAt == null
     private fun owned(id: UUID) = sections.findByPublicIdForUpdate(id) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "홈 섹션을 찾을 수 없습니다.")
     private fun nextOrder() = try { Math.addExact(sections.maxSortOrder(), 1) } catch (_: ArithmeticException) { bad("sortOrder", "노출 순서 범위를 초과했습니다.") }

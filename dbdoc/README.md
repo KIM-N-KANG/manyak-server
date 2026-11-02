@@ -13,7 +13,7 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 25 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 26 |  | BASE TABLE |
 | [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
@@ -67,6 +67,7 @@
 | [public.home_sections](public.home_sections.md) | 11 |  | BASE TABLE |
 | [public.home_section_genres](public.home_section_genres.md) | 2 |  | BASE TABLE |
 | [public.home_section_stories](public.home_section_stories.md) | 3 |  | BASE TABLE |
+| [public.story_chat_summaries](public.story_chat_summaries.md) | 6 |  | BASE TABLE |
 
 ## Relations
 
@@ -147,6 +148,7 @@ erDiagram
 "public.home_section_genres" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
 "public.home_section_stories" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.home_section_stories" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
+"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
 
 "public.story_creation_tags" {
   bigint id
@@ -267,6 +269,7 @@ erDiagram
   varchar_20_ model_code FK
   boolean long_response
   integer summary_through_turn
+  integer revision
 }
 "public.story_messages" {
   bigint id
@@ -829,6 +832,14 @@ erDiagram
   bigint section_id FK
   bigint story_id FK
   integer sort_order
+}
+"public.story_chat_summaries" {
+  bigint id
+  bigint chat_id FK
+  integer through_turn
+  text summary
+  timestamp_with_time_zone invalidated_at
+  timestamp_with_time_zone created_at
 }
 ```
 

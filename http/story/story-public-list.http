@@ -4,8 +4,8 @@
 ### 위에서부터 순서대로 실행하면 회원 소유 공개 스토리를 둘 만든 뒤 최신순 조회 → 커서로 다음 페이지 →
 ### 인기순·좋아요순·채팅순·오리지널 필터 조회 → 에러 케이스(filter·sort·limit·cursor)를 확인합니다.
 ###
-### [KNK-149·KNK-1398] GET /api/v1/stories — 발행(PUBLISHED)·공개(PUBLIC)·미삭제·회원 소유 스토리만.
-###   - 인증 불필요(요청자 신원을 쓰지 않습니다). 게스트 제작 스토리(소유자 없음)는 제외합니다.
+### [KNK-149·KNK-1398] GET /api/v1/stories — 발행(PUBLISHED)·공개(PUBLIC)·미삭제 스토리. 소유자 유무와 무관합니다.
+###   - 인증 불필요(요청자 신원을 쓰지 않습니다). 게스트 공개 스토리도 author null로 노출하고 비공개 스토리는 제외합니다.
 ###   - filter=all(기본) | original(마냑 공식 계정 소유만). 그 외 값은 400.
 ###     공식 계정(manyak.official-user-public-id) 미설정 환경에서 original은 빈 페이지입니다.
 ###   - sort=popular(기본, 인기순) | latest(등록 최신순) | likes(좋아요 많은 순) | chats(누적 턴 수 많은 순). 그 외 값은 400.

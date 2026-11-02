@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
 import com.knk.manyak.story.service.UsernameTokenRenderer.render
 import com.knk.manyak.chat.dto.ChangeChatSettingsResponse
 import com.knk.manyak.auth.repository.UserRepository
@@ -124,6 +125,7 @@ class ChatService(
     // 인물 이미지 정본은 story_character_images다(KNK-1126) — 인물별 여러 장을 요청에 싣는다.
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
+    private val summaries: StoryChatSummaryRepository,
     // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val storyChatShareRepository: StoryChatShareRepository,
@@ -1516,7 +1518,8 @@ class ChatService(
     ): AiTurnCall = assemblyTransactionTemplate.execute {
         // 스토리를 여기서 **다시** 읽는다. 호출부가 읽어둔 값을 쓰면 게이트 판정만 트랜잭션 밖 시점이 되어
         // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
-        val context = ChatHistoryContext.of(chat, storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), compactSettings.enabled, turnNumber)
+        val context = ChatHistoryContext.of(chat, storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), compactSettings.enabled, turnNumber,
+            summaries.findFirstByChatIdAndInvalidatedAtIsNullAndThroughTurnLessThanOrderByThroughTurnDesc(chat.id, turnNumber))
         val story = storyRepository.findById(chat.storyId).orElse(null)
         // 조립 재료는 생성 결과를 통해 독자에게 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064·1065).
         // 판정 주체는 **턴을 돌리는 사람**이고, 세 진입점(이어쓰기·재생성·선택지)이 모두 앞에서 requireChatOwner로

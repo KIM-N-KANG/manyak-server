@@ -153,7 +153,7 @@ data class StoryDetailResponse(
     )
     val startSettings: List<StoryStartSettingResponse>,
 
-    @field:Schema(description = "스토리 공개 여부. 기본 생성 시 PRIVATE입니다.", example = "PRIVATE")
+    @field:Schema(description = "스토리 공개 여부. 간편 제작에서 생략하면 PUBLIC입니다.", example = "PRIVATE")
     val visibility: StoryVisibility,
 
     @field:Schema(description = "등록 상태", example = "PUBLISHED")

@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.entity.StoryChatSummary
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
@@ -50,6 +53,7 @@ import org.junit.jupiter.params.provider.CsvSource
     ],
 )
 class ChatRegenerateHistoryIntegrationTests {
+    @Autowired lateinit var summaries: StoryChatSummaryRepository
 
     class CapturingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
@@ -153,7 +157,8 @@ class ChatRegenerateHistoryIntegrationTests {
     )
     fun `요약 경계에 따라 실제 턴 재생성 선택지 AI 요청을 구성한다`(operation: String, turns: Int, historySize: Int, usesSummary: Boolean) {
         val story = storyRepository.save(Story(title = "요약 요청", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = turns, summary = "저장한 요약", summaryThroughTurn = 10))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = turns))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = "저장한 요약", throughTurn = 10))
         repeat(turns) { index ->
             val turn = index + 1
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
@@ -178,7 +183,7 @@ class ChatRegenerateHistoryIntegrationTests {
         assertThat(captured.userInput).isEqualTo(if (operation == "continue") "새 입력" else "u$turns")
         if (operation == "choices") {
             assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a$turns")
-            assertThat(storyChatRepository.findById(chat.id).orElseThrow().summaryThroughTurn).isEqualTo(10)
+            assertThat((summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0)).isEqualTo(10)
         }
     }
 
@@ -186,7 +191,8 @@ class ChatRegenerateHistoryIntegrationTests {
     @ValueSource(strings = ["continue", "regenerate", "choices"])
     fun `요약 끝 턴이 원문 응답 수를 넘어도 실제 요청은 원문으로 완료된다`(operation: String) {
         val story = storyRepository.save(Story(title = "요약 범위 방어", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16, summary = "잘못된 요약", summaryThroughTurn = 14))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = "잘못된 요약", throughTurn = 14))
         repeat(12) { index ->
             val turn = index + 1
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))

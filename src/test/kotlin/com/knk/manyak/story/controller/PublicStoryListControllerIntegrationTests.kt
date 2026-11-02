@@ -32,8 +32,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 
 /**
  * 공개 스토리 목록 조회 통합 검증(KNK-149).
- * - 비로그인으로 200이고 공개(PUBLISHED∧PUBLIC)·미삭제·회원 소유 스토리만 나온다.
- * - 게스트 소유(user_id NULL)는 공개 범위를 고를 수 없어 기본값 PUBLIC으로 생긴 체험 스토리라 제외한다.
+ * - 비로그인으로 200이고 공개(PUBLISHED∧PUBLIC)·미삭제 스토리가 소유자 유무와 무관하게 나온다.
+ * - 게스트 공개 스토리는 author null로 노출하고 비공개 스토리는 제외한다.
  * - popular는 좋아요 가중 합, latest는 createdAt, likes는 좋아요 수, chats는 누적 턴 수 내림차순이다.
  * - 동률은 publicId 내림차순이며 기본 정렬은 popular다.
  * - 커서는 keyset이라 페이지 사이에 중복·누락이 없고, 정렬이 다른 커서는 400이다.
@@ -132,20 +132,32 @@ class PublicStoryListControllerIntegrationTests {
     }
 
     @Test
-    fun `비공개 초안 삭제 게스트 소유는 목록에서 제외한다`() {
+    fun `비공개 초안 삭제는 제외하고 게스트 공개 스토리는 작성자 없이 반환한다`() {
         val author = saveUser()
         val visible = saveStory(author, "공개")
         saveStory(author, "비공개", visibility = StoryVisibility.PRIVATE)
         saveStory(author, "초안", status = StoryStatus.DRAFT)
         saveStory(author, "삭제됨", deletedAt = Instant.now())
-        saveStory(null, "게스트 제작")
+        val guest = saveStory(null, "게스트 제작", createdAt = Instant.parse("2026-06-02T00:00:00Z"))
+        saveStory(null, "게스트 비공개", visibility = StoryVisibility.PRIVATE)
+        like(guest, 1)
+        chat(guest, 1)
 
         for (sort in listOf("popular", "latest", "likes", "chats")) {
             get("?sort=$sort")
                 .expectStatus().isOk
                 .expectBody()
+                .jsonPath("$.items.length()").isEqualTo(2)
+                .jsonPath("$.items[0].id").isEqualTo(guest.publicId.toString())
+                .jsonPath("$.items[0].author").isEmpty
+                .jsonPath("$.items[1].id").isEqualTo(visible.publicId.toString())
+
+            val cursor = cursorOf(get("?sort=$sort&limit=1").expectStatus().isOk.expectBody().returnResult().responseBody)
+            get("?sort=$sort&limit=1&cursor=$cursor")
+                .expectStatus().isOk.expectBody()
                 .jsonPath("$.items.length()").isEqualTo(1)
                 .jsonPath("$.items[0].id").isEqualTo(visible.publicId.toString())
+                .jsonPath("$.nextCursor").doesNotExist()
         }
     }
 
