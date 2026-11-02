@@ -77,7 +77,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY s.createdAt DESC, s.publicId DESC
         """,
@@ -91,7 +90,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (s.createdAt < :createdAt OR (s.createdAt = :createdAt AND s.publicId < :publicId))
         ORDER BY s.createdAt DESC, s.publicId DESC
@@ -111,7 +109,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
                    + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
@@ -127,7 +124,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
                    + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
@@ -159,7 +155,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
         """,
@@ -173,7 +168,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) < :likeCount
                OR ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) = :likeCount
@@ -199,7 +193,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
                   WHERE c.storyId = s.id) DESC, s.publicId DESC
@@ -214,7 +207,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
         WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
-          AND s.userId IS NOT NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount), 0) FROM StoryChat c
                 WHERE c.storyId = s.id) < :turnCount

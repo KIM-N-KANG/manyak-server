@@ -107,7 +107,6 @@ abstract class CampaignStoryIntegrationTests {
         val rejected = listOf(
             Story(title = "소유자 비공개", userId = admin.id, visibility = StoryVisibility.PRIVATE),
             Story(title = "게스트 비공개", visibility = StoryVisibility.PRIVATE),
-            Story(title = "게스트 공개", visibility = StoryVisibility.PUBLIC),
             Story(title = "초안", userId = admin.id, status = StoryStatus.DRAFT),
             Story(title = "삭제", userId = admin.id, deletedAt = Instant.now()),
         ).map { stories.saveAndFlush(it).publicId.toString() } + listOf(UUID.randomUUID().toString(), "bad", "123")
@@ -116,8 +115,10 @@ abstract class CampaignStoryIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
     }
 
-    @Test fun `공개 스토리 알림은 발송 데이터에 UUID와 스토리 절대 딥링크를 싣는다`() {
-        val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = admin.id))
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `회원과 게스트 공개 스토리 알림은 UUID와 스토리 절대 딥링크를 싣는다`(member: Boolean) {
+        val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = if (member) admin.id else null))
         val campaign = create(story)
         assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(1)
         assertThat(data.single()).containsEntry("storyId", story.publicId.toString())
@@ -142,12 +143,12 @@ abstract class CampaignStoryIntegrationTests {
         }
     }
 
-    @Test fun `게스트 소유 공개 스토리는 발송 시 이동 정보를 제외한다`() {
+    @Test fun `예약 뒤 게스트 소유가 된 공개 스토리도 발송 시 이동 정보를 유지한다`() {
         val story = stories.saveAndFlush(Story(title = "공개 스토리", userId = admin.id))
         create(story)
         jdbc.update("UPDATE stories SET user_id=NULL WHERE id=?", story.id)
         assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(1)
-        assertThat(data.single()).doesNotContainKeys("storyId", "deepLink")
+        assertThat(data.single()).containsEntry("storyId", story.publicId.toString()).containsKey("deepLink")
     }
 
     @Test fun `이동 대상 없는 예약은 storyId null을 반환하고 링크 없이 발송한다`() {

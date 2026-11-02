@@ -1406,7 +1406,7 @@ Content-Type: application/json
 %}
 
 
-### KNK-1875 공개 범위 검증 안내
+### KNK-1980 공개 범위 검증 안내
 # 회원 PUBLIC: auth-login-google.http로 전역 accessToken을 설정합니다.
 # 아래는 케이스마다 새 진행을 만들므로 위에서부터 순서대로 실행합니다.
 # 게스트는 별도 deviceId를 사용하고, 회원은 체험 잔여 또는 이프가 필요합니다.
@@ -1495,7 +1495,7 @@ Content-Type: application/json
     }
 %}
 
-### 게스트 PUBLIC 완성 — PUBLIC 저장, 공개 스냅샷 생성
+### 게스트 공개 범위 생략 완성: 기본 PUBLIC 저장, 공개 스냅샷 생성
 POST {{baseUrl}}/api/v1/stories/simple
 X-Manyak-Device-Id: {{guestPublicDeviceId}}
 Content-Type: application/json
@@ -1503,8 +1503,7 @@ Content-Type: application/json
 {
   "requestId": "{{$uuid}}",
   "simpleCreationId": {{guestPublicCreationId}},
-  "storylineId": {{guestPublicStorylineId}},
-  "visibility": "PUBLIC"
+  "storylineId": {{guestPublicStorylineId}}
 }
 
 > {%
@@ -1526,6 +1525,21 @@ Accept: application/json
     });
 %}
 
+
+### 게스트 기본 공개 스토리 일괄 조회: 작성자는 null
+POST {{baseUrl}}/api/v1/stories/batch
+Content-Type: application/json
+
+{"storyIds":["{{guestPublicStoryId}}"]}
+
+> {%
+    client.test("게스트 공개 카드는 작성자 없이 반환한다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.length === 1, `expected=1 actual=${response.body.length}`);
+        client.assert(response.body[0].author === null, `expected=null actual=${JSON.stringify(response.body[0].author)}`);
+        client.assert(response.body[0].visibility === "PUBLIC", `expected=PUBLIC actual=${response.body[0].visibility}`);
+    });
+%}
 
 ### 허용하지 않는 공개 범위 — 완성된 진행이어도 역직렬화 단계에서 400
 POST {{baseUrl}}/api/v1/stories/simple

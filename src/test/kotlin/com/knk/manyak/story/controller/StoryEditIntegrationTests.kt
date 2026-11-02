@@ -422,6 +422,23 @@ class StoryEditIntegrationTests {
         )
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `공개 스냅샷 없는 스토리를 비공개로 저장하면 변경 전 내용을 보존한다`(editContent: Boolean) {
+        val story = seedStory(userId = owner().id)
+        assertEquals(null, snapshotService.findByStoryId(story.id))
+        val titleEdit = if (editContent) ",\"title\":\"비공개 개작\"" else ""
+        restTestClient.patch()
+            .uri("/api/v1/stories/${story.publicId}")
+            .header("Authorization", approvals.bearer(story.userId!!))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"visibility":"PRIVATE"$titleEdit}""")
+            .exchange().let { approvals.complete(it, edit = true) }
+            .expectStatus().isOk
+        assertEquals(StoryVisibility.PRIVATE, storyRepository.findById(story.id).orElseThrow().visibility)
+        assertEquals(story.title, snapshotService.findByStoryId(story.id)!!.title)
+    }
+
     @Test
     fun `비공개로 전환하며 고친 값은 스냅샷에 들어가지 않는다`() {
         val story = seedStory(userId = owner().id)
