@@ -136,6 +136,7 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  integer hidden_turn_count
 }
 "public.story_lorebooks" {
   bigint id

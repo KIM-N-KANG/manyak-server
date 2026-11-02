@@ -109,6 +109,7 @@ class SecurityConfig {
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/shares/{shareId}")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream")).permitAll()
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream")).permitAll()
+                    .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/edit/stream")).permitAll()
                     // 선택지 생성(§4-3-3). 인증 선택(회원 소유 검증은 서비스가 403). turnId는 숫자.
                     .requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/{turnId:\\d+}/choices")).permitAll()
                     // 로어북 카탈로그는 인증 없이 조회하는 공개 목록이다(일반 제작 참조용). {storyId} 매처보다 앞에 둬 명시적으로 허용한다.
@@ -256,6 +257,7 @@ class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/shares/{shareId}"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/regenerate/stream"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/edit/stream"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/v1/chats/{chatId}/turns/{turnId:\\d+}/choices"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/lorebooks"),
             // 공개 스토리 목록(KNK-149)도 요청자 신원을 쓰지 않지만(무인증), 클라이언트가 자동 첨부한

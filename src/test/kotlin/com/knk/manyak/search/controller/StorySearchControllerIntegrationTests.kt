@@ -252,11 +252,13 @@ class StorySearchControllerIntegrationTests {
 
     @Test
     fun `게스트 공개 비공개 완성본은 이관 전후 공개만 검색되고 이관 뒤 작성자가 표시된다`() {
-        fun completeGuest(visibility: StoryVisibility): Story {
+        val deviceId = UUID.randomUUID().toString()
+        val privateDeviceId = UUID.randomUUID().toString()
+        fun completeGuest(visibility: StoryVisibility, ownerDevice: String): Story {
             val session = sessions.save(StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED))
             val storyline = storylines.save(StoryCreationStoryline(creationSession = session, storylineText = "마법 왕국", storylineOrder = 1))
             val result = client.post().uri("/api/v1/stories/simple")
-                .header("X-Manyak-Device-Id", UUID.randomUUID().toString())
+                .header("X-Manyak-Device-Id", ownerDevice)
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .body(mapOf("requestId" to UUID.randomUUID().toString(), "simpleCreationId" to session.id,
                     "storylineId" to storyline.id, "visibility" to visibility.name))
@@ -268,8 +270,8 @@ class StorySearchControllerIntegrationTests {
             }
         }
 
-        val public = completeGuest(StoryVisibility.PUBLIC)
-        val private = completeGuest(StoryVisibility.PRIVATE)
+        val public = completeGuest(StoryVisibility.PUBLIC, deviceId)
+        val private = completeGuest(StoryVisibility.PRIVATE, privateDeviceId)
         assertTrue(reader.read(public.id)!!.visible)
         assertNull(reader.read(public.id)!!.author)
         assertFalse(reader.read(private.id)!!.visible)
@@ -286,12 +288,20 @@ class StorySearchControllerIntegrationTests {
 
         val member = users.save(User(nickname = "이관 검색 작가", status = UserStatus.ACTIVE))
         client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", deviceId)
             .header("Authorization", "Bearer ${jwt.issueAccessToken(member.publicId)}")
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-            .body(mapOf("storyIds" to listOf(public.publicId.toString(), private.publicId.toString())))
+            .body(mapOf("storyIds" to listOf(public.publicId.toString())))
             .exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
-            .jsonPath("$.stories[1].status").isEqualTo("MIGRATED")
+        val privateMember = users.save(User(nickname = "비공개 이관 작가", status = UserStatus.ACTIVE))
+        client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", privateDeviceId)
+            .header("Authorization", "Bearer ${jwt.issueAccessToken(privateMember.publicId)}")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(private.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
 
         val after = search()
         assertEquals(listOf(public.publicId.toString()), after.map { it.id })

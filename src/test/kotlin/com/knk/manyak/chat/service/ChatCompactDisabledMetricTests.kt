@@ -60,7 +60,7 @@ class ChatCompactDisabledMetricTests {
             messages.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "입력", messageOrder = index * 2 + 1))
             messages.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "응답", messageOrder = index * 2 + 2))
         }
-        fun last() = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
+        fun last() = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
         fun append() = persister.persistTurn(chat.id, "입력", "응답", emptyList(),
             judgmentSource = TurnJudgmentSource(), expectedState = GenerationStartState(last().id, 0), billingModelCode = "LITE")
 

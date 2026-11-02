@@ -69,14 +69,15 @@ class ChatDomainRepositoryTests {
         assertEquals(listOf(MessageRole.USER, MessageRole.ASSISTANT), messages.map { it.role })
     }
 
+    // 부분 유일 제약은 H2 ddl-auto가 만들지 못하므로 ChatInputEditMigrationPostgresTests에서 검증한다.
     @Test
-    fun `같은 세션에 동일 message_order는 UNIQUE 제약으로 거부된다`() {
+    fun `숨긴 메시지는 채팅의 가시 원문에서 제외된다`() {
         val session = newSession()
-        messageRepository.saveAndFlush(message(session.id, MessageRole.USER, "처음", order = 1))
-
-        assertThrows(DataIntegrityViolationException::class.java) {
-            messageRepository.saveAndFlush(message(session.id, MessageRole.ASSISTANT, "중복", order = 1))
-        }
+        val hidden = message(session.id, MessageRole.USER, "숨긴 입력", order = 1)
+        hidden.hiddenAt = java.time.Instant.now()
+        messageRepository.saveAndFlush(hidden)
+        messageRepository.saveAndFlush(message(session.id, MessageRole.USER, "새 입력", order = 1))
+        assertEquals(listOf("새 입력"), messageRepository.findByChatIdOrderByMessageOrderAsc(session.id).map { it.content })
     }
 
     @Test
@@ -100,7 +101,7 @@ class ChatDomainRepositoryTests {
         messageRepository.save(message(session.id, MessageRole.USER, "a", order = 1))
         messageRepository.save(message(session.id, MessageRole.ASSISTANT, "b", order = 2))
 
-        val last = messageRepository.findFirstByChatIdOrderByMessageOrderDesc(session.id)
+        val last = messageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(session.id)
 
         assertEquals(2, last?.messageOrder)
     }

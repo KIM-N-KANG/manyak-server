@@ -109,6 +109,23 @@ class ChatRegenerateHistoryIntegrationTests {
         capturingAiClient.lastAiOutput.set(null)
     }
 
+    @Test fun `입력 수정은 대상 앞 원문을 보내고 뒤 턴을 숨긴 새 턴을 저장한다`() {
+        val story = storyRepository.save(Story(title = "수정 스토리", genre = "판타지"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 5))
+        val turns = (1..5).map { n ->
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$n", messageOrder = n * 2 - 1))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$n", messageOrder = n * 2))
+        }
+        val body = restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/edit/stream")
+            .header("X-Manyak-Device-Id", "edit-device").contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"turnId":${turns[2].id},"userInput":"새 입력","userSource":"typed","realtimeImage":false}""")
+            .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+        assertThat(body).contains("completed")
+        assertThat(capturingAiClient.lastRequest.get().history.map { it.content }).containsExactly("u1", "a1", "u2", "a2")
+        assertThat(capturingAiClient.lastRequest.get().userInput).isEqualTo("새 입력")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().currentTurn).isEqualTo(3)
+    }
+
     @Test
     fun `재생성은 마지막 턴을 제외한 이전 내역을 history로 보내고 마지막 입력을 그대로 재전송한다`() {
         val story = storyRepository.save(Story(title = "재생성 내역 스토리", genre = "판타지"))
@@ -127,7 +144,7 @@ class ChatRegenerateHistoryIntegrationTests {
                 StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "AI 응답 $turn", messageOrder = turn * 2 + 1),
             )
         }
-        val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val lastAssistant = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
 
         regenerate(chat.publicId.toString(), lastAssistant.id)
 
@@ -165,7 +182,7 @@ class ChatRegenerateHistoryIntegrationTests {
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
         }
-        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val last = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
         when (operation) {
             "regenerate" -> regenerate(chat.publicId.toString(), last.id)
             "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")
@@ -199,7 +216,7 @@ class ChatRegenerateHistoryIntegrationTests {
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
         }
-        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val last = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
         when (operation) {
             "regenerate" -> assertThat(regenerate(chat.publicId.toString(), last.id)).contains("completed")
             "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")

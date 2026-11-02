@@ -30,6 +30,7 @@
 | long_response | boolean | false | false |  |  |  |
 | summary_through_turn | integer | 0 | false |  |  |  |
 | revision | integer | 0 | false |  |  |  |
+| hidden_turn_count | integer | 0 | false |  |  |  |
 
 ## Constraints
 
@@ -42,6 +43,7 @@
 | ck_story_chats_regenerated_count | CHECK | CHECK ((regenerated_count >= 0)) |
 | ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
 | ck_story_chats_summary_through_turn | CHECK | CHECK ((summary_through_turn >= 0)) |
+| story_chats_hidden_turn_count_check | CHECK | CHECK ((hidden_turn_count >= 0)) |
 | story_chats_revision_check | CHECK | CHECK ((revision >= 0)) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
@@ -106,6 +108,7 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  integer hidden_turn_count
 }
 "public.story_messages" {
   bigint id
@@ -118,6 +121,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.story_choices" {
   bigint id

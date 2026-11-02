@@ -88,6 +88,7 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  integer hidden_turn_count
 }
 "public.story_messages" {
   bigint id
@@ -100,6 +101,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.user_story_ending_reaches" {
   bigint id

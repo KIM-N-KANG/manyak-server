@@ -89,6 +89,7 @@ class ChatTurnPersister(
         billingModelCode: String,
         creditTransactionId: Long? = null,
         storyPublicId: UUID? = null,
+        editTurnId: Long? = null,
     ): PersistedTurn {
         // 이어쓰기(append)도 재생성과 같은 채팅 락을 잡아 두 경로를 채팅 단위로 직렬화한다. 락이 없으면
         // append가 새 메시지를 먼저 insert한 뒤 story_chats UPDATE에서 블록되는 사이, 동시 재생성이 그 미커밋
@@ -97,15 +98,16 @@ class ChatTurnPersister(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
         verifyStartState(chat, expectedState)
         verifyCharge(creditTransactionId)
+        if (editTurnId != null) hideEditedTurns(chat, editTurnId)
 
         // 도달 엔딩을 먼저 해소해 ASSISTANT 메시지 표식(reached_ending_id)으로 함께 저장한다.
         val reachedEnding = resolveReachedEnding(chat, judgment.endingName, judgmentSource)
 
         // 선택 기록은 아래 insert보다 **먼저** 해야 한다 — 새 ASSISTANT를 넣고 나면 그게 마지막 턴이 돼 판정이 뒤집힌다.
-        recordChoiceSelection(chatId, selection, userInput)
+        if (editTurnId == null) recordChoiceSelection(chatId, selection, userInput)
 
         val lastOrder = storyMessageRepository
-            .findFirstByChatIdOrderByMessageOrderDesc(chatId)
+            .findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chatId)
             ?.messageOrder
             ?: 0
 
@@ -185,7 +187,7 @@ class ChatTurnPersister(
     private fun recordChoiceSelection(chatId: Long, selection: ChoiceSelection, userInput: String) {
         val sourceTurnId = selection.sourceTurnId ?: return // 값을 안 보낸 요청(구버전 클라이언트)은 로그도 남기지 않는다.
         val lastAssistant = storyMessageRepository
-            .findFirstByChatIdAndRoleOrderByMessageOrderDesc(chatId, MessageRole.ASSISTANT)
+            .findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chatId, MessageRole.ASSISTANT)
         // 마지막 턴 대조 하나가 "다른 채팅의 턴 ID"와 "이미 진행된 낡은 턴"을 함께 막는다.
         val isLastTurn = lastAssistant?.id == sourceTurnId
         val choice = if (!isLastTurn) {
@@ -378,7 +380,7 @@ class ChatTurnPersister(
         verifyCharge(creditTransactionId)
 
         // 재확인: 여전히 이 ASSISTANT가 마지막 턴인가. 그 사이 새 턴이 쌓였으면(마지막 id 불일치) 폐기한다.
-        val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chatId)
+        val lastAssistant = storyMessageRepository.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chatId, MessageRole.ASSISTANT)
         if (lastAssistant == null ||
             lastAssistant.role != MessageRole.ASSISTANT ||
             lastAssistant.id != expectedAssistantId
@@ -425,20 +427,7 @@ class ChatTurnPersister(
 
         // current_turn은 증가시키지 않는다 — 같은 논리 턴의 재생성이다. 대신 regenerated_count를 올려, 유료(CHAT_TURN)
         // 선차감이 완료된 재생성을 크레딧 대사(KNK-448)가 완료 수에 포함하게 한다(성공 재생성의 초과 환불 방지).
-        val previousThrough = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0
-        if (summaries.invalidateFromTurn(chat.id, chat.currentTurn, Instant.now()) > 0) {
-            // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 재생성은 무효화하지 않았다.
-            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
-            TransactionSynchronizationManager.registerSynchronization(
-                object : TransactionSynchronization {
-                    override fun afterCommit() {
-                        runCatching { structuredLogger.event("chat_compact_invalidated",
-                            "chat_id" to chat.publicId.toString(), "story_id" to storyPublicId?.toString(),
-                            "turn_number" to chat.currentTurn, "summary_through_turn" to previousThrough) }
-                    }
-                },
-            )
-        }
+        invalidateSummaries(chat, chat.currentTurn)
         chat.regeneratedCount += 1
         chat.revision += 1
         storyChatRepository.save(chat)
@@ -465,7 +454,7 @@ class ChatTurnPersister(
         val chat = storyChatRepository.findByIdForUpdate(chatId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
 
-        val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chatId)
+        val lastAssistant = storyMessageRepository.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chatId, MessageRole.ASSISTANT)
         if (lastAssistant == null ||
             lastAssistant.role != MessageRole.ASSISTANT ||
             lastAssistant.id != expectedAssistantId
@@ -513,6 +502,47 @@ class ChatTurnPersister(
      */
     data class ReachedEnding(val id: Long?, val name: String)
 
+    private fun hideEditedTurns(chat: StoryChat, turnId: Long) {
+        val visible = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+        val assistants = visible.filter { it.role == MessageRole.ASSISTANT }
+        val index = assistants.indexOfFirst { it.id == turnId }
+        if (index < 0) throw ResponseStatusException(HttpStatus.NOT_FOUND, "수정할 턴을 찾을 수 없습니다.")
+        val target = assistants[index]
+        val user = visible.lastOrNull { it.role == MessageRole.USER && it.messageOrder < target.messageOrder }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "수정할 입력을 찾을 수 없습니다.")
+        val hidden = visible.filter { it.messageOrder >= user.messageOrder }
+        val at = Instant.now()
+        hidden.forEach { it.hiddenAt = at }
+        // 새 행이 같은 순서 번호를 재사용하기 전에 부분 유일 인덱스에서 옛 행을 뺀다.
+        storyMessageRepository.flush()
+        chat.hiddenTurnCount += hidden.count { it.role == MessageRole.ASSISTANT }
+        if (hidden.any { it.reachedEndingId != null || it.reachedEndingNameSnapshot != null }) {
+            chat.reachedEndingId = null
+            chat.reachedEndingNameSnapshot = null
+            chat.status = ChatStatus.ACTIVE
+        }
+        invalidateSummaries(chat, index + 1)
+        chat.currentTurn = index
+        chat.revision += 1
+    }
+
+    private fun invalidateSummaries(chat: StoryChat, targetTurn: Int) {
+        val previousThrough = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0
+        if (summaries.invalidateFromTurn(chat.id, targetTurn, Instant.now()) > 0) {
+            // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 저장은 무효화하지 않았다.
+            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
+                    override fun afterCommit() {
+                        runCatching { structuredLogger.event("chat_compact_invalidated",
+                            "chat_id" to chat.publicId.toString(), "story_id" to storyPublicId?.toString(),
+                            "turn_number" to targetTurn, "summary_through_turn" to previousThrough) }
+                    }
+                },
+            )
+        }
+    }
+
     private fun verifyCharge(id: Long?) {
         if (id == null) return
         val charge = creditTransactionRepository.findByIdForUpdate(id) ?: error("차감 행이 없습니다: $id")
@@ -525,7 +555,7 @@ class ChatTurnPersister(
     private fun verifyStartState(chat: StoryChat, expected: GenerationStartState) {
         val lastId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
             .lastOrNull { it.role == MessageRole.ASSISTANT }?.id
-        if (lastId != expected.lastTurnId || chat.regeneratedCount != expected.regeneratedCount) {
+        if (lastId != expected.lastTurnId || chat.revision != expected.revision) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "생성 시작 후 마지막 턴이 변경되었습니다.")
         }
     }
@@ -590,4 +620,4 @@ data class TurnJudgmentSource(
 )
 
 /** Redis 키의 만료와 무관하게 잠금 안에서 검증할 생성 시작 상태. */
-data class GenerationStartState(val lastTurnId: Long?, val regeneratedCount: Int)
+data class GenerationStartState(val lastTurnId: Long?, val revision: Int)
