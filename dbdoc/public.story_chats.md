@@ -4,7 +4,7 @@
 
 | Name | Type | Default | Nullable | Children | Parents | Comment |
 | ---- | ---- | ------- | -------- | -------- | ------- | ------- |
-| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) [public.story_chat_shares](public.story_chat_shares.md) |  |  |
+| id | bigint | nextval('story_chats_id_seq'::regclass) | false | [public.story_messages](public.story_messages.md) [public.story_choices](public.story_choices.md) [public.story_chat_main_events](public.story_chat_main_events.md) [public.story_chat_shares](public.story_chat_shares.md) [public.story_chat_summaries](public.story_chat_summaries.md) |  |  |
 | user_id | bigint |  | true |  |  |  |
 | story_id | bigint |  | false |  | [public.stories](public.stories.md) |  |
 | start_setting_id | bigint |  | true |  | [public.story_start_settings](public.story_start_settings.md) |  |
@@ -29,6 +29,7 @@
 | model_code | varchar(20) | 'LITE'::character varying | false |  | [public.chat_models](public.chat_models.md) |  |
 | long_response | boolean | false | false |  |  |  |
 | summary_through_turn | integer | 0 | false |  |  |  |
+| revision | integer | 0 | false |  |  |  |
 
 ## Constraints
 
@@ -41,6 +42,7 @@
 | ck_story_chats_regenerated_count | CHECK | CHECK ((regenerated_count >= 0)) |
 | ck_story_chats_status | CHECK | CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'ENDED'::character varying])::text[]))) |
 | ck_story_chats_summary_through_turn | CHECK | CHECK ((summary_through_turn >= 0)) |
+| story_chats_revision_check | CHECK | CHECK ((revision >= 0)) |
 | story_chats_story_id_fkey | FOREIGN KEY | FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE |
 | story_chats_start_setting_id_fkey | FOREIGN KEY | FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL |
 | story_chats_pkey | PRIMARY KEY | PRIMARY KEY (id) |
@@ -70,6 +72,7 @@ erDiagram
 "public.story_choices" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_chat_main_events" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
 "public.story_chat_shares" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE"
+"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
@@ -102,6 +105,7 @@ erDiagram
   varchar_20_ model_code FK
   boolean long_response
   integer summary_through_turn
+  integer revision
 }
 "public.story_messages" {
   bigint id
@@ -137,6 +141,14 @@ erDiagram
   uuid public_id
   bigint chat_id FK
   integer turn_cutoff
+  timestamp_with_time_zone created_at
+}
+"public.story_chat_summaries" {
+  bigint id
+  bigint chat_id FK
+  integer through_turn
+  text summary
+  timestamp_with_time_zone invalidated_at
   timestamp_with_time_zone created_at
 }
 "public.stories" {

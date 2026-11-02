@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import tools.jackson.databind.ObjectMapper
@@ -49,6 +50,7 @@ class ChatTurnPersister(
     private val structuredLogger: StructuredLogger,
     private val storyRepository: StoryRepository,
     private val storyChatRepository: StoryChatRepository,
+    private val summaries: StoryChatSummaryRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val storyMessageVersionRepository: StoryMessageVersionRepository,
@@ -423,10 +425,8 @@ class ChatTurnPersister(
 
         // current_turn은 증가시키지 않는다 — 같은 논리 턴의 재생성이다. 대신 regenerated_count를 올려, 유료(CHAT_TURN)
         // 선차감이 완료된 재생성을 크레딧 대사(KNK-448)가 완료 수에 포함하게 한다(성공 재생성의 초과 환불 방지).
-        if (chat.summaryThroughTurn > 0 && chat.currentTurn <= chat.summaryThroughTurn) {
-            val previousThrough = chat.summaryThroughTurn
-            chat.summary = null
-            chat.summaryThroughTurn = 0
+        val previousThrough = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0
+        if (summaries.invalidateFromTurn(chat.id, chat.currentTurn, Instant.now()) > 0) {
             // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 재생성은 무효화하지 않았다.
             val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
             TransactionSynchronizationManager.registerSynchronization(
@@ -440,6 +440,7 @@ class ChatTurnPersister(
             )
         }
         chat.regeneratedCount += 1
+        chat.revision += 1
         storyChatRepository.save(chat)
         return PersistedTurn(turnId = lastAssistant.id, turnNumber = chat.currentTurn)
     }
