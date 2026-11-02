@@ -22,7 +22,6 @@ import org.springframework.security.oauth2.server.resource.web.DefaultBearerToke
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
-import org.springframework.security.web.util.matcher.OrRequestMatcher
 import org.springframework.web.cors.CorsConfiguration
 import tools.jackson.databind.ObjectMapper
 import org.springframework.web.cors.CorsConfigurationSource
@@ -164,7 +163,9 @@ class SecurityConfig {
             // 이 경로들은 아래 bearerTokenResolver에서 토큰 resolve를 건너뛰므로 RS 필터(BearerTokenAuthenticationFilter)가
             // 401을 내지 않고, 인증 시도는 이 필터만 수행한다. RS 필터보다 앞에 둬 동일 요청에서 principal을 먼저 확정한다.
             .addFilterBefore(
-                OptionalJwtAuthenticationFilter(jwtDecoder, OrRequestMatcher(*OPTIONAL_AUTH_MATCHERS)),
+                OptionalJwtAuthenticationFilter(jwtDecoder, { request ->
+                    OPTIONAL_AUTH_MATCHERS.any { it.matches(request) } && BEARER_SKIP_MATCHERS.none { it.matches(request) }
+                }),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
@@ -225,6 +226,7 @@ class SecurityConfig {
         // 공개 인증 경로. authorizeHttpRequests의 permitAll 매처와 동일한 경로·메서드로 맞춘다.
         // 여기에 든 경로는 permitAll이면서 동시에 Bearer 토큰 resolve를 건너뛴다(만료/위조 헤더 무시).
         val BEARER_SKIP_MATCHERS = arrayOf(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/stories/home"),
             // 공지 공개 조회는 게스트·만료 토큰·관리자 토큰 모두 동일하게 처리한다.
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/notices"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/v1/notices/{noticeId}"),

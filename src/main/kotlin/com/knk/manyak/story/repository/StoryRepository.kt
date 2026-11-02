@@ -1,7 +1,8 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
+import com.knk.manyak.story.repository.StoryListExpressions.POPULAR_SCORE
+import com.knk.manyak.story.repository.StoryListExpressions.TURN_COUNT
 import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -121,9 +122,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id)) DESC, s.publicId DESC
+        ORDER BY $POPULAR_SCORE DESC, s.publicId DESC
         """,
     )
     fun findPublicPopular(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -136,16 +135,10 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id)) < :score
-               OR (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id)) = :score
+          AND ($POPULAR_SCORE < :score
+               OR ($POPULAR_SCORE = :score
                    AND s.publicId < :publicId))
-        ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                      WHERE c.storyId = s.id)) DESC, s.publicId DESC
+        ORDER BY $POPULAR_SCORE DESC, s.publicId DESC
         """,
     )
     fun findPublicPopularAfter(
@@ -205,8 +198,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                  WHERE c.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $TURN_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicChats(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -219,13 +211,10 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND ((SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                WHERE c.storyId = s.id) < :turnCount
-               OR ((SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                    WHERE c.storyId = s.id) = :turnCount
+          AND ($TURN_COUNT < :turnCount
+               OR ($TURN_COUNT = :turnCount
                    AND s.publicId < :publicId))
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
-                  WHERE c.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $TURN_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicChatsAfter(

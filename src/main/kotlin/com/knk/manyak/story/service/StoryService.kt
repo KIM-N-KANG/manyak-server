@@ -469,6 +469,10 @@ class StoryService(
         }
     }
 
+    @Transactional(readOnly = true)
+    fun assembleSummaryCards(stories: List<Story>): List<StorySummaryResponse> =
+        stories.toSummaryResponses(officialStoryAccount.officialUserId())
+
     private fun List<Story>.toSummaryResponses(officialId: Long?): List<StorySummaryResponse> {
         if (isEmpty()) {
             return emptyList()

@@ -13,11 +13,11 @@ import org.springframework.stereotype.Service
 /** 제출 시에만 호출한다. 승인, 저장된 제출본 회수와 간편 제작 컴파일에는 적용하지 않는다. */
 @Service
 class GenreInputValidator(private val tags: StoryCreationTagRepository) {
-    fun normalize(input: List<String>, existingGenre: String? = null): List<String> {
+    fun normalize(input: List<String>, existingGenre: String? = null, maxCount: Int = 8): List<String> {
         // 중복 제거와 trim 전에 기존 개수와 길이 제한을 검사한다. 서비스 직접 호출도 같은 계약이다.
-        if (input.size !in 1..8 || input.any { it.length > 30 }) {
+        if (input.size !in 1..maxCount || input.any { it.length > 30 }) {
             throw CodedResponseStatusException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", INVALID_MESSAGE,
-                details = listOf(ApiErrorDetail("genres", "장르는 1개 이상 8개 이하, 각 30자 이하여야 합니다.")))
+                details = listOf(ApiErrorDetail("genres", "장르는 1개 이상 ${maxCount}개 이하, 각 30자 이하여야 합니다.")))
         }
         val provided = tags.findByTagSourceAndIsActiveTrueOrderByCategoryAscSortOrderAscIdAsc(StoryCreationTagSource.PREDEFINED)
             .filter { it.category == SimpleStoryTagCategory.GENRE }.associateBy { it.normalizedName }
