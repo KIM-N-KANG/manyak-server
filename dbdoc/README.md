@@ -13,8 +13,8 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 26 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 27 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 11 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -270,6 +270,7 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  integer hidden_turn_count
 }
 "public.story_messages" {
   bigint id
@@ -282,6 +283,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.story_choices" {
   bigint id

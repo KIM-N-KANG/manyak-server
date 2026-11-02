@@ -8,7 +8,6 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
-import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 
 enum class MessageRole {
@@ -18,15 +17,7 @@ enum class MessageRole {
 }
 
 @Entity
-@Table(
-    name = "story_messages",
-    uniqueConstraints = [
-        UniqueConstraint(
-            name = "uq_story_messages_order",
-            columnNames = ["chat_id", "message_order"],
-        ),
-    ],
-)
+@Table(name = "story_messages")
 class StoryMessage(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -70,6 +61,9 @@ class StoryMessage(
     // 활성 AI 응답을 만든 턴의 청구 모델. 재생성 시 교체하며 사용자 입력·기존 행은 NULL로 둔다.
     @Column(name = "model_code", length = 20)
     var modelCode: String? = null,
+
+    @Column(name = "hidden_at")
+    var hiddenAt: Instant? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),

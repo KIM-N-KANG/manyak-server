@@ -184,13 +184,13 @@ class ChatCompactIntegrationTests {
     private fun reload(chat: StoryChat) = chats.findById(chat.id).orElseThrow()
     private fun regenerate(chat: StoryChat) {
         val current = reload(chat)
-        val last = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
-        persister.regenerateLastTurn(chat.id, last.id, "재생성", emptyList(), GenerationStartState(last.id, current.regeneratedCount), "LITE")
+        val last = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
+        persister.regenerateLastTurn(chat.id, last.id, "재생성", emptyList(), GenerationStartState(last.id, current.revision), "LITE")
     }
     private fun append(chat: StoryChat) {
-        val last = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)
+        val last = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)
         persister.persistTurn(chat.id, "다음 입력", "다음 응답", emptyList(), judgmentSource = TurnJudgmentSource(),
-            expectedState = GenerationStartState(last?.id, reload(chat).regeneratedCount), billingModelCode = "LITE")
+            expectedState = GenerationStartState(last?.id, reload(chat).revision), billingModelCode = "LITE")
     }
     private fun continueThroughHttp(chat: StoryChat, input: String = "다음 입력", token: String? = null): String {
         val body = http.post().uri("/api/v1/chats/${chat.publicId}/turns/stream")
@@ -384,7 +384,7 @@ class ChatCompactIntegrationTests {
     }
     @Test fun `재생성 호출 중 요약이 먼저 저장돼도 뒤의 재생성이 비운다`() {
         val chat = fixture()
-        val state = GenerationStartState(messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!.id, 0)
+        val state = GenerationStartState(messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!.id, 0)
         service.compact(event(chat))
         persister.regenerateLastTurn(chat.id, state.lastTurnId!!, "새 본문", emptyList(), state, "LITE")
         assertThat(currentSummary(chat)?.summary).isNull()
@@ -487,7 +487,7 @@ class ChatCompactIntegrationTests {
             assertThat(charges).hasSize(1)
             assertThat(charges.single().amount).isEqualTo(-cost)
             assertThat(reload(chat).currentTurn).isEqualTo(10)
-            val saved = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
+            val saved = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
             assertThat(saved.content).isEqualTo("이어쓰기 응답")
             assertThat(saved.creditTransactionId).isEqualTo(charges.single().id)
             assertThat(queue.tasks).hasSize(1)
