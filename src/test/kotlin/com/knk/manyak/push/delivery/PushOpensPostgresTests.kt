@@ -89,7 +89,7 @@ class PushOpensPostgresTests {
                 UUID.randomUUID(), campaign, if (devices > 0) PushDeliveryOutcome.DELIVERED else PushDeliveryOutcome.UNDELIVERED,
                 "fixture", devices, 0, Instant.parse(at)), cid, user)
         }
-        report(uid, "2030-01-01T00:00:00Z")
+        report(other, "2030-01-01T00:00:00Z")
         report(uid, "2030-01-03T00:00:00Z")
         report(null, "2030-01-03T00:00:00Z")
         report(other, "2030-01-03T00:00:00Z", 0)
@@ -97,8 +97,15 @@ class PushOpensPostgresTests {
         assertThat(reached.userId).isEqualTo(uid)
         assertThat(reached.campaignId).isEqualTo(campaign)
         assertThat(reached.completedAt).isEqualTo(Instant.parse("2030-01-03T00:00:00Z"))
+        report(uid, "2030-01-03T01:00:00Z") // 같은 회원의 중복 도달도 분모는 1
+        assertThat(repository.campaignReach(campaign)!!.deliveredMembers).isEqualTo(1)
+        assertThat(repository.campaignReach(LocalDate.parse("2030-01-02"), LocalDate.parse("2030-01-02")).single().deliveredMembers).isEqualTo(1)
+        val summary = com.knk.manyak.push.repository.CampaignDeliverySummaryRepository(jdbc).summaries(listOf(cid)).getValue(cid)
+        assertThat(summary.deliveredMembers).isEqualTo(1)
+        assertThat(repository.reachedMemberDeliveries(listOf(campaign)).map { it.userId }).containsExactly(uid, uid)
+        assertThat(repository.reachedMemberDeliveries(emptyList<UUID>())).isEmpty()
         val date = LocalDate.parse("2030-01-03")
-        assertThat(repository.reachedMemberDeliveries(date, date, listOf(PushDeliveryType.NOTICE)).map { it.userId }).containsExactly(uid)
+        assertThat(repository.reachedMemberDeliveries(date, date, listOf(PushDeliveryType.NOTICE)).map { it.userId }).containsExactly(uid, uid)
         assertThat(repository.reachedMemberDeliveries(date, date, emptyList())).isEmpty()
 
         val story = jdbc.queryForObject("INSERT INTO stories(public_id,title,genre) VALUES (?,'전환','판타지') RETURNING id", Long::class.java, UUID.randomUUID())!!
@@ -111,12 +118,19 @@ class PushOpensPostgresTests {
         message(uid, reached.completedAt) // 직후 구간 시작 포함, 사전 구간 종료 제외
         message(other, reached.completedAt.minusSeconds(86400).minusNanos(1000))
         message(other, reached.completedAt.plusSeconds(86400)) // 직후 구간 종료 제외
+        val exact = jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'정각만') RETURNING id", Long::class.java, UUID.randomUUID())!!
+        message(exact, reached.completedAt)
         val conversion = com.knk.manyak.admin.repository.PushChatConversionRepository(jdbc)
         val rows = conversion.activity(List(501) { reached } + reached.copy(userId = other))
         assertThat(rows).hasSize(502)
         assertThat(rows.take(501)).allMatch { it.chatted && it.chattedBefore }
         assertThat(rows.last().chatted).isFalse()
         assertThat(rows.last().chattedBefore).isFalse()
+        val exactActivity = conversion.activity(listOf(reached.copy(userId = exact))).single()
+        assertThat(exactActivity.chatted).isTrue()
+        assertThat(exactActivity.chattedBefore).isFalse()
+        val converted = conversion.activity(repository.reachedMemberDeliveries(campaign)).filter { it.chatted }.map { it.delivery.userId }.distinct().size
+        assertThat(converted.toDouble() / summary.deliveredMembers).isEqualTo(1.0)
         assertThat(conversion.activity(emptyList())).isEmpty()
     }
 

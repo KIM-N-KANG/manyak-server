@@ -45,9 +45,9 @@ class AdminCampaignListRepository(private val jdbc: NamedParameterJdbcTemplate) 
             LEFT JOIN notices n ON n.id=c.notice_id
             LEFT JOIN stories s ON s.id=c.story_id
             LEFT JOIN (
-                SELECT campaign_id, SUM(CASE WHEN delivered_devices > 0 THEN 1 ELSE 0 END) AS delivered_members,
-                    SUM(delivered_devices) AS delivered_devices, SUM(failed_devices) AS failed_devices
-                FROM push_delivery_results GROUP BY campaign_id
+                SELECT r.campaign_id, COUNT(DISTINCT CASE WHEN ${campaignMemberDeliveryCondition("r", "pc")} THEN r.user_id END) AS delivered_members,
+                    SUM(r.delivered_devices) AS delivered_devices, SUM(r.failed_devices) AS failed_devices
+                FROM push_delivery_results r JOIN push_campaigns pc ON pc.id=r.campaign_id GROUP BY r.campaign_id
             ) d ON d.campaign_id=c.id""", query, page, "c.public_id", RowMapper { rs, _ ->
                 AdminCampaignResponse(
                     campaignId = rs.getObject("public_id", UUID::class.java), kind = PushKind.valueOf(rs.getString("kind")),

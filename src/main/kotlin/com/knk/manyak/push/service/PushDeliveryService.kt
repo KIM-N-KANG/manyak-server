@@ -44,6 +44,9 @@ class PushDeliveryService(
     fun reachedMemberDeliveries(campaignId: java.util.UUID): List<PushMemberDelivery> = repository.reachedMemberDeliveries(campaignId)
 
     @Transactional(readOnly = true)
+    fun reachedMemberDeliveries(campaignIds: List<java.util.UUID>): List<PushMemberDelivery> = repository.reachedMemberDeliveries(campaignIds)
+
+    @Transactional(readOnly = true)
     fun reachedMemberDeliveries(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushMemberDelivery> =
         repository.reachedMemberDeliveries(from, to, types)
 

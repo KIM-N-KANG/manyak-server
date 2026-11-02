@@ -334,4 +334,20 @@ class PushOpensTests {
         assertThat(requests).hasSize(3)
     }
 
+    @Test fun `캠페인 세 개 목록의 도달 시각은 한 번에 일괄 조회한다`() {
+        val ids = List(3) { UUID.randomUUID() }
+        `when`(delivery.campaignReach(anyValue(), anyValue())).thenReturn(ids.map { campaign(link = false).copy(campaignId = it) })
+        val rows = ids.map { PushMemberDelivery(1, PushDeliveryType.NOTICE, fixture.clock.instant(), it) }
+        `when`(delivery.reachedMemberDeliveries(ids)).thenReturn(rows)
+        val conversions = mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java)
+        `when`(conversions.activity(rows)).thenReturn(rows.mapIndexed { i, row ->
+            com.knk.manyak.admin.repository.PushDeliveryChatActivity(row, i != 1, false) })
+        val result = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(), fixture.clock, conversions).read(query())
+        assertThat(result.campaigns.map { it.chattedMembers }).containsExactly(1L, 0L, 1L)
+        verify(conversions).activity(rows)
+        val calls = mockingDetails(delivery).invocations.filter { it.method.name == "reachedMemberDeliveries" && it.arguments.size == 1 }
+        assertThat(calls).hasSize(1)
+        assertThat(calls.single().arguments[0]).isEqualTo(ids)
+    }
+
 }

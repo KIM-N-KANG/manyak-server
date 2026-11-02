@@ -111,11 +111,12 @@ class PushOpensService(private val delivery: PushDeliveryService, private val sn
         val campaigns = delivery.campaignReach(range.from, range.to)
         val reaches = delivery.activityReach(activityFrom ?: range.from, range.to, types).groupBy { it.type }
         val activityChats = chatConversions.activity(delivery.reachedMemberDeliveries(activityFrom ?: range.from, range.to, types)).groupBy { it.delivery.type }
+        val campaignChats = chatConversions.activity(delivery.reachedMemberDeliveries(campaigns.map { it.campaignId })).groupBy { it.delivery.campaignId }
         val result = load(range, metrics())
         return PushOpensResponse(result.asOf, result.pending, range.from, range.to, settings.measuredFrom, campaigns.map { row ->
             val state = state(row)
             val n = counts(result, row.campaignId.toString(), row.startedAt?.atZone(AdminDateRange.KST)?.toLocalDate(), state)
-            val chats = conversion(chatConversions.activity(delivery.reachedMemberDeliveries(row.campaignId)), row.deliveredMembers)
+            val chats = conversion(campaignChats[row.campaignId].orEmpty(), row.deliveredMembers)
             PushOpenCampaign(row.campaignId, row.kind, row.title, row.noticeId, requireNotNull(row.startedAt), row.deliveredMembers, state,
                 n.push, n.rate(row.deliveredMembers), n.web, n.app, n.inbox, n.webInbox, n.appInbox, chats.after, chats.before, chats.rate)
         }, activityFrom, types.map { type ->

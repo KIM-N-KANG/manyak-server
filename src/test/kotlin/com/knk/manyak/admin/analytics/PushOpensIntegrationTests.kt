@@ -242,4 +242,29 @@ class PushOpensIntegrationTests {
         assertConversion(row, 1, 0, 1.0)
     }
 
+    @Test fun `마지막 회차 분모는 과거 null 회원 중복을 제외하고 목록 단건 상세 전환율과 일치한다`() {
+        val token = conversionAuth()
+        val campaign = conversionCampaign(link = false)
+        val old = users.save(User(nickname = "과거 회차"))
+        val current = users.save(User(nickname = "현재 회차"))
+        conversionDelivery(old, "2026-10-21T02:00:00Z", campaign)
+        conversionDelivery(current, "2026-10-22T02:00:00Z", campaign)
+        conversionDelivery(null, "2026-10-22T03:00:00Z", campaign)
+        conversionDelivery(current, "2026-10-22T04:00:00Z", campaign)
+        conversionMessage(current, "2026-10-22T05:00:00Z")
+        emptyOpens("2026-10-22")
+        val row = conversionGet("?from=2026-10-22&to=2026-10-22", token)["campaigns"].single()
+        assertThat(row["deliveredMembers"].asLong()).isEqualTo(1)
+        assertConversion(row, 1, 0, 1.0)
+        val single = conversionGet("/${campaign.publicId}", token)
+        assertThat(single["deliveredMembers"].asLong()).isEqualTo(1)
+        assertConversion(single, 1, 0, 1.0)
+        for (path in listOf("/api/v1/admin/push/campaigns/${campaign.publicId}", "/api/v1/admin/push/campaigns")) {
+            val body = mapper.readTree(client.get().uri(path).header("Authorization", "Bearer $token").exchange()
+                .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+            val item = if (body.has("items")) body["items"].single() else body
+            assertThat(item["deliveredMembers"].asLong()).isEqualTo(1)
+        }
+    }
+
 }
