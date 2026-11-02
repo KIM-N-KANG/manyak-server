@@ -46,7 +46,7 @@ class PushOpensTests {
     @AfterEach fun stop() { server.shutdown() }
     private fun <T> anyValue(): T { org.mockito.ArgumentMatchers.any<T>(); @Suppress("UNCHECKED_CAST") return null as T }
     private fun campaign(link: Boolean? = true, started: LocalDate = day, delivered: Long = 100) = PushCampaignReach(id, PushKind.SERVICE, "점검", null, started.atStartOfDay(ZoneOffset.UTC).toInstant(), link, delivered)
-    private fun service(measured: LocalDate? = day.minusDays(20), android: LocalDate? = null) = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(measured, android), fixture.clock)
+    private fun service(measured: LocalDate? = day.minusDays(20), android: LocalDate? = null) = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(measured, android), fixture.clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java))
     private fun query(from: LocalDate = day.minusDays(1), to: LocalDate = day) = AnalyticsRangeQuery().apply { this.from=from.toString();this.to=to.toString() }
 
     @Test fun `7일 웹 조회는 두 경로를 묶어 2회 호출하고 350 비용과 일별 값을 저장한다`() {
@@ -332,6 +332,22 @@ class PushOpensTests {
         val failing = service(day.minusDays(10), null)
         repeat(2) { assertThatThrownBy { failing.campaign(other) }.isInstanceOf(AdminAnalyticsUnavailable::class.java) }
         assertThat(requests).hasSize(3)
+    }
+
+    @Test fun `캠페인 세 개 목록의 도달 시각은 한 번에 일괄 조회한다`() {
+        val ids = List(3) { UUID.randomUUID() }
+        `when`(delivery.campaignReach(anyValue(), anyValue())).thenReturn(ids.map { campaign(link = false).copy(campaignId = it) })
+        val rows = ids.map { PushMemberDelivery(1, PushDeliveryType.NOTICE, fixture.clock.instant(), it) }
+        `when`(delivery.reachedMemberDeliveries(ids)).thenReturn(rows)
+        val conversions = mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java)
+        `when`(conversions.activity(rows)).thenReturn(rows.mapIndexed { i, row ->
+            com.knk.manyak.admin.repository.PushDeliveryChatActivity(row, i != 1, false) })
+        val result = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(), fixture.clock, conversions).read(query())
+        assertThat(result.campaigns.map { it.chattedMembers }).containsExactly(1L, 0L, 1L)
+        verify(conversions).activity(rows)
+        val calls = mockingDetails(delivery).invocations.filter { it.method.name == "reachedMemberDeliveries" && it.arguments.size == 1 }
+        assertThat(calls).hasSize(1)
+        assertThat(calls.single().arguments[0]).isEqualTo(ids)
     }
 
 }

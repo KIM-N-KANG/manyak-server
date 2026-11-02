@@ -31,3 +31,6 @@ data class PushDeliveryStatsResponse(val from: LocalDate, val to: LocalDate, val
 data class PushCampaignReach(val campaignId: java.util.UUID, val kind: PushKind, val title: String, val noticeId: java.util.UUID?,
     val startedAt: java.time.Instant?, val deepLinkIncluded: Boolean?, val deliveredMembers: Long)
 data class PushActivityReach(val type: PushDeliveryType, val date: java.time.LocalDate, val deliveredMembers: Long)
+
+/** 다른 도메인에 제공하는 도달 시각. 원문과 기기 식별자는 노출하지 않는다. */
+data class PushMemberDelivery(val userId: Long, val type: PushDeliveryType, val completedAt: Instant, val campaignId: UUID? = null)
