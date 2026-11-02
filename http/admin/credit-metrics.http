@@ -1,0 +1,88 @@
+# 이프 경제 지표 — ADMIN BACKEND 4-2-44, KNK-1968.
+# 준비: 로컬 PostgreSQL·Redis와 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken을 저장한 뒤 순서대로 실행한다.
+# 조회 전용. 원장 적립·소모는 요청 기간, 잔액 분포·구성은 asOf 시점의 유효 로트 기준이다.
+# 고정 fixture에서 검증한다. 조회 사이의 사용·만료·적립은 현재 잔액에 반영될 수 있다.
+@baseUrl = http://localhost:8080
+@from = 2026-10-01
+@to = 2026-10-20
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {% client.test("서버 정상", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
+
+### 1. 기본 최근 30일 — 고정 사유·싱크 비율·현재 잔액
+GET {{baseUrl}}/api/v1/admin/credits/metrics
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("이프 경제 지표 계약", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const b = response.body;
+        const grants = ["SIGNUP_REWARD", "INVITE_REWARD", "ATTENDANCE_REWARD", "PURCHASE", "ADMIN_GRANT"];
+        const spends = ["STORY_CREATION", "CHAT_TURN", "CHAT_IMAGE"];
+        client.assert(JSON.stringify(b.grantedByReason.map(x => x.reason)) === JSON.stringify(grants), JSON.stringify(b.grantedByReason));
+        client.assert(JSON.stringify(b.spentByReason.map(x => x.reason)) === JSON.stringify(spends), JSON.stringify(b.spentByReason));
+        [...b.grantedByReason, ...b.spentByReason].forEach(x => client.assert(Number.isInteger(x.amount) && x.amount >= 0, JSON.stringify(x)));
+        client.assert(b.granted === b.grantedByReason.reduce((sum, x) => sum + x.amount, 0), JSON.stringify(b));
+        client.assert(b.spent === b.spentByReason.reduce((sum, x) => sum + x.amount, 0), JSON.stringify(b));
+        client.assert(b.granted === 0 ? b.sinkRate === null : typeof b.sinkRate === "number" && Math.abs(b.sinkRate - b.spent / b.granted) < 1e-10, JSON.stringify(b));
+        const balances = b.balances;
+        ["members", "total", "purchased", "rewarded", "legacy", "expiringIn30Days"].forEach(key =>
+            client.assert(Number.isInteger(balances[key]) && balances[key] >= 0, `field=${key} actual=${balances[key]}`));
+        client.assert(balances.total === balances.purchased + balances.rewarded + balances.legacy, JSON.stringify(balances));
+        client.assert(balances.expiringIn30Days <= balances.total, JSON.stringify(balances));
+        client.assert(JSON.stringify(balances.buckets.map(x => x.bucket)) === JSON.stringify(["0", "1~99", "100~499", "500~1999", "2000+"]), JSON.stringify(balances.buckets));
+        client.assert(balances.buckets.reduce((sum, x) => sum + x.members, 0) === balances.members, JSON.stringify(balances));
+        client.assert(typeof b.asOf === "string" && b.from <= b.to, JSON.stringify(b));
+        client.global.set("creditMetricsFrom", b.from);
+        client.global.set("creditMetricsTo", b.to);
+    });
+%}
+
+### 2. 위에서 받은 기간 명시 — 같은 날짜 파싱
+GET {{baseUrl}}/api/v1/admin/credits/metrics?from={{creditMetricsFrom}}&to={{creditMetricsTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("명시 기간", () => client.assert(response.status === 200 && response.body.from === client.global.get("creditMetricsFrom") && response.body.to === client.global.get("creditMetricsTo"), JSON.stringify(response.body)));
+%}
+
+### 3. 빠른 기간 90일 — 잔액은 계속 현재 값
+GET {{baseUrl}}/api/v1/admin/credits/metrics?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일 허용", () => client.assert(response.status === 200, `actual=${response.status}`)); %}
+
+### 4. 허용 외 기간 400
+GET {{baseUrl}}/api/v1/admin/credits/metrics?days=10
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 오류", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 5. 한쪽 날짜만 400
+GET {{baseUrl}}/api/v1/admin/credits/metrics?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("날짜 쌍 필요", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 6. days와 명시 날짜 혼용 400
+GET {{baseUrl}}/api/v1/admin/credits/metrics?days=7&from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 혼용 거절", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
+
+### 7. 미인증 401
+GET {{baseUrl}}/api/v1/admin/credits/metrics
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+### 8. 자유 조회 — 오늘 이하 날짜로 조정
+GET {{baseUrl}}/api/v1/admin/credits/metrics?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+# fixture: 적립 1000, 소모 -650, 만료 -30, 환불 +20이면 granted=1000, spent=650, sinkRate=0.65.
+# 구매 잔여300, 보상50, 무기한 승계100, 만료 지난 미정리40이면 유효 total=450이며 만료40은 제외한다.
+# expires_at=asOf는 제외. asOf<expires_at<=asOf+30일은 expiringIn30Days에 포함. expires_at=null은 유효하나 만료 예정에는 없음.
+# 로트 없는 미탈퇴 회원은 0 구간에 포함한다. SUSPENDED는 포함, DELETED 또는 deleted_at 존재 회원은 잔액에서 제외한다.
+# 팀 계정은 모든 값에서 제외. 환불·만료 원장은 기간 적립/소모 사유 합계에 넣지 않는다.
