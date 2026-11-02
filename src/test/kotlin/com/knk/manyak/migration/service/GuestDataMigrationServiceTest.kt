@@ -11,6 +11,12 @@ import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
+import com.knk.manyak.story.entity.StoryCreationRequest
+import com.knk.manyak.story.entity.StoryCreationSession
+import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.entity.StoryVisibility
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -48,10 +54,11 @@ class GuestDataMigrationServiceTest {
     private val serverAnalytics: com.knk.manyak.global.observability.analytics.ServerAnalytics =
         mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
     private val events = mock(org.springframework.context.ApplicationEventPublisher::class.java)
+    private val storyCreationRequestRepository = mock(StoryCreationRequestRepository::class.java)
     private val service =
         GuestDataMigrationService(
             storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
-            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events,
+            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events, storyCreationRequestRepository,
         )
 
     private val userId = 10L
@@ -67,10 +74,34 @@ class GuestDataMigrationServiceTest {
     private fun user(migratedAt: Instant?) = User(id = userId, nickname = "me", migratedAt = migratedAt)
 
     private fun story(publicId: UUID, ownerId: Long?) =
-        Story(publicId = publicId, userId = ownerId, title = "제목")
+        Story(publicId = publicId, userId = ownerId, title = "제목", visibility = StoryVisibility.PRIVATE)
 
     private fun chat(publicId: UUID, ownerId: Long?) =
         StoryChat(publicId = publicId, userId = ownerId, storyId = 1L)
+
+    @Test
+    fun `기기 증명에 실패하면 조건부 갱신과 진행 클레임과 재색인을 하지 않는다`() {
+        val story = Story(id = 71, title = "공개 게스트")
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story))
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(story.publicId.toString())))
+
+        assertThat(result.stories.single().status).isEqualTo(MigrationStatus.CONFLICT)
+        verify(storyRepository, never()).claimByPublicId(story.publicId, userId)
+        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
+        verifyNoInteractions(events)
+    }
+
+    @Test
+    fun `이미 소유한 스토리는 기기 증명을 다시 요구하지 않는다`() {
+        val story = Story(id = 71, userId = userId, title = "공개 회원")
+        `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(story))
+
+        val result = service.migrate(userId, MigrationRequest(storyIds = listOf(story.publicId.toString())))
+
+        assertThat(result.stories.single().status).isEqualTo(MigrationStatus.ALREADY_OWNED)
+        verifyNoInteractions(storyCreationSessionRepository, storyCreationRequestRepository)
+    }
 
     @Test
     fun `공개 범위와 무관하게 MIGRATED 스토리에만 재색인을 요청한다`() {
@@ -83,9 +114,17 @@ class GuestDataMigrationServiceTest {
             .thenReturn(listOf(public, private, mine, other))
         `when`(storyRepository.claimByPublicId(public.publicId, userId)).thenReturn(1)
         `when`(storyRepository.claimByPublicId(private.publicId, userId)).thenReturn(1)
+        val requestId = UUID.randomUUID()
+        `when`(storyCreationSessionRepository.findFirstByStoryIdOrderByIdAsc(public.id)).thenReturn(
+            StoryCreationSession(storyId = public.id, creationRequestId = requestId, status = StoryCreationSessionStatus.STORY_CREATED),
+        )
+        `when`(storyCreationRequestRepository.findByRequestId(requestId)).thenReturn(
+            StoryCreationRequest(requestId = requestId, deviceIdHash = "device_hash_test", stage = StoryCreationStage.STORY_COMPLETION),
+        )
 
         val result = service.migrate(userId, MigrationRequest(storyIds =
-            listOf(public.publicId, private.publicId, mine.publicId, other.publicId, missing, public.publicId).map { it.toString() }))
+            listOf(public.publicId, private.publicId, mine.publicId, other.publicId, missing, public.publicId).map { it.toString() }),
+            deviceIdHash = "device_hash_test")
 
         assertThat(result.stories.map { it.status }).containsExactly(
             MigrationStatus.MIGRATED, MigrationStatus.MIGRATED, MigrationStatus.ALREADY_OWNED,
@@ -219,7 +258,7 @@ class GuestDataMigrationServiceTest {
     @Test
     fun `스토리를 MIGRATED하면 연결된 생성 세션도 클레임한다`() {
         val pid = UUID.randomUUID()
-        val migratedStory = Story(id = 77L, publicId = pid, userId = null, title = "제목")
+        val migratedStory = Story(id = 77L, publicId = pid, userId = null, title = "제목", visibility = StoryVisibility.PRIVATE)
         `when`(storyRepository.findAllByPublicIdInAndDeletedAtIsNull(anyCollection())).thenReturn(listOf(migratedStory))
         `when`(storyRepository.claimByPublicId(pid, userId)).thenReturn(1)
 

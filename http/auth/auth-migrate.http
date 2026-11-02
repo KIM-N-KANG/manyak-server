@@ -4,7 +4,7 @@
 ### [KNK-389] 비로그인→계정 데이터 마이그레이션(클레임):
 ###   - 로그인 직후 클라이언트가 기기(localStorage)에 보관한 게스트 스토리·채팅의 공개 ID 목록을 제출한다.
 ###   - 서버는 user_id가 NULL인 행에만 요청자의 user_id를 설정(클레임)하고, 항목별 status를 돌려준다.
-###   - status 4종: MIGRATED(이번에 이관) · ALREADY_OWNED(이미 요청자 소유) · CONFLICT(타인 소유) · NOT_FOUND(부재/삭제).
+###   - status 4종: MIGRATED(이번에 이관) · ALREADY_OWNED(이미 요청자 소유) · CONFLICT(타인 소유 또는 스토리 기기 증명 실패) · NOT_FOUND(부재/삭제).
 ###   - 인증 필수(anyRequest().authenticated()): 토큰이 없거나 무효면 401.
 ###
 ### [KNK-434] 이관 1회 잠금(스펙 §4-3-5, KNK-480):
@@ -12,6 +12,11 @@
 ###   - 잠긴 계정의 이후 호출은 어떤 항목도 평가하지 않고 migrationClosed=true + 빈 stories·chats 로 닫힌다.
 ###   - 응답에 migrationClosed(boolean) 필드가 추가됐다(최초 이관·미이관 계정은 false, 잠긴 계정은 true).
 ###   - 따라서 아래 4번 해피 패스는 아직 이관하지 않은(migrated_at NULL) "새 계정"으로 실행해야 MIGRATED 를 관찰합니다.
+###
+### 기기 증명:
+###   - 완성 요청에 기기 해시가 있으면 게스트 제작 때와 같은 X-Manyak-Device-Id 값이 필요합니다.
+###   - 기록이 없거나 해시가 비어 있으면 발행된 공개 스토리는 CONFLICT, 비공개 또는 초안은 이관할 수 있습니다.
+###   - 채팅은 기기 증명을 하지 않습니다.
 ###
 ### 사전 준비:
 ###   - 서버 실행: ./gradlew bootRun  (기본 포트 8080)
@@ -29,6 +34,8 @@
 # 게스트(비로그인)로 만든 스토리·채팅의 공개 ID(UUID).
 @guestStoryId = PUT_A_GUEST_STORY_PUBLIC_ID_HERE
 @guestChatId = PUT_A_GUEST_CHAT_PUBLIC_ID_HERE
+# 스토리를 게스트로 완성할 때 보낸 기기 ID 원본. 해시가 아니라 같은 헤더 값을 넣습니다.
+@deviceId = PUT_THE_ORIGINAL_GUEST_DEVICE_ID_HERE
 
 ### 0. 백엔드 상태 확인
 GET {{baseUrl}}/actuator/health
@@ -70,6 +77,7 @@ Accept: application/json
 # 단, 이미 이관한(잠긴) 계정은 형식 검증 전에 migrationClosed=true(200)로 닫히므로, 미이관 계정으로 확인하세요.
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -84,6 +92,7 @@ Accept: application/json
 ### 3. (경계) 빈 배열 → 200, 빈 결과
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -101,18 +110,48 @@ Accept: application/json
     });
 %}
 
-### 4. (해피 패스) 게스트 스토리·채팅 이관 → 200, 항목별 status, migrationClosed=false
-# @guestStoryId / @guestChatId 를 게스트로 만든 실제 공개 ID 로 채운 뒤, "아직 이관하지 않은 계정"으로 실행하세요.
-# 게스트(user_id NULL) 항목은 MIGRATED 가 되고, 이 순간 계정이 잠깁니다(migrated_at 기록).
+### 3-1. 기기 헤더 없음 → 스토리 CONFLICT
+# 완성 요청에 기기 해시가 있는 @guestStoryId로 실행합니다. 이 요청은 계정을 잠그지 않습니다.
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "storyIds": ["{{guestStoryId}}"], "chatIds": [] }
+
+> {%
+    client.test("기기 헤더 없으면 스토리는 CONFLICT", () => {
+        client.assert(response.status === 200 && response.body.stories[0].status === "CONFLICT",
+            `기기 증명 없는 스토리 이관 거부. actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 3-2. 다른 기기 헤더 → 스토리 CONFLICT
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}-different
+Content-Type: application/json
+
+{ "storyIds": ["{{guestStoryId}}"], "chatIds": [] }
+
+> {%
+    client.test("다른 기기면 스토리는 CONFLICT", () => {
+        client.assert(response.status === 200 && response.body.stories[0].status === "CONFLICT",
+            `다른 기기 스토리 이관 거부. actual=${JSON.stringify(response.body)}`);
+    });
+%}
+
+### 4. (해피 패스) 게스트 스토리·채팅 이관 → 200, 항목별 status, migrationClosed=false
+# @guestStoryId / @guestChatId 를 게스트로 만든 실제 공개 ID 로 채운 뒤, "아직 이관하지 않은 계정"으로 실행하세요.
+# 같은 기기로 증명된 게스트(user_id NULL) 스토리와 채팅은 MIGRATED 가 되고, 이 순간 계정이 잠깁니다(migrated_at 기록).
+POST {{baseUrl}}/api/v1/auth/migrate
+Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
 { "storyIds": ["{{guestStoryId}}"], "chatIds": ["{{guestChatId}}"] }
 
 > {%
-    const VALID = ["MIGRATED", "ALREADY_OWNED", "CONFLICT", "NOT_FOUND"];
     client.test("이관 요청은 200이다", () => {
         client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
     });
@@ -124,8 +163,8 @@ Accept: application/json
     client.test("응답이 항목별 {id, status} 구조다", () => {
         client.assert(Array.isArray(b.stories) && b.stories.length === 1, `stories 개수가 1이 아닙니다. actual=${JSON.stringify(b.stories)}`);
         client.assert(Array.isArray(b.chats) && b.chats.length === 1, `chats 개수가 1이 아닙니다. actual=${JSON.stringify(b.chats)}`);
-        client.assert(VALID.indexOf(b.stories[0].status) >= 0, `스토리 status 가 유효하지 않습니다. actual=${b.stories[0].status}`);
-        client.assert(VALID.indexOf(b.chats[0].status) >= 0, `채팅 status 가 유효하지 않습니다. actual=${b.chats[0].status}`);
+        client.assert(b.stories[0].status === "MIGRATED", `스토리 status 가 유효하지 않습니다. actual=${b.stories[0].status}`);
+        client.assert(b.chats[0].status === "MIGRATED", `채팅 status 가 유효하지 않습니다. actual=${b.chats[0].status}`);
     });
 %}
 
@@ -133,6 +172,7 @@ Accept: application/json
 # 4번에서 한 건이라도 MIGRATED 됐다면 계정이 잠깁니다(이관 1회 제한). 재호출은 어떤 항목도 평가하지 않고 닫힙니다.
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -156,6 +196,7 @@ Accept: application/json
 # 1~5번째 실행은 migrationClosed=false + NOT_FOUND, 6번째부터는 migrationClosed=true + 빈 결과로 바뀌어야 합니다.
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
@@ -173,6 +214,7 @@ Accept: application/json
 # 배열 상한(각 100개) 초과 시 400 은 통합 테스트로 고정돼 있습니다(수기로 101개를 넣기 번거로워 여기서는 생략).
 POST {{baseUrl}}/api/v1/auth/migrate
 Authorization: Bearer {{accessToken}}
+X-Manyak-Device-Id: {{deviceId}}
 Content-Type: application/json
 Accept: application/json
 
