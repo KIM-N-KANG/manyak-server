@@ -13,8 +13,8 @@
 | [public.story_settings](public.story_settings.md) | 8 |  | BASE TABLE |
 | [public.story_start_settings](public.story_start_settings.md) | 8 |  | BASE TABLE |
 | [public.story_suggested_inputs](public.story_suggested_inputs.md) | 5 |  | BASE TABLE |
-| [public.story_chats](public.story_chats.md) | 25 |  | BASE TABLE |
-| [public.story_messages](public.story_messages.md) | 10 |  | BASE TABLE |
+| [public.story_chats](public.story_chats.md) | 29 |  | BASE TABLE |
+| [public.story_messages](public.story_messages.md) | 11 |  | BASE TABLE |
 | [public.story_choices](public.story_choices.md) | 9 |  | BASE TABLE |
 | [public.story_creation_storyline_ratings](public.story_creation_storyline_ratings.md) | 5 |  | BASE TABLE |
 | [public.feedbacks](public.feedbacks.md) | 8 |  | BASE TABLE |
@@ -64,6 +64,10 @@
 | [public.admin_analytics_daily_values](public.admin_analytics_daily_values.md) | 8 |  | BASE TABLE |
 | [public.admin_analytics_range_values](public.admin_analytics_range_values.md) | 9 |  | BASE TABLE |
 | [public.user_notifications](public.user_notifications.md) | 14 |  | BASE TABLE |
+| [public.story_chat_summaries](public.story_chat_summaries.md) | 6 |  | BASE TABLE |
+| [public.home_sections](public.home_sections.md) | 11 |  | BASE TABLE |
+| [public.home_section_genres](public.home_section_genres.md) | 2 |  | BASE TABLE |
+| [public.home_section_stories](public.home_section_stories.md) | 3 |  | BASE TABLE |
 
 ## Relations
 
@@ -82,6 +86,7 @@ erDiagram
 "public.story_suggested_inputs" }o--|| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE CASCADE"
 "public.story_chats" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
 "public.story_chats" }o--o| "public.story_start_settings" : "FOREIGN KEY (start_setting_id) REFERENCES story_start_settings(id) ON DELETE SET NULL"
+"public.story_chats" }o--o| "public.story_chats" : "FOREIGN KEY (forked_from_chat_id) REFERENCES story_chats(id)"
 "public.story_chats" }o--o| "public.story_endings" : "FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL"
 "public.story_chats" }o--o| "public.story_main_events" : "FOREIGN KEY (target_main_event_id) REFERENCES story_main_events(id) ON DELETE SET NULL"
 "public.story_chats" }o--|| "public.chat_models" : "FOREIGN KEY (model_code) REFERENCES chat_models(code)"
@@ -141,6 +146,10 @@ erDiagram
 "public.push_delivery_results" }o--o| "public.push_campaigns" : "FOREIGN KEY (campaign_id) REFERENCES push_campaigns(id)"
 "public.notices" }o--|| "public.users" : "FOREIGN KEY (created_by_user_id) REFERENCES users(id)"
 "public.user_notifications" }o--|| "public.users" : "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+"public.story_chat_summaries" }o--|| "public.story_chats" : "FOREIGN KEY (chat_id) REFERENCES story_chats(id)"
+"public.home_section_genres" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
+"public.home_section_stories" }o--|| "public.stories" : "FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE"
+"public.home_section_stories" }o--|| "public.home_sections" : "FOREIGN KEY (section_id) REFERENCES home_sections(id) ON DELETE CASCADE"
 
 "public.story_creation_tags" {
   bigint id
@@ -261,6 +270,10 @@ erDiagram
   varchar_20_ model_code FK
   boolean long_response
   integer summary_through_turn
+  integer revision
+  integer hidden_turn_count
+  bigint forked_from_chat_id FK
+  integer forked_from_turn
 }
 "public.story_messages" {
   bigint id
@@ -273,6 +286,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.story_choices" {
   bigint id
@@ -801,6 +815,36 @@ erDiagram
   varchar_16_ notice_tag
   timestamp_with_time_zone created_at
   timestamp_with_time_zone read_at
+}
+"public.story_chat_summaries" {
+  bigint id
+  bigint chat_id FK
+  integer through_turn
+  text summary
+  timestamp_with_time_zone invalidated_at
+  timestamp_with_time_zone created_at
+}
+"public.home_sections" {
+  bigint id
+  uuid public_id
+  varchar_30_ name
+  varchar_10_ source
+  varchar_10_ sort_by
+  boolean original_only
+  integer item_limit
+  boolean is_active
+  integer sort_order
+  timestamp_with_time_zone created_at
+  timestamp_with_time_zone updated_at
+}
+"public.home_section_genres" {
+  bigint section_id FK
+  varchar_30_ genre
+}
+"public.home_section_stories" {
+  bigint section_id FK
+  bigint story_id FK
+  integer sort_order
 }
 ```
 

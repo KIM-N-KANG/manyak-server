@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.controller
 
+import com.knk.manyak.chat.entity.StoryChatSummary
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
@@ -50,6 +53,7 @@ import org.junit.jupiter.params.provider.CsvSource
     ],
 )
 class ChatRegenerateHistoryIntegrationTests {
+    @Autowired lateinit var summaries: StoryChatSummaryRepository
 
     class CapturingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
@@ -105,6 +109,23 @@ class ChatRegenerateHistoryIntegrationTests {
         capturingAiClient.lastAiOutput.set(null)
     }
 
+    @Test fun `입력 수정은 대상 앞 원문을 보내고 뒤 턴을 숨긴 새 턴을 저장한다`() {
+        val story = storyRepository.save(Story(title = "수정 스토리", genre = "판타지"))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 5))
+        val turns = (1..5).map { n ->
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$n", messageOrder = n * 2 - 1))
+            storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$n", messageOrder = n * 2))
+        }
+        val body = restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/edit/stream")
+            .header("X-Manyak-Device-Id", "edit-device").contentType(MediaType.APPLICATION_JSON).accept(MediaType.TEXT_EVENT_STREAM)
+            .body("""{"turnId":${turns[2].id},"userInput":"새 입력","userSource":"typed","realtimeImage":false}""")
+            .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+        assertThat(body).contains("completed")
+        assertThat(capturingAiClient.lastRequest.get().history.map { it.content }).containsExactly("u1", "a1", "u2", "a2")
+        assertThat(capturingAiClient.lastRequest.get().userInput).isEqualTo("새 입력")
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().currentTurn).isEqualTo(3)
+    }
+
     @Test
     fun `재생성은 마지막 턴을 제외한 이전 내역을 history로 보내고 마지막 입력을 그대로 재전송한다`() {
         val story = storyRepository.save(Story(title = "재생성 내역 스토리", genre = "판타지"))
@@ -123,7 +144,7 @@ class ChatRegenerateHistoryIntegrationTests {
                 StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "AI 응답 $turn", messageOrder = turn * 2 + 1),
             )
         }
-        val lastAssistant = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val lastAssistant = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
 
         regenerate(chat.publicId.toString(), lastAssistant.id)
 
@@ -153,14 +174,15 @@ class ChatRegenerateHistoryIntegrationTests {
     )
     fun `요약 경계에 따라 실제 턴 재생성 선택지 AI 요청을 구성한다`(operation: String, turns: Int, historySize: Int, usesSummary: Boolean) {
         val story = storyRepository.save(Story(title = "요약 요청", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = turns, summary = "저장한 요약", summaryThroughTurn = 10))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = turns))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = "저장한 요약", throughTurn = 10))
         repeat(turns) { index ->
             val turn = index + 1
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
         }
-        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val last = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
         when (operation) {
             "regenerate" -> regenerate(chat.publicId.toString(), last.id)
             "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")
@@ -178,7 +200,7 @@ class ChatRegenerateHistoryIntegrationTests {
         assertThat(captured.userInput).isEqualTo(if (operation == "continue") "새 입력" else "u$turns")
         if (operation == "choices") {
             assertThat(capturingAiClient.lastAiOutput.get()).isEqualTo("a$turns")
-            assertThat(storyChatRepository.findById(chat.id).orElseThrow().summaryThroughTurn).isEqualTo(10)
+            assertThat((summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0)).isEqualTo(10)
         }
     }
 
@@ -186,14 +208,15 @@ class ChatRegenerateHistoryIntegrationTests {
     @ValueSource(strings = ["continue", "regenerate", "choices"])
     fun `요약 끝 턴이 원문 응답 수를 넘어도 실제 요청은 원문으로 완료된다`(operation: String) {
         val story = storyRepository.save(Story(title = "요약 범위 방어", genre = "판타지"))
-        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16, summary = "잘못된 요약", summaryThroughTurn = 14))
+        val chat = storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 16))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = "잘못된 요약", throughTurn = 14))
         repeat(12) { index ->
             val turn = index + 1
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$turn", messageOrder = turn * 3))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.SYSTEM, content = "system", messageOrder = turn * 3 + 1))
             storyMessageRepository.save(StoryMessage(chatId = chat.id, role = MessageRole.ASSISTANT, content = "a$turn", messageOrder = turn * 3 + 2))
         }
-        val last = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(chat.id)!!
+        val last = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id)!!
         when (operation) {
             "regenerate" -> assertThat(regenerate(chat.publicId.toString(), last.id)).contains("completed")
             "choices" -> restTestClient.post().uri("/api/v1/chats/${chat.publicId}/turns/${last.id}/choices")

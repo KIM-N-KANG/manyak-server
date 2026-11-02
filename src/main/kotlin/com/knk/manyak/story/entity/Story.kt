@@ -100,8 +100,8 @@ class Story(
     fun isPubliclyVisible(): Boolean =
         status == StoryStatus.PUBLISHED && visibility == StoryVisibility.PUBLIC
 
-    /** 공개 목록·검색 노출 조건(KNK-149·1141). 게스트는 UUID로 열람할 수 있어도 공개 목록에는 싣지 않는다. */
-    fun isPubliclyListed(): Boolean = isPubliclyVisible() && deletedAt == null && userId != null
+    /** 공개 목록과 검색 노출 조건. 소유자 유무와 무관하게 발행 공개 스토리를 노출한다. */
+    fun isPubliclyListed(): Boolean = isPubliclyVisible() && deletedAt == null
 
     /**
      * 읽기 허용 여부(KNK-464):

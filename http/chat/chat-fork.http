@@ -1,0 +1,139 @@
+# 채팅 포크 검증. docker compose up -d 및 ./gradlew bootRun 후 실행합니다.
+# auth/auth-login-google.http에서 accessToken을 준비합니다.
+# chat-create.http와 턴 진행 요청으로 회원 본인 채팅에 완료 턴을 1개 이상 만든 뒤 sourceChatId에 입력합니다.
+# 아래는 기존 원본 상세를 읽어 대상 턴과 비교값을 준비하고, 새 채팅을 만든 뒤 원본 보존을 확인합니다.
+@baseUrl = http://localhost:8080
+@accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
+@sourceChatId = PUT_YOUR_CHAT_PUBLIC_UUID_HERE
+
+### 0. 서버 확인
+GET {{baseUrl}}/actuator/health
+
+> {%
+    client.test("서버 상태", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+%}
+
+### 1. 원본과 대상 턴 준비: 3턴 이상이면 3번째, 아니면 마지막 턴
+GET {{baseUrl}}/api/v1/chats/{{sourceChatId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("포크할 완료 턴이 있다", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.turns.length > 0, "본인 채팅의 완료 턴이 필요합니다.");
+    });
+    const count = Math.min(3, response.body.turns.length);
+    client.global.set("forkTurnId", response.body.turns[count - 1].id);
+    client.global.set("forkExpectedTurns", count);
+    client.global.set("forkOriginalTurns", response.body.turns.length);
+    client.global.set("forkOriginalContent", JSON.stringify(response.body.turns));
+%}
+
+### 2. 대상 턴까지 무료 복사: 위 준비를 먼저 실행합니다
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"turnId":{{forkTurnId}}}
+
+> {%
+    client.test("새 채팅 생성 응답", () => {
+        client.assert(response.status === 201, `expected=201 actual=${response.status}`);
+        client.assert(Boolean(response.body.id), "새 채팅 UUID가 없습니다.");
+        client.assert(response.body.suggestedInputs.length === 0, `expected=[] actual=${JSON.stringify(response.body.suggestedInputs)}`);
+    });
+    client.global.set("forkChatId", response.body.id);
+%}
+
+### 3. 복사본 상세: 대상 턴까지만 있고 ID는 새로 발급됩니다
+GET {{baseUrl}}/api/v1/chats/{{forkChatId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("복사 범위", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(response.body.turns.length === Number(client.global.get("forkExpectedTurns")), `actual=${response.body.turns.length}`);
+        client.assert(String(response.body.turns[response.body.turns.length - 1].id) !== String(client.global.get("forkTurnId")), "복사본 턴 ID는 새로 발급되어야 합니다.");
+    });
+%}
+
+### 4. 원본은 그대로입니다: 다른 창에서 원본을 진행하지 않은 상태로 실행합니다
+GET {{baseUrl}}/api/v1/chats/{{sourceChatId}}
+Authorization: Bearer {{accessToken}}
+
+> {%
+    client.test("원본 보존", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        client.assert(JSON.stringify(response.body.turns) === client.global.get("forkOriginalContent"), "원본 턴이 바뀌었습니다.");
+    });
+%}
+
+### 5. 인증 없는 포크는 401
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Content-Type: application/json
+
+{"turnId":{{forkTurnId}}}
+
+> {%
+    client.test("회원 전용", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`));
+%}
+
+### 6. turnId 누락은 400
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+> {%
+    client.test("필수 턴", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 7. 양수가 아닌 turnId는 400
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"turnId":0}
+
+> {%
+    client.test("턴 ID 범위", () => client.assert(response.status === 400, `expected=400 actual=${response.status}`));
+%}
+
+### 8. 없는 턴은 404
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"turnId":9223372036854775807}
+
+> {%
+    client.test("턴 부재", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 9. 형식이 잘못된 채팅 ID는 404
+POST {{baseUrl}}/api/v1/chats/not-a-uuid/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"turnId":{{forkTurnId}}}
+
+> {%
+    client.test("채팅 형식 오류", () => client.assert(response.status === 404, `expected=404 actual=${response.status}`));
+%}
+
+### 선택 검증: 타인의 채팅 또는 소유자 없는 채팅으로 sourceChatId를 바꾸면 403
+# 1번 준비를 다시 하지 말고 기존 forkTurnId로 권한 검사를 먼저 확인합니다.
+POST {{baseUrl}}/api/v1/chats/{{sourceChatId}}/fork
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"turnId":{{forkTurnId}}}
+
+> {%
+    client.test("소유권 거절", () => client.assert(response.status === 403, `expected=403 actual=${response.status}`));
+%}
+
+### 자유 조회: 복사본에서 계속 진행하거나 원본 삭제 뒤 이미지 URL을 확인합니다
+GET {{baseUrl}}/api/v1/chats/{{forkChatId}}
+Authorization: Bearer {{accessToken}}

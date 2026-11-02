@@ -66,6 +66,14 @@ internal class AdminQuery {
                     WHERE ct.character_id=$alias.id AND ct.creation_session_id=$alias.creation_session_id)))"""
         }
         fun normalized(column: String) = "LOWER(TRIM(REGEXP_REPLACE($column, '\\s+', ' ', 'g')))"
+        /** 복사한 AI 응답은 새 메시지 ID의 앞 forked_from_turn개다. 숨긴 행도 남으므로 수정 후에도 식별이 유지된다. */
+        fun generatedAssistant(message: String = "m", chat: String = "c"): String =
+            "($chat.forked_from_turn=0 OR (SELECT COUNT(*) FROM story_messages fork_prefix WHERE fork_prefix.chat_id=$chat.id AND fork_prefix.role='ASSISTANT' AND fork_prefix.id<=$message.id)>$chat.forked_from_turn)"
+
+        /** 사용자 입력은 그 앞의 복사 AI 응답 수가 복사 턴 수 이상일 때부터 새 활동이다. */
+        fun generatedUser(message: String = "m", chat: String = "c"): String =
+            "($chat.forked_from_turn=0 OR (SELECT COUNT(*) FROM story_messages fork_prefix WHERE fork_prefix.chat_id=$chat.id AND fork_prefix.role='ASSISTANT' AND fork_prefix.id<$message.id)>=$chat.forked_from_turn)"
+
         val turnBounds = listOf(0..0, 1..1, 2..2, 3..3, 4..4, 5..5, 6..6, 7..9, 10..14, 15..19, 20..29, 30..49, 50..Int.MAX_VALUE)
         // 스토리 상세와 전환 지표는 0을 뺀 턴 분포 구간의 시작 턴을 공통 기준으로 쓴다.
         val turnReachThresholds = turnBounds.drop(1).map { it.first }

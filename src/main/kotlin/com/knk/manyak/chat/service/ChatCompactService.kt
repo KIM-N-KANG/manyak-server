@@ -1,5 +1,7 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+import com.knk.manyak.chat.entity.StoryChatSummary
 import com.knk.manyak.chat.client.ChatCompactAiClient
 import com.knk.manyak.chat.client.ChatCompactAiRequest
 import com.knk.manyak.chat.config.ChatCompactSettings
@@ -32,6 +34,7 @@ class ChatCompactService(
     private val settings: ChatCompactSettings,
     @Qualifier("chatCompactExecutor") private val executor: Executor,
     private val chats: StoryChatRepository,
+    private val summaries: StoryChatSummaryRepository,
     private val messages: StoryMessageRepository,
     private val stories: StoryRepository,
     private val starts: StoryStartSettingRepository,
@@ -69,11 +72,12 @@ class ChatCompactService(
             requireNotNull(read.execute {
                 val chat = chats.findById(event.chatId).orElseThrow()
                 storyPublicId = stories.findById(chat.storyId).orElseThrow().publicId
+                val summary = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)
                 CompactSnapshot(
-                    ChatCompactAiRequest(if (chat.summaryThroughTurn > 0) chat.summary.orEmpty() else "", ChatHistoryContext.range(
-                        messages.findByChatIdOrderByMessageOrderAsc(chat.id), chat.summaryThroughTurn, event.through,
+                    ChatCompactAiRequest(summary?.summary.orEmpty(), ChatHistoryContext.range(
+                        messages.findByChatIdOrderByMessageOrderAsc(chat.id), (summary?.throughTurn ?: 0), event.through,
                     )),
-                    chat.regeneratedCount,
+                    chat.revision,
                     AiTraceLink(
                         creationId = chat.creationId, storyId = storyPublicId, chatId = chat.publicId,
                         startSettingId = chat.startSettingId?.let { starts.findById(it).orElse(null)?.publicId },
@@ -111,11 +115,10 @@ class ChatCompactService(
                 val chat = chats.findByIdForUpdate(event.chatId)
                 when {
                     chat == null || chat.deletedAt != null -> "CHAT_DELETED"
-                    chat.regeneratedCount != snapshot.regeneratedCount -> "REGENERATED"
-                    event.through <= chat.summaryThroughTurn -> "SUPERSEDED"
+                    chat.revision != snapshot.revision -> "REGENERATED"
+                    event.through <= (summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0) -> "SUPERSEDED"
                     else -> {
-                        // 더티 체킹과 @PreUpdate를 피하고 설정 변경과도 컬럼 단위로 병합한다.
-                        check(chats.updateSummary(chat.id, result, event.through) == 1)
+                        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, summary = result, throughTurn = event.through))
                         null
                     }
                 }
@@ -153,5 +156,5 @@ class ChatCompactService(
         const val OUTCOME_DISABLED = "disabled"
     }
 
-    private data class CompactSnapshot(val request: ChatCompactAiRequest, val regeneratedCount: Int, val traceLink: AiTraceLink)
+    private data class CompactSnapshot(val request: ChatCompactAiRequest, val revision: Int, val traceLink: AiTraceLink)
 }

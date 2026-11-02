@@ -326,7 +326,7 @@ class AdminReadApiIntegrationTests {
     @Test fun `대화 요약 성공률은 저장 실패 폐기와 재생성 무효화에 영향받지 않는다`() {
         val target = chat(story(), turns = 20)
         // SAVE_FAILED와 REGENERATED는 로그 이벤트뿐이며 세 호출 모두 AI 결과는 SUCCEEDED다.
-        // 저장 후 무효화된 경우도 현재 DB는 summary NULL과 summary_through_turn 0이다.
+        // 무효화 이력도 AI 호출 성공률을 바꾸지 않는다.
         for (status in listOf("SUCCEEDED", "SUCCEEDED", "SUCCEEDED", "FAILED")) {
             jdbc.update("""INSERT INTO ai_call_logs(request_id,caller_service,feature,chat_id,status,retry_count,created_at)
                 VALUES (?,'test','chat_compact',?,?,0,?)""", UUID.randomUUID().toString(), target.publicId, status, java.sql.Timestamp.from(now))
@@ -338,20 +338,22 @@ class AdminReadApiIntegrationTests {
             assertThat(success["value"].asDouble()).isEqualTo(75.0)
         }
         assertSuccessRate()
-        jdbc.update("UPDATE story_chats SET summary='저장된 요약', summary_through_turn=20 WHERE id=?", target.id)
+        jdbc.update("INSERT INTO story_chat_summaries(chat_id,through_turn,summary,created_at) VALUES (?,20,'저장된 요약',CURRENT_TIMESTAMP)", target.id)
         assertSuccessRate()
-        jdbc.update("UPDATE story_chats SET summary=NULL, summary_through_turn=0 WHERE id=?", target.id)
+        jdbc.update("UPDATE story_chat_summaries SET invalidated_at=CURRENT_TIMESTAMP WHERE chat_id=?", target.id)
         assertSuccessRate()
     }
 
     @Test fun `채팅 목록과 상세는 저장된 요약 끝 턴만 노출하고 처음과 무효화된 상태는 모두 영이다`() {
         val source = story()
         val summarized = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = source.id,
-            currentTurn = 25, summary = "노출하면 안 되는 대화 요약 본문", summaryThroughTurn = 20))
+            currentTurn = 25))
+        jdbc.update("INSERT INTO story_chat_summaries(chat_id,through_turn,summary,created_at) VALUES (?,10,'10 요약',CURRENT_TIMESTAMP),(?,20,'노출하면 안 되는 대화 요약 본문',CURRENT_TIMESTAMP)", summarized.id, summarized.id)
         val neverSummarized = chat(source)
         val invalidated = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = source.id,
-            currentTurn = 20, summary = "무효화 전 요약", summaryThroughTurn = 20))
-        jdbc.update("UPDATE story_chats SET summary=NULL, summary_through_turn=0 WHERE id=?", invalidated.id)
+            currentTurn = 20))
+        jdbc.update("INSERT INTO story_chat_summaries(chat_id,through_turn,summary,created_at) VALUES (?,20,'무효화 전 요약',CURRENT_TIMESTAMP)", invalidated.id)
+        jdbc.update("UPDATE story_chat_summaries SET invalidated_at=CURRENT_TIMESTAMP WHERE chat_id=?", invalidated.id)
         message(summarized, 30)
         val expected = mapOf(summarized.publicId.toString() to 20, neverSummarized.publicId.toString() to 0, invalidated.publicId.toString() to 0)
         val list = json(get("/chats?storyId=${source.publicId}").expectStatus().isOk)["items"]

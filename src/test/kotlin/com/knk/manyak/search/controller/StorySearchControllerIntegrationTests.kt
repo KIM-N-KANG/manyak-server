@@ -217,12 +217,12 @@ class StorySearchControllerIntegrationTests {
     }
 
     @Test
-    fun `삭제 초안 게스트 부재 문서는 숨기고 빈 페이지 커서는 필터 전 hit를 따른다`() {
+    fun `삭제 초안 게스트 비공개 부재 문서는 숨기고 빈 페이지 커서는 필터 전 hit를 따른다`() {
         val user = users.save(User(nickname = "게이트작가", status = UserStatus.ACTIVE))
         val hidden = listOf(
             Story(userId = user.id, title = "삭제 왕국", deletedAt = Instant.now()),
             Story(userId = user.id, title = "초안 왕국", status = StoryStatus.DRAFT),
-            Story(title = "게스트 왕국"),
+            Story(title = "게스트 왕국", visibility = StoryVisibility.PRIVATE),
         ).map(stories::save)
         val missing = Story(title = "없는 왕국")
         val last = staleHit(missing)
@@ -236,6 +236,81 @@ class StorySearchControllerIntegrationTests {
         assertEquals(StorySearchCursor.fromSort(last.sort()).encode("왕국"), body.nextCursor)
         hidden.forEach { verify(indexer).index(it.id) }
         verifyNoMoreInteractions(indexer)
+    }
+
+    @Test
+    fun `게스트 공개 스토리는 검색에 작성자 없이 노출한다`() {
+        val guest = stories.save(Story(title = "게스트 왕국"))
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(guest))))
+        val body = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!
+        assertEquals(guest.publicId.toString(), body.items.single().id)
+        assertNull(body.items.single().author)
+        verifyNoInteractions(indexer)
+    }
+
+    @Test
+    fun `게스트 공개 비공개 완성본은 이관 전후 공개만 검색되고 이관 뒤 작성자가 표시된다`() {
+        val deviceId = UUID.randomUUID().toString()
+        val privateDeviceId = UUID.randomUUID().toString()
+        fun completeGuest(visibility: StoryVisibility, ownerDevice: String): Story {
+            val session = sessions.save(StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED))
+            val storyline = storylines.save(StoryCreationStoryline(creationSession = session, storylineText = "마법 왕국", storylineOrder = 1))
+            val result = client.post().uri("/api/v1/stories/simple")
+                .header("X-Manyak-Device-Id", ownerDevice)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(mapOf("requestId" to UUID.randomUUID().toString(), "simpleCreationId" to session.id,
+                    "storylineId" to storyline.id, "visibility" to visibility.name))
+                .exchange().expectStatus().isCreated
+                .expectBody(SimpleStoryCreateResponse::class.java).returnResult().responseBody!!
+            return stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!.also {
+                assertNull(it.userId)
+                assertEquals(visibility, it.visibility)
+            }
+        }
+
+        val public = completeGuest(StoryVisibility.PUBLIC, deviceId)
+        val private = completeGuest(StoryVisibility.PRIVATE, privateDeviceId)
+        assertTrue(reader.read(public.id)!!.visible)
+        assertNull(reader.read(public.id)!!.author)
+        assertFalse(reader.read(private.id)!!.visible)
+        // 같은 게스트 시점의 hit를 이관 뒤에도 반환한다. 비공개 hit가 남아도 DB에서 제외해야 한다.
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java)))
+            .thenReturn(response(listOf(staleHit(public), staleHit(private))))
+
+        fun search() = client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
+            .expectBody(StoryPageResponse::class.java).returnResult().responseBody!!.items
+
+        val before = search()
+        assertEquals(listOf(public.publicId.toString()), before.map { it.id })
+        assertNull(before.single().author)
+
+        val member = users.save(User(nickname = "이관 검색 작가", status = UserStatus.ACTIVE))
+        client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", deviceId)
+            .header("Authorization", "Bearer ${jwt.issueAccessToken(member.publicId)}")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(public.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+        val privateMember = users.save(User(nickname = "비공개 이관 작가", status = UserStatus.ACTIVE))
+        client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", privateDeviceId)
+            .header("Authorization", "Bearer ${jwt.issueAccessToken(privateMember.publicId)}")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(private.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+
+        val after = search()
+        assertEquals(listOf(public.publicId.toString()), after.map { it.id })
+        assertEquals(member.nickname, after.single().author!!.nickname)
+        assertNull(after.single().author!!.id)
+        assertTrue(reader.read(public.id)!!.visible)
+        assertEquals(member.nickname, reader.read(public.id)!!.author!!.nickname)
+        assertFalse(reader.read(private.id)!!.visible)
+        assertEquals(StoryVisibility.PRIVATE, stories.findById(private.id).orElseThrow().visibility)
     }
 
     private fun staleHit(story: Story): Hit<StorySearchDocument> = Hit.Builder<StorySearchDocument>()
@@ -316,7 +391,7 @@ class StorySearchControllerIntegrationTests {
     }
 
     @Test
-    fun `색인 문서는 초안 비공개 삭제 게스트를 숨기고 인물명을 포함한다`() {
+    fun `색인 문서는 게스트 공개를 노출하고 초안 비공개 삭제를 숨기며 인물명을 포함한다`() {
         val user = users.save(User(nickname = "문서작가", status = UserStatus.ACTIVE))
         val samples = listOf(
             Story(userId = user.id, title = "공개", genre = "판타지, , 로맨스"),
@@ -324,9 +399,11 @@ class StorySearchControllerIntegrationTests {
             Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE),
             Story(userId = user.id, title = "삭제", deletedAt = Instant.now()),
             Story(title = "게스트"),
+            Story(title = "게스트 비공개", visibility = StoryVisibility.PRIVATE),
         ).map(stories::save)
         characters.save(StoryCharacter(story = samples.first(), name = "마법사"))
-        assertEquals(listOf(true, false, false, false, false), samples.map { reader.read(it.id)!!.visible })
+        assertEquals(listOf(true, false, false, false, true, false), samples.map { reader.read(it.id)!!.visible })
+        assertNull(reader.read(samples[4].id)!!.author)
         val document = reader.read(samples.first().id)!!
         assertEquals(listOf("판타지", "로맨스"), document.genres)
         assertEquals(listOf("마법사"), document.characterNames)
@@ -347,7 +424,7 @@ class StorySearchControllerIntegrationTests {
         val result = complete().expectBody(SimpleStoryCreateResponse::class.java).returnResult().responseBody!!
         val story = stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!
         indexed(story.id)
-        assertFalse(reader.read(story.id)!!.visible)
+        assertTrue(reader.read(story.id)!!.visible)
         complete()
         verify(indexer, after(200).never()).index(story.id)
     }

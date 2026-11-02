@@ -1,5 +1,8 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.chat.entity.StoryChatSummary
+import com.knk.manyak.chat.repository.StoryChatSummaryRepository
+
 import com.knk.manyak.chat.dto.BatchChatRequest
 import tools.jackson.databind.json.JsonMapper
 import com.knk.manyak.story.entity.Story
@@ -110,6 +113,7 @@ class ChatCompactIntegrationTests {
     @Autowired lateinit var generationStore: ChatGenerationStore
     @Autowired lateinit var chatService: ChatService
     @Autowired lateinit var service: ChatCompactService
+    @Autowired lateinit var summaries: StoryChatSummaryRepository
     @Autowired lateinit var chats: StoryChatRepository
     @Autowired lateinit var messages: StoryMessageRepository
     @Autowired lateinit var stories: StoryRepository
@@ -122,6 +126,41 @@ class ChatCompactIntegrationTests {
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var tm: PlatformTransactionManager
 
+    @Test fun `대상 15턴은 유효한 10턴 요약과 그 뒤 원문을 고른다`() {
+        val chat = fixture(20, 10)
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 20, summary = "20 요약"))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 14, summary = "무효 요약", invalidatedAt = java.time.Instant.now()))
+        val selected = summaries.findFirstByChatIdAndInvalidatedAtIsNullAndThroughTurnLessThanOrderByThroughTurnDesc(chat.id, 15)
+        val context = ChatHistoryContext.of(chat, messages.findByChatIdOrderByMessageOrderAsc(chat.id), true, 15, selected)
+        assertThat(context.summary).isEqualTo("이전 요약")
+        assertThat(context.history.map { it.content }).containsExactlyElementsOf((11..14).flatMap { listOf("u$it", "a$it <image>url</image>") })
+        assertThat(summaries.findByChatIdOrderByThroughTurnAsc(chat.id)).hasSize(3)
+    }
+
+    @Test fun `재생성 횟수가 그대로여도 개정 횟수가 바뀌면 진행 중 요약을 폐기한다`() {
+        val chat = fixture()
+        ai.respond = {
+            jdbc.update("UPDATE story_chats SET revision=revision+1 WHERE id=?", chat.id)
+            "낡은 요약"
+        }
+        service.compact(event(chat))
+        assertThat(currentSummary(chat)).isNull()
+        assertThat(reload(chat).regeneratedCount).isZero()
+        assertThat(reason("chat_compact_discarded")).isEqualTo("REGENERATED")
+    }
+
+    @Test fun `재생성은 대상 이상 끝 턴만 무효화하고 이전 요약과 전체 이력을 보존한다`() {
+        val chat = fixture(15, 10)
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 15, summary = "15 요약"))
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 20, summary = "20 요약"))
+        regenerate(chat)
+        assertThat(currentSummary(chat)?.throughTurn).isEqualTo(10)
+        val rows = summaries.findByChatIdOrderByThroughTurnAsc(chat.id)
+        assertThat(rows.map { it.throughTurn }).containsExactly(10, 15, 20)
+        assertThat(rows.filter { it.invalidatedAt != null }.map { it.throughTurn }).containsExactly(15, 20)
+        assertThat(log.entries.single { it.first == "chat_compact_invalidated" }.second["summary_through_turn"]).isEqualTo(20)
+    }
+
     @BeforeEach fun reset() {
         cleaner.cleanAll()
         ai.requests.clear(); ai.links.clear(); ai.respond = { "새 요약" }
@@ -130,7 +169,8 @@ class ChatCompactIntegrationTests {
     }
     private fun fixture(turns: Int = 10, through: Int = 0, userId: Long? = null, model: String = "LITE"): StoryChat {
         val story = stories.save(Story(title = "요약 테스트", genre = "판타지"))
-        val chat = chats.save(StoryChat(storyId = story.id, userId = userId, modelCode = model, currentTurn = turns, summary = if (through > 0) "이전 요약" else null, summaryThroughTurn = through))
+        val chat = chats.save(StoryChat(storyId = story.id, userId = userId, modelCode = model, currentTurn = turns))
+        if (through > 0) summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = through, summary = "이전 요약"))
         repeat(turns) { index ->
             val n = index + 1
             messages.save(StoryMessage(chatId = chat.id, role = MessageRole.USER, content = "u$n", messageOrder = n * 3))
@@ -140,16 +180,17 @@ class ChatCompactIntegrationTests {
         return chat
     }
     private fun event(chat: StoryChat, through: Int = chat.currentTurn) = ChatTurnCommitted(chat.id, chat.publicId, chat.storyId, through)
+    private fun currentSummary(chat: StoryChat) = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)
     private fun reload(chat: StoryChat) = chats.findById(chat.id).orElseThrow()
     private fun regenerate(chat: StoryChat) {
         val current = reload(chat)
-        val last = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
-        persister.regenerateLastTurn(chat.id, last.id, "재생성", emptyList(), GenerationStartState(last.id, current.regeneratedCount), "LITE")
+        val last = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
+        persister.regenerateLastTurn(chat.id, last.id, "재생성", emptyList(), GenerationStartState(last.id, current.revision), "LITE")
     }
     private fun append(chat: StoryChat) {
-        val last = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)
+        val last = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)
         persister.persistTurn(chat.id, "다음 입력", "다음 응답", emptyList(), judgmentSource = TurnJudgmentSource(),
-            expectedState = GenerationStartState(last?.id, reload(chat).regeneratedCount), billingModelCode = "LITE")
+            expectedState = GenerationStartState(last?.id, reload(chat).revision), billingModelCode = "LITE")
     }
     private fun continueThroughHttp(chat: StoryChat, input: String = "다음 입력", token: String? = null): String {
         val body = http.post().uri("/api/v1/chats/${chat.publicId}/turns/stream")
@@ -195,8 +236,8 @@ class ChatCompactIntegrationTests {
         val original = messages.findByChatIdOrderByMessageOrderAsc(chat.id).map { it.id to it.content }
         service.compact(event(chat))
         val saved = reload(chat)
-        assertThat(saved.summary).isEqualTo("새 요약")
-        assertThat(saved.summaryThroughTurn).isEqualTo(10)
+        assertThat(currentSummary(chat)?.summary).isEqualTo("새 요약")
+        assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(10)
         assertThat(saved.updatedAt).isEqualTo(originalUpdatedAt)
         assertThat(messages.findByChatIdOrderByMessageOrderAsc(chat.id).map { it.id to it.content }).isEqualTo(original)
         val call = calls.findAll().single()
@@ -221,7 +262,7 @@ class ChatCompactIntegrationTests {
         assertThat(ai.requests.single().summary).isEqualTo("이전 요약")
         assertThat(ai.requests.single().history.first().content).isEqualTo("u11")
         assertThat(ai.requests.single().history).hasSize(20)
-        assertThat(reload(chat).summaryThroughTurn).isEqualTo(20)
+        assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(20)
     }
     @Test fun `요약 시작은 이어쓰기 경계 커밋 뒤 한 번이고 재생성은 시작하지 않는다`() {
         val chat = fixture(8)
@@ -257,14 +298,14 @@ class ChatCompactIntegrationTests {
             continueThroughHttp(chat)
             assertThat(compact.isDone).isFalse()
             assertThat(reload(chat).currentTurn).isEqualTo(turns + 1)
-            assertThat(reload(chat).summaryThroughTurn).isEqualTo(through)
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(through)
             assertThat(turnAi.requests.single().summary).isEqualTo(if (through == 0) "" else "이전 요약")
             assertThat(turnAi.requests.single().history.map { it.content }).containsExactlyElementsOf(
                 ((through + 1)..turns).flatMap { listOf("u$it", "a$it <image>url</image>") })
             release.countDown()
             compact.get(10, TimeUnit.SECONDS)
-            assertThat(reload(chat).summary).isEqualTo("고정 범위 요약")
-            assertThat(reload(chat).summaryThroughTurn).isEqualTo(turns)
+            assertThat(currentSummary(chat)?.summary).isEqualTo("고정 범위 요약")
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(turns)
             assertThat(ai.requests.single().history).hasSize(20)
             continueThroughHttp(chat, "요약 뒤 입력")
             assertThat(turnAi.requests.last().summary).isEqualTo("고정 범위 요약")
@@ -285,7 +326,7 @@ class ChatCompactIntegrationTests {
             awaitLatch(entered)
             service.compact(event(chat, 10))
             assertThat(turn.isDone).isFalse()
-            assertThat(reload(chat).summaryThroughTurn).isEqualTo(10)
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(10)
             assertThat(turnAi.requests.single().summary).isEmpty()
             assertThat(turnAi.requests.single().history.map { it.content }).containsExactlyElementsOf(
                 (1..11).flatMap { listOf("u$it", "a$it <image>url</image>") })
@@ -303,7 +344,7 @@ class ChatCompactIntegrationTests {
         val chat = fixture()
         ai.respond = { TransactionTemplate(tm).executeWithoutResult { chats.findByIdForUpdate(chat.id)!!.deletedAt = Instant.now() }; "삭제 뒤 응답" }
         service.compact(event(chat))
-        assertThat(reload(chat).summaryThroughTurn).isZero()
+        assertThat((currentSummary(chat)?.throughTurn ?: 0)).isZero()
         assertThat(reason("chat_compact_discarded")).isEqualTo("CHAT_DELETED")
     }
     @Test fun `늦게 끝난 이전 요약은 새 범위를 덮지 않는다`() {
@@ -314,8 +355,8 @@ class ChatCompactIntegrationTests {
             "10턴 요약"
         }
         service.compact(event(chat, 10))
-        assertThat(reload(chat).summary).isEqualTo("20턴 요약")
-        assertThat(reload(chat).summaryThroughTurn).isEqualTo(20)
+        assertThat(currentSummary(chat)?.summary).isEqualTo("20턴 요약")
+        assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(20)
         assertThat(reason("chat_compact_discarded")).isEqualTo("SUPERSEDED")
     }
     @Test fun `요약 중 재생성은 범위 안팎 모두 결과를 폐기한다`() {
@@ -323,28 +364,30 @@ class ChatCompactIntegrationTests {
             val chat = fixture(turns)
             ai.respond = { regenerate(chat); "오래된 요약" }
             service.compact(event(chat, 10))
-            assertThat(reload(chat).summaryThroughTurn).isZero()
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isZero()
             assertThat(reason("chat_compact_discarded")).isEqualTo("REGENERATED")
         }
     }
     @Test fun `저장된 요약 무효화는 재생성 트랜잭션에 묶이고 범위 밖은 유지한다`() {
         val inside = fixture(10, 10)
         regenerate(inside)
-        assertThat(reload(inside).summary).isNull(); assertThat(reload(inside).summaryThroughTurn).isZero()
+        assertThat(currentSummary(inside)?.summary).isNull(); assertThat((currentSummary(inside)?.throughTurn ?: 0)).isZero()
         assertThat(log.entries.any { it.first == "chat_compact_invalidated" }).isTrue()
+        assertThat(summaries.findByChatIdOrderByThroughTurnAsc(inside.id).single().invalidatedAt).isNotNull()
+        assertThat(reload(inside).revision).isEqualTo(1)
         val outside = fixture(12, 10)
         regenerate(outside)
-        assertThat(reload(outside).summary).isEqualTo("이전 요약")
+        assertThat(currentSummary(outside)?.summary).isEqualTo("이전 요약")
         val rollback = fixture(10, 10)
         TransactionTemplate(tm).executeWithoutResult { status -> regenerate(rollback); status.setRollbackOnly() }
-        assertThat(reload(rollback).summaryThroughTurn).isEqualTo(10)
+        assertThat((currentSummary(rollback)?.throughTurn ?: 0)).isEqualTo(10)
     }
     @Test fun `재생성 호출 중 요약이 먼저 저장돼도 뒤의 재생성이 비운다`() {
         val chat = fixture()
-        val state = GenerationStartState(messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!.id, 0)
+        val state = GenerationStartState(messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!.id, 0)
         service.compact(event(chat))
         persister.regenerateLastTurn(chat.id, state.lastTurnId!!, "새 본문", emptyList(), state, "LITE")
-        assertThat(reload(chat).summary).isNull()
+        assertThat(currentSummary(chat)?.summary).isNull()
     }
     @Test fun `실패 뒤 다음 요약과 무효화 뒤 다음 요약은 다음 경계까지 기다린다`() {
         for (invalidate in listOf(false, true)) {
@@ -365,8 +408,8 @@ class ChatCompactIntegrationTests {
     @Test fun `롤백 뒤 일괄 비우면 다음 요청은 원문이고 다음 경계에서 다시 요약한다`() {
         val chat = fixture(10, 10)
         jdbc.update("UPDATE story_chats SET regenerated_count = regenerated_count + 1 WHERE id = ?", chat.id)
-        jdbc.update("UPDATE story_chats SET summary = NULL, summary_through_turn = 0 WHERE summary_through_turn > 0")
-        val context = ChatHistoryContext.of(reload(chat), messages.findByChatIdOrderByMessageOrderAsc(chat.id), true, 11)
+        jdbc.update("UPDATE story_chat_summaries SET invalidated_at = CURRENT_TIMESTAMP WHERE invalidated_at IS NULL")
+        val context = ChatHistoryContext.of(reload(chat), messages.findByChatIdOrderByMessageOrderAsc(chat.id), true, 11, currentSummary(chat))
         assertThat(context.summary).isEmpty()
         assertThat(context.history).hasSize(20)
         repeat(9) { append(chat) }
@@ -382,8 +425,8 @@ class ChatCompactIntegrationTests {
             val chat = fixture(20, 10)
             ai.respond = response
             service.compact(event(chat))
-            assertThat(reload(chat).summary).isEqualTo("이전 요약")
-            assertThat(reload(chat).summaryThroughTurn).isEqualTo(10)
+            assertThat(currentSummary(chat)?.summary).isEqualTo("이전 요약")
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(10)
             assertThat(reason("chat_compact_failed")).isEqualTo("AI_FAILED")
             assertThat(calls.findAll().last().status).isEqualTo(AiCallStatus.FAILED)
             assertThat(calls.findAll().last().errorCode).isEqualTo("AI_COMPACT_FAILED")
@@ -424,8 +467,8 @@ class ChatCompactIntegrationTests {
             compact.get(10, TimeUnit.SECONDS)
             settings.get(10, TimeUnit.SECONDS)
             assertThat(reload(chat).longResponse).isTrue()
-            assertThat(reload(chat).summary).isEqualTo("새 요약")
-            assertThat(reload(chat).summaryThroughTurn).isEqualTo(10)
+            assertThat(currentSummary(chat)?.summary).isEqualTo("새 요약")
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isEqualTo(10)
         } finally { release.countDown(); pool.shutdownNow() }
     }
 
@@ -444,7 +487,7 @@ class ChatCompactIntegrationTests {
             assertThat(charges).hasSize(1)
             assertThat(charges.single().amount).isEqualTo(-cost)
             assertThat(reload(chat).currentTurn).isEqualTo(10)
-            val saved = messages.findFirstByChatIdAndRoleOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
+            val saved = messages.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)!!
             assertThat(saved.content).isEqualTo("이어쓰기 응답")
             assertThat(saved.creditTransactionId).isEqualTo(charges.single().id)
             assertThat(queue.tasks).hasSize(1)
@@ -453,7 +496,7 @@ class ChatCompactIntegrationTests {
             assertThat(ai.requests).isEmpty()
             assertThat(calls.findAll().map { it.feature }).containsExactly(AiCallFeature.CHAT_RESPONSE)
             assertThat(reload(chat).currentTurn).isEqualTo(10)
-            assertThat(reload(chat).summaryThroughTurn).isZero()
+            assertThat((currentSummary(chat)?.throughTurn ?: 0)).isZero()
             assertThat(wallet.balanceOf(member.id)).isEqualTo(balance)
             assertThat(transactions.findAll().filter { it.reason == CreditReason.CHAT_TURN }.map { it.id }).containsExactly(charges.single().id)
             assertThat(messages.findById(saved.id).orElseThrow().content).isEqualTo(saved.content)

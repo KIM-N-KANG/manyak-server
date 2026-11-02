@@ -65,7 +65,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         return AdminQuery.turnReachThresholds.map { AdminRetention(it, if (total == 0.0) 0.0 else (row["n$it"] as Number).toDouble() / total) }
     }
 
-    private val firstAt = "(SELECT MIN(m.created_at) FROM story_messages m WHERE m.chat_id=c.id AND m.role='USER')"
+    private val firstAt = "(SELECT MIN(m.created_at) FROM story_messages m WHERE m.chat_id=c.id AND m.role='USER' AND ${AdminQuery.generatedUser()})"
     // EXTRACT(EPOCH FROM timestamp subtraction)는 H2 PostgreSQL 모드와 PostgreSQL에서 같은 초 값을 낸다.
     private val firstSeconds = "EXTRACT(EPOCH FROM ($firstAt - c.created_at))"
     private val credits = """(SELECT COALESCE(SUM(-t.amount),0) FROM credit_transactions t WHERE t.ref_id=c.id
@@ -80,12 +80,12 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
             val date = AdminQuery().apply { range("m.created_at", it, it) }
             var sql = date.where()
             date.params.forEach { (key, value) -> sql = sql.replace(":$key", ":turn_$key"); q.params["turn_$key"] = value }
-            q.add("EXISTS (SELECT 1 FROM story_messages m WHERE m.chat_id=c.id AND m.role='ASSISTANT' AND $sql)")
+            q.add("EXISTS (SELECT 1 FROM story_messages m WHERE m.chat_id=c.id AND m.role='ASSISTANT' AND ${AdminQuery.generatedAssistant()} AND $sql)")
         }
         q.range("c.created_at", request.from, request.to)
         q.search(request.normalizedQuery(), listOf("c.public_id"), listOf("s.title", "u.nickname"))
         q.ai(request, "al.chat_id=c.public_id")
-        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, c.summary_through_turn, c.created_at, c.updated_at, c.deleted_at,
+        return jdbc.adminPage("""c.public_id, s.public_id AS story_public_id, s.title, s.genre, c.current_turn, COALESCE((SELECT MAX(cs.through_turn) FROM story_chat_summaries cs WHERE cs.chat_id=c.id AND cs.invalidated_at IS NULL), 0) AS summary_through_turn, c.created_at, c.updated_at, c.deleted_at,
             $credits AS credits_spent, $firstSeconds AS first_seconds, $MEMBER_COLUMNS""",
             "FROM story_chats c JOIN stories s ON s.id=c.story_id LEFT JOIN users u ON u.id=c.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id",
             q, page, "c.public_id", RowMapper { rs: ResultSet, _ ->

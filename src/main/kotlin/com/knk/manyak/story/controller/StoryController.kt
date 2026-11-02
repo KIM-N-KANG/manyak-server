@@ -199,6 +199,20 @@ class StoryController(
             rawCursor = cursor,
         )
 
+    @Operation(summary = "탐색 목록 조회", description = "표지가 있는 공개 스토리를 무작위 순서로 반환합니다. 회원은 자신의 스토리가 제외됩니다. 다음 커서는 같은 순서를 유지합니다.")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "탐색 목록", content = [Content(schema = Schema(implementation = StoryPageResponse::class))]),
+        ApiResponse(responseCode = "400", description = "숫자가 아닌 limit 또는 잘못된 탐색 커서", content = [Content(schema = Schema(hidden = true))]),
+    ])
+    @GetMapping("/explore")
+    fun getExploreStories(
+        @CurrentUserId userId: Long?,
+        @Parameter(description = "한 페이지 개수(기본 20, 1~50으로 보정)")
+        @RequestParam(defaultValue = "$DEFAULT_LIMIT") limit: Int,
+        @Parameter(description = "이전 탐색 응답의 nextCursor. 생략하면 새 순서로 시작합니다.")
+        @RequestParam(required = false) cursor: String?,
+    ): StoryPageResponse = storyService.getExploreStories(userId, limit.coerceIn(MIN_LIMIT, MAX_LIMIT), cursor)
+
     @Operation(summary = "공개 스토리 검색", description = "검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다.")
     @ApiResponses(value = [
         ApiResponse(responseCode = "200", description = "검색 성공", content = [Content(schema = Schema(implementation = StoryPageResponse::class))]),

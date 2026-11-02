@@ -483,8 +483,9 @@ Authorization: Bearer {{adminToken}}
     if (response.status === 200 && response.body.items.length) client.global.set("adminChatId", response.body.items[0].chatId);
 %}
 
-# 요약을 만든 적 없는 채팅과 재생성으로 요약이 비워진 채팅은 모두 summaryThroughTurn=0.
-# 요약이 저장된 채팅은 저장된 끝 턴(예: 20)이 보이고 summary 본문은 없다.
+# 요약 이력이 없거나 유효한 이력이 모두 무효화된 채팅은 summaryThroughTurn=0.
+# 유효한 이력의 끝 턴이 10과 20이면 summaryThroughTurn=20이며 summary 본문은 없다.
+# 20 요약만 무효화되면 10, 모두 무효화되면 0인지 목록과 아래 상세에서 대조한다.
 
 ### 대화 요약 실패 호출 필터 — 실제 실패 기록이 있는 채팅만 확인
 GET {{baseUrl}}/api/v1/admin/chats?aiFeature=chat_compact&aiStatus=FAILED
