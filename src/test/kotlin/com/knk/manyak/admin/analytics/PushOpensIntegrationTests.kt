@@ -116,4 +116,130 @@ class PushOpensIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
     }
 
+    @Autowired private lateinit var stories: com.knk.manyak.story.repository.StoryRepository
+    @Autowired private lateinit var chats: com.knk.manyak.chat.repository.StoryChatRepository
+    @Autowired private lateinit var messages: com.knk.manyak.chat.repository.StoryMessageRepository
+
+    private fun conversionAuth(): String {
+        cleaner.cleanAll()
+        val admin = users.save(User(nickname = "전환 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id,granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
+        return jwt.issueAdminToken(admin.publicId)
+    }
+    private fun conversionCampaign(start: String = "2026-10-22T00:00:00Z", link: Boolean? = true) =
+        campaigns.saveAndFlush(PushCampaign(title = "전환", body = "본문", scheduledAt = Instant.EPOCH,
+            status = PushCampaignStatus.SENT, startedAt = Instant.parse(start), deepLinkIncluded = link))
+    private fun conversionDelivery(user: User?, at: String, campaign: PushCampaign? = null, type: String = "PROMOTION", devices: Int = 1) {
+        jdbc.update("""INSERT INTO push_delivery_results(message_id,campaign_id,type,kind,user_id,outcome,reason,delivered_devices,failed_devices,completed_at)
+            VALUES (?,?,?,'SERVICE',?,?,'fixture',?,0,?)""", java.util.UUID.randomUUID().toString(), campaign?.id, type, user?.id,
+            if (devices > 0) "DELIVERED" else "UNDELIVERED", devices, java.sql.Timestamp.from(Instant.parse(at)))
+    }
+    private fun conversionMessage(user: User?, at: String, role: String = "USER", deleted: Boolean = false) {
+        val story = stories.saveAndFlush(com.knk.manyak.story.entity.Story(title = "전환 스토리", genre = "판타지"))
+        val chat = chats.saveAndFlush(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, userId = user?.id,
+            deletedAt = if (deleted) Instant.parse(at) else null))
+        messages.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
+            role = com.knk.manyak.chat.entity.MessageRole.valueOf(role), content = "집계에서 읽지 않는 원문", messageOrder = 1, createdAt = Instant.parse(at)))
+    }
+    private fun conversionGet(path: String, token: String) = mapper.readTree(client.get().uri("/api/v1/admin/campaigns/push-opens$path")
+        .header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+    private fun emptyOpens(vararg dates: String) {
+        repeat(2) { server.enqueue(MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf(
+            "xValues" to dates.toList(), "seriesLabels" to emptyList<String>(), "series" to emptyList<Long>()))))) }
+    }
+    private fun assertConversion(row: tools.jackson.databind.JsonNode, after: Long?, before: Long?, rate: Double?) {
+        for ((key, value) in mapOf("chattedMembers" to after, "chattedBeforeMembers" to before)) {
+            assertThat(row.has(key)).describedAs(key).isTrue()
+            if (value == null) assertThat(row[key].isNull).isTrue() else assertThat(row[key].asLong()).isEqualTo(value)
+        }
+        assertThat(row.has("chatRate")).isTrue()
+        if (rate == null) assertThat(row["chatRate"].isNull).isTrue() else assertThat(row["chatRate"].asDouble()).isEqualTo(rate)
+    }
+
+    @Test fun `채팅 전환은 도달 처리 시각 앞뒤 24시간의 USER 메시지를 회원별로 세고 캠페인 단건도 같다`() {
+        val token = conversionAuth()
+        val campaign = conversionCampaign()
+        val members = (1..4).map { users.save(User(nickname = "수신$it")) }
+        members.forEach { conversionDelivery(it, "2026-10-22T02:00:00Z", campaign) }
+        conversionMessage(members[0], "2026-10-22T10:00:00Z")
+        conversionMessage(members[0], "2026-10-22T11:00:00Z") // 한 회원 중복 제거
+        conversionMessage(members[1], "2026-10-23T03:00:00Z") // 25시간 뒤 제외
+        conversionMessage(members[2], "2026-10-21T20:00:00Z")
+        conversionMessage(members[2], "2026-10-22T05:00:00Z")
+        conversionMessage(members[3], "2026-10-22T05:00:00Z", "ASSISTANT")
+        emptyOpens("2026-10-22", "2026-10-23")
+        val row = conversionGet("?from=2026-10-22&to=2026-10-23", token)["campaigns"].single()
+        assertConversion(row, 2, 1, 0.5)
+        assertConversion(conversionGet("/${campaign.publicId}", token), 2, 1, 0.5)
+    }
+
+    @Test fun `채팅 전환은 NO_LINK BEFORE_MEASUREMENT에서도 계산하고 PENDING과 도달 영은 null이다`() {
+        val token = conversionAuth()
+        val noLink = conversionCampaign(link = false)
+        val before = conversionCampaign("2026-10-20T00:00:00Z")
+        val pending = campaigns.saveAndFlush(PushCampaign(title = "대기", body = "본문", scheduledAt = Instant.EPOCH))
+        val undelivered = conversionCampaign(link = false)
+        val member = users.save(User(nickname = "수신자"))
+        for (campaign in listOf(noLink, before)) conversionDelivery(member, "2026-10-22T02:00:00Z", campaign)
+        conversionDelivery(member, "2026-10-22T02:00:00Z", undelivered, devices = 0)
+        conversionMessage(member, "2026-10-22T03:00:00Z")
+        val calls = server.requestCount
+        for ((campaign, state) in listOf(noLink to "NO_LINK", before to "BEFORE_MEASUREMENT")) {
+            val row = conversionGet("/${campaign.publicId}", token)
+            assertThat(row["openState"].asText()).isEqualTo(state)
+            assertThat(row["pushOpens"].isNull).isTrue()
+            assertConversion(row, 1, 0, 1.0)
+        }
+        assertConversion(conversionGet("/${pending.publicId}", token), null, null, null)
+        assertConversion(conversionGet("/${undelivered.publicId}", token), null, null, null)
+        assertThat(server.requestCount).isEqualTo(calls)
+    }
+
+    @Test fun `활동 알림 채팅 전환은 같은 집계 구간에서 종류 KST 날짜 회원 중복을 빼고 날짜 합을 센다`() {
+        val token = conversionAuth()
+        val member = users.save(User(nickname = "반복 수신"))
+        for (at in listOf("2026-10-22T01:00:00Z", "2026-10-22T02:00:00Z", "2026-10-23T02:00:00Z"))
+            conversionDelivery(member, at, type = "ATTENDANCE_REMINDER")
+        // 측정 시작 전 활동은 activityFrom=10-21로 잘려 분모와 분자 모두에서 빠진다.
+        conversionDelivery(member, "2026-10-20T02:00:00Z", type = "ATTENDANCE_REMINDER")
+        conversionMessage(member, "2026-10-20T03:00:00Z")
+        conversionMessage(member, "2026-10-22T05:00:00Z")
+        conversionDelivery(null, "2026-10-22T02:00:00Z", type = "ATTENDANCE_REMINDER")
+        conversionDelivery(member, "2026-10-22T02:00:00Z", type = "STORY_COMPLETED", devices = 0)
+        emptyOpens("2026-10-21", "2026-10-22", "2026-10-23")
+        val body = conversionGet("?from=2026-10-20&to=2026-10-23", token)
+        assertThat(body["activityFrom"].asText()).isEqualTo("2026-10-21")
+        val attendance = body["activityTypes"].single { it["type"].asText() == "ATTENDANCE_REMINDER" }
+        assertThat(attendance["deliveredMembers"].asLong()).isEqualTo(2)
+        assertConversion(attendance, 1, 1, 0.5)
+        assertConversion(body["activityTypes"].first(), null, null, null)
+        val before = conversionGet("?from=2026-10-20&to=2026-10-20", token)
+        assertThat(before["activityFrom"].isNull).isTrue()
+        assertConversion(before["activityTypes"].single { it["type"].asText() == "ATTENDANCE_REMINDER" }, 1, 0, 1.0)
+    }
+
+    @Test fun `채팅 전환은 타인과 게스트를 제외하고 삭제 채팅도 소유자로 판정하며 매번 다시 센다`() {
+        val token = conversionAuth()
+        val campaign = conversionCampaign(link = false)
+        val recipient = users.save(User(nickname = "도달 회원"))
+        val other = users.save(User(nickname = "다른 회원"))
+        conversionDelivery(recipient, "2026-10-22T02:00:00Z", campaign)
+        conversionMessage(other, "2026-10-22T03:00:00Z")
+        conversionMessage(null, "2026-10-22T03:00:00Z")
+        assertConversion(conversionGet("/${campaign.publicId}", token), 0, 0, 0.0)
+        conversionMessage(recipient, "2026-10-22T03:00:00Z", deleted = true)
+        assertConversion(conversionGet("/${campaign.publicId}", token), 1, 0, 1.0)
+    }
+
+    @Test fun `캠페인 채팅 전환은 열람 366일 상한과 무관하게 마지막 회차 도달 전체를 센다`() {
+        val token = conversionAuth()
+        val campaign = conversionCampaign("2025-09-01T00:00:00Z", link = false)
+        val member = users.save(User(nickname = "늦은 보고"))
+        conversionDelivery(member, "2026-10-22T02:00:00Z", campaign)
+        conversionMessage(member, "2026-10-22T03:00:00Z")
+        val row = conversionGet("/${campaign.publicId}", token)
+        assertThat(row["to"].asText()).isEqualTo("2026-09-01")
+        assertConversion(row, 1, 0, 1.0)
+    }
+
 }

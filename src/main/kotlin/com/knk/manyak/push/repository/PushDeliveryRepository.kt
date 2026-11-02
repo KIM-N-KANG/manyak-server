@@ -81,4 +81,26 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
             }
     }
 
+    /** 캠페인 선점 전의 결과를 제외하고 마지막 회차의 도달 회원 시각을 제공한다. */
+    fun reachedMemberDeliveries(campaignId: UUID): List<PushMemberDelivery> = jdbc.query("""
+        SELECT r.user_id,r.type,r.completed_at FROM push_delivery_results r
+        JOIN push_campaigns c ON c.id=r.campaign_id
+        WHERE c.public_id=? AND c.started_at IS NOT NULL AND r.completed_at>=c.started_at
+            AND r.delivered_devices>0 AND r.user_id IS NOT NULL
+        """, { rs, _ -> PushMemberDelivery(rs.getLong("user_id"), PushDeliveryType.valueOf(rs.getString("type")),
+            rs.getTimestamp("completed_at").toInstant(), campaignId) }, campaignId)
+
+    fun reachedMemberDeliveries(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushMemberDelivery> {
+        if (types.isEmpty()) return emptyList()
+        val zone = ZoneId.of("Asia/Seoul")
+        return org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc).query("""
+            SELECT user_id,type,completed_at FROM push_delivery_results
+            WHERE completed_at>=:from AND completed_at<:to AND type IN (:types)
+                AND delivered_devices>0 AND user_id IS NOT NULL
+            """, mapOf("from" to Timestamp.from(from.atStartOfDay(zone).toInstant()),
+                "to" to Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()), "types" to types.map { it.name })) { rs, _ ->
+            PushMemberDelivery(rs.getLong("user_id"), PushDeliveryType.valueOf(rs.getString("type")), rs.getTimestamp("completed_at").toInstant())
+        }
+    }
+
 }

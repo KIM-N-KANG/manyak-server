@@ -46,7 +46,7 @@ class PushOpensTests {
     @AfterEach fun stop() { server.shutdown() }
     private fun <T> anyValue(): T { org.mockito.ArgumentMatchers.any<T>(); @Suppress("UNCHECKED_CAST") return null as T }
     private fun campaign(link: Boolean? = true, started: LocalDate = day, delivered: Long = 100) = PushCampaignReach(id, PushKind.SERVICE, "점검", null, started.atStartOfDay(ZoneOffset.UTC).toInstant(), link, delivered)
-    private fun service(measured: LocalDate? = day.minusDays(20), android: LocalDate? = null) = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(measured, android), fixture.clock)
+    private fun service(measured: LocalDate? = day.minusDays(20), android: LocalDate? = null) = PushOpensService(delivery, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(measured, android), fixture.clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java))
     private fun query(from: LocalDate = day.minusDays(1), to: LocalDate = day) = AnalyticsRangeQuery().apply { this.from=from.toString();this.to=to.toString() }
 
     @Test fun `7일 웹 조회는 두 경로를 묶어 2회 호출하고 350 비용과 일별 값을 저장한다`() {

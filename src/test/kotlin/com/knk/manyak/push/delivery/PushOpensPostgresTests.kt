@@ -80,4 +80,44 @@ class PushOpensPostgresTests {
         assertThat(repository.campaignReach(UUID.randomUUID())).isNull()
     }
 
+    @Test fun `도달 시각 연산과 채팅 전환은 PostgreSQL에서 null 미도달 선점 전 결과 및 24시간 경계를 처리한다`() {
+        val campaign = UUID.randomUUID()
+        val cid = jdbc.queryForObject("""INSERT INTO push_campaigns(public_id,title,body,scheduled_at,started_at,status)
+            VALUES (?,'회차 검증','본문','2030-01-01T00:00:00Z','2030-01-02T00:00:00Z','SENT') RETURNING id""", Long::class.java, campaign)!!
+        fun report(user: Long?, at: String, devices: Int = 1) {
+            repository.insert(PushDeliveryReportRequest(UUID.randomUUID().toString(), PushDeliveryType.NOTICE, PushKind.SERVICE,
+                UUID.randomUUID(), campaign, if (devices > 0) PushDeliveryOutcome.DELIVERED else PushDeliveryOutcome.UNDELIVERED,
+                "fixture", devices, 0, Instant.parse(at)), cid, user)
+        }
+        report(uid, "2030-01-01T00:00:00Z")
+        report(uid, "2030-01-03T00:00:00Z")
+        report(null, "2030-01-03T00:00:00Z")
+        report(other, "2030-01-03T00:00:00Z", 0)
+        val reached = repository.reachedMemberDeliveries(campaign).single()
+        assertThat(reached.userId).isEqualTo(uid)
+        assertThat(reached.campaignId).isEqualTo(campaign)
+        assertThat(reached.completedAt).isEqualTo(Instant.parse("2030-01-03T00:00:00Z"))
+        val date = LocalDate.parse("2030-01-03")
+        assertThat(repository.reachedMemberDeliveries(date, date, listOf(PushDeliveryType.NOTICE)).map { it.userId }).containsExactly(uid)
+        assertThat(repository.reachedMemberDeliveries(date, date, emptyList())).isEmpty()
+
+        val story = jdbc.queryForObject("INSERT INTO stories(public_id,title,genre) VALUES (?,'전환','판타지') RETURNING id", Long::class.java, UUID.randomUUID())!!
+        fun message(user: Long, at: Instant) {
+            val chat = jdbc.queryForObject("INSERT INTO story_chats(public_id,story_id,user_id,deleted_at) VALUES (?,?,?,now()) RETURNING id",
+                Long::class.java, UUID.randomUUID(), story, user)!!
+            jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order,created_at) VALUES (?,'USER','원문',1,?)", chat, at.atOffset(ZoneOffset.UTC))
+        }
+        message(uid, reached.completedAt.minusSeconds(86400)) // 사전 구간 시작 포함
+        message(uid, reached.completedAt) // 직후 구간 시작 포함, 사전 구간 종료 제외
+        message(other, reached.completedAt.minusSeconds(86400).minusNanos(1000))
+        message(other, reached.completedAt.plusSeconds(86400)) // 직후 구간 종료 제외
+        val conversion = com.knk.manyak.admin.repository.PushChatConversionRepository(jdbc)
+        val rows = conversion.activity(List(501) { reached } + reached.copy(userId = other))
+        assertThat(rows).hasSize(502)
+        assertThat(rows.take(501)).allMatch { it.chatted && it.chattedBefore }
+        assertThat(rows.last().chatted).isFalse()
+        assertThat(rows.last().chattedBefore).isFalse()
+        assertThat(conversion.activity(emptyList())).isEmpty()
+    }
+
 }
