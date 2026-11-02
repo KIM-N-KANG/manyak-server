@@ -6,9 +6,16 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryCreationRequest
+import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
@@ -44,6 +51,8 @@ class MigrationControllerIntegrationTests {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
+    @Autowired private lateinit var storyCreationRequestRepository: StoryCreationRequestRepository
+    @Autowired private lateinit var deviceIdHasher: DeviceIdHasher
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @Autowired private lateinit var documents: com.knk.manyak.search.service.StorySearchDocumentReader
@@ -66,6 +75,7 @@ class MigrationControllerIntegrationTests {
     fun `게스트 공개 비공개 스토리는 이관 후 공개만 목록과 검색에 노출된다`() {
         val me = saveUser("이관회원")
         val public = storyRepository.save(Story(title = "게스트 공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC))
+        recordCompletion(public, deviceIdHasher.hash("guest-device"))
         val private = storyRepository.save(Story(title = "게스트 비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
         restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
             .expectBody().jsonPath("$.items.length()").isEqualTo(0)
@@ -73,6 +83,7 @@ class MigrationControllerIntegrationTests {
         assertThat(documents.read(private.id)!!.visible).isFalse()
 
         restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", "guest-device")
             .header("Authorization", "Bearer ${accessTokenFor(me)}").contentType(MediaType.APPLICATION_JSON)
             .body(mapOf("storyIds" to listOf(public.publicId, private.publicId).map { it.toString() }))
             .exchange().expectStatus().isOk
@@ -133,7 +144,192 @@ class MigrationControllerIntegrationTests {
         userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
 
     private fun saveStory(ownerId: Long?): Story =
-        storyRepository.save(Story(userId = ownerId, title = "제목"))
+        storyRepository.save(Story(userId = ownerId, title = "제목", visibility = StoryVisibility.PRIVATE))
+
+    private fun recordCompletion(story: Story, deviceHash: String?, status: StoryCreationRequestStatus = StoryCreationRequestStatus.COMPLETED) {
+        val request = storyCreationRequestRepository.saveAndFlush(
+            StoryCreationRequest(requestId = UUID.randomUUID(), deviceIdHash = deviceHash,
+                stage = StoryCreationStage.STORY_COMPLETION, status = status),
+        )
+        storyCreationSessionRepository.saveAndFlush(
+            StoryCreationSession(storyId = story.id, creationRequestId = request.requestId,
+                status = StoryCreationSessionStatus.STORY_CREATED),
+        )
+    }
+
+    private fun migrateStory(user: User, story: Story, deviceId: String? = null, chats: List<UUID> = emptyList()): RestTestClient.ResponseSpec {
+        val request = restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(user)}")
+            .contentType(MediaType.APPLICATION_JSON)
+        if (deviceId != null) request.header("X-Manyak-Device-Id", deviceId)
+        return request.body(mapOf("storyIds" to listOf(story.publicId.toString()), "chatIds" to chats.map { it.toString() })).exchange()
+    }
+
+    @Test
+    fun `같은 기기는 공개 게스트 완성 스토리와 진행 소유권을 이관한다`() {
+        val me = saveUser("같은기기")
+        val story = storyRepository.saveAndFlush(Story(title = "완성 스토리"))
+        recordCompletion(story, deviceIdHasher.hash("guest-device"))
+
+        migrateStory(me, story, "guest-device").expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(storyCreationSessionRepository.findFirstByStoryIdOrderByIdAsc(story.id)!!.userId).isEqualTo(me.id)
+    }
+
+    @Test
+    fun `다른 기기는 비공개 스토리도 이관하지 않고 계정과 진행을 열어 둔다`() {
+        val me = saveUser("다른기기")
+        val story = saveStory(null)
+        recordCompletion(story, deviceIdHasher.hash("guest-device"))
+
+        migrateStory(me, story, "other-device").expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+        assertThat(storyCreationSessionRepository.findFirstByStoryIdOrderByIdAsc(story.id)!!.userId).isNull()
+        assertThat(userRepository.findById(me.id).orElseThrow().migratedAt).isNull()
+        assertThat(indexRequests.ids).isEmpty()
+    }
+
+    @Test
+    fun `기기 기록이 있는 스토리는 헤더가 없으면 CONFLICT다`() {
+        val me = saveUser("헤더없음")
+        val story = saveStory(null)
+        recordCompletion(story, deviceIdHasher.hash("guest-device"))
+
+        migrateStory(me, story).expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+    }
+
+    @Test
+    fun `완성 요청 기록이 없는 비공개 게스트 스토리는 헤더 없이 이관한다`() {
+        val me = saveUser("기록없는비공개")
+        val story = saveStory(null)
+
+        migrateStory(me, story).expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isEqualTo(me.id)
+    }
+
+    @Test
+    fun `완성 요청 기록이 없는 공개 게스트 스토리는 헤더를 보내도 CONFLICT다`() {
+        val me = saveUser("기록없는공개")
+        val story = storyRepository.saveAndFlush(Story(title = "공개 스토리"))
+
+        migrateStory(me, story, "guest-device").expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+    }
+
+    @Test
+    fun `스토리 기기 증명이 실패해도 같은 요청의 채팅과 다른 스토리는 이관한다`() {
+        val me = saveUser("부분이관")
+        val story = saveStory(null)
+        recordCompletion(story, deviceIdHasher.hash("guest-device"))
+        val otherStory = saveStory(null)
+        val chat = storyChatRepository.saveAndFlush(StoryChat(storyId = story.id))
+
+        restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .header("X-Manyak-Device-Id", "other-device").contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(story.publicId, otherStory.publicId).map { it.toString() },
+                "chatIds" to listOf(chat.publicId.toString())))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+            .jsonPath("$.stories[1].status").isEqualTo("MIGRATED")
+            .jsonPath("$.chats[0].status").isEqualTo("MIGRATED")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+        assertThat(storyRepository.findById(otherStory.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(storyChatRepository.findById(chat.id).orElseThrow().userId).isEqualTo(me.id)
+        assertThat(indexRequests.ids).containsExactly(otherStory.id)
+    }
+
+    @Test
+    fun `완성 기기 해시가 null 또는 공백이면 공개 여부로 판정한다`() {
+        for ((index, hash) in listOf(null, "", "   ").withIndex()) {
+            for (visibility in StoryVisibility.entries) {
+                val me = saveUser("빈해시${index}${visibility.name}")
+                val story = storyRepository.saveAndFlush(Story(title = "해시 없음", visibility = visibility))
+                recordCompletion(story, hash)
+
+                migrateStory(me, story).expectStatus().isOk.expectBody()
+                    .jsonPath("$.stories[0].status").isEqualTo(if (visibility == StoryVisibility.PUBLIC) "CONFLICT" else "MIGRATED")
+                assertThat(storyRepository.findById(story.id).orElseThrow().userId)
+                    .isEqualTo(if (visibility == StoryVisibility.PUBLIC) null else me.id)
+            }
+        }
+    }
+
+    @Test
+    fun `기기 기록이 없는 공개 초안은 발행되지 않아 이관한다`() {
+        val me = saveUser("초안이관")
+        val story = storyRepository.saveAndFlush(Story(title = "초안", status = StoryStatus.DRAFT))
+
+        migrateStory(me, story).expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
+    }
+
+    @Test
+    fun `진행이 가리키는 완성 요청이 없어도 공개 스토리는 CONFLICT다`() {
+        val me = saveUser("완성기록없음")
+        val story = storyRepository.saveAndFlush(Story(title = "완성 요청 없음"))
+        storyCreationSessionRepository.saveAndFlush(
+            StoryCreationSession(storyId = story.id, creationRequestId = UUID.randomUUID(), status = StoryCreationSessionStatus.STORY_CREATED),
+        )
+
+        migrateStory(me, story, "guest-device").expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+    }
+
+    @Test
+    fun `같은 기기라도 삭제된 스토리는 NOT_FOUND다`() {
+        val me = saveUser("삭제스토리")
+        val story = storyRepository.saveAndFlush(Story(title = "삭제됨", deletedAt = java.time.Instant.now()))
+        recordCompletion(story, deviceIdHasher.hash("guest-device"))
+
+        migrateStory(me, story, "guest-device").expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[0].status").isEqualTo("NOT_FOUND")
+        assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+    }
+
+    @Test
+    fun `첫 진행에 기록이 없어도 뒤 진행의 해시로 증명하고 완성 요청 상태는 보지 않는다`() {
+        for (status in StoryCreationRequestStatus.entries) {
+            for ((index, device) in listOf("device-a", "device-b", null).withIndex()) {
+                val me = saveUser("복수진행${status.name}$index")
+                val story = saveStory(null)
+                storyCreationSessionRepository.saveAndFlush(
+                    StoryCreationSession(storyId = story.id, status = StoryCreationSessionStatus.STORY_CREATED),
+                )
+                recordCompletion(story, deviceIdHasher.hash("device-a"), status)
+
+                val matches = device == "device-a"
+                migrateStory(me, story, device).expectStatus().isOk.expectBody()
+                    .jsonPath("$.stories[0].status").isEqualTo(if (matches) "MIGRATED" else "CONFLICT")
+                assertThat(storyRepository.findById(story.id).orElseThrow().userId).isEqualTo(if (matches) me.id else null)
+                val sessions = storyCreationSessionRepository.findAll().filter { it.storyId == story.id }
+                assertThat(sessions).hasSize(2)
+                assertThat(sessions.map { it.userId }).containsOnly(if (matches) me.id else null)
+            }
+        }
+    }
+
+    @Test
+    fun `연결된 두 진행의 기기 해시가 다르면 어느 기기로도 이관하지 않는다`() {
+        for ((index, device) in listOf("device-a", "device-b", null).withIndex()) {
+            val me = saveUser("상충기기$index")
+            val story = saveStory(null)
+            recordCompletion(story, deviceIdHasher.hash("device-a"), StoryCreationRequestStatus.PENDING)
+            recordCompletion(story, deviceIdHasher.hash("device-b"), StoryCreationRequestStatus.FAILED)
+
+            migrateStory(me, story, device).expectStatus().isOk.expectBody()
+                .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+            assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+            assertThat(storyCreationSessionRepository.findAll().filter { it.storyId == story.id }.map { it.userId }).containsOnlyNulls()
+        }
+    }
 
     private fun saveChat(ownerId: Long?): StoryChat {
         // 채팅은 실제 스토리를 참조하도록 픽스처를 만든다(story_id 무결성 유지).
