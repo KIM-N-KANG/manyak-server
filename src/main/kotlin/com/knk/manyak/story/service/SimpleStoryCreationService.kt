@@ -1139,7 +1139,7 @@ class SimpleStoryCreationService(
                         genre = genre,
                         // 컴파일 표지 업로드가 성공하면 URL을 저장하고, 실패하면 표지 없이 등록한다.
                         thumbnailImageUrl = uploadedThumbnail?.url,
-                        // 선택한 공개 범위를 그대로 저장한다. 생략한 요청은 DTO 기본값 PRIVATE이다.
+                        // 선택한 공개 범위를 그대로 저장한다. 생략한 요청은 DTO 기본값 PUBLIC이다.
                         visibility = visibility,
                     ),
                 )

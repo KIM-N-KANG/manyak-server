@@ -4,6 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.user.entity.UserPersona
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -13,6 +14,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
+import java.time.Instant
 
 @ActiveProfiles("test")
 @AutoConfigureRestTestClient
@@ -34,6 +36,26 @@ class UserPersonaControllerIntegrationTests {
     }
     private fun post(body: String) = client.post().uri(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON).body(body).exchange()
     private fun patch(id: String, body: String) = client.patch().uri("$path/$id").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON).body(body).exchange()
+    @Test fun `목록은 생성 시각 오름차순이고 같은 시각이면 내부 ID 오름차순이다`() {
+        val base = Instant.parse("2026-10-01T00:00:00Z")
+        fun save(name: String, seconds: Long) = personas.saveAndFlush(
+            UserPersona(userId = user.id, name = name, description = "설명", createdAt = base.plusSeconds(seconds)),
+        )
+        val newest = save("최신", 30)
+        val tiedFirst = save("같은 시각 첫째", 10)
+        val oldest = save("최초", 0)
+        val tiedSecond = save("같은 시각 둘째", 10)
+        val middle = save("중간", 20)
+
+        val expected = listOf(oldest, tiedFirst, tiedSecond, middle, newest)
+        val body = client.get().uri(path).header("Authorization", auth).exchange()
+            .expectStatus().isOk.expectBody().returnResult().responseBody!!
+        val rows = mapper.readTree(body)
+        kotlin.test.assertEquals(expected.size, rows.size())
+        expected.forEachIndexed { index, persona ->
+            kotlin.test.assertEquals(persona.publicId.toString(), rows[index].path("id").asText())
+        }
+    }
     @Test fun `등록 수정 목록 삭제와 소유권`() {
         val bytes = post("""{"name":" 민우 ","description":" 탐험가 "}""").expectStatus().isCreated.expectBody().jsonPath("$.name").isEqualTo("민우").returnResult().responseBody!!
         val id = mapper.readTree(bytes).path("id").asText()

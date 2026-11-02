@@ -11,6 +11,8 @@ import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
 import com.knk.manyak.story.entity.UserStoryEndingReach
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -30,7 +32,8 @@ import java.util.UUID
 /**
  * 게스트(비로그인)가 기기에 쌓은 스토리·채팅의 소유권을 로그인 계정으로 이관(클레임)한다.
  *
- * 서버에는 게스트 식별 수단이 없어(콘텐츠 행에 device_id를 저장하지 않음) 클라이언트가 제출한 공개 ID 목록을 신뢰한다.
+ * 소유자 없는 스토리는 완성 요청에 저장된 기기 해시로 증명한다. 기록이 없으면 발행된 공개 스토리의 이관을 거부한다.
+ * 채팅은 공개 식별자가 목록에 노출되지 않아 제출된 식별자를 신뢰한다.
  * `user_id`가 NULL인 행에만 요청자의 `user_id`를 설정하고, 스토리·채팅은 서로 독립 처리한다(채팅은 참조 스토리 소유자와 무관).
  * 효과는 멱등하며(재호출해도 소유권 불변, 응답 status만 상태를 반영), 항목별 부분 성공이라 일부 충돌이 전체를 롤백하지 않는다.
  *
@@ -51,6 +54,7 @@ class GuestDataMigrationService(
     private val storyEndingRepository: StoryEndingRepository,
     private val serverAnalytics: ServerAnalytics,
     private val events: ApplicationEventPublisher,
+    private val storyCreationRequestRepository: StoryCreationRequestRepository,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -61,7 +65,7 @@ class GuestDataMigrationService(
     }
 
     @Transactional
-    fun migrate(userId: Long, request: MigrationRequest): MigrationResponse {
+    fun migrate(userId: Long, request: MigrationRequest, deviceIdHash: String? = null): MigrationResponse {
         // 이관 잠금 게이트(스펙 §4-3-5, KNK-480): 이관은 계정당 1회만 허용한다.
         // 사용자 행에 비관적 쓰기 락(findByIdForUpdate)을 걸어 같은 계정의 동시 최초 이관을 직렬화한다.
         // 락이 없으면 두 요청이 서로 다른 게스트 ID로 동시에 들어와 둘 다 migrated_at==null을 읽고 통과해
@@ -83,7 +87,7 @@ class GuestDataMigrationService(
         user.migrationAttempts += 1
 
         val (stories, chats) = try {
-            claimStories(userId, parseUuids(request.storyIds)) to claimChats(userId, parseUuids(request.chatIds))
+            claimStories(userId, parseUuids(request.storyIds), deviceIdHash) to claimChats(userId, parseUuids(request.chatIds))
         } catch (e: ResponseStatusException) {
             // 요청 UUID 형식 오류(400)는 요청 자체 실패로 분류한다(스펙 §6-4-2-8 마이그레이션 실패 = validation).
             if (e.statusCode == HttpStatus.BAD_REQUEST) serverAnalytics.migrationFailed(userId, AnalyticsErrorType.VALIDATION)
@@ -139,16 +143,21 @@ class GuestDataMigrationService(
         }
     }
 
-    private fun claimStories(userId: Long, ids: List<UUID>): List<MigrationResult> {
+    private fun claimStories(userId: Long, ids: List<UUID>, deviceIdHash: String?): List<MigrationResult> {
         val storyByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
             .associateBy { it.publicId }
         val ownerByPublicId = storyByPublicId.mapValues { it.value.userId }
+        val deviceHashesByStoryId = loadStoryDeviceHashes(storyByPublicId.values.filter { it.userId == null })
         val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
                 claim = { storyRepository.claimByPublicId(id, userId) },
                 currentOwner = { storyRepository.findUserIdByPublicId(id) },
+                canClaim = {
+                    val story = storyByPublicId.getValue(id)
+                    hasStoryDeviceProof(story, deviceHashesByStoryId[story.id].orEmpty(), deviceIdHash)
+                },
             )
             if (status == MigrationStatus.MIGRATED) {
                 // 스토리를 새로 클레임했으면 연결된 생성 세션 소유권도 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
@@ -165,6 +174,25 @@ class GuestDataMigrationService(
             }
             MigrationResult(id.toString(), status)
         }
+    }
+
+    private fun loadStoryDeviceHashes(stories: Collection<Story>): Map<Long, List<String>> {
+        if (stories.isEmpty()) return emptyMap()
+        val sessions = storyCreationSessionRepository.findAllByStoryIdIn(stories.map { it.id }.toSet())
+        val requestIds = sessions.mapNotNull { it.creationRequestId }.toSet()
+        val requestsById = if (requestIds.isEmpty()) emptyMap() else
+            storyCreationRequestRepository.findAllByRequestIdIn(requestIds).associateBy { it.requestId }
+        return sessions.mapNotNull { session ->
+            val storyId = session.storyId ?: return@mapNotNull null
+            val hash = requestsById[session.creationRequestId]?.deviceIdHash?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            storyId to hash
+        }.groupBy({ it.first }, { it.second })
+    }
+
+    private fun hasStoryDeviceProof(story: Story, recordedHashes: List<String>, deviceIdHash: String?): Boolean {
+        if (recordedHashes.isNotEmpty()) return recordedHashes.all { it == deviceIdHash }
+        return !(story.isPubliclyVisible() && story.deletedAt == null)
     }
 
     private fun claimChats(userId: Long, ids: List<UUID>): List<MigrationResult> {
@@ -213,6 +241,7 @@ class GuestDataMigrationService(
      * 스냅샷 소유권으로 우선 판정하고, 게스트(NULL) 행만 [claim] 조건부 UPDATE로 원자적으로 클레임한다.
      * - 스냅샷에 없음 → NOT_FOUND, 요청자 소유 → ALREADY_OWNED, 타인 소유 → CONFLICT.
      * - 게스트 행: 같은 요청 내 중복이면 ALREADY_OWNED, claim이 1이면 MIGRATED.
+     * - 스토리의 기기 증명([canClaim])에 실패하면 조건부 갱신 전에 CONFLICT로 거절한다.
      * - claim이 0(동시 요청에 선점됨)이면 [currentOwner]로 실제 소유자를 재확인한다: 요청자면 ALREADY_OWNED(멱등), 아니면 CONFLICT.
      */
     private fun status(
@@ -222,11 +251,13 @@ class GuestDataMigrationService(
         claimed: MutableSet<UUID>,
         claim: () -> Int,
         currentOwner: () -> Long?,
+        canClaim: () -> Boolean = { true },
     ): MigrationStatus = when {
         id !in ownerByPublicId -> MigrationStatus.NOT_FOUND
         ownerByPublicId[id] == userId -> MigrationStatus.ALREADY_OWNED
         ownerByPublicId[id] != null -> MigrationStatus.CONFLICT
         id in claimed -> MigrationStatus.ALREADY_OWNED
+        !canClaim() -> MigrationStatus.CONFLICT
         claim() == 1 -> { claimed.add(id); MigrationStatus.MIGRATED }
         currentOwner() == userId -> MigrationStatus.ALREADY_OWNED
         else -> MigrationStatus.CONFLICT

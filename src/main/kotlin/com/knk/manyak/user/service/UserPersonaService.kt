@@ -17,7 +17,7 @@ import java.util.UUID
 @Service
 class UserPersonaService(private val personas: UserPersonaRepository, private val users: UserRepository) {
     @Transactional(readOnly = true)
-    fun list(userId: Long): List<UserPersonaResponse> = personas.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId).map(::response)
+    fun list(userId: Long): List<UserPersonaResponse> = personas.findByUserIdAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(userId).map(::response)
 
     @Transactional
     fun create(userId: Long, request: CreateUserPersonaRequest): UserPersonaResponse {

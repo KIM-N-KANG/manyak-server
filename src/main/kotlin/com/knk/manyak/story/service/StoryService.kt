@@ -70,7 +70,28 @@ class StoryService(
     private val userRepository: UserRepository,
     private val officialStoryAccount: OfficialStoryAccount,
     private val authorResolver: StoryAuthorResolver,
+    private val exploreSeedSource: StoryExploreSeedSource,
 ) {
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    fun getExploreStories(userId: Long?, limit: Int, rawCursor: String?): StoryPageResponse {
+        val cursor = rawCursor?.let(StoryExploreCursor::decode)
+        val seed = cursor?.seed ?: exploreSeedSource.nextSeed()
+        val order = compareBy<StoryExploreCursor> { it.sortValue }.thenBy { it.publicId.toString() }
+        // ponytail: H2에는 PostgreSQL md5()가 없어 공통 MD5 정렬을 애플리케이션에서 한다.
+        // 공개 후보 전체의 식별자와 표지 정보를 읽는 O(N) 메모리와 O(N log N) 정렬이다.
+        // 규모가 커지면 DB별 해시 함수로 정렬과 keyset 조회를 내려야 한다.
+        val fetched = storyRepository.findExploreCandidates(userId).asSequence()
+            .filter { imageUrlResolver.visibleThumbnailSmUrlFor(it.thumbnailImageUrl, it.thumbnailImageKey, it.thumbnailModerationStatus) != null }
+            .map { StoryExploreCursor(seed, StoryExploreCursor.hash(seed, it.publicId), it.publicId) }
+            .filter { cursor == null || order.compare(it, cursor) > 0 }
+            .sortedWith(order).take(limit + 1).toList()
+        if (fetched.isEmpty()) return StoryPageResponse(emptyList(), null)
+        val page = fetched.take(limit)
+        val storiesById = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(page.map { it.publicId }).associateBy { it.publicId }
+        val items = page.map { storiesById.getValue(it.publicId) }.toSummaryResponses(officialStoryAccount.officialUserId())
+        return StoryPageResponse(items, if (fetched.size > limit) page.last().encode() else null)
+    }
 
     @Transactional(readOnly = true)
     fun getLorebooks(genre: String?): List<LorebookListItemResponse> {

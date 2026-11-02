@@ -56,12 +56,20 @@ client.test("페르소나 등록 201", () => {
 client.global.set("personaId", response.body.id);
 %}
 
-### 목록, 최신순
+### 목록, 생성 시각이 오래된 순 (같은 시각은 내부 ID 오름차순)
 GET {{baseUrl}}/api/v1/users/me/personas
 Authorization: Bearer {{accessToken}}
 
 > {%
 client.test("페르소나 목록", () => client.assert(response.status === 200 && Array.isArray(response.body), `actual=${response.status}`));
+client.test("페르소나 생성 시각 오름차순", () => {
+  const rows = response.body;
+  for (let i = 1; i < rows.length; i++) {
+    client.assert(Date.parse(rows[i - 1].createdAt) <= Date.parse(rows[i].createdAt),
+      `생성 시각 순서 오류: previous=${rows[i - 1].createdAt}, current=${rows[i].createdAt}`);
+  }
+});
+// 내부 ID는 응답에 없으므로 같은 시각의 순서는 통합 테스트에서 검증한다.
 %}
 
 ### 페르소나로 채팅 생성

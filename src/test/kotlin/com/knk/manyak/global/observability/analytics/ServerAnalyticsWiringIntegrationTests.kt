@@ -409,7 +409,7 @@ class ServerAnalyticsWiringIntegrationTests {
     fun `이관 부분 성공은 중복과 누락을 포함한 제출 총수를 집계하고 커밋 후 한 번 발행한다`() {
         val user = member()
         val other = member()
-        fun story(owner: Long? = null) = stories.save(Story(userId = owner, title = "이관 이벤트 검증"))
+        fun story(owner: Long? = null) = stories.save(Story(userId = owner, title = "이관 이벤트 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
         val guestStory = story()
         val ownedStory = story(user.id)
         val conflictStory = story(other.id)
@@ -461,7 +461,7 @@ class ServerAnalyticsWiringIntegrationTests {
     @Test
     fun `이관 UUID 형식 오류는 validation 실패만 발행하고 앞선 클레임도 롤백한다`() {
         val user = member()
-        val guestStory = stories.save(Story(title = "형식 오류 롤백 검증"))
+        val guestStory = stories.save(Story(title = "형식 오류 롤백 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
         assertThatThrownBy {
             migrations.migrate(user.id, MigrationRequest(
                 storyIds = listOf(guestStory.publicId.toString()), chatIds = listOf("invalid-uuid"),
@@ -481,7 +481,7 @@ class ServerAnalyticsWiringIntegrationTests {
     @Test
     fun `이관 성공 결과도 트랜잭션 롤백 시 이벤트와 소유권을 남기지 않는다`() {
         val user = member()
-        val guestStory = stories.save(Story(title = "이관 롤백 검증"))
+        val guestStory = stories.save(Story(title = "이관 롤백 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
         val guestChat = chats.save(StoryChat(storyId = guestStory.id))
         TransactionTemplate(transactions).executeWithoutResult {
             migrations.migrate(user.id, MigrationRequest(
