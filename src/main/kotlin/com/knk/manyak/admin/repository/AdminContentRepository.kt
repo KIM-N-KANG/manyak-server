@@ -35,7 +35,7 @@ class AdminContentRepository(private val jdbc: NamedParameterJdbcTemplate) {
         period.params.forEach { (key, value) -> periodSql = periodSql.replace(":$key", ":chat_$key"); q.params["chat_$key"] = value }
         val chatCondition = "c.story_id=s.id AND c.deleted_at IS NULL AND $periodSql"
         val count = "(SELECT COUNT(*) FROM story_chats c WHERE $chatCondition)"
-        val turns = "(SELECT COALESCE(SUM(c.current_turn - c.forked_from_turn),0) FROM story_chats c WHERE $chatCondition)"
+        val turns = "(SELECT COALESCE(SUM(c.current_turn + c.hidden_turn_count - c.forked_from_turn),0) FROM story_chats c WHERE $chatCondition)"
         if (request.chatFrom != null || request.chatTo != null) q.add("$count > 0")
         val from = "FROM stories s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN admin_accounts a ON a.user_id=u.id $session"
         val result = jdbc.adminPage("""s.public_id, s.title, s.genre, s.description, s.visibility, s.created_at, s.deleted_at, s.taken_down_at, s.takedown_reason, s.takedown_reason_detail, s.user_id AS owner_internal_id,

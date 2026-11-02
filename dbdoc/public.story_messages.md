@@ -14,6 +14,7 @@
 | reached_ending_name_snapshot | varchar(100) |  | true |  |  |  |
 | credit_transaction_id | bigint |  | true |  | [public.credit_transactions](public.credit_transactions.md) |  |
 | model_code | varchar(20) |  | true |  | [public.chat_models](public.chat_models.md) |  |
+| hidden_at | timestamp with time zone |  | true |  |  |  |
 
 ## Constraints
 
@@ -24,7 +25,6 @@
 | story_messages_chat_id_fkey | FOREIGN KEY | FOREIGN KEY (chat_id) REFERENCES story_chats(id) ON DELETE CASCADE |
 | story_messages_pkey | PRIMARY KEY | PRIMARY KEY (id) |
 | fk_story_messages_reached_ending | FOREIGN KEY | FOREIGN KEY (reached_ending_id) REFERENCES story_endings(id) ON DELETE SET NULL |
-| uq_story_messages_order | UNIQUE | UNIQUE (chat_id, message_order) |
 | story_messages_credit_transaction_id_fkey | FOREIGN KEY | FOREIGN KEY (credit_transaction_id) REFERENCES credit_transactions(id) |
 | story_messages_model_code_fkey | FOREIGN KEY | FOREIGN KEY (model_code) REFERENCES chat_models(code) |
 
@@ -33,10 +33,10 @@
 | Name | Definition |
 | ---- | ---------- |
 | story_messages_pkey | CREATE UNIQUE INDEX story_messages_pkey ON public.story_messages USING btree (id) |
-| uq_story_messages_order | CREATE UNIQUE INDEX uq_story_messages_order ON public.story_messages USING btree (chat_id, message_order) |
 | idx_story_messages_admin_role_created_chat | CREATE INDEX idx_story_messages_admin_role_created_chat ON public.story_messages USING btree (role, created_at, chat_id) |
 | idx_story_messages_admin_chat_role_created | CREATE INDEX idx_story_messages_admin_chat_role_created ON public.story_messages USING btree (chat_id, role, created_at) |
 | uq_story_messages_credit_transaction | CREATE UNIQUE INDEX uq_story_messages_credit_transaction ON public.story_messages USING btree (credit_transaction_id) WHERE (credit_transaction_id IS NOT NULL) |
+| uq_story_messages_order_visible | CREATE UNIQUE INDEX uq_story_messages_order_visible ON public.story_messages USING btree (chat_id, message_order) WHERE (hidden_at IS NULL) |
 
 ## Relations
 
@@ -61,6 +61,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.story_choices" {
   bigint id
@@ -109,6 +110,7 @@ erDiagram
   boolean long_response
   integer summary_through_turn
   integer revision
+  integer hidden_turn_count
   bigint forked_from_chat_id FK
   integer forked_from_turn
 }

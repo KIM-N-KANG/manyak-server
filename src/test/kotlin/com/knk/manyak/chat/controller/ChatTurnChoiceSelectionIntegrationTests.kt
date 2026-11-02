@@ -265,7 +265,7 @@ class ChatTurnChoiceSelectionIntegrationTests {
         val fixture = seedChatWithOneTurn()
         streamTurn(fixture.chatPublicId, CHOICE_TEXTS[1], sourceTurnId = fixture.assistantId, choiceOrder = 2)
 
-        val newAssistantId = storyMessageRepository.findFirstByChatIdOrderByMessageOrderDesc(fixture.chatId)!!.id
+        val newAssistantId = storyMessageRepository.findFirstByChatIdAndHiddenAtIsNullOrderByMessageOrderDesc(fixture.chatId)!!.id
         // 상태 조회는 재생성 저장이 끝난 뒤여야 한다. SSE body를 completed까지 소비해 비동기 저장 완료를 기다린다
         // — 상태 코드만 보면 스트림이 열린 시점에 반환돼 조회가 저장을 앞지를 수 있다(플래키).
         val regenerateBody = restTestClient.post()

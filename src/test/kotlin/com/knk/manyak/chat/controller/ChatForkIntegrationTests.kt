@@ -118,6 +118,7 @@ class ChatForkIntegrationTests {
         assertEquals(f.chat.id, copy.forkedFromChatId)
         assertEquals(turn, copy.forkedFromTurn)
         assertEquals(turn, copy.currentTurn)
+        assertEquals(0, copy.hiddenTurnCount)
         assertEquals(0, copy.regeneratedCount)
         assertEquals(0, copy.revision)
         assertEquals(member.id, copy.userId)
@@ -195,11 +196,16 @@ class ChatForkIntegrationTests {
 
     @Test fun `기존 메시지 조회의 숨김 필터를 그대로 따르고 숨긴 대상 턴은 404다`() {
         val f = fixture()
-        val visible = messages.findByChatIdOrderByMessageOrderAsc(f.chat.id).filter { it.id != f.turns[2].id && it.messageOrder != 9 }
-        doReturn(visible).`when`(messages).findByChatIdOrderByMessageOrderAsc(f.chat.id)
+        jdbc.update("UPDATE story_messages SET hidden_at=CURRENT_TIMESTAMP WHERE chat_id=? AND message_order IN (9, 10)", f.chat.id)
+        chats.save(f.chat.apply { currentTurn = 4; hiddenTurnCount = 1 })
+        assertEquals(4, messages.findByChatIdOrderByMessageOrderAsc(f.chat.id).count { it.role == MessageRole.ASSISTANT })
         request(f.chat.publicId.toString(), """{"turnId":${f.turns[2].id}}""").expectStatus().isNotFound
         val (_, copy) = fork(f, 5)
         assertEquals(4, copy.currentTurn)
+        assertEquals(4, copy.forkedFromTurn)
+        assertEquals(0, copy.hiddenTurnCount)
+        assertEquals(7L, chats.sumTurnCountByStoryId(f.chat.storyId))
+        assertEquals(0L, jdbc.queryForObject("SELECT COUNT(*) FROM story_messages WHERE chat_id=? AND hidden_at IS NOT NULL", Long::class.java, copy.id))
         assertFalse(messages.findByChatIdOrderByMessageOrderAsc(copy.id).any { it.content.startsWith("응답 3 ") })
     }
 

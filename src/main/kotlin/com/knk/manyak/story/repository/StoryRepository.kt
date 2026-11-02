@@ -122,7 +122,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                       WHERE c.storyId = s.id)) DESC, s.publicId DESC
         """,
     )
@@ -137,14 +137,14 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                       WHERE c.storyId = s.id)) < :score
                OR (((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                       WHERE c.storyId = s.id)) = :score
                    AND s.publicId < :publicId))
         ORDER BY ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) * $POPULAR_LIKE_WEIGHT
-                   + (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+                   + (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                       WHERE c.storyId = s.id)) DESC, s.publicId DESC
         """,
     )
@@ -195,7 +195,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
 
     /**
      * 공개 스토리 목록 채팅순 첫 페이지(KNK-1398). 1차 키는 누적 턴 수다.
-     * 삭제된 채팅을 포함한 `current_turn + regenerated_count - forked_from_turn` 합이라 카드의 `turnCount`와 같은 출처다([StoryChatRepository]).
+     * 삭제된 채팅을 포함한 `current_turn + hidden_turn_count + regenerated_count - forked_from_turn` 합이라 카드의 `turnCount`와 같은 출처다([StoryChatRepository]).
      * 좋아요순과 같은 이유로 비정규화 컬럼을 두지 않고 상관 서브쿼리로 집계한다.
      */
     @Query(
@@ -205,7 +205,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                   WHERE c.storyId = s.id) DESC, s.publicId DESC
         """,
     )
@@ -219,12 +219,12 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+          AND ((SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                 WHERE c.storyId = s.id) < :turnCount
-               OR ((SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+               OR ((SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                     WHERE c.storyId = s.id) = :turnCount
                    AND s.publicId < :publicId))
-        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
+        ORDER BY (SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c
                   WHERE c.storyId = s.id) DESC, s.publicId DESC
         """,
     )

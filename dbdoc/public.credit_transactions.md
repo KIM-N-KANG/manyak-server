@@ -69,6 +69,7 @@ erDiagram
   varchar_100_ reached_ending_name_snapshot
   bigint credit_transaction_id FK
   varchar_20_ model_code FK
+  timestamp_with_time_zone hidden_at
 }
 "public.story_message_versions" {
   bigint id

@@ -33,6 +33,7 @@ import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.CreateChatRequest
 import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
+import com.knk.manyak.chat.dto.EditChatRequest
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
@@ -713,11 +714,26 @@ class ChatService(
      * 디바이스 ID별 chat_turn 체험 한도를 예약하며(KNK-477), 한도 소진·device 헤더 누락은 동기 402/400이다.
      * 턴이 completed 없이 끝나면(error·생성 마감·미완료) 선차감분·예약분을 전액 환불·복원한다(정확히 1회, 멱등 키로 이중 방어).
      */
+    fun editChatTurn(chatId: String, request: EditChatRequest, userId: Long? = null, deviceId: String? = null): SseEmitter =
+        streamChatTurn(chatId, ContinueChatRequest(userInput = request.userInput, userSource = request.userSource,
+            realtimeImage = request.realtimeImage), userId, deviceId, editTurnId = request.turnId)
+
+    private fun resolveEditTurnNumber(chatId: Long, turnId: Long): Int {
+        val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatId)
+        val assistants = messages.filter { it.role == MessageRole.ASSISTANT }
+        val index = assistants.indexOfFirst { it.id == turnId }
+        if (index < 0 || messages.none { it.role == MessageRole.USER && it.messageOrder < assistants[index].messageOrder }) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "수정할 턴을 찾을 수 없습니다.")
+        }
+        return index + 1
+    }
+
     fun streamChatTurn(
         chatId: String,
         request: ContinueChatRequest,
         userId: Long? = null,
         deviceId: String? = null,
+        editTurnId: Long? = null,
     ): SseEmitter = streamEntry { recordResult ->
         // 선택 기록의 세대 가드 기준 시각(KNK-819). **AI 호출 전인 요청 진입 시점**에 잡아야 한다 — 사용자는
         // 요청을 보내기 전에 선택지를 봤으므로, 이 시각 이후에 만들어진 선택지 행은 재생성이 갈아끼운 세대다.
@@ -731,7 +747,8 @@ class ChatService(
         // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
         // 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용하며 차감이 없다(회원은 이관 후 접근, KNK-480).
         requireChatOwner(chat, userId)
-        val generation = acquireGeneration(chat, "CONTINUE", request.userInput, requestedAt, null)
+        if (editTurnId != null) resolveEditTurnNumber(chat.id, editTurnId)
+        val generation = acquireGeneration(chat, if (editTurnId == null) "CONTINUE" else "EDIT", request.userInput, requestedAt, editTurnId)
         var streamingOwnsGeneration = false
         try {
             val prepared = requireNotNull(assemblyTransactionTemplate.execute {
@@ -740,7 +757,8 @@ class ChatService(
                 if (request.hasLastTurnId && request.lastTurnId != state.lastTurnId) {
                     throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 변경되었습니다.")
                 }
-                Triple(freshChat, state, assembleAiRequest(freshChat, request.userInput, freshChat.currentTurn + 1, request.userSource))
+                val targetNumber = editTurnId?.let { resolveEditTurnNumber(chat.id, it) } ?: (freshChat.currentTurn + 1)
+                Triple(freshChat, state, assembleAiRequest(freshChat, request.userInput, targetNumber, request.userSource))
             })
             val startState = prepared.second
             val aiCall = prepared.third
@@ -761,6 +779,7 @@ class ChatService(
                 persist = { result, chargeId, billingModelCode ->
                     chatTurnPersister.persistTurn(
                         chatId = chat.id,
+                        editTurnId = editTurnId,
                         storyPublicId = aiCall.traceLink.storyId,
                         expectedState = startState,
                         creditTransactionId = chargeId,
@@ -983,7 +1002,7 @@ class ChatService(
 
     private fun generationStartState(chat: StoryChat) = GenerationStartState(
         storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id).lastOrNull { it.role == MessageRole.ASSISTANT }?.id,
-        chat.regeneratedCount,
+        chat.revision,
     )
 
     private fun streamEntry(block: (TurnResultRecorder) -> SseEmitter): SseEmitter {
@@ -1113,7 +1132,7 @@ class ChatService(
                 }
                 if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
             }
-            chatRealtimeImageService.issue(imageReservation, chat.publicId, if (isRegenerated) chat.currentTurn else chat.currentTurn + 1)
+            chatRealtimeImageService.issue(imageReservation, chat.publicId, requireNotNull(aiCall.traceLink.turnNumber))
             if (imageReservation.slot != null) imageCall = imageAiCalls.start(chat.storyId, chat.publicId)
         } catch (throwable: Throwable) {
             try {

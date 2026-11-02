@@ -164,6 +164,7 @@ data class ChatDetailResponse(
 )
 
 data class GeneratingTurnResponse(
+    @field:Schema(description = "생성 종류", allowableValues = ["CONTINUE", "REGENERATE", "EDIT"])
     val type: String,
     val userInput: String,
     val startedAt: Instant,
@@ -325,6 +326,14 @@ data class ContinueChatRequest(
         }
 }
 
+
+@Schema(description = "채팅 입력 수정 요청")
+data class EditChatRequest(
+    @field:Positive val turnId: Long,
+    @field:NotBlank @field:Size(max = 3000) val userInput: String,
+    @field:Pattern(regexp = "choice|edited_choice|typed") val userSource: String? = null,
+    val realtimeImage: Boolean = true,
+)
 
 @Schema(description = "AI 응답 재생성 요청")
 data class RegenerateChatRequest(
