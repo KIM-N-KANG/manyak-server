@@ -64,7 +64,7 @@ class AdminStoryConsumptionRepository(private val jdbc: NamedParameterJdbcTempla
                 AND s.user_id IS NOT NULL AND ${owner("s.user_id", excluded)} GROUP BY s.user_id
         ) SELECT
             (SELECT COUNT(DISTINCT c.user_id) FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
-                WHERE m.role='USER' AND m.created_at>=:from AND m.created_at<=:until
+                WHERE m.role='USER' AND ${AdminQuery.generatedUser()} AND m.created_at>=:from AND m.created_at<=:until
                     AND c.user_id IS NOT NULL AND ${owner("c.user_id", excluded)}) AS active_members,
             COALESCE(SUM(current_creator),0) AS members,COALESCE(SUM(previous_creator),0) AS previous_members,
             COALESCE(SUM(CASE WHEN current_creator=1 AND previous_creator=1 THEN 1 ELSE 0 END),0) AS retained

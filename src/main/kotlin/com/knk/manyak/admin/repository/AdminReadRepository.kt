@@ -29,7 +29,7 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
         (SELECT MAX(s.created_at) FROM stories s WHERE s.user_id=u.id))"""
 
     // 목록·상세·정렬이 같은 활성 ASSISTANT 메시지를 센다. 채팅 삭제 여부는 제한하지 않는다.
-    private val memberTurnsFrom = "FROM story_chats c JOIN story_messages m ON m.chat_id=c.id WHERE m.role='ASSISTANT'"
+    private val memberTurnsFrom = "FROM story_chats c JOIN story_messages m ON m.chat_id=c.id WHERE m.role='ASSISTANT' AND ${AdminQuery.generatedAssistant()}"
     private val turns = "(SELECT COUNT(*) $memberTurnsFrom AND c.user_id=u.id)"
 
     fun members(request: AdminMembersRequest, page: AdminPagination, memberId: UUID? = null): AdminPageResponse<AdminMemberListResponse> {

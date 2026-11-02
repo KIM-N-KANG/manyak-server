@@ -207,6 +207,26 @@ class HomeSectionsIntegrationTests {
         }
     }
 
+    @Test fun `포크 복사 턴은 홈 기본 섹션과 필터 및 공개 목록 정렬에 더하지 않는다`() {
+        val forked = stories.save(Story(title = "복사 턴 제외", userId = official.id))
+        val generated = stories.save(Story(title = "새 응답 우선", userId = official.id))
+        val source = chats.save(StoryChat(storyId = forked.id, currentTurn = 2, hiddenTurnCount = 2, regeneratedCount = 1))
+        chats.save(StoryChat(storyId = forked.id, currentTurn = 100, forkedFromChatId = source.id, forkedFromTurn = 100,
+            deletedAt = Instant.now()))
+        chats.save(StoryChat(storyId = generated.id, currentTurn = 6))
+        val expected = listOf(generated.publicId.toString(), forked.publicId.toString())
+        for (section in home()["sections"]) assertThat(ids(section)).containsExactlyElementsOf(expected)
+        for (sort in listOf("popular", "chats")) {
+            val section = filter(mapOf("sort" to sort, "itemLimit" to 1))
+            val public = mapper.readTree(client.get().uri("/api/v1/stories?sort=$sort&limit=1").exchange()
+                .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
+            assertThat(ids(public)).containsExactly(generated.publicId.toString())
+            assertThat(home()["sections"][0]["items"]).isEqualTo(public["items"])
+            assertThat(public["items"][0]["turnCount"].asInt()).isEqualTo(6)
+            request(HttpMethod.DELETE, "$path/${section["id"].asText()}", mapOf("reason" to "다음 정렬")).expectStatus().isNoContent
+        }
+    }
+
     @Test fun `홈 인기순과 채팅순의 같은 누적 값은 public_id 내림차순으로 정렬한다`() {
         val high = stories.save(Story(title = "높은 UUID", publicId = UUID.fromString("00000000-0000-0000-0000-000000000020")))
         val low = stories.save(Story(title = "낮은 UUID", publicId = UUID.fromString("00000000-0000-0000-0000-000000000010")))

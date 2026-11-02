@@ -21,7 +21,7 @@ class AdminChatEngagementRepository(private val jdbc: NamedParameterJdbcTemplate
     fun activity(from: Instant, until: Instant, excluded: List<Long>): List<AdminChatActivity> = jdbc.query("""
         SELECT ${day("m.created_at")} AS metric_date,c.user_id,c.id AS chat_id
         FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
-        WHERE m.role='USER' AND m.created_at>=:from AND m.created_at<=:until
+        WHERE m.role='USER' AND ${AdminQuery.generatedUser()} AND m.created_at>=:from AND m.created_at<=:until
             AND c.user_id IS NOT NULL AND ${owner(excluded)}
         GROUP BY ${day("m.created_at")},c.user_id,c.id
         """, params(from, until, excluded)) { rs, _ ->
@@ -31,7 +31,7 @@ class AdminChatEngagementRepository(private val jdbc: NamedParameterJdbcTemplate
     fun turns(from: Instant, until: Instant, excluded: List<Long>): Map<LocalDate, Long> = jdbc.query("""
         SELECT ${day("m.created_at")} AS metric_date,COUNT(*) AS n
         FROM story_messages m JOIN story_chats c ON c.id=m.chat_id
-        WHERE m.role='ASSISTANT' AND m.created_at>=:from AND m.created_at<=:until AND ${owner(excluded)}
+        WHERE m.role='ASSISTANT' AND ${AdminQuery.generatedAssistant()} AND m.created_at>=:from AND m.created_at<=:until AND ${owner(excluded)}
         GROUP BY ${day("m.created_at")}
         """, params(from, until, excluded)) { rs, _ -> LocalDate.ofEpochDay(rs.getLong("metric_date")) to rs.getLong("n") }.toMap()
 
