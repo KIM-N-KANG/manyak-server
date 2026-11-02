@@ -13,6 +13,17 @@ import java.time.Instant
 import java.util.UUID
 
 interface StoryRepository : JpaRepository<Story, Long> {
+    @Query("""
+        SELECT s.publicId AS publicId, s.thumbnailImageUrl AS thumbnailImageUrl,
+               s.thumbnailImageKey AS thumbnailImageKey, s.thumbnailModerationStatus AS thumbnailModerationStatus
+        FROM Story s
+        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+          AND s.deletedAt IS NULL
+          AND (:requesterId IS NULL OR s.userId IS NULL OR s.userId <> :requesterId)
+    """)
+    fun findExploreCandidates(@Param("requesterId") requesterId: Long?): List<StoryExploreCandidate>
+
     // 공개 여부와 무관하게 삭제되지 않은 소유 스토리의 ID를 조회한다.
     @Query(
         """
