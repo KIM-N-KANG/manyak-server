@@ -1,4 +1,4 @@
-# 알림 열람: ADMIN BACKEND 4-1-24~25·4-2-36·4-2-42, KNK-1927
+# 알림 열람: ADMIN BACKEND 4-1-24~25·4-2-36·4-2-42, KNK-1927·KNK-1966
 # 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken 준비.
 # MANYAK_ADMIN_PUSH_OPENS_MEASURED_FROM은 푸시 UTM 서버를 배포한 KST 날짜(YYYY-MM-DD).
 # MANYAK_ADMIN_PUSH_OPENS_APP_MEASURED_FROM은 앱 v1.7.7의 Play 배포일 KST 날짜. 빈 플랫폼은 조회하지 않는다.
@@ -38,6 +38,16 @@ Authorization: Bearer {{adminToken}}
             }
             client.assert(!("inboxOpenRate" in c), JSON.stringify(c));
             if (c.deliveredMembers === 0) client.assert(c.pushOpenRate === null, JSON.stringify(c));
+        });
+        [...b.campaigns, ...b.activityTypes].forEach(row => {
+            const fields = ["chattedMembers", "chattedBeforeMembers", "chatRate"];
+            client.assert(fields.every(key => key in row), `채팅 전환 필드 누락 actual=${JSON.stringify(row)}`);
+            if (row.deliveredMembers === 0) client.assert(fields.every(key => row[key] === null), `도달 0 actual=${JSON.stringify(row)}`);
+            else {
+                client.assert(Number.isInteger(row.chattedMembers) && Number.isInteger(row.chattedBeforeMembers), JSON.stringify(row));
+                client.assert(row.chattedMembers >= 0 && row.chattedMembers <= row.deliveredMembers && row.chattedBeforeMembers >= 0 && row.chattedBeforeMembers <= row.deliveredMembers, JSON.stringify(row));
+                client.assert(Math.abs(row.chatRate - row.chattedMembers / row.deliveredMembers) < 1e-10, JSON.stringify(row));
+            }
         });
         client.assert("androidMeasuredFrom" in b, JSON.stringify(b));
         if (b.campaigns.length) client.global.set("pushOpenCampaignId", b.campaigns[0].campaignId);
@@ -102,6 +112,13 @@ Authorization: Bearer {{adminToken}}
         const b = response.body;
         client.assert(response.status === 200 && b.campaignId === client.global.get("pushOpenCampaignId"), JSON.stringify(b));
         client.assert(Array.isArray(b.pendingDates) && "androidMeasuredFrom" in b, JSON.stringify(b));
+        const conversionFields = ["chattedMembers", "chattedBeforeMembers", "chatRate"];
+        client.assert(conversionFields.every(key => key in b), `채팅 전환 필드 누락 actual=${JSON.stringify(b)}`);
+        if (b.deliveredMembers === 0) client.assert(conversionFields.every(key => b[key] === null), JSON.stringify(b));
+        else {
+            client.assert(Number.isInteger(b.chattedMembers) && Number.isInteger(b.chattedBeforeMembers), JSON.stringify(b));
+            client.assert(Math.abs(b.chatRate - b.chattedMembers / b.deliveredMembers) < 1e-10, JSON.stringify(b));
+        }
         if (b.startedAt === null) client.assert(b.openState === "PENDING" && b.from === null && b.to === null && b.deliveredMembers === 0, JSON.stringify(b));
         if (b.openState !== "MEASURED") client.assert(b.asOf === null && b.pendingDates.length === 0 && b.pushOpens === null && b.inboxOpens === null, JSON.stringify(b));
         else {
@@ -138,3 +155,13 @@ GET {{baseUrl}}/api/v1/admin/campaigns/push-opens/00000000-0000-4000-8000-000000
 # 상태 PENDING, NO_LINK, BEFORE_MEASUREMENT인 단건은 자격 증명 없이도 조회하지 않고 200이다.
 # 웹보다 늦은 앱 측정 시작일 전에 시작한 캠페인은 이후 앱 기록이 있어도 앱 값이 null이어야 한다.
 # 새벽 배치 후 같은 날짜를 조회하면 저장 값이 재사용되며 웹의 기존 push_opens 키도 재사용된다.
+
+# 채팅 전환은 openState와 무관한 DB 값: NO_LINK·BEFORE_MEASUREMENT여도 도달 회원이 있으면 숫자다.
+# 도달 직전 24시간/직후 24시간의 소유 채팅 USER 메시지만 센다. 활동은 activityFrom~to의 종류·KST 날짜별 회원 수 합.
+# 같은 회원이 하루에 여러 번 도달/채팅해도 1명이며 다른 날짜에 다시 도달하면 각 날짜에서 센다.
+# 실제 fixture: 도달 4명 중 A는 8시간 뒤, B는 25시간 뒤, C는 6시간 전과 3시간 뒤, D는 AI 응답만 있으면 2명/1명/0.5.
+# 도달 0 또는 발송 기록 없는 PENDING은 세 전환 필드가 모두 null이어야 한다.
+
+# KNK-1966 검수 보정: 도달 회원 분모도 마지막 선점 이후 완료·회원 참조 있음·회원 중복 제거 기준이다.
+# 재현 fixture: 같은 캠페인에 선점 전 A 1건, 선점 후 B 1건, null 회원 1건, B 중복 1건을 넣고 B가 채팅하면
+# 위 목록·단건 요청 모두 deliveredMembers=1, chattedMembers=1, chatRate=1.0이어야 한다. 기기 합계는 별도다.

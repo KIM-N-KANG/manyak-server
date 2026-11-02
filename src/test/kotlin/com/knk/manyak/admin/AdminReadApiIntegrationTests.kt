@@ -446,11 +446,74 @@ class AdminReadApiIntegrationTests {
         assertThat(body.has("turnCount")).isTrue()
         assertThat(body["turnCount"].asLong()).isEqualTo(9)
         assertThat(body["periodChatCount"].isNull).isTrue()
-        assertThat(json(get("/members").expectStatus().isOk)["items"].all { !it.has("turnCount") }).isTrue()
+        val listed = json(get("/members").expectStatus().isOk)["items"].single { it["memberId"].asText() == admin.publicId.toString() }
+        assertThat(listed.path("turnCount").asLong()).isEqualTo(body["turnCount"].asLong())
+        assertThat(listed.path("periodTurnCount").isNull).isTrue()
+        assertThat(body.path("periodTurnCount").isNull).isTrue()
         val empty = member("채팅 없는 회원", UserStatus.DELETED)
         val emptyBody = json(get("/members/${empty.publicId}").expectStatus().isOk)
         assertThat(emptyBody.has("turnCount")).isTrue()
         assertThat(emptyBody["turnCount"].asLong()).isZero()
+    }
+
+    private fun memberTurns(owner: User, target: com.knk.manyak.story.entity.Story, count: Int, at: Instant,
+                            deleted: Boolean = false, migrated: Boolean = false) {
+        val room = chatRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryChat(storyId = target.id,
+            userId = if (migrated) null else owner.id, createdAt = at, currentTurn = 99, deletedAt = if (deleted) now else null))
+        repeat(count) { n ->
+            val message = messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
+                role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "활성 응답", messageOrder = n + 1,
+                createdAt = now.plusSeconds(86400))) // 메시지 시각 대신 채팅 생성일로 기간을 거른다.
+            if (n == 0) repeat(2) { version -> versions.saveAndFlush(com.knk.manyak.chat.entity.StoryMessageVersion(
+                messageId = message.id, versionNumber = version + 1, content = "이전 판본", choices = "[]")) }
+        }
+        messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
+            role = com.knk.manyak.chat.entity.MessageRole.USER, content = "사용자 입력", messageOrder = count + 1))
+        if (migrated) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", owner.id, room.id)
+    }
+
+    @Test fun `회원 목록 누적 턴과 기간 턴은 상세와 같은 정의로 삭제 이관 채팅을 포함한다`() {
+        val owner = member("목록턴대상")
+        val target = story(admin)
+        val start = midnight.minusSeconds(86400) // 10-20 KST 자정
+        memberTurns(owner, target, 2, start, deleted = true)
+        memberTurns(owner, target, 3, midnight.minusNanos(1000)) // 10-20 KST 마지막 마이크로초
+        memberTurns(owner, target, 4, midnight, migrated = true) // 기간 밖 10-21
+        val full = json(get("/members?q=${owner.publicId}").expectStatus().isOk)["items"].single()
+        assertThat(full.path("turnCount").asLong()).isEqualTo(9)
+        assertThat(full["chatCount"].asLong()).isEqualTo(2)
+        assertThat(full.path("periodTurnCount").isNull).isTrue()
+        val detail = json(get("/members/${owner.publicId}").expectStatus().isOk)
+        assertThat(detail["turnCount"]).isEqualTo(full["turnCount"])
+        assertThat(detail.path("periodTurnCount").isNull).isTrue()
+        val period = json(get("/members?q=${owner.publicId}&chatFrom=2026-10-20&chatTo=2026-10-20").expectStatus().isOk)["items"].single()
+        assertThat(period.path("turnCount").asLong()).isEqualTo(9)
+        assertThat(period["periodChatCount"].asLong()).isEqualTo(1)
+        assertThat(period.path("periodTurnCount").asLong()).isEqualTo(5)
+        val fromOnly = json(get("/members?q=${owner.publicId}&chatFrom=2026-10-21").expectStatus().isOk)["items"].single()
+        assertThat(fromOnly.path("periodTurnCount").asLong()).isEqualTo(4)
+        val toOnly = json(get("/members?q=${owner.publicId}&chatTo=2026-10-20").expectStatus().isOk)["items"].single()
+        assertThat(toOnly.path("periodTurnCount").asLong()).isEqualTo(5)
+    }
+
+    @Test fun `회원 목록 턴 정렬은 기간과 무관한 누적 기준이고 동률 공개 UUID 및 페이지 경계를 유지한다`() {
+        val target = story(admin)
+        val ids = (1..4).map { UUID.fromString("00000000-0000-4000-8000-${it.toString().padStart(12, '0')}") }
+        val totals = listOf(9, 0, 9, 4)
+        val periods = listOf(1, 0, 2, 4)
+        ids.forEachIndexed { index, id ->
+            val user = member("턴정렬$index", id = id)
+            memberTurns(user, target, periods[index], midnight.minusSeconds(86400))
+            memberTurns(user, target, totals[index] - periods[index], midnight.minusSeconds(172800), deleted = true)
+        }
+        fun page(order: String, number: Int, size: Int = 2) = json(get("/members?q=턴정렬&sort=turnCount&order=$order&page=$number&size=$size&chatFrom=2026-10-20&chatTo=2026-10-20").expectStatus().isOk)
+        val first = page("desc", 1)
+        assertThat(first["totalElements"].asLong()).isEqualTo(4)
+        assertThat(first["items"].toList().map { it["memberId"].asText() }).containsExactly(ids[0].toString(), ids[2].toString())
+        assertThat(first["items"].toList().map { it["turnCount"].asLong() }).containsExactly(9, 9)
+        assertThat(page("desc", 2)["items"].toList().map { it["turnCount"].asLong() }).containsExactly(4, 0)
+        assertThat(page("asc", 1, 4)["items"].toList().map { it["memberId"].asText() }).containsExactly(ids[1].toString(), ids[3].toString(), ids[0].toString(), ids[2].toString())
+        assertThat(page("desc", 3)["items"].size()).isZero()
     }
 
     @Test fun `상세는 로트 기반 잔액과 콘텐츠 수를 응답하고 접속 기록을 남긴다`() {
@@ -1092,6 +1155,84 @@ class AdminReadApiIntegrationTests {
             assertThat(page["totalElements"].asLong()).isEqualTo(expected)
             assertThat(point["value"].asDouble()).isEqualTo(expected.toDouble())
         }
+    }
+
+    @Test fun `기간 합계는 범위 안 일별 여덟 지표의 합이고 출석은 포함하지 않는다`() {
+        repeat(9) { member("첫날$it", created = Instant.parse("2026-10-14T15:00:00Z")) }
+        repeat(11) { member("둘째날$it", created = midnight) }
+        repeat(3) { member("범위 밖$it", created = Instant.parse("2026-10-13T15:00:00Z")) }
+        val owner = member("활동 회원")
+        val target = story(owner)
+        jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(midnight), target.id)
+        val room = chat(target, owner)
+        message(room, 2, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+        ledger(owner, 250, "ATTENDANCE_REWARD")
+        ledger(owner, 5000, "PURCHASE")
+        ledger(owner, -20, "CHAT_TURN")
+        ledger(owner, 20, "REFUND")
+        order(owner)
+        val body = json(get("/dashboard/charts?from=2026-10-15&to=2026-10-21").expectStatus().isOk)
+        val expected = mapOf("joined" to 20L, "chats" to 1L, "turns" to 1L, "stories" to 1L,
+            "granted" to 5250L, "spent" to 20L, "payments" to 1L, "revenue" to 4800L)
+        assertThat(body.path("totals").size()).isEqualTo(8)
+        expected.forEach { (key, value) ->
+            assertThat(body.path("totals").path(key).asLong()).describedAs(key).isEqualTo(value)
+            assertThat(body["daily"].sumOf { it[key].asLong() }).isEqualTo(value)
+        }
+        assertThat(body.path("totals").has("attendance")).isFalse()
+    }
+
+    @Test fun `직전 기간은 days와 직접 기간 모두 같은 길이이며 팀과 KST 범위 밖을 제외한다`() {
+        val start = Instant.parse("2026-10-07T15:00:00Z") // 직전 기간 첫날 10-08 KST
+        repeat(4) { member("직전 가입$it", created = start) }
+        member("직전 마지막", created = Instant.parse("2026-10-14T14:59:59.999999Z"))
+        repeat(2) { member("직전 전날$it", created = start.minusSeconds(1)) }
+        member("현재 첫날", created = Instant.parse("2026-10-14T15:00:00Z"))
+        val team = member("팀", created = start)
+        val owner = member("활동 회원")
+        for (user in listOf(owner, team)) {
+            val target = story(user)
+            jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(start), target.id)
+            val room = chat(target, user, created = start)
+            message(room, 1, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+            ledger(user, 250, "ATTENDANCE_REWARD", start)
+            ledger(user, -20, "CHAT_TURN", start)
+            order(user, completed = start)
+        }
+        val service = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
+            com.knk.manyak.admin.config.AdminDashboardProperties(listOf(team.id, admin.id)), official,
+            java.time.Clock.fixed(now, java.time.ZoneOffset.UTC))
+        val requests = listOf(
+            com.knk.manyak.admin.dto.AdminChartsRequest().apply { days = "7" },
+            com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-15"; to = "2026-10-21" })
+        requests.forEach { request ->
+            val body = mapper.readTree(mapper.writeValueAsString(service.charts(request)))
+            val previous = body.path("previous")
+            assertThat(previous.path("from").asText()).isEqualTo("2026-10-08")
+            assertThat(previous.path("to").asText()).isEqualTo("2026-10-14")
+            val expected = mapOf("joined" to 5L, "chats" to 1L, "turns" to 1L, "stories" to 1L,
+                "granted" to 250L, "spent" to 20L, "payments" to 1L, "revenue" to 4800L)
+            assertThat(previous.path("totals").size()).isEqualTo(8)
+            expected.forEach { (key, value) -> assertThat(previous.path("totals").path(key).asLong()).describedAs(key).isEqualTo(value) }
+            assertThat(body.path("totals").path("joined").asLong()).isEqualTo(1)
+        }
+        for (days in listOf(7, 30, 90)) {
+            val body = json(get("/dashboard/charts?days=$days").expectStatus().isOk)
+            val from = java.time.LocalDate.parse(body["from"].asText())
+            assertThat(body.path("previous").path("from").asText()).isEqualTo(from.minusDays(days.toLong()).toString())
+            assertThat(body.path("previous").path("to").asText()).isEqualTo(from.minusDays(1).toString())
+        }
+    }
+
+    @Test fun `직전 기간 상한은 366일을 추가로 읽고 빈 기간의 합계는 모두 영이다`() {
+        val body = json(get("/dashboard/charts?from=2025-10-21&to=2026-10-21").expectStatus().isOk)
+        val previous = body.path("previous")
+        assertThat(previous.path("from").asText()).isEqualTo("2024-10-20")
+        assertThat(previous.path("to").asText()).isEqualTo("2025-10-20")
+        assertThat(previous.path("totals").size()).isEqualTo(8)
+        previous.path("totals").forEach { assertThat(it.asLong()).isZero() }
+        assertThat(previous.path("totals").has("attendance")).isFalse()
+        assertThat(body["daily"].size()).isEqualTo(366)
     }
 
     @Test fun `직접 기간은 KST 양끝을 포함하고 링크와 빈 날짜를 같은 범위로 만든다`() {

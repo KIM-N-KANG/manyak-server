@@ -79,10 +79,69 @@ class AdminReadPostgresTests {
             }
             assertThat(reads.memberTurnCount(owner)).isEqualTo(9)
             assertThat(reads.memberTurnCount(userId)).isEqualTo(1)
+            val ownerId = jdbc.queryForObject("SELECT public_id FROM users WHERE id=?", UUID::class.java, owner)!!
+            val listed = reads.members(AdminMembersRequest(), AdminPagination(1, 1, "u.created_at desc"), ownerId).items.single()
+            assertThat(listed.turnCount).isEqualTo(9)
+            assertThat(listed.periodTurnCount).isNull()
         } finally {
             jdbc.update("DELETE FROM story_chats WHERE user_id=?", owner)
             jdbc.update("DELETE FROM users WHERE id=?", owner)
         }
+    }
+
+    private fun withMemberPlanFixture(block: () -> Unit) {
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_story_chats_user_created ON story_chats (user_id, created_at)")
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_story_messages_admin_chat_role_created ON story_messages (chat_id, role, created_at)")
+        val ids = jdbc.queryForList("""INSERT INTO users(public_id,nickname,created_at)
+            SELECT gen_random_uuid(), '회원 실행 계획 ' || n, TIMESTAMPTZ '2026-10-22 00:00:00+00' + n * INTERVAL '1 second'
+            FROM generate_series(1,40) AS seq(n) RETURNING id""", Long::class.java)
+        val named = NamedParameterJdbcTemplate(jdbc)
+        val params = mapOf("ids" to ids, "story" to jdbc.queryForObject("SELECT id FROM stories WHERE public_id=?", Long::class.java, storyId)!!)
+        try {
+            // 회원마다 20개 채팅(삭제/미삭제 각 10개), 채팅마다 USER/ASSISTANT 각 30개.
+            named.update("""INSERT INTO story_chats(public_id,user_id,story_id,created_at,deleted_at)
+                SELECT gen_random_uuid(), u.id, :story, TIMESTAMPTZ '2026-10-21 00:00:00+00' + n * INTERVAL '1 hour',
+                    CASE WHEN n % 2 = 0 THEN TIMESTAMPTZ '2026-10-23 00:00:00+00' ELSE NULL END
+                FROM users u CROSS JOIN generate_series(1,20) AS seq(n) WHERE u.id IN (:ids)""", params)
+            named.update("""INSERT INTO story_messages(chat_id,role,content,message_order,created_at)
+                SELECT c.id, CASE WHEN n % 2 = 0 THEN 'ASSISTANT' ELSE 'USER' END, '실행 계획 fixture', n,
+                    c.created_at + n * INTERVAL '1 second'
+                FROM story_chats c CROSS JOIN generate_series(1,60) AS seq(n) WHERE c.user_id IN (:ids)""", params)
+            for (table in listOf("users", "story_chats", "story_messages")) jdbc.execute("ANALYZE $table")
+            block()
+        } finally {
+            named.update("DELETE FROM story_chats WHERE user_id IN (:ids)", params)
+            named.update("DELETE FROM users WHERE id IN (:ids)", params)
+            for (table in listOf("users", "story_chats", "story_messages")) jdbc.execute("ANALYZE $table")
+        }
+    }
+
+    @Test fun `회원 턴 집계는 정렬 여부와 무관하게 응답 페이지 ID로 묶고 기본 정렬 전에 실행하지 않는다`() = withMemberPlanFixture {
+        val plans = mutableListOf<String>()
+        for ((sort, column) in listOf("createdAt" to "u.created_at", "turnCount" to "turn_count")) {
+            val traced = org.mockito.Mockito.spy(NamedParameterJdbcTemplate(jdbc))
+            val repository = AdminReadRepository(traced, ObjectMapper())
+            val response = repository.members(AdminMembersRequest().apply { this.sort = sort }, AdminPagination(1, 1, "$column desc"))
+            assertThat(response.items).hasSize(1)
+            val queries = org.mockito.Mockito.mockingDetails(traced).invocations.filter {
+                it.method.name == "query" && it.arguments.size == 3 && it.arguments[0] is String && it.arguments[1] is Map<*, *>
+            }.map { invocation ->
+                @Suppress("UNCHECKED_CAST")
+                (invocation.arguments[0] as String) to (invocation.arguments[1] as Map<String, Any>)
+            }
+            val pageQuery = queries.single { it.first.contains("LIMIT :size") }
+            assertThat(pageQuery.first.contains("m.role='ASSISTANT'")).isEqualTo(sort == "turnCount")
+            val turnQuery = queries.single { it.first.contains("GROUP BY c.user_id") }
+            assertThat(turnQuery.second["memberIds"] as Collection<*>).hasSize(1)
+            for ((sql, params) in queries) {
+                val explanation = NamedParameterJdbcTemplate(jdbc).queryForList("EXPLAIN (ANALYZE, BUFFERS) $sql", params)
+                    .joinToString("\n") { it.values.first().toString() }
+                plans += "$sort\n$sql\n$explanation\n"
+            }
+        }
+        val output = java.nio.file.Path.of("build/reports/admin-member-turn-plans.txt")
+        java.nio.file.Files.createDirectories(output.parent)
+        java.nio.file.Files.writeString(output, plans.joinToString("\n"))
     }
 
     @Test fun `실제 PostgreSQL 제출본 동률은 UUID 오름차순이며 페이지 누락이 없다`() {

@@ -1,0 +1,88 @@
+# 채팅 몰입 지표 — ADMIN BACKEND 4-2-46, KNK-1970.
+# 준비: 로컬 PostgreSQL·Redis와 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken을 저장한다.
+# 위에서부터 실행한다. 조회 전용이며 메시지·성공 판본 보관 시각 기준이다. 삭제 채팅도 포함한다.
+# 활성·이어 가기는 회원 USER 메시지만, 턴은 게스트를 포함한 ASSISTANT 메시지, 재생성은 판본 행 기준이다.
+@baseUrl = http://localhost:8080
+@from = 2026-10-01
+@to = 2026-10-20
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {% client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`)); %}
+
+### 1. 기본 30일 — 응답과 날짜 채움
+GET {{baseUrl}}/api/v1/admin/chats/engagement
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("채팅 몰입 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        const integer = (value, field) => client.assert(Number.isInteger(value) && value >= 0, `field=${field} expected=nonnegative integer actual=${value}`);
+        const ratio = (actual, n, d) => client.assert(d === 0 ? actual === null : typeof actual === "number" && Math.abs(actual - n / d) < 1e-10, `ratio expected=${d === 0 ? null : n / d} actual=${actual}`);
+        integer(b.activeMembers, "activeMembers"); integer(b.monthlyActiveMembers, "monthlyActiveMembers");
+        const start = Date.parse(b.from + "T00:00:00Z"), end = Date.parse(b.to + "T00:00:00Z");
+        client.assert(b.daily.length === (end - start) / 86400000 + 1 && b.daily.length === 30, `expected=30 complete days actual=${b.daily.length}`);
+        b.daily.forEach((d, i) => {
+            const expectedDate = new Date(start + i * 86400000).toISOString().slice(0, 10);
+            client.assert(d.date === expectedDate, `expected=${expectedDate} actual=${d.date}`);
+            ["activeMembers", "turns", "continuedMembers", "regenerations"].forEach(key => integer(d[key], key));
+            ratio(d.turnsPerActiveMember, d.turns, d.activeMembers);
+            ratio(d.regenerationRate, d.regenerations, d.turns);
+            client.assert(d.continuedMembers <= d.activeMembers, JSON.stringify(d));
+            if (i) ratio(d.continuationRate, d.continuedMembers, b.daily[i - 1].activeMembers);
+            else client.assert(d.continuationRate === null || d.continuationRate >= 0 && d.continuationRate <= 1, JSON.stringify(d));
+            client.assert(d.stickiness === null || d.stickiness >= 0 && d.stickiness <= 1, JSON.stringify(d));
+            if (i === b.daily.length - 1) ratio(d.stickiness, d.activeMembers, b.monthlyActiveMembers);
+        });
+        ratio(b.turnsPerActiveMember, b.daily.reduce((sum, d) => sum + d.turns, 0), b.activeMembers);
+        client.assert(typeof b.asOf === "string", JSON.stringify(b));
+        client.global.set("engagementFrom", b.from); client.global.set("engagementTo", b.to);
+    });
+%}
+
+### 2. 앞 응답의 명시 기간
+GET {{baseUrl}}/api/v1/admin/chats/engagement?from={{engagementFrom}}&to={{engagementTo}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("명시 기간", () => client.assert(response.status === 200 && response.body.from === client.global.get("engagementFrom") && response.body.to === client.global.get("engagementTo"), JSON.stringify(response.body))); %}
+
+### 3. 빠른 범위 90일
+GET {{baseUrl}}/api/v1/admin/chats/engagement?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일 날짜 채움", () => client.assert(response.status === 200 && response.body.daily.length === 90, `expected=200,90 days actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 4. 허용하지 않는 days 400
+GET {{baseUrl}}/api/v1/admin/chats/engagement?days=10
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("빠른 범위 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 5. 날짜 한쪽 누락 400
+GET {{baseUrl}}/api/v1/admin/chats/engagement?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 6. 기간 혼용 400
+GET {{baseUrl}}/api/v1/admin/chats/engagement?days=7&from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 혼용 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 7. 미인증 401
+GET {{baseUrl}}/api/v1/admin/chats/engagement
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 8. 자유 조회 — 오늘 이하 날짜로 조정
+GET {{baseUrl}}/api/v1/admin/chats/engagement?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+# fixture: 회원 A의 USER2·ASSISTANT2, B의 USER1·ASSISTANT1, 게스트의 USER1·ASSISTANT1이면 활성2·턴4·1인당턴2.
+# 전날 A채팅1·B채팅2, 오늘 A채팅1·B채팅3이면 continuedMembers=1, continuationRate=.5(범위 첫날도 동일).
+# 판본3개 중 팀 채팅1개와 턴40개면 regenerations=2, regenerationRate=.05. 누적 regenerated_count는 사용하지 않는다.
+# 오늘 활성20명, 오늘 포함 30일 고유 활성100명이면 stickiness=.2. 날짜별 활성의 합을 월 활성으로 사용하지 않는다.
+# 게스트 판본은 재생성에 포함한다. 게스트 USER는 활성·이어 가기에서 제외한다. 모든 집계는 팀 소유 채팅을 제외한다.

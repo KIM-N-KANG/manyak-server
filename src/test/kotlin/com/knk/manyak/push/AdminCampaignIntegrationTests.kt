@@ -214,7 +214,7 @@ class AdminCampaignIntegrationTests {
         }
     }
 
-    @Test fun `목록과 상세는 발송 결과 행에서 도달과 실패를 집계한다`() {
+    @Test fun `미선점 무회원 발송 결과는 회원 영과 기존 기기 합계를 반환한다`() {
         val id = create()["campaignId"].asText()
         val internalId = campaigns.findAll().single().id
         for ((i, counts) in listOf(2 to 0, 1 to 1, 0 to 2).withIndex()) {
@@ -225,7 +225,7 @@ class AdminCampaignIntegrationTests {
         for (path in listOf("/campaigns/$id", "/campaigns")) {
             val prefix = if (path == "/campaigns") "$.items[0]" else "$"
             call(HttpMethod.GET, path).expectStatus().isOk.expectBody()
-                .jsonPath("$prefix.deliveredMembers").isEqualTo(2)
+                .jsonPath("$prefix.deliveredMembers").isEqualTo(0)
                 .jsonPath("$prefix.deliveredDevices").isEqualTo(3)
                 .jsonPath("$prefix.failedDevices").isEqualTo(3)
         }
@@ -269,11 +269,13 @@ class AdminCampaignIntegrationTests {
         val results = listOf(listOf(1 to 1), listOf(2 to 2, 1 to 1), listOf(3 to 3, 0 to 0))
         results.forEachIndexed { i, rows ->
             val campaign = campaigns.findByPublicId(UUID.fromString(ids[i]))!!
+            jdbc.update("UPDATE push_campaigns SET started_at=? WHERE id=?", java.sql.Timestamp.from(Instant.EPOCH), campaign.id)
             rows.forEachIndexed { j, counts ->
+                val recipient = users.save(User(nickname = "도달 정렬 $i $j"))
                 jdbc.update("""INSERT INTO push_delivery_results
-                    (message_id, type, kind, campaign_id, outcome, reason, delivered_devices, failed_devices, completed_at)
-                    VALUES (?, 'PROMOTION', 'MARKETING', ?, 'DELIVERED', 'OK', ?, ?, CURRENT_TIMESTAMP)""",
-                    "$i:$j", campaign.id, counts.first, counts.second)
+                    (message_id, type, kind, campaign_id, user_id, outcome, reason, delivered_devices, failed_devices, completed_at)
+                    VALUES (?, 'PROMOTION', 'MARKETING', ?, ?, 'DELIVERED', 'OK', ?, ?, CURRENT_TIMESTAMP)""",
+                    "$i:$j", campaign.id, recipient.id, counts.first, counts.second)
             }
         }
         for (sort in listOf("deliveredMembers", "deliveredDevices", "failedDevices")) {

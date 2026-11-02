@@ -191,7 +191,7 @@ class AnalyticsBatchTests {
             mapOf("instagram" to listOf("ig"), "threads" to listOf("th", "threads"), "dcinside" to listOf("dc")))
         val policy = AnalyticsBatchPolicy()
         val dashboard = AdminAnalyticsService(fixture.snapshots, AmplitudeDashboardProperties(teamCohortId = "team"), fixture.mapper, clock)
-        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads(), PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, queries, PushOpensSettings(day.minusDays(5), day.minusDays(3)), clock))
+        val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads(), PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, queries, PushOpensSettings(day.minusDays(5), day.minusDays(3)), clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java)))
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
         server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
@@ -236,7 +236,7 @@ class AnalyticsBatchTests {
 
     @Test fun `열람 배치는 각 측정 시작일부터 백필하며 빈 플랫폼과 미래 시작일은 조회하지 않는다`() {
         val service = PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots,
-            AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(day.minusDays(4), day.plusDays(1)), clock)
+            AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(day.minusDays(4), day.plusDays(1)), clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java))
         val entries = service.batchMetrics()
         assertThat(entries).hasSize(4)
         assertThat(entries.sumOf { it.metric.definition.perDay }).isEqualTo(100)
@@ -256,7 +256,7 @@ class AnalyticsBatchTests {
         assertThat(runner.run()!!.cost).isEqualTo(150)
         assertThat(requested.flatMap { it.dates() }).allMatch { it >= day.minusDays(4) && it < day }
         assertThat(runner.run()).isNull()
-        val empty = PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(), clock)
+        val empty = PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), PushOpensSettings(), clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java))
         assertThat(empty.batchMetrics()).isEmpty()
     }
 
