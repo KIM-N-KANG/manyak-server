@@ -73,10 +73,11 @@ data class AdminMemberDetailResponse(
     val memberId: UUID, val nickname: String, val status: UserStatus, @get:JsonProperty("isAdmin") val isAdmin: Boolean, val createdAt: Instant,
     val lastActiveAt: Instant?, val creditsSpent: Long, val paidKrw: Long, val chatCount: Long, val periodChatCount: Long?,
     val creditBalance: Long, val storyCount: Long, val turnCount: Long, val deletedAt: Instant?,
+    val periodTurnCount: Long?,
 ) {
-    constructor(member: AdminMemberListResponse, creditBalance: Long, storyCount: Long, turnCount: Long, deletedAt: Instant?) : this(
+    constructor(member: AdminMemberListResponse, creditBalance: Long, storyCount: Long, deletedAt: Instant?) : this(
         member.memberId, member.nickname, member.status, member.isAdmin, member.createdAt, member.lastActiveAt,
-        member.creditsSpent, member.paidKrw, member.chatCount, member.periodChatCount, creditBalance, storyCount, turnCount, deletedAt)
+        member.creditsSpent, member.paidKrw, member.chatCount, member.periodChatCount, creditBalance, storyCount, member.turnCount, deletedAt, member.periodTurnCount)
 }
 
 data class AdminPaymentOrderResponse(

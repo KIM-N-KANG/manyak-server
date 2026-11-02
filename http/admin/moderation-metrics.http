@@ -1,0 +1,92 @@
+# 검수 판정 비율 추이 — ADMIN BACKEND 4-2-47, KNK-1971.
+# 준비: 로컬 PostgreSQL·Redis와 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken을 저장한다.
+# 위에서부터 실행한다. 조회 전용. 재제출 후 사라진 과거 판정을 복원하지 않고 지금 남아 있는 판정을 센다.
+# 검수 지표에는 팀 제외를 적용하지 않는다. held·pending은 요청 기간과 무관한 현재 값이다.
+@baseUrl = http://localhost:8080
+@from = 2026-10-01
+@to = 2026-10-20
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {% client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`)); %}
+
+### 1. 기본 30일 — 판정·날짜·사유 계약
+GET {{baseUrl}}/api/v1/admin/moderation/metrics
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("검수 지표 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        ["decided", "approved", "rejected", "failed", "held", "pending"].forEach(key => client.assert(Number.isInteger(b[key]) && b[key] >= 0, `field=${key} expected=nonnegative integer actual=${b[key]}`));
+        client.assert(b.decided === b.approved + b.rejected, `decided expected=${b.approved + b.rejected} actual=${b.decided}`);
+        client.assert(b.decided === 0 ? b.rejectionRate === null : typeof b.rejectionRate === "number" && Math.abs(b.rejectionRate - b.rejected / b.decided) < 1e-10, `rate expected=${b.decided === 0 ? null : b.rejected / b.decided} actual=${b.rejectionRate}`);
+        const start = Date.parse(b.from + "T00:00:00Z"), end = Date.parse(b.to + "T00:00:00Z");
+        client.assert(b.daily.length === 30 && b.daily.length === (end - start) / 86400000 + 1, `expected=30 complete days actual=${b.daily.length}`);
+        b.daily.forEach((d, i) => {
+            const expected = new Date(start + i * 86400000).toISOString().slice(0, 10);
+            client.assert(d.date === expected, `date expected=${expected} actual=${d.date}`);
+            ["submitted", "approved", "rejected", "failed"].forEach(key => client.assert(Number.isInteger(d[key]) && d[key] >= 0, `daily field=${key} actual=${d[key]}`));
+        });
+        ["approved", "rejected", "failed"].forEach(key => client.assert(b[key] === b.daily.reduce((sum, d) => sum + d[key], 0), `daily total field=${key} actual=${b[key]}`));
+        const seen = new Set();
+        b.rejectionRules.forEach((r, i) => {
+            client.assert(typeof r.rule === "string" && r.rule.length > 0 && ["TEXT", "IMAGE"].includes(r.type), JSON.stringify(r));
+            client.assert(Number.isInteger(r.submissions) && r.submissions > 0 && r.submissions <= b.rejected, JSON.stringify(r));
+            const key = r.rule + "/" + r.type;
+            client.assert(!seen.has(key), `expected=unique pair actual=${key}`); seen.add(key);
+            if (i) {
+                const p = b.rejectionRules[i - 1];
+                client.assert(p.submissions > r.submissions || p.submissions === r.submissions && p.rule <= r.rule, `expected=submissions desc,rule asc actual=${JSON.stringify([p, r])}`);
+            }
+        });
+        client.assert(typeof b.asOf === "string", JSON.stringify(b));
+        client.global.set("moderationMetricsFrom", b.from); client.global.set("moderationMetricsTo", b.to);
+    });
+%}
+
+### 2. 앞 응답의 명시 기간
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?from={{moderationMetricsFrom}}&to={{moderationMetricsTo}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("명시 기간", () => client.assert(response.status === 200 && response.body.from === client.global.get("moderationMetricsFrom") && response.body.to === client.global.get("moderationMetricsTo"), JSON.stringify(response.body))); %}
+
+### 3. 빠른 범위 90일
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일 날짜 채움", () => client.assert(response.status === 200 && response.body.daily.length === 90, `expected=200,90 days actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 4. 허용 외 days 400
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?days=10
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("빠른 범위 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 5. 한쪽 날짜 누락 400
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 6. 기간 혼용 400
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?days=7&from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 혼용 거절", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 7. 미인증 401
+GET {{baseUrl}}/api/v1/admin/moderation/metrics
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 8. 자유 조회 — 오늘 이하 날짜로 조정
+GET {{baseUrl}}/api/v1/admin/moderation/metrics?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+# fixture: 기간 판정 승인6·거절2·실패1, 범위 밖 거절1이면 decided=8, rejectionRate=.25, failed=1.
+# PENDING 보류1·미보류3이면 held=1, pending=3. 다른 기간으로 조회해도 현재 보류·대기 값이다.
+# 거절 제출본1의 동일 규칙 TEXT2·IMAGE1, 제출본2의 TEXT1이면 그 규칙 TEXT submissions=2, IMAGE=1.
+# 재제출로 PENDING이 된 행의 이전 거절·사유는 집계하지 않는다. submitted는 최초 created_at 날짜에만 한 번 센다.
+# 팀 계정과 팀 소유 스토리의 제출본도 포함한다. 거절 사유 합은 여러 규칙·종류 때문에 rejected보다 클 수 있다.

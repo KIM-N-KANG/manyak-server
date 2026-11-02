@@ -54,7 +54,7 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
     fun campaignReach(from: LocalDate, to: LocalDate): List<PushCampaignReach> {
         val zone = ZoneId.of("Asia/Seoul")
         return jdbc.query("""SELECT c.public_id,c.kind,c.title,n.public_id AS notice_id,c.started_at,c.deep_link_included,
-            (SELECT COUNT(*) FROM push_delivery_results r WHERE r.campaign_id=c.id AND r.delivered_devices>0) AS reached
+            (SELECT COUNT(DISTINCT r.user_id) FROM push_delivery_results r WHERE ${campaignMemberDeliveryCondition()}) AS reached
             FROM push_campaigns c LEFT JOIN notices n ON n.id=c.notice_id
             WHERE c.started_at >= ? AND c.started_at < ? ORDER BY c.started_at DESC,c.public_id ASC""",
             { rs, _ -> PushCampaignReach(rs.getObject("public_id",UUID::class.java),PushKind.valueOf(rs.getString("kind")),rs.getString("title"),
@@ -63,7 +63,7 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
     }
 
     fun campaignReach(publicId: UUID): PushCampaignReach? = jdbc.query("""SELECT c.public_id,c.kind,c.title,n.public_id AS notice_id,c.started_at,c.deep_link_included,
-        CASE WHEN c.started_at IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM push_delivery_results r WHERE r.campaign_id=c.id AND r.delivered_devices>0) END AS reached
+        CASE WHEN c.started_at IS NULL THEN 0 ELSE (SELECT COUNT(DISTINCT r.user_id) FROM push_delivery_results r WHERE ${campaignMemberDeliveryCondition()}) END AS reached
         FROM push_campaigns c LEFT JOIN notices n ON n.id=c.notice_id WHERE c.public_id=?""",
         { rs, _ -> PushCampaignReach(rs.getObject("public_id",UUID::class.java),PushKind.valueOf(rs.getString("kind")),rs.getString("title"),
             rs.getObject("notice_id",UUID::class.java),rs.getTimestamp("started_at")?.toInstant(),rs.getObject("deep_link_included") as Boolean?,rs.getLong("reached")) }, publicId).singleOrNull()
@@ -79,6 +79,31 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
             mapOf("from" to Timestamp.from(from.atStartOfDay(zone).toInstant()),"to" to Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()),"types" to types.map { it.name })) { rs,_ ->
                 PushActivityReach(PushDeliveryType.valueOf(rs.getString("type")),LocalDate.ofEpochDay(rs.getLong("epoch_day")),rs.getLong("reached"))
             }
+    }
+
+    /** 캠페인 선점 전의 결과를 제외하고 마지막 회차의 도달 회원 시각을 제공한다. */
+    fun reachedMemberDeliveries(campaignId: UUID): List<PushMemberDelivery> = reachedMemberDeliveries(listOf(campaignId))
+
+    fun reachedMemberDeliveries(campaignIds: List<UUID>): List<PushMemberDelivery> = campaignIds.distinct().chunked(500).flatMap { ids ->
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc).query("""
+            SELECT c.public_id AS campaign_id,r.user_id,r.type,r.completed_at FROM push_delivery_results r
+            JOIN push_campaigns c ON c.id=r.campaign_id
+            WHERE c.public_id IN (:ids) AND ${campaignMemberDeliveryCondition()}
+            """, mapOf("ids" to ids)) { rs, _ -> PushMemberDelivery(rs.getLong("user_id"), PushDeliveryType.valueOf(rs.getString("type")),
+            rs.getTimestamp("completed_at").toInstant(), rs.getObject("campaign_id", UUID::class.java)) }
+    }
+
+    fun reachedMemberDeliveries(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushMemberDelivery> {
+        if (types.isEmpty()) return emptyList()
+        val zone = ZoneId.of("Asia/Seoul")
+        return org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc).query("""
+            SELECT user_id,type,completed_at FROM push_delivery_results
+            WHERE completed_at>=:from AND completed_at<:to AND type IN (:types)
+                AND delivered_devices>0 AND user_id IS NOT NULL
+            """, mapOf("from" to Timestamp.from(from.atStartOfDay(zone).toInstant()),
+                "to" to Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()), "types" to types.map { it.name })) { rs, _ ->
+            PushMemberDelivery(rs.getLong("user_id"), PushDeliveryType.valueOf(rs.getString("type")), rs.getTimestamp("completed_at").toInstant())
+        }
     }
 
 }

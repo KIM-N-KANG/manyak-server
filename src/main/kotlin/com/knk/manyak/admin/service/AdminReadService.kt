@@ -49,7 +49,7 @@ class AdminReadService(
         AdminDateRange.of(request.creditDate, request.creditDate)
         AdminDateRange.of(request.attendanceDate, request.attendanceDate)
         val page = request.pagination(mapOf("createdAt" to "u.created_at", "lastActiveAt" to "last_active_at",
-            "creditsSpent" to "credits_spent", "paidKrw" to "paid_krw", "chatCount" to "chat_count"), "createdAt")
+            "creditsSpent" to "credits_spent", "paidKrw" to "paid_krw", "chatCount" to "chat_count", "turnCount" to "turn_count"), "createdAt")
         val result = reads.members(request, page)
         if (query != null) audits.recordAccess(adminUserId, AdminAuditAction.MEMBER_SEARCHED, query)
         result
@@ -58,7 +58,7 @@ class AdminReadService(
     fun member(adminUserId: Long, memberId: UUID): AdminMemberDetailResponse = SocialAuthPrivacyFilter.safely {
         val user = requireMember(memberId)
         val summary = reads.members(AdminMembersRequest(), AdminPagination(1, 1, "u.created_at desc"), memberId).items.single()
-        val result = AdminMemberDetailResponse(summary, wallet.balanceOf(user.id), reads.contentCount("stories", user.id), reads.memberTurnCount(user.id), user.deletedAt)
+        val result = AdminMemberDetailResponse(summary, wallet.balanceOf(user.id), reads.contentCount("stories", user.id), user.deletedAt)
         audits.recordAccess(adminUserId, AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
         result
     }

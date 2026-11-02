@@ -15,10 +15,11 @@ class CampaignDeliverySummaryRepository(private val jdbc: JdbcTemplate) {
         val installed = jdbc.queryForObject("""SELECT COUNT(*) FROM information_schema.tables
             WHERE LOWER(table_schema) = 'public' AND LOWER(table_name) = 'push_delivery_results'""", Long::class.java) ?: 0
         if (installed == 0L) return emptyMap()
-        return NamedParameterJdbcTemplate(jdbc).query("""SELECT campaign_id,
-            SUM(CASE WHEN delivered_devices > 0 THEN 1 ELSE 0 END) AS delivered_members,
-            SUM(delivered_devices) AS delivered_devices, SUM(failed_devices) AS failed_devices
-            FROM push_delivery_results WHERE campaign_id IN (:ids) GROUP BY campaign_id""",
+        return NamedParameterJdbcTemplate(jdbc).query("""SELECT r.campaign_id,
+            COUNT(DISTINCT CASE WHEN ${campaignMemberDeliveryCondition()} THEN r.user_id END) AS delivered_members,
+            SUM(r.delivered_devices) AS delivered_devices, SUM(r.failed_devices) AS failed_devices
+            FROM push_delivery_results r JOIN push_campaigns c ON c.id=r.campaign_id
+            WHERE r.campaign_id IN (:ids) GROUP BY r.campaign_id""",
             mapOf("ids" to campaignIds)) { rs, _ -> rs.getLong("campaign_id") to CampaignDeliverySummary(
                 rs.getLong("delivered_members"), rs.getLong("delivered_devices"), rs.getLong("failed_devices")) }.toMap()
     }

@@ -40,6 +40,16 @@ class PushDeliveryService(
     @Transactional(readOnly = true)
     fun activityReach(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushActivityReach> = repository.activityReach(from, to, types)
 
+    @Transactional(readOnly = true)
+    fun reachedMemberDeliveries(campaignId: java.util.UUID): List<PushMemberDelivery> = repository.reachedMemberDeliveries(campaignId)
+
+    @Transactional(readOnly = true)
+    fun reachedMemberDeliveries(campaignIds: List<java.util.UUID>): List<PushMemberDelivery> = repository.reachedMemberDeliveries(campaignIds)
+
+    @Transactional(readOnly = true)
+    fun reachedMemberDeliveries(from: LocalDate, to: LocalDate, types: List<PushDeliveryType>): List<PushMemberDelivery> =
+        repository.reachedMemberDeliveries(from, to, types)
+
     /** S8 캠페인 상세에서 이미 해석한 내부 PK로 호출한다. 결과가 없어도 모두 0이다. */
     @Transactional(readOnly = true)
     fun campaignStats(campaignId: Long): CampaignDeliveryStats = repository.campaignStats(campaignId)
