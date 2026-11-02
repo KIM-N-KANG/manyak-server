@@ -1094,6 +1094,84 @@ class AdminReadApiIntegrationTests {
         }
     }
 
+    @Test fun `기간 합계는 범위 안 일별 여덟 지표의 합이고 출석은 포함하지 않는다`() {
+        repeat(9) { member("첫날$it", created = Instant.parse("2026-10-14T15:00:00Z")) }
+        repeat(11) { member("둘째날$it", created = midnight) }
+        repeat(3) { member("범위 밖$it", created = Instant.parse("2026-10-13T15:00:00Z")) }
+        val owner = member("활동 회원")
+        val target = story(owner)
+        jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(midnight), target.id)
+        val room = chat(target, owner)
+        message(room, 2, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+        ledger(owner, 250, "ATTENDANCE_REWARD")
+        ledger(owner, 5000, "PURCHASE")
+        ledger(owner, -20, "CHAT_TURN")
+        ledger(owner, 20, "REFUND")
+        order(owner)
+        val body = json(get("/dashboard/charts?from=2026-10-15&to=2026-10-21").expectStatus().isOk)
+        val expected = mapOf("joined" to 20L, "chats" to 1L, "turns" to 1L, "stories" to 1L,
+            "granted" to 5250L, "spent" to 20L, "payments" to 1L, "revenue" to 4800L)
+        assertThat(body.path("totals").size()).isEqualTo(8)
+        expected.forEach { (key, value) ->
+            assertThat(body.path("totals").path(key).asLong()).describedAs(key).isEqualTo(value)
+            assertThat(body["daily"].sumOf { it[key].asLong() }).isEqualTo(value)
+        }
+        assertThat(body.path("totals").has("attendance")).isFalse()
+    }
+
+    @Test fun `직전 기간은 days와 직접 기간 모두 같은 길이이며 팀과 KST 범위 밖을 제외한다`() {
+        val start = Instant.parse("2026-10-07T15:00:00Z") // 직전 기간 첫날 10-08 KST
+        repeat(4) { member("직전 가입$it", created = start) }
+        member("직전 마지막", created = Instant.parse("2026-10-14T14:59:59.999999Z"))
+        repeat(2) { member("직전 전날$it", created = start.minusSeconds(1)) }
+        member("현재 첫날", created = Instant.parse("2026-10-14T15:00:00Z"))
+        val team = member("팀", created = start)
+        val owner = member("활동 회원")
+        for (user in listOf(owner, team)) {
+            val target = story(user)
+            jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(start), target.id)
+            val room = chat(target, user, created = start)
+            message(room, 1, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+            ledger(user, 250, "ATTENDANCE_REWARD", start)
+            ledger(user, -20, "CHAT_TURN", start)
+            order(user, completed = start)
+        }
+        val service = com.knk.manyak.admin.service.AdminChartsService(chartsRepository,
+            com.knk.manyak.admin.config.AdminDashboardProperties(listOf(team.id, admin.id)), official,
+            java.time.Clock.fixed(now, java.time.ZoneOffset.UTC))
+        val requests = listOf(
+            com.knk.manyak.admin.dto.AdminChartsRequest().apply { days = "7" },
+            com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-15"; to = "2026-10-21" })
+        requests.forEach { request ->
+            val body = mapper.readTree(mapper.writeValueAsString(service.charts(request)))
+            val previous = body.path("previous")
+            assertThat(previous.path("from").asText()).isEqualTo("2026-10-08")
+            assertThat(previous.path("to").asText()).isEqualTo("2026-10-14")
+            val expected = mapOf("joined" to 5L, "chats" to 1L, "turns" to 1L, "stories" to 1L,
+                "granted" to 250L, "spent" to 20L, "payments" to 1L, "revenue" to 4800L)
+            assertThat(previous.path("totals").size()).isEqualTo(8)
+            expected.forEach { (key, value) -> assertThat(previous.path("totals").path(key).asLong()).describedAs(key).isEqualTo(value) }
+            assertThat(body.path("totals").path("joined").asLong()).isEqualTo(1)
+        }
+        for (days in listOf(7, 30, 90)) {
+            val body = json(get("/dashboard/charts?days=$days").expectStatus().isOk)
+            val from = java.time.LocalDate.parse(body["from"].asText())
+            assertThat(body.path("previous").path("from").asText()).isEqualTo(from.minusDays(days.toLong()).toString())
+            assertThat(body.path("previous").path("to").asText()).isEqualTo(from.minusDays(1).toString())
+        }
+    }
+
+    @Test fun `직전 기간 상한은 366일을 추가로 읽고 빈 기간의 합계는 모두 영이다`() {
+        val body = json(get("/dashboard/charts?from=2025-10-21&to=2026-10-21").expectStatus().isOk)
+        val previous = body.path("previous")
+        assertThat(previous.path("from").asText()).isEqualTo("2024-10-20")
+        assertThat(previous.path("to").asText()).isEqualTo("2025-10-20")
+        assertThat(previous.path("totals").size()).isEqualTo(8)
+        previous.path("totals").forEach { assertThat(it.asLong()).isZero() }
+        assertThat(previous.path("totals").has("attendance")).isFalse()
+        assertThat(body["daily"].size()).isEqualTo(366)
+    }
+
     @Test fun `직접 기간은 KST 양끝을 포함하고 링크와 빈 날짜를 같은 범위로 만든다`() {
         for (at in listOf(midnight.minusSeconds(86400), midnight.minusSeconds(1), midnight)) users.save(User(nickname = "경계", createdAt = at))
         val body = json(get("/dashboard/charts?from=2026-10-20&to=2026-10-20").expectStatus().isOk)
