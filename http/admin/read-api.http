@@ -191,6 +191,19 @@ GET {{baseUrl}}/api/v1/admin/dashboard/charts?days=7
 Authorization: Bearer {{adminToken}}
 
 > {%
+    client.test("기간 합계와 직전 기간", () => {
+        const b = response.body;
+        const keys = ["joined", "chats", "turns", "stories", "granted", "spent", "payments", "revenue"];
+        [b.totals, b.previous.totals].forEach(totals => {
+            client.assert(Object.keys(totals).length === 8 && keys.every(key => Number.isInteger(totals[key])), `8개 정수 합계 actual=${JSON.stringify(totals)}`);
+            client.assert(!Object.prototype.hasOwnProperty.call(totals, "attendance"), "출석 기간 합계는 없어야 합니다");
+        });
+        keys.forEach(key => client.assert(b.totals[key] === b.daily.reduce((sum, day) => sum + day[key], 0), `일별 합계 불일치 key=${key} actual=${b.totals[key]}`));
+        const first = new Date(b.from + "T00:00:00Z");
+        const previousFrom = new Date(first); previousFrom.setUTCDate(first.getUTCDate() - 7);
+        const previousTo = new Date(first); previousTo.setUTCDate(first.getUTCDate() - 1);
+        client.assert(b.previous.from === previousFrom.toISOString().slice(0, 10) && b.previous.to === previousTo.toISOString().slice(0, 10), `직전 7일 actual=${JSON.stringify(b.previous)}`);
+    });
     client.test("차트 계약", () => {
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
         client.assert(response.body.daily.length === 7 && response.body.distributions.length === 9, "7일과 9개 차트가 필요합니다");
@@ -577,6 +590,13 @@ GET {{baseUrl}}/api/v1/admin/dashboard/charts?from=2026-10-01&to=2026-10-20
 Authorization: Bearer {{adminToken}}
 
 > {%
+client.test("직접 기간 합계와 직전 20일", () => {
+  const b = response.body;
+  client.assert(b.previous.from === "2026-09-11" && b.previous.to === "2026-09-30", `직전 기간 actual=${JSON.stringify(b.previous)}`);
+  const keys = ["joined", "chats", "turns", "stories", "granted", "spent", "payments", "revenue"];
+  client.assert(Object.keys(b.totals).length === 8 && Object.keys(b.previous.totals).length === 8, "합계는 출석을 제외한 8개 필드여야 합니다");
+  keys.forEach(key => client.assert(b.totals[key] === b.daily.reduce((sum, day) => sum + day[key], 0) && Number.isInteger(b.previous.totals[key]), `합계 key=${key} actual=${b.totals[key]}`));
+});
 client.test("직접 기간 응답", () => {
   client.assert(response.status === 200 && response.body.from === "2026-10-01" && response.body.to === "2026-10-20" && response.body.daily.length === 20, `actual=${JSON.stringify(response.body)}`);
 });

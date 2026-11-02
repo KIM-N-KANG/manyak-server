@@ -130,7 +130,13 @@ data class AdminPaymentUsage(val turns: Long, val stories: Long, val creditsSpen
 data class AdminChartsResponse(
     val asOf: Instant, val from: LocalDate, val to: LocalDate, val daily: List<AdminDailyMetrics>,
     val distributions: List<AdminDistribution>,
+    val totals: AdminChartTotals, val previous: AdminChartPreviousPeriod,
 )
+data class AdminChartTotals(
+    val joined: Long, val chats: Long, val turns: Long, val stories: Long,
+    val granted: Long, val spent: Long, val payments: Long, val revenue: Long,
+)
+data class AdminChartPreviousPeriod(val from: LocalDate, val to: LocalDate, val totals: AdminChartTotals)
 data class AdminDailyMetrics(
     val date: LocalDate, val joined: Long = 0, val chats: Long = 0, val turns: Long = 0, val stories: Long = 0,
     val granted: Long = 0, val spent: Long = 0, val payments: Long = 0, val revenue: Long = 0, val attendance: Long = 0,
