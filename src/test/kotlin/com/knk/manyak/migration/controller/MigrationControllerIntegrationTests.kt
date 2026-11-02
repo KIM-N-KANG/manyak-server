@@ -146,10 +146,10 @@ class MigrationControllerIntegrationTests {
     private fun saveStory(ownerId: Long?): Story =
         storyRepository.save(Story(userId = ownerId, title = "제목", visibility = StoryVisibility.PRIVATE))
 
-    private fun recordCompletion(story: Story, deviceHash: String?) {
+    private fun recordCompletion(story: Story, deviceHash: String?, status: StoryCreationRequestStatus = StoryCreationRequestStatus.COMPLETED) {
         val request = storyCreationRequestRepository.saveAndFlush(
             StoryCreationRequest(requestId = UUID.randomUUID(), deviceIdHash = deviceHash,
-                stage = StoryCreationStage.STORY_COMPLETION, status = StoryCreationRequestStatus.COMPLETED),
+                stage = StoryCreationStage.STORY_COMPLETION, status = status),
         )
         storyCreationSessionRepository.saveAndFlush(
             StoryCreationSession(storyId = story.id, creationRequestId = request.requestId,
@@ -292,6 +292,43 @@ class MigrationControllerIntegrationTests {
         migrateStory(me, story, "guest-device").expectStatus().isOk.expectBody()
             .jsonPath("$.stories[0].status").isEqualTo("NOT_FOUND")
         assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+    }
+
+    @Test
+    fun `첫 진행에 기록이 없어도 뒤 진행의 해시로 증명하고 완성 요청 상태는 보지 않는다`() {
+        for (status in StoryCreationRequestStatus.entries) {
+            for ((index, device) in listOf("device-a", "device-b", null).withIndex()) {
+                val me = saveUser("복수진행${status.name}$index")
+                val story = saveStory(null)
+                storyCreationSessionRepository.saveAndFlush(
+                    StoryCreationSession(storyId = story.id, status = StoryCreationSessionStatus.STORY_CREATED),
+                )
+                recordCompletion(story, deviceIdHasher.hash("device-a"), status)
+
+                val matches = device == "device-a"
+                migrateStory(me, story, device).expectStatus().isOk.expectBody()
+                    .jsonPath("$.stories[0].status").isEqualTo(if (matches) "MIGRATED" else "CONFLICT")
+                assertThat(storyRepository.findById(story.id).orElseThrow().userId).isEqualTo(if (matches) me.id else null)
+                val sessions = storyCreationSessionRepository.findAll().filter { it.storyId == story.id }
+                assertThat(sessions).hasSize(2)
+                assertThat(sessions.map { it.userId }).containsOnly(if (matches) me.id else null)
+            }
+        }
+    }
+
+    @Test
+    fun `연결된 두 진행의 기기 해시가 다르면 어느 기기로도 이관하지 않는다`() {
+        for ((index, device) in listOf("device-a", "device-b", null).withIndex()) {
+            val me = saveUser("상충기기$index")
+            val story = saveStory(null)
+            recordCompletion(story, deviceIdHasher.hash("device-a"), StoryCreationRequestStatus.PENDING)
+            recordCompletion(story, deviceIdHasher.hash("device-b"), StoryCreationRequestStatus.FAILED)
+
+            migrateStory(me, story, device).expectStatus().isOk.expectBody()
+                .jsonPath("$.stories[0].status").isEqualTo("CONFLICT")
+            assertThat(storyRepository.findById(story.id).orElseThrow().userId).isNull()
+            assertThat(storyCreationSessionRepository.findAll().filter { it.storyId == story.id }.map { it.userId }).containsOnlyNulls()
+        }
     }
 
     private fun saveChat(ownerId: Long?): StoryChat {

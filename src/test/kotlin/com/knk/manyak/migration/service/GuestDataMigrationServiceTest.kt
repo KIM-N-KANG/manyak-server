@@ -115,11 +115,11 @@ class GuestDataMigrationServiceTest {
         `when`(storyRepository.claimByPublicId(public.publicId, userId)).thenReturn(1)
         `when`(storyRepository.claimByPublicId(private.publicId, userId)).thenReturn(1)
         val requestId = UUID.randomUUID()
-        `when`(storyCreationSessionRepository.findFirstByStoryIdOrderByIdAsc(public.id)).thenReturn(
-            StoryCreationSession(storyId = public.id, creationRequestId = requestId, status = StoryCreationSessionStatus.STORY_CREATED),
+        `when`(storyCreationSessionRepository.findAllByStoryIdIn(setOf(public.id, private.id))).thenReturn(
+            listOf(StoryCreationSession(storyId = public.id, creationRequestId = requestId, status = StoryCreationSessionStatus.STORY_CREATED)),
         )
-        `when`(storyCreationRequestRepository.findByRequestId(requestId)).thenReturn(
-            StoryCreationRequest(requestId = requestId, deviceIdHash = "device_hash_test", stage = StoryCreationStage.STORY_COMPLETION),
+        `when`(storyCreationRequestRepository.findAllByRequestIdIn(setOf(requestId))).thenReturn(
+            listOf(StoryCreationRequest(requestId = requestId, deviceIdHash = "device_hash_test", stage = StoryCreationStage.STORY_COMPLETION)),
         )
 
         val result = service.migrate(userId, MigrationRequest(storyIds =
@@ -132,6 +132,10 @@ class GuestDataMigrationServiceTest {
         verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(71))
         verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(72))
         org.mockito.Mockito.verifyNoMoreInteractions(events)
+        verify(storyCreationSessionRepository, times(1)).findAllByStoryIdIn(setOf(public.id, private.id))
+        verify(storyCreationRequestRepository, times(1)).findAllByRequestIdIn(setOf(requestId))
+        verify(storyCreationSessionRepository, never()).findFirstByStoryIdOrderByIdAsc(anyLong())
+        verify(storyCreationRequestRepository, never()).findByRequestId(requestId)
     }
 
     @Test

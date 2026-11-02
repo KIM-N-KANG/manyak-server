@@ -9,6 +9,7 @@ import java.util.UUID
 
 interface StoryCreationRequestRepository : JpaRepository<StoryCreationRequest, Long> {
     fun findByRequestId(requestId: UUID): StoryCreationRequest?
+    fun findAllByRequestIdIn(requestIds: Collection<UUID>): List<StoryCreationRequest>
     fun findByUserIdAndStatus(userId: Long, status: com.knk.manyak.story.entity.StoryCreationRequestStatus): List<StoryCreationRequest>
 
     /** 사용자 잠금을 먼저 잡기 위한 비잠금 소유자 조회. 엔티티를 미리 로드하지 않는다. */

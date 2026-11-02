@@ -147,13 +147,17 @@ class GuestDataMigrationService(
         val storyByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
             .associateBy { it.publicId }
         val ownerByPublicId = storyByPublicId.mapValues { it.value.userId }
+        val deviceHashesByStoryId = loadStoryDeviceHashes(storyByPublicId.values.filter { it.userId == null })
         val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
                 claim = { storyRepository.claimByPublicId(id, userId) },
                 currentOwner = { storyRepository.findUserIdByPublicId(id) },
-                canClaim = { hasStoryDeviceProof(storyByPublicId.getValue(id), deviceIdHash) },
+                canClaim = {
+                    val story = storyByPublicId.getValue(id)
+                    hasStoryDeviceProof(story, deviceHashesByStoryId[story.id].orEmpty(), deviceIdHash)
+                },
             )
             if (status == MigrationStatus.MIGRATED) {
                 // 스토리를 새로 클레임했으면 연결된 생성 세션 소유권도 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
@@ -172,10 +176,22 @@ class GuestDataMigrationService(
         }
     }
 
-    private fun hasStoryDeviceProof(story: Story, deviceIdHash: String?): Boolean {
-        val creationRequestId = storyCreationSessionRepository.findFirstByStoryIdOrderByIdAsc(story.id)?.creationRequestId
-        val recordedHash = creationRequestId?.let { storyCreationRequestRepository.findByRequestId(it)?.deviceIdHash }
-        if (!recordedHash.isNullOrBlank()) return recordedHash == deviceIdHash
+    private fun loadStoryDeviceHashes(stories: Collection<Story>): Map<Long, List<String>> {
+        if (stories.isEmpty()) return emptyMap()
+        val sessions = storyCreationSessionRepository.findAllByStoryIdIn(stories.map { it.id }.toSet())
+        val requestIds = sessions.mapNotNull { it.creationRequestId }.toSet()
+        val requestsById = if (requestIds.isEmpty()) emptyMap() else
+            storyCreationRequestRepository.findAllByRequestIdIn(requestIds).associateBy { it.requestId }
+        return sessions.mapNotNull { session ->
+            val storyId = session.storyId ?: return@mapNotNull null
+            val hash = requestsById[session.creationRequestId]?.deviceIdHash?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            storyId to hash
+        }.groupBy({ it.first }, { it.second })
+    }
+
+    private fun hasStoryDeviceProof(story: Story, recordedHashes: List<String>, deviceIdHash: String?): Boolean {
+        if (recordedHashes.isNotEmpty()) return recordedHashes.all { it == deviceIdHash }
         return !(story.isPubliclyVisible() && story.deletedAt == null)
     }
 
