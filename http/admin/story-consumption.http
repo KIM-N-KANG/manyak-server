@@ -1,0 +1,91 @@
+# 콘텐츠 소비 지표 — ADMIN BACKEND 4-2-45, KNK-1969.
+# 준비: 로컬 PostgreSQL·Redis와 ./gradlew bootRun. auth.http에서 관리자 로그인해 adminToken을 저장한다.
+# 위에서부터 순서대로 실행한다. 조회 전용이며 고정 fixture를 준비한 DB에서 비교한다.
+# 공개 스토리와 순위 메타데이터는 지금 상태, 소비 채팅은 생성일, 활성 회원은 사용자 메시지 날짜 기준이다.
+@baseUrl = http://localhost:8080
+@from = 2026-10-01
+@to = 2026-10-20
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {% client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`)); %}
+
+### 1. 기본 30일·순위 20편 — 응답 계약
+GET {{baseUrl}}/api/v1/admin/stories/consumption
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("콘텐츠 소비 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        ["publicStories", "officialStories", "playedStories", "otherMemberChats"].forEach(key =>
+            client.assert(Number.isInteger(b[key]) && b[key] >= 0, `field=${key} expected=nonnegative integer actual=${b[key]}`));
+        const ratio = (actual, numerator, denominator) => client.assert(denominator === 0 ? actual === null : typeof actual === "number" && Math.abs(actual - numerator / denominator) < 1e-10, `ratio expected=${denominator === 0 ? null : numerator / denominator} actual=${actual}`);
+        ratio(b.playedRate, b.playedStories, b.publicStories);
+        client.assert(b.officialStories <= b.publicStories && b.playedStories <= b.publicStories, JSON.stringify(b));
+        client.assert(b.otherMemberChats === 0 ? b.topConcentration === null : b.topConcentration > 0 && b.topConcentration <= 1, `concentration expected=null or (0,1] actual=${b.topConcentration}`);
+        client.assert(Array.isArray(b.ranking) && b.ranking.length <= 20, `ranking expected=at most 20 actual=${JSON.stringify(b.ranking)}`);
+        b.ranking.forEach((r, i) => {
+            client.assert(typeof r.storyId === "string" && typeof r.title === "string" && typeof r.official === "boolean" && typeof r.deleted === "boolean", JSON.stringify(r));
+            client.assert(r.chats > 0 && r.players > 0 && r.players <= r.chats && r.turns >= 0, JSON.stringify(r));
+            if (i) {
+                const p = b.ranking[i - 1];
+                client.assert(p.chats > r.chats || p.chats === r.chats && (p.turns > r.turns || p.turns === r.turns && p.storyId < r.storyId), `order expected=chats desc,turns desc,storyId asc actual=${JSON.stringify([p, r])}`);
+            }
+        });
+        const c = b.creators;
+        ["activeMembers", "members", "previousMembers", "retained"].forEach(key => client.assert(Number.isInteger(c[key]) && c[key] >= 0, `creator field=${key} actual=${c[key]}`));
+        ratio(c.rate, c.members, c.activeMembers);
+        ratio(c.retentionRate, c.retained, c.previousMembers);
+        client.assert(c.retained <= c.previousMembers && c.retained <= c.members, JSON.stringify(c));
+        client.assert(typeof b.asOf === "string" && b.from <= b.to, JSON.stringify(b));
+        client.global.set("consumptionFrom", b.from);
+        client.global.set("consumptionTo", b.to);
+    });
+%}
+
+### 2. 앞 응답의 날짜와 limit=1 — 집중도는 순위 limit과 독립
+GET {{baseUrl}}/api/v1/admin/stories/consumption?from={{consumptionFrom}}&to={{consumptionTo}}&limit=1
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("명시 기간·최소 limit", () => client.assert(response.status === 200 && response.body.ranking.length <= 1 && response.body.from === client.global.get("consumptionFrom") && response.body.to === client.global.get("consumptionTo"), JSON.stringify(response.body))); %}
+
+### 3. 최대 limit과 빠른 기간
+GET {{baseUrl}}/api/v1/admin/stories/consumption?days=90&limit=50
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일·최대 limit", () => client.assert(response.status === 200 && response.body.ranking.length <= 50, `expected=200,<=50 actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 4. limit 하한 400 BAD_REQUEST
+GET {{baseUrl}}/api/v1/admin/stories/consumption?limit=0
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("limit 하한 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 5. limit 상한 400 BAD_REQUEST
+GET {{baseUrl}}/api/v1/admin/stories/consumption?limit=51
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("limit 상한 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 6. 날짜 쌍 누락 400
+GET {{baseUrl}}/api/v1/admin/stories/consumption?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 7. 미인증 401
+GET {{baseUrl}}/api/v1/admin/stories/consumption
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 8. 자유 조회 — 오늘 이하 날짜로 조정
+GET {{baseUrl}}/api/v1/admin/stories/consumption?from={{from}}&to={{to}}&limit=20
+Authorization: Bearer {{adminToken}}
+
+# fixture: 공개 목록 조건 스토리 3편 중 공식 1편이면 publicStories=3, officialStories=1.
+# X에 본인1·다른 회원2·게스트1·삭제 채팅1이면 X의 chats=2, players=2. 비공개·삭제 스토리도 순위에 들어간다.
+# 12편에 각10건, 1편에100건이면 otherMemberChats=220, topConcentration=190/220(limit에 무관).
+# 활성10명, 현재 창작자3명, 직전4명 중 유지2명이면 rate=.3, retentionRate=.5. 삭제 스토리 창작자도 센다.
+# 공식 계정이 팀 제외 목록에 있으면 creators에서 빠지지만 공개 수·소비 순위에는 남는다.
