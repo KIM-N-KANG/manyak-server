@@ -79,10 +79,42 @@ class AdminReadPostgresTests {
             }
             assertThat(reads.memberTurnCount(owner)).isEqualTo(9)
             assertThat(reads.memberTurnCount(userId)).isEqualTo(1)
+            val ownerId = jdbc.queryForObject("SELECT public_id FROM users WHERE id=?", UUID::class.java, owner)!!
+            val listed = reads.members(AdminMembersRequest(), AdminPagination(1, 1, "u.created_at desc"), ownerId).items.single()
+            assertThat(listed.turnCount).isEqualTo(9)
+            assertThat(listed.periodTurnCount).isNull()
         } finally {
             jdbc.update("DELETE FROM story_chats WHERE user_id=?", owner)
             jdbc.update("DELETE FROM users WHERE id=?", owner)
         }
+    }
+
+    @Test fun `회원 턴 집계는 정렬 여부와 무관하게 응답 페이지 ID로 묶고 기본 정렬 전에 실행하지 않는다`() {
+        val plans = mutableListOf<String>()
+        for ((sort, column) in listOf("createdAt" to "u.created_at", "turnCount" to "turn_count")) {
+            val traced = org.mockito.Mockito.spy(NamedParameterJdbcTemplate(jdbc))
+            val repository = AdminReadRepository(traced, ObjectMapper())
+            val response = repository.members(AdminMembersRequest().apply { this.sort = sort }, AdminPagination(1, 1, "$column desc"))
+            assertThat(response.items).hasSize(1)
+            val queries = org.mockito.Mockito.mockingDetails(traced).invocations.filter {
+                it.method.name == "query" && it.arguments.size == 3 && it.arguments[0] is String && it.arguments[1] is Map<*, *>
+            }.map { invocation ->
+                @Suppress("UNCHECKED_CAST")
+                (invocation.arguments[0] as String) to (invocation.arguments[1] as Map<String, Any>)
+            }
+            val pageQuery = queries.single { it.first.contains("LIMIT :size") }
+            assertThat(pageQuery.first.contains("m.role='ASSISTANT'")).isEqualTo(sort == "turnCount")
+            val turnQuery = queries.single { it.first.contains("GROUP BY c.user_id") }
+            assertThat(turnQuery.second["memberIds"] as Collection<*>).hasSize(1)
+            for ((sql, params) in queries) {
+                val explanation = NamedParameterJdbcTemplate(jdbc).queryForList("EXPLAIN (ANALYZE, BUFFERS) $sql", params)
+                    .joinToString("\n") { it.values.first().toString() }
+                plans += "$sort\n$sql\n$explanation\n"
+            }
+        }
+        val output = java.nio.file.Path.of("build/reports/admin-member-turn-plans.txt")
+        java.nio.file.Files.createDirectories(output.parent)
+        java.nio.file.Files.writeString(output, plans.joinToString("\n"))
     }
 
     @Test fun `실제 PostgreSQL 제출본 동률은 UUID 오름차순이며 페이지 누락이 없다`() {

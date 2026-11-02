@@ -54,7 +54,8 @@ X-Manyak-Request-Id: admin_members_manual
         client.assert(Array.isArray(response.body.items) && response.body.items.length <= 20, `actual=${JSON.stringify(response.body)}`);
         client.assert(response.body.page === 1 && response.body.size === 20, `actual=${JSON.stringify(response.body)}`);
         client.assert(typeof response.body.totalElements === "number" && typeof response.body.totalPages === "number", "전체 페이지 정보가 필요합니다");
-        client.assert(response.body.items.every(m => !("email" in m) && !("userId" in m) && !("turnCount" in m)), "이메일·내부 ID·상세 전용 turnCount가 없어야 합니다");
+        client.assert(response.body.items.every(m => !("email" in m) && !("userId" in m)), "이메일·내부 ID가 없어야 합니다");
+        client.assert(response.body.items.every(m => Number.isInteger(m.turnCount) && m.turnCount >= 0 && m.periodTurnCount === null), "목록 누적 턴과 기간 없음 null 확인");
     });
 %}
 
@@ -63,7 +64,10 @@ GET {{baseUrl}}/api/v1/admin/members?q={{adminSelfId}}&status=ACTIVE
 Authorization: Bearer {{adminToken}}
 
 > {%
-    client.test("UUID 검색", () => client.assert(response.status === 200 && response.body.items.length === 1, `actual=${JSON.stringify(response.body)}`));
+    client.test("UUID 검색", () => {
+        client.assert(response.status === 200 && response.body.items.length === 1, `actual=${JSON.stringify(response.body)}`);
+        client.global.set("memberListTurnCount", response.body.items[0].turnCount);
+    });
 %}
 
 ### 회원 상세 — 로트 기준 미만료 잔액·콘텐츠 수·누적 턴, 조회마다 ACCESS 기록
@@ -78,6 +82,7 @@ X-Manyak-Request-Id: admin_member_detail_manual
         client.assert(response.status === 200, `expected=200 actual=${response.status}`);
         for (const key of ["creditBalance", "storyCount", "chatCount", "turnCount"]) client.assert(typeof response.body[key] === "number", `field=${key} actual=${response.body[key]}`);
         client.assert(Number.isInteger(response.body.turnCount) && response.body.turnCount >= 0, `turnCount=${response.body.turnCount}`);
+        client.assert(response.body.turnCount === client.global.get("memberListTurnCount") && response.body.periodTurnCount === null, "목록과 상세의 누적 턴은 같고 상세 기간 턴은 null이어야 합니다");
         client.assert(!("email" in response.body) && !("id" in response.body), "개인 식별 필드가 없어야 합니다");
     });
 %}
@@ -798,3 +803,24 @@ Authorization: Bearer {{adminToken}}
 ### 회원 채팅 범위 자유 조회 — 실제 회원 공개 ID로 교체
 GET {{baseUrl}}/api/v1/admin/chats?memberId=replace-with-member-public-id&deleted=include
 Authorization: Bearer {{adminToken}}
+
+### 회원 누적 턴 내림차순 — 기간을 지정해도 누적 기준, 동률은 공개 UUID 오름차순
+# 아래 날짜는 fixture의 채팅 생성일에 맞춘다. 메시지 작성일로 기간을 거르지 않는다.
+# AI 응답 2·3·4개 방 중 2개 방은 삭제, 4개 방은 이관이고 기간에 2·3개 방만 있으면 누적 9, 기간 턴 5, 기간 채팅 1.
+GET {{baseUrl}}/api/v1/admin/members?sort=turnCount&order=desc&chatFrom=2026-10-20&chatTo=2026-10-20&size=100
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("회원 누적 턴 정렬과 기간 턴", () => {
+        client.assert(response.status === 200, `actual=${response.status}`);
+        const items = response.body.items;
+        items.forEach((member, i) => {
+            client.assert(Number.isInteger(member.turnCount) && Number.isInteger(member.periodTurnCount) && member.periodTurnCount >= 0 && member.periodTurnCount <= member.turnCount, JSON.stringify(member));
+            if (i) {
+                const previous = items[i - 1];
+                client.assert(previous.turnCount >= member.turnCount, "정렬은 periodTurnCount가 아닌 turnCount 기준이어야 합니다");
+                if (previous.turnCount === member.turnCount) client.assert(previous.memberId <= member.memberId, "동률은 공개 UUID 오름차순이어야 합니다");
+            }
+        });
+    });
+%}

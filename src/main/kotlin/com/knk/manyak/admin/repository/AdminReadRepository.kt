@@ -28,6 +28,10 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
         (SELECT MAX(t.created_at) FROM credit_transactions t WHERE t.user_id=u.id),
         (SELECT MAX(s.created_at) FROM stories s WHERE s.user_id=u.id))"""
 
+    // 목록·상세·정렬이 같은 활성 ASSISTANT 메시지를 센다. 채팅 삭제 여부는 제한하지 않는다.
+    private val memberTurnsFrom = "FROM story_chats c JOIN story_messages m ON m.chat_id=c.id WHERE m.role='ASSISTANT'"
+    private val turns = "(SELECT COUNT(*) $memberTurnsFrom AND c.user_id=u.id)"
+
     fun members(request: AdminMembersRequest, page: AdminPagination, memberId: UUID? = null): AdminPageResponse<AdminMemberListResponse> {
         val q = AdminQuery()
         q.equal("u.public_id", memberId)
@@ -68,12 +72,29 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
             attendance.params.forEach { (key, value) -> sql = sql.replace(":$key", ":att_$key"); q.params["att_$key"] = value }
             q.add("EXISTS (SELECT 1 FROM credit_transactions t WHERE t.user_id=u.id AND CAST(t.reason AS VARCHAR)='ATTENDANCE_REWARD' AND $sql)")
         }
-        val select = "$MEMBER_COLUMNS, $active AS last_active_at, $spent AS credits_spent, $paid AS paid_krw, $chats AS chat_count, ${if (period) periodChats else "NULL"} AS period_chat_count"
-        return jdbc.adminPage(select, "FROM users u LEFT JOIN admin_accounts a ON a.user_id=u.id", q, page, "u.public_id", RowMapper { rs, _ ->
-            val summary = memberSummary(rs)!!
-            AdminMemberListResponse(summary.memberId, summary.nickname, summary.status, summary.isAdmin, summary.createdAt,
-                rs.instant("last_active_at"), rs.getLong("credits_spent"), rs.getLong("paid_krw"), rs.getLong("chat_count"), rs.longOrNull("period_chat_count"))
-        })
+        // 정렬 집계만 후보 회원 전체에 계산하고, 나머지 집계는 페이지가 정해진 뒤에 읽는다.
+        val sortColumn = page.orderBy.substringBefore(' ')
+        val sortExpression = mapOf("last_active_at" to active, "credits_spent" to spent, "paid_krw" to paid,
+            "chat_count" to chats, "turn_count" to turns)[sortColumn]
+        val selected = jdbc.adminPage("u.id AS internal_member_id, $MEMBER_COLUMNS" +
+            (sortExpression?.let { ", $it AS $sortColumn" } ?: ""),
+            "FROM users u LEFT JOIN admin_accounts a ON a.user_id=u.id", q, page, "u.public_id",
+            RowMapper { rs, _ -> rs.getLong("internal_member_id") to memberSummary(rs)!! })
+        if (selected.items.isEmpty()) return page.response(emptyList(), selected.totalElements)
+        val members = selected.items.toMap()
+        val turnCounts = memberTurnCounts(members.keys.toList(), request.chatFrom, request.chatTo)
+        val summaries = jdbc.query("""SELECT u.id AS internal_member_id, $active AS last_active_at,
+            $spent AS credits_spent, $paid AS paid_krw, $chats AS chat_count,
+            ${if (period) periodChats else "NULL"} AS period_chat_count
+            FROM users u WHERE u.id IN (:memberIds)""", q.params + mapOf("memberIds" to members.keys.toList()), RowMapper { rs, _ ->
+            val id = rs.getLong("internal_member_id")
+            val summary = members.getValue(id)
+            val turnCount = turnCounts[id]
+            id to AdminMemberListResponse(summary.memberId, summary.nickname, summary.status, summary.isAdmin, summary.createdAt,
+                rs.instant("last_active_at"), rs.getLong("credits_spent"), rs.getLong("paid_krw"), rs.getLong("chat_count"),
+                rs.longOrNull("period_chat_count"), turnCount?.total ?: 0L, if (period) turnCount?.period ?: 0L else null)
+        }).toMap()
+        return page.response(selected.items.map { summaries.getValue(it.first) }, selected.totalElements)
     }
 
     private val paymentColumns = """o.public_id, o.product_id, o.status, o.price_krw, o.credit_amount, o.completed_at, o.refunded_at, o.reversal_shortfall, $MEMBER_COLUMNS"""
@@ -154,10 +175,18 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
                     rs.getString("after_state")?.let(mapper::readTree), rs.getString("request_id"), rs.instant("created_at")!!)
             })
     }
-    // 삭제·게스트 이관 여부와 무관하게 현재 소유 채팅의 활성 AI 응답만 센다. 재생성 판본은 별도 테이블이다.
-    fun memberTurnCount(userId: Long): Long = jdbc.queryForObject("""SELECT COUNT(*)
-        FROM story_chats c JOIN story_messages m ON m.chat_id=c.id
-        WHERE c.user_id=:id AND m.role='ASSISTANT'""", mapOf("id" to userId), Long::class.java)!!
+    private data class MemberTurnCounts(val total: Long, val period: Long?)
+    private fun memberTurnCounts(userIds: List<Long>, from: String? = null, to: String? = null): Map<Long, MemberTurnCounts> {
+        if (userIds.isEmpty()) return emptyMap()
+        val range = AdminQuery().apply { range("c.created_at", from, to) }
+        val period = if (from != null || to != null) "SUM(CASE WHEN ${range.where()} THEN 1 ELSE 0 END)" else "NULL"
+        return jdbc.query("""SELECT c.user_id, COUNT(*) AS turn_count, $period AS period_turn_count
+            $memberTurnsFrom AND c.user_id IN (:memberIds) GROUP BY c.user_id""",
+            range.params + mapOf("memberIds" to userIds), RowMapper { rs, _ ->
+                rs.getLong("user_id") to MemberTurnCounts(rs.getLong("turn_count"), rs.longOrNull("period_turn_count"))
+            }).toMap()
+    }
+    fun memberTurnCount(userId: Long): Long = memberTurnCounts(listOf(userId))[userId]?.total ?: 0L
 
     fun contentCount(table: String, userId: Long): Long {
         require(table in setOf("stories", "story_chats"))
