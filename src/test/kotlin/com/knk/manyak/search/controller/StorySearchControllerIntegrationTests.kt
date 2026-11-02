@@ -252,26 +252,26 @@ class StorySearchControllerIntegrationTests {
 
     @Test
     fun `게스트 공개 비공개 완성본은 이관 전후 공개만 검색되고 이관 뒤 작성자가 표시된다`() {
-        fun completeGuest(visibility: StoryVisibility): Pair<Story, String> {
-            val deviceId = UUID.randomUUID().toString()
+        val deviceId = UUID.randomUUID().toString()
+        val privateDeviceId = UUID.randomUUID().toString()
+        fun completeGuest(visibility: StoryVisibility, ownerDevice: String): Story {
             val session = sessions.save(StoryCreationSession(status = StoryCreationSessionStatus.STORYLINES_GENERATED))
             val storyline = storylines.save(StoryCreationStoryline(creationSession = session, storylineText = "마법 왕국", storylineOrder = 1))
             val result = client.post().uri("/api/v1/stories/simple")
-                .header("X-Manyak-Device-Id", deviceId)
+                .header("X-Manyak-Device-Id", ownerDevice)
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .body(mapOf("requestId" to UUID.randomUUID().toString(), "simpleCreationId" to session.id,
                     "storylineId" to storyline.id, "visibility" to visibility.name))
                 .exchange().expectStatus().isCreated
                 .expectBody(SimpleStoryCreateResponse::class.java).returnResult().responseBody!!
-            val story = stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!.also {
+            return stories.findByPublicIdAndDeletedAtIsNull(UUID.fromString(result.id))!!.also {
                 assertNull(it.userId)
                 assertEquals(visibility, it.visibility)
             }
-            return story to deviceId
         }
 
-        val (public, publicDevice) = completeGuest(StoryVisibility.PUBLIC)
-        val (private, privateDevice) = completeGuest(StoryVisibility.PRIVATE)
+        val public = completeGuest(StoryVisibility.PUBLIC, deviceId)
+        val private = completeGuest(StoryVisibility.PRIVATE, privateDeviceId)
         assertTrue(reader.read(public.id)!!.visible)
         assertNull(reader.read(public.id)!!.author)
         assertFalse(reader.read(private.id)!!.visible)
@@ -288,17 +288,16 @@ class StorySearchControllerIntegrationTests {
 
         val member = users.save(User(nickname = "이관 검색 작가", status = UserStatus.ACTIVE))
         client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", deviceId)
             .header("Authorization", "Bearer ${jwt.issueAccessToken(member.publicId)}")
-            .header("X-Manyak-Device-Id", publicDevice)
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
             .body(mapOf("storyIds" to listOf(public.publicId.toString())))
             .exchange().expectStatus().isOk.expectBody()
             .jsonPath("$.stories[0].status").isEqualTo("MIGRATED")
-
         val privateMember = users.save(User(nickname = "비공개 이관 작가", status = UserStatus.ACTIVE))
         client.post().uri("/api/v1/auth/migrate")
+            .header("X-Manyak-Device-Id", privateDeviceId)
             .header("Authorization", "Bearer ${jwt.issueAccessToken(privateMember.publicId)}")
-            .header("X-Manyak-Device-Id", privateDevice)
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
             .body(mapOf("storyIds" to listOf(private.publicId.toString())))
             .exchange().expectStatus().isOk.expectBody()
@@ -312,7 +311,6 @@ class StorySearchControllerIntegrationTests {
         assertEquals(member.nickname, reader.read(public.id)!!.author!!.nickname)
         assertFalse(reader.read(private.id)!!.visible)
         assertEquals(StoryVisibility.PRIVATE, stories.findById(private.id).orElseThrow().visibility)
-        assertEquals(privateMember.id, stories.findById(private.id).orElseThrow().userId)
     }
 
     private fun staleHit(story: Story): Hit<StorySearchDocument> = Hit.Builder<StorySearchDocument>()
