@@ -28,6 +28,15 @@ class AdminChartsService(
         // DB timestamp 정밀도(마이크로초)에 맞춰 다음 KST 자정 직전까지만 포함한다.
         val end = minOf(now, to.plusDays(1).atStartOfDay(AdminDateRange.KST).toInstant().minusNanos(1000))
         val daily = repository.daily(start, end, properties.excludedUserIds)
+        val previousFrom = from.minusDays(days.toLong())
+        val previousTo = from.minusDays(1)
+        val previousDaily = repository.daily(previousFrom.atStartOfDay(AdminDateRange.KST).toInstant(),
+            start.minusNanos(1000), properties.excludedUserIds)
+        fun totals(rows: Collection<Map<String, Long>>): AdminChartTotals {
+            fun sum(key: String) = rows.sumOf { it[key] ?: 0L }
+            return AdminChartTotals(sum("joined"), sum("chats"), sum("turns"), sum("stories"),
+                sum("granted"), sum("spent"), sum("payments"), sum("revenue"))
+        }
         val raw = repository.distributions(start, end, properties.excludedUserIds, official.officialUserId())
         fun Map<String, Any?>.number(key: String) = (this[key] as? Number)?.toDouble() ?: 0.0
         fun rounded(value: Double) = BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
@@ -84,6 +93,6 @@ class AdminChartsService(
             val date = from.plusDays(offset.toLong()); val values = daily[date] ?: emptyMap()
             AdminDailyMetrics(date, values["joined"] ?: 0, values["chats"] ?: 0, values["turns"] ?: 0, values["stories"] ?: 0,
                 values["granted"] ?: 0, values["spent"] ?: 0, values["payments"] ?: 0, values["revenue"] ?: 0, values["attendance"] ?: 0)
-        }, charts)
+        }, charts, totals(daily.values), AdminChartPreviousPeriod(previousFrom, previousTo, totals(previousDaily.values)))
     }
 }
