@@ -1,0 +1,107 @@
+# 요일과 시간대 활동 — ADMIN BACKEND 4-2-48, KNK-2012.
+# 준비: 로컬 PostgreSQL·Redis 기동 후 ./gradlew bootRun.
+# auth.http에서 관리자 로그인해 client.global의 adminToken을 저장한 뒤 위에서부터 실행한다.
+# 조회 전용. 가입·USER 입력·스토리 생성·결제 완료의 KST 시각을 집계한다.
+@baseUrl = http://localhost:8080
+@from = 2026-10-01
+@to = 2026-10-03
+
+### 0. 서버 상태
+GET {{baseUrl}}/actuator/health
+
+> {% client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`)); %}
+
+### 1. 기본 최근 30일 — 고정 크기와 평균 분모
+GET {{baseUrl}}/api/v1/admin/users/activity-hours
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("요일과 시간대 활동 계약", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        client.assert(b.totalDays === 30 && typeof b.asOf === "string", JSON.stringify(b));
+        client.assert(b.weekdayDays.length === 7 && b.weekdayDays.reduce((n, d) => n + d.days, 0) === b.totalDays, JSON.stringify(b.weekdayDays));
+        const ratio = (actual, n, d) => client.assert(d === 0 ? actual === null : typeof actual === "number" && Math.abs(actual - n / d) < 1e-12, `expected=${d === 0 ? null : n / d} actual=${actual}`);
+        ["signups", "messages", "stories", "payments"].forEach(key => {
+            const m = b.metrics[key];
+            client.assert(m.cells.length === 168 && m.weekdays.length === 7 && m.hours.length === 24, JSON.stringify(m));
+            ratio(m.dailyAverage, m.total, b.totalDays);
+            client.assert(m.cells.reduce((n, c) => n + c.count, 0) === m.total, `expected=${m.total} actual=sum(cells)`);
+            m.cells.forEach((c, i) => {
+                const day = Math.floor(i / 24);
+                client.assert(c.weekday === day + 1 && c.hour === i % 24 && Number.isInteger(c.count) && c.count >= 0, JSON.stringify(c));
+                client.assert(b.weekdayDays[day].weekday === day + 1, JSON.stringify(b.weekdayDays));
+                ratio(c.average, c.count, b.weekdayDays[day].days);
+            });
+            m.weekdays.forEach((d, i) => {
+                client.assert(d.weekday === i + 1 && d.count === m.cells.slice(i * 24, (i + 1) * 24).reduce((n, c) => n + c.count, 0), JSON.stringify(d));
+                ratio(d.average, d.count, b.weekdayDays[i].days);
+            });
+            m.hours.forEach((h, i) => {
+                client.assert(h.hour === i && h.count === m.cells.filter(c => c.hour === i).reduce((n, c) => n + c.count, 0), JSON.stringify(h));
+                ratio(h.average, h.count, b.totalDays);
+            });
+        });
+        client.global.set("activityHoursFrom", b.from); client.global.set("activityHoursTo", b.to);
+    });
+%}
+
+### 2. 앞 응답의 직접 범위
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?from={{activityHoursFrom}}&to={{activityHoursTo}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("명시 기간", () => client.assert(response.status === 200 && response.body.from === client.global.get("activityHoursFrom") && response.body.to === client.global.get("activityHoursTo"), JSON.stringify(response.body))); %}
+
+### 3. 빠른 범위 90일
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?days=90
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("90일", () => client.assert(response.status === 200 && response.body.totalDays === 90, `expected=200,90 actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 4. 없는 요일의 평균은 null
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+    client.test("짧은 범위의 빈 요일", () => {
+        client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+        const b = response.body;
+        b.weekdayDays.filter(d => d.days === 0).forEach(d => Object.values(b.metrics).forEach(m => {
+            client.assert(m.weekdays[d.weekday - 1].average === null, JSON.stringify(m.weekdays));
+            client.assert(m.cells.filter(c => c.weekday === d.weekday).every(c => c.count === 0 && c.average === null), JSON.stringify(m.cells));
+        }));
+    });
+%}
+
+### 5. 허용하지 않는 days
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?days=14
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("days 오류", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 6. 날짜 한쪽 누락
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?from={{from}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 누락", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 7. 기간 혼용
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?days=7&from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 혼용", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 8. 366일 초과
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?from=2024-01-01&to=2025-01-01
+Authorization: Bearer {{adminToken}}
+
+> {% client.test("기간 상한", () => client.assert(response.status === 400 && response.body.code === "BAD_REQUEST", `expected=400 BAD_REQUEST actual=${response.status} ${JSON.stringify(response.body)}`)); %}
+
+### 9. 미인증
+GET {{baseUrl}}/api/v1/admin/users/activity-hours
+
+> {% client.test("관리자 인증 필요", () => client.assert(response.status === 401, `expected=401 actual=${response.status}`)); %}
+
+### 10. 자유 조회 — 오늘 이하 날짜로 조정
+GET {{baseUrl}}/api/v1/admin/users/activity-hours?from={{from}}&to={{to}}
+Authorization: Bearer {{adminToken}}

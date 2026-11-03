@@ -62,6 +62,14 @@ class OpenApiConfig {
         }
     }
 
+    // ADMIN 4-2-48도 nullable 평균을 포함해 응답 필드가 항상 존재한다.
+    @Bean
+    fun adminActivityHoursRequired(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        api.components?.schemas?.filterKeys { it.startsWith("AdminActivityHours") }?.values?.forEach { schema ->
+            schema.required = schema.properties?.keys?.toList()
+        }
+    }
+
     // MODERATION 4-2-10의 조건부 입력 규칙. 서비스 검증은 유지하고 문서에만 oneOf를 더한다.
     @Bean
     fun storyTakedownSchema(): OpenApiCustomizer = OpenApiCustomizer { api ->
