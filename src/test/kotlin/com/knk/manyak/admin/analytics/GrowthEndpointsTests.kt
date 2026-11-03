@@ -148,8 +148,8 @@ class GrowthEndpointsTests {
         assertThat(fixture.store.daily(definitions.appActivation().definition, day, day)).isEmpty()
     }
     @Test fun `범위 상한과 기본 캠페인 누락은 호출 전에 거절한다`() {
-        assertThatThrownBy { campaigns.activation(query(32)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
-        assertThatThrownBy { campaigns.reach(query(32)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+        assertThatThrownBy { campaigns.activation(query(32).apply { from = "2026-09-22"; to = "2026-10-23" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+        assertThatThrownBy { campaigns.reach(query(32).apply { from = "2026-09-22"; to = "2026-10-23" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { campaigns.creatives(query(367)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { campaigns.appTransfer(query(367)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { users.appActivation(query(367)) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)

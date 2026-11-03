@@ -173,7 +173,8 @@ class AnalyticsSnapshots(private val store: AnalyticsValueRepository, private va
                     var remaining = available
                     val neededRanges = rangeMetrics.filter { !freshRange(it, ranges[rangeKey(it)]) }
                     val rangeCost = neededRanges.sumOf { it.range.days * it.definition.perDay }
-                    val selectedRanges = if (metrics.isEmpty()) {
+                    // 확정 범위만 남았으면 조회마다 고른다. 진행 중 범위가 있으면 범위 전용 갱신은 전체를 예약한다.
+                    val selectedRanges = if (metrics.isEmpty() && neededRanges.any { it.range.to > today().minusDays(2) }) {
                         if (rangeCost <= remaining) { remaining -= rangeCost; neededRanges } else emptyList()
                     } else neededRanges.filter { metric ->
                         val expected = metric.range.days * metric.definition.perDay

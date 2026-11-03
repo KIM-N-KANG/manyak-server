@@ -208,4 +208,56 @@ class AnalyticsSnapshotsTests {
         } finally { logger.detachAppender(events); events.stop() }
     }
 
+
+    @Test fun `확정 범위는 예산 안의 조회만 저장하고 부족한 범위는 공통 load에서 예외로 바꾸지 않는다`() {
+        val range = AnalyticsRange(day.minusDays(36), day.minusDays(2))
+        fun spec(name: String) = RangeAnalyticsMetric(AnalyticsDefinition(name, "/api/2/users", listOf("m" to "active", "segment" to name), 8, fixture.mapper), range, 1) { fixture.mapper.valueToTree<JsonNode>(10) }
+        val all = spec("confirmed_all"); val ads = spec("confirmed_ads")
+        val first = load("/confirmed", range, emptyList(), listOf(all, ads))
+        assertThat(first.value(all)).isNotNull()
+        assertThat(first.value(all)!!.value.asLong()).isEqualTo(10)
+        assertThat(first.value(all)!!.finalizedAt).isNotNull()
+        assertThat(first.value(ads)).isNull()
+        assertThat(first.progress.cost).isEqualTo(280)
+        assertThat(server.requestCount).isEqualTo(1)
+        val second = load("/confirmed", range, emptyList(), listOf(all, ads))
+        assertThat(second.progress.failure).isEqualTo(AnalyticsFailureReason.budget_exceeded)
+        assertThat(second.value(all)).isNotNull(); assertThat(second.value(ads)).isNull()
+        assertThat(server.requestCount).isEqualTo(1)
+        fixture.clock.at = now.plusSeconds(300)
+        val done = load("/confirmed", range, emptyList(), listOf(all, ads))
+        assertThat(done.value(ads)!!.finalizedAt).isNotNull()
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+    @Test fun `확정 범위와 어제 범위를 함께 요청하면 전체 비용을 한 번에 예약한다`() {
+        val confirmed = AnalyticsRange(day.minusDays(36), day.minusDays(2))
+        val ongoing = AnalyticsRange(day.minusDays(31), day.minusDays(1))
+        fun spec(name: String, range: AnalyticsRange, cost: Int) = RangeAnalyticsMetric(
+            AnalyticsDefinition(name, "/api/2/users", listOf("m" to "active"), cost, fixture.mapper), range) { fixture.mapper.valueToTree<JsonNode>(10) }
+        assertThat(fixture.budget.reserve(250)).isTrue()
+        val a = spec("mixed_confirmed", confirmed, 4); val b = spec("mixed_ongoing", ongoing, 8)
+        val result = load("/mixed", confirmed, emptyList(), listOf(a, b))
+        assertThat(result.progress.failure).isEqualTo(AnalyticsFailureReason.budget_exceeded)
+        assertThat(result.value(a)).isNull(); assertThat(result.value(b)).isNull()
+        assertThat(server.requestCount).isZero()
+    }
+    @Test fun `다른 태스크가 호출 직전 저장한 확정 범위는 재사용하고 예약 비용을 반환한다`() {
+        val range = AnalyticsRange(day.minusDays(36), day.minusDays(2))
+        val ads = RangeAnalyticsMetric(AnalyticsDefinition("range_race_ads", "/api/2/users", listOf("m" to "active"), 8, fixture.mapper), range, 1) { fixture.mapper.valueToTree<JsonNode>(9) }
+        val other = AnalyticsTestFixture(fixture.properties, fixture.clock, repository = fixture.store)
+        val spy = Mockito.spy(fixture.store); var reads = 0
+        Mockito.doAnswer { invocation ->
+            if (++reads == 2) other.snapshots.load("/other", range, emptyList(), rangeMetrics = listOf(ads), backgroundLimit = 500)
+            invocation.callRealMethod()
+        }.`when`(spy).range(ads.definition, range.from, range.to)
+        val snapshots = AnalyticsSnapshots(spy, fixture.client, fixture.budget, fixture.mapper, fixture.clock)
+        try {
+            val result = snapshots.load("/reuse", range, emptyList(), rangeMetrics = listOf(ads))
+            assertThat(result.value(ads)!!.value.asLong()).isEqualTo(9)
+            assertThat(result.progress.cost).isZero()
+            assertThat(server.requestCount).isEqualTo(1) // 다른 태스크의 조회만 있다.
+            assertThat(fixture.budget.reserve(500)).isTrue()
+            assertThat(other.budget.reserve(220)).isTrue(); assertThat(other.budget.reserve(1)).isFalse()
+        } finally { snapshots.close(); other.snapshots.close() }
+    }
 }

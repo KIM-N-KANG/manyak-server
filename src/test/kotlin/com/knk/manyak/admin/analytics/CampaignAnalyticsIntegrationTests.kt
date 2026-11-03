@@ -42,6 +42,7 @@ class CampaignAnalyticsIntegrationTests {
     @Autowired private lateinit var budget: AmplitudeBudget
     @Autowired private lateinit var clock: Clock
     @Test fun `관리자 캠페인 5개 API는 정의된 쿼리 계산 캐시 비용 예산을 적용한다`() {
+        (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(301)
         cleaner.cleanAll(); requests.clear()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -164,6 +165,39 @@ class CampaignAnalyticsIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
         val docs = mapper.readTree(client.get().uri("/v3/api-docs").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
         assertThat(docs["paths"].has("/api/v1/admin/campaigns/sources")).isTrue()
+    }
+
+    @Test fun `확정 활성화 범위는 일부 저장 중 503이고 다음 창 완료 후 호출 없이 200이다`() {
+        cleaner.cleanAll(); requests.clear()
+        (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(301)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                val events = request.requestUrl!!.queryParameterValues("e")
+                return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to listOf(mapOf("cumulativeRaw" to List(events.size) { 100 - it * 10 })))))
+            }
+        }
+        val admin = users.save(User(nickname = "확정 범위 관리자"))
+        jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", admin.id)
+        val token = jwt.issueAdminToken(admin.publicId)
+        fun get(query: String) = client.get().uri("/api/v1/admin/campaigns/funnels/activation?$query")
+            .header("Authorization", "Bearer $token").exchange()
+        val query = "from=2026-09-17&to=2026-10-21"
+        val first = get(query).expectStatus().isEqualTo(503).expectBody(String::class.java).returnResult().responseBody!!
+        assertThat(mapper.readTree(first)["code"].asText()).isEqualTo("SERVICE_UNAVAILABLE")
+        assertThat(requests).hasSize(1)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_range_values", Long::class.java)).isEqualTo(1)
+        get(query).expectStatus().isEqualTo(503)
+        assertThat(requests).hasSize(1)
+        (clock as MutableAnalyticsClock).at = clock.instant().plusSeconds(300)
+        get(query).expectStatus().isOk
+        assertThat(requests).hasSize(2)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_analytics_range_values WHERE finalized_at IS NOT NULL", Long::class.java)).isEqualTo(2)
+        get(query).expectStatus().isOk
+        assertThat(requests).hasSize(2)
+        get("from=2026-08-20&to=2026-10-21").expectStatus().isBadRequest // 63일
+        get("from=2026-09-21&to=2026-10-22").expectStatus().isBadRequest // D-1 32일
+        get("days=90").expectStatus().isBadRequest
     }
 }
 

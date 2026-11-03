@@ -3,6 +3,7 @@ package com.knk.manyak.admin.analytics
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
+import org.mockito.Mockito
 import java.time.*
 import java.util.UUID
 
@@ -32,7 +33,7 @@ class CampaignAnalyticsTests {
                 val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val to = LocalDate.parse(url.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList()
-                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 0 })))))
+                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 0 }), "seriesCollapsed" to listOf(listOf(mapOf("value" to 0)))))))
             }
         }
     }
@@ -196,5 +197,90 @@ class CampaignAnalyticsTests {
         assertThatThrownBy { empty.story(StoryCampaignQuery().apply { campaign = "custom" }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThatThrownBy { service.analytics(CampaignQuery().apply { campaign = "x".repeat(101) }) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
         assertThat(server.requestCount).isZero()
+    }
+
+    private fun ranged(days: Int, to: LocalDate = day.minusDays(2)) = CampaignQuery().apply {
+        from = to.minusDays(days.toLong() - 1).toString(); this.to = to.toString()
+    }
+    private fun invoke(target: CampaignAnalyticsService, kind: String, query: CampaignQuery): Any = when (kind) {
+        "creation" -> target.creation(query)
+        "story" -> target.story(StoryCampaignQuery().apply { from = query.from; to = query.to })
+        "activation" -> target.activation(query)
+        else -> target.reach(query)
+    }
+    private class CapturedRanges : RuntimeException()
+    private fun saveRanges(kind: String, query: CampaignQuery) {
+        var captured = emptyList<RangeAnalyticsMetric>()
+        val snapshots = Mockito.mock(AnalyticsSnapshots::class.java) { invocation ->
+            if (invocation.method.name == "load") {
+                captured = invocation.getArgument(4)
+                throw CapturedRanges()
+            }
+            Mockito.RETURNS_DEFAULTS.answer(invocation)
+        }
+        org.springframework.test.util.ReflectionTestUtils.setField(snapshots, "policy", AnalyticsPolicy())
+        val capture = CampaignAnalyticsService(settings, snapshots, AnalyticsQueryFactory(fixture.mapper), fixture.clock)
+        assertThatThrownBy { invoke(capture, kind, query) }.isInstanceOf(CapturedRanges::class.java)
+        captured.forEach { metric ->
+            val value = if (metric.definition.path.endsWith("/funnels"))
+                fixture.mapper.valueToTree<tools.jackson.databind.JsonNode>(List(metric.definition.parameters.count { it.first == "e" }) { 100 })
+            else fixture.mapper.valueToTree<tools.jackson.databind.JsonNode>(100)
+            fixture.store.saveRange(metric.definition, metric.range.from, metric.range.to, AnalyticsValue(value, now, now))
+        }
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource("creation,41,20", "story,35,31", "activation,62,31", "reach,62,31")
+    fun `D-2 확정 범위 상한은 저장 값을 호출 없이 쓰고 D-1과 오늘 상한은 유지한다`(kind: String, maximum: Int, ongoing: Int) {
+        val query = ranged(maximum)
+        saveRanges(kind, query)
+        invoke(service, kind, query)
+        assertThat(requests).isEmpty()
+        for (bad in listOf(ranged(maximum + 1), ranged(ongoing + 1, day.minusDays(1)), ranged(ongoing + 1, day))) {
+            assertThatThrownBy { invoke(service, kind, bad) }.isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+        }
+        assertThat(fixture.budget.reserve(500)).isTrue()
+    }
+    @Test fun `확정 활성화 35일은 조회마다 저장하고 다음 예산 창에 나머지를 받아 재사용한다`() {
+        val query = ranged(35)
+        assertThatThrownBy { service.activation(query) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).hasSize(1)
+        fixture.budget.reservation(220).also { assertThat(it).isNotNull() }!!.close()
+        assertThat(fixture.budget.reserve(221)).isFalse()
+        assertThatThrownBy { service.activation(query) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).hasSize(1)
+        fixture.clock.at = now.plusSeconds(299)
+        assertThatThrownBy { service.activation(query) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).hasSize(1)
+        fixture.clock.at = now.plusSeconds(360) // 299초 요청이 건 쿨다운도 지난 뒤
+        assertThat(service.activation(query).steps[0].users).isEqualTo(CampaignSegments(100, 80))
+        assertThat(requests).hasSize(2)
+        assertThat(service.activation(query).steps).hasSize(4)
+        assertThat(requests).hasSize(2)
+    }
+    @Test fun `다른 태스크는 저장된 전체 조회를 공유하고 광고 조회만 이어 받는다`() {
+        val query = ranged(35)
+        assertThatThrownBy { service.activation(query) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).hasSize(1)
+        val other = AnalyticsTestFixture(fixture.properties, fixture.clock, repository = fixture.store)
+        try {
+            val target = CampaignAnalyticsService(settings, other.snapshots, AnalyticsQueryFactory(other.mapper), other.clock)
+            assertThat(target.activation(query).steps[0].users).isEqualTo(CampaignSegments(100, 80))
+            assertThat(requests).hasSize(2)
+            assertThat(fixture.mapper.readTree(requests.last().requestUrl!!.queryParameter("e")!!).toString()).contains("initial_utm_campaign")
+            assertThat(other.budget.reserve(220)).isTrue(); assertThat(other.budget.reserve(1)).isFalse()
+        } finally { other.snapshots.close() }
+    }
+    @Test fun `확정 누적 도달 62일은 빈 저장소에서도 네 조회 비용248로 완료한다`() {
+        assertThat(service.reach(ranged(62)).chatUsers.all).isZero()
+        assertThat(requests).hasSize(4)
+        assertThat(fixture.budget.reserve(252)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = [0, 1])
+    fun `오늘이나 어제 활성화 31일은 예산250 소비 후 전체496을 예약 못하면 전송하지 않는다`(offset: Long) {
+        assertThat(fixture.budget.reserve(250)).isTrue()
+        assertThatThrownBy { service.activation(ranged(31, day.minusDays(offset))) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
+        assertThat(requests).isEmpty()
+        assertThat(fixture.budget.reserve(250)).isTrue()
     }
 }
