@@ -50,16 +50,23 @@ class EmptyGroupedResponseTests {
         assertThat(app.totals.newUsersBySource).isEmpty()
         assertThat(server.requestCount).isEqualTo(1) // 저장된 빈 배열은 미수집이 아니므로 다시 조회하지 않는다.
     }
-    @ParameterizedTest @ValueSource(strings = ["[0]", "[[0]]"])
+    @ParameterizedTest @ValueSource(strings = ["[0]", "[[0]]", "[[0,1]]", "[[0,1,2]]"])
     fun `묶음 이름 없는 영 계열은 날짜마다 빈 배열로 저장하고 준비 중 날짜가 없다`(labels: String) {
         assertEmptyStored(labels, "[[0,0]]")
     }
     @Test fun `계열 없는 응답도 날짜마다 빈 배열로 저장하고 준비 중 날짜가 없다`() {
         assertEmptyStored("[]", "[]")
     }
-    @ParameterizedTest @ValueSource(strings = ["[0]", "[[0]]"])
+    @ParameterizedTest @ValueSource(strings = ["[0]", "[[0]]", "[[0,1]]", "[[0,1,2]]"])
     fun `묶음 이름 없는 계열에 하나라도 영이 아니면 parse_error이고 저장하지 않는다`(labels: String) {
         val result = load(labels, "[[0,1]]")
+        assertThat(result.progress.failure).isEqualTo(AnalyticsFailureReason.parse_error)
+        assertThat(result.pendingDates()).containsExactlyElementsOf(range.dates())
+        assertThat(fixture.store.daily(metric.definition, range.from, range.to)).isEmpty()
+    }
+    @ParameterizedTest @ValueSource(strings = ["true", "{}", "[]", "[true]", "[0,{}]", "0.0", "[0.0]", "[0,0.0]", "[{},0]", "[[0]]"])
+    fun `정수 인덱스 모양이 아닌 이름 없는 라벨은 영 계열이어도 parse_error이고 저장하지 않는다`(label: String) {
+        val result = load("[$label]", "[[0,0]]")
         assertThat(result.progress.failure).isEqualTo(AnalyticsFailureReason.parse_error)
         assertThat(result.pendingDates()).containsExactlyElementsOf(range.dates())
         assertThat(fixture.store.daily(metric.definition, range.from, range.to)).isEmpty()

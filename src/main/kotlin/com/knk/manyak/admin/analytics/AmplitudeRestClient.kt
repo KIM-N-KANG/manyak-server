@@ -117,6 +117,7 @@ object AmplitudeResults {
             val parts = if (label.isArray) label.toList().let { if (it.size == 2 && it.first().isNumber) it.drop(1) else it } else listOf(label)
             // 이름 없는 계열은 묶음 값이 없는 응답이며, 정상 0일 때만 버린다.
             if (parts.none { it.isString || it.isNull }) {
+                require(label.isIntegralNumber || label.isArray && !label.isEmpty && label.all { it.isIntegralNumber })
                 require(series[index].all { number(it) == 0L })
                 return@mapIndexedNotNull null
             }
