@@ -217,6 +217,24 @@ client.test("앱 유입", () => {
 });
 %}
 
+### 앱 유입 · 묶음 값 없는 과거 이틀 — 저장 후 준비 중 날짜가 없어야 한다
+# 위 관리자 로그인 준비와 Amplitude 연결 설정이 필요하다. Android 신규 사용자가 없는 범위를 쓴다.
+# 백필/최초 조회가 완료된 뒤 실행한다. 이름 없는 0 계열과 계열 없음은 날짜별 빈 배열로 저장된다.
+# 비영 값이 있는 이름 없는 계열은 parse_error로 남고 해당 값을 저장하지 않는다(자동 테스트로 검증).
+GET {{baseUrl}}/api/v1/admin/campaigns/app-transfer?from=2026-07-01&to=2026-07-02
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("묶음 값 없는 날짜도 수집 완료", () => {
+  client.assert(response.status === 200, `expected=200 actual=${response.status}`);
+  const b = response.body;
+  client.assert(b.pendingDates.length === 0, `expected=[] actual=${JSON.stringify(b.pendingDates)}`);
+  client.assert(JSON.stringify(b.daily.map(d => d.date)) === JSON.stringify(["2026-07-01", "2026-07-02"]), `expected=two dates actual=${JSON.stringify(b.daily)}`);
+  b.daily.forEach(d => client.assert(Array.isArray(d.newUsersBySource) && d.newUsersBySource.length === 0, `expected=[] actual=${JSON.stringify(d.newUsersBySource)}`));
+  client.assert(Array.isArray(b.totals.newUsersBySource) && b.totals.newUsersBySource.length === 0, `expected=[] actual=${JSON.stringify(b.totals.newUsersBySource)}`);
+});
+%}
+
 ### 400 · 오늘로 끝나는 첫 방문 활성화 32일
 GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?from={{campaignRangeTooLongFrom}}&to={{campaignToday}}
 Authorization: Bearer {{adminToken}}
