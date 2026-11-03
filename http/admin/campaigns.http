@@ -1,20 +1,34 @@
 # 관리자 캠페인 분석. IntelliJ HTTP Client에서 위에서부터 실행한다.
 # 준비: Postgres·Redis, ./gradlew bootRun, 기존 관리자 로그인으로 얻은 adminToken.
 # 조회 환경의 MANYAK_AMPLITUDE_API_KEY / MANYAK_AMPLITUDE_SECRET_KEY를 사용한다. 키를 파일에 넣지 않는다.
-# 추이 366일(미수신 날짜는 pendingDates), 간편 제작 20일, 상세 진입 31일, 유입 소스 10일 상한.
+# 추이 366일(미수신 날짜는 pendingDates), 진행 중 간편 제작 20일·상세 진입/활성화/누적 도달 31일, 유입 소스 10일 상한.
+# to가 확정일(KST 오늘-2일 이하)이면 간편 제작 41일·상세 진입 35일·활성화/누적 도달 62일까지 허용한다.
 # from/to는 양끝 포함 KST, days와 중복 불가. 간편 제작·소스의 days는 7만 허용한다.
 # 원값은 DB에 저장한다. 확정일은 영구 재사용, 일별 어제 값은 하루 한 번, 오늘 값은 10분마다 갱신한다.
 # 퍼널·소스는 범위별 저장이며 오늘·어제 포함 범위는 10분마다 갱신한다. 실패 뒤 60초 쿨다운.
 # 퍼널은 전환 창 1일이 끝난 뒤 받은 값만 확정한다. 가입 조회는 ce:신규 가입 (구글·카카오) 한 이벤트다.
-# 모든 분석 API는 태스크당 5분 500 비용을 공유하므로 예산 부족 카드는 60초 뒤 다시 요청한다.
+# 모든 분석 API는 태스크당 5분 500 비용을 공유한다. 확정 범위는 조회별로 저장하며 모두 받을 때까지 503이다.
+# 큰 확정 조회를 이어 받으려면 첫 예약 뒤 5분과 마지막 예산 부족의 60초 쿨다운이 지난 뒤 재시도한다. 저장한 확정 값은 다시 받지 않는다.
 # 일별 지표는 받은 날짜만 반환하고 준비 중 날짜는 pendingDates에 남는다. 저장 값이 없으면 503이다.
 @baseUrl = http://localhost:8080
 @adminToken = replace-with-admin-token
 @from = 2026-10-22
 @to = 2026-10-23
+@confirmedCampaign = KR_META_WEB_ACTIVATION_COLD_202609
+@confirmedFrom = 2026-09-17
+@confirmedTo = 2026-10-21
 
 ### 서버 상태
 GET {{baseUrl}}/actuator/health
+
+> {%
+client.test("서버 정상", () => client.assert(response.status === 200, `expected=200 actual=${response.status}`));
+const kstToday = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+const day = Date.parse(kstToday + "T00:00:00Z");
+client.global.set("campaignToday", kstToday);
+client.global.set("campaignCreationTooLongFrom", new Date(day - 20 * 86400000).toISOString().slice(0, 10));
+client.global.set("campaignRangeTooLongFrom", new Date(day - 31 * 86400000).toISOString().slice(0, 10));
+%}
 
 ### 캠페인 목록 · 종료일 없는 마지막 항목이 기본 캠페인
 GET {{baseUrl}}/api/v1/admin/campaigns
@@ -45,7 +59,7 @@ client.test("추이와 세그먼트 계산", () => {
 });
 %}
 
-### 간편 제작 퍼널 · 기본 최근 7일, 최대 20일, 활성 사용자 기준(n=active)
+### 간편 제작 퍼널 · 기본 최근 7일, 진행 중 20일·확정 41일, 활성 사용자 기준(n=active)
 # 1단계 client_storyCreate_viewed, 2단계 client_storyCreate_tagCategory_selected(from_category GENRE, direction forward). Active Users 6단계 차트와 대조한다.
 # 광고 착지가 간편 제작 화면으로 바뀌기 전 기간과 전환율을 그대로 비교할 수 없다.
 GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation
@@ -111,8 +125,8 @@ GET {{baseUrl}}/api/v1/admin/campaigns/analytics?days=7&campaign=KR_META_WEB_ACT
 Authorization: Bearer {{adminToken}}
 
 
-### 400 · 간편 제작은 21일 범위를 받지 않음
-GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation?from=2026-10-03&to=2026-10-23
+### 400 · 오늘로 끝나는 간편 제작 21일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation?from={{campaignCreationTooLongFrom}}&to={{campaignToday}}
 Authorization: Bearer {{adminToken}}
 
 > {% client.test("간편 제작 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
@@ -203,14 +217,14 @@ client.test("앱 유입", () => {
 });
 %}
 
-### 400 · 첫 방문 활성화 31일 초과
-GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?from=2026-09-29&to=2026-10-30
+### 400 · 오늘로 끝나는 첫 방문 활성화 32일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?from={{campaignRangeTooLongFrom}}&to={{campaignToday}}
 Authorization: Bearer {{adminToken}}
 
 > {% client.test("활성화 기간 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
 
-### 400 · 누적 도달 31일 초과
-GET {{baseUrl}}/api/v1/admin/campaigns/reach?from=2026-09-29&to=2026-10-30
+### 400 · 오늘로 끝나는 누적 도달 32일
+GET {{baseUrl}}/api/v1/admin/campaigns/reach?from={{campaignRangeTooLongFrom}}&to={{campaignToday}}
 Authorization: Bearer {{adminToken}}
 
 > {% client.test("누적 도달 기간 상한", () => client.assert(response.status === 400, `actual=${response.status}`)); %}
@@ -231,3 +245,57 @@ Authorization: Bearer {{adminToken}}
 GET {{baseUrl}}/api/v1/admin/campaigns/app-transfer?days=7
 
 > {% client.test("앱 유입 인증", () => client.assert(response.status === 401, `actual=${response.status}`)); %}
+
+# KNK-2008: 끝난 3차 캠페인 확정 범위 35일. 같은 요청을 반복해 나머지 조회를 이어 받는다.
+# 활성화는 조회당 280(전체+광고 합560), 간편 제작은 조회당420(합840)이므로 빈 저장소의 첫 요청은 503일 수 있다.
+# 상세 진입은 490, 누적 도달은 합140이다. 다른 소비가 있으면 이 요청도 503일 수 있다.
+
+### 확정 3차 · 첫 방문 활성화 35일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/activation?campaign={{confirmedCampaign}}&from={{confirmedFrom}}&to={{confirmedTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("확정 활성화 35일", () => {
+  client.assert(response.status === 200 || response.status === 503, `expected=200 or 503 actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.from === "2026-09-17" && response.body.to === "2026-10-21" && response.body.steps.length === 4, JSON.stringify(response.body));
+  else client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+});
+%}
+
+### 확정 3차 · 누적 도달 35일
+GET {{baseUrl}}/api/v1/admin/campaigns/reach?campaign={{confirmedCampaign}}&from={{confirmedFrom}}&to={{confirmedTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("확정 누적 도달 35일", () => {
+  client.assert(response.status === 200 || response.status === 503, `expected=200 or 503 actual=${response.status}`);
+  if (response.status === 200) {
+    client.assert(response.body.from === "2026-09-17" && response.body.to === "2026-10-21", JSON.stringify(response.body));
+    ["chatUsers", "deepChatUsers"].forEach(key => client.assert(response.body[key].nonAds === response.body[key].all - response.body[key].ads, JSON.stringify(response.body)));
+  } else client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+});
+%}
+
+### 확정 3차 · 간편 제작 35일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/creation?campaign={{confirmedCampaign}}&from={{confirmedFrom}}&to={{confirmedTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("확정 간편 제작 35일", () => {
+  client.assert(response.status === 200 || response.status === 503, `expected=200 or 503 actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.from === "2026-09-17" && response.body.to === "2026-10-21" && response.body.steps.length === 6, JSON.stringify(response.body));
+  else client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+});
+%}
+
+### 확정 3차 · 상세 진입 35일
+GET {{baseUrl}}/api/v1/admin/campaigns/funnels/story-detail?campaign={{confirmedCampaign}}&from={{confirmedFrom}}&to={{confirmedTo}}
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("확정 상세 진입 35일", () => {
+  client.assert(response.status === 200 || response.status === 503, `expected=200 or 503 actual=${response.status}`);
+  if (response.status === 200) client.assert(response.body.from === "2026-09-17" && response.body.to === "2026-10-21" && response.body.steps.length === 7, JSON.stringify(response.body));
+  else client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+});
+%}

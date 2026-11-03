@@ -110,7 +110,7 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
         }
     }
     fun creation(query: CampaignQuery): CampaignCreationResponse {
-        val range = query.range(clock, 20, 7, setOf(7)); val campaign = campaign(query)
+        val range = query.range(clock, 20, 7, setOf(7), confirmedMaximum = 41); val campaign = campaign(query)
         val all = queries.funnel("campaign_creation_all", range, CampaignEvents.creation.mapIndexed { i, event -> CampaignEvents.event(event, CampaignEvents.common() + AdminMetricEvents.creationFilters(i)) })
         val ads = queries.funnel("campaign_creation_ads", range, CampaignEvents.creation.mapIndexed { i, event -> CampaignEvents.event(event, CampaignEvents.common() + ads(campaign) + AdminMetricEvents.creationFilters(i)) })
         val result = snapshots.load("/api/v1/admin/campaigns/funnels/creation", range, emptyList(), rangeMetrics = listOf(all, ads))
@@ -120,7 +120,7 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
         })
     }
     fun story(query: StoryCampaignQuery): CampaignStoryResponse {
-        val range = query.range(clock, 31, 7); val campaign = campaign(query)
+        val range = query.range(clock, 31, 7, confirmedMaximum = 35); val campaign = campaign(query)
         val story = query.storyId ?: settings.items.lastOrNull { it.campaign == campaign }?.storyId ?: badAdminQuery("대상 스토리가 없습니다.")
         val names = listOf("client_storyDetail_viewed", "client_storyDetail_chatStartButton_clicked") + List(5) { CampaignEvents.MESSAGE }
         val events = names.mapIndexed { i, name -> CampaignEvents.event(name, CampaignEvents.common() + when (i) {
@@ -134,7 +134,7 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
         return CampaignStoryResponse(value.fetchedAt, range.from, range.to, campaign, story, names.mapIndexed { i, name -> StoryCampaignStep(name, if (i >= 2) i - 1 else null, value.value[i].asLong()) })
     }
     fun activation(query: CampaignQuery): CampaignActivationResponse {
-        val range = query.range(clock, 31, 7); val campaign = campaign(query)
+        val range = query.range(clock, 31, 7, confirmedMaximum = 62); val campaign = campaign(query)
         val names = listOf("_active", AdminMetricEvents.MESSAGE, AdminMetricEvents.MESSAGE, AdminMetricEvents.SIGNUP)
         val metrics = listOf(false, true).map { ad -> queries.funnel("campaign_activation_" + (if (ad) "ads" else "all"), range,
             names.mapIndexed { i, name -> CampaignEvents.event(name, CampaignEvents.common() + (if (ad) listOf(ads(campaign)) else emptyList()) +
@@ -147,7 +147,7 @@ class CampaignAnalyticsService(private val settings: CampaignSettings, private v
         })
     }
     fun reach(query: CampaignQuery): CampaignReachResponse {
-        val range = query.range(clock, 31, 7); val campaign = campaign(query)
+        val range = query.range(clock, 31, 7, confirmedMaximum = 62); val campaign = campaign(query)
         val metrics = listOf(false, true).flatMap { deep -> listOf(false, true).map { ad ->
             queries.collapsed("campaign_reach_${deep}_$ad", range, CampaignEvents.event(AdminMetricEvents.MESSAGE,
                 CampaignEvents.common() + (if (ad) listOf(ads(campaign)) else emptyList()) +
