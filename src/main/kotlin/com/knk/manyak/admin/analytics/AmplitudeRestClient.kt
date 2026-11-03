@@ -112,13 +112,18 @@ object AmplitudeResults {
         require(dates.isArray && dates.size() == range.days && labels.isArray && series.isArray && labels.size() == series.size())
         val parsedDates = dates.toList().map(::date)
         require(parsedDates.toSet() == range.dates().toSet() && parsedDates.distinct().size == range.days)
-        val names = labels.toList().map { label ->
-            val parts = if (label.isArray) label.toList().let { if (it.size == 2 && it.first().isNumber) it.drop(1) else it } else listOf(label)
-            require(parts.size == 1 && parts.all { it.isString || it.isNull })
-            parts.first().let { if (it.isNull || it.asText() == "(none)") null else it.asText() }
-        }
         series.forEach { require(it.isArray && it.size() == range.days) }
-        parsedDates.mapIndexed { i, date -> date to names.mapIndexed { group, name -> Group(listOf(name), number(series[group][i])) } }.toMap()
+        val names = labels.toList().mapIndexedNotNull { index, label ->
+            val parts = if (label.isArray) label.toList().let { if (it.size == 2 && it.first().isNumber) it.drop(1) else it } else listOf(label)
+            // 이름 없는 계열은 묶음 값이 없는 응답이며, 정상 0일 때만 버린다.
+            if (parts.none { it.isString || it.isNull }) {
+                require(series[index].all { number(it) == 0L })
+                return@mapIndexedNotNull null
+            }
+            require(parts.size == 1 && parts.all { it.isString || it.isNull })
+            index to parts.first().let { if (it.isNull || it.asText() == "(none)") null else it.asText() }
+        }
+        parsedDates.mapIndexed { i, date -> date to names.map { (group, name) -> Group(listOf(name), number(series[group][i])) } }.toMap()
     }
     fun <T> parse(block: () -> T): T = try { block() } catch (failure: AmplitudeFetchFailure) { throw failure } catch (failure: Exception) { throw AmplitudeFetchFailure(AnalyticsFailureReason.parse_error, exceptionClass = failure.javaClass.name, phase = "result_decode") }
 }
