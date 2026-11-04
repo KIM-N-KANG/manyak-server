@@ -146,13 +146,13 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
 
     fun transactions(userId: Long, page: AdminPagination): AdminPageResponse<AdminTransactionResponse> {
         val q = AdminQuery().apply { equal("user_id", userId) }
-        // 누계를 전체 회원 원장에 먼저 적용하고 바깥에서 페이징한다. 동시각은 내부 기록 순서를 유지한다.
+        // 누계를 전체 회원 원장에 먼저 적용하고 바깥에서 페이징한다. 동시각의 조회 순서는 요청한 정렬 방향을 따른다.
         val from = """FROM (SELECT id, amount, reason, created_at, user_id,
             SUM(amount) OVER (ORDER BY created_at ASC, id ASC ROWS UNBOUNDED PRECEDING) AS balance_after
             FROM credit_transactions WHERE user_id=:p0) t"""
         return jdbc.adminPage("amount, reason, balance_after, created_at", from, q, page, "id", RowMapper { rs, _ ->
             AdminTransactionResponse(rs.getLong("amount"), rs.getString("reason"), rs.getLong("balance_after"), rs.instant("created_at")!!)
-        })
+        }, idDescending = page.orderBy.contains(" desc", ignoreCase = true))
     }
     fun attendance(userId: Long, page: AdminPagination): AdminPageResponse<AdminAttendanceResponse> {
         val q = AdminQuery().apply { params["user"] = userId }
