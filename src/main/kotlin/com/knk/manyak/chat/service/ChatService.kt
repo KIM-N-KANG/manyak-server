@@ -200,9 +200,9 @@ class ChatService(
         if (!story.isReadableBy(userId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         }
-        // 교차 접근 차단(§4-5, KNK-480): 게스트 소유(NULL) 스토리에는 인증 회원이 채팅을 시작할 수 없다(이관 후 접근).
-        // 소유자 있는(본인·공개 발행) 스토리 채팅 생성은 영향받지 않는다.
-        if (story.userId == null && userId != null) {
+        // 소유자 없는 스토리는 발행 상태이며 공개일 때만 회원이 채팅을 시작할 수 있다(KNK-2038).
+        // 그 밖의 소유자 없는 스토리는 익명 요청만 허용한다.
+        if (story.userId == null && userId != null && !story.isPubliclyVisible()) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "이 스토리로는 채팅을 시작할 수 없습니다.")
         }
         // 시작 설정 복수화(KNK-515): startSettingId를 지정하면 그 시작 설정으로, 미지정이면 스토리의 첫(기본) 시작 설정으로 시작한다.
