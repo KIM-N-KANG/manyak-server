@@ -39,9 +39,11 @@ class StorySearchService(
         val pageSize = limit.coerceIn(1, 50)
         val request = SearchRequest.Builder().index(properties.storyIndex).size(pageSize + 1)
             .query { it.bool { b ->
-                b.must { m -> m.multiMatch { mm ->
+                b.should { m -> m.multiMatch { mm ->
                     mm.query(query).fields("title^3", "oneLineIntro", "genres", "characterNames").type(TextQueryType.BestFields)
-                } }.filter { f -> f.term { t -> t.field("visible").value { v -> v.booleanValue(true) } } }
+                } }.should { m -> m.wildcard { w ->
+                    w.field("genres").value("*${escapeWildcard(query)}*").caseInsensitive(true)
+                } }.minimumShouldMatch("1").filter { f -> f.term { t -> t.field("visible").value { v -> v.booleanValue(true) } } }
             } }
             .sort { it.score { s -> s.order(SortOrder.Desc) } }
             .sort { it.field { f -> f.field("createdAt").order(SortOrder.Desc) } }
@@ -85,4 +87,9 @@ class StorySearchService(
             nextCursor = if (hits.size > pageSize) StorySearchCursor.fromSort(page.last().sort()).encode(query) else null,
         )
     }
+
+    private fun escapeWildcard(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("?", "\\?")
 }

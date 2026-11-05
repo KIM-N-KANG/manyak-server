@@ -86,6 +86,48 @@ class StorySearchOpenSearchTests {
         }
     }
 
+    @Test
+    fun `실제 OpenSearch 장르 검색은 포함 일치와 대소문자 무시를 지원하고 별표와 물음표를 문자로 비교한다`() {
+        OpenSearchContainer<Nothing>("opensearchproject/opensearch:2.19.4").use { container ->
+            container.start()
+            containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
+                AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
+                    AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
+                        .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                        .build()).use { transport ->
+                    val client = OpenSearchClient(transport)
+                    val index = "stories-genres-test"
+                    // 제목, 소개, 인물에는 검색어를 넣지 않아 장르 조건만 검증한다.
+                    client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = true))
+                    val documents = listOf("탈출물", "BL", "탈*출물", "탈?출물", "탈X출물", "탈출물").mapIndexed { i, genre ->
+                        doc("제목", "소개", i.toLong(), visible = i != 5).copy(genres = listOf(genre))
+                    }
+                    documents.forEach { document ->
+                        client.index { it.index(index).id(document.publicId).document(document) }
+                    }
+                    client.indices().refresh { it.index(index) }
+                    val repository = mock(StoryRepository::class.java)
+                    `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
+                        Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
+                            visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
+                    })
+                    val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
+                    `when`(authors.resolveAll(anyList())).thenReturn(emptyMap())
+                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
+                        mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
+                    fun ids(query: String) = service.search(query, 50, null).items.map { it.id }.toSet()
+                    assertEquals(setOf(documents[0].publicId), ids("탈출"))
+                    assertEquals(setOf(documents[0].publicId), ids("탈출물"))
+                    assertEquals(setOf(documents[1].publicId), ids("bl"))
+                    assertEquals(setOf(documents[2].publicId), ids("탈*"))
+                    assertEquals(setOf(documents[3].publicId), ids("탈?"))
+                    assertTrue(ids("없는*장르").isEmpty())
+                    assertTrue(ids("없는?장르").isEmpty())
+                }
+            }
+        }
+    }
+
     // 보안 플러그인을 끈 컨테이너는 HTTP다. 서명·직렬화는 AWS transport 그대로 두고,
     // 최종 소켓 주소만 일회용 컨테이너로 바꾼다. 실 AWS 자격증명·도메인은 사용하지 않는다.
     private fun containerHttpClient(endpoint: URI): SdkHttpClient {

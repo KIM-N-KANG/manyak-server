@@ -23,6 +23,42 @@ import java.util.UUID
 
 class StorySearchServiceTests {
     @Test
+    fun `검색 질의는 기존 필드와 장르 포함 조건 중 하나를 요구하고 특수문자를 이스케이프한다`() {
+        val client = Mockito.mock(OpenSearchClient::class.java)
+        val service = StorySearchService(
+            client, StorySearchProperties(), Mockito.mock(StoryRepository::class.java),
+            Mockito.mock(StorySearchIndexer::class.java), Mockito.mock(OfficialStoryAccount::class.java),
+            Mockito.mock(StoryAuthorResolver::class.java),
+        )
+        val requests = mutableListOf<SearchRequest>()
+        Mockito.`when`(client.search(Mockito.any(SearchRequest::class.java), Mockito.eq(StorySearchDocument::class.java)))
+            .thenAnswer {
+                requests += it.getArgument<SearchRequest>(0)
+                throw OpenSearchException(ErrorResponse.Builder().status(404)
+                    .error { e -> e.type("index_not_found_exception").reason("test") }.build())
+            }
+        for ((query, pattern) in listOf(
+            " 탈출 " to "*탈출*", "bl" to "*bl*", "탈*" to "*탈\\**",
+            "탈?" to "*탈\\?*", "탈\\*?" to "*탈\\\\\\*\\?*",
+        )) {
+            service.search(query, 20, null)
+            val bool = requests.last().query()!!.bool()
+            assertEquals("1", bool.minimumShouldMatch())
+            assertEquals(2, bool.should().size)
+            val multiMatch = bool.should().single { it.isMultiMatch }.multiMatch()
+            assertEquals(query.trim(), multiMatch.query())
+            assertEquals(listOf("title^3", "oneLineIntro", "genres", "characterNames"), multiMatch.fields())
+            val wildcard = bool.should().single { it.isWildcard }.wildcard()
+            assertEquals("genres", wildcard.field())
+            assertEquals(pattern, wildcard.value())
+            assertEquals(true, wildcard.caseInsensitive())
+            val visible = bool.filter().single().term()
+            assertEquals("visible", visible.field())
+            assertTrue(visible.value().booleanValue())
+        }
+    }
+
+    @Test
     fun `없는 인덱스는 빈 페이지를 반환하고 다른 저장소 오류는 503이다`() {
         val client = Mockito.mock(OpenSearchClient::class.java)
         val stories = Mockito.mock(StoryRepository::class.java)
