@@ -779,6 +779,23 @@ class AdminReadApiIntegrationTests {
         }
     }
 
+    @Test fun `회원 이프 내역은 동시각 동률도 요청 방향으로 기록 순서를 정렬한다`() {
+        val user = member("동률 원장")
+        for (amount in listOf(100L, -20L, 50L)) jdbc.update(
+            "INSERT INTO credit_transactions(user_id, amount, reason, created_at) VALUES (?, ?, ?, ?)",
+            user.id, amount, if (amount < 0) "CHAT_TURN" else "ATTENDANCE_REWARD", java.sql.Timestamp.from(now))
+        val path = "/members/${user.publicId}/transactions"
+        val descending = json(get("$path?size=2").expectStatus().isOk)["items"]
+        assertThat(descending.toList().map { it["amount"].asLong() }).containsExactly(50L, -20L)
+        assertThat(descending.toList().map { it["balanceAfter"].asLong() }).containsExactly(130L, 80L)
+        val second = json(get("$path?size=2&page=2&order=desc").expectStatus().isOk)["items"]
+        assertThat(second.toList().map { it["amount"].asLong() }).containsExactly(100L)
+        assertThat(second[0]["balanceAfter"].asLong()).isEqualTo(100L)
+        val ascending = json(get("$path?size=3&order=asc").expectStatus().isOk)["items"]
+        assertThat(ascending.toList().map { it["amount"].asLong() }).containsExactly(100L, -20L, 50L)
+        assertThat(ascending.toList().map { it["balanceAfter"].asLong() }).containsExactly(100L, 80L, 130L)
+    }
+
     @Test fun `회원 거래 페이지는 누계만 공개하고 출석은 KST 날짜별이며 상세 접속 기록을 남긴다`() {
         val user = member("거래")
         for ((amount, reason, instant) in listOf(Triple(250L, "ATTENDANCE_REWARD", midnight),
@@ -788,7 +805,7 @@ class AdminReadApiIntegrationTests {
         }
         val body = json(get("/members/${user.publicId}/transactions?size=2").expectStatus().isOk)
         assertThat(body["totalPages"].asLong()).isEqualTo(2)
-        assertThat(body["items"][0]["balanceAfter"].asLong()).isEqualTo(230)
+        assertThat(body["items"][0]["balanceAfter"].asLong()).isEqualTo(200)
         assertThat(body["items"][0].has("id")).isFalse()
         val attendance = json(get("/members/${user.publicId}/attendance").expectStatus().isOk)
         assertThat(attendance["items"][0]["date"].asText()).isEqualTo("2026-10-21")

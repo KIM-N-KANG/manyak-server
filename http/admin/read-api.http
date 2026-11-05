@@ -845,3 +845,31 @@ Authorization: Bearer {{adminToken}}
         });
     });
 %}
+
+### 회원 이프 내역 — 동시각도 기록 역순, 필요하면 조회 대상 adminSelfId를 다른 회원 공개 ID로 변경
+GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}/transactions?size=100&sort=createdAt&order=desc
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("최신순 원장 누계 연결", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const rows = response.body.items;
+    for (let i = 0; i + 1 < rows.length; i++) {
+        client.assert(rows[i].balanceAfter - rows[i].amount === rows[i + 1].balanceAfter, "동시각도 내부 기록 역순이어야 누계가 연결됩니다");
+    }
+});
+%}
+
+### 회원 이프 내역 — 동시각도 기록 정순, 누계 산식은 동일
+GET {{baseUrl}}/api/v1/admin/members/{{adminSelfId}}/transactions?size=100&sort=createdAt&order=asc
+Authorization: Bearer {{adminToken}}
+
+> {%
+client.test("과거순 원장 누계 연결", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const rows = response.body.items;
+    for (let i = 1; i < rows.length; i++) {
+        client.assert(rows[i - 1].balanceAfter + rows[i].amount === rows[i].balanceAfter, "동시각도 내부 기록 정순이어야 누계가 연결됩니다");
+    }
+});
+%}
