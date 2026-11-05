@@ -16,7 +16,7 @@ Content-Type: application/json
 {
   "title": "검색검증 마법 왕국",
   "oneLineIntro": "마법사가 왕국의 비밀을 찾는다",
-  "genres": ["판타지"],
+  "genres": ["로맨스판타지", "BL"],
   "visibility": "PUBLIC",
   "storySettings": {"worldSetting":"왕국", "characterSetting":"마법사", "userRoleSetting":"여행자", "ruleSetting":"비밀을 찾는다"},
   "startSettings": [{"name":"성문", "prologue":"성문 앞에 섰다", "startSituation":"왕국에 입장한다", "suggestedInputs":["문을 연다","주변을 살핀다","인사한다"]}]
@@ -60,6 +60,51 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=20
     // KNK-1660: 프로필 이미지가 있는 회원으로 준비하면 검색에도 그 URL이 채워져야 합니다.
     // 이미지 변경 후 재색인 없이 3번을 다시 실행해 정본 프로필 반영을 확인합니다.
     client.assert(card.title === "검색검증 마법 왕국" && card.author.id === null, `actual=${JSON.stringify(card)}`);
+  });
+%}
+
+# 결과가 50건을 넘으면 nextCursor로 끝까지 확인한다. 준비 스토리 공개 철회 전에 실행한다.
+### 장르 포함 일치: 로맨스판타지는 로맨스판으로 검색된다(준비 스토리 승인 및 색인 반영 후 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=로맨스판&limit=50
+
+> {%
+  client.test("장르 포함 일치: 로맨스판타지는 로맨스판으로 검색된다", () => {
+    client.assert(response.status === 200, `expected=200, actual=${response.status}`);
+    const found = response.body.items.some(x => x.id === client.global.get("searchStoryId"));
+    client.assert(found === true, `expected=true, actual=${found}, body=${JSON.stringify(response.body)}`);
+  });
+%}
+
+### 장르 대소문자 무시: BL은 bl로 검색된다(준비 스토리 승인 및 색인 반영 후 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=bl&limit=50
+
+> {%
+  client.test("장르 대소문자 무시: BL은 bl로 검색된다", () => {
+    client.assert(response.status === 200, `expected=200, actual=${response.status}`);
+    const found = response.body.items.some(x => x.id === client.global.get("searchStoryId"));
+    client.assert(found === true, `expected=true, actual=${found}, body=${JSON.stringify(response.body)}`);
+  });
+%}
+
+### 장르 별표 리터럴: 로맨*은 로맨스판타지와 일치하지 않는다(준비 스토리 승인 및 색인 반영 후 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=로맨%2A&limit=50
+
+> {%
+  client.test("장르 별표 리터럴: 로맨*은 로맨스판타지와 일치하지 않는다", () => {
+    client.assert(response.status === 200, `expected=200, actual=${response.status}`);
+    const found = response.body.items.some(x => x.id === client.global.get("searchStoryId"));
+    client.assert(found === false, `expected=false, actual=${found}, body=${JSON.stringify(response.body)}`);
+  });
+%}
+
+### 장르 물음표 리터럴: 로맨?은 로맨스판타지와 일치하지 않는다(준비 스토리 승인 및 색인 반영 후 실행)
+GET {{baseUrl}}/api/v1/stories/search?q=로맨%3F&limit=50
+
+> {%
+  client.test("장르 물음표 리터럴: 로맨?은 로맨스판타지와 일치하지 않는다", () => {
+    client.assert(response.status === 200, `expected=200, actual=${response.status}`);
+    const found = response.body.items.some(x => x.id === client.global.get("searchStoryId"));
+    client.assert(found === false, `expected=false, actual=${found}, body=${JSON.stringify(response.body)}`);
   });
 %}
 
