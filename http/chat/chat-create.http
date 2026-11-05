@@ -7,8 +7,8 @@
 ###   요청 body의 storyId는 UUID 문자열이므로 반드시 따옴표로 감쌉니다. 순차 정수 추측은 404로 차단됩니다.
 ### [KNK-257] 소프트 삭제된 스토리로는 채팅을 생성할 수 없습니다(404).
 ###
-### [KNK-480] 교차 접근 차단: 인증 회원은 게스트(NULL) 소유 스토리에 채팅을 시작할 수 없습니다(403, 3-2번).
-###   소유자 있는(본인·공개 발행) 스토리 채팅 생성은 허용되며, 게스트(토큰 없음)의 게스트 스토리 채팅 생성도 허용됩니다.
+### [KNK-2038] 회원도 발행 공개된 게스트(NULL) 소유 스토리로 회원 소유 채팅을 시작할 수 있습니다(201, 3-2번).
+###   그 밖의 소유자 없는 스토리는 회원 요청을 403으로 거절하며, 익명의 채팅 생성은 그대로 허용됩니다.
 ###
 ### [KNK-185] 채팅 생성 응답에 suggestedInputs(추천 입력) 배열이 포함됩니다.
 ###   start_setting의 story_suggested_inputs를 input_order 순으로 내려주며,
@@ -22,7 +22,7 @@
 ###   - Postgres + AI 서버 기동 (docker compose up -d) — 스토리 생성은 실제 AI(/api/v1/story/compile) 호출
 
 @baseUrl = http://localhost:8080
-# 3-2번(소유권 403) 검증용 회원 토큰. auth-login-google.http 5번을 먼저 실행하면 전역 accessToken이 채워집니다.
+# 3-2번(회원 채팅 생성 201) 검증용 회원 토큰. auth-login-google.http 5번을 먼저 실행하면 전역 accessToken이 채워집니다.
 @accessToken = PUT_A_VALID_ACCESS_TOKEN_HERE
 
 ### 0. 백엔드 상태 확인
@@ -142,10 +142,9 @@ Accept: application/json
     });
 %}
 
-### 3-2. (소유권) 게스트(NULL) 소유 스토리에 회원이 채팅 생성 → 403 (교차 접근 차단, KNK-480)
-# 1~2번을 토큰 없이(게스트로) 실행해 만든 NULL 소유 스토리({{storyId}})에 인증 회원이 채팅을 시작하려는 시도입니다.
-# 회원은 먼저 이관(POST /api/v1/auth/migrate)해야 합니다. {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요.
-# (같은 스토리를 3번처럼 토큰 없이 만들면 게스트라 201입니다. 소유자 있는 스토리 생성도 회원에게 201입니다.)
+### 3-2. [KNK-2038] 발행 공개된 게스트(NULL) 소유 스토리에 회원이 채팅 생성 → 201
+# 1~2번을 토큰 없이 실행해 만든 발행 공개 스토리({{storyId}})를 사용합니다.
+# {{accessToken}}을 유효한 회원 토큰으로 채운 뒤 실행하세요. 생성한 채팅은 요청한 회원 소유입니다.
 POST {{baseUrl}}/api/v1/chats
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -156,9 +155,12 @@ Accept: application/json
 }
 
 > {%
-    client.test("회원이 게스트 스토리로 채팅을 만들면 403이다", () => {
-        client.assert(response.status === 403, `403이 아닙니다(토큰이 유효한지 확인). actual=${response.status}`);
+    client.test("회원이 게스트 공개 스토리로 채팅을 만들면 201이다", () => {
+        client.assert(response.status === 201, `201이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.storyId === client.global.get("storyId"),
+            `storyId가 다릅니다. actual=${response.body.storyId}`);
     });
+    client.global.set("memberChatId", response.body.id);
 %}
 
 ### 4. 형식은 올바르나 존재하지 않는 스토리 UUID로 채팅 생성 → 404
@@ -247,7 +249,7 @@ Content-Type: application/json
 ### 8. [KNK-1587] 정지 회원의 채팅 생성 → 403
 # 수동 준비(로컬 검증 DB만 사용): ACTIVE 회원으로 로그인해 만료 전 access 토큰과
 # 해당 회원 소유 스토리의 public_id를 확보한 뒤 users.status를 SUSPENDED로 변경합니다.
-# 아래 두 변수에 준비한 값을 넣습니다. 위 게스트 스토리를 쓰면 소유권 403과 혼동되므로 쓰지 않습니다.
+# 아래 두 변수에 준비한 정지 회원의 토큰과 해당 회원 소유 스토리의 공개 식별자를 넣습니다.
 # 요청 전후 story_chats에서 해당 회원의 행 수가 늘지 않는지도 확인합니다.
 # 두 요청을 마치면 users.status를 ACTIVE로 복구합니다.
 @suspendedAccessToken = PUT_SUSPENDED_MEMBER_ACCESS_TOKEN_HERE

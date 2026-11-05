@@ -36,7 +36,7 @@ import java.time.Instant
  * (1) 타인의 공개 스토리 201 = `회원이 공개 발행된 타인 스토리로 채팅을 생성하면 201이다`,
  * (2) 타인의 비공개·초안 404 = 아래 PRIVATE·DRAFT 두 건,
  * (3) 삭제된 스토리 404 = `소프트 삭제된 스토리로 채팅을 생성하면 404로 응답한다 (KNK-257)`,
- * (4) 게스트 소유(NULL)에 회원이 붙으면 403 = `회원이 게스트(NULL) 소유 스토리로 채팅을 생성하면 403이다`,
+ * (4) 소유자 없는 스토리에 회원 요청은 발행 공개이면 201과 회원 소유 채팅, 그 밖에는 403,
  * (5) 비로그인 사용자의 공개 스토리 채팅 생성 = 아래 비로그인 201 한 건.
  */
 @ActiveProfiles("test")
@@ -489,20 +489,75 @@ class ChatCreateControllerIntegrationTests {
     // ---- 소유권 게이트(§4-5, KNK-480): 회원-게스트 교차 접근 ----
 
     @Test
-    fun `회원이 게스트(NULL) 소유 스토리로 채팅을 생성하면 403이다`() {
-        // 교차 접근 차단: 인증 회원은 게스트가 만든 NULL 소유 스토리에 채팅을 시작할 수 없다(이관 후 접근).
+    fun `회원이 발행 공개된 소유자 없는 스토리로 채팅을 생성하면 201이고 회원 소유다`() {
         val member = saveUser("회원")
-        val story = storyRepository.save(Story(title = "게스트 스토리")) // userId null, 기본 PUBLISHED·PUBLIC
+        val story = storyRepository.save(
+            Story(title = "게스트 공개 스토리", status = StoryStatus.PUBLISHED, visibility = StoryVisibility.PUBLIC),
+        )
 
-        restTestClient.post()
+        val response = restTestClient.post()
             .uri("/api/v1/chats")
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body("""{"storyId":"${story.publicId}"}""")
             .exchange()
-            .expectStatus().isForbidden
+            .expectStatus().isCreated
+            .expectBody(CreateChatResponse::class.java)
+            .returnResult().responseBody!!
 
-        assertThat(storyChatRepository.count()).isZero()
+        val chat = storyChatRepository.findAll().single()
+        assertThat(chat.publicId.toString()).isEqualTo(response.id)
+        assertThat(chat.userId).isEqualTo(member.id)
+        assertThat(chat.storyId).isEqualTo(story.id)
+    }
+
+    @Test
+    fun `회원이 공개가 아니거나 발행 상태가 아닌 소유자 없는 스토리로 채팅을 생성하면 403이다`() {
+        val member = saveUser("회원")
+        for (status in StoryStatus.entries) {
+            for (visibility in StoryVisibility.entries) {
+                if (status == StoryStatus.PUBLISHED && visibility == StoryVisibility.PUBLIC) continue
+                val story = storyRepository.save(
+                    Story(title = "게스트 제한 스토리", status = status, visibility = visibility),
+                )
+
+                restTestClient.post()
+                    .uri("/api/v1/chats")
+                    .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(member.publicId)}")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("""{"storyId":"${story.publicId}"}""")
+                    .exchange()
+                    .expectStatus().isForbidden
+                    .expectBody()
+                    .jsonPath("$.message").isEqualTo("이 스토리로는 채팅을 시작할 수 없습니다.")
+
+                assertThat(storyChatRepository.count()).isZero()
+            }
+        }
+    }
+
+    @Test
+    fun `익명이 소유자 없는 스토리로 채팅을 생성하면 201이고 소유자는 null이다`() {
+        for (status in StoryStatus.entries) {
+            for (visibility in StoryVisibility.entries) {
+                val story = storyRepository.save(
+                    Story(title = "게스트 스토리", status = status, visibility = visibility),
+                )
+
+                val response = restTestClient.post()
+                    .uri("/api/v1/chats")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("""{"storyId":"${story.publicId}"}""")
+                    .exchange()
+                    .expectStatus().isCreated
+                    .expectBody(CreateChatResponse::class.java)
+                    .returnResult().responseBody!!
+
+                val chat = storyChatRepository.findAll().single { it.publicId.toString() == response.id }
+                assertThat(chat.userId).isNull()
+                assertThat(chat.storyId).isEqualTo(story.id)
+            }
+        }
     }
 
     @Test
@@ -586,8 +641,7 @@ class ChatCreateControllerIntegrationTests {
 
     @Test
     fun `비로그인 사용자가 타인 회원의 공개 스토리로 채팅을 생성하면 201이다`() {
-        // 게스트도 공개 스토리는 플레이할 수 있다. 교차 접근 차단(KNK-480)은 게스트 소유(NULL) 스토리에
-        // 회원이 붙는 반대 방향만 막으므로, 소유자 있는 공개 스토리에는 걸리지 않아야 한다.
+        // 게스트도 회원 소유 공개 스토리로 소유자 없는 채팅을 시작할 수 있다.
         val author = saveUser("작가")
         val story = storyRepository.save(Story(title = "공개작", userId = author.id)) // 기본 PUBLISHED·PUBLIC
 
