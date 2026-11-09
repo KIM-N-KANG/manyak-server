@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -46,7 +47,6 @@ import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.util.UUID
 
 @Service
 class StoryService(
@@ -407,13 +407,6 @@ class StoryService(
         return storyRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
-
-    private fun parsePublicIdOrNull(raw: String): UUID? =
-        try {
-            UUID.fromString(raw)
-        } catch (ignored: IllegalArgumentException) {
-            null
-        }
 
     private fun Lorebook.toListItemResponse(): LorebookListItemResponse =
         LorebookListItemResponse(id = id, name = name, genre = genre)

@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.chat.repository.StoryChatSummaryRepository
 import com.knk.manyak.story.service.UsernameTokenRenderer.render
 import com.knk.manyak.chat.dto.ChangeChatSettingsResponse
@@ -1759,13 +1760,6 @@ class ChatService(
         return storyChatRepository.findByPublicIdAndDeletedAtIsNullForUpdate(parsed)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅을 찾을 수 없습니다.")
     }
-
-    private fun parsePublicIdOrNull(raw: String): UUID? =
-        try {
-            UUID.fromString(raw)
-        } catch (ignored: IllegalArgumentException) {
-            null
-        }
 
     /**
      * 스토리 공개 식별자(UUID 문자열)로 삭제되지 않은 스토리를 조회한다. 형식 오류·미존재·삭제는 404로 통일한다.
