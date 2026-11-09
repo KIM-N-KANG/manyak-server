@@ -7,6 +7,7 @@ import com.knk.manyak.credit.dto.CreditProductsResponse
 import com.knk.manyak.credit.service.CreditOrderService
 import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -22,7 +23,6 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 @Tag(name = "Credits", description = "이프 API")
@@ -44,7 +44,7 @@ class CreditOrderController(private val service: CreditOrderService) {
     @PostMapping("/api/v1/users/me/credits/orders")
     @ResponseStatus(HttpStatus.CREATED)
     fun create(@CurrentUserId userId: Long?, @Valid @RequestBody request: CreateCreditOrderRequest): CreateCreditOrderResponse =
-        service.create(ownerId(userId), request.productId)
+        service.create(requireUser(userId), request.productId)
 
     @Operation(summary = "본인 이프 충전 주문 조회", description = "결제 복귀 후 완료 여부 확인용입니다. 없는 주문과 타인 주문은 모두 404입니다.")
     @SecurityRequirement(name = "bearerAuth")
@@ -55,8 +55,5 @@ class CreditOrderController(private val service: CreditOrderService) {
     ])
     @GetMapping("/api/v1/users/me/credits/orders/{orderId}")
     fun get(@CurrentUserId userId: Long?, @PathVariable orderId: UUID): CreditOrderResponse =
-        service.get(ownerId(userId), orderId)
-
-    private fun ownerId(userId: Long?): Long = userId
-        ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        service.get(requireUser(userId), orderId)
 }

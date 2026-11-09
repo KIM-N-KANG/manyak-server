@@ -2,6 +2,7 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.search.service.StorySearchService
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.ImagePresignRequest
@@ -97,7 +98,7 @@ class StoryController(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: ImagePresignRequest,
     ): ImagePresignResponse = storyImageService.presignDraft(
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다."),
+        requireUser(userId),
         request,
     )
 
@@ -369,10 +370,6 @@ class StoryController(
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
     ) = storyService.deleteStory(storyId, userId)
-
-    // 좋아요 경로는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
-    private fun requireUser(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     private companion object {
         const val DEFAULT_LIMIT = 20

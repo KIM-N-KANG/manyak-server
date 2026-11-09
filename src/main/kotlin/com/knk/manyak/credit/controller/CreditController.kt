@@ -9,6 +9,7 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -16,13 +17,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Credits", description = "이프 API")
 @SecurityRequirement(name = "bearerAuth") // 크레딧 API는 인증 필수(스웨거 자물쇠·Authorize 대상). 스킴은 OpenApiConfig.SECURITY_SCHEME_NAME.
@@ -58,8 +57,7 @@ class CreditController(
     fun getMyCredits(
         @CurrentUserId userId: Long?,
     ): CreditBalanceResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val ownerId = requireUser(userId)
         return CreditBalanceResponse(balance = creditWalletService.balanceOf(ownerId))
     }
 
@@ -90,8 +88,7 @@ class CreditController(
     fun claimAttendance(
         @CurrentUserId userId: Long?,
     ): CreditAttendanceResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val ownerId = requireUser(userId)
         suspensionGuard.requireActive(ownerId)
         val outcome = attendanceRewardService.claimDailyAttendance(ownerId)
         analytics.creditAttendanceSucceeded(ownerId, outcome.rewarded, outcome.amount)
@@ -141,8 +138,7 @@ class CreditController(
         @RequestParam(defaultValue = "50") limit: Int,
         @RequestParam(required = false) cursor: String?,
     ): CreditTransactionPageResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val ownerId = requireUser(userId)
         return creditTransactionHistoryService.history(ownerId, type, limit, cursor)
     }
 }

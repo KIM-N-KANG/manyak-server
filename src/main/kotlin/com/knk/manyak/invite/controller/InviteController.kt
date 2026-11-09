@@ -1,6 +1,7 @@
 package com.knk.manyak.invite.controller
 
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.invite.dto.InviteRedeemRequest
 import com.knk.manyak.invite.dto.InviteRedeemResponse
 import com.knk.manyak.invite.dto.InviteResponse
@@ -13,13 +14,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Invite", description = "초대 API")
 @SecurityRequirement(name = "bearerAuth") // 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
@@ -52,8 +51,7 @@ class InviteController(
     fun getMyInvite(
         @CurrentUserId userId: Long?,
     ): InviteResponse {
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val ownerId = requireUser(userId)
         return inviteService.getOrCreateInvite(ownerId)
     }
 
@@ -106,8 +104,7 @@ class InviteController(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: InviteRedeemRequest,
     ): InviteRedeemResponse {
-        val redeemerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val redeemerId = requireUser(userId)
         return inviteService.redeem(redeemerId, request.code)
     }
 }
