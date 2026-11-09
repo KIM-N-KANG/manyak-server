@@ -12,10 +12,6 @@ interface StoryCharacterRepository : JpaRepository<StoryCharacter, Long> {
     // 스토리의 인물을 저장 순서(=컴파일 응답 순서)로 조회한다.
     fun findByStoryIdOrderByIdAsc(storyId: Long): List<StoryCharacter>
 
-    // 채팅 요청에 실을 인물-이미지 매핑(KNK-943). 이미지 생성·업로드에 실패해 image_url이 NULL인 인물은
-    // AI가 URL 없는 태그를 만들 수 없어야 하므로 조회 단계에서 제외한다.
-    fun findByStoryIdAndImageUrlIsNotNullOrderByIdAsc(storyId: Long): List<StoryCharacter>
-
     /**
      * 인물 행을 비관적 쓰기 락으로 조회한다(KNK-1126). 이미지 상한(인물당 10장) 판정이 "개수를 읽고 → 넣는다"라
      * 잠금이 없으면 상한 직전의 동시 추가 둘이 모두 통과해 11장이 되고 `sort_order`도 겹친다.
@@ -26,15 +22,4 @@ interface StoryCharacterRepository : JpaRepository<StoryCharacter, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM StoryCharacter c WHERE c.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): StoryCharacter?
-
-    /**
-     * 위와 같은 락을 잡되 **이름을 스칼라로** 돌려준다(PR #273 Codex P2).
-     *
-     * 엔티티 조회는 이미 1차 캐시에 있는 인스턴스를 그대로 돌려줄 수 있어, 락을 기다리는 동안 다른
-     * 트랜잭션이 개명을 커밋해도 옛 이름이 보인다. 스칼라 조회는 캐시를 타지 않아 잠근 행의 현재 값이다.
-     * 행이 사라졌으면 null이므로 호출부가 삭제된 인물을 404로 가른다.
-     */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT c.name FROM StoryCharacter c WHERE c.id = :id")
-    fun findNameByIdForUpdate(@Param("id") id: Long): String?
 }

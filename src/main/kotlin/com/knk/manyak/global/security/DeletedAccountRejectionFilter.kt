@@ -1,5 +1,6 @@
 package com.knk.manyak.global.security
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.user.consent.UserConsentService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.auth.entity.UserStatus
@@ -14,7 +15,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.web.filter.OncePerRequestFilter
 import tools.jackson.databind.ObjectMapper
-import java.util.UUID
 
 /**
  * 탈퇴(DELETED) 계정의 잔여 access 토큰을 인증 필터 계층에서 전면 거부한다(스펙 §4-3-5, KNK-1019).
@@ -83,14 +83,5 @@ class DeletedAccountRejectionFilter(
         "POST" -> path == "/api/v1/users/me/consents"
         "DELETE" -> path == "/api/v1/users/me" || path == "/api/v1/users/me/push-tokens"
         else -> false
-    }
-
-    private fun parsePublicIdOrNull(subject: String?): UUID? {
-        if (subject == null) return null
-        return try {
-            UUID.fromString(subject)
-        } catch (_: IllegalArgumentException) {
-            null
-        }
     }
 }

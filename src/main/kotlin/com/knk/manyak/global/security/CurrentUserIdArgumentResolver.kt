@@ -1,5 +1,6 @@
 package com.knk.manyak.global.security
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import org.springframework.core.MethodParameter
@@ -12,7 +13,6 @@ import org.springframework.web.context.request.NativeWebRequest
 import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.method.support.ModelAndViewContainer
 import org.springframework.web.server.ResponseStatusException
-import java.util.UUID
 
 /**
  * [CurrentUserId] 파라미터를 현재 로그인 사용자의 내부 PK(Long)로 해석한다.
@@ -44,15 +44,5 @@ class CurrentUserIdArgumentResolver(
         val publicId = parsePublicIdOrNull(authentication.token.subject) ?: return null
         // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
         return userRepository.findByPublicId(publicId)?.id
-    }
-
-    private fun parsePublicIdOrNull(subject: String?): UUID? {
-        // sub가 없는 토큰(subject=null)은 익명으로 본다. UUID.fromString(null)이 NPE를 던지지 않도록 먼저 거른다.
-        if (subject == null) return null
-        return try {
-            UUID.fromString(subject)
-        } catch (_: IllegalArgumentException) {
-            null
-        }
     }
 }

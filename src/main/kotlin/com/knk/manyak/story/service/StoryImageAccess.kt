@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
@@ -186,13 +187,6 @@ class StoryImageAccess(
     companion object {
         private const val UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
         private val DRAFT_OBJECT_KEY = Regex("(?:thumbnails|characters)/uploaded/drafts/$UUID_SEGMENT/$UUID_SEGMENT\\.(?:jpg|png|webp)")
-
-        fun parsePublicIdOrNull(value: String): UUID? =
-            try {
-                UUID.fromString(value)
-            } catch (ignored: IllegalArgumentException) {
-                null
-            }
 
         /** 같은 인물 안에서 이름이 겹쳤다. 사전 조회와 유니크 위반이 같은 409로 모인다. */
         fun duplicateImageName(cause: Throwable? = null) = ResponseStatusException(

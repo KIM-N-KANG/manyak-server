@@ -40,8 +40,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
     // 소프트 삭제된 스토리(deleted_at IS NOT NULL)는 조회·삭제 대상에서 제외한다.
     fun findByIdAndDeletedAtIsNull(id: Long): Story?
 
-    fun findAllByIdInAndDeletedAtIsNull(ids: Collection<Long>): List<Story>
-
     // 인물 이미지 보상 삭제 판정(KNK-966): 커밋이 반영됐는데 응답만 유실된 모호한 실패에서 스토리 행이 남았는지 본다.
     // 삭제 여부를 가리지 않는다 — 행이 남아 있으면 image_url도 남아 있으므로 객체를 지우면 안 된다.
     fun existsByPublicId(publicId: UUID): Boolean
