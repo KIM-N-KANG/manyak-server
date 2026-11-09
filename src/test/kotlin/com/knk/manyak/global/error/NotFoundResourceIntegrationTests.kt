@@ -1,10 +1,8 @@
 package com.knk.manyak.global.error
 
+import com.knk.manyak.support.AlternateConfigIntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -17,17 +15,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  *
  * prod 프로파일 대신 test 프로파일에서 springdoc만 비활성화해 동일 상황(permitAll + 핸들러 없음)을 재현한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = [
-        "springdoc.api-docs.enabled=false",
-        "springdoc.swagger-ui.enabled=false",
-    ],
-)
-class NotFoundResourceIntegrationTests {
-
+class NotFoundResourceIntegrationTests : AlternateConfigIntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

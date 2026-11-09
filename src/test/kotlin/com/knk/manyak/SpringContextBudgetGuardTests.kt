@@ -52,7 +52,7 @@ class SpringContextBudgetGuardTests {
         // 클래스마다 컨텍스트가 늘어난다(Codex 리뷰 지적).
         val NESTED_TEST_CONFIGURATION = Regex("""^@(\w+\.)*TestConfiguration\b""")
 
-        // 현재 값(17)으로 고정한다. 더 줄였을 때만 이 숫자를 내린다.
-        const val MAX_NESTED_TEST_CONFIGURATIONS = 17
+        // 현재 값(0)으로 고정한다. KNK-2053에서 중첩 설정을 공용 베이스·교체형 페이크로 모두 옮겼다.
+        const val MAX_NESTED_TEST_CONFIGURATIONS = 0
     }
 }

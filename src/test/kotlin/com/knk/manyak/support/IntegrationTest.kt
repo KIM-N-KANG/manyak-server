@@ -35,8 +35,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.util.concurrent.Executor
@@ -70,6 +68,11 @@ import java.util.concurrent.Executor
         "manyak.official-user-public-id=${IntegrationTest.OFFICIAL_USER_PUBLIC_ID}",
         "manyak.internal.shared-secret=${IntegrationTest.INTERNAL_SHARED_SECRET}",
         "manyak.payment.groble.webhook-secret=${IntegrationTest.GROBLE_WEBHOOK_SECRET}",
+        // 환경변수(MANYAK_SLACK_FEEDBACK_WEBHOOK_URL·MANYAK_GOOGLE_FORM_FEEDBACK_ID)가 export돼 있어도 외부 발송을 막는다.
+        // 인라인 테스트 속성은 OS 환경변수보다 우선한다. 웹훅을 로컬 목 서버로 돌리는 테스트는 @DynamicPropertySource로
+        // 덮어쓴다(동적 속성이 인라인 속성보다 우선).
+        "manyak.slack.feedback-webhook-url=",
+        "manyak.google-form.feedback.form-id=",
     ],
 )
 @Import(
@@ -118,17 +121,5 @@ abstract class IntegrationTest {
         const val OFFICIAL_USER_PUBLIC_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         const val INTERNAL_SHARED_SECRET = "internal-push-test-secret"
         const val GROBLE_WEBHOOK_SECRET = "test-only-groble-secret"
-
-        /**
-         * 환경변수(MANYAK_SLACK_FEEDBACK_WEBHOOK_URL·MANYAK_GOOGLE_FORM_FEEDBACK_ID)가 export돼 있어도 빈 값을 강제해
-         * 외부 발송을 막는다. env는 yml보다 우선하므로 test yml만으로는 막히지 않는다. 하위 클래스 전체가 이 메서드
-         * 하나를 공유하므로 컨텍스트 키를 가르지 않는다.
-         */
-        @JvmStatic
-        @DynamicPropertySource
-        fun blockExternalSenders(registry: DynamicPropertyRegistry) {
-            registry.add("manyak.slack.feedback-webhook-url") { "" }
-            registry.add("manyak.google-form.feedback.form-id") { "" }
-        }
     }
 }

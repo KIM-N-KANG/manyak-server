@@ -14,6 +14,7 @@ import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryExploreSeedSource
+import com.knk.manyak.support.ConsentGateIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.MockedBoundaryIntegrationTest
@@ -22,9 +23,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.security.MessageDigest
 import java.time.Instant
@@ -149,10 +147,7 @@ class StoryExploreControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     }
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.auth.consent-gate.enabled=true"])
-class StoryExploreConsentIntegrationTests {
+class StoryExploreConsentIntegrationTests : ConsentGateIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider

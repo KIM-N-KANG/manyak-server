@@ -1,24 +1,16 @@
 package com.knk.manyak.story.client
 
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.RealWiringIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 
 /**
  * `manyak.ai.story.stub` 값에 따라 스토리 AI 클라이언트 빈이 상호배타로 배선되는지 검증한다.
  * 채팅 [com.knk.manyak.chat.client.ChatTurnAiClientWiringIntegrationTests] 미러링.
  */
-@ActiveProfiles("test")
-@SpringBootTest(
-    properties = [
-        "manyak.ai.story.stub=false",
-        "manyak.ai.base-url=http://localhost:8000",
-    ],
-)
-class StoryAiClientRestWiringIntegrationTests {
+class StoryAiClientRestWiringIntegrationTests : RealWiringIntegrationTest() {
 
     @Autowired
     private lateinit var storyAiClient: StoryAiClient

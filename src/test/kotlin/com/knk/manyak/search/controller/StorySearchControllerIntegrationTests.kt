@@ -16,6 +16,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryEditService
 import com.knk.manyak.story.service.StoryService
+import com.knk.manyak.support.AlternateConfigIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.MockedBoundaryIntegrationTest
@@ -32,11 +33,7 @@ import org.opensearch.client.opensearch.core.SearchRequest
 import org.opensearch.client.opensearch.core.SearchResponse
 import org.opensearch.client.opensearch.core.search.Hit
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -464,19 +461,13 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             .shards { it.total(1).successful(1).failed(0) }.hits { it.hits(hits) }.build()
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id="],
-)
-class StorySearchOriginalUnconfiguredIntegrationTests {
+class StorySearchOriginalUnconfiguredIntegrationTests : AlternateConfigIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
-    @MockitoBean private lateinit var openSearch: OpenSearchClient
-    @MockitoBean private lateinit var indexer: StorySearchIndexer
+    @Autowired private lateinit var openSearch: OpenSearchClient
+    @Autowired private lateinit var indexer: StorySearchIndexer
 
     @Test
     fun `공식 계정 설정이 비면 검색 카드의 isOriginal은 false다`() {
