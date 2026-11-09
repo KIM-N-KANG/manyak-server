@@ -98,7 +98,7 @@ class StoryController(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: ImagePresignRequest,
     ): ImagePresignResponse = storyImageService.presignDraft(
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다."),
+        requireUser(userId),
         request,
     )
 
