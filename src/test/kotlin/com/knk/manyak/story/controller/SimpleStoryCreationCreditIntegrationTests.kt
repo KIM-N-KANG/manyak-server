@@ -26,17 +26,14 @@ import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -50,10 +47,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * AI 클라이언트는 @Primary 페이크로 대체하며, compile 실패는 페이크 토글로 강제한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SimpleStoryCreationCreditIntegrationTests {
+class SimpleStoryCreationCreditIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedFakeAiClientConfigFakeStoryAiClient
+    }
+
 
     companion object {
         // compileStory 호출 횟수. 잔액 부족 시 compile이 호출되지 않음을 검증한다(선차감 후 402).
@@ -136,10 +134,7 @@ class SimpleStoryCreationCreditIntegrationTests {
         assertThat(storyRepository.findAll()).isEmpty()
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
@@ -564,3 +559,5 @@ class SimpleStoryCreationCreditIntegrationTests {
             .exchange()
     }
 }
+
+private val scriptedFakeAiClientConfigFakeStoryAiClient = SimpleStoryCreationCreditIntegrationTests.FakeAiClientConfig().fakeStoryAiClient()

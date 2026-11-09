@@ -23,18 +23,15 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -44,10 +41,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * 마지막 턴에 선택지 3개를 생성·저장하고, 멱등(이미 있으면 AI 미호출)·비마지막턴 409·턴0개 404·AI실패 502·
  * ai_call_logs choice_generation 적재를 확인한다. AI는 토글 가능한 @Primary 페이크로 대체한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatChoicesControllerIntegrationTests {
+class ChatChoicesControllerIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedFakeAiClientConfigFakeChatTurnAiClient
+    }
+
 
     companion object {
         val generateChoicesCalls = AtomicInteger(0)
@@ -58,10 +56,7 @@ class ChatChoicesControllerIntegrationTests {
         val stubChoices = listOf("주변을 살핀다.", "한 걸음 나선다.", "자리를 벗어난다.")
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
             override fun streamTurn(
             request: ChatTurnAiRequest,
@@ -298,3 +293,5 @@ class ChatChoicesControllerIntegrationTests {
         return story
     }
 }
+
+private val scriptedFakeAiClientConfigFakeChatTurnAiClient = ChatChoicesControllerIntegrationTests.FakeAiClientConfig().fakeChatTurnAiClient()

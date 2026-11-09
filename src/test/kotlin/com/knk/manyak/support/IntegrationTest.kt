@@ -9,6 +9,8 @@ import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.chat.config.ChatCompactSettings
+import com.knk.manyak.chat.service.ChatGenerationDeadlines
 import com.knk.manyak.chat.service.ChatGenerationEvents
 import com.knk.manyak.chat.service.ChatGenerationReceivers
 import com.knk.manyak.chat.service.ChatGenerationStore
@@ -16,6 +18,7 @@ import com.knk.manyak.chat.service.ChatRealtimeImageService
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.credit.support.H2CreditAdminLocksConfig
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.migration.controller.MigrationIndexEventTestConfig
@@ -101,6 +104,9 @@ import java.util.concurrent.Executor
         ChatGenerationStore::class,
         ChatRealtimeImageService::class,
         StringRedisTemplate::class,
+        ChatGenerationDeadlines::class,
+        ChatCompactSettings::class,
+        AiCallRecorder::class,
     ],
 )
 @MockitoSpyBean(name = "capturingAnalyticsEventPublisher", types = [AnalyticsEventPublisher::class])

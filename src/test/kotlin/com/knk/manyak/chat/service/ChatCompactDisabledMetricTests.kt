@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.service
 
+import com.knk.manyak.support.ChatCompactIntegrationTest
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
@@ -17,17 +18,11 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
-@ActiveProfiles("test")
-@Import(ChatCompactTestConfig::class)
-@SpringBootTest(properties = ["manyak.chat.compact.enabled=false"])
-class ChatCompactDisabledMetricTests {
+class ChatCompactDisabledMetricTests : ChatCompactIntegrationTest() {
     @Autowired lateinit var registry: MeterRegistry
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var chats: StoryChatRepository

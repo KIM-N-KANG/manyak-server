@@ -30,20 +30,15 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
 
@@ -54,17 +49,11 @@ import java.util.concurrent.atomic.AtomicReference
  * 가짜 AI 빈 때문에 별도 ApplicationContext가 만들어지므로, 기본 테스트 컨텍스트와
  * 같은 이름의 in-memory H2를 공유하지 않도록 전용 DB 이름으로 분리한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-history-capture;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-        // 턴 조립이 **몇 행을 읽는지** 재기 위해 Hibernate 통계를 켠다(부분 캡처 회귀 가드).
-        "spring.jpa.properties.hibernate.generate_statistics=true",
-    ],
-)
-class ChatStreamHistoryIntegrationTests {
+class ChatStreamHistoryIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
+    }
+
     @Autowired private lateinit var wallet: com.knk.manyak.credit.service.CreditWalletService
 
     @Autowired private lateinit var jwt: com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -93,18 +82,14 @@ class ChatStreamHistoryIntegrationTests {
         }
     }
 
-    @TestConfiguration
     class CapturingAiClientConfig {
-        @Bean
-        @Primary
         fun capturingChatTurnAiClient(): CapturingChatTurnAiClient = CapturingChatTurnAiClient()
     }
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
 
-    @Autowired
-    private lateinit var capturingAiClient: CapturingChatTurnAiClient
+    private val capturingAiClient = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
 
     @Autowired
     private lateinit var storyRepository: StoryRepository
@@ -153,6 +138,7 @@ class ChatStreamHistoryIntegrationTests {
 
     @BeforeEach
     fun setUp() {
+        com.knk.manyak.support.stopExecuting(moderationExecutor)
         databaseCleaner.cleanAll()
         com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "미스터리")
     }
@@ -504,7 +490,7 @@ class ChatStreamHistoryIntegrationTests {
     @Autowired private lateinit var submissionRows: com.knk.manyak.story.submission.StorySubmissionRepository
     @Autowired private lateinit var moderation: com.knk.manyak.story.submission.SubmissionTransactions
     @Autowired private lateinit var json: tools.jackson.databind.ObjectMapper
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
 
     @Test
@@ -560,3 +546,5 @@ class ChatStreamHistoryIntegrationTests {
         return body
     }
 }
+
+private val scriptedCapturingAiClientConfigCapturingChatTurnAiClient = ChatStreamHistoryIntegrationTests.CapturingAiClientConfig().capturingChatTurnAiClient()

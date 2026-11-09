@@ -6,9 +6,8 @@ import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.global.observability.AiTraceLink
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -16,14 +15,11 @@ import java.util.concurrent.TimeUnit
  * 채팅 AI 호출 공용 페이크 배선. 호출을 임의 지점에서 붙잡아(동시성 테스트) 순서를 결정적으로 만들고,
  * 보낸 요청을 캡처하며([lastRequest]), 스트리밍 중 인물 이미지 이벤트를 발행할 수 있다([nextCharacterImage]).
  *
- * 테스트 클래스마다 중첩 `@TestConfiguration`을 두지 않고 이 클래스를 `@Import`한다 — 중첩 설정은 클래스마다
- * Spring 컨텍스트를 하나씩 늘려 캐시 상한(32) 축출 사고로 이어졌다(KNK-686, `SpringContextBudgetGuardTests`).
+ * 빈으로 등록하지 않는다. [ScriptedAiIntegrationTest]를 상속한 테스트가 `@BeforeEach`에서 [reset]을 부르면 이 페이크가
+ * [ScriptedAi]에 꽂힌다 — 설정을 `@Import`하면 그 조합만큼 Spring 컨텍스트가 늘어난다(KNK-686·KNK-2053).
  * 동작은 [gatedInput]·[nextChoices] 토글로 테스트마다 바꾸고, 끝나면 [reset]으로 원복한다.
  */
-@TestConfiguration
 class GatedChatTurnAiClientConfig {
-    @Bean
-    @Primary
     fun realtimeImageStorage(): com.knk.manyak.image.service.UploadedImageStorage = object : com.knk.manyak.image.service.UploadedImageStorage {
         override fun isEnabled() = realtimeEnabled
         override fun serveUrlOf(objectKey: String) = "https://cdn.test/$objectKey"
@@ -36,8 +32,6 @@ class GatedChatTurnAiClientConfig {
     }
 
 
-    @Bean
-    @Primary
     fun gatedChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
         override fun streamTurn(
             request: ChatTurnAiRequest,
@@ -76,6 +70,14 @@ class GatedChatTurnAiClientConfig {
     }
 
     companion object {
+        /** 이 페이크(턴 AI·실시간 이미지 저장소)를 [ScriptedAi]에 꽂는다. 원복은 베이스의 `@AfterEach`가 한다. */
+        @JvmStatic
+        fun install() {
+            val fake = GatedChatTurnAiClientConfig()
+            ScriptedAi.chat = fake.gatedChatTurnAiClient()
+            ScriptedAi.imageStorage = fake.realtimeImageStorage()
+        }
+
         @Volatile var onImageStream: (ChatTurnAiRequest, (ChatCharacterImageEvent) -> Unit) -> Unit = { _, _ -> }
         @Volatile var onRealtimeHead: () -> Unit = {}
         @Volatile var turnFailure: RuntimeException? = null
@@ -114,8 +116,10 @@ class GatedChatTurnAiClientConfig {
         @JvmStatic
         var nextCharacterImage: ChatCharacterImageEvent? = null
 
+        /** 페이크 상태를 원복하고 [ScriptedAi]에 다시 꽂는다. 사용하는 테스트는 `@BeforeEach`에서 이것을 부른다. */
         @JvmStatic
         fun reset() {
+            install()
             gatedInput = null
             nextChoices = emptyList()
             lastRequest = null

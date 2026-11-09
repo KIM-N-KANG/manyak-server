@@ -28,18 +28,15 @@ import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.UUID
@@ -52,10 +49,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 같은 requestId 재요청은 COMPLETED면 저장된 결과를 AI 재호출 없이 돌려주고, PENDING이면 409, FAILED면 재실행한다.
  * - 소유 주체(게스트 디바이스)만 복구 조회할 수 있다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SimpleStoryCreationRecoveryIntegrationTests {
+class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedFakeAiClientConfigFakeStoryAiClient
+    }
+
 
     companion object {
         val createStorylinesCalls = AtomicInteger(0)
@@ -67,10 +65,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         var storylineException: RuntimeException? = null
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
                 createStorylinesCalls.incrementAndGet()
@@ -1177,3 +1172,5 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository
 }
+
+private val scriptedFakeAiClientConfigFakeStoryAiClient = SimpleStoryCreationRecoveryIntegrationTests.FakeAiClientConfig().fakeStoryAiClient()

@@ -30,27 +30,24 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.support.TransactionSynchronizationManager
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryControllerIntegrationTests {
+class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedTestConfigStoryAiClient
+    }
+
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -85,8 +82,7 @@ class StoryControllerIntegrationTests {
     @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
-    @Autowired
-    private lateinit var storyAiClient: CapturingStoryAiClient
+    private val storyAiClient = scriptedTestConfigStoryAiClient
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -1303,10 +1299,7 @@ class StoryControllerIntegrationTests {
             ),
         )
 
-    @TestConfiguration
     class TestConfig {
-        @Bean
-        @Primary
         fun storyAiClient(): CapturingStoryAiClient = CapturingStoryAiClient()
     }
 
@@ -1392,3 +1385,5 @@ class StoryControllerIntegrationTests {
         }
     }
 }
+
+private val scriptedTestConfigStoryAiClient = StoryControllerIntegrationTests.TestConfig().storyAiClient()

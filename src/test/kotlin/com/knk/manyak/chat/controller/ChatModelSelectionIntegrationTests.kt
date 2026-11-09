@@ -14,23 +14,17 @@ import com.knk.manyak.credit.service.*
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
-import org.springframework.test.context.ActiveProfiles
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
-@org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(GatedChatTurnAiClientConfig::class)
-class ChatModelSelectionIntegrationTests {
+class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired private lateinit var restTestClient: org.springframework.test.web.servlet.client.RestTestClient
     @Autowired private lateinit var jwtTokenProvider: com.knk.manyak.auth.jwt.JwtTokenProvider
     @Autowired private lateinit var cleaner: DatabaseCleaner
@@ -46,9 +40,9 @@ class ChatModelSelectionIntegrationTests {
     @Autowired private lateinit var service: ChatService
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var publisher: com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
     @Autowired private lateinit var meters: io.micrometer.core.instrument.MeterRegistry
     private val logs = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()

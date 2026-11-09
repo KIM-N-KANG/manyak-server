@@ -43,6 +43,8 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -50,14 +52,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -68,13 +65,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  *
  * AI 클라이언트는 @Primary 페이크로 대체해 요청을 캡처하고 결정적 사건·엔딩을 반환한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-// 기존 프리셋 URL의 호스트를 고정한다. 스텁 스토리지가 돌려주는 생성 URL(https://cdn.test/...)과 호스트를
-// 다르게 둬 어느 경로를 탔는지 어서션만 보고도 구분된다.
-@TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.preset.test"])
-class SimpleStoryCompilePersistenceIntegrationTests {
+class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest() {
 
     companion object {
         @Volatile
@@ -143,10 +134,7 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         var flipSessionToCreatedId: Long? = null
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeStoryAiClient(
             sessionRepository: StoryCreationSessionRepository,
             transactionManager: PlatformTransactionManager,
@@ -181,8 +169,6 @@ class SimpleStoryCompilePersistenceIntegrationTests {
         }
 
         /** 실제 S3 대신 업로드를 기록하는 스텁. 반환 URL은 운영과 같은 `base-url + 객체 키` 모양이다. */
-        @Bean
-        @Primary
         fun fakeGeneratedImageStorage(
             storyRepository: StoryRepository,
             transactionManager: PlatformTransactionManager,
@@ -226,12 +212,17 @@ class SimpleStoryCompilePersistenceIntegrationTests {
     @Autowired private lateinit var storyCharacterRepository: StoryCharacterRepository
     @Autowired private lateinit var imagePresetRepository: ImagePresetRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var transactionManager: PlatformTransactionManager
 
     // 레지스트리가 여럿이면(prometheus·otlp 동시 활성) CompositeMeterRegistry가 @Primary라 인터페이스로 받는다.
     @Autowired private lateinit var meterRegistry: MeterRegistry
 
     @BeforeEach
     fun setUp() {
+        FakeAiClientConfig().let {
+            ScriptedAi.story = it.fakeStoryAiClient(sessionRepository, transactionManager)
+            ScriptedAi.generatedImageStorage = it.fakeGeneratedImageStorage(storyRepository, transactionManager)
+        }
         capturedRequest = null
         protagonistName = null
         tokenTitle = null

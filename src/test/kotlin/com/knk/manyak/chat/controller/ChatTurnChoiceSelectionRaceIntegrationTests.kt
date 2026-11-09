@@ -14,16 +14,13 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -43,11 +40,7 @@ import java.util.concurrent.TimeUnit
  *
  * 페이크 AI([GatedChatTurnAiClientConfig])가 이어쓰기 입력일 때만 대기해 2·3번이 그 사이에 끼어들게 한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@Import(GatedChatTurnAiClientConfig::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatTurnChoiceSelectionRaceIntegrationTests {
+class ChatTurnChoiceSelectionRaceIntegrationTests : ScriptedAiIntegrationTest() {
 
     @Autowired
     private lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
