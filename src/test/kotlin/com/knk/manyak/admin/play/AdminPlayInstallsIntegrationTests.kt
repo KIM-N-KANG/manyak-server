@@ -3,27 +3,25 @@ package com.knk.manyak.admin.play
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.support.AdminMetricsIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminPlayInstallsIntegrationTests {
+class AdminPlayInstallsIntegrationTests : AdminMetricsIntegrationTest() {
+    // 예전에는 시계 빈 없이 시스템 시각을 썼다. 테스트 시작 시각으로 맞춘다.
+    override val clockAt: java.time.Instant get() = java.time.Instant.now()
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
-    @MockitoBean private lateinit var source: PlayReportsSource
+    @Autowired private lateinit var source: PlayReportsSource
     @Test fun `설치 지표는 관리자만 조회하고 원천 대역의 월별 누계와 null 보간 및 캐시를 반환한다`() {
         cleaner.cleanAll()
         val admin = users.save(User(nickname = "관리자")); val member = users.save(User(nickname = "회원"))

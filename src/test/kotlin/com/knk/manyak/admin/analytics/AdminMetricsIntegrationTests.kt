@@ -4,12 +4,11 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -17,11 +16,9 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 
-@AutoConfigureRestTestClient
 @org.springframework.context.annotation.Import(AdminMetricsTestClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids="])
-class AdminMetricsIntegrationTests {
+@org.springframework.test.context.TestPropertySource(properties = ["manyak.admin.dashboard.excluded-user-ids="])
+class AdminMetricsIntegrationTests : IntegrationTest() {
     companion object {
         private val server = MockWebServer().apply { start() }
         private val langfuse = MockWebServer().apply { start() }

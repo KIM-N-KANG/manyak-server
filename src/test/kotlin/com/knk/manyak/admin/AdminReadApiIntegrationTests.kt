@@ -7,13 +7,12 @@ import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.support.AdminMetricsIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
@@ -21,11 +20,8 @@ import tools.jackson.databind.JsonNode
 import java.time.Instant
 import java.util.UUID
 
-@org.springframework.context.annotation.Import(AdminReadClockConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids="])
-class AdminReadApiIntegrationTests {
+class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
+    override val clockAt: java.time.Instant = java.time.Instant.parse("2026-10-20T15:30:00Z")
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var socials: SocialAccountRepository
@@ -58,7 +54,7 @@ class AdminReadApiIntegrationTests {
     @Autowired private lateinit var versions: com.knk.manyak.chat.repository.StoryMessageVersionRepository
     @Autowired private lateinit var messageRepository: com.knk.manyak.chat.repository.StoryMessageRepository
     @Autowired private lateinit var dashboardRepository: com.knk.manyak.admin.repository.AdminDashboardRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
     private val now = Instant.parse("2026-10-20T15:30:00Z")
     private val midnight = Instant.parse("2026-10-20T15:00:00Z")
@@ -836,7 +832,7 @@ class AdminReadApiIntegrationTests {
     @Autowired private lateinit var creationTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var sessionTags: com.knk.manyak.story.repository.StoryCreationSessionTagRepository
     @Autowired private lateinit var aiLogs: com.knk.manyak.global.observability.aicall.AiCallLogRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var official: com.knk.manyak.story.service.OfficialStoryAccount
 
     private fun story(user: User? = null, title: String = "분포", genre: String = "판타지, 미스터리") =
@@ -1536,11 +1532,4 @@ class AdminReadApiIntegrationTests {
         assertThat(body["items"].size()).isEqualTo(1)
         assertThat(body["items"][0]["nickname"].asText()).isEqualTo("100%_!")
     }
-}
-
-@org.springframework.boot.test.context.TestConfiguration
-class AdminReadClockConfig {
-    @org.springframework.context.annotation.Bean
-    @org.springframework.context.annotation.Primary
-    fun adminReadClock(): java.time.Clock = java.time.Clock.fixed(Instant.parse("2026-10-20T15:30:00Z"), java.time.ZoneOffset.UTC)
 }

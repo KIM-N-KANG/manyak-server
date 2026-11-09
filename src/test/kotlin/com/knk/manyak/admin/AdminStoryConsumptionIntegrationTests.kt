@@ -7,27 +7,21 @@ import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.AdminMetricsIntegrationTest
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@Import(AdminReadClockConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = [
-    "manyak.admin.dashboard.excluded-user-ids=987654321,987654322",
-    "manyak.official-user-public-id=00000000-0000-4000-8000-000000000001",
-])
-class AdminStoryConsumptionIntegrationTests {
+class AdminStoryConsumptionIntegrationTests : AdminMetricsIntegrationTest() {
+    override val clockAt: java.time.Instant = java.time.Instant.parse("2026-10-20T15:30:00Z")
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -47,7 +41,7 @@ class AdminStoryConsumptionIntegrationTests {
     @BeforeEach fun setup() {
         cleaner.cleanAll()
         admin = user("소비 관리자")
-        official = excluded("공식", 987654321, UUID.fromString("00000000-0000-4000-8000-000000000001"))
+        official = excluded("공식", 987654321, UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID))
         team = excluded("팀", 987654322)
         jdbc.update("INSERT INTO admin_accounts(user_id,granted_at) VALUES (?,CURRENT_TIMESTAMP)", admin.id)
         token = jwt.issueAdminToken(admin.publicId)
