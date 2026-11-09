@@ -8,22 +8,19 @@ import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.user.dto.*
 import com.knk.manyak.user.service.UserPersonaService
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.jdbc.core.JdbcTemplate
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 import kotlin.test.*
 
-@ActiveProfiles("test")
-@SpringBootTest
-class PersonaChatIntegrationTests {
+class PersonaChatIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var personas: UserPersonaService
     @Autowired private lateinit var service: ChatService

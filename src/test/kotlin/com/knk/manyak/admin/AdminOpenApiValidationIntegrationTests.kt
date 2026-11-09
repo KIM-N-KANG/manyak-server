@@ -1,18 +1,15 @@
 package com.knk.manyak.admin
 
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminOpenApiValidationIntegrationTests {
+class AdminOpenApiValidationIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var mapper: ObjectMapper
     private lateinit var api: JsonNode

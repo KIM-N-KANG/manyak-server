@@ -6,18 +6,14 @@ import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -25,18 +21,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 이벤트는 StructuredLogger를 통해 나가므로 그 로거에 ListAppender를 붙여 event_name·필드를 확인한다.
  * (비동기 채팅 턴 이벤트 user_message_saved/ai_response_saved는 스트리밍 경로 테스트에서 검증한다.)
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class BusinessEventLoggingIntegrationTests {
-
-    companion object {
-        @JvmStatic
-        @DynamicPropertySource
-        fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
-            registry.add("manyak.slack.feedback-webhook-url") { "" }
-        }
-    }
+class BusinessEventLoggingIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

@@ -16,14 +16,13 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -39,10 +38,7 @@ import java.util.UUID
  * 시드한 charge는 실제 now에 만들어지므로, 시계를 미래로 둔 서비스로 대사해 "정지 상태(마지막 charge가
  * cutoff 이전)"를 재현한다. 시간가드(최신 charge 스킵)는 실제 now 시계로 검증한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class CreditReconciliationIntegrationTests {
-
+class CreditReconciliationIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var chargeReconciler: ChatChargeReconciler
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository

@@ -5,17 +5,14 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import tools.jackson.databind.ObjectMapper
 import kotlin.test.assertEquals
 
-@ActiveProfiles("test")
-@SpringBootTest
-class ProtagonistDisplayIntegrationTests {
+class ProtagonistDisplayIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var creation: GeneralStoryCreationService
     @Autowired private lateinit var service: StoryService
     @Autowired private lateinit var edit: StoryEditService

@@ -8,23 +8,19 @@ import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.ai.story.stub=true"])
-class AdminCreationAiIntegrationTests {
+class AdminCreationAiIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
@@ -32,7 +28,7 @@ class AdminCreationAiIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var tags: StoryCreationTagRepository
     @Autowired private lateinit var logs: AiCallLogRepository
-    @MockitoSpyBean private lateinit var stories: StoryRepository
+    @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var mapper: ObjectMapper
     private lateinit var token: String
     private lateinit var device: String

@@ -1,5 +1,6 @@
 package com.knk.manyak.story.client
 
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -28,13 +29,7 @@ class StoryAiClientRestWiringIntegrationTests {
     }
 }
 
-@ActiveProfiles("test")
-@SpringBootTest(
-    properties = [
-        "manyak.ai.story.stub=true",
-    ],
-)
-class StoryAiClientStubWiringIntegrationTests {
+class StoryAiClientStubWiringIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var storyAiClient: StoryAiClient

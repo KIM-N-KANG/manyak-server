@@ -9,14 +9,13 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.event.ApplicationEvents
 import org.springframework.test.context.event.RecordApplicationEvents
@@ -28,10 +27,7 @@ import java.util.UUID
 
 /** MODERATION 5-5-6·10, STORY 5-5-5, ADMIN 5-5-6. */
 @RecordApplicationEvents
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"])
-class StoryTakedownIntegrationTests {
+class StoryTakedownIntegrationTests : IntegrationTest() {
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
@@ -171,7 +167,7 @@ class StoryTakedownIntegrationTests {
         take(s.publicId).expectStatus().isEqualTo(409)
         val deleted = stories.save(Story(userId = owner.id, title = "삭제", deletedAt = Instant.now()))
         val guest = stories.save(Story(title = "게스트"))
-        val official = users.save(User(publicId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nickname = "공식"))
+        val official = users.save(User(publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID), nickname = "공식"))
         val original = stories.save(Story(userId = official.id, title = "공식"))
         listOf(deleted, guest, original).forEach { take(it.publicId).expectStatus().isEqualTo(409) }
         take(UUID.randomUUID()).expectStatus().isNotFound

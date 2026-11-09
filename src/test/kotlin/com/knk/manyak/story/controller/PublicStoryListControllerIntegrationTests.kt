@@ -12,16 +12,13 @@ import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.clearInvocations
 import org.mockito.Mockito.verify
 import org.springframework.http.MediaType
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.UUID
@@ -40,10 +37,7 @@ import org.junit.jupiter.api.Assertions.assertNull
  * - filter=original은 공식 계정 소유만 싣고, 공식 계정 미설정 환경은 빈 페이지다(KNK-1398).
  * - 만료·위조 access 헤더가 자동 첨부돼도 401이 아니다(로그아웃 상태 화면이 부르는 경로).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class PublicStoryListControllerIntegrationTests {
+class PublicStoryListControllerIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -535,20 +529,14 @@ class PublicStoryListControllerIntegrationTests {
  * 공식 계정이 설정된 환경의 `filter=original` 검증(KNK-1398).
  * `filter=original`은 공식 계정 소유의 공개 스토리만 반환해야 한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=11111111-2222-3333-4444-555555555555"],
-)
-class PublicStoryListOriginalFilterIntegrationTests {
+class PublicStoryListOriginalFilterIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var jwt: JwtTokenProvider
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
-    @MockitoSpyBean private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var userRepository: UserRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
 
     @BeforeEach
@@ -712,6 +700,6 @@ class PublicStoryListOriginalFilterIntegrationTests {
     }
 
     companion object {
-        private val OFFICIAL_PUBLIC_ID: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555")
+        private val OFFICIAL_PUBLIC_ID: UUID = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID)
     }
 }

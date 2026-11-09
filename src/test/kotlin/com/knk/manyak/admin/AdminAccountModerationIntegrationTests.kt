@@ -6,12 +6,11 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.submission.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -21,12 +20,9 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@org.springframework.context.annotation.Import(com.knk.manyak.auth.controller.FakeSocialLoginConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminAccountModerationIntegrationTests {
+class AdminAccountModerationIntegrationTests : IntegrationTest() {
     @Autowired lateinit var client: RestTestClient
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     lateinit var users: UserRepository
     @Autowired lateinit var jwt: JwtTokenProvider
     @Autowired lateinit var jdbc: JdbcTemplate
@@ -109,7 +105,7 @@ class AdminAccountModerationIntegrationTests {
     @Autowired lateinit var authTokens: com.knk.manyak.auth.token.AuthTokenService
     @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
     @Autowired lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
 
     @Test fun `새 관리자 네 경로는 앱 토큰과 무토큰 및 역할 없는 관리자 토큰을 거절한다`() {

@@ -3,6 +3,7 @@ package com.knk.manyak.global.observability.analytics
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.user.service.UserWithdrawalService
 import com.knk.manyak.invite.service.InviteService
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -13,11 +14,6 @@ import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.entity.CreditReason
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.social.SocialIdTokenVerifier
-import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.service.GuestDataMigrationService
@@ -30,15 +26,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -50,10 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * 피드백·로그인은 요청 스레드에서 동기 발행되므로 exchange() 직후 캡처를 단언할 수 있다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ServerAnalyticsWiringIntegrationTests {
+class ServerAnalyticsWiringIntegrationTests : IntegrationTest() {
 
     class CapturingPublisher : AnalyticsEventPublisher {
         val events = CopyOnWriteArrayList<AnalyticsEvent>()
@@ -62,30 +50,6 @@ class ServerAnalyticsWiringIntegrationTests {
         }
 
         fun ofType(eventType: String) = events.filter { it.eventType == eventType }
-    }
-
-    @TestConfiguration
-    class CapturingConfig {
-        @Bean
-        @Primary
-        fun capturingPublisher(): CapturingPublisher = CapturingPublisher()
-
-        @Bean
-        @Primary
-        fun fakeSocialIdTokenVerifiers(): Map<SocialProvider, SocialIdTokenVerifier> {
-            val verifier = SocialIdTokenVerifier { idToken ->
-                if (idToken == "invalid") {
-                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 ID 토큰입니다.")
-                }
-                // 실제 검증기는 항상 iat를 채운다. 계정 연동 재인증이 신선도를 fail-closed로 보므로 여기서도 채운다.
-                SocialUserInfo(providerUserId = idToken, issuedAt = Instant.now())
-            }
-            return mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier)
-        }
-
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient

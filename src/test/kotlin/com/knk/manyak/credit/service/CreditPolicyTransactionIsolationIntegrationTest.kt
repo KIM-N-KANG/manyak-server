@@ -6,13 +6,12 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 
@@ -29,9 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate
  * 그 읽기는 DB를 만지지 않았다는 뜻이다. 누군가 읽기 경로에 조회를 되살리면 SQL 실패가 바깥 트랜잭션을
  * 오염시켜 커밋이 UnexpectedRollbackException으로 깨진다.
  */
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-class CreditPolicyTransactionIsolationIntegrationTest {
+class CreditPolicyTransactionIsolationIntegrationTest : IntegrationTest() {
 
     @Autowired private lateinit var creditPolicyService: CreditPolicyService
 

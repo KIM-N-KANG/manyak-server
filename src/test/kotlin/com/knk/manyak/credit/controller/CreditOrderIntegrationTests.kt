@@ -5,6 +5,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -277,13 +278,7 @@ class CreditOrderPaymentTestInitializer : ApplicationContextInitializer<Configur
 }
 
 /** 실제 yml의 링크를 오버라이드하지 않고 6종 주문 생성을 검증한다. */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.payment.groble.webhook-secret=test-only-webhook-secret"],
-)
-class CreditOrderConfiguredLinksIntegrationTests {
+class CreditOrderConfiguredLinksIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider

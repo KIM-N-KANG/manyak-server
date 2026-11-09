@@ -5,12 +5,11 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -23,17 +22,15 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class NoticeIntegrationTests {
+class NoticeIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var campaigns: PushCampaignRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var audits: com.knk.manyak.admin.repository.AdminAuditLogRepository
     private val mapper = ObjectMapper()
     private lateinit var admin: User

@@ -15,6 +15,7 @@ import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -22,26 +23,19 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatForkIntegrationTests {
+class ChatForkIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var chats: StoryChatRepository
-    @MockitoSpyBean private lateinit var messages: StoryMessageRepository
+    @Autowired private lateinit var messages: StoryMessageRepository
     @Autowired private lateinit var choices: StoryChoiceRepository
     @Autowired private lateinit var versions: StoryMessageVersionRepository
     @Autowired private lateinit var summaries: StoryChatSummaryRepository

@@ -6,16 +6,13 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -30,11 +27,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - 링크 코드는 성공 시에만 소비되고, 실패는 TTL 안에서 재시도할 수 있다.
  * - 연동 상태는 `GET /auth/me`의 `linkedProviders`로만 노출된다(전용 조회 엔드포인트 없음).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(FakeSocialLoginConfig::class)
-class AccountLinkIntegrationTests {
+class AccountLinkIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -42,7 +35,7 @@ class AccountLinkIntegrationTests {
     @Autowired
     private lateinit var userRepository: UserRepository
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var socialAccountRepository: SocialAccountRepository
 
     @Autowired

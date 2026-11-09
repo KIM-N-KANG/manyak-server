@@ -10,6 +10,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.seedProvidedGenres
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -17,24 +18,16 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"])
-class HomeSectionsIntegrationTests {
+class HomeSectionsIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var stories: StoryRepository
@@ -45,7 +38,7 @@ class HomeSectionsIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var mapper: ObjectMapper
-    @MockitoSpyBean private lateinit var audits: AdminAuditLogRepository
+    @Autowired private lateinit var audits: AdminAuditLogRepository
     private lateinit var actor: User
     private lateinit var official: User
     private lateinit var token: String
@@ -85,7 +78,7 @@ class HomeSectionsIntegrationTests {
     @BeforeEach fun setup() {
         reset(audits); cleaner.cleanAll()
         actor = users.save(User(nickname = "관리자"))
-        official = users.save(User(nickname = "공식", publicId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")))
+        official = users.save(User(nickname = "공식", publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID)))
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", actor.id)
         token = jwt.issueAdminToken(actor.publicId)
         seedProvidedGenres(tags, "판타지", "로맨스", "미스터리")

@@ -7,17 +7,15 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.doAnswer
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -28,10 +26,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-@org.springframework.context.annotation.Import(com.knk.manyak.credit.support.H2CreditAdminLocksConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminCreditConcurrencyIntegrationTests {
+class AdminCreditConcurrencyIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -39,7 +34,7 @@ class AdminCreditConcurrencyIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var manager: PlatformTransactionManager
     @jakarta.persistence.PersistenceContext private lateinit var entityManager: jakarta.persistence.EntityManager
-    @MockitoSpyBean private lateinit var policies: CreditPolicyRepository
+    @Autowired private lateinit var policies: CreditPolicyRepository
     private lateinit var admin: User
     private lateinit var member: User
     private lateinit var token: String

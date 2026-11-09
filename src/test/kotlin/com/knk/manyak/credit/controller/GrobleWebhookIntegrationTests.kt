@@ -7,6 +7,7 @@ import com.knk.manyak.credit.entity.*
 import com.knk.manyak.credit.repository.*
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -30,12 +31,7 @@ import javax.crypto.spec.SecretKeySpec
 
 private const val SECRET = "test-only-groble-secret"
 
-@org.springframework.context.annotation.Import(PaymentAnalyticsTestConfig::class)
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.payment.groble.webhook-secret=$SECRET"])
-class GrobleWebhookIntegrationTests {
+class GrobleWebhookIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var orders: CreditOrderRepository
