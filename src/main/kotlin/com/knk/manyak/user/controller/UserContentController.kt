@@ -3,6 +3,7 @@ package com.knk.manyak.user.controller
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.service.StoryService
 import com.knk.manyak.user.service.UserWithdrawalService
@@ -22,7 +23,6 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 /**
  * 회원 서재(내 콘텐츠 목록, KNK-447). 다른 기기에서 로그인해도 같은 서재를 보도록 서버가 정본을 제공한다(US-9-4).
@@ -116,10 +116,6 @@ class UserContentController(
         @RequestParam(defaultValue = "100") limit: Int,
     ): List<ChatSummaryResponse> =
         chatService.getMyChats(requireUser(userId), limit.coerceIn(1, MAX_LIMIT))
-
-    // /users/me/** 는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
-    private fun requireUser(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     private companion object {
         const val MAX_LIMIT = 100

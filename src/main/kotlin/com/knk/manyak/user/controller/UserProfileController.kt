@@ -2,6 +2,7 @@ package com.knk.manyak.user.controller
 
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.user.dto.ProfilePresetResponse
 import com.knk.manyak.user.dto.UpdateProfileRequest
 import com.knk.manyak.user.service.UserProfileService
@@ -14,13 +15,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 /**
  * 프로필 수정과 프리셋 목록(KNK-1147, 정책 KNK-1146).
@@ -98,8 +97,4 @@ class UserProfileController(
     @GetMapping("/profile-presets")
     fun listPresets(@CurrentUserId userId: Long?): List<ProfilePresetResponse> =
         userProfileService.listPresets(requireUser(userId))
-
-    // /users/me/** 는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
-    private fun requireUser(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 }

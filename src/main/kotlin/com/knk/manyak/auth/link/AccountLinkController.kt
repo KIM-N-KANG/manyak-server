@@ -2,6 +2,7 @@ package com.knk.manyak.auth.link
 
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
@@ -66,7 +67,7 @@ class AccountLinkController(
     fun reauthenticate(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: SocialReauthRequest,
-    ): LinkCodeResponse = accountLinkService.reauthenticate(requireUserId(userId), request)
+    ): LinkCodeResponse = accountLinkService.reauthenticate(requireUser(userId), request)
 
     @Operation(
         summary = "계정 연동 추가",
@@ -117,16 +118,12 @@ class AccountLinkController(
         @Parameter(description = "재인증으로 받은 일회용 링크 코드", required = true)
         @RequestHeader(value = HEADER_LINK_CODE, required = false) linkCode: String?,
         @Valid @RequestBody request: AccountLinkRequest,
-    ) = accountLinkService.link(requireUserId(userId), parseProvider(provider), linkCode, request)
+    ) = accountLinkService.link(requireUser(userId), parseProvider(provider), linkCode, request)
 
     /** 경로의 provider는 소문자 표기가 정본이다. enum에 없는 값은 400으로 끊는다(지원 여부 판정은 서비스가 한다). */
     private fun parseProvider(raw: String): SocialProvider =
         SocialProvider.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
             ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 로그인 방식입니다.")
-
-    /** 연동은 로그인된 세션 전용이다. 시큐리티가 이미 인증을 요구하므로 여기 도달하면서 null이면 사용자 행이 사라진 경우다. */
-    private fun requireUserId(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     companion object {
         /** 링크 코드 전송 헤더. URL이 아니라 헤더로만 받는다. */
