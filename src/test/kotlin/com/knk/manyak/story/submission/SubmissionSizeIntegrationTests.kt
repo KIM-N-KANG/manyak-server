@@ -9,23 +9,17 @@ import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SubmissionSizeIntegrationTests {
+class SubmissionSizeIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
@@ -36,8 +30,8 @@ class SubmissionSizeIntegrationTests {
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var mapper: ObjectMapper
     @Autowired lateinit var cleaner: DatabaseCleaner
-    @MockitoBean lateinit var storage: UploadedImageStorage
-    @MockitoBean lateinit var ai: StoryModerationClient
+    @Autowired lateinit var storage: UploadedImageStorage
+    @Autowired lateinit var ai: StoryModerationClient
     @BeforeEach fun clean() {
         cleaner.cleanAll()
         com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")

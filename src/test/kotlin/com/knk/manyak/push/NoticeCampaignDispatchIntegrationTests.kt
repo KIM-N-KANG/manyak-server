@@ -12,27 +12,24 @@ import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class NoticeCampaignDispatchIntegrationTests {
+class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var notices: NoticeRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
-    @MockitoSpyBean private lateinit var users: UserRepository
-    @MockitoBean private lateinit var sender: FcmPushSender
-    @MockitoBean private lateinit var store: com.knk.manyak.push.outbox.PushOutboxStore
-    @MockitoBean private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var store: com.knk.manyak.push.outbox.PushOutboxStore
+    @Autowired private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
     private val messages = mutableListOf<com.knk.manyak.push.outbox.PushMessage>()
     @Autowired private lateinit var tokens: DevicePushTokenRepository
     @Autowired private lateinit var notifications: ScheduledNotificationWriter

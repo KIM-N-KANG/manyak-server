@@ -14,6 +14,7 @@ import com.knk.manyak.push.service.AttendanceReminderService
 import com.knk.manyak.push.service.PushMessageTemplateService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,10 +30,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.redis.core.StringRedisTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -47,11 +45,9 @@ import java.time.ZoneId
  * 재가입 회원은 옛 신원 키로 기록되므로 그 키를 그대로 봐야 중복 발송을 막는다(KNK-1053).
  * 같은 날 두 번 도는 것은 Redis `SET NX`가 막는다(배포 교체로 태스크가 cron에 걸치는 창).
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class AttendanceReminderIntegrationTests {
+class AttendanceReminderIntegrationTests : MockedBoundaryIntegrationTest() {
 
-    @MockitoBean private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
+    @Autowired private lateinit var fcmPushSender: com.knk.manyak.push.service.FcmPushSender
 
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter

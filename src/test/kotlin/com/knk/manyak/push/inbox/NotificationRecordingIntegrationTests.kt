@@ -1,5 +1,8 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
+import com.knk.manyak.support.PushRemoteIntegrationTest
+import org.springframework.test.context.TestPropertySource
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
@@ -28,7 +31,6 @@ import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.service.SimpleStoryCreationService
 import org.mockito.Mockito.*
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.AfterEach
@@ -36,33 +38,29 @@ import org.slf4j.MDC
 import com.knk.manyak.global.observability.MdcKeys
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 
-@ActiveProfiles("test")
-abstract class NotificationRecordingIntegrationTests {
-    @MockitoBean(name = "pushExecutor") private lateinit var pushExecutor: java.util.concurrent.Executor
-    @MockitoBean private lateinit var sender: FcmPushSender
-    @MockitoBean private lateinit var outbox: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoSpyBean private lateinit var inbox: UserNotificationStore
+abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegrationTest() {
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("pushExecutor") private lateinit var pushExecutor: java.util.concurrent.Executor
+    @Autowired private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var outbox: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var inbox: UserNotificationStore
     @Autowired private lateinit var creation: SimpleStoryCreationService
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository
-    @MockitoSpyBean private lateinit var requests: StoryCreationRequestRepository
+    @Autowired private lateinit var requests: StoryCreationRequestRepository
     @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var campaignService: com.knk.manyak.push.service.AdminCampaignService
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
-    @MockitoSpyBean private lateinit var recorder: DomainNotificationRecorder
+    @Autowired private lateinit var recorder: DomainNotificationRecorder
     @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var attendance: AttendanceReminderService
@@ -362,8 +360,7 @@ abstract class NotificationRecordingIntegrationTests {
     private fun rows(): List<Map<String, Any?>> = jdbc.queryForList("SELECT * FROM user_notifications ORDER BY id")
 }
 
-@SpringBootTest(properties = ["manyak.push.mode=local", "manyak.ai.story.stub=true"])
 class LocalNotificationRecordingIntegrationTests : NotificationRecordingIntegrationTests()
 
-@SpringBootTest(properties = ["manyak.push.mode=remote", "manyak.ai.story.stub=true"])
+@TestPropertySource(properties = [PushRemoteIntegrationTest.REMOTE])
 class RemoteNotificationRecordingIntegrationTests : NotificationRecordingIntegrationTests()

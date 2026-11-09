@@ -8,13 +8,11 @@ import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Clock
 import java.time.ZoneOffset
@@ -22,12 +20,10 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-@ActiveProfiles("test")
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class ScheduledPushOutboxIntegrationTests {
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoBean private lateinit var sender: FcmPushSender
+class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
+    @Autowired private lateinit var store: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var sender: FcmPushSender
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository

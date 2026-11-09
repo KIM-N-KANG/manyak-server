@@ -16,6 +16,7 @@ import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -24,31 +25,23 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
  * 일반 제작 단발 등록(`POST /stories/general`, 스펙 §4-3-8·§4-8) 통합 테스트.
  * 검증 후 그대로 저장(AI 비호출)·인증 선택 귀속·기본 PRIVATE·엔딩 이름기반 2파라미터 왕복을 확인한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
-class GeneralStoryCreationIntegrationTests {
+class GeneralStoryCreationIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var legacyCreation: com.knk.manyak.story.service.GeneralStoryCreationService
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
 
 
-    @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
+    @Autowired private lateinit var uploadedImageStorage: UploadedImageStorage
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -63,6 +56,7 @@ class GeneralStoryCreationIntegrationTests {
 
     @BeforeEach
     fun setUp() {
+        com.knk.manyak.support.stopExecuting(moderationExecutor)
         databaseCleaner.cleanAll()
         com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")
         `when`(uploadedImageStorage.isEnabled()).thenReturn(true)

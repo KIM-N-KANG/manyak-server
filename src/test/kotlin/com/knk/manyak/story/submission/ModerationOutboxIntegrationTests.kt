@@ -8,22 +8,18 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.mockito.Mockito
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Instant
 import java.util.concurrent.Executor
 
 @org.springframework.test.context.event.RecordApplicationEvents
-@ActiveProfiles("test")
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class ModerationOutboxIntegrationTests {
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+class ModerationOutboxIntegrationTests : PushRemoteIntegrationTest() {
+    @Autowired
     private lateinit var inbox: com.knk.manyak.push.inbox.UserNotificationStore
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
@@ -33,10 +29,10 @@ class ModerationOutboxIntegrationTests {
     @Autowired private lateinit var submissions: StorySubmissionRepository
     @Autowired private lateinit var service: StorySubmissionService
     @Autowired private lateinit var worker: SubmissionTransactions
-    @MockitoBean(name = "storyModerationExecutor") private lateinit var executor: Executor
-    @MockitoBean private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @BeforeEach fun reset() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor") private lateinit var executor: Executor
+    @Autowired private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
+    @Autowired private lateinit var store: PushOutboxStore
+    @BeforeEach fun reset() { com.knk.manyak.support.stopExecuting(executor); cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
 
     @Autowired private lateinit var events: org.springframework.test.context.event.ApplicationEvents
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
@@ -177,7 +173,7 @@ class ModerationOutboxIntegrationTests {
 
 
     @Autowired private lateinit var scheduler: SubmissionPoller
-    @MockitoBean private lateinit var ai: StoryModerationClient
+    @Autowired private lateinit var ai: StoryModerationClient
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])

@@ -12,21 +12,19 @@ import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.*
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 
-@SpringBootTest(properties = ["manyak.push.mode=local"])
-class NoticePushLocalIntegrationTests {
-    @MockitoBean private lateinit var sender: FcmPushSender
+class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
+    @Autowired private lateinit var sender: FcmPushSender
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository

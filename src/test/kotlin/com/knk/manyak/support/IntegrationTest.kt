@@ -19,8 +19,10 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.analytics.AnalyticsEventPublisher
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.migration.controller.MigrationIndexEventTestConfig
+import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.push.inbox.UserNotificationStore
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.submission.SlackSubmissionHeldNotifier
@@ -86,6 +88,8 @@ import java.util.concurrent.Executor
         CreditPolicyRepository::class,
         PushCampaignRepository::class,
         UserNotificationStore::class,
+        DomainNotificationRecorder::class,
+        StoryCreationRequestRepository::class,
         ConsentTokenStore::class,
         AdminEligibilityService::class,
         OfficialStoryAccount::class,

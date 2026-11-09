@@ -7,13 +7,12 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.submission.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
@@ -21,10 +20,7 @@ import tools.jackson.databind.JsonNode
 import java.time.Instant
 import java.util.UUID
 
-@org.springframework.context.annotation.Import(com.knk.manyak.auth.controller.FakeSocialLoginConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminSubmissionReadIntegrationTests {
+class AdminSubmissionReadIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
@@ -33,7 +29,7 @@ class AdminSubmissionReadIntegrationTests {
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var forms: SubmissionFormAssembler
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     lateinit var imageStorage: com.knk.manyak.image.service.UploadedImageStorage
     @Autowired lateinit var mapper: ObjectMapper
     private val now = Instant.parse("2026-10-23T15:00:00Z")

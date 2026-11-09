@@ -10,15 +10,13 @@ import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -26,15 +24,14 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-@SpringBootTest
-class CampaignLifecycleIntegrationTests {
+class CampaignLifecycleIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
-    @MockitoSpyBean private lateinit var users: UserRepository
-    @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var sender: FcmPushSender
     private val now = Instant.parse("2026-10-21T03:00:00Z")
     @BeforeEach fun clean() { cleaner.cleanAll(); reset(users, sender) }
     private fun service(at: Instant = now) = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)

@@ -9,35 +9,31 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.submission.StorySubmissionRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.databind.JsonNode
 import java.util.UUID
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"])
-class AdminOriginalIntegrationTests {
+class AdminOriginalIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var stories: StoryRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoBean private lateinit var storage: com.knk.manyak.image.service.UploadedImageStorage
-    @org.springframework.test.context.bean.override.mockito.MockitoBean private lateinit var indexer: com.knk.manyak.search.service.StorySearchIndexer
+    @Autowired private lateinit var storage: com.knk.manyak.image.service.UploadedImageStorage
+    @Autowired private lateinit var indexer: com.knk.manyak.search.service.StorySearchIndexer
     @Autowired private lateinit var tags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var chats: com.knk.manyak.chat.repository.StoryChatRepository
     @Autowired private lateinit var snapshots: StoryPublicSnapshotRepository
     @Autowired private lateinit var submissions: StorySubmissionRepository
-    @MockitoSpyBean private lateinit var audits: AdminAuditLogRepository
+    @Autowired private lateinit var audits: AdminAuditLogRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
@@ -53,7 +49,7 @@ class AdminOriginalIntegrationTests {
         `when`(storage.serveUrlOf(anyString())).thenAnswer { "https://assets/" + it.arguments[0] }
         `when`(storage.presignPut(anyString(), anyString(), anyLong(), any(java.time.Duration::class.java) ?: java.time.Duration.ZERO)).thenReturn("https://upload/example")
         `when`(storage.head(anyString())).thenReturn(com.knk.manyak.image.service.UploadedObject("image/png", 100))
-        official = users.save(User(publicId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nickname = "공식"))
+        official = users.save(User(publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID), nickname = "공식"))
         tags.save(StoryCreationTag(category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE, name = "판타지", tagSource = StoryCreationTagSource.PREDEFINED))
         actor = users.save(User(nickname = "관리자"))
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", actor.id)

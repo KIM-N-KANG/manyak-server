@@ -6,27 +6,23 @@ import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 import java.util.concurrent.Executor
 
-@ActiveProfiles("test")
-@SpringBootTest
-class SubmissionPollingIntegrationTests {
+class SubmissionPollingIntegrationTests : IntegrationTest() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
     @Autowired lateinit var rows: StorySubmissionRepository
     @Autowired lateinit var service: StorySubmissionService
     @Autowired lateinit var cleaner: DatabaseCleaner
-    @MockitoBean(name = "storyModerationExecutor") lateinit var executor: Executor
-    @BeforeEach fun clean() = cleaner.cleanAll()
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor") lateinit var executor: Executor
+    @BeforeEach fun clean() { com.knk.manyak.support.stopExecuting(executor); cleaner.cleanAll() }
     @Test fun `제출은 실행기에 직접 전달하지 않고 미선점으로 남긴다`() {
         val user = users.save(User(nickname = "작가"))
         repeat(6) {

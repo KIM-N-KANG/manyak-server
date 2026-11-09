@@ -14,6 +14,7 @@ import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.entity.StoryTakedownReason
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -26,17 +27,13 @@ import org.springframework.test.context.event.ApplicationEvents
 import org.mockito.Mockito.*
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
 @RecordApplicationEvents
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class StoryTakedownRemoteIntegrationTests {
+class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired lateinit var events: ApplicationEvents
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var users: UserRepository
@@ -48,10 +45,10 @@ class StoryTakedownRemoteIntegrationTests {
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
     @Autowired lateinit var transactions: PlatformTransactionManager
-    @MockitoBean lateinit var outbox: PushOutboxStore
-    @MockitoBean lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
-    @MockitoSpyBean lateinit var inbox: UserNotificationStore
-    @MockitoSpyBean lateinit var audits: AdminAuditLogRepository
+    @Autowired lateinit var outbox: PushOutboxStore
+    @Autowired lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
+    @Autowired lateinit var inbox: UserNotificationStore
+    @Autowired lateinit var audits: AdminAuditLogRepository
     private lateinit var admin: User
     private lateinit var story: Story
     private val reason = StoryTakedownRequest(StoryTakedownReason.HATE_SPEECH)

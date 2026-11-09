@@ -16,6 +16,7 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,10 +31,6 @@ import org.mockito.Mockito.reset
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -51,13 +48,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * 대상은 `ACTIVE` ∩ 광고 동의 ∩ 등록 토큰 보유이고, 야간(21~08시 KST)에 예약된 캠페인은 거부·연기가 아니라
  * **야간 동의자에게만** 나간다. 선점은 Redis가 아니라 캠페인 행의 조건부 UPDATE가 한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class PromotionPushIntegrationTests {
+class PromotionPushIntegrationTests : MockedBoundaryIntegrationTest() {
 
-    @MockitoBean private lateinit var fcmPushSender: FcmPushSender
+    @Autowired private lateinit var fcmPushSender: FcmPushSender
 
-    @MockitoSpyBean private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var userRepository: UserRepository
 
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter

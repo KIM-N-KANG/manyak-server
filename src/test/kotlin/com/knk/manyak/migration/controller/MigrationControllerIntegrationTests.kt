@@ -19,14 +19,12 @@ import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
@@ -38,12 +36,7 @@ import java.util.UUID
  * - 이관은 계정당 1회(≥1건 MIGRATED 시 잠금): 이후 호출은 평가 없이 migrationClosed=true로 닫힌다(스펙 §4-3-5).
  * - 형식 오류·상한 초과 → 400.
  */
-@org.springframework.context.annotation.Import(MigrationIndexEventTestConfig::class)
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class MigrationControllerIntegrationTests {
-
+class MigrationControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository
@@ -57,7 +50,7 @@ class MigrationControllerIntegrationTests {
 
     @Autowired private lateinit var documents: com.knk.manyak.search.service.StorySearchDocumentReader
     @Autowired private lateinit var indexRequests: IndexRequests
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var indexer: com.knk.manyak.search.service.StorySearchIndexer
 
     class IndexRequests {
