@@ -5,6 +5,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
@@ -25,9 +27,9 @@ import java.time.*
 @ExtendWith(OutputCaptureExtension::class)
 class AdminAiCostIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
-            r.add("manyak.admin.langfuse.host") { server.url("/").toString() }
+            r.add("manyak.admin.langfuse.host") { server.loopbackUrl("/") }
             r.add("manyak.admin.langfuse.public-key") { "cost-public-key" }
             r.add("manyak.admin.langfuse.secret-key") { "cost-secret-key" }
             r.add("manyak.admin.langfuse.environment") { "prod" }

@@ -5,6 +5,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -21,11 +23,11 @@ import java.time.ZoneId
 
 class AdminAnalyticsIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(registry: DynamicPropertyRegistry) {
             registry.add("manyak.analytics.amplitude.api-key") { "mock-api" }
             registry.add("manyak.analytics.amplitude.secret-key") { "mock-secret" }
-            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
     }

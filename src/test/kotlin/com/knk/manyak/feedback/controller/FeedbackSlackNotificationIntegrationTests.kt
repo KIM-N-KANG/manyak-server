@@ -3,6 +3,8 @@ package com.knk.manyak.feedback.controller
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -31,7 +33,7 @@ class FeedbackSlackNotificationIntegrationTests : IntegrationTest() {
         @JvmStatic
         @BeforeAll
         fun startServer() {
-            slackServer.start()
+            slackServer.startOnLoopback()
         }
 
         @JvmStatic
@@ -43,7 +45,7 @@ class FeedbackSlackNotificationIntegrationTests : IntegrationTest() {
         @JvmStatic
         @DynamicPropertySource
         fun registerWebhookUrl(registry: DynamicPropertyRegistry) {
-            registry.add("manyak.slack.feedback-webhook-url") { slackServer.url("/hook").toString() }
+            registry.add("manyak.slack.feedback-webhook-url") { slackServer.loopbackUrl("/hook") }
             // env(MANYAK_GOOGLE_FORM_FEEDBACK_ID) 오염까지 막아 실 구글 폼으로 발송하지 않도록 강제한다.
             registry.add("manyak.google-form.feedback.form-id") { "" }
         }

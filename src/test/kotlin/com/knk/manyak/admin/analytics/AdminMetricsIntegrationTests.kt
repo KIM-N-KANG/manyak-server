@@ -5,6 +5,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
@@ -20,15 +22,15 @@ import java.time.*
 @org.springframework.test.context.TestPropertySource(properties = ["manyak.admin.dashboard.excluded-user-ids="])
 class AdminMetricsIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
-        private val langfuse = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
+        private val langfuse = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
-            r.add("manyak.admin.langfuse.host") { langfuse.url("/").toString() }
+            r.add("manyak.admin.langfuse.host") { langfuse.loopbackUrl("/") }
             r.add("manyak.admin.langfuse.public-key") { "mock" }
             r.add("manyak.admin.langfuse.secret-key") { "mock" }
             r.add("manyak.admin.langfuse.environment") { "prod" }
             r.add("manyak.analytics.amplitude.api-key") { "mock" }; r.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown(); langfuse.shutdown() }
     }

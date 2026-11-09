@@ -464,6 +464,9 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         assertThat(seojun.hair).isEqualTo("검은 단발")
         assertThat(seojun.outfit).isEqualTo("교복")
         assertThat(seojun.visualIdentity).isEqualTo("왼쪽 눈 밑 점")
+        // 루트 base URL(https://cdn.test)을 상속해 프리셋 URL과 생성 URL의 호스트가 같아, 호스트만으로는 두 경로를 구분하지 못한다
+        // (예전에는 프리셋을 cdn.preset.test로 따로 뒀다, KNK-2053). 이 테스트는 프리셋을 시드하지 않아 프리셋 폴백이 나올 수 없고,
+        // 표지·단일 인물 assert는 업로드 키까지 비교하므로 판별력은 유지된다.
         // 업로드된 URL이 인물에 붙는다.
         assertThat(saved.map { it.imageUrl }).allSatisfy { url -> assertThat(url).startsWith("https://cdn.test/") }
 
@@ -515,6 +518,9 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         val saved = storyCharacterRepository.findByStoryIdOrderByIdAsc(story.id)
         // 이미지 유무와 무관하게 인물 전원이 저장된다.
         assertThat(saved.map { it.name }).containsExactly("서준", "하나", "외형없음")
+        // 루트 base URL(https://cdn.test)을 상속해 프리셋 URL과 생성 URL의 호스트가 같아, 호스트만으로는 두 경로를 구분하지 못한다
+        // (예전에는 프리셋을 cdn.preset.test로 따로 뒀다, KNK-2053). 이 테스트는 프리셋을 시드하지 않아 프리셋 폴백이 나올 수 없고,
+        // 표지·단일 인물 assert는 업로드 키까지 비교하므로 판별력은 유지된다.
         assertThat(saved.single { it.name == "서준" }.imageUrl).startsWith("https://cdn.test/")
         assertThat(saved.single { it.name == "하나" }.imageUrl).isNull()
         assertThat(saved.single { it.name == "외형없음" }.imageUrl).isNull()

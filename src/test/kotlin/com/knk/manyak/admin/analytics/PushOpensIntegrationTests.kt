@@ -8,6 +8,8 @@ import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -25,11 +27,11 @@ import java.time.Instant
 @Import(CampaignTestClock::class)
 class PushOpensIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(registry: DynamicPropertyRegistry) {
             registry.add("manyak.analytics.amplitude.api-key") { "mock" }
             registry.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
             registry.add("manyak.admin.push-opens.measured-from") { "2026-10-21" }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }

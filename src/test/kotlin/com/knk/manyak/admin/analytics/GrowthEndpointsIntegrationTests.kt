@@ -5,6 +5,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
@@ -22,11 +24,11 @@ import java.time.format.DateTimeFormatter.BASIC_ISO_DATE
 class GrowthEndpointsIntegrationTests : IntegrationTest() {
     companion object {
         private val mapper = ObjectMapper()
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
             r.add("manyak.analytics.amplitude.api-key") { "mock" }
             r.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
     }
