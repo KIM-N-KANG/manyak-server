@@ -1,5 +1,6 @@
 package com.knk.manyak.user.draft
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.*
@@ -106,7 +107,7 @@ class StoryDraftService(
     @Transactional
     fun delete(userId: Long, id: String) {
         member(userId, lock = true)
-        val parsed = StoryImageAccess.parsePublicIdOrNull(id) ?: return
+        val parsed = parsePublicIdOrNull(id) ?: return
         drafts.deleteOwned(parsed, userId)
     }
 
@@ -122,7 +123,7 @@ class StoryDraftService(
         "version" to d.version, "createdAt" to d.createdAt, "updatedAt" to d.updatedAt,
     )
     private fun saved(d: StoryDraft) = StoryDraftSaved(d.id, d.version, d.createdAt, d.updatedAt)
-    private fun uuid(id: String) = StoryImageAccess.parsePublicIdOrNull(id) ?: missing()
+    private fun uuid(id: String) = parsePublicIdOrNull(id) ?: missing()
     private fun missing(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "초안을 찾을 수 없습니다.")
     private fun bad(message: String): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
     private fun kind(key: String) = if (key.startsWith("thumbnails/uploaded/")) UploadedImageKind.COVER else UploadedImageKind.CHARACTER

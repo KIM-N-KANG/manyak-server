@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.search.event.StoryIndexRequestedEvent
 import com.knk.manyak.global.security.SuspensionGuard
@@ -178,14 +179,14 @@ class StoryEditService(
         val existingByPublicId = existing.associateBy { it.publicId }
 
         // 같은 인물을 두 번 지목하면 뒤엣것만 남고 앞엣것이 조용히 유실된다(시작 설정과 같은 불변식).
-        val requestedPublicIds = inputs.mapNotNull { it.id?.let(StoryImageAccess::parsePublicIdOrNull) }
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parsePublicIdOrNull) }
         if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "인물 ID는 요청 내에서 중복될 수 없습니다.")
         }
 
         val resolved = inputs.map { input ->
             val match = input.id?.let { raw ->
-                existingByPublicId[StoryImageAccess.parsePublicIdOrNull(raw)]
+                existingByPublicId[parsePublicIdOrNull(raw)]
                     ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리에 속하지 않는 인물 ID입니다.")
             }
             input to match
@@ -263,13 +264,13 @@ class StoryEditService(
         }
 
         val existingByPublicId = existing.associateBy { it.publicId }
-        val requestedPublicIds = inputs.mapNotNull { it.id?.let(StoryImageAccess::parsePublicIdOrNull) }
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parsePublicIdOrNull) }
         if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이미지 ID는 요청 내에서 중복될 수 없습니다.")
         }
         val resolved = inputs.map { item ->
             val match = item.id?.let { raw ->
-                existingByPublicId[StoryImageAccess.parsePublicIdOrNull(raw)]
+                existingByPublicId[parsePublicIdOrNull(raw)]
                     ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 인물에 속하지 않는 이미지 ID입니다.")
             }
             item to match
@@ -367,7 +368,7 @@ class StoryEditService(
 
         // 요청 내 시작 설정 id 중복은 전체 교체를 모호하게 만든다: 같은 행을 두 번 덮어 뒤엣것만 남고 앞엣것이 조용히 유실된다.
         // 엔딩·주요 사건 이름 유니크와 같은 불변식으로, 중복 id는 저장하지 않고 400으로 거부한다(silent wipe 방지).
-        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parseStartSettingPublicIdOrNull) }
+        val requestedPublicIds = inputs.mapNotNull { it.id?.let(::parsePublicIdOrNull) }
         if (requestedPublicIds.size != requestedPublicIds.toSet().size) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "시작 설정 ID는 요청 내에서 중복될 수 없습니다.")
         }
@@ -375,7 +376,7 @@ class StoryEditService(
         // 각 입력을 기존 시작 설정(id 매칭) 또는 신규(null)로 해소한다. 매칭 안 되는 id는 400(없거나 이 스토리 소속 아님).
         val resolved = inputs.map { input ->
             val match = input.id?.let { raw ->
-                val publicId = parseStartSettingPublicIdOrNull(raw)
+                val publicId = parsePublicIdOrNull(raw)
                 existingByPublicId[publicId]
                     ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "이 스토리에 속하지 않는 시작 설정 ID입니다.")
             }
@@ -435,14 +436,6 @@ class StoryEditService(
         /** `story_character_images.image_name` 컬럼 길이(V76). DTO의 @Size와 같은 값이다. */
         const val MAX_IMAGE_NAME_LENGTH = 120
     }
-
-    /** 시작 설정 공개 식별자(UUID 문자열)를 파싱한다. 형식 오류는 null로 반환해 호출부에서 400 처리한다. */
-    private fun parseStartSettingPublicIdOrNull(raw: String): UUID? =
-        try {
-            UUID.fromString(raw)
-        } catch (ignored: IllegalArgumentException) {
-            null
-        }
 
     private fun buildEditForm(story: Story): StoryEditFormResponse {
         val setting = storySettingRepository.findByStoryId(story.id)
