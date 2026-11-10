@@ -1,6 +1,6 @@
 package com.knk.manyak.story.admin
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.story.dto.ImagePresignRequest
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid

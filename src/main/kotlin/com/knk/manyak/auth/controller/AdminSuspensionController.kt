@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.controller
 
-import com.knk.manyak.admin.dto.AdminOperationReason
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.dto.AdminOperationReason
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.auth.service.AdminSuspensionService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid

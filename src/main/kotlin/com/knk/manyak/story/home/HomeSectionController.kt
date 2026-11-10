@@ -1,6 +1,6 @@
 package com.knk.manyak.story.home
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*

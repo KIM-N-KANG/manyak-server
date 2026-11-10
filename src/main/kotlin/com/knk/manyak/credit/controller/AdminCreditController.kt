@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.controller
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.service.AdminCreditAdjustmentService
 import com.knk.manyak.credit.service.AdminCreditPolicyService

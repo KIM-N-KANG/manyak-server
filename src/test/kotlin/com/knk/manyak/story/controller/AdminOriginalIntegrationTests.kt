@@ -1,6 +1,6 @@
 package com.knk.manyak.story.controller
 
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -132,8 +132,8 @@ class AdminOriginalIntegrationTests : MockedBoundaryIntegrationTest() {
     }
     @Test fun `감사 저장 실패는 등록과 수정을 롤백한다`() {
         val story = stories.save(Story(userId = official.id, title = "유지"))
-        val dummy = mock(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-        doThrow(IllegalStateException("audit unavailable")).`when`(audits).save(any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: dummy)
+        val dummy = mock(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+        doThrow(IllegalStateException("audit unavailable")).`when`(audits).save(any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: dummy)
         post(mapOf("title" to "롤백", "reason" to "사유")).expectStatus().is5xxServerError
         patch(story.publicId.toString(), mapOf("title" to "롤백", "reason" to "사유")).expectStatus().is5xxServerError
         assertThat(stories.count()).isEqualTo(1)

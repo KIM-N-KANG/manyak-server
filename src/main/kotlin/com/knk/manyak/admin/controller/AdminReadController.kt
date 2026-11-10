@@ -1,7 +1,7 @@
 package com.knk.manyak.admin.controller
 
 import com.knk.manyak.admin.dto.*
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.admin.service.AdminReadService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid

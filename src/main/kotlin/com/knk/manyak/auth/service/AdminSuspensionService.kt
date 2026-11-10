@@ -1,8 +1,8 @@
 package com.knk.manyak.auth.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.repository.AdminAccountRepository
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.role.AdminAccountRepository
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorCodes

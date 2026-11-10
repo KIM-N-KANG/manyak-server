@@ -1,9 +1,9 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.support.SharedPostgres
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
-import com.knk.manyak.admin.repository.AdminChangeActorRepository
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminChangeActorRepository
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.dto.*

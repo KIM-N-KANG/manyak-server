@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.service
 
-import com.knk.manyak.admin.repository.AdminAccountRepository
+import com.knk.manyak.adminkit.role.AdminAccountRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import org.springframework.stereotype.Service

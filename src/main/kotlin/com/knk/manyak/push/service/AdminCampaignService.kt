@@ -1,7 +1,7 @@
 package com.knk.manyak.push.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.entity.PushCampaign

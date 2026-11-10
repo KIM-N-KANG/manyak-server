@@ -1,7 +1,7 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository

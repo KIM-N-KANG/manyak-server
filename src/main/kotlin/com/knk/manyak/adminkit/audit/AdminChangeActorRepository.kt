@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.repository
+package com.knk.manyak.adminkit.audit
 
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.UncategorizedSQLException

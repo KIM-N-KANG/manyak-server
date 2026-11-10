@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.entity
+package com.knk.manyak.adminkit.role
 
 import jakarta.persistence.*
 import java.time.Instant

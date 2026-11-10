@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.dto
+package com.knk.manyak.adminkit.dto
 
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size

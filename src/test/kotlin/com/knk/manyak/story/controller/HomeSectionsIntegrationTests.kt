@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
-import com.knk.manyak.admin.entity.AdminAuditLog
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditLog
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
@@ -304,8 +304,8 @@ class HomeSectionsIntegrationTests : IntegrationTest() {
         val a = stories.save(Story(title = "첫째")); val b = stories.save(Story(title = "둘째"))
         val section = manual(listOf(a)); val id = section["id"].asText()
         doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure")).`when`(audits).save(any(AdminAuditLog::class.java)
-            ?: AdminAuditLog(adminUserId = actor.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                action = com.knk.manyak.admin.entity.AdminAuditAction.ORIGINAL_CREATED, targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.STORY, targetId = id, requestId = "matcher"))
+            ?: AdminAuditLog(adminUserId = actor.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                action = com.knk.manyak.adminkit.audit.AdminAuditAction.ORIGINAL_CREATED, targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.STORY, targetId = id, requestId = "matcher"))
         request(HttpMethod.PATCH, "$path/$id", mapOf("name" to "실패", "storyIds" to listOf(b.publicId.toString()), "reason" to "실패")).expectStatus().is5xxServerError
         request(HttpMethod.DELETE, "$path/$id", mapOf("reason" to "실패")).expectStatus().is5xxServerError
         request(HttpMethod.POST, path, mapOf("name" to "실패", "source" to "FILTER", "sort" to "latest", "reason" to "실패")).expectStatus().is5xxServerError

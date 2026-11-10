@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.admin.dto.AdminOperationReason
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.dto.AdminOperationReason
+import com.knk.manyak.adminkit.security.AdminRequester
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid

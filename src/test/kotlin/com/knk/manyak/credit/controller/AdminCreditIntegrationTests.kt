@@ -60,18 +60,18 @@ class AdminCreditIntegrationTests : IntegrationTest() {
         .header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON).body(mapOf("reason" to "이벤트 종료")).exchange()
 
     @Autowired
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Test fun `감사 저장 실패는 조정 원장 로트 잔액과 정책 변경을 모두 롤백한다`() {
         result(body(amount = 100))
         put("attendance_reward", policy(300)).expectStatus().isOk
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(
-            adminUserId = admin.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.CREDIT_GRANTED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER,
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(
+            adminUserId = admin.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.CREDIT_GRANTED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER,
             targetId = member.publicId.toString(), requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         post(body(key = "failed-grant")).expectStatus().is5xxServerError
         post(body("REVOKE", 100, "failed-revoke")).expectStatus().is5xxServerError
         put("attendance_reward", policy(500)).expectStatus().is5xxServerError

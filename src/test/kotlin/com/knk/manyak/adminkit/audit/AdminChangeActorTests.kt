@@ -1,9 +1,5 @@
-package com.knk.manyak.admin
+package com.knk.manyak.adminkit.audit
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
-import com.knk.manyak.admin.repository.AdminChangeActorRepository
-import com.knk.manyak.admin.service.AdminAuditService
 import jakarta.persistence.EntityManager
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

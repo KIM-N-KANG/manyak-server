@@ -191,7 +191,7 @@ class AdminReadPostgresTests {
         assertThat(reads.payment(orderId)!!.priceKrw).isEqualTo(4800)
         val usage = reads.paymentUsage(userId, reads.firstPaidAt(memberId))
         assertThat(usage.second.creditsSpent).isEqualTo(20)
-        assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
+        assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.adminkit.audit.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
     }
     @Test fun `실제 PostgreSQL에서 전체 이프 거래의 방향과 KST 날짜 및 회원 요약을 조회한다`() {
         val page = reads.creditTransactions(AdminCreditTransactionsRequest().apply {
