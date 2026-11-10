@@ -83,6 +83,28 @@ class UserWithdrawalIntegrationTests : IntegrationTest() {
         assertTrue(pushTokens.existsById(token.id))
     }
 
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+
+    @Test fun `탈퇴는 제출본을 지운 뒤에 알림 내역을 지운다`() {
+        // NOTIFICATION 4-1-19 "탈퇴와의 순서"가 적어 둔 삭제 순서(제출본 다음 알림 내역)를 고정한다. 검수 완료 알림 기록과
+        // 겹칠 때 회원 행 잠금(MODERATION 5-2-1)에 이은 2차 방어다. 리스너 @Order가 뒤집히면 이 테스트가 실패한다.
+        val user = saveMember("순서회원")
+        submissions.save(com.knk.manyak.story.submission.StorySubmission(userId = user.id,
+            kind = com.knk.manyak.story.submission.SubmissionKind.CREATE, payload = "{}"))
+        val submissionsLeftAtInboxDeletion = mutableListOf<Long>()
+        org.mockito.Mockito.doAnswer { call ->
+            // 탈퇴 트랜잭션의 커넥션으로 읽으므로 커밋 전 삭제가 보인다.
+            submissionsLeftAtInboxDeletion += jdbc.queryForObject("SELECT count(*) FROM story_submissions WHERE user_id = ?", Long::class.java, user.id)!!
+            call.callRealMethod()
+        }.`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(notifications))
+            .deleteForUser(user.id)
+
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().isNoContent
+
+        assertEquals(listOf(0L), submissionsLeftAtInboxDeletion)
+    }
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
