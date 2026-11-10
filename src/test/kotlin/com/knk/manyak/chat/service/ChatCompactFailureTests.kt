@@ -20,8 +20,7 @@ import com.knk.manyak.global.observability.aicall.AiCallLog
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.global.observability.aicall.AiCallStatus
-import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import java.util.Optional
 import org.assertj.core.api.Assertions.assertThat
 import org.mockito.Mockito.`when`
@@ -42,8 +41,7 @@ class ChatCompactFailureTests {
         val chats = mock(StoryChatRepository::class.java)
         val summaries = mock(StoryChatSummaryRepository::class.java)
         val messages = mock(StoryMessageRepository::class.java)
-        val stories = mock(StoryRepository::class.java)
-        val starts = mock(StoryStartSettingRepository::class.java)
+        val stories = mock(StoryPlayReader::class.java)
         val calls = mock(AiCallLogRepository::class.java)
         val logger = ChatCompactIntegrationTests.Log()
         val tm = object : PlatformTransactionManager {
@@ -59,7 +57,7 @@ class ChatCompactFailureTests {
         init {
             `when`(chats.findById(1)).thenReturn(Optional.of(chat))
             `when`(chats.findByIdForUpdate(1)).thenReturn(chat)
-            `when`(stories.findById(2)).thenReturn(Optional.of(story))
+            `when`(stories.findPublicId(2)).thenReturn(story.publicId)
             `when`(messages.findByChatIdOrderByMessageOrderAsc(1)).thenReturn((1..10).flatMap { n -> listOf(
                 StoryMessage(chatId = 1, role = MessageRole.USER, content = "u$n", messageOrder = n * 2),
                 StoryMessage(chatId = 1, role = MessageRole.ASSISTANT, content = "a$n", messageOrder = n * 2 + 1),
@@ -71,7 +69,7 @@ class ChatCompactFailureTests {
             }.`when`(calls).save(any(AiCallLog::class.java))
         }
         fun service(enabled: Boolean = true, executor: Executor = Executor { it.run() }, interval: Int = 10) = ChatCompactService(
-            ChatCompactSettings(enabled, interval, 300), executor, chats, summaries, messages, stories, starts,
+            ChatCompactSettings(enabled, interval, 300), executor, chats, summaries, messages, stories,
             ChatCompactAiClient { _, _ -> callCount++; response() },
             AiCallRecorder(calls, registry, "test", logger), logger, registry, tm,
         )

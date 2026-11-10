@@ -18,8 +18,6 @@ import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.snapshot.EndingSnapshot
 import com.knk.manyak.story.snapshot.MainEventSnapshot
-import com.knk.manyak.story.repository.StoryEndingRepository
-import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.service.EndingReachRecorder
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -32,7 +30,7 @@ import java.time.Instant
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import java.util.UUID
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.transaction.support.TransactionSynchronization
@@ -49,15 +47,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 class ChatTurnPersister(
     private val events: ApplicationEventPublisher,
     private val structuredLogger: StructuredLogger,
-    private val storyRepository: StoryRepository,
+    private val storyPlayReader: StoryPlayReader,
     private val storyChatRepository: StoryChatRepository,
     private val summaries: StoryChatSummaryRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
     private val storyMessageVersionRepository: StoryMessageVersionRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
-    private val storyMainEventRepository: StoryMainEventRepository,
-    private val storyEndingRepository: StoryEndingRepository,
     private val endingReachRecorder: EndingReachRecorder,
     private val creditTransactionRepository: CreditTransactionRepository,
 ) {
@@ -256,8 +252,7 @@ class ChatTurnPersister(
             return null
         }
         val liveId = chat.startSettingId
-            ?.let { storyEndingRepository.findFirstByStartSettingIdAndNameAndEnabledTrue(it, candidate.name) }
-            ?.id
+            ?.let { storyPlayReader.findLiveEndingId(it, candidate.name) }
         return ReachedEnding(id = liveId, name = candidate.name)
     }
 
@@ -326,7 +321,7 @@ class ChatTurnPersister(
      * 수정 API의 `mainEvents[]` 전체 교체가 이름을 유지한 채 행만 새로 만들기 때문에 id보다 이름이 잘 살아남는다.
      */
     private fun liveMainEventId(chat: StoryChat, name: String): Long? =
-        storyMainEventRepository.findFirstByStoryIdAndName(chat.storyId, name)?.id
+        storyPlayReader.findLiveMainEventId(chat.storyId, name)
 
     /** 엔딩 도달 반영: 채팅 가드(reached_ending_id)·상태(ENDED)·회원 도달 집계. 게스트는 집계하지 않는다. */
     private fun applyEndingReach(chat: StoryChat, reachedEnding: ReachedEnding?) {
@@ -531,7 +526,7 @@ class ChatTurnPersister(
         val previousThrough = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)?.throughTurn ?: 0
         if (summaries.invalidateFromTurn(chat.id, targetTurn, Instant.now()) > 0) {
             // 로그는 커밋 성공 뒤에만 남긴다. 롤백된 저장은 무효화하지 않았다.
-            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId
+            val storyPublicId = storyPlayReader.findPublicId(chat.storyId)
             TransactionSynchronizationManager.registerSynchronization(
                 object : TransactionSynchronization {
                     override fun afterCommit() {
