@@ -45,7 +45,7 @@ class LorebookEndingRepositoryTests {
     @Autowired
     private lateinit var storySettingRepository: StorySettingRepository
 
-    // 테스트용 H2(jdbc:h2:mem:manyak-test)는 컨텍스트 간 공유된다. @SpringBootTest가 커밋한 로어북 카탈로그 행이
+    // 테스트용 H2는 같은 컨텍스트를 쓰는 테스트 클래스끼리 공유된다(KNK-2070). 다른 클래스가 커밋한 로어북 카탈로그 행이
     // 남아 전역 카탈로그 조회를 오염시키지 않도록, 트랜잭션 안에서 자식→부모 순으로 비운다(테스트 종료 시 롤백).
     // Hibernate DDL에는 ON DELETE CASCADE가 없어, 기존 자식 테이블(추천 입력 → 시작 설정 → 스토리 설정)도
     // 먼저 비워야 stories 삭제가 FK 위반으로 실패하지 않는다.
