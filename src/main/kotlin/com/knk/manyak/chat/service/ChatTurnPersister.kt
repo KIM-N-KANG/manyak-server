@@ -549,8 +549,7 @@ class ChatTurnPersister(
     }
 
     private fun verifyStartState(chat: StoryChat, expected: GenerationStartState) {
-        val lastId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
-            .lastOrNull { it.role == MessageRole.ASSISTANT }?.id
+        val lastId = storyMessageRepository.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)?.id
         if (lastId != expected.lastTurnId || chat.revision != expected.revision) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "생성 시작 후 마지막 턴이 변경되었습니다.")
         }
