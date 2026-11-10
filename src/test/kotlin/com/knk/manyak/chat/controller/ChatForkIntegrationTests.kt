@@ -227,9 +227,14 @@ class ChatForkIntegrationTests : IntegrationTest() {
         val f = fixture()
         // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
         jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, f.chat.id)
-        val before = chats.count()
-        request(f.chat.publicId.toString(), """{"turnId":${f.turns[0].id}}""").expectStatus().isNotFound
-        assertEquals(before, chats.count())
+        try {
+            val before = chats.count()
+            request(f.chat.publicId.toString(), """{"turnId":${f.turns[0].id}}""").expectStatus().isNotFound
+            assertEquals(before, chats.count())
+        } finally {
+            // 없는 스토리를 가리키는 고아 행을 남기지 않는다.
+            jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", f.chat.storyId, f.chat.id)
+        }
     }
     @Test fun `회원 정지 소유권 대상과 본문 검증은 계약의 상태 코드를 반환한다`() {
         val f = fixture()

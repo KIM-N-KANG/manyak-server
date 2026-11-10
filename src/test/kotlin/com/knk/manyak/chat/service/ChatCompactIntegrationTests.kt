@@ -448,10 +448,17 @@ class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
         val chat = fixture(10)
         // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
         jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, chat.id)
-        service.compact(event(chat))
-        assertThat(ai.requests).isEmpty()
-        assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
-        assertThat(currentSummary(chat)).isNull()
+        try {
+            service.compact(event(chat))
+            assertThat(ai.requests).isEmpty()
+            assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
+            // 실패 로그의 error는 예외 클래스 단순명이다. 예외 타입이 바뀌면 로그 값이 바뀐다.
+            assertThat(log.entries.last { it.first == "chat_compact_failed" }.second["error"]).isEqualTo("NoSuchElementException")
+            assertThat(currentSummary(chat)).isNull()
+        } finally {
+            // 없는 스토리를 가리키는 고아 행을 남기지 않는다.
+            jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", chat.storyId, chat.id)
+        }
     }
     @Test fun `요약 저장과 설정 변경은 서로의 값을 유지한다`() {
         val chat = fixture()
