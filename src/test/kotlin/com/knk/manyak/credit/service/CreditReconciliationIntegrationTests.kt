@@ -6,6 +6,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.StoryCreationSession
@@ -41,6 +42,7 @@ import java.util.UUID
 class CreditReconciliationIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var chargeReconciler: ChatChargeReconciler
+    @Autowired private lateinit var storyCreationProgress: StoryCreationProgress
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
@@ -73,7 +75,7 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
 
     // 미래 시계: 시드한 charge(실제 now)가 cutoff(미래 now − 15m) 이전이 되게 해 "정지 상태"로 대사한다.
     private fun serviceAsOf(now: Instant) = CreditReconciliationService(
-        transactionRepository, creditWalletService, storyCreationSessionRepository,
+        transactionRepository, creditWalletService, storyCreationProgress,
         structuredLogger, threshold, Clock.fixed(now, ZoneOffset.UTC), chargeReconciler,
     )
 
