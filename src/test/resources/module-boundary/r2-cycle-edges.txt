@@ -32,7 +32,6 @@ story -> search
 story -> user
 user -> admin
 user -> auth
-user -> chat
 user -> push
 user -> search
 user -> story
