@@ -52,7 +52,7 @@ class AdminAuditService(
         // NOWAIT로 두 재검증 잠금은 기다리지 않고 403으로 롤백한다. flush 이후에는 대상 UPDATE가
         // 지연 실행되지 않고, 감사 INSERT의 유일한 회원 FK는 이미 잠근 처리자라 새 대기 고리가 없다.
         // 탈퇴도 같은 users 행을 먼저 FOR UPDATE 하므로, 먼저 잡은 트랜잭션의 커밋 순서를 따른다.
-        return com.knk.manyak.auth.consent.SocialAuthPrivacyFilter.safely {
+        return com.knk.manyak.global.observability.SocialAuthPrivacyFilter.safely {
             entityManager.flush()
             val allowed = try { actors.lockActiveAdmin(adminUserId) }
                 catch (_: PessimisticLockingFailureException) { false }
@@ -66,7 +66,7 @@ class AdminAuditService(
         require(action.category == AdminAuditCategory.ACCESS)
         val row = row(adminUserId, action, targetId)
         return try {
-            com.knk.manyak.auth.consent.SocialAuthPrivacyFilter.safely {
+            com.knk.manyak.global.observability.SocialAuthPrivacyFilter.safely {
                 requireNotNull(accessTransaction.execute { logs.save(row) })
             }
         } catch (ex: RuntimeException) {

@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.link
 
-import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
+import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.entity.SocialAccount
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.UserStatus

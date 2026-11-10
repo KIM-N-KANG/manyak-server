@@ -1,4 +1,4 @@
-package com.knk.manyak.auth.consent
+package com.knk.manyak.global.observability
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
