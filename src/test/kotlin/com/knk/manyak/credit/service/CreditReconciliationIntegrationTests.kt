@@ -385,21 +385,26 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
     fun `모자란 환불은 그룹 최소 차감액으로 발행하고 환불 로트를 만든다`() {
         val userId = saveUser()
         giveBalance(userId, 100)
-        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
-        chargeStory(userId, sessionId)
+        val chatPk = seedChat(userId, currentTurn = 0)
+        chargeChat(userId, chatPk, amount = 20) // 큰 차감을 먼저 둬서 "첫 차감액"이 아니라 최소액임을 가린다
+        chargeChat(userId, chatPk)
 
         val result = serviceAsOf(future).reconcile()
 
-        assertThat(result.refundsEmitted).isEqualTo(1)
-        val refund = transactionRepository.findAll().single { it.reason == CreditReason.REFUND }
-        assertThat(refund.amount).isEqualTo(cost)
-        assertThat(refund.refType).isEqualTo("STORY")
-        assertThat(refund.refId).isEqualTo(sessionId)
-        assertThat(refund.idempotencyKey).isNull()
-        val lot = lotRepository.findByTransactionIdIn(listOf(refund.id)).single()
-        assertThat(lot.originalAmount).isEqualTo(cost)
-        assertThat(lot.remaining).isEqualTo(cost)
-        assertThat(lot.expiresAt).isNotNull()
+        assertThat(result.refundsEmitted).isEqualTo(2)
+        val refunds = transactionRepository.findAll().filter { it.reason == CreditReason.REFUND }
+        assertThat(refunds).hasSize(2).allSatisfy { refund ->
+            assertThat(refund.amount).isEqualTo(cost)
+            assertThat(refund.refType).isEqualTo("CHAT")
+            assertThat(refund.refId).isEqualTo(chatPk)
+            assertThat(refund.idempotencyKey).isNull()
+        }
+        val lots = lotRepository.findByTransactionIdIn(refunds.map { it.id })
+        assertThat(lots).hasSize(2).allSatisfy { lot ->
+            assertThat(lot.originalAmount).isEqualTo(cost)
+            assertThat(lot.remaining).isEqualTo(cost)
+            assertThat(lot.expiresAt).isNotNull()
+        }
     }
 
     @Test
@@ -429,26 +434,33 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
     }
 
     @Test
-    fun `두 대사가 같은 그룹을 동시에 보정해도 부족분만큼만 환불한다`() {
+    fun `두 대사가 함께 잠금 전 확인을 통과해도 잠금 뒤 재확인으로 부족분만큼만 환불한다`() {
         val userId = saveUser()
         giveBalance(userId, 100)
         val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
         chargeStory(userId, sessionId)
-        val start = java.util.concurrent.CountDownLatch(1)
+        // 두 스레드가 지갑 잠금 직전에서 만나야 넘어간다. 한쪽이 잠금 전 확인에서 끝나면 장벽이 시간 초과로 깨진다.
+        // 그래서 "둘 다 잠금 전 환불 수 0을 보고 지갑 잠금에서 직렬화되는" 인터리빙이 매번 만들어진다.
+        val atLock = java.util.concurrent.CyclicBarrier(2)
+        // 리포지토리는 JDK 프록시라 callRealMethod가 안 된다. 스파이의 기본 응답(실제 빈 위임)으로 넘긴다.
+        val delegate = org.mockito.Mockito.mockingDetails(walletRepository).mockCreationSettings.defaultAnswer
+        org.mockito.Mockito.doAnswer { call ->
+            atLock.await(10, java.util.concurrent.TimeUnit.SECONDS)
+            delegate.answer(call)
+        }.`when`(walletRepository).findByUserIdForUpdate(userId)
         val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
         try {
             val runs = List(2) {
                 executor.submit(java.util.concurrent.Callable {
-                    check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
                     creditWalletService.reconcileRefunds(userId, "STORY", sessionId, cost, targetRefundCount = 1)
                 })
             }
-            start.countDown()
-            assertThat(runs.sumOf { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }).isEqualTo(1)
+            assertThat(runs.map { it.get(20, java.util.concurrent.TimeUnit.SECONDS) }).containsExactlyInAnyOrder(1, 0)
         } finally {
             executor.shutdownNow()
         }
         assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+        assertThat(creditWalletService.balanceOf(userId)).isEqualTo(100)
     }
 
     @Test
