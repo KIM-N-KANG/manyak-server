@@ -15,6 +15,8 @@ import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.AccountCreditAdapter
+import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import org.assertj.core.api.Assertions.assertThat
@@ -72,8 +74,10 @@ class SocialLoginServiceTest {
         `when`(authTokenService.issueTokens(anyUser())).thenReturn(TokenResponse("access", "refresh", 1800))
         return SocialLoginService(
             mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier),
-            registrar, authTokenService, creditWalletService, guestTrialLimitService,
-            userRepository, serverAnalytics, creditPolicyService,
+            registrar, authTokenService,
+            // 실제 어댑터로 감싸 크레딧 서비스 호출 인자(지급량, 사유, 멱등 키)를 그대로 단언한다(KNK-2064).
+            AccountCreditAdapter(guestTrialLimitService, creditPolicyService, creditWalletService, mock(AttendanceRewardService::class.java)),
+            userRepository, serverAnalytics,
         )
     }
 
