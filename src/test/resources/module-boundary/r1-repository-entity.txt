@@ -64,7 +64,6 @@ com.knk.manyak.global.security.DeletedAccountRejectionFilter -> com.knk.manyak.a
 com.knk.manyak.global.security.SuspensionAccessKt -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.global.security.SuspensionGuard -> com.knk.manyak.auth.entity.User
 com.knk.manyak.global.security.SuspensionGuard -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.image.entity.ImagePreset -> com.knk.manyak.story.entity.StoryCreationTag
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.repository.UserRepository

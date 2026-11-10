@@ -55,7 +55,7 @@ class StoryThumbnailWiringIntegrationTests : IntegrationTest() {
         )
         com.knk.manyak.support.seedProvidedGenres(storyCreationTagRepository, "미스터리")
         imagePresetRepository.save(
-            ImagePreset(imageKey = "thumb_0001", type = ImagePresetType.THUMBNAIL, genres = setOf(fantasy)),
+            ImagePreset(imageKey = "thumb_0001", type = ImagePresetType.THUMBNAIL, genres = setOf(fantasy.id)),
         )
         val author = userRepository.save(User(nickname = "썸네일작가", status = UserStatus.ACTIVE))
         accessToken = jwtTokenProvider.issueAccessToken(author.publicId)
