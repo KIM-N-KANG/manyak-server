@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.web.server.ResponseStatusException
@@ -76,6 +77,6 @@ class UserWithdrawalServiceTest {
 
         assertThat(user.withdrawnFromStatus).isEqualTo(UserStatus.SUSPENDED)
         verify(refreshTokenStore, never()).revokeAllForUser(7L)
-        verify(events, never()).publishEvent(UserWithdrawnEvent(7L))
+        verifyNoInteractions(events)
     }
 }
