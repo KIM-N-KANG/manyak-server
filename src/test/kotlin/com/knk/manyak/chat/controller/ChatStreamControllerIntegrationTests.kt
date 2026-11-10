@@ -252,6 +252,39 @@ class ChatStreamControllerIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `이어쓰기·재생성 저장 로그의 story_id는 스토리 공개 식별자다`() {
+        val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val story = seedStory()
+            val session = storyChatRepository.save(StoryChat(storyId = story.id))
+            stream(session.publicId.toString(), "첫 입력")
+            val turnId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(session.id).last().id
+
+            restTestClient.post()
+                .uri("/api/v1/chats/${session.publicId}/turns/regenerate/stream")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .body("""{"turnId":$turnId,"realtimeImage":false}""")
+                .exchange()
+                .expectStatus().isOk
+                .expectBody(String::class.java)
+                .returnResult()
+            generationStore.awaitGenerationReleased(session.publicId.toString())
+
+            for (event in listOf("user_message_saved", "ai_response_saved", "ai_response_regenerated")) {
+                val logged = appender.list.filter { it.formattedMessage.contains("event_name=$event") }
+                assertThat(logged).describedAs(event).hasSize(1)
+                assertThat(logged.single().formattedMessage).describedAs(event).contains("story_id=${story.publicId}")
+            }
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    @Test
     fun `비동기 채팅 턴 이벤트가 request_id를 MDC로 전파받아 기록된다`() {
         val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }

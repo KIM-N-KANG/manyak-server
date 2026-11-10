@@ -9,8 +9,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.StoryStartSettingRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.annotation.Qualifier
@@ -36,8 +35,7 @@ class ChatCompactService(
     private val chats: StoryChatRepository,
     private val summaries: StoryChatSummaryRepository,
     private val messages: StoryMessageRepository,
-    private val stories: StoryRepository,
-    private val starts: StoryStartSettingRepository,
+    private val stories: StoryPlayReader,
     private val client: ChatCompactAiClient,
     private val recorder: AiCallRecorder,
     private val logger: StructuredLogger,
@@ -71,7 +69,7 @@ class ChatCompactService(
         val snapshot = try {
             requireNotNull(read.execute {
                 val chat = chats.findById(event.chatId).orElseThrow()
-                storyPublicId = stories.findById(chat.storyId).orElseThrow().publicId
+                storyPublicId = stories.findPublicId(chat.storyId) ?: throw NoSuchElementException("No value present")
                 val summary = summaries.findFirstByChatIdAndInvalidatedAtIsNullOrderByThroughTurnDesc(chat.id)
                 CompactSnapshot(
                     ChatCompactAiRequest(summary?.summary.orEmpty(), ChatHistoryContext.range(
@@ -80,7 +78,7 @@ class ChatCompactService(
                     chat.revision,
                     AiTraceLink(
                         creationId = chat.creationId, storyId = storyPublicId, chatId = chat.publicId,
-                        startSettingId = chat.startSettingId?.let { starts.findById(it).orElse(null)?.publicId },
+                        startSettingId = chat.startSettingId?.let { stories.findStartSetting(it)?.publicId },
                         turnNumber = event.through,
                     ),
                 )

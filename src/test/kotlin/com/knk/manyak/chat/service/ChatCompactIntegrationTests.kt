@@ -437,6 +437,29 @@ class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
         assertThat(ai.requests).isEmpty()
         assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
     }
+    @Test fun `요약 무효화 로그의 story_id는 스토리 공개 식별자다`() {
+        val chat = fixture(15, 10)
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 15, summary = "15 요약"))
+        regenerate(chat)
+        val storyPublicId = stories.findById(chat.storyId).orElseThrow().publicId
+        assertThat(log.entries.single { it.first == "chat_compact_invalidated" }.second["story_id"]).isEqualTo(storyPublicId.toString())
+    }
+    @Test fun `스토리 행이 없으면 요약은 AI를 부르지 않고 START_FAILED를 남긴다`() {
+        val chat = fixture(10)
+        // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
+        jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, chat.id)
+        try {
+            service.compact(event(chat))
+            assertThat(ai.requests).isEmpty()
+            assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
+            // 실패 로그의 error는 예외 클래스 단순명이다. 예외 타입이 바뀌면 로그 값이 바뀐다.
+            assertThat(log.entries.last { it.first == "chat_compact_failed" }.second["error"]).isEqualTo("NoSuchElementException")
+            assertThat(currentSummary(chat)).isNull()
+        } finally {
+            // 없는 스토리를 가리키는 고아 행을 남기지 않는다.
+            jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", chat.storyId, chat.id)
+        }
+    }
     @Test fun `요약 저장과 설정 변경은 서로의 값을 유지한다`() {
         val chat = fixture()
         val locked = CountDownLatch(1)

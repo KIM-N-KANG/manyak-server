@@ -62,19 +62,14 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.service.ImageUrlResolver
-import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.snapshot.EndingSnapshot
 import com.knk.manyak.story.snapshot.MainEventSnapshot
 import com.knk.manyak.story.snapshot.StartSettingSnapshot
 import com.knk.manyak.story.snapshot.StoryPublicSnapshot
-import com.knk.manyak.story.entity.StoryStartSetting
-import com.knk.manyak.story.repository.StoryCreationSessionRepository
-import com.knk.manyak.story.repository.StoryEndingRepository
-import com.knk.manyak.story.repository.StoryMainEventRepository
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StartSettingView
+import com.knk.manyak.story.service.StoryPlayReader
 import com.knk.manyak.story.service.StoryPublicSnapshotService
-import com.knk.manyak.story.repository.StoryStartSettingRepository
-import com.knk.manyak.story.repository.StorySuggestedInputRepository
+import com.knk.manyak.story.service.StoryView
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.observation.Observation
@@ -113,23 +108,17 @@ class ChatService(
     private val chatGenerationDeadlines: ChatGenerationDeadlines,
     private val chatGenerationEvents: ChatGenerationEvents,
     private val chatGenerationReceivers: ChatGenerationReceivers,
-    private val storyRepository: StoryRepository,
+    // 채팅이 읽는 스토리 값은 전부 이 읽기 API를 거친다(KNK-2055). 호출자 트랜잭션에 합류한다.
+    private val storyPlayReader: StoryPlayReader,
     // 조립 재료를 현재 값·스냅샷 어느 쪽에서 오든 같은 모양으로 뜨는 몫(KNK-1065).
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
     private val personaService: UserPersonaService,
     private val imageUrlResolver: ImageUrlResolver,
-    private val storyStartSettingRepository: StoryStartSettingRepository,
-    private val storySuggestedInputRepository: StorySuggestedInputRepository,
-    private val storyEndingRepository: StoryEndingRepository,
-    // 목표 사건의 라이브 이름 해소용(스냅샷 분기에서 id가 빗나갈 때만 탄다).
-    private val storyMainEventRepository: StoryMainEventRepository,
     // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
     // 인물 이미지 정본은 story_character_images다(KNK-1126) — 인물별 여러 장을 요청에 싣는다.
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val storyChatRepository: StoryChatRepository,
     private val summaries: StoryChatSummaryRepository,
-    // 채팅 생성 시 스토리 → 간편 제작 세션 역조회로 creation_id를 1회 해석하는 데만 쓴다(KNK-751).
-    private val storyCreationSessionRepository: StoryCreationSessionRepository,
     private val storyChatShareRepository: StoryChatShareRepository,
     private val storyMessageRepository: StoryMessageRepository,
     private val storyChoiceRepository: StoryChoiceRepository,
@@ -195,15 +184,15 @@ class ChatService(
         // 스토리 공개 식별자(public_id)로 받아 삭제되지 않은 내부 스토리를 조회한다.
         // 이 한 번의 조회가 KNK-256(public_id 해석)과 KNK-257(삭제된 스토리로 채팅 생성 차단)을 함께 처리한다.
         // 형식 오류·미존재·삭제는 모두 404로 통일된다.
-        val story = resolveStory(request.storyId)
+        val story = resolveStory(request.storyId, userId)
         val chatName = persona?.name ?: story.protagonistName
         // 공개(PUBLISHED∧PUBLIC) 스토리이거나 소유자만 채팅을 시작할 수 있다(KNK-401). 비공개·초안은 소유자 외엔 404.
-        if (!story.isReadableBy(userId)) {
+        if (!story.readable) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         }
         // 소유자 없는 스토리는 발행 상태이며 공개일 때만 회원이 채팅을 시작할 수 있다(KNK-2038).
         // 그 밖의 소유자 없는 스토리는 익명 요청만 허용한다.
-        if (story.userId == null && userId != null && !story.isPubliclyVisible()) {
+        if (story.userId == null && userId != null && !story.publiclyVisible) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "이 스토리로는 채팅을 시작할 수 없습니다.")
         }
         // 시작 설정 복수화(KNK-515): startSettingId를 지정하면 그 시작 설정으로, 미지정이면 스토리의 첫(기본) 시작 설정으로 시작한다.
@@ -220,9 +209,7 @@ class ChatService(
                 startSettingId = startSetting?.id,
                 // AI trace 여정(KNK-751): 이 스토리를 만든 간편 제작 세션의 creation_id를 여기서 **한 번만** 해석해 박는다.
                 // 턴마다 역조회하지 않기 위해서다. 일반 제작(저작) 스토리는 세션이 없어 null이고 헤더가 생략된다.
-                creationId = storyCreationSessionRepository
-                    .findFirstByStoryIdOrderByIdAsc(story.id)
-                    ?.storylineRequestId,
+                creationId = storyPlayReader.findCreationId(story.id),
                 // 프롤로그는 시작 설정이 삭제되면 조회 키(start_setting_id)가 NULL이 돼 되찾을 수 없어 박아 둔다.
                 // 제목·썸네일 스냅샷은 읽기 정본이 stories.last_public_snapshot으로 옮겨가 V71에서 지웠다.
                 storyPrologueSnapshot = startSetting?.prologue?.let { render(it, chatName) },
@@ -293,27 +280,24 @@ class ChatService(
             return emptyList()
         }
         // 응답에 스토리 공개 식별자(public_id)와 제목을 노출하기 위해 스토리를 한 번에 조회해 매핑한다.
-        val storiesByStoryId = storyRepository.findAllById(chats.map { it.storyId })
-            .associateBy { it.id }
+        val storiesByStoryId = storyPlayReader.findViews(chats.map { it.storyId }, userId)
         // 채팅별 마지막 ASSISTANT 메시지만 한 번의 쿼리로 조회해 프리뷰로 사용한다.
         val lastPreviewByChatId = storyMessageRepository
             .findLatestMessagesByChatIdsAndRole(chats.map { it.id }, MessageRole.ASSISTANT)
             .associate { it.chatId to it.content }
         // 채팅이 도달한 엔딩 이름을 한 번에 조회한다(엔딩은 이름으로 노출, KNK-462). 채팅당 최대 1개.
-        val endingNameById = storyEndingRepository
-            .findAllById(chats.mapNotNull { it.reachedEndingId })
-            .associate { it.id to it.name }
+        val endingNameById = storyPlayReader.findEndingNames(chats.mapNotNull { it.reachedEndingId })
         // 스냅샷은 **읽을 수 없는 스토리에만** 필요하다. 별도 테이블이라 그 스토리들만 한 번에 조회한다
         // (스토리 엔티티에 붙어 있었다면 목록 전체가 이 JSON을 함께 읽었다 — PR #224 Codex P2).
         val snapshotByStoryId = storyPublicSnapshotService.findAllByStoryIds(
-            storiesByStoryId.values.filterNot { it.isCurrentMetadataVisibleTo(userId) }.map { it.id },
+            storiesByStoryId.values.filterNot { it.currentMetadataVisible }.map { it.id },
         )
         return chats.map { chat ->
             val story = storiesByStoryId[chat.storyId]
             // 제목·썸네일은 요청자가 지금 그 스토리를 읽을 수 있을 때만 현재 값을 쓴다(KNK-1059).
             // 비공개로 되돌렸거나 삭제됐으면 채팅에 박아둔 스냅샷에서 멈춘다. storyId(public_id)는
             // 요청자가 원래 알던 값이라 그대로 둔다 — 새로 새는 정보가 없다.
-            val showsCurrent = story?.isCurrentMetadataVisibleTo(userId) == true
+            val showsCurrent = story?.currentMetadataVisible == true
             // 읽을 수 없으면 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷에서 멈춘다(KNK-1065).
             val snapshot = if (showsCurrent) null else story?.let { snapshotByStoryId[it.id] }
             val defaultName = if (showsCurrent) story?.protagonistName else snapshot?.protagonistName
@@ -447,16 +431,16 @@ class ChatService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "채팅을 조회할 권한이 없습니다.")
         }
 
-        val story = storyRepository.findById(chat.storyId).orElse(null)
+        val story = storyPlayReader.findView(chat.storyId, userId)
         // 서재와 같은 스냅샷 규칙(KNK-1059·1065). 여기 요청자는 위 게이트를 통과한 채팅 소유자이지만,
         // 스토리 소유자와는 별개라 남의 스토리가 비공개로 돌아가면 그 뒤 제목·프롤로그가 보여선 안 된다.
-        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
+        val showsCurrentStory = story?.currentMetadataVisible == true
         // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 스냅샷에서 멈춘다(KNK-1065).
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
         val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
         val storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
-        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
+        val startSetting = chat.startSettingId?.let { storyPlayReader.findStartSetting(it) }
 
         val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
         val turns = pairTurns(messages)
@@ -471,9 +455,7 @@ class ChatService(
 
         // 도달 엔딩은 이름으로 노출한다(순차 PK 노출 금지, KNK-462). 이 상세에 등장하는 도달 턴들의 엔딩 id를 한 번에
         // 조회해 이름으로 매핑한다(toSummaryResponses와 동일 패턴, N+1 방지). 도달 턴이 없으면 조회를 생략한다.
-        val endingNameById = storyEndingRepository
-            .findAllById(turns.mapNotNull { it.reachedEndingId })
-            .associate { it.id to it.name }
+        val endingNameById = storyPlayReader.findEndingNames(turns.mapNotNull { it.reachedEndingId })
 
         // 아직 한 번도 이어쓰지 않은 채팅(turns 비어 있음)만 시작 추천 입력을 채운다.
         // 진행 턴이 있으면 다음 행동은 마지막 턴의 choices로 안내하므로 조회를 생략하고 빈 배열로 둔다.
@@ -577,9 +559,9 @@ class ChatService(
         val chat = storyChatRepository.findById(share.chatId).orElse(null)?.takeIf { it.deletedAt == null }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "공유를 찾을 수 없습니다.")
 
-        val story = storyRepository.findById(chat.storyId).orElse(null)
-        val startSetting = chat.startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
-        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(userId) == true
+        val story = storyPlayReader.findView(chat.storyId, userId)
+        val startSetting = chat.startSettingId?.let { storyPlayReader.findStartSetting(it) }
+        val showsCurrentStory = story?.currentMetadataVisible == true
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
         val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
 
@@ -587,9 +569,7 @@ class ChatService(
         val turns = loadSharedTurns(chat.id, share.turnCutoff)
 
         // 도달 엔딩은 상세와 동일하게 이름으로 노출한다(순차 PK 노출 금지, KNK-462).
-        val endingNameById = storyEndingRepository
-            .findAllById(turns.mapNotNull { it.reachedEndingId })
-            .associate { it.id to it.name }
+        val endingNameById = storyPlayReader.findEndingNames(turns.mapNotNull { it.reachedEndingId })
 
         return ChatShareResponse(
             id = share.publicId.toString(),
@@ -763,7 +743,7 @@ class ChatService(
             })
             val startState = prepared.second
             val aiCall = prepared.third
-            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
+            val storyPublicId = storyPlayReader.findPublicId(chat.storyId)?.toString().orEmpty()
 
             streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
             return@streamEntry streamTurnInternal(
@@ -864,7 +844,7 @@ class ChatService(
             })
             val startState = prepared.second
             val aiCall = prepared.third
-            val storyPublicId = storyRepository.findById(chat.storyId).orElse(null)?.publicId?.toString().orEmpty()
+            val storyPublicId = storyPlayReader.findPublicId(chat.storyId)?.toString().orEmpty()
 
             streamingOwnsGeneration = true // 이후의 키 해제는 스트리밍 처리가 소유한다.
             return@streamEntry streamTurnInternal(
@@ -1540,7 +1520,7 @@ class ChatService(
         // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
         val context = ChatHistoryContext.of(chat, storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), compactSettings.enabled, turnNumber,
             summaries.findFirstByChatIdAndInvalidatedAtIsNullAndThroughTurnLessThanOrderByThroughTurnDesc(chat.id, turnNumber))
-        val story = storyRepository.findById(chat.storyId).orElse(null)
+        val story = storyPlayReader.findView(chat.storyId, chat.userId)
         // 조립 재료는 생성 결과를 통해 독자에게 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064·1065).
         // 판정 주체는 **턴을 돌리는 사람**이고, 세 진입점(이어쓰기·재생성·선택지)이 모두 앞에서 requireChatOwner로
         // 요청자 == 채팅 소유자를 강제하므로 chat.userId가 곧 그 사람이다(게스트 채팅은 null).
@@ -1549,11 +1529,11 @@ class ChatService(
         //
         // 두 경우를 **같은 모양(StoryPublicSnapshot)** 으로 만들어 아래 조립이 한 갈래로 흐르게 한다. 갈래를
         // 나누면 한쪽만 고치는 순간 유출이 되살아난다 — KNK-1059가 프롤로그만 막고 설정·사건·엔딩을 놓친 방식이다.
-        val showsCurrentStory = story?.isCurrentMetadataVisibleTo(chat.userId) == true
+        val showsCurrentStory = story?.currentMetadataVisible == true
         val material = if (showsCurrentStory) {
             // 이 채팅이 고른 시작 설정 하나만 읽는다(PR #224 Codex P2). 전체 캡처는 스토리의 모든 시작 설정과
             // 각 추천 입력·엔딩 본문을 뜨는데, 턴 조립은 매 턴 도는 경로이고 시작 설정 개수에 상한이 없다.
-            story?.let { storyPublicSnapshotService.captureTurnMaterial(it, chat.startSettingId) }
+            story?.let { storyPublicSnapshotService.captureTurnMaterial(it.id, chat.startSettingId) }
         } else {
             // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V69 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
             // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이
@@ -1574,8 +1554,8 @@ class ChatService(
         val targetMainEvent = chat.targetMainEventId?.let { targetId ->
             (
                 mainEvents.firstOrNull { it.id == targetId }
-                    ?: storyMainEventRepository.findById(targetId).orElse(null)
-                        ?.let { live -> mainEvents.firstOrNull { it.name == live.name } }
+                    ?: storyPlayReader.findMainEventName(targetId)
+                        ?.let { liveName -> mainEvents.firstOrNull { it.name == liveName } }
                 )
                 ?.let { ChatTurnTargetMainEvent(name = eventNames.aiName(it.name), progressTurns = chat.targetProgressTurns) }
         }
@@ -1630,7 +1610,7 @@ class ChatService(
                 // trace 연결용 식별자는 스냅샷이 아니라 실제 행에서 읽는다 — 열람자에게 가는 값이 아니라
                 // Langfuse에서 이 턴이 어느 시작 설정 행을 탔는지 되짚는 관측 키다.
                 startSettingId = chat.startSettingId
-                    ?.let { storyStartSettingRepository.findById(it).orElse(null) }
+                    ?.let { storyPlayReader.findStartSetting(it) }
                     ?.publicId,
                 turnNumber = turnNumber,
                 isRegenerated = isRegenerated,
@@ -1719,17 +1699,14 @@ class ChatService(
      * 지정하면 그 공개 식별자로 조회하되 반드시 이 스토리 소속이어야 한다. 형식 오류·미존재·타 스토리 소속은 모두 404다
      * (존재 노출 최소화·조용한 폴백 금지). 시작 설정이 하나도 없는 스토리는(미지정 경로) null을 반환해 빈 프롤로그·추천 입력으로 시작한다.
      */
-    private fun resolveStartSetting(storyId: Long, startSettingPublicId: String?): StoryStartSetting? {
+    private fun resolveStartSetting(storyId: Long, startSettingPublicId: String?): StartSettingView? {
         if (startSettingPublicId == null) {
-            return storyStartSettingRepository.findFirstByStoryIdOrderByIdAsc(storyId)
+            return storyPlayReader.findFirstStartSetting(storyId)
         }
         val publicId = parsePublicIdOrNull(startSettingPublicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "시작 설정을 찾을 수 없습니다.")
-        val startSetting = storyStartSettingRepository.findByPublicId(publicId)
-        if (startSetting == null || startSetting.story.id != storyId) {
-            throw ResponseStatusException(HttpStatus.NOT_FOUND, "시작 설정을 찾을 수 없습니다.")
-        }
-        return startSetting
+        return storyPlayReader.findStartSettingOfStory(storyId, publicId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "시작 설정을 찾을 수 없습니다.")
     }
 
     /**
@@ -1738,8 +1715,7 @@ class ChatService(
      */
     private fun loadSuggestedInputs(startSettingId: Long?): List<String> =
         startSettingId
-            ?.let { storySuggestedInputRepository.findByStartSettingIdOrderByInputOrderAsc(it) }
-            ?.map { it.inputText }
+            ?.let { storyPlayReader.findSuggestedInputs(it) }
             ?: emptyList()
 
     /**
@@ -1765,10 +1741,10 @@ class ChatService(
      * 스토리 공개 식별자(UUID 문자열)로 삭제되지 않은 스토리를 조회한다. 형식 오류·미존재·삭제는 404로 통일한다.
      * createChat이 KNK-256(public_id 해석)과 KNK-257(삭제 스토리 채팅 차단)을 한 조회로 처리하게 한다.
      */
-    private fun resolveStory(publicId: String): Story {
+    private fun resolveStory(publicId: String, requesterId: Long?): StoryView {
         val parsed = parsePublicIdOrNull(publicId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
-        return storyRepository.findByPublicIdAndDeletedAtIsNull(parsed)
+        return storyPlayReader.findViewByPublicId(parsed, requesterId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 
