@@ -17,7 +17,7 @@ import org.springframework.transaction.TransactionStatus
  * 경합 자체를 통합 테스트로 재현하려면 쿼리와 쿼리 사이에 다른 트랜잭션의 커밋을 정확히 끼워야 해서
  * 훅을 심거나 타이밍에 기대야 한다(KNK-1059에서 같은 결론). 그래서 여기서는 **설정이 걸려 있다는 사실**을 고정한다.
  * 턴 경로 자체에 `@Transactional`을 붙이지 않는 이유(AI 호출·스트리밍이 커넥션을 수십 초 붙든다)는
- * [ChatService]의 `assemblyTransactionTemplate` KDoc에 있다.
+ * [ChatTurnAssembler.assemblyTransactionTemplate] KDoc에 있다.
  */
 class ChatAssemblyTransactionGuardTests {
 

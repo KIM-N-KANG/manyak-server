@@ -38,8 +38,7 @@ class ChatTurnAssembler(
     private val storyPlayReader: StoryPlayReader,
     // 조립 재료를 현재 값·스냅샷 어느 쪽에서 오든 같은 모양으로 뜨는 몫(KNK-1065).
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
-    // 채팅 요청에 실을 인물-이미지 매핑 조회용(KNK-943).
-    // 인물 이미지 정본은 story_character_images다(KNK-1126) — 인물별 여러 장을 요청에 싣는다.
+    // 채팅이 완결한 주요 사건의 조인 행 조회용(occurred_main_event_names 재료, resolveOccurredMainEventNames).
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     // 채팅 모델과 가격은 요청 조립 시 한 번 읽어 AI 호출과 차감에서 함께 사용한다.
     private val chatModelService: ChatModelService,
@@ -198,16 +197,6 @@ class ChatTurnAssembler(
         )
     } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
 
-    /**
-     * 채팅 요청에 실을 인물-이미지 매핑을 조회한다(스펙 §4-3-3 "채팅 인물 이미지 전달", KNK-943).
-     *
-     * `Phase 3 · 구현`(KNK-1126) — 정본이 `story_character_images`로 옮겨가 **인물별 전부**를 싣는다.
-     * 같은 `name`의 항목이 여러 개이고 `image_name`이 그것을 가른다. 옛 컬럼(`story_characters.image_url`)은
-     * 읽지 않는다(V76이 `{이름}_기본` 행으로 옮겼다). 컬럼 DROP은 다음 릴리스다(두 릴리스 규칙).
-     *
-     * 이미지가 없는 인물은 자연히 빠진다 — AI는 이 매핑에 있는 인물만 태그로 만들 수 있으므로, 매핑에 없으면
-     * 태그가 삭제되고 이미지 없이 본문만 나간다. 전부 없으면 빈 배열이며 AI는 인물 태그 규칙을 쓰지 않는다.
-     */
     /**
      * 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료).
      *

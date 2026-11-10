@@ -28,7 +28,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
  * 라벨이 사라지거나 목표가 매 턴 초기화되는 식이다(PR #224 Codex P2가 이 뿌리에서 네 건 나왔다).
  *
  * 그래서 저장 경로(`ChatTurnPersister`)는 후보를 이름으로 판정한 뒤 라이브 행을 **이름으로** 다시 찾아 id를
- * 얻고, 읽기 경로(`ChatService`)는 스냅샷 분기에서 id 조회가 빗나가면 이름으로 떨어진다.
+ * 얻고, 읽기 경로(`ChatQueryService`의 도달 엔딩 이름, `ChatTurnAssembler`의 목표 사건)는 스냅샷 분기에서 id 조회가
+ * 빗나가면 이름으로 떨어진다.
  *
  * **유일한 예외는 시작 설정이다**([startSettingOf]). 수정 API가 id 매칭 시 in-place 갱신해 행 identity를
  * 보존하고(KNK-515 — 진행 중 채팅의 참조 유지가 설계 의도), 요청에서 빠지면 행이 지워지며
