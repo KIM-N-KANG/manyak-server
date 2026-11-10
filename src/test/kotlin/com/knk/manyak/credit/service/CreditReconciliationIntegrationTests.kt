@@ -320,6 +320,20 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `제작 세션이 없는 차감은 환불하지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val missingSessionId = 999_999L
+        chargeStory(userId, missingSessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.groupsScanned).isEqualTo(1)
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", missingSessionId)).isEqualTo(0)
+    }
+
+    @Test
     fun `스토리가 생성된 세션의 차감은 환불하지 않는다`() {
         val userId = saveUser()
         giveBalance(userId, 100)

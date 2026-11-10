@@ -229,6 +229,24 @@ class ChatChargeReconciliationIntegrationTests : IntegrationTest() {
         assertThat(reconciliation.reconcile().refundsEmitted).isZero()
     }
 
+    @Test fun `잠금 뒤 재확인은 메시지 연결, 버전 연결, 환불 키가 하나라도 있으면 환불하지 않는다`() {
+        val byMessage = charge(50)
+        linked(byMessage)
+        val byVersion = charge(50)
+        val unlinked = messages.save(StoryMessage(chatId = chatId, role = MessageRole.ASSISTANT, content = "현재", messageOrder = 4))
+        versions.save(StoryMessageVersion(messageId = unlinked.id, versionNumber = 1, content = "이전", choices = "[]", creditTransactionId = byVersion))
+        val byRefund = charge(50)
+        wallet.reward(userId, 50, CreditReason.REFUND, "refund:charge:$byRefund", "CHAT_TURN", chatId)
+        val lost = charge(50)
+
+        assertThat(listOf(byMessage, byVersion, byRefund).map { rowReconciler.reconcile(it) }).containsOnly(false)
+        assertThat(rowReconciler.reconcile(lost)).isTrue()
+        assertThat(transactions.findByIdempotencyKey("refund:charge:$byMessage")).isNull()
+        assertThat(transactions.findByIdempotencyKey("refund:charge:$byVersion")).isNull()
+        assertThat(transactions.findByIdempotencyKey("refund:charge:$lost")!!.amount).isEqualTo(50)
+        assertThat(wallet.balanceOf(userId)).isEqualTo(900)
+    }
+
     @Test fun `즉시 환불과 대사는 같은 멱등 키를 쓰고 이미 환불된 차감은 저장할 수 없다`() {
         val id = charge(50)
         wallet.reward(userId, 50, CreditReason.REFUND, "refund:charge:$id", "CHAT_TURN", chatId)
