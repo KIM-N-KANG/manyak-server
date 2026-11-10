@@ -20,7 +20,7 @@ import java.util.UUID
 class AdminModerationController(private val service: AdminModerationService, private val takedowns: StoryTakedownService) {
     @PostMapping("/stories/{storyId}/takedown")
     fun takedown(@PathVariable storyId: UUID, @RequestBody body: StoryTakedownRequest, request: HttpServletRequest) =
-        com.knk.manyak.auth.consent.SocialAuthPrivacyFilter.safely {
+        com.knk.manyak.global.observability.SocialAuthPrivacyFilter.safely {
             takedowns.takeDown(AdminRequester.userId(request), storyId, body)
         }
 

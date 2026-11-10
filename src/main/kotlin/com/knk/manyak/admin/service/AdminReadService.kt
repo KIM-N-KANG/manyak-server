@@ -5,7 +5,7 @@ import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.entity.AdminAuditAction
 import com.knk.manyak.admin.repository.AdminDashboardRepository
 import com.knk.manyak.admin.repository.AdminReadRepository
-import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
+import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditOrderStatus
 import com.knk.manyak.credit.service.CreditWalletService
