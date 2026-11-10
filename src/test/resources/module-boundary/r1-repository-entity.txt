@@ -207,8 +207,6 @@ com.knk.manyak.story.service.StoryImageAccess -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.StoryImageAccess -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.service.StoryService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.StoryService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.story.service.StoryService -> com.knk.manyak.chat.repository.StoryChatRepository
-com.knk.manyak.story.service.StoryService -> com.knk.manyak.chat.repository.StoryTurnCountProjection
 com.knk.manyak.story.submission.AdminModerationService -> com.knk.manyak.admin.entity.AdminAuditAction
 com.knk.manyak.story.submission.AdminModerationService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.submission.AdminSubmissionReadRepository -> com.knk.manyak.admin.repository.AdminQuery

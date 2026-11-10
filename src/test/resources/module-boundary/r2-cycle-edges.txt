@@ -32,7 +32,6 @@ search -> image
 search -> story
 story -> admin
 story -> auth
-story -> chat
 story -> credit
 story -> image
 story -> push
