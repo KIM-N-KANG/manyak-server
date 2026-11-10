@@ -1,0 +1,310 @@
+package com.knk.manyak.auth.controller
+
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.social.ProfileImagePresetService
+import com.knk.manyak.search.service.StorySearchIndexer
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.mockito.Mockito.*
+import java.time.Instant
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.client.RestTestClient
+
+/**
+ * 프로필 수정 API 통합 검증(KNK-1147, 정책 KNK-1146).
+ * - 닉네임은 2~20자, 한글 완성형·영문·숫자만 허용하고 공백은 거부한다.
+ * - 유일성은 정규화 키(소문자 + 공백 제거) 기준이라, 기존 공백 포함 값도 유일 판정에 반영한다.
+ * - 프로필 이미지는 프리셋 선택만 지원한다(업로드 없음). 닉네임 변경과 독립이다.
+ * - 인증 필수이며 정지 계정은 403이다.
+ */
+class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
+
+    @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var profileImagePresetService: ProfileImagePresetService
+    @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var indexer: StorySearchIndexer
+
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+    }
+
+    private fun saveUser(
+        nickname: String = "몽환적인 이야기꾼",
+        status: UserStatus = UserStatus.ACTIVE,
+    ): User = userRepository.save(
+        User(
+            nickname = nickname,
+            status = status,
+            profileImageUrl = "https://api.manyak.app/profile-presets/%EC%9D%B4%EC%95%BC%EA%B8%B0%EA%BE%BC.png",
+            profileThumbnailBase64 = "seed-thumb",
+        ),
+    )
+
+    private fun bearer(user: User) = "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}"
+
+    private fun patch(user: User, body: String) =
+        restTestClient.patch()
+            .uri(PATH)
+            .header("Authorization", bearer(user))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+            .exchange()
+
+    private fun reload(user: User): User = userRepository.findById(user.id).orElseThrow()
+
+    @Test
+    fun `사용자 없는 유효 토큰으로 프리셋을 조회하면 401이다`() {
+        val token = jwtTokenProvider.issueAccessToken(java.util.UUID.randomUUID())
+        restTestClient.get().uri(PRESETS_PATH)
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `토큰 없이 수정하거나 프리셋을 조회하면 401이다`() {
+        restTestClient.patch()
+            .uri(PATH)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"nickname":"새 닉네임"}""")
+            .exchange()
+            .expectStatus().isUnauthorized
+
+        restTestClient.get().uri(PRESETS_PATH).exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `닉네임만 바꾸면 프로필 이미지는 그대로다`() {
+        val user = saveUser()
+
+        patch(user, """{"nickname":"새로운작가"}""")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.nickname").isEqualTo("새로운작가")
+            .jsonPath("$.profileImageUrl").isNotEmpty
+
+        val reloaded = reload(user)
+        assertThat(reloaded.nickname).isEqualTo("새로운작가")
+        assertThat(reloaded.profileThumbnailBase64).isEqualTo("seed-thumb")
+    }
+
+    @Test
+    fun `프리셋만 바꾸면 닉네임은 그대로다`() {
+        val user = saveUser()
+
+        patch(user, """{"profileImagePreset":"마법사"}""")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.nickname").isEqualTo("몽환적인 이야기꾼")
+
+        val reloaded = reload(user)
+        assertThat(reloaded.nickname).isEqualTo("몽환적인 이야기꾼")
+        assertThat(reloaded.profileImageUrl).isEqualTo(profileImagePresetService.imageUrlFor("마법사"))
+        assertThat(reloaded.profileThumbnailBase64).isEqualTo(profileImagePresetService.thumbnailBase64For("마법사"))
+    }
+
+    @Test
+    fun `닉네임과 프리셋을 함께 바꾸면 둘 다 반영된다`() {
+        val user = saveUser()
+
+        patch(user, """{"nickname":"이야기수집가","profileImagePreset":"수집가"}""").expectStatus().isOk
+
+        val reloaded = reload(user)
+        assertThat(reloaded.nickname).isEqualTo("이야기수집가")
+        assertThat(reloaded.profileImageUrl).isEqualTo(profileImagePresetService.imageUrlFor("수집가"))
+    }
+
+    @Test
+    fun `빈 본문은 400이다`() {
+        patch(saveUser(), "{}").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `닉네임에 null만 보내면 400이다`() {
+        // 닉네임은 지울 수 없는 값이라 null 하나만 보내는 요청은 바꿀 것이 없는 요청과 같다.
+        patch(saveUser(), """{"nickname":null}""").expectStatus().isBadRequest
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "가",                    // 1자
+            "가나다라마바사아자차카타파하가나다라마바사",  // 21자
+            "닉네임!",                // 특수문자
+            "닉  네임",               // 연속 공백
+            "ㄱㄴㄷ",                 // 자모 단독
+            "닉네임😀",               // 이모지
+            "   ",                   // 공백뿐(trim 후 빈 문자열)
+        ],
+    )
+    fun `허용 규칙을 어기는 닉네임은 400이다`(nickname: String) {
+        val user = saveUser()
+
+        patch(user, """{"nickname":"$nickname"}""").expectStatus().isBadRequest
+
+        assertThat(reload(user).nickname).isEqualTo("몽환적인 이야기꾼")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["닉 네임", " 닉네임", "닉네임 "])
+    fun `공백 닉네임은 다듬지 않고 400으로 거부한다`(nickname: String) {
+        val user = saveUser()
+        patch(user, """{"nickname":"$nickname"}""").expectStatus().isBadRequest
+        assertThat(reload(user).nickname).isEqualTo(user.nickname)
+    }
+
+    @Test
+    fun `다른 회원과 대소문자나 공백만 다른 닉네임은 409다`() {
+        saveUser(nickname = "Story Teller")
+        val user = saveUser(nickname = "몽환적인 이야기꾼")
+
+        patch(user, """{"nickname":"storyteller"}""")
+            .expectStatus().isEqualTo(org.springframework.http.HttpStatus.CONFLICT)
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("NICKNAME_TAKEN")
+
+        assertThat(reload(user).nickname).isEqualTo("몽환적인 이야기꾼")
+    }
+
+    @Test
+    fun `자기 닉네임의 대소문자만 바꾸는 것은 허용한다`() {
+        val user = saveUser(nickname = "StoryTeller")
+
+        patch(user, """{"nickname":"STORYTELLER"}""")
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.nickname").isEqualTo("STORYTELLER")
+    }
+
+    @Test
+    fun `없는 프리셋 키는 400이다`() {
+        val user = saveUser()
+
+        patch(user, """{"profileImagePreset":"없는프리셋"}""").expectStatus().isBadRequest
+
+        assertThat(reload(user).profileThumbnailBase64).isEqualTo("seed-thumb")
+    }
+
+    @Test
+    fun `정지된 계정은 403이다`() {
+        val suspended = saveUser(status = UserStatus.SUSPENDED)
+
+        patch(suspended, """{"nickname":"바꾸고 싶다"}""").expectStatus().isForbidden
+
+        assertThat(reload(suspended).nickname).isEqualTo("몽환적인 이야기꾼")
+    }
+
+    @Test
+    fun `프리셋 목록은 키와 이미지 URL을 함께 돌려준다`() {
+        val user = saveUser()
+
+        restTestClient.get()
+            .uri(PRESETS_PATH)
+            .header("Authorization", bearer(user))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(profileImagePresetService.presetKeys().size)
+            .jsonPath("$[0].key").isNotEmpty
+            .jsonPath("$[0].imageUrl").isNotEmpty
+    }
+
+    @Test
+    fun `닉네임 변경은 삭제되지 않은 소유 스토리 네 건을 커밋 후 색인한다`() {
+        val user = saveUser(nickname = "기존작가")
+        val first = storyRepository.save(Story(userId = user.id, title = "공개 하나"))
+        val second = storyRepository.save(Story(userId = user.id, title = "공개 둘"))
+        val privateStory = storyRepository.save(Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
+        val draft = storyRepository.save(Story(userId = user.id, title = "초안", status = StoryStatus.DRAFT))
+        storyRepository.save(Story(userId = user.id, title = "삭제", deletedAt = Instant.now()))
+        storyRepository.save(Story(userId = saveUser(nickname = "다른작가").id, title = "다른 회원"))
+        storyRepository.save(Story(title = "게스트"))
+
+        patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
+
+        verify(indexer, timeout(3000)).index(first.id)
+        verify(indexer, timeout(3000)).index(second.id)
+        verify(indexer, timeout(3000)).index(privateStory.id)
+        verify(indexer, timeout(3000)).index(draft.id)
+        verify(indexer, after(200).times(4)).index(anyLong())
+        verifyNoMoreInteractions(indexer)
+        assertThat(reload(user).nickname).isEqualTo("새로운작가")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = [
+        "{\"nickname\":\"기존작가\"}",
+        "{\"profileImagePreset\":\"마법사\"}",
+        "{\"nickname\":\"기존작가\",\"profileImagePreset\":\"마법사\"}",
+    ])
+    fun `닉네임이 그대로면 색인을 요청하지 않는다`(body: String) {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, body).expectStatus().isOk
+
+        verify(indexer, after(200).never()).index(anyLong())
+    }
+
+    @Test
+    fun `대소문자만 바꿔도 표시 닉네임이 달라지므로 재색인한다`() {
+        val user = saveUser(nickname = "StoryTeller")
+        val story = storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, """{"nickname":"STORYTELLER"}""").expectStatus().isOk
+
+        verify(indexer, timeout(3000)).index(story.id)
+    }
+
+    @Test
+    fun `프로필 수정이 실패하면 닉네임과 색인을 반영하지 않는다`() {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        patch(user, """{"nickname":"새로운작가","profileImagePreset":"없는프리셋"}""")
+            .expectStatus().isBadRequest
+
+        assertThat(reload(user).nickname).isEqualTo("기존작가")
+        verify(indexer, after(200).never()).index(anyLong())
+    }
+
+    @Test
+    fun `탈퇴 행이 가진 닉네임은 프로필과 가입 발급에서 재사용할 수 있다`() {
+        userRepository.save(User(nickname = "재사용작가", status = UserStatus.DELETED, deletedAt = Instant.now()))
+        val user = saveUser(nickname = "현재작가")
+        assertThat(userRepository.existsByNicknameKey("재사용작가")).isFalse()
+        val generator = mock(com.knk.manyak.auth.social.NicknameGenerator::class.java)
+        `when`(generator.generate()).thenReturn(com.knk.manyak.auth.social.GeneratedNickname("재사용작가", "작가"))
+        val issuer = com.knk.manyak.auth.social.UniqueNicknameIssuer(generator, userRepository)
+        assertThat(issuer.issue().text).isEqualTo("재사용작가")
+        verify(generator, times(1)).generate()
+        patch(user, """{"nickname":"재사용작가"}""").expectStatus().isOk
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["탈퇴한사용자", "탈퇴한 사용자"])
+    fun `탈퇴 익명화 닉네임은 사용할 수 없다`(nickname: String) {
+        patch(saveUser(), """{"nickname":"$nickname"}""").expectStatus().isBadRequest
+    }
+
+    private companion object {
+        const val PATH = "/api/v1/users/me"
+        const val PRESETS_PATH = "/api/v1/profile-presets"
+    }
+}

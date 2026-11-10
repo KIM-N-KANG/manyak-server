@@ -1,7 +1,7 @@
 package com.knk.manyak.global.security
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.user.consent.UserConsentService
+import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository

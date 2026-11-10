@@ -4,7 +4,7 @@ import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.story.service.UsernameTokenRenderer.render
 import com.knk.manyak.chat.dto.ChangeChatSettingsResponse
 import com.knk.manyak.chat.dto.ChatPersonaResponse
-import com.knk.manyak.user.service.UserPersonaService
+import com.knk.manyak.auth.service.UserPersonaService
 import com.knk.manyak.chat.client.ChatTurnGenerationDeadlineException
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiException

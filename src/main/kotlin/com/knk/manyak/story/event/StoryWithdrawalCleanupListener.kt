@@ -2,7 +2,7 @@ package com.knk.manyak.story.event
 
 import com.knk.manyak.story.draft.StoryDraftRepository
 import com.knk.manyak.story.submission.StorySubmissionRepository
-import com.knk.manyak.user.event.UserWithdrawnEvent
+import com.knk.manyak.auth.event.UserWithdrawnEvent
 import org.springframework.context.event.EventListener
 import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component

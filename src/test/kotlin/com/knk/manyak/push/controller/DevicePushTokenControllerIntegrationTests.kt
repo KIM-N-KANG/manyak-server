@@ -9,7 +9,7 @@ import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.service.DevicePushTokenService
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
-import com.knk.manyak.user.service.UserWithdrawalService
+import com.knk.manyak.auth.service.UserWithdrawalService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

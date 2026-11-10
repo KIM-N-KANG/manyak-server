@@ -61,7 +61,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var recorder: DomainNotificationRecorder
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var promotion: PromotionPushService

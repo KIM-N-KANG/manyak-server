@@ -42,7 +42,7 @@ class SocialAccountRegistrarTest {
     private val profileImagePresetService: ProfileImagePresetService = mock(ProfileImagePresetService::class.java)
     private val registrar = SocialAccountRegistrar(
         userRepository, socialAccountRepository, uniqueNicknameIssuer, profileImagePresetService,
-        mock(com.knk.manyak.user.consent.UserConsentService::class.java),
+        mock(com.knk.manyak.auth.consent.UserConsentService::class.java),
     )
 
     @Test

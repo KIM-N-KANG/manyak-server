@@ -3,7 +3,6 @@ package com.knk.manyak.auth.consent
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.user.consent.UserConsentResponse
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 

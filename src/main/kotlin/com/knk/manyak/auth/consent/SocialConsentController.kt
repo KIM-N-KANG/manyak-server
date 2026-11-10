@@ -5,7 +5,6 @@ import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.observability.RequestCorrelationFilter
-import com.knk.manyak.user.consent.UserConsentRequest
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content

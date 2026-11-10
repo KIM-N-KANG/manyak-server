@@ -54,7 +54,7 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var eligibility: com.knk.manyak.admin.service.AdminEligibilityService
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = ["withdraw", "suspend", "revoke"])
@@ -83,7 +83,7 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
         assertThat(passedFilter).isTrue()
         // probe가 감사 직전에 쓴 nickname은 롤백되고, 자격 회수 트랜잭션의 값은 보존된다.
         assertThat(jdbc.queryForObject("SELECT nickname FROM users WHERE id = ?", String::class.java, user.id))
-            .isEqualTo(if (change == "withdraw") com.knk.manyak.user.service.UserWithdrawalService.ANONYMIZED_NICKNAME else "actor-race")
+            .isEqualTo(if (change == "withdraw") com.knk.manyak.auth.service.UserWithdrawalService.ANONYMIZED_NICKNAME else "actor-race")
         assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, user.id))
             .isEqualTo(when (change) { "withdraw" -> "DELETED"; "suspend" -> "SUSPENDED"; else -> "ACTIVE" })
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()

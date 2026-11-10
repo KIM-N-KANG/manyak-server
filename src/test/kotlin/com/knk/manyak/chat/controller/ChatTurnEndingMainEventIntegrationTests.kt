@@ -807,7 +807,7 @@ class ChatTurnEndingMainEventIntegrationTests : ScriptedAiIntegrationTest() {
         val share = chatService.createChatShare(chat.publicId.toString(), null)
         assertThat(chatQueryService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("민우의 끝")
     }
-    @Autowired private lateinit var personas: com.knk.manyak.user.service.UserPersonaService
+    @Autowired private lateinit var personas: com.knk.manyak.auth.service.UserPersonaService
     @Autowired private lateinit var storyService: com.knk.manyak.story.service.StoryService
 
     @Test fun `서로 다른 페르소나와 기본 주인공의 같은 엔딩은 원문 하나로 집계된다`() {
@@ -817,8 +817,8 @@ class ChatTurnEndingMainEventIntegrationTests : ScriptedAiIntegrationTest() {
         val member = userRepository.save(User(nickname = "플레이어"))
         jdbcTemplate.update("UPDATE stories SET user_id = ? WHERE id = ?", member.id, story.id)
         creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
-        val first = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("하늘", "항해사"))
-        val second = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("서윤", "탐험가"))
+        val first = personas.create(member.id, com.knk.manyak.auth.dto.CreateUserPersonaRequest("하늘", "항해사"))
+        val second = personas.create(member.id, com.knk.manyak.auth.dto.CreateUserPersonaRequest("서윤", "탐험가"))
         val token = jwtTokenProvider.issueAccessToken(member.publicId)
         for ((personaId, name) in listOf(first.id to "하늘", second.id to "서윤", null to "기본")) {
             val created = chatService.createChat(com.knk.manyak.chat.dto.CreateChatRequest(story.publicId.toString(), personaId = personaId), member.id)
