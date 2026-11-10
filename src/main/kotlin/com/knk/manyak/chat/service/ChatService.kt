@@ -63,10 +63,10 @@ import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.EndingSnapshot
-import com.knk.manyak.story.entity.MainEventSnapshot
-import com.knk.manyak.story.entity.StartSettingSnapshot
-import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.snapshot.EndingSnapshot
+import com.knk.manyak.story.snapshot.MainEventSnapshot
+import com.knk.manyak.story.snapshot.StartSettingSnapshot
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryEndingRepository

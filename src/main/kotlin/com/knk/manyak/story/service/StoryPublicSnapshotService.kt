@@ -1,17 +1,17 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.image.service.ImageModeration
-import com.knk.manyak.story.entity.CharacterImageSnapshot
-import com.knk.manyak.story.entity.EndingSnapshot
-import com.knk.manyak.story.entity.MainEventSnapshot
-import com.knk.manyak.story.entity.StartSettingSnapshot
+import com.knk.manyak.story.snapshot.CharacterImageSnapshot
+import com.knk.manyak.story.snapshot.EndingSnapshot
+import com.knk.manyak.story.snapshot.MainEventSnapshot
+import com.knk.manyak.story.snapshot.StartSettingSnapshot
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.entity.StorySetting
-import com.knk.manyak.story.entity.StorySettingsSnapshot
+import com.knk.manyak.story.snapshot.StorySettingsSnapshot
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository

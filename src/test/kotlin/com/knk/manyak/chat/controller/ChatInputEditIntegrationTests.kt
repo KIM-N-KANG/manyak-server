@@ -15,6 +15,7 @@ import com.knk.manyak.credit.service.*
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.EndingReachRecorder
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.ScriptedAi
 import com.knk.manyak.support.ScriptedAiIntegrationTest
