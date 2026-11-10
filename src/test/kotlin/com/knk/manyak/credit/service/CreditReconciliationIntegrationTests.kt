@@ -7,7 +7,9 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.port.StoryCreationProgress
+import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
@@ -44,6 +46,8 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var chargeReconciler: ChatChargeReconciler
     @Autowired private lateinit var storyCreationProgress: StoryCreationProgress
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
+    @Autowired private lateinit var lotRepository: CreditLotRepository
+    @Autowired private lateinit var walletRepository: CreditWalletRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
@@ -374,6 +378,93 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
         val result = serviceAsOf(future).reconcile()
 
         assertThat(result.refundsEmitted).isEqualTo(1)
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+    }
+
+    @Test
+    fun `모자란 환불은 그룹 최소 차감액으로 발행하고 환불 로트를 만든다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(1)
+        val refund = transactionRepository.findAll().single { it.reason == CreditReason.REFUND }
+        assertThat(refund.amount).isEqualTo(cost)
+        assertThat(refund.refType).isEqualTo("STORY")
+        assertThat(refund.refId).isEqualTo(sessionId)
+        assertThat(refund.idempotencyKey).isNull()
+        val lot = lotRepository.findByTransactionIdIn(listOf(refund.id)).single()
+        assertThat(lot.originalAmount).isEqualTo(cost)
+        assertThat(lot.remaining).isEqualTo(cost)
+        assertThat(lot.expiresAt).isNotNull()
+    }
+
+    @Test
+    fun `일부만 환불된 그룹은 부족분만 발행한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0) // 3차감 모두 미완료, 그중 1건만 즉시 환불됨
+        repeat(3) { chargeChat(userId, chatPk) }
+        inflightRefund(userId, "CHAT", chatPk)
+        val afterInflight = creditWalletService.balanceOf(userId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(2)
+        assertThat(refundCount(userId, "CHAT", chatPk)).isEqualTo(3)
+        assertThat(creditWalletService.balanceOf(userId)).isEqualTo(afterInflight + 2 * cost)
+    }
+
+    @Test
+    fun `지갑이 없는 회원의 그룹은 환불하지 않는다`() {
+        val userId = saveUser()
+
+        val emitted = creditWalletService.reconcileRefunds(userId, "STORY", 999_999L, cost, targetRefundCount = 1)
+
+        assertThat(emitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", 999_999L)).isEqualTo(0)
+    }
+
+    @Test
+    fun `두 대사가 같은 그룹을 동시에 보정해도 부족분만큼만 환불한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val runs = List(2) {
+                executor.submit(java.util.concurrent.Callable {
+                    check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                    creditWalletService.reconcileRefunds(userId, "STORY", sessionId, cost, targetRefundCount = 1)
+                })
+            }
+            start.countDown()
+            assertThat(runs.sumOf { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }).isEqualTo(1)
+        } finally {
+            executor.shutdownNow()
+        }
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+    }
+
+    @Test
+    fun `환불이 이미 충분한 그룹은 지갑을 잠그지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+        inflightRefund(userId, "STORY", sessionId) // 실패 뒤 정상 환불된 그룹: 있어야 할 환불 수 1을 이미 채움
+        org.mockito.Mockito.clearInvocations(walletRepository)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.groupsScanned).isEqualTo(1)
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        org.mockito.Mockito.verify(walletRepository, org.mockito.Mockito.never()).findByUserIdForUpdate(userId)
         assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
     }
 }

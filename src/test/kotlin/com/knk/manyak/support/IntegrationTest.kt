@@ -16,6 +16,7 @@ import com.knk.manyak.chat.service.ChatGenerationReceivers
 import com.knk.manyak.chat.service.ChatGenerationStore
 import com.knk.manyak.chat.service.ChatRealtimeImageService
 import com.knk.manyak.credit.repository.CreditPolicyRepository
+import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.credit.support.H2CreditAdminLocksConfig
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
@@ -93,6 +94,7 @@ import java.util.concurrent.Executor
         StoryMessageRepository::class,
         AdminAuditLogRepository::class,
         CreditPolicyRepository::class,
+        CreditWalletRepository::class,
         PushCampaignRepository::class,
         UserNotificationStore::class,
         DomainNotificationRecorder::class,

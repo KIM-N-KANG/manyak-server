@@ -559,6 +559,21 @@ class ChatStorySnapshotIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `비공개로 바뀐 스토리의 이용내역 스냅샷 제목도 이름 토큰을 주인공 이름으로 바꾼다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(
+            Story(userId = owner.id, title = "{username}이(가) 지킨 등대", protagonistName = "하늘", thumbnailImageKey = "thumb_0001"),
+        ).also(::publish)
+        val chat = createChat(story, reader)
+        chargeFor(chat, reader.id)
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(historyTitle(reader)).isEqualTo("하늘이 지킨 등대")
+    }
+
+    @Test
     fun `다시 공개하면 이용내역이 현재 제목으로 복귀한다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")

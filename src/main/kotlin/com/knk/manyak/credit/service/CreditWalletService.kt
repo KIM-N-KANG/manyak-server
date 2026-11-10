@@ -290,6 +290,10 @@ class CreditWalletService(
      * 재실행·동시 실행이 겹쳐도 락 안 재확인이 초과 환불을 막는다. 이미 충분하면(부족분 ≤ 0) 아무것도 하지 않는다.
      * in-flight 환불이 [reward]로 유니크 키를 쓰는 것과 달리, 이 사후 환불의 멱등성은 이 재확인이 보장한다(키 없음).
      *
+     * 잠그기 전에 같은 수를 한 번 먼저 세어 이미 충분하면 지갑을 잠그지 않는다(KNK-2066). 실패 뒤 정상 환불된 그룹은
+     * target이 영원히 양수라 대사마다 지갑을 잠갔다 풀기만 했다. 원장은 추가만 하고 지우거나 고치지 않으므로 환불 수는
+     * 줄지 않는다. 그래서 잠그기 전에 충분했던 그룹은 잠근 뒤에도 충분하고, 결과(발행 0)가 같다.
+     *
      * @return 이번에 추가한 REFUND 행 수(0이면 이미 충분).
      */
     @Transactional
@@ -302,6 +306,9 @@ class CreditWalletService(
     ): Int {
         require(unitAmount > 0) { "환불 단위액은 양수여야 합니다: $unitAmount" }
         if (targetRefundCount <= 0) return 0
+        if (transactionRepository.countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND) >=
+            targetRefundCount
+        ) return 0
         // 지갑이 없으면 차감된 적이 없다는 뜻이라 대사할 것도 없다.
         val wallet = walletRepository.findByUserIdForUpdate(userId) ?: return 0
         val currentRefunds = transactionRepository
