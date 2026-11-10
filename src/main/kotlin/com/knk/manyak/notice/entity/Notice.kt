@@ -5,13 +5,7 @@ import java.time.Instant
 import java.util.UUID
 
 enum class NoticeTag {
-    SERVICE, UPDATE, MAINTENANCE, EVENT, PROMOTION;
-
-    val pushKind: com.knk.manyak.push.dto.PushKind
-        get() = when (this) {
-            EVENT, PROMOTION -> com.knk.manyak.push.dto.PushKind.MARKETING
-            else -> com.knk.manyak.push.dto.PushKind.SERVICE
-        }
+    SERVICE, UPDATE, MAINTENANCE, EVENT, PROMOTION
 }
 
 enum class NoticeStatus { DRAFT, PUBLISHED }
