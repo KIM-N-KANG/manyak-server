@@ -5,6 +5,8 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.ProfileImagePresetService
+import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.search.service.StorySearchIndexer
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStatus
@@ -39,6 +41,7 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var indexer: StorySearchIndexer
+    @Autowired private lateinit var creditWalletService: CreditWalletService
 
     @BeforeEach
     fun setUp() {
@@ -102,6 +105,25 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         val reloaded = reload(user)
         assertThat(reloaded.nickname).isEqualTo("새로운작가")
         assertThat(reloaded.profileThumbnailBase64).isEqualTo("seed-thumb")
+    }
+
+    @Test
+    fun `프로필 수정 응답도 크레딧 잔액과 오늘 출석 여부를 담는다`() {
+        val user = saveUser()
+        patch(user, """{"nickname":"잔액확인작가"}""")
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(0)
+            .jsonPath("$.attendedToday").isEqualTo(false)
+
+        creditWalletService.reward(user.id, 300, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val attendance = restTestClient.post().uri("/api/v1/users/me/credits/attendance").header("Authorization", bearer(user))
+            .exchange().expectStatus().isOk.expectBody(Map::class.java).returnResult().responseBody!!
+        val expectedBalance = 300 + (attendance["amount"] as Number).toLong()
+
+        patch(user, """{"nickname":"출석확인작가"}""")
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.creditBalance").value<Number> { assertThat(it.toLong()).isEqualTo(expectedBalance) }
+            .jsonPath("$.attendedToday").isEqualTo(true)
     }
 
     @Test
