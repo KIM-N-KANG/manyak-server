@@ -1,33 +1,27 @@
 package com.knk.manyak.chat.migration
 
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 
 /** V104의 실제 채팅을 만든 뒤 V105 이후 마이그레이션을 적용한다. H2 ddl-auto로 검증할 수 없는 경로다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatModelMigrationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "chat-model-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private var chatId = 0L
 
     @BeforeAll fun migrate() {
-        pg.start()
-        val datasource = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "chat-model-test")
+        val datasource = SharedPostgres.database()
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").target("104").load().migrate()
         jdbc = JdbcTemplate(datasource)
         val story = jdbc.queryForObject("INSERT INTO stories(title) VALUES ('기존 채팅 검증') RETURNING id", Long::class.java)!!
         chatId = jdbc.queryForObject("INSERT INTO story_chats(story_id) VALUES (?) RETURNING id", Long::class.java, story)!!
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").load().migrate()
     }
-    @AfterAll fun stop() { pg.stop() }
 
     @Test fun `출력 분량은 기존 행과 구버전 컬럼 생략 삽입에 false를 채우고 null을 거절한다`() {
         assertThat(jdbc.queryForObject("SELECT long_response FROM story_chats WHERE id = ?", Boolean::class.java, chatId)).isFalse()

@@ -1,5 +1,6 @@
 package com.knk.manyak.push.outbox
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.event.StoryCompletedEvent
@@ -15,12 +16,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.core.env.MapPropertySource
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.annotation.EnableTransactionManagement
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.kafka.KafkaContainer
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.*
@@ -31,9 +29,6 @@ import java.util.concurrent.*
 /** 테스트 전용 컨테이너만 사용한다. 앱의 datasource/Flyway 프로파일 격리는 변경하지 않는다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PushOutboxPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "outbox-test")
-        .withEnv("POSTGRES_DB", "outbox").withExposedPorts(5432)
-        .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private val now = Instant.parse("2026-09-25T00:00:00Z")
     private val mapper = jacksonObjectMapper()
     private lateinit var jdbc: JdbcTemplate
@@ -44,8 +39,7 @@ class PushOutboxPostgresTests {
     private val event = StoryCompletedEvent(7, UUID.randomUUID(), UUID.randomUUID().toString(), "완성 제목")
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/outbox", "postgres", "outbox-test")
+        val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         val migration = java.io.File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText()
         jdbc.execute(migration)
@@ -65,7 +59,7 @@ class PushOutboxPostgresTests {
         context.refresh()
         store = context.getBean(PushOutboxStore::class.java)
     }
-    @AfterAll fun stop() { if (::context.isInitialized) context.close(); pg.stop() }
+    @AfterAll fun stop() { if (::context.isInitialized) context.close() }
     @BeforeEach fun clean() { jdbc.update("DELETE FROM push_outbox"); MDC.clear() }
     @AfterEach fun clearMdc() { MDC.clear() }
     private fun record() { tx.executeWithoutResult { context.publishEvent(event) } }

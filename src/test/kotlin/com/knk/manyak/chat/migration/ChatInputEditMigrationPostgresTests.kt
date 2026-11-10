@@ -1,24 +1,19 @@
 package com.knk.manyak.chat.migration
 
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatInputEditMigrationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "input-edit-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private var chat = 0L
     @BeforeAll fun migrate() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "input-edit-test")
+        val ds = SharedPostgres.database()
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").target("122").load().migrate()
         jdbc = JdbcTemplate(ds)
         val story = jdbc.queryForObject("INSERT INTO stories(title) VALUES ('입력 수정 검증') RETURNING id", Long::class.java)!!
@@ -26,7 +21,6 @@ class ChatInputEditMigrationPostgresTests {
         jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order) VALUES (?,'ASSISTANT','기존 응답',1)", chat)
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
     }
-    @AfterAll fun stop() { pg.stop() }
     @Test fun `기존 메시지는 보이고 숨김 뒤 같은 순서 삽입만 허용한다`() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM story_messages WHERE chat_id=? AND hidden_at IS NULL", Int::class.java, chat)).isEqualTo(1)
         assertThatThrownBy { jdbc.update("INSERT INTO story_messages(chat_id,role,content,message_order) VALUES (?,'ASSISTANT','중복',1)", chat) }.isInstanceOf(DataIntegrityViolationException::class.java)

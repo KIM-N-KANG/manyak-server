@@ -1,13 +1,11 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.io.File
 import java.time.Instant
 import java.util.UUID
@@ -16,16 +14,13 @@ import java.util.concurrent.CompletableFuture
 /** H2가 검증하지 않는 V111 제약·인덱스·동시 충돌을 격리된 실제 PostgreSQL에서 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class UserNotificationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "inbox-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private lateinit var store: UserNotificationStore
     private lateinit var tx: TransactionTemplate
     private val now = Instant.parse("2026-10-24T00:00:00Z")
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "inbox-test")
+        val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         tx = TransactionTemplate(DataSourceTransactionManager(ds))
         jdbc.execute("""CREATE TABLE users(id BIGINT PRIMARY KEY, public_id UUID NOT NULL, status TEXT NOT NULL,
@@ -40,7 +35,6 @@ class UserNotificationPostgresTests {
         jdbc.execute(File("src/main/resources/db/migration/V114__credit_expiry_notification_type.sql").readText())
         store = UserNotificationStore(jdbc)
     }
-    @AfterAll fun stop() { pg.stop() }
     @BeforeEach fun clean() {
         jdbc.update("DELETE FROM users")
         jdbc.update("DELETE FROM credit_transactions")

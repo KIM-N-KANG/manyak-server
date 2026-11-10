@@ -1,13 +1,11 @@
 package com.knk.manyak.push.delivery
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.repository.PushDeliveryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -16,18 +14,14 @@ import java.util.concurrent.CompletableFuture
 /** 앱 datasource와 별개인 폐기 가능한 PostgreSQL에서 V101과 실제 집계 SQL을 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PushDeliveryPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "delivery-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private lateinit var repository: PushDeliveryRepository
     @BeforeAll fun start() {
-        pg.start()
-        jdbc = JdbcTemplate(DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "delivery-test"))
+        jdbc = JdbcTemplate(SharedPostgres.database())
         jdbc.execute("CREATE TABLE users(id BIGINT PRIMARY KEY); CREATE TABLE push_campaigns(id BIGINT PRIMARY KEY)")
         jdbc.execute(java.io.File("src/main/resources/db/migration/V101__create_push_delivery_results.sql").readText())
         repository = PushDeliveryRepository(jdbc)
     }
-    @AfterAll fun stop() { pg.stop() }
     @BeforeEach fun clean() { jdbc.update("DELETE FROM push_delivery_results") }
     private fun report(id: String, at: String = "2026-10-20T15:00:00Z") = PushDeliveryReportRequest(id,
         PushDeliveryType.NOTICE, PushKind.SERVICE, UUID.randomUUID(), outcome = PushDeliveryOutcome.DELIVERED,
