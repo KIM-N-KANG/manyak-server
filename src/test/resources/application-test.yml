@@ -1,16 +1,27 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:manyak-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    # 테스트 컨텍스트마다 자기 인메모리 H2를 쓴다(KNK-2070). url을 두지 않으면 Spring Boot가 내장 DB URL
+    # jdbc:h2:mem:<UUID>;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE를 만든다. UUID는 컨텍스트의 DataSourceProperties
+    # 빈이 한 번 만들어 들고 있으므로, 같은 컨텍스트 안의 모든 빈은 같은 DB를 본다(${random.uuid}는 읽을 때마다 값이
+    # 바뀌어 쓰지 않는다). 설정 파일 값이라 컨텍스트 캐시 키는 늘지 않는다.
+    # 예전처럼 모든 컨텍스트가 jdbc:h2:mem:manyak-test 하나를 공유하면, H2의 IN 체크 제약이 테이블을 만든 커넥션에
+    # 묶이는 탓에 마지막으로 스키마를 만든 컨텍스트의 커넥션 하나가 닫히는 순간 모든 컨텍스트의 insert가
+    # "Check constraint invalid"(원인 "The database has been closed")로 깨졌다(KNK-2055 간헐 실패).
+    # URL을 직접 지정한 조합(ChatCompactIntegrationTest 등)은 그 URL을 그대로 쓴다.
+    generate-unique-name: true
     username: sa
     password:
     driver-class-name: org.h2.Driver
+    hikari:
+      # URL 대신 연결 속성으로 H2 호환 설정을 넘긴다(H2는 연결 속성으로 받은 설정도 URL 옵션과 같게 적용한다).
+      data-source-properties:
+        MODE: PostgreSQL
+        DATABASE_TO_LOWER: "TRUE"
+        DEFAULT_NULL_ORDERING: HIGH
   jpa:
     hibernate:
-      # create-drop이 아니라 create다. 컨텍스트가 캐시에서 축출돼 닫힐 때 create-drop은 종료 시 DROP을 돌리는데,
-      # 모든 컨텍스트가 같은 H2(jdbc:h2:mem:manyak-test)를 공유하므로 그 DROP이 아직 쓰는 컨텍스트의 스키마까지
-      # 통째로 떨어뜨린다. DatabaseCleaner는 information_schema를 읽어 지우므로 테이블이 0개면 조용히 통과하고,
-      # 증상은 한참 뒤 "Table not found"로 드러난다(무작위 클래스 순서에서 재현, KNK-686).
-      # create는 부팅 시 drop+create를 그대로 하므로 스키마 초기화는 동일하고, 종료 시 DROP만 사라진다.
+      # create-drop이 아니라 create다(KNK-686). 컨텍스트마다 DB가 따로라 종료 시 DROP이 남의 스키마를 지우는 일은
+      # 이제 없지만, 바꿀 이유가 없어 부팅 시 drop+create만 하는 create를 유지한다.
       ddl-auto: create
     open-in-view: false
   flyway:
