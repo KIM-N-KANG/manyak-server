@@ -39,14 +39,7 @@ class UserConsentService(
 
     /** 인증 전 조회와 서버 게이트는 계정 상태나 로그인 시각을 쓰지 않는다. */
     @Transactional(readOnly = true)
-    fun authenticationStatus(userId: Long?): UserConsentResponse {
-        fun status(type: ConsentDocType): ConsentStatusResponse {
-            val version = requiredVersion(type)
-            return ConsentStatusResponse(version, userId == null ||
-                !userConsentRepository.existsByUserIdAndDocTypeAndVersion(userId, type, version))
-        }
-        return UserConsentResponse(status(ConsentDocType.TERMS), status(ConsentDocType.PRIVACY), status(ConsentDocType.AGE14))
-    }
+    fun authenticationStatus(userId: Long?): UserConsentResponse = statusOf(userId)
 
     fun validateVersions(request: UserConsentRequest) {
         submitted(request).forEach { (type, version) ->
@@ -99,8 +92,10 @@ class UserConsentService(
         ConsentDocType.AGE14 -> AGE14_VERSION
     }
 
-    private fun statusOf(userId: Long): UserConsentResponse {
-        val agreed = userConsentRepository.findAllByUserId(userId).map { it.docType to it.version }.toSet()
+    /** 회원이 없으면 조회 없이 전부 필요하다. 있으면 동의 행을 한 번에 읽어 문서별 현행 버전 행 유무로 판정한다. */
+    private fun statusOf(userId: Long?): UserConsentResponse {
+        val agreed = userId?.let { id -> userConsentRepository.findAllByUserId(id).map { it.docType to it.version }.toSet() }
+            .orEmpty()
         fun status(type: ConsentDocType): ConsentStatusResponse {
             val version = requiredVersion(type)
             return ConsentStatusResponse(version, (type to version) !in agreed)
