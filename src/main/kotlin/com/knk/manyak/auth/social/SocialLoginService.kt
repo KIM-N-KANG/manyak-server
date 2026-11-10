@@ -4,13 +4,9 @@ import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.port.SignupCreditPort
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
-import com.knk.manyak.credit.entity.CreditReason
-import com.knk.manyak.credit.service.CreditPolicyKey
-import com.knk.manyak.credit.service.CreditPolicyService
-import com.knk.manyak.credit.service.CreditWalletService
-import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import org.springframework.dao.DataIntegrityViolationException
@@ -48,12 +44,10 @@ class SocialLoginService(
     private val verifiers: Map<SocialProvider, SocialIdTokenVerifier>,
     private val registrar: SocialAccountRegistrar,
     private val authTokenService: AuthTokenService,
-    private val creditWalletService: CreditWalletService,
-    private val guestTrialLimitService: GuestTrialLimitService,
+    // 체험 스냅샷과 가입 보상(지급량과 사유는 credit이 정한다, KNK-2064).
+    private val signupCredit: SignupCreditPort,
     private val userRepository: UserRepository,
     private val serverAnalytics: ServerAnalytics,
-    // 가입 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
-    private val creditPolicyService: CreditPolicyService,
 ) {
 
     fun login(
@@ -105,7 +99,7 @@ class SocialLoginService(
         // 이전 계정이 회원 체험을 이미 썼는지 알 방법이 없고, 안 쓴 경우까지 부여하면 탈퇴·재가입 반복으로
         // 무료 스토리 1편 + 채팅 5턴을 무한히 얻는다. 과소 부여가 파밍 허용보다 안전하다.
         val snapshotDeviceId = effectiveDeviceId.takeIf { user.rejoinedAt == null }
-        if (user.memberTrialSeededAt == null && guestTrialLimitService.snapshotTrialAtSignup(user.id, snapshotDeviceId)) {
+        if (user.memberTrialSeededAt == null && signupCredit.snapshotTrialAtSignup(user.id, snapshotDeviceId)) {
             userRepository.markMemberTrialSeeded(user.id, Instant.now())
         }
         // 매 로그인마다 시도하되 멱등 키로 회원당 1회만 적립한다(생성 시 유실된 보상까지 자가 복구).
@@ -172,11 +166,6 @@ class SocialLoginService(
      * 기존 회원·순수 신규 가입은 NULL이라 키 문자열이 종전(`signup:{id}`)과 같아 원장 호환이 유지된다.
      */
     private fun rewardSignup(user: User) {
-        creditWalletService.reward(
-            user.id,
-            creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD),
-            CreditReason.SIGNUP_REWARD,
-            "signup:${user.rewardIdentityUserId ?: user.id}",
-        )
+        signupCredit.rewardSignup(user.id, "signup:${user.rewardIdentityUserId ?: user.id}")
     }
 }

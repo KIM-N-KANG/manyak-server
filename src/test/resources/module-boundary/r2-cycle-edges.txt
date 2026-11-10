@@ -3,7 +3,6 @@ admin -> credit
 admin -> push
 admin -> story
 auth -> admin
-auth -> credit
 auth -> search
 auth -> story
 chat -> admin

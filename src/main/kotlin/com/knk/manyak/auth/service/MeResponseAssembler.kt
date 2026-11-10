@@ -3,8 +3,7 @@ package com.knk.manyak.auth.service
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.link.AccountLinkService
-import com.knk.manyak.credit.service.AttendanceRewardService
-import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.auth.port.MeCreditSummaryPort
 import org.springframework.stereotype.Component
 
 /**
@@ -15,8 +14,7 @@ import org.springframework.stereotype.Component
  */
 @Component
 class MeResponseAssembler(
-    private val creditWalletService: CreditWalletService,
-    private val attendanceRewardService: AttendanceRewardService,
+    private val creditSummary: MeCreditSummaryPort,
     private val accountLinkService: AccountLinkService,
 ) {
 
@@ -28,8 +26,8 @@ class MeResponseAssembler(
         profileThumbnailBase64 = user.profileThumbnailBase64,
         status = user.status,
         // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
-        creditBalance = creditWalletService.balanceOf(user.id),
-        attendedToday = attendanceRewardService.hasAttendedToday(user.id),
+        creditBalance = creditSummary.balanceOf(user.id),
+        attendedToday = creditSummary.hasAttendedToday(user.id),
         // 계정 연동 상태(KNK-739). 전용 조회 엔드포인트를 두지 않고 이 응답 하나로 노출한다(왕복을 늘리지 않는다).
         linkedProviders = accountLinkService.linkedProviders(user.id),
     )
