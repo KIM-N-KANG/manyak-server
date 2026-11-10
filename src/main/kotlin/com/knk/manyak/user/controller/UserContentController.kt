@@ -1,7 +1,7 @@
 package com.knk.manyak.user.controller
 
 import com.knk.manyak.chat.dto.ChatSummaryResponse
-import com.knk.manyak.chat.service.ChatService
+import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.story.dto.StorySummaryResponse
@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/users/me")
 class UserContentController(
     private val storyService: StoryService,
-    private val chatService: ChatService,
+    private val chatQueryService: ChatQueryService,
     private val userWithdrawalService: UserWithdrawalService,
 ) {
 
@@ -115,7 +115,7 @@ class UserContentController(
         @Parameter(description = "최대 개수(기본 100, 최대 100)")
         @RequestParam(defaultValue = "100") limit: Int,
     ): List<ChatSummaryResponse> =
-        chatService.getMyChats(requireUser(userId), limit.coerceIn(1, MAX_LIMIT))
+        chatQueryService.getMyChats(requireUser(userId), limit.coerceIn(1, MAX_LIMIT))
 
     private companion object {
         const val MAX_LIMIT = 100

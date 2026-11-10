@@ -72,6 +72,7 @@ class ChatInputEditIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired lateinit var reconciliation: CreditReconciliationService
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var service: ChatService
+    @Autowired lateinit var chatQueryService: ChatQueryService
     @Autowired lateinit var persister: ChatTurnPersister
     @Autowired lateinit var generation: ChatGenerationStore
     @Autowired lateinit var compactService: ChatCompactService
@@ -204,7 +205,7 @@ class ChatInputEditIntegrationTests : ScriptedAiIntegrationTest() {
     @Test fun `수정 키는 EDIT를 노출하고 이어쓰기 재생성 수정의 중복 실행을 거절한다`() {
         val f = fixture()
         ai.beforeResult = {
-            val state = service.getChatDetail(f.chat.publicId.toString(), null).generatingTurn!!
+            val state = chatQueryService.getChatDetail(f.chat.publicId.toString(), null).generatingTurn!!
             assertThat(state.type).isEqualTo("EDIT"); assertThat(state.targetTurnId).isEqualTo(f.turns[2].id)
             assertThatThrownBy { service.streamChatTurn(f.chat.publicId.toString(), ContinueChatRequest("다른 입력"), deviceId = "different") }.hasMessageContaining("409")
             assertThatThrownBy { service.regenerateChatTurn(f.chat.publicId.toString(), RegenerateChatRequest(f.turns.last().id), deviceId = "different") }.hasMessageContaining("409")
@@ -229,10 +230,10 @@ class ChatInputEditIntegrationTests : ScriptedAiIntegrationTest() {
         val f = fixture()
         val share = service.createChatShare(f.chat.publicId.toString(), null)
         edit(f)
-        val detail = service.getChatDetail(f.chat.publicId.toString(), null)
+        val detail = chatQueryService.getChatDetail(f.chat.publicId.toString(), null)
         assertThat(detail.turns.map { it.id }).containsExactly(f.turns[0].id, f.turns[1].id, visible(f).last().id)
-        assertThat(service.getChatShare(share.shareId, null).turns.map { it.aiOutput }).doesNotContain("a3", "a4", "a5")
-        assertThat(service.getChatsByIds(BatchChatRequest(listOf(f.chat.publicId.toString())), null).single().lastStoryPreview).contains("수정 응답")
+        assertThat(chatQueryService.getChatShare(share.shareId, null).turns.map { it.aiOutput }).doesNotContain("a3", "a4", "a5")
+        assertThat(chatQueryService.getChatsByIds(BatchChatRequest(listOf(f.chat.publicId.toString())), null).single().lastStoryPreview).contains("수정 응답")
         val latest = messages.findLatestMessagesByChatIdsAndRole(listOf(f.chat.id), MessageRole.ASSISTANT).single()
         assertThat(latest.content).isEqualTo("수정 응답")
         service.generateChoices(f.chat.publicId.toString(), latest.id)

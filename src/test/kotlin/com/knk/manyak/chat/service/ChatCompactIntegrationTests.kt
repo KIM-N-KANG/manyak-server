@@ -108,6 +108,7 @@ class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
     @Autowired lateinit var transactions: CreditTransactionRepository
     @Autowired lateinit var generationStore: ChatGenerationStore
     @Autowired lateinit var chatService: ChatService
+    @Autowired lateinit var chatQueryService: ChatQueryService
     @Autowired lateinit var service: ChatCompactService
     @Autowired lateinit var summaries: StoryChatSummaryRepository
     @Autowired lateinit var chats: StoryChatRepository
@@ -212,19 +213,19 @@ class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
         val chat = fixture(10)
         val other = fixture(5)
         val ids = listOf(chat.publicId.toString(), other.publicId.toString())
-        val beforeOrder = chatService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }
+        val beforeOrder = chatQueryService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }
         val share = chatService.createChatShare(chat.publicId.toString(), null)
         service.compact(event(chat, 10))
         val responses = listOf(
-            chatService.getChatDetail(chat.publicId.toString(), null),
-            chatService.getChatsByIds(BatchChatRequest(ids), null),
-            chatService.getChatShare(share.shareId, null),
+            chatQueryService.getChatDetail(chat.publicId.toString(), null),
+            chatQueryService.getChatsByIds(BatchChatRequest(ids), null),
+            chatQueryService.getChatShare(share.shareId, null),
         )
         responses.forEach {
             val json = JsonMapper().writeValueAsString(it)
             assertThat(json).doesNotContain("새 요약", "summaryThroughTurn", "summary_through_turn", "\"summary\"")
         }
-        assertThat(chatService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }).isEqualTo(beforeOrder)
+        assertThat(chatQueryService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }).isEqualTo(beforeOrder)
     }
 
     @Test fun `요약 저장은 메시지와 갱신 시각을 유지하고 호출 기록과 로그를 남긴다`() {
