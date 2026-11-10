@@ -1,4 +1,4 @@
-package com.knk.manyak.user.draft
+package com.knk.manyak.story.draft
 
 import jakarta.persistence.*
 import org.hibernate.annotations.JdbcTypeCode

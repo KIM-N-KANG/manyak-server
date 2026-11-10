@@ -157,6 +157,8 @@ com.knk.manyak.search.service.StorySearchService -> com.knk.manyak.story.reposit
 com.knk.manyak.story.admin.AdminOriginalService -> com.knk.manyak.admin.entity.AdminAuditAction
 com.knk.manyak.story.admin.AdminOriginalService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.admin.AdminOriginalService -> com.knk.manyak.auth.repository.UserRepository
+com.knk.manyak.story.draft.StoryDraftService -> com.knk.manyak.auth.entity.User
+com.knk.manyak.story.draft.StoryDraftService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.home.HomeSectionService -> com.knk.manyak.admin.entity.AdminAuditAction
 com.knk.manyak.story.service.OfficialStoryAccount -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.OfficialStoryAccount -> com.knk.manyak.auth.repository.UserRepository
@@ -164,7 +166,6 @@ com.knk.manyak.story.service.SimpleStoryCreationService -> com.knk.manyak.credit
 com.knk.manyak.story.service.StoryAuthorResolver -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.StoryAuthorResolver -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.service.StoryCreationRequestRecorder -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.story.service.StoryCreationRequestRecorder -> com.knk.manyak.user.draft.StoryDraftRepository
 com.knk.manyak.story.service.StoryImageAccess -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.StoryImageAccess -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.service.StoryService -> com.knk.manyak.auth.entity.User
@@ -182,7 +183,6 @@ com.knk.manyak.story.submission.ModerationPushListener -> com.knk.manyak.auth.re
 com.knk.manyak.story.submission.StorySubmissionService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.submission.StorySubmissionService -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.story.submission.StorySubmissionService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.story.submission.StorySubmissionService -> com.knk.manyak.user.draft.StoryDraftRepository
 com.knk.manyak.story.submission.StoryTakedownOutboxListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.submission.StoryTakedownOutboxListener -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.submission.StoryTakedownOutboxListener -> com.knk.manyak.push.outbox.PushOutboxStore
@@ -198,12 +198,6 @@ com.knk.manyak.story.submission.SubmissionTransactions -> com.knk.manyak.auth.re
 com.knk.manyak.user.consent.UserConsentService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.user.consent.UserConsentService -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.user.consent.UserConsentService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.auth.entity.User
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.story.entity.StoryCreationRequest
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.story.entity.StoryCreationRequestStatus
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.story.entity.StoryCreationStage
-com.knk.manyak.user.draft.StoryDraftService -> com.knk.manyak.story.repository.StoryCreationRequestRepository
 com.knk.manyak.user.service.AdminSuspensionResponse -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.user.service.AdminSuspensionService -> com.knk.manyak.admin.entity.AdminAuditAction
 com.knk.manyak.user.service.AdminSuspensionService -> com.knk.manyak.admin.repository.AdminAccountRepository
@@ -225,4 +219,5 @@ com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.reposit
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.push.inbox.UserNotificationStore
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.push.repository.DevicePushTokenRepository
+com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.story.draft.StoryDraftRepository
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.story.submission.StorySubmissionRepository

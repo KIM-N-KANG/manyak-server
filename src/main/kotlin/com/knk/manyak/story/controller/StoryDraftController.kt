@@ -1,8 +1,8 @@
-package com.knk.manyak.user.controller
+package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.security.CurrentUserId
-import com.knk.manyak.user.draft.PutStoryDraftRequest
-import com.knk.manyak.user.draft.StoryDraftService
+import com.knk.manyak.story.draft.PutStoryDraftRequest
+import com.knk.manyak.story.draft.StoryDraftService
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException

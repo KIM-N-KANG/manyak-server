@@ -27,7 +27,7 @@ class StorySubmissionService(
     private val mapper: ObjectMapper,
     private val suspension: SuspensionGuard,
     private val genres: GenreInputValidator,
-    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
 ) {
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
