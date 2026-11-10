@@ -17,7 +17,6 @@ credit -> chat
 credit -> story
 notice -> admin
 notice -> auth
-notice -> push
 push -> admin
 push -> auth
 push -> credit
