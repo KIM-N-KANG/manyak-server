@@ -622,6 +622,19 @@ class ChatStorySnapshotIntegrationTests : IntegrationTest() {
         assertThat(detailTitle(chat, owner)).isEqualTo("바뀐 제목")
     }
 
+    @Test
+    fun `스토리가 삭제되면 채팅 상세는 스냅샷 제목을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+
+        // 상세는 삭제된 스토리 행도 읽어(findById는 삭제를 거르지 않는다) 게이트가 스냅샷으로 보낸다.
+        deleteAndRename(story, "바뀐 제목")
+
+        assertThat(detailTitle(chat, reader)).isEqualTo("원래 제목")
+    }
+
     // ---- 공유 열람 ----
 
     @Test

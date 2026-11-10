@@ -437,6 +437,22 @@ class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
         assertThat(ai.requests).isEmpty()
         assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
     }
+    @Test fun `요약 무효화 로그의 story_id는 스토리 공개 식별자다`() {
+        val chat = fixture(15, 10)
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 15, summary = "15 요약"))
+        regenerate(chat)
+        val storyPublicId = stories.findById(chat.storyId).orElseThrow().publicId
+        assertThat(log.entries.single { it.first == "chat_compact_invalidated" }.second["story_id"]).isEqualTo(storyPublicId.toString())
+    }
+    @Test fun `스토리 행이 없으면 요약은 AI를 부르지 않고 START_FAILED를 남긴다`() {
+        val chat = fixture(10)
+        // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
+        jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, chat.id)
+        service.compact(event(chat))
+        assertThat(ai.requests).isEmpty()
+        assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
+        assertThat(currentSummary(chat)).isNull()
+    }
     @Test fun `요약 저장과 설정 변경은 서로의 값을 유지한다`() {
         val chat = fixture()
         val locked = CountDownLatch(1)
