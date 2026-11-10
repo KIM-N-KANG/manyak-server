@@ -16,10 +16,11 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.story.entity.EndingSnapshot
-import com.knk.manyak.story.entity.MainEventSnapshot
+import com.knk.manyak.story.snapshot.EndingSnapshot
+import com.knk.manyak.story.snapshot.MainEventSnapshot
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
+import com.knk.manyak.story.service.EndingReachRecorder
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus

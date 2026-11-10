@@ -1,4 +1,4 @@
-package com.knk.manyak.chat.service
+package com.knk.manyak.story.service
 
 import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional
  *
  * 그래서 도달 기록만 새 트랜잭션으로 떼어, 유니크 위반이 나면 이 트랜잭션만 롤백되고 호출부(턴 저장)는 유지되게 한다.
  * 위반 예외는 호출부가 잡아 멱등 결과로 흡수한다(다른 트랜잭션이 이미 같은 도달을 기록함).
+ *
+ * 호출부는 chat의 턴 저장(`ChatTurnPersister`)이지만 `user_story_ending_reaches`가 story 소유 테이블이라 story 모듈에 둔다
+ * (KNK-2055). 별도 빈이어야 REQUIRES_NEW가 프록시를 타므로 호출부 클래스에 합치지 않는다.
  */
 @Component
 class EndingReachRecorder(

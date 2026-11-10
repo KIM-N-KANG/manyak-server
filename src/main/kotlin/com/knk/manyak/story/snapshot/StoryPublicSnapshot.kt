@@ -1,11 +1,11 @@
-package com.knk.manyak.story.entity
+package com.knk.manyak.story.snapshot
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 /**
  * 스토리가 **마지막으로 공개(PUBLISHED∧PUBLIC)였던 시점**의 표시·생성 재료(KNK-1065).
  *
- * `story_public_snapshots.snapshot`(jsonb)에 통째로 담긴다([StoryPublicSnapshotRow]). 읽을 수 없는 스토리를 참조하는 채팅 경로
+ * `story_public_snapshots.snapshot`(jsonb)에 통째로 담긴다([com.knk.manyak.story.entity.StoryPublicSnapshotRow]). 읽을 수 없는 스토리를 참조하는 채팅 경로
  * (서재·이용내역·상세·공유·AI 턴 요청 조립)는 스토리의 현재 값 대신 이 스냅샷을 쓴다 — 제작자가 스토리를
  * 감추고 뜯어고치는 중이면 그 개작이 이미 채팅을 시작한 독자에게, 또 생성 결과를 통해 새어 나가기 때문이다.
  *

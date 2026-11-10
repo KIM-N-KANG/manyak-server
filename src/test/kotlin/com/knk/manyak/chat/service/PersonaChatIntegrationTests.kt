@@ -7,6 +7,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.story.service.StoryPublicSnapshotService
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.user.dto.*

@@ -20,7 +20,7 @@ import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
-import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
