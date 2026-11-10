@@ -79,8 +79,10 @@ class UserWithdrawalService(
             social.deletedAt = now
             social.email = null
         }
-        // 다른 모듈의 회원 데이터 삭제. 동기 리스너가 이 트랜잭션 안에서 story(제출본 → 초안) → push(토큰 → 알림 내역)
-        // 순서로 지우고, 실패하면 예외가 여기로 전파돼 탈퇴 전체가 롤백된다.
+        // 다른 모듈의 회원 데이터 삭제. 동기 리스너가 이 트랜잭션 안에서 story(제출본, 초안) 다음 push(토큰, 알림 내역)
+        // 순서로 지우고, 실패하면 예외가 여기로 전파돼 탈퇴 전체가 롤백된다. 알림 내역을 제출본보다 뒤에 지우는 순서는
+        // 검수 완료 알림 기록과 겹칠 때 회원 행 잠금(MODERATION 5-2-1)에 이은 2차 방어다(NOTIFICATION 4-1-19 "탈퇴와의 순서",
+        // [UserWithdrawnEvent] 참조).
         // push 리스너가 flush+clear 하므로 엔티티 수정은 모두 이 앞에서 한다(뒤에서 바꾼 user·social 변경은 조용히 유실된다).
         events.publishEvent(UserWithdrawnEvent(id))
         refreshTokenStore.revokeAllForUser(id)
