@@ -5,38 +5,14 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
-import jakarta.validation.constraints.Size
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.dto.StoryEditFormResponse
 import com.knk.manyak.story.entity.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 import java.time.LocalDate
-import java.util.Locale
 import java.util.UUID
 
-open class AdminSearchRequest : AdminListRequest() {
-    @field:Size(min = 1, max = 50) var q: String? = null
-    var from: String? = null
-    var to: String? = null
-    fun normalizedQuery(): String? = q?.let {
-        val normalized = it.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
-        if (normalized.isEmpty() || it.length > 50) badAdminQuery("검색어는 1~50자여야 합니다.")
-        normalized
-    }
-}
-open class AdminAiRequest : AdminSearchRequest() {
-    var aiFrom: String? = null
-    var aiTo: String? = null
-    var aiFeature: String? = null
-    var aiStatus: String? = null
-    var hasLatency: Boolean? = null
-    fun validateAi(features: Set<String>) {
-        if (aiFeature != null && aiFeature !in features) badAdminQuery("AI 기능이 올바르지 않습니다.")
-        if (aiStatus != null && aiStatus !in setOf("SUCCEEDED", "FAILED", "STARTED", "FINISHED")) badAdminQuery("AI 상태가 올바르지 않습니다.")
-        AdminDateRange.of(aiFrom, aiTo)
-    }
-}
 class AdminStoriesRequest : AdminAiRequest() {
     var scope: String? = null
     var genre: String? = null
