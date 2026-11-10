@@ -25,6 +25,7 @@ import com.knk.manyak.chat.entity.ChatStatus
 import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryChatShare
+import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatShareRepository
 import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -260,8 +261,7 @@ class ChatService(
         streamChatTurn(chatId, ContinueChatRequest(userInput = request.userInput, userSource = request.userSource,
             realtimeImage = request.realtimeImage), userId, deviceId, editTurnId = request.turnId)
 
-    private fun resolveEditTurnNumber(chatId: Long, turnId: Long): Int {
-        val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatId)
+    private fun resolveEditTurnNumber(messages: List<StoryMessage>, turnId: Long): Int {
         val assistants = messages.filter { it.role == MessageRole.ASSISTANT }
         val index = assistants.indexOfFirst { it.id == turnId }
         if (index < 0 || messages.none { it.role == MessageRole.USER && it.messageOrder < assistants[index].messageOrder }) {
@@ -289,7 +289,7 @@ class ChatService(
         // 이 검사가 없으면 토큰을 빼 게스트로 위장해 소유 채팅을 무료로 이어써 선차감을 우회할 수 있다(Codex P1).
         // 게스트 채팅(chat.userId == null)은 게스트(요청 userId == null)만 허용하며 차감이 없다(회원은 이관 후 접근, KNK-480).
         requireChatOwner(chat, userId)
-        if (editTurnId != null) resolveEditTurnNumber(chat.id, editTurnId)
+        if (editTurnId != null) resolveEditTurnNumber(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), editTurnId)
         val generation = acquireGeneration(chat, if (editTurnId == null) "CONTINUE" else "EDIT", request.userInput, requestedAt, editTurnId)
         var streamingOwnsGeneration = false
         try {
@@ -299,8 +299,10 @@ class ChatService(
                 if (request.hasLastTurnId && request.lastTurnId != state.lastTurnId) {
                     throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_TURN_STALE, "마지막 턴이 변경되었습니다.")
                 }
-                val targetNumber = editTurnId?.let { resolveEditTurnNumber(chat.id, it) } ?: (freshChat.currentTurn + 1)
-                Triple(freshChat, state, chatTurnAssembler.assembleAiRequest(freshChat, request.userInput, targetNumber, request.userSource))
+                // 이력 전체는 조립 트랜잭션에서 한 번만 읽어 턴 번호 확정과 AI 요청 구성이 같이 쓴다(KNK-2074). 같은 스냅샷이다.
+                val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+                val targetNumber = editTurnId?.let { resolveEditTurnNumber(messages, it) } ?: (freshChat.currentTurn + 1)
+                Triple(freshChat, state, chatTurnAssembler.assembleAiRequest(freshChat, messages, request.userInput, targetNumber, request.userSource))
             })
             val startState = prepared.second
             val aiCall = prepared.third
@@ -388,7 +390,7 @@ class ChatService(
         if (chat.status == ChatStatus.ENDED) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_ENDED, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
         }
-        val initialTarget = resolveRegenerateTarget(chat.id, request.turnId)
+        val initialTarget = resolveRegenerateTarget(storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), request.turnId)
         val generation = acquireGeneration(chat, "REGENERATE", initialTarget.userInput, requestedAt, request.turnId)
         var streamingOwnsGeneration = false
         try {
@@ -398,10 +400,11 @@ class ChatService(
                     throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.CHAT_ENDED, "엔딩에 도달한 채팅은 재생성할 수 없습니다.")
                 }
                 // 마지막 턴 검증과 재생성용 history(마지막 턴 제외)·재전송 입력을 같은 스냅샷에서 확정한다.
-                val target = resolveRegenerateTarget(chat.id, request.turnId)
+                val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+                val target = resolveRegenerateTarget(messages, request.turnId)
                 val state = generationStartState(freshChat)
                 // 재생성은 마지막 턴을 교체하므로 대상 턴 번호는 current_turn 그대로다(+1 아님).
-                Triple(freshChat, state, chatTurnAssembler.buildAiRequest(freshChat, target.userInput, freshChat.currentTurn, isRegenerated = true))
+                Triple(freshChat, state, chatTurnAssembler.buildAiRequest(freshChat, messages, target.userInput, freshChat.currentTurn, isRegenerated = true))
             })
             val startState = prepared.second
             val aiCall = prepared.third
@@ -464,10 +467,11 @@ class ChatService(
         val prepared = requireNotNull(chatTurnAssembler.assemblyTransactionTemplate.execute {
             val chat = storyChatRepository.resolveChat(chatId)
             requireChatOwner(chat, userId)
-            val target = resolveRegenerateTarget(chat.id, turnId)
+            val messages = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id)
+            val target = resolveRegenerateTarget(messages, turnId)
             val existing = storyChoiceRepository.findByMessageIdOrderByChoiceOrderAsc(turnId)
             if (existing.isNotEmpty()) return@execute ChoicesAssembly(chat, target, null, existing.map { it.choiceText })
-            ChoicesAssembly(chat, target, chatTurnAssembler.buildAiRequest(chat, target.userInput, chat.currentTurn, isRegenerated = false), null)
+            ChoicesAssembly(chat, target, chatTurnAssembler.buildAiRequest(chat, messages, target.userInput, chat.currentTurn, isRegenerated = false), null)
         })
         prepared.existing?.let { return ChatChoicesResponse(it) }
         val chat = prepared.chat
@@ -514,8 +518,7 @@ class ChatService(
      * 마지막 ASSISTANT가 없으면(턴 0개) 404, [requestedTurnId]가 서버의 마지막 턴 id와 다르면(낡은 값·중간에 진행됨) 409.
      * history는 마지막 턴(USER·ASSISTANT 쌍)을 제외한 1..N-1로 구성하고(SYSTEM 제외), userInput은 마지막 USER 입력을 그대로 둔다.
      */
-    private fun resolveRegenerateTarget(chatPk: Long, requestedTurnId: Long): RegenerateTarget {
-        val all = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chatPk)
+    private fun resolveRegenerateTarget(all: List<StoryMessage>, requestedTurnId: Long): RegenerateTarget {
         // 완료된 마지막 턴 = 가장 큰 messageOrder의 ASSISTANT. 없으면 재생성할 턴이 없다(턴 0개).
         val lastAssistant = all.lastOrNull { it.role == MessageRole.ASSISTANT }
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "재생성할 턴이 없습니다.")
@@ -543,7 +546,7 @@ class ChatService(
     )
 
     private fun generationStartState(chat: StoryChat) = GenerationStartState(
-        storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id).lastOrNull { it.role == MessageRole.ASSISTANT }?.id,
+        storyMessageRepository.findFirstByChatIdAndRoleAndHiddenAtIsNullOrderByMessageOrderDesc(chat.id, MessageRole.ASSISTANT)?.id,
         chat.revision,
     )
 

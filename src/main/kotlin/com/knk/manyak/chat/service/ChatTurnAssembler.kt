@@ -10,9 +10,9 @@ import com.knk.manyak.chat.client.ChatTurnStorySettings
 import com.knk.manyak.chat.client.ChatTurnTargetMainEvent
 import com.knk.manyak.chat.config.ChatCompactSettings
 import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatMainEventRepository
 import com.knk.manyak.chat.repository.StoryChatSummaryRepository
-import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.service.StoryPlayReader
 import com.knk.manyak.story.service.StoryPublicSnapshotService
@@ -32,7 +32,6 @@ import org.springframework.transaction.PlatformTransactionManager
  */
 @Component
 class ChatTurnAssembler(
-    private val storyMessageRepository: StoryMessageRepository,
     private val summaries: StoryChatSummaryRepository,
     private val compactSettings: ChatCompactSettings,
     private val storyPlayReader: StoryPlayReader,
@@ -65,12 +64,14 @@ class ChatTurnAssembler(
      */
     internal fun assembleAiRequest(
         chat: StoryChat,
+        messages: List<StoryMessage>,
         userInput: String,
         turnNumber: Int,
         userSource: String?,
     ): AiTurnCall =
         buildAiRequest(
             chat = chat,
+            messages = messages,
             userInput = userInput,
             turnNumber = turnNumber,
             isRegenerated = false,
@@ -86,6 +87,9 @@ class ChatTurnAssembler(
      */
     internal fun buildAiRequest(
         chat: StoryChat,
+        // 채팅의 숨기지 않은 메시지 전체(order 오름차순). 호출부가 **이 조립 트랜잭션 안에서** 읽어 마지막 턴 검증과
+        // 함께 쓴다(KNK-2074). 같은 스냅샷이라 여기서 다시 읽은 것과 같다. 트랜잭션 밖에서 읽은 목록을 넘기지 않는다.
+        messages: List<StoryMessage>,
         userInput: String,
         // 이번 호출이 만들 턴 번호의 **예측치**다(이어쓰기 current_turn + 1, 재생성·선택지는 그 턴 자체인 current_turn).
         // 권위값이 아니며 최종 대조는 ai_call_logs.turn_number가 한다(번호 선점은 하지 않는다 — 실패가 번호를 태우면 안 됨).
@@ -95,7 +99,7 @@ class ChatTurnAssembler(
     ): AiTurnCall = assemblyTransactionTemplate.execute {
         // 스토리를 여기서 **다시** 읽는다. 호출부가 읽어둔 값을 쓰면 게이트 판정만 트랜잭션 밖 시점이 되어
         // 자식 데이터와 다른 스냅샷을 보게 된다(Codex P2). 조립에 필요한 스토리 파생 값을 전부 이 안에서 읽는다.
-        val context = ChatHistoryContext.of(chat, storyMessageRepository.findByChatIdOrderByMessageOrderAsc(chat.id), compactSettings.enabled, turnNumber,
+        val context = ChatHistoryContext.of(chat, messages, compactSettings.enabled, turnNumber,
             summaries.findFirstByChatIdAndInvalidatedAtIsNullAndThroughTurnLessThanOrderByThroughTurnDesc(chat.id, turnNumber))
         val story = storyPlayReader.findView(chat.storyId, chat.userId)
         // 조립 재료는 생성 결과를 통해 독자에게 전달되므로 읽기 응답과 같은 규칙을 탄다(KNK-1064·1065).
