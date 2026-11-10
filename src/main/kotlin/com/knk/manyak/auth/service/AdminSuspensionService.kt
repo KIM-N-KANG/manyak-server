@@ -1,8 +1,8 @@
 package com.knk.manyak.auth.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.repository.AdminAccountRepository
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.role.AdminRoleReader
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorCodes
@@ -18,7 +18,7 @@ import java.util.UUID
 @Service
 class AdminSuspensionService(
     private val users: UserRepository,
-    private val accounts: AdminAccountRepository,
+    private val adminRoles: AdminRoleReader,
     private val audits: AdminAuditService,
     private val mapper: ObjectMapper,
 ) {
@@ -26,7 +26,7 @@ class AdminSuspensionService(
     fun change(adminUserId: Long, memberId: UUID, reason: String, suspend: Boolean): AdminSuspensionResponse {
         val user = users.findByPublicIdForUpdate(memberId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다.")
-        if (suspend && accounts.existsById(user.id)) {
+        if (suspend && adminRoles.hasRole(user.id)) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.ADMIN_ACCOUNT_PROTECTED,
                 "관리자 역할이 있는 회원은 정지할 수 없습니다.")
         }

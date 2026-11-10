@@ -1,7 +1,7 @@
 package com.knk.manyak.notice.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.notice.dto.*
 import com.knk.manyak.notice.entity.*

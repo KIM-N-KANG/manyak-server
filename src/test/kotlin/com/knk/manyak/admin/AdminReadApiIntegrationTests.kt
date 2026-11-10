@@ -45,7 +45,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
                        created: Instant = Instant.parse("2026-01-01T00:00:00Z")) =
         users.save(User(nickname = name, status = status, publicId = id, createdAt = created))
 
-    @Autowired private lateinit var audits: com.knk.manyak.admin.service.AdminAuditService
+    @Autowired private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditService
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
     @Autowired private lateinit var orders: com.knk.manyak.credit.repository.CreditOrderRepository
     @Autowired private lateinit var lots: com.knk.manyak.credit.repository.CreditLotRepository
@@ -55,7 +55,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     @Autowired private lateinit var messageRepository: com.knk.manyak.chat.repository.StoryMessageRepository
     @Autowired private lateinit var dashboardRepository: com.knk.manyak.admin.repository.AdminDashboardRepository
     @Autowired
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
     private val now = Instant.parse("2026-10-20T15:30:00Z")
     private val midnight = Instant.parse("2026-10-20T15:00:00Z")
 
@@ -170,11 +170,11 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     @Test fun `실제 회원 조회도 접속 기록 저장 실패면 개인정보 응답 대신 500이다`() {
         val user = member("개인정보")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-                    category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS,
-                    action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_VIEWED,
-                    targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+                    category = com.knk.manyak.adminkit.audit.AdminAuditCategory.ACCESS,
+                    action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_VIEWED,
+                    targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
         get("/members?q=개인정보").expectStatus().is5xxServerError.expectBody().jsonPath("$.items").doesNotExist()
         get("/members/${user.publicId}").expectStatus().is5xxServerError.expectBody().jsonPath("$.memberId").doesNotExist()
         get("/members/${user.publicId}/transactions").expectStatus().is5xxServerError.expectBody().jsonPath("$.items").doesNotExist()
@@ -188,7 +188,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         org.slf4j.MDC.put("request_id", "req_fixture")
         try {
             org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult {
-                audits.recordChange(admin.id, com.knk.manyak.admin.entity.AdminAuditAction.CREDIT_GRANTED, target, "테스트",
+                audits.recordChange(admin.id, com.knk.manyak.adminkit.audit.AdminAuditAction.CREDIT_GRANTED, target, "테스트",
                     mapper.readTree("{\"balance\":1}"), mapper.readTree("{\"balance\":2}"))
             }
         } finally { org.slf4j.MDC.clear() }

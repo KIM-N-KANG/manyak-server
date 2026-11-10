@@ -24,7 +24,7 @@ class ChatModelPromotionIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
     @Autowired private lateinit var trials: com.knk.manyak.credit.service.GuestTrialLimitService
     @Autowired
-    private lateinit var audits: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
     private lateinit var token: String
     private lateinit var memberToken: String
     private lateinit var member: User
@@ -96,13 +96,13 @@ class ChatModelPromotionIntegrationTests : IntegrationTest() {
 
     @Test fun `감사 기록 실패는 프로모션 덮어쓰기와 해제를 함께 롤백한다`() {
         put().expectStatus().isOk
-        val existing = com.knk.manyak.admin.entity.AdminAuditLog(
-            adminUserId = member.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.CHAT_MODEL_PROMOTION_UPSERTED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.CHAT_MODEL,
+        val existing = com.knk.manyak.adminkit.audit.AdminAuditLog(
+            adminUserId = member.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.CHAT_MODEL_PROMOTION_UPSERTED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.CHAT_MODEL,
             targetId = "LITE", requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: existing)
+            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: existing)
         put(data = body(10)).expectStatus().is5xxServerError
         delete().expectStatus().is5xxServerError
         assertThat(models.findById("LITE").orElseThrow().promoTurnCost).isZero()

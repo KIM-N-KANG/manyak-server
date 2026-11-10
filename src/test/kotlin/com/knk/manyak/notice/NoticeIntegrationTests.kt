@@ -31,7 +31,7 @@ class NoticeIntegrationTests : IntegrationTest() {
     @Autowired
     private lateinit var campaigns: PushCampaignRepository
     @Autowired
-    private lateinit var audits: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
     private val mapper = ObjectMapper()
     private lateinit var admin: User
     private lateinit var token: String
@@ -210,12 +210,12 @@ class NoticeIntegrationTests : IntegrationTest() {
         val draft = create()["noticeId"].asText()
         val published = create()["noticeId"].asText(); publish(published)
         val beforeCount = count("admin_audit_logs")
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.NOTICE_CREATED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.NOTICE, targetId = draft, requestId = "fixture")
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.NOTICE_CREATED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.NOTICE, targetId = draft, requestId = "fixture")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure"))
-            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         call(HttpMethod.POST, body = mapOf("title" to "실패", "body" to "실패", "tag" to "SERVICE", "notificationTitle" to "실패 알림", "notificationBody" to "실패 본문", "reason" to "작성")).expectStatus().is5xxServerError
         call(HttpMethod.PATCH, "/$draft", mapOf("title" to "실패", "reason" to "수정")).expectStatus().is5xxServerError
         call(HttpMethod.POST, "/$draft/publish", mapOf("notify" to true, "notificationKind" to "SERVICE", "reason" to "게시")).expectStatus().is5xxServerError

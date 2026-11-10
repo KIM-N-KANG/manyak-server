@@ -59,7 +59,7 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
         .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
 
     @Autowired
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
 
@@ -106,12 +106,12 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
         val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문",
             tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED,
             createdByUserId = admin.id))
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = "fixture", requestId = "fixture")
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = "fixture", requestId = "fixture")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", notice.publicId.toString()) }).expectStatus().is5xxServerError
         assertThat(notices.findById(notice.id).orElseThrow().notifiedAt).isNull()
         assertThat(campaigns.count()).isZero()
@@ -122,12 +122,12 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
         val retryId = create()["campaignId"].asText()
         jdbc.update("UPDATE push_campaigns SET status='FAILED' WHERE public_id=?", UUID.fromString(retryId))
         templates.save(PushMessageTemplate(templateKey = "attendance_reminder", title = "기존", body = "본문", effectiveFrom = Instant.EPOCH))
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = cancelId, requestId = "matcher")
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = cancelId, requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         call(HttpMethod.POST, "/campaigns", campaignBody()).expectStatus().is5xxServerError
         call(HttpMethod.POST, "/campaigns/$cancelId/cancel", mapOf("reason" to "취소")).expectStatus().is5xxServerError
         call(HttpMethod.POST, "/campaigns/$retryId/retry", mapOf("reason" to "재실행")).expectStatus().is5xxServerError

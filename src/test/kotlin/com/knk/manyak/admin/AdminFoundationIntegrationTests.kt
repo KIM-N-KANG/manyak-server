@@ -43,10 +43,10 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
         return mapper.readTree(login(sub).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)["accessToken"].asText()
     }
 
-    @Autowired private lateinit var audits: com.knk.manyak.admin.service.AdminAuditService
+    @Autowired private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditService
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
     @Autowired
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
     @Autowired
     private lateinit var events: com.knk.manyak.global.observability.StructuredLogger
     @Autowired
@@ -118,11 +118,11 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
         val user = member("admin")
         val token = adminToken(user)
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = user.id,
-                    category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS,
-                    action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_VIEWED,
-                    targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER,
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = user.id,
+                    category = com.knk.manyak.adminkit.audit.AdminAuditCategory.ACCESS,
+                    action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_VIEWED,
+                    targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER,
                     targetId = user.publicId.toString(), requestId = "matcher"))
         client.put().uri("/api/v1/admin/foundation-probe").header("Authorization", "Bearer $token")
             .exchange().expectStatus().is5xxServerError
@@ -154,7 +154,7 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
             val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
             org.assertj.core.api.Assertions.assertThatThrownBy {
                 tx.executeWithoutResult {
-                    audits.recordAccess(user.id, com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
+                    audits.recordAccess(user.id, com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
                     error("outer rollback")
                 }
             }.isInstanceOf(IllegalStateException::class.java)
@@ -164,7 +164,7 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
 
     @Test fun `변경 감사는 트랜잭션이 없으면 거부하고 사유와 JSON 한도를 검사한다`() {
         val user = member("admin")
-        val action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_SUSPENDED
+        val action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_SUSPENDED
         org.assertj.core.api.Assertions.assertThatThrownBy { audits.recordChange(user.id, action, user.publicId.toString(), "reason") }
             .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
         val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)

@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.security
+package com.knk.manyak.adminkit.security
 
 import jakarta.servlet.http.HttpServletRequest
 

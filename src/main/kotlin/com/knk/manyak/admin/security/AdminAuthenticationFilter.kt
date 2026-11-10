@@ -1,6 +1,7 @@
 package com.knk.manyak.admin.security
 
 import com.knk.manyak.admin.service.AdminEligibilityService
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint

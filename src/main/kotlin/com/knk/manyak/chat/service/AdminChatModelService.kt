@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.chat.dto.*
 import com.knk.manyak.chat.entity.ChatModel
 import com.knk.manyak.chat.repository.ChatModelRepository

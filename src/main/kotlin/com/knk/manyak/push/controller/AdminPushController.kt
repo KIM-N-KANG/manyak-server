@@ -1,6 +1,6 @@
 package com.knk.manyak.push.controller
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.service.AdminCampaignService
 import com.knk.manyak.push.service.AdminPushTemplateService

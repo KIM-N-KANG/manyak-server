@@ -1,8 +1,8 @@
 package com.knk.manyak.admin.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.entity.AdminAuditTargetType
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditTargetType
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.credit.entity.CreditOrderStatus
 import jakarta.validation.constraints.Max
@@ -59,7 +59,7 @@ class AdminAuditLogsRequest : AdminSearchRequest() {
     var adminId: UUID? = null
     var action: AdminAuditAction? = null
     var targetType: AdminAuditTargetType? = null
-    var category: com.knk.manyak.admin.entity.AdminAuditCategory? = null
+    var category: com.knk.manyak.adminkit.audit.AdminAuditCategory? = null
     @field:Size(min = 1, max = 255) var targetId: String? = null
 }
 

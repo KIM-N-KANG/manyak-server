@@ -2,7 +2,8 @@ package com.knk.manyak.admin.service
 
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.*
-import com.knk.manyak.admin.entity.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.admin.repository.AdminDashboardRepository
 import com.knk.manyak.admin.repository.AdminReadRepository
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter

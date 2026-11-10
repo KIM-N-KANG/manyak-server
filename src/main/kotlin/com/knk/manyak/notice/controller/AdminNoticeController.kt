@@ -1,6 +1,6 @@
 package com.knk.manyak.notice.controller
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.notice.dto.*
 import com.knk.manyak.notice.service.NoticeService

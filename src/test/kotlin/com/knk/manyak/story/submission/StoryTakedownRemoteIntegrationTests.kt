@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.inbox.UserNotification
@@ -105,9 +105,9 @@ class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
             "OUTBOX" -> doThrow(exception).`when`(outbox).insert(anyMessage(), anyInstant())
             "INBOX" -> doThrow(exception).`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<UserNotificationStore>(inbox))
                 .insert(any(UserNotification::class.java) ?: UserNotification(userId = 0, messageKey = "", type = com.knk.manyak.push.inbox.NotificationType.STORY_TAKEN_DOWN, title = "", body = ""))
-            "AUDIT" -> doThrow(exception).`when`(audits).save(any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                    action = AdminAuditAction.STORY_TAKEN_DOWN, targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.STORY,
+            "AUDIT" -> doThrow(exception).`when`(audits).save(any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                    action = AdminAuditAction.STORY_TAKEN_DOWN, targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.STORY,
                     targetId = "", requestId = "test"))
         }
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException::class.java) { take() }

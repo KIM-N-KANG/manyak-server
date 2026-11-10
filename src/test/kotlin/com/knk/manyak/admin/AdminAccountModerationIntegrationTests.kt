@@ -106,7 +106,7 @@ class AdminAccountModerationIntegrationTests : IntegrationTest() {
     @Autowired lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
     @Autowired
-    lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Test fun `새 관리자 네 경로는 앱 토큰과 무토큰 및 역할 없는 관리자 토큰을 거절한다`() {
         val user = member()
@@ -258,11 +258,11 @@ class AdminAccountModerationIntegrationTests : IntegrationTest() {
         val suspended = member(UserStatus.SUSPENDED)
         val row = held()
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-                    category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                    action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_SUSPENDED,
-                    targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+                    category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                    action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_SUSPENDED,
+                    targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
         call(HttpMethod.POST, "/members/${active.publicId}/suspension").expectStatus().is5xxServerError
         call(HttpMethod.DELETE, "/members/${suspended.publicId}/suspension").expectStatus().is5xxServerError
         call(HttpMethod.POST, "/moderation/holds/${row.publicId}/release").expectStatus().is5xxServerError

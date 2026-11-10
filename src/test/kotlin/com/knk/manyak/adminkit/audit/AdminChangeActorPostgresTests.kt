@@ -1,7 +1,6 @@
-package com.knk.manyak.admin
+package com.knk.manyak.adminkit.audit
 
 import com.knk.manyak.support.SharedPostgres
-import com.knk.manyak.admin.repository.AdminChangeActorRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.*

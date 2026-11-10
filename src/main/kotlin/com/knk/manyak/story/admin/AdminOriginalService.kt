@@ -1,7 +1,7 @@
 package com.knk.manyak.story.admin
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.*

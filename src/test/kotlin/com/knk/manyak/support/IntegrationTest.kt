@@ -1,7 +1,7 @@
 package com.knk.manyak.support
 
 import com.knk.manyak.admin.AdminProbeConfig
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.admin.service.AdminEligibilityService
 import com.knk.manyak.auth.consent.ConsentTokenStore
 import com.knk.manyak.auth.controller.FakeSocialLoginConfig

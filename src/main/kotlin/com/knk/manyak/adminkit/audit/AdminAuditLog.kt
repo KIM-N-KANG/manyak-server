@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.entity
+package com.knk.manyak.adminkit.audit
 
 import jakarta.persistence.*
 import org.hibernate.annotations.JdbcTypeCode

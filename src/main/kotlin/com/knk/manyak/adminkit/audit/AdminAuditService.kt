@@ -1,8 +1,5 @@
-package com.knk.manyak.admin.service
+package com.knk.manyak.adminkit.audit
 
-import com.knk.manyak.admin.entity.*
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
-import com.knk.manyak.admin.repository.AdminChangeActorRepository
 import jakarta.persistence.EntityManager
 import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.http.HttpStatus

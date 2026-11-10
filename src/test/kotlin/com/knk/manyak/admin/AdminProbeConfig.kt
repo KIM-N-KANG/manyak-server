@@ -1,8 +1,8 @@
 package com.knk.manyak.admin
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.security.AdminRequester
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.security.AdminRequester
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
