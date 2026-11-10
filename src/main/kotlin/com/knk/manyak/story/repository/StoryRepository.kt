@@ -1,6 +1,7 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.repository.StoryListExpressions.LIKE_COUNT
 import com.knk.manyak.story.repository.StoryListExpressions.POPULAR_SCORE
 import com.knk.manyak.story.repository.StoryListExpressions.TURN_COUNT
 import jakarta.persistence.LockModeType
@@ -158,7 +159,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $LIKE_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicLikes(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -171,10 +172,10 @@ interface StoryRepository : JpaRepository<Story, Long> {
           AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) < :likeCount
-               OR ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) = :likeCount
+          AND ($LIKE_COUNT < :likeCount
+               OR ($LIKE_COUNT = :likeCount
                    AND s.publicId < :publicId))
-        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $LIKE_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicLikesAfter(
