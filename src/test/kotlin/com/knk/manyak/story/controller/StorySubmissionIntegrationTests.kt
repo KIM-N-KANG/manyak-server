@@ -371,7 +371,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
         org.junit.jupiter.api.Assertions.assertEquals(0, submissions.count())
         org.junit.jupiter.api.Assertions.assertEquals(0, stories.count())
     }
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
 
 
     @Test fun `승인 적용 검증 실패는 롤백 후 APPLY_FAILED로 기록한다`() {

@@ -4,8 +4,6 @@ import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.user.consent.UserConsentRequest
-import com.knk.manyak.user.consent.UserConsentService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test

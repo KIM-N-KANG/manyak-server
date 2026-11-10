@@ -43,7 +43,7 @@ class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired lateinit var updates: StorySubmissionService
     @Autowired lateinit var worker: SubmissionTransactions
     @Autowired lateinit var jdbc: JdbcTemplate
-    @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired lateinit var transactions: PlatformTransactionManager
     @Autowired lateinit var outbox: PushOutboxStore
     @Autowired lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay

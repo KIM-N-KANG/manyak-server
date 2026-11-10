@@ -10,8 +10,8 @@ import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
-import com.knk.manyak.user.dto.*
-import com.knk.manyak.user.service.UserPersonaService
+import com.knk.manyak.auth.dto.*
+import com.knk.manyak.auth.service.UserPersonaService
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

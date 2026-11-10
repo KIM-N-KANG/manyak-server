@@ -2,7 +2,7 @@ package com.knk.manyak.push.event
 
 import com.knk.manyak.push.inbox.UserNotificationStore
 import com.knk.manyak.push.repository.DevicePushTokenRepository
-import com.knk.manyak.user.event.UserWithdrawnEvent
+import com.knk.manyak.auth.event.UserWithdrawnEvent
 import org.springframework.context.event.EventListener
 import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component

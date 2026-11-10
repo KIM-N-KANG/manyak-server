@@ -4,7 +4,7 @@ import com.knk.manyak.auth.consent.ConsentTokenStore
 import com.knk.manyak.auth.consent.SocialConsentService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.support.ConsentGateIntegrationTest
-import com.knk.manyak.user.consent.UserConsentRequest
+import com.knk.manyak.auth.consent.UserConsentRequest
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.doCallRealMethod
 import java.util.concurrent.CyclicBarrier
@@ -38,7 +38,7 @@ class SocialConsentIntegrationTests : ConsentGateIntegrationTest() {
     @Autowired private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
     @Autowired private lateinit var codes: ConsentTokenStore
     @Autowired private lateinit var service: SocialConsentService
-    @Autowired private lateinit var consentService: com.knk.manyak.user.consent.UserConsentService
+    @Autowired private lateinit var consentService: com.knk.manyak.auth.consent.UserConsentService
     @Autowired private lateinit var trials: GuestTrialLimitService
     private val mapper = ObjectMapper()
 

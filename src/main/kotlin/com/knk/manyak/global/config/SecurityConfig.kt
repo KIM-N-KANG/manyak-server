@@ -1,6 +1,6 @@
 package com.knk.manyak.global.config
 
-import com.knk.manyak.user.consent.UserConsentService
+import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint

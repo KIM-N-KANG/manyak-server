@@ -103,7 +103,7 @@ class AdminAccountModerationIntegrationTests : IntegrationTest() {
     @Autowired lateinit var claims: SubmissionClaimStore
     @Autowired lateinit var submissionService: StorySubmissionService
     @Autowired lateinit var authTokens: com.knk.manyak.auth.token.AuthTokenService
-    @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
     @Autowired
     lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository

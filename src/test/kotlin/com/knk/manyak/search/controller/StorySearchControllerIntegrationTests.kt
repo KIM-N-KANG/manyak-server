@@ -20,8 +20,8 @@ import com.knk.manyak.support.AlternateConfigIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.MockedBoundaryIntegrationTest
-import com.knk.manyak.user.dto.UpdateProfileRequest
-import com.knk.manyak.user.service.UserProfileService
+import com.knk.manyak.auth.dto.UpdateProfileRequest
+import com.knk.manyak.auth.service.UserProfileService
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

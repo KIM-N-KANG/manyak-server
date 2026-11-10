@@ -4,7 +4,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.IntegrationTest
-import com.knk.manyak.user.service.UserWithdrawalService
+import com.knk.manyak.auth.service.UserWithdrawalService
 import com.knk.manyak.invite.service.InviteService
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import org.springframework.transaction.PlatformTransactionManager

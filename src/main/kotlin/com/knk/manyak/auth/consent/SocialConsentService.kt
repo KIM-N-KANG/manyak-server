@@ -10,8 +10,6 @@ import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.user.consent.UserConsentRequest
-import com.knk.manyak.user.consent.UserConsentService
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

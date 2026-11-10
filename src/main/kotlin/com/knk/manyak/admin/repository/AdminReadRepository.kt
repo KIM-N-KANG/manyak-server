@@ -43,7 +43,7 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
             val uuid = runCatching { UUID.fromString(search) }.getOrNull()?.takeIf { it.toString() == search }
             if (uuid != null) q.equal("u.public_id", uuid) else {
                 q.params["search"] = search
-                q.params["nickname"] = com.knk.manyak.user.service.nicknameKeyOf(search)
+                q.params["nickname"] = com.knk.manyak.auth.service.nicknameKeyOf(search)
                 q.add("""((u.status <> 'DELETED' AND POSITION(:nickname IN REGEXP_REPLACE(LOWER(u.nickname), '\s+', '', 'g')) > 0)
                     OR EXISTS (SELECT 1 FROM social_accounts sa WHERE sa.user_id=u.id AND sa.deleted_at IS NULL AND LOWER(sa.email)=:search))""")
             }
