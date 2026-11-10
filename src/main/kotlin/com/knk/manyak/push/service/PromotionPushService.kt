@@ -5,6 +5,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.dto.PushKind
+import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.config.PushCampaignProperties
 import com.knk.manyak.global.observability.StructuredLogger
 import org.springframework.boot.context.properties.EnableConfigurationProperties
