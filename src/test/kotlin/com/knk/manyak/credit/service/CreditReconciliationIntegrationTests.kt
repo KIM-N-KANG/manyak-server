@@ -9,6 +9,7 @@ import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
@@ -46,6 +47,7 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var storyCreationProgress: StoryCreationProgress
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
     @Autowired private lateinit var lotRepository: CreditLotRepository
+    @Autowired private lateinit var walletRepository: CreditWalletRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
@@ -446,6 +448,23 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
         } finally {
             executor.shutdownNow()
         }
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+    }
+
+    @Test
+    fun `환불이 이미 충분한 그룹은 지갑을 잠그지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+        inflightRefund(userId, "STORY", sessionId) // 실패 뒤 정상 환불된 그룹: 있어야 할 환불 수 1을 이미 채움
+        org.mockito.Mockito.clearInvocations(walletRepository)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.groupsScanned).isEqualTo(1)
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        org.mockito.Mockito.verify(walletRepository, org.mockito.Mockito.never()).findByUserIdForUpdate(userId)
         assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
     }
 }
