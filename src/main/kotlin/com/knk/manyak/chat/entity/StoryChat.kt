@@ -59,7 +59,7 @@ class StoryChat(
      * 스토리 스냅샷은 시작 설정을 id로 찾는데, 소유자가 편집 폼에서 시작 설정 항목을 빼면 행이 삭제되고
      * FK(`ON DELETE SET NULL`)가 [startSettingId]를 비운다. 조회 키가 사라져 사전으로는 덮을 수 없다 —
      * [reachedEndingNameSnapshot]과 같은 구조의 파괴라 같은 방식으로 폴백한다
-     * ([ChatService]의 `brokenReferencePrologue`). 이름·시작 상황은 여기 없어 부분 복구다.
+     * (`chat.service`의 최상위 함수 `brokenReferencePrologue`). 이름·시작 상황은 여기 없어 부분 복구다.
      */
     @Column(name = "story_prologue_snapshot", columnDefinition = "TEXT")
     val storyPrologueSnapshot: String? = null,
