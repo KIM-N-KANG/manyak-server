@@ -1,6 +1,7 @@
 package com.knk.manyak.credit.controller
 
 import com.knk.manyak.credit.dto.CreditPolicyResponse
+import com.knk.manyak.credit.port.ChatTurnPricing
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
 import io.swagger.v3.oas.annotations.Operation
@@ -28,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 class CreditPolicyController(
     private val creditPolicyService: CreditPolicyService,
-    private val chatModelService: com.knk.manyak.chat.service.ChatModelService,
+    private val chatTurnPricing: ChatTurnPricing,
 ) {
 
     @Operation(
@@ -63,7 +64,7 @@ class CreditPolicyController(
             inviteMonthlyCap = amounts.getValue(CreditPolicyKey.INVITE_MONTHLY_CAP),
             attendanceReward = amounts.getValue(CreditPolicyKey.ATTENDANCE_REWARD),
             storyCreationCost = amounts.getValue(CreditPolicyKey.STORY_CREATION_COST),
-            chatTurnCost = chatModelService.litePrice(),
+            chatTurnCost = chatTurnPricing.litePrice(),
             chatImageCost = amounts.getValue(CreditPolicyKey.CHAT_IMAGE_COST),
         )
     }

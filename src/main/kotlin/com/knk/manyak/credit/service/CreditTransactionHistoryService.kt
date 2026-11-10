@@ -1,16 +1,14 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
 import com.knk.manyak.credit.dto.CreditTransactionResponse
 import com.knk.manyak.credit.dto.CreditTransactionType
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
+import com.knk.manyak.credit.port.ChatStoryLookup
+import com.knk.manyak.credit.port.StoryTitleLookup
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
-import com.knk.manyak.story.repository.StoryCreationSessionRepository
-import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.service.StoryPublicSnapshotService
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -31,10 +29,8 @@ import java.time.Instant
 class CreditTransactionHistoryService(
     private val transactionRepository: CreditTransactionRepository,
     private val lotRepository: CreditLotRepository,
-    private val storyRepository: StoryRepository,
-    private val storyPublicSnapshotService: StoryPublicSnapshotService,
-    private val storyChatRepository: StoryChatRepository,
-    private val sessionRepository: StoryCreationSessionRepository,
+    private val chatStoryLookup: ChatStoryLookup,
+    private val storyTitleLookup: StoryTitleLookup,
     private val cursorCodec: CreditCursorCodec,
 ) {
 
@@ -82,47 +78,21 @@ class CreditTransactionHistoryService(
     }
 
     /**
-     * 행 id → 스토리 제목. `ref_type`으로 두 갈래를 나눠 각각 한 번씩만 조회한다.
-     *
-     * 함정: `ref_type`이 `"STORY"`인 행의 `ref_id`는 스토리 PK가 아니라 **제작 세션 PK**다
-     * ([com.knk.manyak.story.service.SimpleStoryCreationService]가 세션 id로 차감한다). 세션을 한 단계 거치지
-     * 않고 `stories.id`로 곧장 조인하면 엉뚱한 스토리 제목이 붙는다. 실패한 세션은 `story_id`가 NULL이라 제목도 없다.
-     *
-     * 채팅 참조 행은 서재와 같은 스냅샷 규칙을 탄다(KNK-1059): 요청자가 지금 그 스토리를 읽을 수 있으면 현재
-     * 제목, 아니면 채팅에 박아둔 스냅샷. 제작 참조 행은 요청자가 곧 소유자라 읽기가 언제나 허용되므로 새는
-     * 정보가 없고, 삭제 시 `null`인 현행 동작을 그대로 둔다.
+     * 행 id → 스토리 제목. `ref_type`으로 채팅 참조와 제작 참조를 나누고, 채팅 → 스토리 id를 한 번, 진행, 스토리,
+     * 스냅샷을 각각 한 번씩만 조회한다. 제목 규칙(읽기 판정, 스냅샷, 삭제, 이름 토큰)은 story가 [StoryTitleLookup]에서 정한다.
      */
     private fun resolveTitles(rows: List<CreditTransaction>, userId: Long): Map<Long, String?> {
         val chatIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_CHAT || it.refType == "CHAT_TURN" || it.refType == "CHAT_IMAGE") it.refId else null }
         val sessionIds = rows.mapNotNullTo(mutableSetOf()) { if (it.refType == REF_STORY) it.refId else null }
         if (chatIds.isEmpty() && sessionIds.isEmpty()) return emptyMap()
 
-        val chatById = storyChatRepository.findAllById(chatIds).associateBy { it.id }
-        val storyIdBySession = sessionRepository.findAllById(sessionIds).associate { it.id to it.storyId }
-        val storyIds = (chatById.values.map { it.storyId } + storyIdBySession.values.filterNotNull()).toSet()
-        val storyById = storyRepository.findAllById(storyIds).associateBy { it.id }
-        // 스냅샷은 읽을 수 없는 스토리에만 필요하다(별도 테이블 — PR #224 Codex P2). 그 스토리들만 한 번에 조회한다.
-        val snapshotByStoryId = storyPublicSnapshotService.findAllByStoryIds(
-            storyById.values.filterNot { it.isCurrentMetadataVisibleTo(userId) }.map { it.id },
-        )
+        val storyIdByChat = chatStoryLookup.storyIdsByChatId(chatIds)
+        val titles = storyTitleLookup.titles(userId, storyIdByChat.values, sessionIds)
 
         return rows.mapNotNull { row ->
             val title = when (row.refType) {
-                REF_CHAT, "CHAT_TURN", "CHAT_IMAGE" -> {
-                    val chat = chatById[row.refId] ?: return@mapNotNull null
-                    val story = storyById[chat.storyId]
-                    // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 제목에서 멈춘다(KNK-1065).
-                    if (story?.isCurrentMetadataVisibleTo(userId) == true) {
-                        com.knk.manyak.story.service.UsernameTokenRenderer.render(story.title, story.protagonistName)
-                    } else {
-                        story?.let { snapshotByStoryId[it.id] }?.let { com.knk.manyak.story.service.UsernameTokenRenderer.render(it.title, it.protagonistName) }
-                    }
-                }
-                // 삭제된 스토리는 제목을 내리지 않는다 — 클라이언트가 "삭제된 스토리" 폴백 문구를 쓴다.
-                REF_STORY -> storyIdBySession[row.refId]
-                    ?.let { storyById[it] }
-                    ?.takeIf { it.deletedAt == null }
-                    ?.let { com.knk.manyak.story.service.UsernameTokenRenderer.render(it.title, it.protagonistName) }
+                REF_CHAT, "CHAT_TURN", "CHAT_IMAGE" -> storyIdByChat[row.refId]?.let { titles.byChatStoryId[it] }
+                REF_STORY -> titles.bySessionId[row.refId]
                 else -> null
             } ?: return@mapNotNull null
             row.id to title

@@ -39,7 +39,7 @@ class GuestTrialLimitServiceIntegrationTest {
 
     // Redis 예약·복원 전용 슬라이스에는 JPA 모델 서비스를 띄우지 않는다.
     @org.springframework.test.context.bean.override.mockito.MockitoBean
-    private lateinit var chatModels: com.knk.manyak.chat.service.ChatModelService
+    private lateinit var chatTurnPricing: com.knk.manyak.credit.port.ChatTurnPricing
 
 
     @Autowired
