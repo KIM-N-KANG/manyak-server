@@ -4,8 +4,6 @@ chat -> auth
 chat -> credit
 chat -> story
 credit -> auth
-credit -> chat
-credit -> story
 notice -> auth
 push -> auth
 push -> credit

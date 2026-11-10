@@ -3,6 +3,7 @@ package com.knk.manyak.chat.service
 import com.knk.manyak.chat.dto.ChatModelPromotionResponse
 import com.knk.manyak.chat.dto.ChatModelResponse
 import com.knk.manyak.chat.repository.ChatModelRepository
+import com.knk.manyak.credit.port.ChatTurnPricing
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -16,7 +17,7 @@ import java.time.Clock
 class ChatModelService(
     private val repository: ChatModelRepository,
     private val clock: Clock = Clock.systemUTC(),
-) {
+) : ChatTurnPricing {
     fun list(userId: Long? = null): List<ChatModelResponse> {
         val active = repository.findByIsActiveTrueOrderBySortOrderAscCodeAsc()
         check(active.count { it.isDefault } == 1) { "노출 중인 기본 채팅 모델이 없습니다." }
@@ -43,11 +44,11 @@ class ChatModelService(
         ?.takeIf { it.isActive }?.code
         ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "선택할 수 없는 모델입니다.")
 
-    fun litePromotionFree(): Boolean = repository.findById("LITE").orElse(null)?.let {
+    override fun litePromotionFree(): Boolean = repository.findById("LITE").orElse(null)?.let {
         it.promotionActiveAt(clock.instant()) && it.promoTurnCost == 0L
     } == true
 
-    fun litePrice(): Long = repository.findById("LITE").orElseThrow { IllegalStateException("LITE 모델이 없습니다.") }.turnCost
+    override fun litePrice(): Long = repository.findById("LITE").orElseThrow { IllegalStateException("LITE 모델이 없습니다.") }.turnCost
 }
 
 data class BillingModel(val code: String, val turnCost: Long)

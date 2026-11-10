@@ -242,6 +242,18 @@ class CreditTransactionHistoryIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `제목의 이름 토큰은 채팅 참조와 제작 참조 모두 주인공 이름과 조사로 바꾼다`() {
+        val user = saveUser()
+        val story = storyRepository.save(
+            Story(userId = user.id, title = "{username}이(가) 지킨 등대", protagonistName = "하늘"),
+        )
+        tx(user.id, -10, CreditReason.CHAT_TURN, "CHAT", chat(user.id, story.id).id, base)
+        tx(user.id, -20, CreditReason.STORY_CREATION, "STORY", session(user.id, story.id).id, base.plusSeconds(10))
+
+        assertThat(get(user).items.map { it.title }).containsExactly("하늘이 지킨 등대", "하늘이 지킨 등대")
+    }
+
+    @Test
     fun `삭제된 스토리와 연결 끊긴 행은 title이 null이다`() {
         val user = saveUser()
         val deleted = story(user.id, "지워진 스토리", deleted = true)
