@@ -1,5 +1,6 @@
 package com.knk.manyak.story.submission
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.outbox.PushOutboxRelay
@@ -10,7 +11,6 @@ import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -21,12 +21,9 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.event.EventListener
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -34,7 +31,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import javax.sql.DataSource
 
-/** 기본 H2 격리 설정은 유지하고, 이 컨텍스트만 일회용 PostgreSQL과 실제 서비스/JPA 잠금을 사용한다. */
+/** 기본 H2 격리 설정은 유지하고, 이 컨텍스트만 PostgreSQL(공유 컨테이너의 전용 DB)과 실제 서비스/JPA 잠금을 사용한다. */
 @SpringBootTest(properties = ["spring.jpa.hibernate.ddl-auto=validate", "manyak.push.mode=remote"])
 @Import(StoryTakedownPostgresConfig::class)
 class StoryTakedownPostgresTests {
@@ -136,17 +133,7 @@ class StoryTakedownPostgresTests {
 /** 실제 PostgreSQL 서비스 통합 검증에서 공유할 수 있는 격리 datasource 설정. */
 @TestConfiguration(proxyBeanMethods = false)
 class StoryTakedownPostgresConfig {
-    @Bean(destroyMethod = "stop")
-    fun postgres(): GenericContainer<*> = GenericContainer("postgres:17-alpine")
-        .withEnv("POSTGRES_PASSWORD", "takedown-test").withExposedPorts(5432)
-        .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
-        .apply { start() }
-
     @Bean
-    fun dataSource(postgres: GenericContainer<*>): DataSource {
-        val ds = DriverManagerDataSource("jdbc:postgresql://${postgres.host}:${postgres.getMappedPort(5432)}/postgres", "postgres", "takedown-test")
-        Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
-        return ds
-    }
+    fun dataSource(): DataSource = SharedPostgres.database(SharedPostgres.POSTGRES_17, migrated = true)
     @Bean fun recordedEvents() = StoryTakedownPostgresTests.RecordedEvents()
 }

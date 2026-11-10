@@ -9,6 +9,7 @@ import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import org.mockito.Mockito.*
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIf
 import com.knk.manyak.search.config.StorySearchConfig
@@ -32,104 +33,98 @@ import java.util.UUID
 class StorySearchOpenSearchTests {
     @Test
     fun `실제 OpenSearch는 숨긴 문서를 제외하고 제목을 우선하며 다음 페이지를 이어준다`() {
-        OpenSearchContainer<Nothing>("opensearchproject/opensearch:2.19.4").use { container ->
-            container.start()
-            containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
-                AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
-                    AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
-                        .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
-                        .build()).use { transport ->
-                    val client = OpenSearchClient(transport)
-                    val plugins = container.execInContainer("bin/opensearch-plugin", "list").stdout
-                    val hasNori = plugins.lineSequence().any { it.trim() == "analysis-nori" }
-                    println("OpenSearch 2.19.4 analysis-nori=$hasNori; test analyzer=${if (hasNori) "korean" else "standard"}")
-                    val index = "stories-test"
-                    client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = !hasNori))
-                    val documents = listOf(
-                        doc("왕국", "여행", 1),
-                        doc("여행", "왕국", 2),
-                        doc("왕국", "여행", 3, false),
-                    )
-                    val properties = StorySearchProperties(storyIndex = index)
-                    val reader = mock(StorySearchDocumentReader::class.java)
-                    `when`(reader.readPage(0)).thenReturn(documents)
-                    `when`(reader.read(1)).thenReturn(documents.first())
-                    val indexer = StorySearchIndexer(client, properties, reader, StorySearchIndexAdmin(client, properties))
-                    // 단건 전송과 운영 AWS transport의 NDJSON bulk를 모두 실제 컨테이너에 보낸다.
-                    indexer.reindex()
-                    client.indices().refresh { it.index(index) }
-                    assertEquals(documents.size.toLong(), client.count { it.index(index) }.count())
-                    // 검색 엔진 검증은 실제 컨테이너로, DB 게이트는 위 문서에 대응하는 정본 픽스처로 분리한다.
-                    val repository = mock(StoryRepository::class.java)
-                    `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
-                        Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
-                            visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
-                    })
-                    val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
-                    `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
-                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
-                    val first = service.search("왕국", 1, null)
-                    assertEquals(documents[0].toSummary(isOriginal = false), first.items.single())
-                    assertNotNull(first.nextCursor)
-                    val second = service.search("왕국", 1, first.nextCursor)
-                    assertEquals(documents[1].publicId, second.items.single().id)
-                    assertNull(second.nextCursor)
-                    assertEquals(2, service.search("왕국", 50, null).items.size)
-                    assertTrue(service.search("없는검색어", 20, null).items.isEmpty())
-                    // 관련도 검증 후 단건 덮어쓰기를 확인한다. 삭제된 이전 버전이 BM25 통계에 섞이지 않게 한다.
-                    indexer.index(1)
-                    assertEquals(documents.first(), client.get(
-                        { it.index(index).id(documents.first().publicId) }, StorySearchDocument::class.java,
-                    ).source())
-                }
+        containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
+            AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
+                AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
+                    .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()).use { transport ->
+                val client = OpenSearchClient(transport)
+                val plugins = container.execInContainer("bin/opensearch-plugin", "list").stdout
+                val hasNori = plugins.lineSequence().any { it.trim() == "analysis-nori" }
+                println("OpenSearch 2.19.4 analysis-nori=$hasNori; test analyzer=${if (hasNori) "korean" else "standard"}")
+                val index = "stories-test"
+                client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = !hasNori))
+                val documents = listOf(
+                    doc("왕국", "여행", 1),
+                    doc("여행", "왕국", 2),
+                    doc("왕국", "여행", 3, false),
+                )
+                val properties = StorySearchProperties(storyIndex = index)
+                val reader = mock(StorySearchDocumentReader::class.java)
+                `when`(reader.readPage(0)).thenReturn(documents)
+                `when`(reader.read(1)).thenReturn(documents.first())
+                val indexer = StorySearchIndexer(client, properties, reader, StorySearchIndexAdmin(client, properties))
+                // 단건 전송과 운영 AWS transport의 NDJSON bulk를 모두 실제 컨테이너에 보낸다.
+                indexer.reindex()
+                client.indices().refresh { it.index(index) }
+                assertEquals(documents.size.toLong(), client.count { it.index(index) }.count())
+                // 검색 엔진 검증은 실제 컨테이너로, DB 게이트는 위 문서에 대응하는 정본 픽스처로 분리한다.
+                val repository = mock(StoryRepository::class.java)
+                `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
+                    Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
+                        visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
+                })
+                val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
+                `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
+                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
+                val first = service.search("왕국", 1, null)
+                assertEquals(documents[0].toSummary(isOriginal = false), first.items.single())
+                assertNotNull(first.nextCursor)
+                val second = service.search("왕국", 1, first.nextCursor)
+                assertEquals(documents[1].publicId, second.items.single().id)
+                assertNull(second.nextCursor)
+                assertEquals(2, service.search("왕국", 50, null).items.size)
+                assertTrue(service.search("없는검색어", 20, null).items.isEmpty())
+                // 관련도 검증 후 단건 덮어쓰기를 확인한다. 삭제된 이전 버전이 BM25 통계에 섞이지 않게 한다.
+                indexer.index(1)
+                assertEquals(documents.first(), client.get(
+                    { it.index(index).id(documents.first().publicId) }, StorySearchDocument::class.java,
+                ).source())
             }
         }
     }
 
     @Test
     fun `실제 OpenSearch 장르 검색은 포함 일치와 대소문자 무시를 지원하고 별표와 물음표를 문자로 비교한다`() {
-        OpenSearchContainer<Nothing>("opensearchproject/opensearch:2.19.4").use { container ->
-            container.start()
-            containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
-                AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
-                    AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
-                        .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
-                        .build()).use { transport ->
-                    val client = OpenSearchClient(transport)
-                    val index = "stories-genres-test"
-                    // 제목, 소개, 인물에는 검색어를 넣지 않아 장르 조건만 검증한다.
-                    client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = true))
-                    val documents = listOf("탈출물", "BL", "탈*출물", "탈?출물", "탈X출물", "탈출물").mapIndexed { i, genre ->
-                        doc("제목", "소개", i.toLong(), visible = i != 5).copy(genres = listOf(genre))
-                    }
-                    documents.forEach { document ->
-                        client.index { it.index(index).id(document.publicId).document(document) }
-                    }
-                    client.indices().refresh { it.index(index) }
-                    val repository = mock(StoryRepository::class.java)
-                    `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
-                        Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
-                            visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
-                    })
-                    val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
-                    `when`(authors.resolveAll(anyList())).thenReturn(emptyMap())
-                    val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
-                        mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
-                    fun ids(query: String) = service.search(query, 50, null).items.map { it.id }.toSet()
-                    assertEquals(setOf(documents[0].publicId), ids("탈출"))
-                    assertEquals(setOf(documents[0].publicId), ids("탈출물"))
-                    assertEquals(setOf(documents[1].publicId), ids("bl"))
-                    assertEquals(setOf(documents[2].publicId), ids("탈*"))
-                    assertEquals(setOf(documents[3].publicId), ids("탈?"))
-                    assertTrue(ids("없는*장르").isEmpty())
-                    assertTrue(ids("없는?장르").isEmpty())
+        containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
+            AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
+                AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
+                    .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()).use { transport ->
+                val client = OpenSearchClient(transport)
+                val index = "stories-genres-test"
+                // 제목, 소개, 인물에는 검색어를 넣지 않아 장르 조건만 검증한다.
+                client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = true))
+                val documents = listOf("탈출물", "BL", "탈*출물", "탈?출물", "탈X출물", "탈출물").mapIndexed { i, genre ->
+                    doc("제목", "소개", i.toLong(), visible = i != 5).copy(genres = listOf(genre))
                 }
+                documents.forEach { document ->
+                    client.index { it.index(index).id(document.publicId).document(document) }
+                }
+                client.indices().refresh { it.index(index) }
+                val repository = mock(StoryRepository::class.java)
+                `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
+                    Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
+                        visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
+                })
+                val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
+                `when`(authors.resolveAll(anyList())).thenReturn(emptyMap())
+                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
+                    mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
+                fun ids(query: String) = service.search(query, 50, null).items.map { it.id }.toSet()
+                assertEquals(setOf(documents[0].publicId), ids("탈출"))
+                assertEquals(setOf(documents[0].publicId), ids("탈출물"))
+                assertEquals(setOf(documents[1].publicId), ids("bl"))
+                assertEquals(setOf(documents[2].publicId), ids("탈*"))
+                assertEquals(setOf(documents[3].publicId), ids("탈?"))
+                assertTrue(ids("없는*장르").isEmpty())
+                assertTrue(ids("없는?장르").isEmpty())
             }
         }
     }
 
     // 보안 플러그인을 끈 컨테이너는 HTTP다. 서명·직렬화는 AWS transport 그대로 두고,
-    // 최종 소켓 주소만 일회용 컨테이너로 바꾼다. 실 AWS 자격증명·도메인은 사용하지 않는다.
+    // 최종 소켓 주소만 테스트 컨테이너로 바꾼다. 실 AWS 자격증명·도메인은 사용하지 않는다.
     private fun containerHttpClient(endpoint: URI): SdkHttpClient {
         val delegate = ApacheHttpClient.builder().build()
         return object : SdkHttpClient {
@@ -150,5 +145,12 @@ class StorySearchOpenSearchTests {
     companion object {
         @JvmStatic
         fun dockerAvailable(): Boolean = DockerClientFactory.instance().isDockerAvailable
+
+        // 테스트마다 다른 인덱스를 쓰므로 클래스 안에서 컨테이너 하나를 공유한다(기동 ~6초, KNK-2058).
+        private val lazyContainer = lazy { OpenSearchContainer<Nothing>("opensearchproject/opensearch:2.19.4").apply { start() } }
+        private val container by lazyContainer
+
+        @JvmStatic @AfterAll
+        fun stop() { if (lazyContainer.isInitialized()) container.stop() }
     }
 }

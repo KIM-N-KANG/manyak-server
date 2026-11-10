@@ -1,24 +1,19 @@
 package com.knk.manyak.notice
 
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.*
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.sql.SQLException
 import java.util.UUID
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class NoticeNotificationTextPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "notice-text-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private val oldId = UUID.randomUUID()
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "notice-text-test")
+        val ds = SharedPostgres.database()
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").target("111").load().migrate()
         jdbc = JdbcTemplate(ds)
         val owner = jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'관리자') RETURNING id", Long::class.java, UUID.randomUUID())!!
@@ -29,7 +24,6 @@ class NoticeNotificationTextPostgresTests {
             SELECT gen_random_uuid(),'기존 알림','본문',CURRENT_TIMESTAMP,'SCHEDULED','SERVICE',id,'SERVICE' FROM notices WHERE public_id=?""", oldId)
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
     }
-    @AfterAll fun stop() { pg.stop() }
     @Test fun `V112는 문구 두 열을 nullable 길이 100 300과 기본값 없이 추가한다`() {
         val rows = jdbc.queryForList("""SELECT column_name,is_nullable,character_maximum_length,column_default FROM information_schema.columns
             WHERE table_name='notices' AND column_name IN ('notification_title','notification_body') ORDER BY column_name""")

@@ -1,11 +1,11 @@
 package com.knk.manyak.chat.migration
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.admin.analytics.AdminMetricReadRepository
 import com.knk.manyak.admin.analytics.AnalyticsRange
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
-import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -13,22 +13,17 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.time.LocalDate
 
 /** V109의 기존 메시지를 보존한 채 응답 모델 컬럼을 추가한다. H2 ddl-auto와 별도로 FK와 NULL을 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class StoryMessageModelMigrationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "message-model-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var datasource: DriverManagerDataSource
     private lateinit var jdbc: JdbcTemplate
     private var chatId = 0L
 
     @BeforeAll fun migrate() {
-        pg.start()
-        datasource = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "message-model-test")
+        datasource = SharedPostgres.database()
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").target("109").load().migrate()
         jdbc = JdbcTemplate(datasource)
         val story = jdbc.queryForObject("INSERT INTO stories(title) VALUES ('응답 모델 검증') RETURNING id", Long::class.java)!!
@@ -37,7 +32,6 @@ class StoryMessageModelMigrationPostgresTests {
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").load().migrate()
     }
 
-    @AfterAll fun stop() { pg.stop() }
 
     @Test fun `응답 모델은 varchar20 nullable이며 기본값 없이 기존 행을 백필하지 않는다`() {
         val column = jdbc.queryForMap("""SELECT data_type, character_maximum_length, is_nullable, column_default

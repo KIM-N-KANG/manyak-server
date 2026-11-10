@@ -33,6 +33,8 @@ class AdminAiCostIntegrationTests : IntegrationTest() {
             r.add("manyak.admin.langfuse.public-key") { "cost-public-key" }
             r.add("manyak.admin.langfuse.secret-key") { "cost-secret-key" }
             r.add("manyak.admin.langfuse.environment") { "prod" }
+            // 운영 기본 1초 호출 간격은 호출 수만큼 실대기가 된다. 간격 보장 자체는 LangfuseCostSnapshotsTests가 검증한다(KNK-2058).
+            r.add("manyak.admin.langfuse.call-interval") { "10ms" }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
     }

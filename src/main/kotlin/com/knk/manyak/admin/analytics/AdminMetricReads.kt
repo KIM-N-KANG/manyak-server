@@ -108,9 +108,9 @@ class AdminMetricReadService(private val repository: AdminMetricReadRepository, 
         fun day(date: LocalDate, groups: List<List<DailyAnalyticsMetric>>) = if (date in ready) counts(groups, listOf(date)) else null
     }
     private fun segment(query: AdminSegmentRequest) = analyticsSegment(query.segment)
-    // 대시보드 분석 지표처럼 5초 안에 못 받은 플랫폼 값은 준비 중으로 두고 DB 값을 바로 응답한다.
+    // 대시보드 분석 지표처럼 platformTimeout(기본 5초) 안에 못 받은 플랫폼 값은 준비 중으로 두고 DB 값을 바로 응답한다.
     private fun platformValues(endpoint: String, range: AnalyticsRange, metrics: List<DailyAnalyticsMetric>) =
-        PlatformValues(snapshots.load(endpoint, range, metrics, timeout = Duration.ofSeconds(5)))
+        PlatformValues(snapshots.load(endpoint, range, metrics, timeout = dashboard.platformTimeout))
     private fun range(query: AdminChartsRequest) = query.resolve(clock).let { AnalyticsRange(it.from, it.to) }
     private fun Map<String, Any?>.n(key: String) = (this[key] as Number?)?.toLong() ?: 0L
     private fun Map<String, Any?>.date() = LocalDate.ofEpochDay(n("metric_day"))

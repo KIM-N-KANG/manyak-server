@@ -1,5 +1,6 @@
 package com.knk.manyak.admin
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.admin.repository.AdminChangeActorRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -7,10 +8,7 @@ import org.junit.jupiter.api.*
 import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -19,16 +17,13 @@ import java.util.concurrent.TimeUnit
 /** 앱 datasource와 별개인 PostgreSQL에서 실제 NOWAIT와 커밋까지의 잠금 보존을 확인한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AdminChangeActorPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "actor-guard-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private val pool = Executors.newFixedThreadPool(2)
     private lateinit var jdbc: JdbcTemplate
     private lateinit var tx: TransactionTemplate
     private lateinit var actors: AdminChangeActorRepository
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "actor-guard-test")
+        val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         tx = TransactionTemplate(DataSourceTransactionManager(ds))
         actors = AdminChangeActorRepository(jdbc)
@@ -42,7 +37,7 @@ class AdminChangeActorPostgresTests {
             jdbc.update("INSERT INTO admin_accounts VALUES (?)", id)
         }
     }
-    @AfterAll fun stop() { pool.shutdownNow(); pg.stop() }
+    @AfterAll fun stop() { pool.shutdownNow() }
 
     @Test fun `처리자나 역할 잠금이 경합하면 기다리지 않아 교차 잠금 순서가 추가되지 않는다`() {
         for (sql in listOf("SELECT id FROM users WHERE id = 1 FOR UPDATE", "SELECT user_id FROM admin_accounts WHERE user_id = 1 FOR UPDATE")) {

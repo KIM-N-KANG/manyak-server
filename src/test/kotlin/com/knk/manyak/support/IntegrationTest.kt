@@ -82,6 +82,7 @@ import java.util.concurrent.Executor
     AdminProbeConfig::class,
     MigrationIndexEventTestConfig::class,
     SubmissionApprovalTestSupport::class,
+    NoResponseRetryRestTestClientConfig::class,
 )
 @MockitoSpyBean(
     types = [

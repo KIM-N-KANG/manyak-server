@@ -5,6 +5,7 @@ import org.springframework.data.redis.connection.stream.ReadOffset
 import org.springframework.data.redis.connection.stream.StreamOffset
 import org.springframework.data.redis.connection.stream.StreamReadOptions
 import org.springframework.beans.factory.DisposableBean
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -20,6 +21,9 @@ class ChatGenerationEvents(
     private val redis: StringRedisTemplate,
     private val mapper: ObjectMapper,
     private val logger: StructuredLogger,
+    /** 빈 XREAD 한 번의 BLOCK 시간. 지나면 생성 중 키를 확인한다. 읽기 명령 한도(READ_COMMAND_TIMEOUT_SECONDS)보다 짧아야 한다. */
+    @Value("\${manyak.chat.generation-events.read-wait:PT${READ_WAIT_SECONDS}S}")
+    private val readWait: Duration = Duration.ofSeconds(READ_WAIT_SECONDS),
 ) : DisposableBean {
     // 운영 공유 명령 한도(2초)는 XREAD BLOCK 5초보다 짧다. 읽기용 팩토리만 10초로 분리한다.
     // 기존 호스트·인증·TLS·클라이언트 리소스 설정을 그대로 사용하며 Spring 빈으로 노출하지 않는다.
@@ -87,7 +91,7 @@ class ChatGenerationEvents(
             while (connected()) {
                 val options = StreamReadOptions.empty().count(100)
                 val records = connection.streamCommands().xRead(
-                    if (draining) options else options.block(Duration.ofSeconds(READ_WAIT_SECONDS)),
+                    if (draining) options else options.block(readWait),
                     StreamOffset.create(streamKey, ReadOffset.from(offset)),
                 ).orEmpty()
                 for (record in records) {

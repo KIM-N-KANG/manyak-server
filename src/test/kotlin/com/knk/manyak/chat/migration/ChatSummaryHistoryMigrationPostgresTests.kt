@@ -1,25 +1,20 @@
 package com.knk.manyak.chat.migration
 
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatSummaryHistoryMigrationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "summary-history-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private var chat = 0L
     private var story = 0L
     @BeforeAll fun migrate() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "summary-history-test")
+        val ds = SharedPostgres.database()
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").target("119").load().migrate()
         jdbc = JdbcTemplate(ds)
         story = jdbc.queryForObject("INSERT INTO stories(title) VALUES ('요약 이력 검증') RETURNING id", Long::class.java)!!
@@ -27,7 +22,6 @@ class ChatSummaryHistoryMigrationPostgresTests {
         jdbc.update("INSERT INTO story_chats(story_id,summary,summary_through_turn) VALUES (?,'끝 턴 없음',0),(?,NULL,10)", story, story)
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
     }
-    @AfterAll fun stop() { pg.stop() }
     @Test fun `기존 유효 요약만 복사하고 구버전 컬럼과 삽입 호환을 보존한다`() {
         assertThat(jdbc.queryForObject("SELECT summary FROM story_chat_summaries WHERE chat_id=?", String::class.java, chat)).isEqualTo("기존 요약")
         assertThat(jdbc.queryForObject("SELECT count(*) FROM story_chat_summaries WHERE summary IN ('기존 요약','끝 턴 없음')", Int::class.java)).isEqualTo(1)

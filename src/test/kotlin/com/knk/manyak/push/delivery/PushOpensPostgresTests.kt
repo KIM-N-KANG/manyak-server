@@ -1,21 +1,17 @@
 package com.knk.manyak.push.delivery
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.repository.PushDeliveryRepository
 import org.assertj.core.api.Assertions.*
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.time.*
 import java.util.UUID
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PushOpensPostgresTests {
-    private val pg=GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD","push-opens-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n",2))
     private lateinit var jdbc:JdbcTemplate
     private lateinit var repository:PushDeliveryRepository
     private val from=LocalDate.parse("2026-10-23")
@@ -24,8 +20,7 @@ class PushOpensPostgresTests {
     private var other=0L
     private val ids=List(4) { UUID.randomUUID() }
     @BeforeAll fun start() {
-        pg.start()
-        val ds=DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres","postgres","push-opens-test")
+        val ds=SharedPostgres.database()
         Flyway.configure().dataSource(ds).locations("classpath:db/migration").target("111").load().migrate()
         jdbc=JdbcTemplate(ds);repository=PushDeliveryRepository(jdbc)
         uid=jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'수신 회원') RETURNING id",Long::class.java,UUID.randomUUID())!!
@@ -54,7 +49,6 @@ class PushOpensPostgresTests {
         report(PushDeliveryType.STORY_COMPLETED,other,"2026-10-22T14:59:59Z")
         report(PushDeliveryType.STORY_COMPLETED,other,"2026-10-24T15:00:00Z")
     }
-    @AfterAll fun stop() { pg.stop() }
     @Test fun `V113은 기존 발송 기록을 추측하지 않고 nullable 기본값 없음으로 추가한다`() {
         assertThat(jdbc.queryForObject("SELECT deep_link_included FROM push_campaigns WHERE public_id=?",Boolean::class.java,ids[2])).isNull()
         val col=jdbc.queryForMap("SELECT is_nullable,column_default FROM information_schema.columns WHERE table_name='push_campaigns' AND column_name='deep_link_included'")
