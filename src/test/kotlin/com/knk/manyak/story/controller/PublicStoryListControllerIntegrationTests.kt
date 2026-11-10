@@ -430,6 +430,73 @@ class PublicStoryListControllerIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `likes 동률과 좋아요 0은 limit 1로 빠짐없이 이어 읽고 커서 값은 좋아요 수다`() {
+        val author = saveUser()
+        val hot = saveStory(author, "셋")
+        val tiedA = saveStory(author, "하나A")
+        val tiedB = saveStory(author, "하나B")
+        val zeroA = saveStory(author, "없음A")
+        val zeroB = saveStory(author, "없음B")
+        like(hot, 3)
+        like(tiedA, 1)
+        like(tiedB, 1)
+        chat(zeroA, 50) // 채팅은 좋아요순에 영향이 없다
+        val expected = listOf(hot.publicId.toString()) +
+            listOf(tiedA, tiedB).map { it.publicId.toString() }.sortedDescending() +
+            listOf(zeroA, zeroB).map { it.publicId.toString() }.sortedDescending()
+
+        assertEquals(expected to listOf(3L, 1L, 1L, 0L, 0L), readAllByOne("likes", "k") { it["likeCount"].asLong() })
+    }
+
+    @Test
+    fun `숨긴 턴은 더하고 포크 복사 턴은 빼서 chats와 popular를 limit 1로 이어 읽는다`() {
+        val author = saveUser()
+        val hidden = saveStory(author, "숨긴 턴")
+        val forked = saveStory(author, "포크")
+        val plain = saveStory(author, "그대로")
+        val empty = saveStory(author, "채팅 없음")
+        storyChatRepository.save(StoryChat(storyId = hidden.id, currentTurn = 2, hiddenTurnCount = 3, regeneratedCount = 1))
+        val source = storyChatRepository.save(StoryChat(storyId = forked.id, currentTurn = 4))
+        storyChatRepository.save(
+            StoryChat(storyId = forked.id, currentTurn = 9, forkedFromChatId = source.id, forkedFromTurn = 4, deletedAt = Instant.now()),
+        )
+        chat(plain, 5)
+        like(plain, 1)
+        // 누적 턴: 숨긴 턴 6, 포크 4 + (9 - 4) = 9, 그대로 5, 채팅 없음 0. 인기순은 그대로가 좋아요로 15.
+        for ((sort, prefix, order) in listOf(
+            Triple("chats", "c", listOf(forked to 9L, hidden to 6L, plain to 5L, empty to 0L)),
+            Triple("popular", "s", listOf(plain to 15L, forked to 9L, hidden to 6L, empty to 0L)),
+        )) {
+            val (ids, scores) = readAllByOne(sort, prefix) {
+                if (sort == "chats") it["turnCount"].asLong() else it["likeCount"].asLong() * 10 + it["turnCount"].asLong()
+            }
+            assertEquals(order.map { it.first.publicId.toString() }, ids)
+            assertEquals(order.map { it.second }, scores)
+        }
+    }
+
+    /** limit 1로 끝까지 읽어 id와 카드 값 목록을 돌려준다. 다음 커서가 있으면 그 값이 `접두:카드 값:id`인지도 확인한다. */
+    private fun readAllByOne(
+        sort: String,
+        prefix: String,
+        cardValue: (tools.jackson.databind.JsonNode) -> Long,
+    ): Pair<List<String>, List<Long>> {
+        val ids = mutableListOf<String>()
+        val values = mutableListOf<Long>()
+        var cursor: String? = null
+        do {
+            val query = "?sort=$sort&limit=1" + (cursor?.let { "&cursor=$it" } ?: "")
+            val page = ObjectMapper().readTree(get(query).expectStatus().isOk.expectBody().returnResult().responseBody!!)
+            val item = page["items"].single()
+            ids.add(item["id"].asText())
+            values.add(cardValue(item))
+            cursor = page["nextCursor"].takeUnless { it.isNull }?.asText()
+            cursor?.let { assertEquals("$prefix:${values.last()}:${ids.last()}", String(Base64.getUrlDecoder().decode(it))) }
+        } while (cursor != null)
+        return ids to values
+    }
+
+    @Test
     fun `알 수 없는 filter는 400이다`() {
         get("?filter=mine").expectStatus().isBadRequest
     }
