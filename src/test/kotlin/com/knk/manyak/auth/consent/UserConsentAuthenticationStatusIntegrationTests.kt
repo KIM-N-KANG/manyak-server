@@ -5,7 +5,9 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.ScriptedAiIntegrationTest
+import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
+import org.hibernate.SessionFactory
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -16,13 +18,14 @@ import org.springframework.jdbc.core.JdbcTemplate
  * 인증 경로의 동의 필요 여부 판정(동의 게이트, 동의 완료)을 경우별로 고정한다(ACCOUNT 4-1-13, 5-1-3).
  *
  * 필요 여부는 문서마다 현행 버전 행이 있는지로만 정해진다. 같은 판정을 하는 회원 조회 [UserConsentService.getConsents]와
- * 결과가 같아야 한다.
+ * 결과가 같아야 하고, 인증 요청마다 실행되므로 조회 문장 수도 고정한다(KNK-2064).
  */
 class UserConsentAuthenticationStatusIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired private lateinit var service: UserConsentService
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
+    @Autowired private lateinit var entityManagerFactory: EntityManagerFactory
     @Value("\${manyak.legal.terms-version}") private lateinit var termsVersion: String
     @Value("\${manyak.legal.privacy-version}") private lateinit var privacyVersion: String
 
@@ -50,6 +53,13 @@ class UserConsentAuthenticationStatusIntegrationTests : ScriptedAiIntegrationTes
             .containsExactly(termsVersion, privacyVersion, "1")
         assertThat(status).isEqualTo(service.getConsents(userId))
         return listOf(status.terms.needsConsent, status.privacy.needsConsent, status.age14.needsConsent)
+    }
+
+    private fun preparedStatements(block: () -> Unit): Long {
+        val statistics = entityManagerFactory.unwrap(SessionFactory::class.java).statistics
+        statistics.clear()
+        block()
+        return statistics.prepareStatementCount
     }
 
     @Test
@@ -123,5 +133,16 @@ class UserConsentAuthenticationStatusIntegrationTests : ScriptedAiIntegrationTes
         agreeAllCurrent(other)
 
         assertThat(needs(user())).containsExactly(true, true, true)
+    }
+
+    @Test
+    fun `인증 경로의 동의 판정은 조회 한 번으로 끝난다`() {
+        val agreed = user()
+        agreeAllCurrent(agreed)
+        val missing = user()
+
+        assertThat(preparedStatements { service.authenticationStatus(agreed) }).isEqualTo(1)
+        assertThat(preparedStatements { service.authenticationStatus(missing) }).isEqualTo(1)
+        assertThat(preparedStatements { service.authenticationStatus(null) }).isZero()
     }
 }
