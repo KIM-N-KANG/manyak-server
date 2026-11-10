@@ -886,7 +886,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         val genreTag = tagRepository.findAll()
             .first { it.category == SimpleStoryTagCategory.GENRE && it.name == genre }
         return imagePresetRepository.save(
-            ImagePreset(imageKey = imageKey, type = ImagePresetType.THUMBNAIL, genres = setOf(genreTag)),
+            ImagePreset(imageKey = imageKey, type = ImagePresetType.THUMBNAIL, genres = setOf(genreTag.id)),
         )
     }
 
