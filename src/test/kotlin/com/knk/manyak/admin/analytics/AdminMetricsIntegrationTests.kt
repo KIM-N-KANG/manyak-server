@@ -29,6 +29,8 @@ class AdminMetricsIntegrationTests : IntegrationTest() {
             r.add("manyak.admin.langfuse.public-key") { "mock" }
             r.add("manyak.admin.langfuse.secret-key") { "mock" }
             r.add("manyak.admin.langfuse.environment") { "prod" }
+            // 운영 기본 1초 호출 간격은 호출 수만큼 실대기가 된다. 간격 보장 자체는 LangfuseCostSnapshotsTests가 검증한다(KNK-2058).
+            r.add("manyak.admin.langfuse.call-interval") { "10ms" }
             r.add("manyak.analytics.amplitude.api-key") { "mock" }; r.add("manyak.analytics.amplitude.secret-key") { "mock" }
             r.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
