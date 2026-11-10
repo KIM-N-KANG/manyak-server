@@ -7,23 +7,18 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryDraftControllerIntegrationTests {
+class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -32,7 +27,7 @@ class StoryDraftControllerIntegrationTests {
     @Autowired private lateinit var requests: StoryCreationRequestRepository
     @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
     @Autowired private lateinit var service: com.knk.manyak.user.draft.StoryDraftService
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var images: com.knk.manyak.image.service.UploadedImageStorage
     private lateinit var user: User
     private lateinit var auth: String

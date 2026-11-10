@@ -1,26 +1,20 @@
 package com.knk.manyak.admin
 
-import com.knk.manyak.auth.controller.FakeSocialLoginConfig
 import com.knk.manyak.auth.entity.*
 import com.knk.manyak.auth.repository.*
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 
-@Import(FakeSocialLoginConfig::class, AdminProbeConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminFoundationIntegrationTests {
+class AdminFoundationIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var socials: SocialAccountRepository
@@ -51,14 +45,14 @@ class AdminFoundationIntegrationTests {
 
     @Autowired private lateinit var audits: com.knk.manyak.admin.service.AdminAuditService
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var events: com.knk.manyak.global.observability.StructuredLogger
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var eligibility: com.knk.manyak.admin.service.AdminEligibilityService
     @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
 

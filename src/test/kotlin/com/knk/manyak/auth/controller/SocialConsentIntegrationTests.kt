@@ -3,8 +3,8 @@ package com.knk.manyak.auth.controller
 import com.knk.manyak.auth.consent.ConsentTokenStore
 import com.knk.manyak.auth.consent.SocialConsentService
 import com.knk.manyak.credit.service.GuestTrialLimitService
+import com.knk.manyak.support.ConsentGateIntegrationTest
 import com.knk.manyak.user.consent.UserConsentRequest
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.doCallRealMethod
 import java.util.concurrent.CyclicBarrier
@@ -20,22 +20,14 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 
-@ActiveProfiles("test")
-@Import(FakeSocialLoginConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.auth.consent-gate.enabled=true"])
-class SocialConsentIntegrationTests {
+class SocialConsentIntegrationTests : ConsentGateIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var socials: SocialAccountRepository
@@ -43,8 +35,8 @@ class SocialConsentIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var redis: StringRedisTemplate
-    @MockitoSpyBean private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
-    @MockitoSpyBean private lateinit var codes: ConsentTokenStore
+    @Autowired private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
+    @Autowired private lateinit var codes: ConsentTokenStore
     @Autowired private lateinit var service: SocialConsentService
     @Autowired private lateinit var consentService: com.knk.manyak.user.consent.UserConsentService
     @Autowired private lateinit var trials: GuestTrialLimitService

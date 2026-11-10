@@ -11,12 +11,11 @@ import com.knk.manyak.story.submission.StorySubmissionRepository
 import com.knk.manyak.story.submission.SubmissionKind
 import com.knk.manyak.story.submission.SubmissionStatus
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
@@ -26,10 +25,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** ADMIN 4-2-7 스토리 설정, 5-5-6 스토리 설정 행. */
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"])
-class AdminStorySettingsIntegrationTests {
+class AdminStorySettingsIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: JwtTokenProvider
@@ -148,7 +144,7 @@ class AdminStorySettingsIntegrationTests {
     }
 
     @Test fun `공식 계정 스토리는 오리지널 상세의 수정 폼 필드와 같은 값이다`() {
-        val official = users.save(User(publicId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), nickname = "공식"))
+        val official = users.save(User(publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID), nickname = "공식"))
         val story = full().also { jdbc.update("UPDATE stories SET user_id = ? WHERE id = ?", official.id, it.id) }
         val body = ok(story)
         val original = json(client.get().uri("/api/v1/admin/originals/${story.publicId}").header("Authorization", "Bearer $token")

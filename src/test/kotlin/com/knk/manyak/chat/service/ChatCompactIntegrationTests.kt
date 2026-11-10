@@ -10,11 +10,9 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -42,6 +40,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.global.observability.aicall.AiCallStatus
+import com.knk.manyak.support.ChatCompactIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import java.time.Duration
 import java.time.Instant
@@ -58,17 +57,14 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.api.Test
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@Import(ChatCompactTestConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.chat.compact.enabled=true", "spring.datasource.url=jdbc:h2:mem:compact;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;LOCK_TIMEOUT=10000"])
-class ChatCompactIntegrationTests {
+class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
+    // 압축이 켜진 경로를 검증한다. 설정 빈은 공용 스파이라 테스트마다 켜고, 끝나면 자동 reset된다.
+    @Autowired lateinit var compactSettings: com.knk.manyak.chat.config.ChatCompactSettings
+
     class Ai : ChatCompactAiClient {
         val requests = CopyOnWriteArrayList<ChatCompactAiRequest>()
         val links = CopyOnWriteArrayList<AiTraceLink>()
@@ -162,6 +158,7 @@ class ChatCompactIntegrationTests {
     }
 
     @BeforeEach fun reset() {
+        org.mockito.Mockito.doReturn(true).`when`(compactSettings).enabled
         cleaner.cleanAll()
         ai.requests.clear(); ai.links.clear(); ai.respond = { "새 요약" }
         queue.tasks.clear(); queue.reject = false; log.entries.clear()

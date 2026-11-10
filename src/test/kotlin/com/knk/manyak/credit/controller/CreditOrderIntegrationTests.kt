@@ -4,38 +4,27 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.support.AlternateConfigIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.RealWiringIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.env.YamlPropertySourceLoader
 import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.core.env.EnumerablePropertySource
 import org.springframework.core.env.MapPropertySource
 import org.springframework.core.io.ClassPathResource
-import org.springframework.test.context.ContextConfiguration
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
-@org.springframework.context.annotation.Import(PaymentAnalyticsTestConfig::class)
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@ContextConfiguration(initializers = [CreditOrderPaymentTestInitializer::class])
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = [
-        "manyak.payment.groble.webhook-secret=test-only-webhook-secret",
-    ],
-)
-class CreditOrderIntegrationTests {
+class CreditOrderIntegrationTests : RealWiringIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -231,16 +220,7 @@ class CreditOrderIntegrationTests {
     }
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@ContextConfiguration(initializers = [CreditOrderPaymentTestInitializer::class])
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = [
-        "manyak.payment.groble.webhook-secret=",
-    ],
-)
-class CreditOrderUnconfiguredIntegrationTests {
+class CreditOrderUnconfiguredIntegrationTests : AlternateConfigIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -277,13 +257,7 @@ class CreditOrderPaymentTestInitializer : ApplicationContextInitializer<Configur
 }
 
 /** 실제 yml의 링크를 오버라이드하지 않고 6종 주문 생성을 검증한다. */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.payment.groble.webhook-secret=test-only-webhook-secret"],
-)
-class CreditOrderConfiguredLinksIntegrationTests {
+class CreditOrderConfiguredLinksIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider

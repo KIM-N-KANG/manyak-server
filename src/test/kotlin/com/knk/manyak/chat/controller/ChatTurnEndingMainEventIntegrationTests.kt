@@ -33,20 +33,15 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
 
@@ -58,15 +53,11 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * AI 클라이언트를 요청 캡처 + 판정 결과 주입 가능한 가짜로 교체한다(가짜 빈 때문에 전용 H2로 분리).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-ending-runtime;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatTurnEndingMainEventIntegrationTests {
+class ChatTurnEndingMainEventIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedJudgingAiClientConfigJudgingChatTurnAiClient
+    }
+
 
     class JudgingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
@@ -95,15 +86,12 @@ class ChatTurnEndingMainEventIntegrationTests {
         }
     }
 
-    @TestConfiguration
     class JudgingAiClientConfig {
-        @Bean
-        @Primary
         fun judgingChatTurnAiClient(): JudgingChatTurnAiClient = JudgingChatTurnAiClient()
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var judgingAiClient: JudgingChatTurnAiClient
+    private val judgingAiClient = scriptedJudgingAiClientConfigJudgingChatTurnAiClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var storyMainEventRepository: StoryMainEventRepository
@@ -885,3 +873,5 @@ class ChatTurnEndingMainEventIntegrationTests {
         assertThat(chatService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("하늘의 끝")
     }
 }
+
+private val scriptedJudgingAiClientConfigJudgingChatTurnAiClient = ChatTurnEndingMainEventIntegrationTests.JudgingAiClientConfig().judgingChatTurnAiClient()

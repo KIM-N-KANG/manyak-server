@@ -2,14 +2,12 @@ package com.knk.manyak.admin
 
 import com.knk.manyak.admin.repository.AdminDashboardRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.support.AdminMetricsIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
@@ -18,11 +16,8 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
-@AutoConfigureRestTestClient
-@Import(com.knk.manyak.admin.analytics.AdminMetricsTestClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids=900001,900002,900003"])
-class AdminMembersCumulativeIntegrationTests {
+class AdminMembersCumulativeIntegrationTests : AdminMetricsIntegrationTest() {
+    override val clockAt: java.time.Instant = java.time.Instant.parse("2026-10-23T03:00:00Z")
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner

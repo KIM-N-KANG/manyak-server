@@ -4,33 +4,30 @@ import com.knk.manyak.feedback.dto.CreateFeedbackRequest
 import com.knk.manyak.feedback.notification.FeedbackNotifier
 import com.knk.manyak.feedback.service.FeedbackService
 import com.knk.manyak.global.observability.MdcKeys
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.SoftAssertions.assertSoftly
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Import
-import org.springframework.test.context.ActiveProfiles
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /** 피드백 저장의 커밋 후 리스너가 기본 비동기 실행기를 선택하고 요청 MDC를 전파하는지 검증한다. */
-@ActiveProfiles("test")
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.slack.feedback-webhook-url=", "manyak.google-form.feedback.form-id="],
-)
-@Import(FeedbackAsyncTestConfig::class)
-class FeedbackAsyncExecutorIntegrationTests {
+class FeedbackAsyncExecutorIntegrationTests : ScriptedAiIntegrationTest() {
 
     @Autowired
     private lateinit var feedbackService: FeedbackService
 
     @Autowired
     private lateinit var recordingNotifier: RecordingFeedbackNotifier
+
+    // 기록 알림 빈은 같은 조합의 다른 클래스와 공유된다. 앞 클래스가 남긴 관측값을 비우고 시작한다.
+    @BeforeEach
+    fun clearObservations() = recordingNotifier.observations.clear()
 
     @AfterEach
     fun clearMdc() = MDC.clear()

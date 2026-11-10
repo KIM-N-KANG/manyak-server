@@ -4,21 +4,16 @@ import com.knk.manyak.story.submission.*
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.http.MediaType
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StorySubmissionIntegrationTests {
+class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var users: com.knk.manyak.auth.repository.UserRepository
     @Autowired private lateinit var stories: com.knk.manyak.story.repository.StoryRepository
@@ -27,9 +22,10 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var worker: com.knk.manyak.story.submission.SubmissionTransactions
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired private lateinit var cleaner: com.knk.manyak.support.DatabaseCleaner
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var executor: java.util.concurrent.Executor
     @org.junit.jupiter.api.BeforeEach fun clean() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
+    @org.junit.jupiter.api.BeforeEach fun stopExecutors() = com.knk.manyak.support.stopExecuting(executor, pushExecutor)
 
     @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
 
@@ -230,7 +226,7 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var runner: com.knk.manyak.story.submission.SubmissionExecutor
     @Autowired private lateinit var assembler: com.knk.manyak.story.submission.SubmissionFormAssembler
     @Autowired private lateinit var tokens: com.knk.manyak.auth.jwt.JwtTokenProvider
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var ai: com.knk.manyak.story.submission.StoryModerationClient
 
     @Test fun `회원 HTTP 접수는 202와 UUID만 반환하고 타인 제출본은 404`() {
@@ -323,9 +319,9 @@ class StorySubmissionIntegrationTests {
     }
 
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "pushExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("pushExecutor")
     private lateinit var pushExecutor: java.util.concurrent.Executor
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var pushSender: com.knk.manyak.push.service.FcmPushSender
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
 

@@ -8,12 +8,11 @@ import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.PushMessageTemplateService
 import com.knk.manyak.push.service.PushTemplateKey
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -26,9 +25,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminCampaignIntegrationTests {
+class AdminCampaignIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -60,7 +57,7 @@ class AdminCampaignIntegrationTests {
     private fun templateGet() = mapper.readTree(call(HttpMethod.GET, "/templates/attendance_reminder")
         .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
 
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository

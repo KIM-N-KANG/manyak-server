@@ -3,12 +3,11 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 
 /**
  * 크레딧 수치 정책의 통합 검증(KNK-1056).
@@ -19,9 +18,7 @@ import org.springframework.test.context.ActiveProfiles
  * `credit_policies`에 행이 있을 때의 해석 규칙은 [CreditPolicyServiceTest]가 mock으로 본다.
  * 여기서는 저장·재조회가 실 매핑(컬럼명·타입)으로 도는지만 확인한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-class CreditPolicyServiceIntegrationTest {
+class CreditPolicyServiceIntegrationTest : IntegrationTest() {
 
     @Autowired private lateinit var creditPolicyService: CreditPolicyService
 

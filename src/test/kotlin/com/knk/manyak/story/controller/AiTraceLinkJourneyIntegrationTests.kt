@@ -21,18 +21,13 @@ import com.knk.manyak.story.entity.StoryCreationTag
 import com.knk.manyak.story.entity.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -45,15 +40,12 @@ import tools.jackson.databind.ObjectMapper
  * 같은 requestId 재시도에 동일하다. 완성(compile) 단계 requestId나 세션 순차 PK와 혼동하면 여정이 끊기므로
  * 이 테스트가 세 호출의 값이 하나로 이어지는지를 검증한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-trace-journey;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class AiTraceLinkJourneyIntegrationTests {
+class AiTraceLinkJourneyIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedCapturingAiClientConfigCapturingStoryAiClient
+        ScriptedAi.chat = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
+    }
+
 
     class CapturingStoryAiClient : StoryAiClient {
         val storylineLink = AtomicReference<AiTraceLink>()
@@ -103,20 +95,15 @@ class AiTraceLinkJourneyIntegrationTests {
         ): ChatChoicesResult = ChatChoicesResult(emptyList())
     }
 
-    @TestConfiguration
     class CapturingAiClientConfig {
-        @Bean
-        @Primary
         fun capturingStoryAiClient(): CapturingStoryAiClient = CapturingStoryAiClient()
 
-        @Bean
-        @Primary
         fun capturingChatTurnAiClient(): CapturingChatTurnAiClient = CapturingChatTurnAiClient()
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var storyAiClient: CapturingStoryAiClient
-    @Autowired private lateinit var chatAiClient: CapturingChatTurnAiClient
+    private val storyAiClient = scriptedCapturingAiClientConfigCapturingStoryAiClient
+    private val chatAiClient = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
     @Autowired private lateinit var tagRepository: StoryCreationTagRepository
     @Autowired private lateinit var objectMapper: ObjectMapper
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -317,3 +304,6 @@ class AiTraceLinkJourneyIntegrationTests {
         Regex(""""turnId":(\d+)""").find(sse)?.groupValues?.get(1)?.toLong()
             ?: error("completed 이벤트에 turnId가 없습니다: $sse")
 }
+
+private val scriptedCapturingAiClientConfigCapturingStoryAiClient = AiTraceLinkJourneyIntegrationTests.CapturingAiClientConfig().capturingStoryAiClient()
+private val scriptedCapturingAiClientConfigCapturingChatTurnAiClient = AiTraceLinkJourneyIntegrationTests.CapturingAiClientConfig().capturingChatTurnAiClient()

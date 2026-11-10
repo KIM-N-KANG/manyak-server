@@ -9,12 +9,11 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -22,10 +21,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.internal.shared-secret=delivery-test-secret"])
-class PushDeliveryIntegrationTests {
+class PushDeliveryIntegrationTests : IntegrationTest() {
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var cleaner: DatabaseCleaner
@@ -51,7 +47,7 @@ class PushDeliveryIntegrationTests {
         "recipientId" to recipient, "campaignId" to campaign, "outcome" to outcome, "reason" to "TEST",
         "deliveredDevices" to delivered, "failedDevices" to failed, "completedAt" to at)
 
-    private fun report(body: Any, secret: String? = "delivery-test-secret"): RestTestClient.ResponseSpec {
+    private fun report(body: Any, secret: String? = IntegrationTest.INTERNAL_SHARED_SECRET): RestTestClient.ResponseSpec {
         val req = client.post().uri("/internal/push-deliveries").contentType(MediaType.APPLICATION_JSON)
         secret?.let { req.header("X-Manyak-Internal-Secret", it) }
         return req.body(body).exchange()

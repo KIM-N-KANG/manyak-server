@@ -4,18 +4,15 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.doReturn
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -28,12 +25,9 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 만들 수 없다. 그래서 저장 시점의 위반만 스파이로 흉내 내, **예외를 어디서 잡는지**를 고정한다 —
  * 트랜잭션 안에서 잡아 커밋으로 넘어가면 rollback-only 오염으로 500이 된다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class NicknameRaceConflictIntegrationTests {
+class NicknameRaceConflictIntegrationTests : IntegrationTest() {
 
-    @MockitoSpyBean private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var userRepository: UserRepository
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider

@@ -1,5 +1,8 @@
 package com.knk.manyak.push
 
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
+import com.knk.manyak.support.PushRemoteIntegrationTest
+import org.springframework.test.context.TestPropertySource
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
@@ -21,26 +24,21 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.push.mode=local"])
 class LocalCampaignStoryIntegrationTests : CampaignStoryIntegrationTests()
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.push.mode=remote"])
+@TestPropertySource(properties = [PushRemoteIntegrationTest.REMOTE])
 class RemoteCampaignStoryIntegrationTests : CampaignStoryIntegrationTests()
 
 /** 같은 예약 계약과 발송 데이터 검증을 로컬 FCM·원격 아웃박스 경로에 모두 적용한다. */
-@AutoConfigureRestTestClient
-abstract class CampaignStoryIntegrationTests {
+abstract class CampaignStoryIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -49,9 +47,9 @@ abstract class CampaignStoryIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var promotion: PromotionPushService
-    @MockitoBean private lateinit var sender: FcmPushSender
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var store: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
     private val mapper = ObjectMapper()
     private val root = "/api/v1/admin/push/campaigns"
     private lateinit var admin: User

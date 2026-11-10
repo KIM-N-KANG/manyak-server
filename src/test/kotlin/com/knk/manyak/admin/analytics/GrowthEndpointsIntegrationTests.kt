@@ -4,12 +4,13 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -19,17 +20,15 @@ import tools.jackson.databind.ObjectMapper
 import java.time.*
 import java.time.format.DateTimeFormatter.BASIC_ISO_DATE
 
-@AutoConfigureRestTestClient
 @Import(GrowthEndpointClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class GrowthEndpointsIntegrationTests {
+class GrowthEndpointsIntegrationTests : IntegrationTest() {
     companion object {
         private val mapper = ObjectMapper()
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
             r.add("manyak.analytics.amplitude.api-key") { "mock" }
             r.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
     }

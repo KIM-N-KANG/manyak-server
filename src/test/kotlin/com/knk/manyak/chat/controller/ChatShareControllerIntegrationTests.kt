@@ -20,12 +20,10 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
@@ -37,10 +35,7 @@ import java.util.UUID
  * 발급은 채팅 상세 조회와 같은 소유권 게이트를 쓰고, 열람은 인증 없이 공유 토큰(UUID) 보유만으로 열린다.
  * 시점 고정은 메시지 복사가 아니라 발급 시점 current_turn을 커트라인으로 기록하는 방식이다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatShareControllerIntegrationTests {
+class ChatShareControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

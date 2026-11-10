@@ -13,27 +13,20 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.stopExecuting
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /** 새 스토리의 표지 null과 기존 프리셋 표지의 상세, 목록 노출을 검증한다. */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.test"])
-@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
-class StoryThumbnailWiringIntegrationTests {
+class StoryThumbnailWiringIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
 
 
@@ -50,6 +43,7 @@ class StoryThumbnailWiringIntegrationTests {
 
     @BeforeEach
     fun setUp() {
+        stopExecuting(moderationExecutor)
         databaseCleaner.cleanAll()
         val fantasy = storyCreationTagRepository.save(
             StoryCreationTag(

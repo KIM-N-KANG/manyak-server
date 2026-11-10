@@ -14,18 +14,13 @@ import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -35,20 +30,13 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 가짜 AI 빈 때문에 별도 ApplicationContext가 만들어지므로, 기본 테스트 컨텍스트와
  * 같은 이름의 in-memory H2를 공유해 create-drop이 서로 간섭하지 않도록 DB를 분리한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-error-relay;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatStreamErrorRelayIntegrationTests {
+class ChatStreamErrorRelayIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedThrowingAiClientConfigThrowingChatTurnAiClient
+    }
 
-    @TestConfiguration
+
     class ThrowingAiClientConfig {
-        @Bean
-        @Primary
         fun throwingChatTurnAiClient(): ChatTurnAiClient =
             object : ChatTurnAiClient {
                 override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
@@ -117,3 +105,5 @@ class ChatStreamErrorRelayIntegrationTests {
         assertThat(reloaded.currentTurn).isZero()
     }
 }
+
+private val scriptedThrowingAiClientConfigThrowingChatTurnAiClient = ChatStreamErrorRelayIntegrationTests.ThrowingAiClientConfig().throwingChatTurnAiClient()

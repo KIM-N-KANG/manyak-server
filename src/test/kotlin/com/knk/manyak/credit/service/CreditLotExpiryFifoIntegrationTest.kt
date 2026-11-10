@@ -11,13 +11,12 @@ import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.time.Duration
 import java.time.Instant
 
@@ -30,10 +29,7 @@ import java.time.Instant
  *
  * 만료 경계는 로트의 `expiresAt`을 과거·근접·먼 미래로 직접 심어 실시간 시계 기준으로 검증한다(고정 시계 불필요).
  */
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-class CreditLotExpiryFifoIntegrationTest {
-
+class CreditLotExpiryFifoIntegrationTest : IntegrationTest() {
 
     @Autowired private lateinit var service: CreditWalletService
     @Autowired private lateinit var walletRepository: CreditWalletRepository

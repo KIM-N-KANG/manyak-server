@@ -20,17 +20,14 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -42,11 +39,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * AI 클라이언트는 공용 페이크([GatedChatTurnAiClientConfig])를 @Import해 쓴다 — 중첩 @TestConfiguration은
  * 클래스마다 Spring 컨텍스트를 하나씩 늘려 캐시 상한 축출로 이어진다(KNK-686, SpringContextBudgetGuardTests).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@Import(GatedChatTurnAiClientConfig::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatCharacterImageIntegrationTests {
+class ChatCharacterImageIntegrationTests : ScriptedAiIntegrationTest() {
 
     @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 

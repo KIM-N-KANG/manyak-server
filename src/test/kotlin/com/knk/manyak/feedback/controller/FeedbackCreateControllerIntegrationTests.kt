@@ -3,34 +3,16 @@ package com.knk.manyak.feedback.controller
 import com.knk.manyak.feedback.entity.Platform
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class FeedbackCreateControllerIntegrationTests {
-
-    companion object {
-        @JvmStatic
-        @DynamicPropertySource
-        fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
-            // 환경변수(MANYAK_SLACK_FEEDBACK_WEBHOOK_URL)가 export 돼 있어도 빈 값을 강제해 외부 발송을 막는다.
-            registry.add("manyak.slack.feedback-webhook-url") { "" }
-            // env(MANYAK_GOOGLE_FORM_FEEDBACK_ID) 오염까지 막아 실 구글 폼으로 발송하지 않도록 강제한다.
-            registry.add("manyak.google-form.feedback.form-id") { "" }
-        }
-    }
+class FeedbackCreateControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

@@ -2,17 +2,13 @@ package com.knk.manyak.feedback.controller
 
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 
@@ -23,21 +19,7 @@ import org.springframework.test.web.servlet.post
  * RestTestClient(RANDOM_PORT)의 하부 전송(Reactor Netty)은 헤더 미설정 시 `ReactorNetty/x.y` 를 강제로 붙여
  * "헤더 없음" 을 표현할 수 없으므로, 헤더를 완전히 제어할 수 있는 in-process MockMvc 로 검증한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureMockMvc
-@SpringBootTest
-class FeedbackUserAgentControllerIntegrationTests {
-
-    companion object {
-        @JvmStatic
-        @DynamicPropertySource
-        fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
-            // 환경변수(MANYAK_SLACK_FEEDBACK_WEBHOOK_URL)가 export 돼 있어도 빈 값을 강제해 외부 발송을 막는다.
-            registry.add("manyak.slack.feedback-webhook-url") { "" }
-            // env(MANYAK_GOOGLE_FORM_FEEDBACK_ID) 오염까지 막아 실 구글 폼으로 발송하지 않도록 강제한다.
-            registry.add("manyak.google-form.feedback.form-id") { "" }
-        }
-    }
+class FeedbackUserAgentControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var mockMvc: MockMvc

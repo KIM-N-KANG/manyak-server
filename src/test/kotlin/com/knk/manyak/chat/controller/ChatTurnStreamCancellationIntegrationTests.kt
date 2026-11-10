@@ -20,31 +20,23 @@ import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Import
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import org.mockito.Mockito
 import java.util.concurrent.Executor
 import java.util.function.Consumer
 
-@org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
-@Import(ChatTurnStreamCancellationTestConfig::class)
-@ActiveProfiles("test")
-@SpringBootTest(properties = [
-    "spring.datasource.url=jdbc:h2:mem:manyak-stream-cancel;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-])
-class ChatTurnStreamCancellationIntegrationTests {
+class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedChatTurnStreamCancellationTestConfigAi
+    }
+
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
     @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
 
@@ -80,10 +72,10 @@ class ChatTurnStreamCancellationIntegrationTests {
     @Autowired lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired lateinit var service: ChatService
     private val worker = ControlledWorker()
-    @MockitoBean(name = "chatSseExecutor") lateinit var executor: Executor
-    @Autowired lateinit var ai: ControlledAi
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("chatSseExecutor")  lateinit var executor: Executor
+    private val ai = scriptedChatTurnStreamCancellationTestConfigAi
     @Autowired lateinit var stories: StoryRepository
-    @MockitoSpyBean lateinit var chats: StoryChatRepository
+    @Autowired lateinit var chats: StoryChatRepository
     @Autowired lateinit var messages: StoryMessageRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var wallet: CreditWalletService
@@ -93,7 +85,7 @@ class ChatTurnStreamCancellationIntegrationTests {
     @Autowired lateinit var trials: GuestTrialLimitService
     @Autowired lateinit var meters: io.micrometer.core.instrument.MeterRegistry
     @Autowired lateinit var cleaner: DatabaseCleaner
-    @MockitoSpyBean lateinit var images: ChatRealtimeImageService
+    @Autowired lateinit var images: ChatRealtimeImageService
 
     @BeforeEach fun setUp() {
         Mockito.doAnswer { call ->
@@ -113,10 +105,10 @@ class ChatTurnStreamCancellationIntegrationTests {
         ai.returnedCompleted = false
     }
 
-    @MockitoBean lateinit var chatGenerationDeadlines: com.knk.manyak.chat.service.ChatGenerationDeadlines
-    @MockitoSpyBean lateinit var store: com.knk.manyak.chat.service.ChatGenerationStore
-    @MockitoSpyBean lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
-    @MockitoSpyBean lateinit var logger: com.knk.manyak.global.observability.StructuredLogger
+    @Autowired lateinit var chatGenerationDeadlines: com.knk.manyak.chat.service.ChatGenerationDeadlines
+    @Autowired lateinit var store: com.knk.manyak.chat.service.ChatGenerationStore
+    @Autowired lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+    @Autowired lateinit var logger: com.knk.manyak.global.observability.StructuredLogger
     private lateinit var deadline: Runnable
 
     private fun deadline() = deadline.run()
@@ -715,9 +707,9 @@ class ChatTurnStreamCancellationIntegrationTests {
         }
     }
 
-    @MockitoSpyBean lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
+    @Autowired lateinit var generationEvents: com.knk.manyak.chat.service.ChatGenerationEvents
 
-    @MockitoSpyBean lateinit var receivers: com.knk.manyak.chat.service.ChatGenerationReceivers
+    @Autowired lateinit var receivers: com.knk.manyak.chat.service.ChatGenerationReceivers
 
     private fun assertResumeResponse(chatId: String, generationId: String, status: Int, code: String) {
         val response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
@@ -953,8 +945,8 @@ class ChatTurnStreamCancellationIntegrationTests {
     }
 }
 
-@TestConfiguration
 class ChatTurnStreamCancellationTestConfig {
-    @Bean @Primary
     fun ai() = ChatTurnStreamCancellationIntegrationTests.ControlledAi()
 }
+
+private val scriptedChatTurnStreamCancellationTestConfigAi = ChatTurnStreamCancellationTestConfig().ai()

@@ -18,13 +18,11 @@ import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.Base64
@@ -37,10 +35,7 @@ import java.util.UUID
  * 원장 행을 서비스가 아니라 리포지토리로 넣는 이유는 createdAt·로트 만료일을 테스트가 정확히 통제해야
  * 하기 때문이다(소멸 행의 createdAt ≠ 실제 만료일 같은 케이스는 실제 흐름으로는 재현하기 어렵다).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CreditTransactionHistoryIntegrationTests {
+class CreditTransactionHistoryIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

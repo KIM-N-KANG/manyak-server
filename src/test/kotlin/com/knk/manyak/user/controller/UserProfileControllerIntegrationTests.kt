@@ -11,19 +11,16 @@ import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Instant
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -33,10 +30,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - 프로필 이미지는 프리셋 선택만 지원한다(업로드 없음). 닉네임 변경과 독립이다.
  * - 인증 필수이며 정지 계정은 403이다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class UserProfileControllerIntegrationTests {
+class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository
@@ -44,7 +38,7 @@ class UserProfileControllerIntegrationTests {
     @Autowired private lateinit var profileImagePresetService: ProfileImagePresetService
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
     @Autowired private lateinit var storyRepository: StoryRepository
-    @MockitoBean private lateinit var indexer: StorySearchIndexer
+    @Autowired private lateinit var indexer: StorySearchIndexer
 
     @BeforeEach
     fun setUp() {

@@ -12,26 +12,17 @@ import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
-import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.global.observability.aicall.AiCallRecorder
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
-import io.micrometer.core.instrument.MeterRegistry
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
+import org.mockito.Mockito
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -46,47 +37,16 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * (실제 클라이언트의 post-persist 연결 끊김·60s 타임아웃은 RestTestClient로 재현할 수 없으므로,
  * persistTurn 성공 직후의 종료 단계가 던지도록 AiCallRecorder를 대체해 결정적으로 만든다.)
  *
- * (kotlin-spring 플러그인이 @Component를 open으로 열어 AiCallRecorder를 서브클래싱할 수 있다. record 등은
- * 실제 동작을 그대로 상속하고 attachTurnNumber만 던지게 오버라이드한다. @Primary 빈으로 별도 컨텍스트가
- * 생기므로 create-drop 간섭을 막으려 H2를 분리한다.)
+ * (AiCallRecorder는 공용 스파이다. record 등은 실제 동작을 그대로 두고 attachTurnNumber만 던지게 스텁한다.
+ * 스텁은 테스트마다 자동 reset된다.)
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-credit-persisted;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatTurnCreditPersistedNoRefundIntegrationTests {
+class ChatTurnCreditPersistedNoRefundIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
     @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
 
 
     /** persistTurn 성공 직후 호출되는 attachTurnNumber를 던지게 해, 저장은 됐지만 completed 전까지 실패한 상태를 만든다. */
-    class FailingAfterPersistAiCallRecorder(
-        repository: AiCallLogRepository,
-        meterRegistry: MeterRegistry,
-        callerService: String,
-        structuredLogger: StructuredLogger,
-    ) : AiCallRecorder(repository, meterRegistry, callerService, structuredLogger) {
-        override fun attachTurnNumber(aiCallLogId: Long, turnNumber: Int) {
-            throw RuntimeException("post-persist terminal failure (test)")
-        }
-    }
-
-    @TestConfiguration
-    class FailingRecorderConfig {
-        @Bean
-        @Primary
-        fun failingAiCallRecorder(
-            repository: AiCallLogRepository,
-            meterRegistry: MeterRegistry,
-            @Value("\${spring.application.name:manyak-server}") callerService: String,
-            structuredLogger: StructuredLogger,
-        ): AiCallRecorder =
-            FailingAfterPersistAiCallRecorder(repository, meterRegistry, callerService, structuredLogger)
-    }
+    @Autowired private lateinit var aiCallRecorder: AiCallRecorder
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -126,6 +86,8 @@ class ChatTurnCreditPersistedNoRefundIntegrationTests {
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()
+        Mockito.doThrow(RuntimeException("post-persist terminal failure (test)"))
+            .`when`(aiCallRecorder).attachTurnNumber(Mockito.anyLong(), Mockito.anyInt())
     }
 
     @Test

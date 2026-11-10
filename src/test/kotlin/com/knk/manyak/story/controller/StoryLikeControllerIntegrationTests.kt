@@ -10,15 +10,13 @@ import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -27,10 +25,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 계약: like만(dislike 없음), 등록 POST·취소 DELETE 모두 204·멱등, 인증 필수(401),
  * 대상 스토리에 읽기 가시성 게이트([Story.isReadableBy]) 적용(읽을 수 없으면 404).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryLikeControllerIntegrationTests {
+class StoryLikeControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

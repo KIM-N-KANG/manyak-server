@@ -3,14 +3,13 @@ package com.knk.manyak.user.service
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.user.dto.CreateUserPersonaRequest
 import com.knk.manyak.user.dto.UpdateUserPersonaRequest
 import com.knk.manyak.user.repository.UserPersonaRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
@@ -22,9 +21,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-@ActiveProfiles("test")
-@SpringBootTest
-class UserPersonaConcurrencyIntegrationTests {
+class UserPersonaConcurrencyIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var personas: UserPersonaRepository
     @Autowired private lateinit var service: UserPersonaService

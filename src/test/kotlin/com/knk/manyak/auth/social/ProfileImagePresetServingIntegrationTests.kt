@@ -1,10 +1,8 @@
 package com.knk.manyak.auth.social
 
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -14,11 +12,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - **인증 없이 서빙**돼야 한다(공개 스토리 author.profileImageUrl로 무인증 노출) — SecurityConfig permitAll.
  * - **한글 파일명**이 퍼센트 인코딩된 경로로 실제 리소스에 해소돼야 한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ProfileImagePresetServingIntegrationTests {
-
+class ProfileImagePresetServingIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
 

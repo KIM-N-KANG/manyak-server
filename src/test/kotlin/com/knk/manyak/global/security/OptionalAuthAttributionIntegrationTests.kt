@@ -28,19 +28,14 @@ import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Clock
 import java.time.Duration
@@ -59,27 +54,19 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * 대상: feedback, chat 생성, simple story 생성(AI 클라이언트는 @Primary 페이크로 대체).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OptionalAuthAttributionIntegrationTests {
+class OptionalAuthAttributionIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedFakeAiClientConfigFakeStoryAiClient
+    }
+
 
     companion object {
         // fake AI의 compileStory 호출 횟수. finalize 소유권 거부가 AI 호출 '전'에 일어남을 검증한다(Codex #76 P2).
         val compileStoryCalls = AtomicInteger(0)
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun disableSlackWebhook(registry: DynamicPropertyRegistry) {
-            registry.add("manyak.slack.feedback-webhook-url") { "" }
-        }
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
         // 테스트는 AI 서버 없이 도메인 귀속만 검증한다. 실제 HTTP 호출 대신 고정 응답을 반환한다.
-        @Bean
-        @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
@@ -408,3 +395,5 @@ class OptionalAuthAttributionIntegrationTests {
             .exchange()
     }
 }
+
+private val scriptedFakeAiClientConfigFakeStoryAiClient = OptionalAuthAttributionIntegrationTests.FakeAiClientConfig().fakeStoryAiClient()

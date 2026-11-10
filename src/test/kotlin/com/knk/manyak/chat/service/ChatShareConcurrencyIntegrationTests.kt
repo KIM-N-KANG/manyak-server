@@ -6,12 +6,11 @@ import com.knk.manyak.chat.repository.StoryChatShareRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -24,9 +23,7 @@ import java.util.concurrent.TimeUnit
  * (= `uq_story_chat_shares_chat_cutoff` 위반이 애초에 발생하지 않는다). 락을 걷어내면 이 테스트가
  * 중복 행 또는 유니크 위반으로 깨진다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class ChatShareConcurrencyIntegrationTests {
+class ChatShareConcurrencyIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var chatService: ChatService
     @Autowired private lateinit var storyRepository: StoryRepository

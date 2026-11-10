@@ -14,15 +14,13 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
@@ -36,10 +34,7 @@ import java.time.Instant
  * 특히 `choiceOrder = 1`(첫 선택지)이 기록되는지를 별도로 고정한다 — 인덱스 산술로 구현하면 0-based 실수가
  * 조용히 첫 선택지를 어긋나게 만든다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatTurnChoiceSelectionIntegrationTests {
+class ChatTurnChoiceSelectionIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 

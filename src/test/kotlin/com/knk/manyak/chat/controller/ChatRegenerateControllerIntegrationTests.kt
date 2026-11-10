@@ -25,15 +25,13 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -43,10 +41,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 불변인지 확인한다. 낡은 turnId 409, 턴 0개 404, 엔딩 도달 409, 그리고 회원 크레딧 선차감/무차감을 검증한다.
  * AI는 기본 스텁(manyak.ai.chat.stub)을 사용하며, 스텁은 마지막 사용자 입력을 본문에 에코한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatRegenerateControllerIntegrationTests {
+class ChatRegenerateControllerIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService

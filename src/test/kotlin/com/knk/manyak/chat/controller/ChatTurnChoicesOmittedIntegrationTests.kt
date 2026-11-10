@@ -17,17 +17,13 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -38,10 +34,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * 페이크 AI는 generateChoices 호출 횟수를 센다 — 턴 스트림이 이를 부르지 않아야 한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatTurnChoicesOmittedIntegrationTests {
+class ChatTurnChoicesOmittedIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedFakeAiClientConfigFakeChatTurnAiClient
+    }
+
 
     companion object {
         val genChoiceCalls = AtomicInteger(0)
@@ -51,10 +48,7 @@ class ChatTurnChoicesOmittedIntegrationTests {
         var streamedChoices: List<String> = emptyList()
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeChatTurnAiClient(): ChatTurnAiClient = object : ChatTurnAiClient {
             override fun streamTurn(
             request: ChatTurnAiRequest,
@@ -164,3 +158,5 @@ class ChatTurnChoicesOmittedIntegrationTests {
         return storyChatRepository.save(StoryChat(storyId = story.id))
     }
 }
+
+private val scriptedFakeAiClientConfigFakeChatTurnAiClient = ChatTurnChoicesOmittedIntegrationTests.FakeAiClientConfig().fakeChatTurnAiClient()

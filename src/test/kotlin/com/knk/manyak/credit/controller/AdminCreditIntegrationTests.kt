@@ -5,12 +5,11 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -23,10 +22,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-@org.springframework.context.annotation.Import(com.knk.manyak.credit.support.H2CreditAdminLocksConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminCreditIntegrationTests {
+class AdminCreditIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -63,7 +59,7 @@ class AdminCreditIntegrationTests {
     private fun delete(key: String) = client.method(org.springframework.http.HttpMethod.DELETE).uri("$root/policies/$key")
         .header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON).body(mapOf("reason" to "이벤트 종료")).exchange()
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
 
     @Test fun `감사 저장 실패는 조정 원장 로트 잔액과 정책 변경을 모두 롤백한다`() {

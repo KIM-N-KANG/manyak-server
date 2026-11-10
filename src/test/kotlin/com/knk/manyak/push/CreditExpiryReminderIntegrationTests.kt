@@ -13,6 +13,7 @@ import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.scheduler.CreditExpiryReminderScheduler
 import com.knk.manyak.push.service.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.junit.jupiter.params.ParameterizedTest
@@ -20,15 +21,12 @@ import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.*
 import java.util.concurrent.*
 
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class CreditExpiryReminderIntegrationTests {
+class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var lots: CreditLotRepository
     @Autowired private lateinit var tokens: DevicePushTokenRepository
@@ -39,9 +37,9 @@ class CreditExpiryReminderIntegrationTests {
     @Autowired private lateinit var redis: StringRedisTemplate
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var store: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var sender: FcmPushSender
     private val now = Instant.parse("2026-10-25T01:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
     private val messages = mutableListOf<PushMessage>()

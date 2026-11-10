@@ -16,6 +16,7 @@ import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -23,10 +24,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import java.time.Duration
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -37,10 +36,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 아무것도 차감되지 않고, (3) 게스트는 차감되지 않고, (4) 정상 완료 턴은 환불되지 않음을 검증한다.
  * 실패 턴의 환불은 예외를 던지는 가짜 AI가 필요하므로 [ChatTurnCreditRefundIntegrationTests]에서 다룬다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatTurnCreditIntegrationTests {
+class ChatTurnCreditIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
     @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
 
