@@ -31,7 +31,7 @@ class ChatReadIsolationGuardTests {
     @Test
     fun `채팅 읽기 경로는 REPEATABLE_READ 읽기 전용 트랜잭션이다`() {
         for (name in readPaths) {
-            val method = ChatService::class.java.methods.first { it.name == name }
+            val method = ChatQueryService::class.java.methods.first { it.name == name }
             val tx = AnnotatedElementUtils.findMergedAnnotation(method, Transactional::class.java)
                 ?: error("$name 에 @Transactional 이 없습니다.")
 

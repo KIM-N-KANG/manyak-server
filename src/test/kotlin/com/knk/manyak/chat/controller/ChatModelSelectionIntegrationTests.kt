@@ -7,6 +7,7 @@ import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.*
+import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
@@ -38,6 +39,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired private lateinit var wallet: CreditWalletService
     @Autowired private lateinit var trials: GuestTrialLimitService
     @Autowired private lateinit var service: ChatService
+    @Autowired private lateinit var chatQueryService: ChatQueryService
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
 
     @Autowired
@@ -72,11 +74,11 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
             val used = trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used
             service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("무료", realtimeImage = false), user.id)
             waitForTurn(chat)
-            await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
             val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
             assertThat(first.creditTransactionId).isNull()
             service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(first.id, false), user.id)
-            await().atMost(Duration.ofSeconds(10)).until { chats.findById(chat.id).orElseThrow().regeneratedCount == 1 && service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            await().atMost(Duration.ofSeconds(10)).until { chats.findById(chat.id).orElseThrow().regeneratedCount == 1 && chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
             assertThat(messages.findById(first.id).orElseThrow().creditTransactionId).isNull()
             assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isEqualTo(used)
             assertThat(wallet.balanceOf(user.id)).isZero()
@@ -119,7 +121,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
             if (freeAtStart) promotion(end = java.time.Instant.now().minusSeconds(1)) else promotion()
             GatedChatTurnAiClientConfig.gate.countDown()
             waitForTurn(chat)
-            await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+            await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
             assertThat(wallet.balanceOf(user.id)).isEqualTo(if (freeAtStart) 1000 else 980)
             val id = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last().creditTransactionId
             if (freeAtStart) assertThat(id).isNull() else assertThat(transactions.findById(id!!).orElseThrow().amount).isEqualTo(-20)
@@ -133,7 +135,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
         service.changeSettings(chat.publicId.toString(), "LITE", user.id)
         GatedChatTurnAiClientConfig.turnFailure = IllegalStateException("promotion failure")
         service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("실패", realtimeImage = false), user.id)
-        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
         assertThat(trials.usage(user.id, null, GuestTrialLimitService.Counter.CHAT_TURN).used).isZero()
         assertThat(transactions.findAll().map { it.reason }).containsExactly(CreditReason.SIGNUP_REWARD)
     }
@@ -169,7 +171,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
         service.changeSettings(chat.publicId.toString(), null, user.id, true)
         GatedChatTurnAiClientConfig.gate.countDown()
         waitForTurn(chat)
-        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
         assertThat(chats.findById(chat.id).orElseThrow().longResponse).isTrue()
         assertThat(logs.list.any { it.formattedMessage.contains("event_name=ai_response_saved") && it.formattedMessage.contains("long_response=false") }).isTrue()
         val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
@@ -179,7 +181,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
             assertThat(logs.list.any { it.formattedMessage.contains("event_name=ai_response_regenerated") && it.formattedMessage.contains("long_response=true") }).isTrue()
         }
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
-        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
         service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("다음 긴 응답", realtimeImage = false), user.id)
         waitForTurn(chat, 2)
         assertThat(GatedChatTurnAiClientConfig.lastRequest!!.longResponse).isTrue()
@@ -222,7 +224,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
         service.changeSettings(chat.publicId.toString(), null, user.id, false)
         GatedChatTurnAiClientConfig.gate.countDown()
         await().atMost(Duration.ofSeconds(10)).until {
-            failedWrites.get() == 1 && service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null
+            failedWrites.get() == 1 && chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null
         }
         val succeeded = events("aiMessage_processed_succeeded")
         assertThat(succeeded).hasSize(1)
@@ -380,7 +382,7 @@ class ChatModelSelectionIntegrationTests : ScriptedAiIntegrationTest() {
         service.changeSettings(chat.publicId.toString(), "LITE", user.id)
         service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest("재생성 준비", realtimeImage = false), user.id)
         waitForTurn(chat)
-        await().atMost(Duration.ofSeconds(10)).until { service.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
+        await().atMost(Duration.ofSeconds(10)).until { chatQueryService.getChatDetail(chat.publicId.toString(), user.id).generatingTurn == null }
         val first = messages.findByChatIdOrderByMessageOrderAsc(chat.id).last()
         assertResponseModel(chat, "LITE")
         service.changeSettings(chat.publicId.toString(), "AURORA", user.id)

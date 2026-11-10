@@ -11,6 +11,7 @@ import com.knk.manyak.chat.entity.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
+import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.chat.service.ChatRealtimeImageService
 import com.knk.manyak.credit.entity.CreditReason
@@ -71,6 +72,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired lateinit var mockMvc: org.springframework.test.web.servlet.MockMvc
     @Autowired lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired lateinit var service: ChatService
+    @Autowired lateinit var chatQueryService: ChatQueryService
     private val worker = ControlledWorker()
     @Autowired @org.springframework.beans.factory.annotation.Qualifier("chatSseExecutor")  lateinit var executor: Executor
     private val ai = scriptedChatTurnStreamCancellationTestConfigAi
@@ -114,7 +116,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
     private fun deadline() = deadline.run()
     private fun input() = ContinueChatRequest("진행", realtimeImage = false)
     private fun start(member: User, chat: StoryChat) = service.streamChatTurn(chat.publicId.toString(), input(), member.id)
-    private fun state(chat: StoryChat, member: User) = service.getChatDetail(chat.publicId.toString(), member.id).generatingTurn
+    private fun state(chat: StoryChat, member: User) = chatQueryService.getChatDetail(chat.publicId.toString(), member.id).generatingTurn
     private fun refunds() = transactions.findAll().filter { it.reason == CreditReason.REFUND }
     private fun rejectedCount() = meters.find("manyak.chat.turn.result").tag("outcome", "rejected").counter()?.count() ?: 0.0
     private fun successCount() = meters.find("manyak.chat.turn.result").tag("outcome", "success").counter()?.count() ?: 0.0
@@ -498,7 +500,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
         seedTurn(chat)
         Mockito.clearInvocations(store, chats)
 
-        val detail = service.getChatDetail(chat.publicId.toString(), null)
+        val detail = chatQueryService.getChatDetail(chat.publicId.toString(), null)
 
         assertThat(detail.turns).hasSize(1)
         val order = Mockito.inOrder(store, chats)
@@ -793,7 +795,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
         val post = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/chats/${chat.publicId.toString().uppercase()}/turns/stream")
             .header("X-Manyak-Device-Id", "resume-device").contentType("application/json").content("""{"userInput":"진행","realtimeImage":false}""")).andReturn()
         assertThat(post.request.isAsyncStarted).isTrue()
-        val generation = service.getChatDetail(chat.publicId.toString(), null).generatingTurn!!
+        val generation = chatQueryService.getChatDetail(chat.publicId.toString(), null).generatingTurn!!
         assertThat(redis.hasKey("chat:${chat.publicId}:gen:${generation.generationId}")).isFalse()
         val get = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/chats/${chat.publicId}/generations/${generation.generationId}/stream")).andReturn()
         assertThat(get.request.isAsyncStarted).isTrue()
@@ -861,7 +863,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
         val story = stories.save(Story(title = "만료 재연결", genre = "판타지"))
         val chat = chats.save(StoryChat(storyId = story.id))
         service.streamChatTurn(chat.publicId.toString(), input(), deviceId = "expiry-device")
-        val id = service.getChatDetail(chat.publicId.toString(), null).generatingTurn!!.generationId
+        val id = chatQueryService.getChatDetail(chat.publicId.toString(), null).generatingTurn!!.generationId
         worker.task.run()
         val key = "chat:${chat.publicId}:gen:$id"
         assertThat(redis.getExpire(key)).isBetween(298, 300)

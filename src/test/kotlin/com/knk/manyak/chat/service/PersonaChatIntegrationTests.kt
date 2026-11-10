@@ -25,6 +25,7 @@ class PersonaChatIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var personas: UserPersonaService
     @Autowired private lateinit var service: ChatService
+    @Autowired private lateinit var chatQueryService: ChatQueryService
     @Autowired private lateinit var chats: StoryChatRepository
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var starts: StoryStartSettingRepository
@@ -52,19 +53,19 @@ class PersonaChatIntegrationTests : IntegrationTest() {
         assertEquals("하늘은 출발", chat.storyPrologueSnapshot)
         personas.update(reader.id, persona.id, UpdateUserPersonaRequest("변경", "다른 설명"))
         personas.delete(reader.id, persona.id)
-        assertEquals("하늘의 스토리", service.getChatDetail(created.id, reader.id).storyTitle)
-        assertEquals("하늘", service.getMyChats(reader.id, 10).single().persona!!.name)
+        assertEquals("하늘의 스토리", chatQueryService.getChatDetail(created.id, reader.id).storyTitle)
+        assertEquals("하늘", chatQueryService.getMyChats(reader.id, 10).single().persona!!.name)
         story.visibility = StoryVisibility.PRIVATE
         story.title = "비공개 {username}"
         story.protagonistName = "비밀"
         stories.saveAndFlush(story)
         val share = service.createChatShare(created.id, reader.id)
-        val shared = service.getChatShare(share.shareId, null)
+        val shared = chatQueryService.getChatShare(share.shareId, null)
         assertEquals("하늘의 스토리", shared.storyTitle)
         assertEquals("하늘은 출발", shared.prologue)
         assertFalse(mapper.valueToTree<tools.jackson.databind.JsonNode>(shared).has("persona"))
         jdbc.update("update story_chats set start_setting_id = null where id = ?", chat.id)
-        assertEquals("하늘은 출발", service.getChatDetail(created.id, reader.id).prologue)
+        assertEquals("하늘은 출발", chatQueryService.getChatDetail(created.id, reader.id).prologue)
     }
     @Test fun `게스트 페르소나 요청은 스토리 조회 전에 거부하고 기본 선택은 null이다`() {
         val error = assertFailsWith<ResponseStatusException> { service.createChat(CreateChatRequest("bad-story", personaId = "bad-persona"), null) }
@@ -89,7 +90,7 @@ class PersonaChatIntegrationTests : IntegrationTest() {
         story.visibility = StoryVisibility.PRIVATE
         stories.saveAndFlush(story)
         jdbc.update("update story_chats set start_setting_id = null where public_id = ?", UUID.fromString(chat.id))
-        assertEquals("{username}는", service.getChatDetail(chat.id, reader.id).prologue)
+        assertEquals("{username}는", chatQueryService.getChatDetail(chat.id, reader.id).prologue)
         val old = mapper.readValue("""{"title":"{username} 원문"}""", StoryPublicSnapshot::class.java)
         assertNull(old.protagonistName)
         assertEquals("{username} 원문", com.knk.manyak.story.service.UsernameTokenRenderer.render(old.title, old.protagonistName))

@@ -14,6 +14,7 @@ import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.dto.EditChatRequest
 import com.knk.manyak.chat.dto.RegenerateChatRequest
+import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.global.error.ApiErrorCodes
@@ -53,6 +54,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 @RequestMapping("/api/v1")
 class ChatController(
     private val chatService: ChatService,
+    private val chatQueryService: ChatQueryService,
 ) {
 
     @Operation(summary = "채팅 모델 목록", description = "노출 중인 모델과 정가를 노출 순서로 반환합니다. 회원에게만 진행 중인 promotion을 제공합니다. 회원 턴 체험은 적용 가격이 양수인 LITE에만 적용됩니다. 인증은 선택입니다.")
@@ -130,7 +132,7 @@ class ChatController(
         @Valid @RequestBody request: BatchChatRequest,
         // optional 인증: 열람 불가 항목(회원 요청의 NULL 채팅·타인 소유)을 조용히 제외하는 데 쓴다(스펙 §4-5 B16).
         @CurrentUserId userId: Long?,
-    ): List<ChatSummaryResponse> = chatService.getChatsByIds(request, userId)
+    ): List<ChatSummaryResponse> = chatQueryService.getChatsByIds(request, userId)
 
     @Operation(
         summary = "채팅 상세 조회",
@@ -160,7 +162,7 @@ class ChatController(
         @Parameter(description = "채팅 ID(공개 식별자)")
         @PathVariable chatId: String,
         @CurrentUserId userId: Long?,
-    ): ChatDetailResponse = chatService.getChatDetail(chatId, userId)
+    ): ChatDetailResponse = chatQueryService.getChatDetail(chatId, userId)
 
     @Operation(
         summary = "채팅 공유 발급",
@@ -226,7 +228,7 @@ class ChatController(
         // 인증은 필요 없지만, 토큰이 실려 있으면 그 요청자로 스토리 읽기 권한을 판정한다(KNK-1059).
         // 익명 열람은 null이라 공개 스토리만 현재 제목을 본다.
         @CurrentUserId userId: Long?,
-    ): ChatShareResponse = chatService.getChatShare(shareId, userId)
+    ): ChatShareResponse = chatQueryService.getChatShare(shareId, userId)
 
     @Operation(
         summary = "채팅 삭제",
