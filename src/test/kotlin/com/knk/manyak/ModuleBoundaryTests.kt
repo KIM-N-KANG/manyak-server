@@ -17,7 +17,7 @@ import java.io.File
  * 규칙(기준 파일은 `src/test/resources/module-boundary/`):
  * - **R1** `r1-repository-entity.txt`: 다른 모듈의 리포지토리·엔티티를 직접 참조하지 않는다. 대상이 `..repository..`·`..entity..`
  *   패키지에 있거나, `@Entity`·`@Embeddable`·`@MappedSuperclass`·`@Repository`가 붙었거나 Spring Data `Repository` 하위 타입이면
- *   위반이다(기능 하위 패키지의 `user.draft.StoryDraftRepository` 같은 것도 잡는다). 줄 = `참조하는 클래스 -> 참조되는 클래스`.
+ *   위반이다(기능 하위 패키지의 `story.draft.StoryDraftRepository` 같은 것도 잡는다). 줄 = `참조하는 클래스 -> 참조되는 클래스`.
  *   admin도 예외가 아니다(admin은 다른 모듈이 감사 로그·관리자 쿼리 도구로 거꾸로 의존하는 모듈이라 순수 조회 모듈이 아니다).
  *   global 안의 엔티티·리포지토리도 대상이다(global 공용 예외는 R2의 x→global 간선에만 적용).
  * - **R2** `r2-cycle-edges.txt`: 모듈 간 순환을 만들지 않는다. 클래스 의존이 하나라도 있으면 모듈 간선 a→b로 보고, b에서 a로

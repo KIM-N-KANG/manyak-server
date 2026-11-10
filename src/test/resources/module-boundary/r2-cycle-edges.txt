@@ -29,7 +29,6 @@ story -> auth
 story -> credit
 story -> push
 story -> search
-story -> user
 user -> admin
 user -> auth
 user -> push

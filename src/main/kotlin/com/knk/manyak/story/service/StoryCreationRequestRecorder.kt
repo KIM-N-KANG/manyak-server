@@ -37,7 +37,7 @@ import java.util.UUID
 class StoryCreationRequestRecorder(
     private val repository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
-    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
     private val users: com.knk.manyak.auth.repository.UserRepository,
     // 이 시간(초)보다 오래 PENDING인 행은 실행 중 프로세스가 죽은 것으로 보고 재실행을 허용한다(무한 409 방지).
     // 최장 생성 동작(스토리 완성 AI 120초)보다 충분히 커, 진행 중인 정상 요청을 가로채지 않는다.

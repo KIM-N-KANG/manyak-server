@@ -100,7 +100,7 @@ class UserNotificationPostgresTests {
         }
         val recorder = com.knk.manyak.story.service.StoryCreationRequestRecorder(repository,
             tools.jackson.module.kotlin.jacksonObjectMapper(),
-            org.mockito.Mockito.mock(com.knk.manyak.user.draft.StoryDraftRepository::class.java), users, 300,
+            org.mockito.Mockito.mock(com.knk.manyak.story.draft.StoryDraftRepository::class.java), users, 300,
             DataSourceTransactionManager(jdbc.dataSource!!))
         try {
             val replay = pool.submit {

@@ -1,4 +1,4 @@
-package com.knk.manyak.user.draft
+package com.knk.manyak.story.draft
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.auth.entity.User
