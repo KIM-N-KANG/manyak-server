@@ -35,11 +35,6 @@ com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.aut
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.credit.service.AttendanceRewardService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.credit.service.ChatChargeReconciler -> com.knk.manyak.chat.repository.StoryMessageRepository
-com.knk.manyak.credit.service.ChatChargeReconciler -> com.knk.manyak.chat.repository.StoryMessageVersionRepository
-com.knk.manyak.credit.service.CreditReconciliationService -> com.knk.manyak.story.entity.StoryCreationSession
-com.knk.manyak.credit.service.CreditReconciliationService -> com.knk.manyak.story.entity.StoryCreationSessionStatus
-com.knk.manyak.credit.service.CreditReconciliationService -> com.knk.manyak.story.repository.StoryCreationSessionRepository
 com.knk.manyak.credit.service.CreditTransactionHistoryService -> com.knk.manyak.chat.entity.StoryChat
 com.knk.manyak.credit.service.CreditTransactionHistoryService -> com.knk.manyak.chat.repository.StoryChatRepository
 com.knk.manyak.credit.service.CreditTransactionHistoryService -> com.knk.manyak.story.entity.Story
