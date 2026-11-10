@@ -11,7 +11,9 @@ interface StoryLikeRepository : JpaRepository<StoryLike, Long> {
 
     fun existsByUserIdAndStoryId(userId: Long, storyId: Long): Boolean
 
-    fun countByStoryId(storyId: Long): Long
+    // 파생 쿼리는 count(id)라 힙을 읽는다. COUNT(*)는 idx_story_likes_story만으로 센다(KNK-2076).
+    @Query("SELECT COUNT(*) FROM StoryLike l WHERE l.storyId = :storyId")
+    fun countByStoryId(@Param("storyId") storyId: Long): Long
 
     /** 좋아요 취소. 지울 행이 없어도 조용히 통과한다(멱등 계약). */
     @Transactional
@@ -20,7 +22,7 @@ interface StoryLikeRepository : JpaRepository<StoryLike, Long> {
     fun deleteByUserIdAndStoryId(@Param("userId") userId: Long, @Param("storyId") storyId: Long)
 
     // 목록 응답용 배치 집계(N+1 방지). 좋아요가 없는 스토리는 결과에 빠지므로 호출부가 0으로 보정한다.
-    @Query("SELECT l.storyId AS storyId, COUNT(l) AS likeCount FROM StoryLike l WHERE l.storyId IN :storyIds GROUP BY l.storyId")
+    @Query("SELECT l.storyId AS storyId, COUNT(*) AS likeCount FROM StoryLike l WHERE l.storyId IN :storyIds GROUP BY l.storyId")
     fun countByStoryIds(@Param("storyIds") storyIds: Collection<Long>): List<StoryLikeCountProjection>
 }
 
