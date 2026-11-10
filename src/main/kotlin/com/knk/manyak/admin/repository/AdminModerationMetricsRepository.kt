@@ -2,6 +2,7 @@ package com.knk.manyak.admin.repository
 
 import com.knk.manyak.admin.dto.AdminModerationMetricsDay
 import com.knk.manyak.admin.dto.AdminModerationRejectionRule
+import com.knk.manyak.adminkit.query.AdminQuery
 import org.springframework.jdbc.core.RowCallbackHandler
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository

@@ -4,6 +4,7 @@ import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.repository.AdminActivityHoursCount
 import com.knk.manyak.admin.repository.AdminActivityHoursRepository
+import com.knk.manyak.adminkit.query.AdminDateRange
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock

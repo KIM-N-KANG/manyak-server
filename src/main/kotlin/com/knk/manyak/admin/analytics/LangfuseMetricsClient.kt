@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.analytics
 
-import com.knk.manyak.admin.dto.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminDateRange
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.stereotype.Component

@@ -3,6 +3,7 @@ package com.knk.manyak.admin.service
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.repository.AdminStoryConsumptionRepository
+import com.knk.manyak.adminkit.query.AdminDateRange
 import com.knk.manyak.story.service.OfficialStoryAccount
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

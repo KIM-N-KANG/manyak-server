@@ -1,7 +1,7 @@
 package com.knk.manyak.push.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.admin.dto.AdminSearchRequest
+import com.knk.manyak.adminkit.query.AdminSearchRequest
 import com.knk.manyak.push.entity.PushCampaignStatus
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size

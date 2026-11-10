@@ -1,7 +1,5 @@
 com.knk.manyak.admin.dto.AdminMemberDetailResponse -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.admin.dto.AdminMemberListResponse -> com.knk.manyak.auth.entity.UserStatus
-com.knk.manyak.admin.dto.AdminMemberSummary -> com.knk.manyak.auth.entity.User
-com.knk.manyak.admin.dto.AdminMemberSummary -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.admin.dto.AdminMembersRequest -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.admin.dto.AdminPaymentDetailResponse -> com.knk.manyak.credit.entity.CreditOrderStatus
 com.knk.manyak.admin.dto.AdminPaymentOrderResponse -> com.knk.manyak.credit.entity.CreditOrderStatus
@@ -9,7 +7,6 @@ com.knk.manyak.admin.dto.AdminPaymentsRequest -> com.knk.manyak.credit.entity.Cr
 com.knk.manyak.admin.dto.AdminStorySettingsResponse -> com.knk.manyak.story.entity.StoryVisibility
 com.knk.manyak.admin.repository.AdminReadRepository -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.admin.repository.AdminReadRepository -> com.knk.manyak.credit.entity.CreditOrderStatus
-com.knk.manyak.admin.repository.AdminReadRepositoryKt -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.entity.User
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.admin.service.AdminEligibilityService -> com.knk.manyak.auth.entity.User
@@ -101,8 +98,6 @@ com.knk.manyak.push.outbox.ScheduledPushOutboxWriter -> com.knk.manyak.auth.enti
 com.knk.manyak.push.outbox.ScheduledPushOutboxWriter -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.outbox.StoryCompletionOutboxListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.outbox.StoryCompletionOutboxListener -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.repository.AdminCampaignListRepository -> com.knk.manyak.admin.repository.AdminQuery
-com.knk.manyak.push.repository.AdminCampaignListRepository -> com.knk.manyak.admin.repository.AdminQueryKt
 com.knk.manyak.push.repository.PushCampaignRepository -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.service.AdminCampaignService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.service.AdminCampaignService -> com.knk.manyak.story.entity.Story
@@ -163,9 +158,6 @@ com.knk.manyak.story.service.StoryImageAccess -> com.knk.manyak.auth.repository.
 com.knk.manyak.story.service.StoryService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.service.StoryService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.submission.AdminModerationService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.story.submission.AdminSubmissionReadRepository -> com.knk.manyak.admin.repository.AdminQuery
-com.knk.manyak.story.submission.AdminSubmissionReadRepository -> com.knk.manyak.admin.repository.AdminQueryKt
-com.knk.manyak.story.submission.AdminSubmissionReadRepository -> com.knk.manyak.admin.repository.AdminReadRepositoryKt
 com.knk.manyak.story.submission.ModerationOutboxListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.story.submission.ModerationOutboxListener -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.story.submission.ModerationOutboxListener -> com.knk.manyak.push.outbox.PushOutboxStore

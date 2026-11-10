@@ -1,7 +1,7 @@
 package com.knk.manyak.admin.analytics
 
-import com.knk.manyak.admin.dto.AdminDateRange
-import com.knk.manyak.admin.dto.badAdminQuery
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.badAdminQuery
 import org.springframework.stereotype.Service
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.*

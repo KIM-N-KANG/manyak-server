@@ -1,7 +1,7 @@
 package com.knk.manyak.admin.service
 
 import com.knk.manyak.admin.dto.AdminLoginResponse
-import com.knk.manyak.admin.dto.AdminMemberSummary
+import com.knk.manyak.auth.dto.AdminMemberSummary
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.entity.SocialProvider
 import com.knk.manyak.auth.jwt.JwtTokenProvider

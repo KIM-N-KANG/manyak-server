@@ -6,6 +6,11 @@ import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.admin.repository.AdminDashboardRepository
 import com.knk.manyak.admin.repository.AdminReadRepository
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminListRequest
+import com.knk.manyak.adminkit.query.AdminPageResponse
+import com.knk.manyak.adminkit.query.AdminPagination
+import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditOrderStatus

@@ -47,7 +47,7 @@ class AnalyticsBatchRunner(private val catalog: AnalyticsBatchCatalog, private v
 
     /** 완료 표식 없이 매번 DB에서 재개할 위치를 결정한다. */
     @Synchronized fun run(): AnalyticsBatchResult? {
-        val now = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST)
+        val now = clock.instant().atZone(com.knk.manyak.adminkit.query.AdminDateRange.KST)
         val entries = catalog.metrics()
         val nightly = if (now.toLocalTime() >= policy.nightlyStart) work(entries, now.toLocalDate(), true) else emptyList()
         val phase = if (nightly.isNotEmpty()) "nightly" else "backfill"

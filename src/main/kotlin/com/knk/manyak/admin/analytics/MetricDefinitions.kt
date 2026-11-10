@@ -121,7 +121,7 @@ class MetricDefinitions(private val queries: AnalyticsQueryFactory, private val 
     private fun savedTurns(metric: String, platform: String, segment: String, filter: Map<String, Any>) = queries.daily(metric, AdminMetricEvents.event(AdminMetricEvents.CHAT_SUCCEEDED,
         filters(platform) + AdminMetricEvents.filter("is_regenerated", listOf("false")) + filter + AdminMetricEvents.segment(segment)), "totals")
     /** 플랫폼마다 기준 턴 오름차순이다. 한 턴의 성공 이벤트는 한 번이라 합계가 그 턴을 저장한 채팅 수다. */
-    fun turnReach(segment: String): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds.map { turn ->
+    fun turnReach(segment: String): List<DailyAnalyticsMetric> = splitPlatforms.flatMap { platform -> com.knk.manyak.adminkit.query.AdminQuery.turnReachThresholds.map { turn ->
         savedTurns("conversion_turn_reach", platform, segment, AdminMetricEvents.filter("turn_number", listOf(turn.toString())))
     } }
     /** 플랫폼마다 전체, default, persona, none 고유 사용자 12개 뒤에 모델별 웹과 앱 턴 수가 온다. */

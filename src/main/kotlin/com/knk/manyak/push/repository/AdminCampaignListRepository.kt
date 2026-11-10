@@ -1,9 +1,9 @@
 package com.knk.manyak.push.repository
 
-import com.knk.manyak.admin.repository.AdminQuery
-import com.knk.manyak.admin.repository.adminPage
-import com.knk.manyak.admin.repository.instant
-import com.knk.manyak.admin.repository.longOrNull
+import com.knk.manyak.adminkit.query.AdminQuery
+import com.knk.manyak.adminkit.query.adminPage
+import com.knk.manyak.adminkit.query.instant
+import com.knk.manyak.adminkit.query.longOrNull
 import com.knk.manyak.push.dto.AdminCampaignListRequest
 import com.knk.manyak.push.dto.AdminCampaignPageResponse
 import com.knk.manyak.push.dto.AdminCampaignResponse

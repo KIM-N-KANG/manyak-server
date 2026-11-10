@@ -2,8 +2,8 @@ package com.knk.manyak.admin.analytics
 
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.AdminChartsRequest
-import com.knk.manyak.admin.dto.AdminDateRange
-import com.knk.manyak.admin.repository.AdminQuery
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminQuery
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
