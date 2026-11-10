@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.dto
+package com.knk.manyak.adminkit.query
 
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min

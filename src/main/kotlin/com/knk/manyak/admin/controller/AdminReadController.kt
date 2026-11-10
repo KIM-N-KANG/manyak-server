@@ -1,6 +1,7 @@
 package com.knk.manyak.admin.controller
 
 import com.knk.manyak.admin.dto.*
+import com.knk.manyak.adminkit.query.AdminListRequest
 import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.admin.service.AdminReadService
 import jakarta.servlet.http.HttpServletRequest

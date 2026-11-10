@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.infra
 
-import com.knk.manyak.admin.dto.badAdminQuery
+import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.global.error.ApiErrorResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import jakarta.servlet.http.HttpServletRequest

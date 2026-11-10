@@ -2,8 +2,8 @@ package com.knk.manyak.admin
 
 import com.knk.manyak.admin.config.AdminDashboardConfig
 import com.knk.manyak.admin.config.AdminDashboardProperties
-import com.knk.manyak.admin.dto.AdminDateRange
-import com.knk.manyak.admin.dto.AdminPagination
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminPagination
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

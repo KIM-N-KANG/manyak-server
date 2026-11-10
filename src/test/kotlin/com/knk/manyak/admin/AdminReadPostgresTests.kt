@@ -1,5 +1,6 @@
 package com.knk.manyak.admin
 
+import com.knk.manyak.adminkit.query.AdminPagination
 import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.repository.*

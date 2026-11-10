@@ -124,7 +124,7 @@ class AdminMetricPlatformTests {
             assertThat(f).containsEntry("is_regenerated", "is:false").containsKeys("country", "platform").doesNotContainKey("user_id")
             assertThat(e["filters"].toList().single { it["subprop_key"].asText() == "turn_number" }["subprop_value"][0].isString).isTrue()
         }
-        assertThat(requests.map { filters(event(it))["turn_number"] }.toSet()).containsExactlyInAnyOrderElementsOf(com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds.map { "is:$it" })
+        assertThat(requests.map { filters(event(it))["turn_number"] }.toSet()).containsExactlyInAnyOrderElementsOf(com.knk.manyak.adminkit.query.AdminQuery.turnReachThresholds.map { "is:$it" })
         assertThat(service().reach(request("2026-10-17", "2026-10-23")).segment).isEqualTo("all")
     }
 
@@ -148,7 +148,7 @@ class AdminMetricPlatformTests {
         assertThat(platforms.getValue("web").chats).isEqualTo(10); assertThat(platforms.getValue("web").reached.single { it.turn == 5 }.rate).isEqualTo(0.4)
         assertThat(platforms.getValue("web").reached.single { it.turn == 50 }.chats).isZero()
         assertThat(platforms.getValue("all").chats).isEqualTo(30); assertThat(platforms.getValue("all").reached.single { it.turn == 5 }.chats).isEqualTo(14)
-        assertThat(platforms.values).allMatch { p -> p.reached.map { it.turn } == com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds }
+        assertThat(platforms.values).allMatch { p -> p.reached.map { it.turn } == com.knk.manyak.adminkit.query.AdminQuery.turnReachThresholds }
     }
 
     @Test fun `범위 전에 시작한 채팅이 있으면 플랫폼 도달 비율은 1을 넘는다`() {

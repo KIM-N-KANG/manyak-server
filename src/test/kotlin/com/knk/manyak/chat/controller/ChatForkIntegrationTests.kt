@@ -264,7 +264,7 @@ class ChatForkIntegrationTests : IntegrationTest() {
         assertEquals(5L, adminEngagement.turns(Instant.EPOCH, until, emptyList()).values.sum())
         assertEquals(setOf(f.chat.id), adminEngagement.activity(Instant.EPOCH, until, emptyList()).map { it.chatId }.toSet())
         val rows = adminContent.stories(com.knk.manyak.admin.dto.AdminStoriesRequest(),
-            com.knk.manyak.admin.dto.AdminPagination(1, 20, "s.created_at DESC"), null)
+            com.knk.manyak.adminkit.query.AdminPagination(1, 20, "s.created_at DESC"), null)
         // 현재 진행 깊이는 원본 4 + 복사본 3. 생성 응답 수 5와 정의가 다르다.
         assertEquals(7L, rows.items.single().totalTurns)
         val before = adminDashboard.summary(until, Instant.EPOCH, emptyList()).chats

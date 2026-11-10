@@ -1,7 +1,3 @@
-admin -> auth
-admin -> credit
-admin -> push
-admin -> story
 auth -> search
 auth -> story
 chat -> auth
@@ -11,7 +7,6 @@ credit -> auth
 credit -> chat
 credit -> story
 notice -> auth
-push -> admin
 push -> auth
 push -> credit
 push -> notice
@@ -19,7 +14,6 @@ push -> story
 search -> auth
 search -> chat
 search -> story
-story -> admin
 story -> auth
 story -> credit
 story -> push

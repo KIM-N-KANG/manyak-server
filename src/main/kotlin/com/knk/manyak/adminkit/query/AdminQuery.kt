@@ -1,6 +1,5 @@
-package com.knk.manyak.admin.repository
+package com.knk.manyak.adminkit.query
 
-import com.knk.manyak.admin.dto.*
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet

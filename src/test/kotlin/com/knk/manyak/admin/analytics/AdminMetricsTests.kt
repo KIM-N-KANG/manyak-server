@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.analytics
 
-import com.knk.manyak.admin.dto.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminDateRange
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*

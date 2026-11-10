@@ -1,7 +1,7 @@
-package com.knk.manyak.admin.dto
+package com.knk.manyak.auth.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.admin.repository.instant
+import com.knk.manyak.adminkit.query.instant
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import java.sql.ResultSet

@@ -2,6 +2,10 @@ package com.knk.manyak.admin.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.knk.manyak.adminkit.query.AdminAiRequest
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.badAdminQuery
+import com.knk.manyak.auth.dto.AdminMemberSummary
 import com.knk.manyak.auth.entity.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
