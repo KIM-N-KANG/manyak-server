@@ -91,10 +91,10 @@ class AdminMetricPlatformTests {
     }
 
     @Test fun `플랫폼 조회가 5초를 넘기면 받은 값만 저장하고 DB 값은 바로 주며 그 키는 쿨다운이다`(output: CapturedOutput) {
-        // 운영 예산 5초·지연 2초를 같은 비율(1초·400ms)로 줄인다. 기본값 5초는 아래 기본값 테스트가 지킨다(KNK-2058).
-        val budget = AdminDashboardProperties(platformTimeout = java.time.Duration.ofSeconds(1))
+        // 운영 예산 5초·지연 2초를 같은 비율(2초·800ms)로 줄인다. 저장 개수 경계 여유는 양쪽 400ms다. 기본값 5초는 아래 기본값 테스트가 지킨다(KNK-2058).
+        val budget = AdminDashboardProperties(platformTimeout = java.time.Duration.ofSeconds(2))
         val delegate = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(400, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(800, java.util.concurrent.TimeUnit.MILLISECONDS) }
         fun timed(call: () -> Unit) { val started = System.nanoTime(); call(); assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofMillis(5800)) }
         val day = com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-23"; to = "2026-10-23" }
         lateinit var signup: SignupResponse
