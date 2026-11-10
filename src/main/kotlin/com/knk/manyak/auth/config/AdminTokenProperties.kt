@@ -1,4 +1,4 @@
-package com.knk.manyak.admin.config
+package com.knk.manyak.auth.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration

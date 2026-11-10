@@ -4,7 +4,6 @@ admin -> image
 admin -> push
 admin -> story
 admin -> user
-auth -> admin
 auth -> credit
 auth -> user
 chat -> admin

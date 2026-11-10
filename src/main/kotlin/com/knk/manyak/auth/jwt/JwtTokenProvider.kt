@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.jwt
 
-import com.knk.manyak.admin.config.AdminTokenProperties
+import com.knk.manyak.auth.config.AdminTokenProperties
 import com.knk.manyak.auth.config.AuthProperties
 import com.nimbusds.jose.jwk.source.ImmutableSecret
 import org.springframework.security.oauth2.core.OAuth2Error
