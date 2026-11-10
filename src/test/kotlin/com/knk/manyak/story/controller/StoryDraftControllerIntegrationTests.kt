@@ -1,4 +1,4 @@
-package com.knk.manyak.user.controller
+package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
@@ -25,8 +25,8 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var mapper: ObjectMapper
     @Autowired private lateinit var requests: StoryCreationRequestRepository
-    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
-    @Autowired private lateinit var service: com.knk.manyak.user.draft.StoryDraftService
+    @Autowired private lateinit var drafts: com.knk.manyak.story.draft.StoryDraftRepository
+    @Autowired private lateinit var service: com.knk.manyak.story.draft.StoryDraftService
     @Autowired
     private lateinit var images: com.knk.manyak.image.service.UploadedImageStorage
     private lateinit var user: User
@@ -48,8 +48,8 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         val changedTime = Instant.parse("2026-10-14T12:00:01.987654321Z")
         val initialMicros = initialTime.truncatedTo(java.time.temporal.ChronoUnit.MICROS)
         val changedMicros = changedTime.truncatedTo(java.time.temporal.ChronoUnit.MICROS)
-        val initialRequest = mapper.readValue(body(), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)
-        val changedRequest = mapper.readValue(body("{\"x\":1}", ",\"baseVersion\":1"), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)
+        val initialRequest = mapper.readValue(body(), com.knk.manyak.story.draft.PutStoryDraftRequest::class.java)
+        val changedRequest = mapper.readValue(body("{\"x\":1}", ",\"baseVersion\":1"), com.knk.manyak.story.draft.PutStoryDraftRequest::class.java)
         // static mock은 현재 테스트 스레드에만 적용한다. 실제 서비스와 DB를 쓰고 Clock 의존성은 추가하지 않는다.
         org.mockito.Mockito.mockStatic(Instant::class.java, org.mockito.Mockito.CALLS_REAL_METHODS).use { clock ->
             clock.`when`<Instant> { Instant.now() }.thenReturn(initialTime)
@@ -132,7 +132,7 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             val results = (1..2).map { pool.submit<Int> {
                 ready.countDown(); check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
                 try {
-                    service.put(user.id, UUID.randomUUID().toString(), mapper.readValue(body(), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)); 200
+                    service.put(user.id, UUID.randomUUID().toString(), mapper.readValue(body(), com.knk.manyak.story.draft.PutStoryDraftRequest::class.java)); 200
                 } catch (e: org.springframework.web.server.ResponseStatusException) { e.statusCode.value() }
             } }
             check(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)); start.countDown()
@@ -148,7 +148,7 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             val results = (1..2).map { value -> pool.submit<Int> {
                 ready.countDown(); check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
                 try {
-                    service.put(user.id, id.toString(), mapper.readValue(body("{\"x\":$value}", ",\"baseVersion\":1"), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)); 200
+                    service.put(user.id, id.toString(), mapper.readValue(body("{\"x\":$value}", ",\"baseVersion\":1"), com.knk.manyak.story.draft.PutStoryDraftRequest::class.java)); 200
                 } catch (e: org.springframework.web.server.ResponseStatusException) { e.statusCode.value() }
             } }
             check(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)); start.countDown()
@@ -166,7 +166,7 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
                 val results = listOf(user, other).map { owner -> pool.submit<Int> {
                     ready.countDown(); check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
                     try {
-                        service.put(owner.id, id.toString(), mapper.readValue(body("{\"owner\":${owner.id}}"), com.knk.manyak.user.draft.PutStoryDraftRequest::class.java)); 200
+                        service.put(owner.id, id.toString(), mapper.readValue(body("{\"owner\":${owner.id}}"), com.knk.manyak.story.draft.PutStoryDraftRequest::class.java)); 200
                     } catch (e: org.springframework.web.server.ResponseStatusException) { e.statusCode.value() }
                       catch (_: org.springframework.dao.DataIntegrityViolationException) { 500 }
                 } }
@@ -239,8 +239,8 @@ class StoryDraftControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Test fun `목록은 유효한 내 PENDING 두 단계와 초안을 최초 생성 시각 역순으로 합친다`() {
         val now = Instant.now()
         val other = users.save(User(nickname = "타인"))
-        val otherDraft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), other.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val otherDraft = drafts.save(com.knk.manyak.story.draft.StoryDraft(UUID.randomUUID(), other.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         val recentlyUpdated = StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id,
             stage = StoryCreationStage.STORYLINE_GENERATION, createdAt = now.minusSeconds(1000), updatedAt = now)
         val failed = StoryCreationRequest(requestId = UUID.randomUUID(), userId = user.id,

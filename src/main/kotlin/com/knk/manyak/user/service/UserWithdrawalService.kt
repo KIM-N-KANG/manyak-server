@@ -36,7 +36,7 @@ class UserWithdrawalService(
     private val socialAccountRepository: SocialAccountRepository,
     private val refreshTokenStore: RefreshTokenStore,
     private val devicePushTokenRepository: DevicePushTokenRepository,
-    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
     private val analytics: ServerAnalytics,
     private val notifications: com.knk.manyak.push.inbox.UserNotificationStore,
 ) {

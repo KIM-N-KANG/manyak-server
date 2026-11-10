@@ -27,13 +27,13 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @org.junit.jupiter.api.BeforeEach fun clean() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
     @org.junit.jupiter.api.BeforeEach fun stopExecutors() = com.knk.manyak.support.stopExecuting(executor, pushExecutor)
 
-    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+    @Autowired private lateinit var drafts: com.knk.manyak.story.draft.StoryDraftRepository
 
     @Test fun `일반 접수 202에서 내 초안을 삭제하고 타인과 미존재 초안은 무시한다`() {
         val owner = users.save(User(nickname = "작가"))
         val other = users.save(User(nickname = "타인"))
-        fun draft(userId: Long) = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), userId,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        fun draft(userId: Long) = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), userId,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         val mine = draft(owner.id); val theirs = draft(other.id)
         val auth = "Bearer ${tokens.issueAccessToken(owner.publicId)}"
         for (id in listOf(mine.id, theirs.id, java.util.UUID.randomUUID())) {
@@ -49,8 +49,8 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
 
     @Test fun `일반 접수 검증 실패는 초안을 유지한다`() {
         val owner = users.save(User(nickname = "작가"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         client.post().uri("/api/v1/stories/general").header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
             .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(title = "", draftId = draft.id)))
             .exchange().expectStatus().isBadRequest
@@ -59,8 +59,8 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
 
     @Test fun `일반 접수 트랜잭션 롤백은 제출본과 초안 삭제를 함께 되돌린다`() {
         val owner = users.save(User(nickname = "작가"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         assertThrows(IllegalStateException::class.java) {
             org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult {
                 service.create(request().copy(draftId = draft.id), owner.id)
@@ -75,8 +75,8 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Test fun `REJECTED 제출본을 draftId와 함께 재제출하면 202이고 소유 초안이 삭제된다`() {
         val owner = users.save(User(nickname = "재제출 작가"))
         val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         client.put().uri("/api/v1/stories/submissions/${row.publicId}")
             .header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
             .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(draftId = draft.id)))
@@ -89,8 +89,8 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Test fun `타인과 미존재 draftId는 무시하고 재제출 성공`() {
         val owner = users.save(User(nickname = "재제출 작가"))
         val other = users.save(User(nickname = "타인"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), other.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), other.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         for (id in listOf(draft.id, java.util.UUID.randomUUID())) {
             val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
             client.put().uri("/api/v1/stories/submissions/${row.publicId}")
