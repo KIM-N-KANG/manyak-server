@@ -24,7 +24,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder
 @Configuration
 @EnableConfigurationProperties(
     AuthProperties::class,
-    com.knk.manyak.admin.config.AdminTokenProperties::class,
+    AdminTokenProperties::class,
     GoogleAuthProperties::class,
     KakaoAuthProperties::class,
 )
