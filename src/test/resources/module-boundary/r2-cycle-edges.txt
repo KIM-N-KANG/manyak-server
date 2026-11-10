@@ -19,7 +19,6 @@ credit -> story
 image -> story
 notice -> admin
 notice -> auth
-notice -> push
 push -> admin
 push -> auth
 push -> credit
