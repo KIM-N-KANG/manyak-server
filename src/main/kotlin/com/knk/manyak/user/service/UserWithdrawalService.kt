@@ -5,7 +5,8 @@ import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.push.repository.DevicePushTokenRepository
+import com.knk.manyak.user.event.UserWithdrawnEvent
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -26,19 +27,16 @@ import java.time.temporal.ChronoUnit
  * - 탈퇴 직전 상태를 `withdrawn_from_status`에 남긴다(KNK-1053) — 재가입 계정의 정지 제재 승계 근거.
  * - 소유 스토리는 공개 상태를 유지한다(팀 결정). 작성자 표기는 익명화된 닉네임이 자연 반영된다.
  * - refresh는 전 family 폐기, 잔여 access 토큰은 해석 계층(CurrentUserIdArgumentResolver)이 전면 401로 무효화한다.
- * - 디바이스 푸시 토큰은 하드 삭제한다(KNK-1131). 탈퇴한 회원의 기기로 알림이 가면 안 되고, 토큰은 재가입 매칭에
- *   쓰이지 않아 남길 이유가 없다(재가입 기기는 앱이 새로 등록한다).
+ * - 다른 모듈의 회원 데이터(제출본·초안·디바이스 푸시 토큰·알림 내역)는 [UserWithdrawnEvent]를 받은 각 모듈의 동기
+ *   리스너가 같은 트랜잭션 안에서 하드 삭제한다(KNK-2063). 리스너가 실패하면 탈퇴 전체가 롤백된다.
  */
 @Service
 class UserWithdrawalService(
-    private val submissions: com.knk.manyak.story.submission.StorySubmissionRepository,
     private val userRepository: UserRepository,
     private val socialAccountRepository: SocialAccountRepository,
     private val refreshTokenStore: RefreshTokenStore,
-    private val devicePushTokenRepository: DevicePushTokenRepository,
-    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
     private val analytics: ServerAnalytics,
-    private val notifications: com.knk.manyak.push.inbox.UserNotificationStore,
+    private val events: ApplicationEventPublisher,
 ) {
 
     @Transactional
@@ -51,10 +49,12 @@ class UserWithdrawalService(
         // `reward_identity_user_id`·`member_trial_seeded_at`·`migration_attempts`·`invite_code`까지 같은 행의
         // 모든 동시 갱신이 대상이고, 락이 그 전부를 한 번에 닫는다.
         //
-        // 데드락 없음: 이 트랜잭션이 잡는 잠금은 사용자 행과 그 사용자의 `social_accounts` 행뿐이고 지갑 락은
-        // 잡지 않는다. 지갑 락(KNK-587 순서 규칙)은 [com.knk.manyak.credit.service.CreditWalletService]에만 있고,
-        // 그걸 잡는 경로(redeem 등)는 모두 사용자 행을 먼저 잡는다. 전 경로가 users → (wallets·social_accounts)
-        // 한 방향이라 교차 대기 고리가 생기지 않는다.
+        // 데드락 없음: 이 트랜잭션은 사용자 행을 **가장 먼저** 잠그고, 그 뒤에 그 사용자의 `social_accounts` 행과
+        // [UserWithdrawnEvent] 리스너의 bulk DELETE가 건드리는 `story_submissions`·`story_drafts`·`device_push_tokens`·
+        // `user_notifications` 행을 잠근다. 지갑 락은 잡지 않는다. 지갑 락(KNK-587 순서 규칙)은
+        // [com.knk.manyak.credit.service.CreditWalletService]에만 있고 그걸 잡는 경로(redeem 등)는 모두 사용자 행을 먼저
+        // 잡는다. 위 네 테이블을 잠그는 다른 경로도 사용자 행을 먼저 잡거나(제출·초안·토큰 등록·알림 기록) 사용자 행을
+        // 기다리지 않는다(스토리 삭제·무효 토큰 삭제·읽음 처리). 전 경로가 users → 나머지 한 방향이라 교차 대기 고리가 생기지 않는다.
         val user = userRepository.findByIdForUpdate(id)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         // 잠금 후 재검사. 해석 계층(CurrentUserIdArgumentResolver)이 DELETED 토큰을 이미 401로 끊지만, 필터 통과
@@ -79,10 +79,10 @@ class UserWithdrawalService(
             social.deletedAt = now
             social.email = null
         }
-        submissions.deleteForUser(id)
-        drafts.deleteForUser(id)
-        devicePushTokenRepository.deleteByUserId(id)
-        notifications.deleteForUser(id)
+        // 다른 모듈의 회원 데이터 삭제. 동기 리스너가 이 트랜잭션 안에서 story(제출본 → 초안) → push(토큰 → 알림 내역)
+        // 순서로 지우고, 실패하면 예외가 여기로 전파돼 탈퇴 전체가 롤백된다.
+        // push 리스너가 flush+clear 하므로 엔티티 수정은 모두 이 앞에서 한다(뒤에서 바꾼 user·social 변경은 조용히 유실된다).
+        events.publishEvent(UserWithdrawnEvent(id))
         refreshTokenStore.revokeAllForUser(id)
         analytics.withdrawalSucceeded(
             user.publicId.toString(), ChronoUnit.DAYS.between(user.createdAt, now),

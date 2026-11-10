@@ -217,7 +217,3 @@ com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.entity.
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.entity.UserStatus
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.repository.SocialAccountRepository
 com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.push.inbox.UserNotificationStore
-com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.push.repository.DevicePushTokenRepository
-com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.story.draft.StoryDraftRepository
-com.knk.manyak.user.service.UserWithdrawalService -> com.knk.manyak.story.submission.StorySubmissionRepository

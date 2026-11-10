@@ -21,6 +21,7 @@ push -> auth
 push -> credit
 push -> notice
 push -> story
+push -> user
 search -> auth
 search -> chat
 search -> story
@@ -29,8 +30,8 @@ story -> auth
 story -> credit
 story -> push
 story -> search
+story -> user
 user -> admin
 user -> auth
-user -> push
 user -> search
 user -> story

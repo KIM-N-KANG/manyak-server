@@ -53,6 +53,36 @@ class UserWithdrawalIntegrationTests : IntegrationTest() {
         assertEquals("{\"text\":\"미등록 입력\"}", drafts.findById(theirs.id).orElseThrow().payload)
     }
 
+    @Autowired private lateinit var submissions: com.knk.manyak.story.submission.StorySubmissionRepository
+    @Autowired private lateinit var pushTokens: com.knk.manyak.push.repository.DevicePushTokenRepository
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.UserNotificationStore
+
+    @Test fun `탈퇴 정리의 마지막 삭제가 실패하면 앞선 삭제와 계정 변경까지 전부 롤백된다`() {
+        // 마지막 단계(알림 내역 삭제)를 실패시켜, 그 앞의 제출본·초안·푸시 토큰 삭제와 flush된 사용자·소셜 변경이
+        // 모두 한 트랜잭션으로 되돌아가는지 고정한다. 부분 삭제가 남으면 안 된다.
+        val user = saveMember("롤백회원")
+        socialAccountRepository.save(SocialAccount(userId = user.id, provider = SocialProvider.GOOGLE, providerUserId = "rollback-sub", email = "rollback@example.com"))
+        val submission = submissions.save(com.knk.manyak.story.submission.StorySubmission(userId = user.id,
+            kind = com.knk.manyak.story.submission.SubmissionKind.CREATE, payload = "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), user.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val token = pushTokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id, token = "rollback-token", platform = com.knk.manyak.push.entity.PushPlatform.ANDROID))
+        org.mockito.Mockito.doThrow(org.springframework.dao.TransientDataAccessResourceException("inbox unavailable"))
+            .`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(notifications))
+            .deleteForUser(user.id)
+
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().is5xxServerError
+
+        val reloaded = userRepository.findById(user.id).orElseThrow()
+        assertEquals(UserStatus.ACTIVE, reloaded.status)
+        assertEquals("롤백회원", reloaded.nickname)
+        assertEquals("rollback@example.com", socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "rollback-sub")!!.email)
+        assertTrue(submissions.existsById(submission.id))
+        assertTrue(drafts.existsById(draft.id))
+        assertTrue(pushTokens.existsById(token.id))
+    }
+
     @BeforeEach
     fun setUp() {
         databaseCleaner.cleanAll()

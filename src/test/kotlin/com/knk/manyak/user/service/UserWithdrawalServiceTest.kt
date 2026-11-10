@@ -5,14 +5,16 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
-import com.knk.manyak.push.repository.DevicePushTokenRepository
+import com.knk.manyak.user.event.UserWithdrawnEvent
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.web.server.ResponseStatusException
 
 /**
@@ -27,10 +29,9 @@ class UserWithdrawalServiceTest {
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val socialAccountRepository: SocialAccountRepository = mock(SocialAccountRepository::class.java)
     private val refreshTokenStore: RefreshTokenStore = mock(RefreshTokenStore::class.java)
-    private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val analytics = mock(com.knk.manyak.global.observability.analytics.ServerAnalytics::class.java)
-    private val notifications = mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java)
-    private val service = UserWithdrawalService(org.mockito.Mockito.mock(com.knk.manyak.story.submission.StorySubmissionRepository::class.java), userRepository, socialAccountRepository, refreshTokenStore, devicePushTokenRepository, mock(com.knk.manyak.story.draft.StoryDraftRepository::class.java), analytics, notifications)
+    private val events: ApplicationEventPublisher = mock(ApplicationEventPublisher::class.java)
+    private val service = UserWithdrawalService(userRepository, socialAccountRepository, refreshTokenStore, analytics, events)
 
     @Test
     fun `탈퇴는 사용자 행을 잠그고 읽는다`() {
@@ -42,7 +43,7 @@ class UserWithdrawalServiceTest {
 
         // 잠금 없는 findById로 읽으면 동시 갱신이 되돌아간다 — 반드시 findByIdForUpdate여야 한다.
         verify(userRepository).findByIdForUpdate(5L)
-        verify(notifications).deleteForUser(5L)
+        verify(events).publishEvent(UserWithdrawnEvent(5L))
         verify(userRepository, never()).findById(5L)
         assertThat(user.status).isEqualTo(UserStatus.DELETED)
         assertThat(user.withdrawnFromStatus).isEqualTo(UserStatus.ACTIVE)
@@ -76,5 +77,6 @@ class UserWithdrawalServiceTest {
 
         assertThat(user.withdrawnFromStatus).isEqualTo(UserStatus.SUSPENDED)
         verify(refreshTokenStore, never()).revokeAllForUser(7L)
+        verifyNoInteractions(events)
     }
 }
