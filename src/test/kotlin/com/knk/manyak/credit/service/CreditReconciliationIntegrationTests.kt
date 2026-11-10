@@ -347,4 +347,33 @@ class CreditReconciliationIntegrationTests : IntegrationTest() {
         assertThat(result.refundsEmitted).isEqualTo(0)
         assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(0)
     }
+
+    // 차감 1건 그룹에서는 완료 수 1과 NEVER_REFUND가 같은 결과(환불 0)라 판정 매핑을 구분하지 못한다. 2건으로 구분한다.
+    @Test
+    fun `제작 세션이 없으면 차감이 둘이어도 환불하지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val missingSessionId = 999_999L
+        chargeStory(userId, missingSessionId)
+        chargeStory(userId, missingSessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", missingSessionId)).isEqualTo(0)
+    }
+
+    @Test
+    fun `스토리가 생성된 세션에 차감이 둘이면 하나만 환불한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORY_CREATED)
+        chargeStory(userId, sessionId)
+        chargeStory(userId, sessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(1)
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+    }
 }
