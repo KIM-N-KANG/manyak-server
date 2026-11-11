@@ -1,6 +1,6 @@
 package com.knk.manyak.push.event
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.story.submission.StoryModerationCompleted
@@ -34,7 +34,7 @@ internal fun StoryModerationCompleted.pushData(base: String): Map<String, String
 @Component
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "local", matchIfMissing = true)
 class ModerationPushListener(
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val sender: FcmPushSender,
     @Qualifier("pushExecutor") private val executor: Executor,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val base: String,
@@ -46,7 +46,7 @@ class ModerationPushListener(
             executor.execute {
                 try {
                     val messageId = "story-moderation:${event.submissionId}:${event.attempt}"
-                    if (users.findById(event.userId).orElse(null)?.servicePushEnabled == true) {
+                    if (accounts.pushRecipientOf(event.userId)?.servicePushEnabled == true) {
                         sender.sendToUser(event.userId, event.pushData(base), messageId = messageId)
                     } else sender.recordDiscarded(event.userId, event.pushData(base), messageId, "SERVICE_PUSH_DISABLED")
                 } catch (ex: RuntimeException) { log.warn("moderation_push_failed submission={} error={}", event.submissionId, ex.javaClass.simpleName) }

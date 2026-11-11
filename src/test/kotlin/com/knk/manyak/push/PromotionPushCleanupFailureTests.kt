@@ -30,6 +30,7 @@ class PromotionPushCleanupFailureTests {
         val clock = Clock.fixed(now, ZoneOffset.UTC)
         val campaigns = mock(PushCampaignRepository::class.java)
         val users = mock(UserRepository::class.java)
+        val targets = mock(com.knk.manyak.push.repository.PushTargetRepository::class.java)
         val sender = mock(FcmPushSender::class.java)
         val expired = PushCampaign(id = 1, title = "만료", body = "본문", scheduledAt = now,
             status = PushCampaignStatus.SENDING, startedAt = now.minusSeconds(1800))
@@ -51,9 +52,9 @@ class PromotionPushCleanupFailureTests {
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {
-            PromotionPushScheduler(PromotionPushService(campaigns, users, sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(users, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java)), notices = mock(com.knk.manyak.notice.repository.NoticeRepository::class.java)), StructuredLogger(), clock).run()
+            PromotionPushScheduler(PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(com.knk.manyak.auth.service.AccountQueryService(users), targets, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java)), notices = mock(com.knk.manyak.notice.repository.NoticeRepository::class.java)), StructuredLogger(), clock).run()
             verify(campaigns).claim(scheduled.id, now)
-            verify(users).findMarketingPushTargetIds()
+            verify(targets).findMarketingPushTargetIds()
             verify(campaigns).finishIfOwned(scheduled.id, now, PushCampaignStatus.SENT, 0, 0, now)
             assertThat(appender.list.map { it.formattedMessage }).anySatisfy {
                 assertThat(it).contains("event_name=promotion_push_failed", "error=cleanup unavailable")

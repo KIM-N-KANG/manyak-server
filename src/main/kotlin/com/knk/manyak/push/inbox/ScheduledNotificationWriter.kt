@@ -1,6 +1,6 @@
 package com.knk.manyak.push.inbox
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -15,7 +15,8 @@ data class NotificationRound(val pushTargetIds: List<Long>, val recordedPushes: 
 /** 대상 조회·내역의 INSERT SELECT·원격 아웃박스를 같은 스냅샷/트랜잭션에 기록한다. */
 @Service
 class ScheduledNotificationWriter(
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
+    private val targets: com.knk.manyak.push.repository.PushTargetRepository,
     private val store: UserNotificationStore,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val base: String,
     private val clock: Clock = Clock.systemUTC(),
@@ -31,8 +32,8 @@ class ScheduledNotificationWriter(
         val now = clock.instant()
         val type = NotificationType.CREDIT_EXPIRY_REMINDER
         for (target in inboxTargets) {
-            val user = users.findById(target.userId).orElseThrow()
-            store.insert(UserNotification(userId = user.id, messageKey = "credit-expiry:${user.publicId}:$occurrence",
+            val publicId = accounts.requirePublicIdOf(target.userId)
+            store.insert(UserNotification(userId = target.userId, messageKey = "credit-expiry:$publicId:$occurrence",
                 type = type, title = data.getValue("title"), body = data.getValue("body"),
                 deepLink = data.getValue("deepLink"), createdAt = now))
         }
@@ -51,9 +52,9 @@ class ScheduledNotificationWriter(
         onTargetsSelected: (Int) -> Unit = {},
     ): NotificationRound {
         val targetIds = when (scenario) {
-            "attendance" -> users.findAttendanceReminderTargetIds(occurrence)
-            "notice" -> users.findServicePushTargetIds()
-            "promotion" -> users.findMarketingPushTargetIds()
+            "attendance" -> targets.findAttendanceReminderTargetIds(occurrence)
+            "notice" -> targets.findServicePushTargetIds()
+            "promotion" -> targets.findMarketingPushTargetIds()
             else -> error("Unknown scheduled notification scenario: $scenario")
         }
         // 실패한 회차도 기존 캠페인 target_count를 보고할 수 있게 조회 직후 전달한다.

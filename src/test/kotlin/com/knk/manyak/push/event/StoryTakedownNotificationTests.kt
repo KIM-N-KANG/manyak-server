@@ -55,7 +55,7 @@ class StoryTakedownNotificationTests {
         val sender = mock(FcmPushSender::class.java)
         `when`(users.findById(1L)).thenReturn(Optional.of(User(id = 1, nickname = "작가", servicePushEnabled = true)))
         val e = event()
-        StoryTakedownPushListener(users, sender, Executor { it.run() }, "https://manyak.app").takenDown(e)
+        StoryTakedownPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, Executor { it.run() }, "https://manyak.app").takenDown(e)
         verify(sender).sendToUser(1, e.pushData("https://manyak.app"), messageId = e.messageId)
     }
     @Test fun `로컬 서비스 알림 꺼짐은 발송하지 않는다`() {
@@ -63,7 +63,7 @@ class StoryTakedownNotificationTests {
         val sender = mock(FcmPushSender::class.java)
         `when`(users.findById(1L)).thenReturn(Optional.of(User(id = 1, nickname = "작가", servicePushEnabled = false)))
         val e = event()
-        StoryTakedownPushListener(users, sender, Executor { it.run() }, "https://manyak.app").takenDown(e)
+        StoryTakedownPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, Executor { it.run() }, "https://manyak.app").takenDown(e)
         verify(sender).recordDiscarded(1, e.pushData("https://manyak.app"), e.messageId, "SERVICE_PUSH_DISABLED")
         verifyNoMoreInteractions(sender)
     }
@@ -75,8 +75,8 @@ class StoryTakedownNotificationTests {
         log.addAppender(appender)
         try {
             `when`(users.findById(1L)).thenThrow(IllegalStateException("private exception"))
-            StoryTakedownPushListener(users, sender, Executor { it.run() }, "https://manyak.app").takenDown(event())
-            StoryTakedownPushListener(users, sender, Executor { throw RejectedExecutionException("private exception") }, "https://manyak.app").takenDown(event())
+            StoryTakedownPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, Executor { it.run() }, "https://manyak.app").takenDown(event())
+            StoryTakedownPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, Executor { throw RejectedExecutionException("private exception") }, "https://manyak.app").takenDown(event())
             assertThat(appender.list.map { it.formattedMessage }).anySatisfy { assertThat(it).contains("story_takedown_push_failed", "IllegalStateException") }
                 .anySatisfy { assertThat(it).contains("story_takedown_push_rejected") }
             assertThat(appender.list.joinToString { it.formattedMessage }).doesNotContain("private exception", "달빛", "혐오 표현")

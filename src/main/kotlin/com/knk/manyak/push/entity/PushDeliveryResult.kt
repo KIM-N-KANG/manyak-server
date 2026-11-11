@@ -13,7 +13,8 @@ class PushDeliveryResult(
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 40) val type: PushDeliveryType,
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16) val kind: PushKind,
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "campaign_id") val campaign: PushCampaign? = null,
-    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "user_id") val user: com.knk.manyak.auth.entity.User? = null,
+    // 수신 회원의 내부 PK. JPA 연관 대신 평문 컬럼으로 둔다(DevicePushToken, SocialAccount 선례). FK는 V101이 정한다.
+    @Column(name = "user_id") val userId: Long? = null,
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16) val outcome: PushDeliveryOutcome,
     @Column(nullable = false, length = 40) val reason: String,
     @Column(name = "delivered_devices", nullable = false) val deliveredDevices: Int,

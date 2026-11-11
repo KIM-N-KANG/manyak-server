@@ -96,6 +96,7 @@ import java.util.concurrent.Executor
         CreditPolicyRepository::class,
         CreditWalletRepository::class,
         PushCampaignRepository::class,
+        com.knk.manyak.push.repository.PushTargetRepository::class,
         UserNotificationStore::class,
         DomainNotificationRecorder::class,
         StoryCreationRequestRepository::class,

@@ -47,7 +47,7 @@ class StoryCompletionPushModeTests {
 
     // 제출을 즉시 실행해 검증을 결정적으로 만든다. 실행기를 실제 풀로 두면 verify가 경쟁한다.
     private fun listener(mode: String, executor: Executor = SyncTaskExecutor()) = StoryCompletionPushListener(
-        userRepository = userRepository,
+        accounts = com.knk.manyak.auth.service.AccountQueryService(userRepository),
         fcmPushSender = fcmPushSender,
         pushExecutor = executor,
         pushMode = mode,

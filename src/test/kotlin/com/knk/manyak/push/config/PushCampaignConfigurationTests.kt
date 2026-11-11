@@ -22,7 +22,7 @@ class PushCampaignConfigurationTests {
         .withInitializer { it.beanFactory.conversionService = ApplicationConversionService.getSharedInstance() }
         .withUserConfiguration(PromotionPushService::class.java)
         .withBean(PushCampaignRepository::class.java, { campaigns })
-        .withBean(UserRepository::class.java, { mock(UserRepository::class.java) })
+        .withBean(com.knk.manyak.auth.service.AccountQueryService::class.java, { com.knk.manyak.auth.service.AccountQueryService(mock(UserRepository::class.java)) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
         .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
         .withBean(NoticeRepository::class.java, { mock(NoticeRepository::class.java) })

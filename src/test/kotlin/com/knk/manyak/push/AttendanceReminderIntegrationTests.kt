@@ -64,7 +64,7 @@ class AttendanceReminderIntegrationTests : MockedBoundaryIntegrationTest() {
     // 서비스, 스케줄러, 출석 키의 날짜를 같은 시계로 맞추고 실제 cron은 켜지 않는다.
     private var clock: Clock = atHour(15)
     private val attendanceReminderService: AttendanceReminderService
-        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
+        get() = AttendanceReminderService(com.knk.manyak.auth.service.AccountQueryService(userRepository), pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
     private val attendanceReminderScheduler: AttendanceReminderScheduler
         get() = AttendanceReminderScheduler(attendanceReminderService, redisTemplate, structuredLogger, clock)
 

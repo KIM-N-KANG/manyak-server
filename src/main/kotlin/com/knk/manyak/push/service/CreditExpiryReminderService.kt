@@ -2,7 +2,7 @@ package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
@@ -21,7 +21,7 @@ data class CreditExpiryReminderResult(val targets: Int, val cooldown: Int, val s
 @Service
 class CreditExpiryReminderService(
     private val lots: CreditLotRepository,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val templates: PushMessageTemplateService,
     private val sender: FcmPushSender,
     private val redis: StringRedisTemplate,
@@ -53,7 +53,7 @@ class CreditExpiryReminderService(
             sent = round.recordedPushes
         } else {
             for (target in targets) {
-                val user = users.findById(target.userId).orElse(null)
+                val user = accounts.pushRecipientOf(target.userId)
                 val messageId = "credit-expiry:${user?.publicId}:$today"
                 val rejection = when {
                     user == null || user.status != UserStatus.ACTIVE -> "NOT_ACTIVE"

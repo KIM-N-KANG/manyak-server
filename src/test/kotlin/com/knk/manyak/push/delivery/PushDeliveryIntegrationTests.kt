@@ -168,9 +168,9 @@ class PushDeliveryIntegrationTests : IntegrationTest() {
     }
 
     @Test fun `로컬 완성 리스너는 메시지 ID와 FCM 미설정 폐기 결과를 기록한다`() {
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, com.knk.manyak.auth.service.AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
-        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(users, sender, java.util.concurrent.Executor { it.run() })
+        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, java.util.concurrent.Executor { it.run() })
         val requestId = UUID.randomUUID()
         listener.onStoryCompleted(com.knk.manyak.story.event.StoryCompletedEvent(user.id, requestId, UUID.randomUUID().toString(), "완성"))
         val row = jdbc.queryForMap("SELECT * FROM push_delivery_results")
@@ -180,7 +180,7 @@ class PushDeliveryIntegrationTests : IntegrationTest() {
 
     @Test fun `로컬 발송은 무효 토큰을 실패 기기에서 빼고 부분 성공을 기록한다`() {
         val messaging = org.mockito.Mockito.mock(com.google.firebase.messaging.FirebaseMessaging::class.java)
-        val sender = com.knk.manyak.push.service.FcmPushSender(messaging, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(messaging, tokens, com.knk.manyak.auth.service.AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
         repeat(3) { tokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id,
             token = "local-$it", platform = com.knk.manyak.push.dto.PushPlatform.ANDROID)) }
@@ -197,9 +197,9 @@ class PushDeliveryIntegrationTests : IntegrationTest() {
     @Test fun `로컬 자격 거절과 만료는 발송 없이 폐기로 기록한다`() {
         user.servicePushEnabled = false
         users.saveAndFlush(user)
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, com.knk.manyak.auth.service.AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
-        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(users, sender, java.util.concurrent.Executor { it.run() })
+        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(com.knk.manyak.auth.service.AccountQueryService(users), sender, java.util.concurrent.Executor { it.run() })
         listener.onStoryCompleted(com.knk.manyak.story.event.StoryCompletedEvent(user.id, UUID.randomUUID(), UUID.randomUUID().toString(), "완성"))
         sender.sendToUser(user.id, mapOf("type" to "ATTENDANCE_REMINDER"),
             expiresAt = Instant.EPOCH, messageId = "expired-local")
@@ -216,7 +216,7 @@ class PushDeliveryIntegrationTests : IntegrationTest() {
                 ?: com.knk.manyak.push.dto.PushDeliveryReportRequest("matcher", com.knk.manyak.push.dto.PushDeliveryType.STORY_COMPLETED,
                     com.knk.manyak.push.dto.PushKind.SERVICE, user.publicId, outcome = com.knk.manyak.push.dto.PushDeliveryOutcome.DISCARDED,
                     reason = "TEST", deliveredDevices = 0, failedDevices = 0, completedAt = Instant.now()))
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, com.knk.manyak.auth.service.AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = recording)
         org.assertj.core.api.Assertions.assertThatCode {
             sender.sendToUser(user.id, mapOf("type" to "STORY_COMPLETED"), messageId = "record-failure")

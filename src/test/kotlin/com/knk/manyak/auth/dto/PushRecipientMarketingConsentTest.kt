@@ -1,4 +1,4 @@
-package com.knk.manyak.auth.entity
+package com.knk.manyak.auth.dto
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -6,16 +6,17 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * 광고 푸시 수신 판정(KNK-1132, 정책 KNK-1129). 야간(21~08시 KST)에는 야간 동의가 따로 있어야 한다.
  * 발송기(KNK-1116·1117)가 이 판정을 쓴다.
  */
-class UserMarketingPushConsentTest {
+class PushRecipientMarketingConsentTest {
 
-    private fun userWith(marketing: Instant?, night: Instant?): User =
-        User(
-            nickname = "수신자",
+    private fun userWith(marketing: Instant?, night: Instant?): PushRecipient =
+        PushRecipient(
+            id = 1, publicId = UUID.randomUUID(), status = UserStatus.ACTIVE, servicePushEnabled = true,
             marketingPushAgreedAt = marketing,
             marketingPushNightAgreedAt = night,
         )
