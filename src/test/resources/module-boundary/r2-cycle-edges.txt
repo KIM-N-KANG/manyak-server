@@ -1,10 +1,2 @@
-auth -> story
-credit -> auth
-notice -> auth
-push -> auth
-push -> credit
-push -> notice
 push -> story
-story -> auth
-story -> credit
 story -> push
