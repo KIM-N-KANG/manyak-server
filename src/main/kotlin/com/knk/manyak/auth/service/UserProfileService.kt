@@ -1,8 +1,7 @@
 package com.knk.manyak.auth.service
 
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
-import com.knk.manyak.story.event.StoryIndexRequestedEvent
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.auth.event.UserNicknameChangedEvent
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.entity.UserStatus
@@ -15,7 +14,6 @@ import com.knk.manyak.auth.dto.ProfilePresetResponse
 import com.knk.manyak.auth.dto.UpdateProfileRequest
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -80,14 +78,11 @@ class UserProfileService(
  */
 @Component
 class ProfileUpdater(
-    private val stories: StoryRepository,
     private val events: ApplicationEventPublisher,
     private val userRepository: UserRepository,
     private val profileImagePresetService: ProfileImagePresetService,
     private val meResponseAssembler: MeResponseAssembler,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
-
     @Transactional
     fun update(userId: Long, request: UpdateProfileRequest): MeResponse {
         if (request.nickname == null && request.profileImagePreset == null) {
@@ -118,10 +113,8 @@ class ProfileUpdater(
         // 변환은 트랜잭션 밖의 [UserProfileService.updateProfile] 몫이다.
         userRepository.flush()
         if (user.nickname != previousNickname) {
-            // 공개 전환과 경합하면 재색인이 누락될 수 있어 공개 여부로 거르지 않는다(Codex P2).
-            val storyIds = stories.findActiveIdsByUserId(userId)
-            storyIds.forEach { events.publishEvent(StoryIndexRequestedEvent(it)) }
-            log.info("nickname_reindex_requested userId={} stories={}", userId, storyIds.size)
+            // 소유 스토리 재색인은 story가 이 트랜잭션 안에서 구독해 요청한다([UserNicknameChangedEvent]).
+            events.publishEvent(UserNicknameChangedEvent(userId))
         }
         return meResponseAssembler.assemble(user)
     }

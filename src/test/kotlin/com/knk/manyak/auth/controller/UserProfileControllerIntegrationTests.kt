@@ -5,6 +5,7 @@ import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.dto.UpdateProfileRequest
+import com.knk.manyak.auth.event.UserNicknameChangedEvent
 import com.knk.manyak.auth.service.ProfileUpdater
 import com.knk.manyak.auth.social.ProfileImagePresetService
 import com.knk.manyak.credit.entity.CreditReason
@@ -19,6 +20,7 @@ import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito.*
 import java.time.Instant
 import org.junit.jupiter.params.ParameterizedTest
@@ -26,6 +28,8 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.client.RestTestClient
+import org.springframework.context.ApplicationEventPublisher
+import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 
@@ -48,6 +52,7 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var profileUpdater: ProfileUpdater
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
+    @Autowired private lateinit var events: ApplicationEventPublisher
 
     @BeforeEach
     fun setUp() {
@@ -338,6 +343,18 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         verify(storyRepository).findActiveIdsByUserId(user.id)
         assertThat(reload(user).nickname).isEqualTo("기존작가")
+        verify(indexer, after(200).never()).index(anyLong())
+    }
+
+    @Test
+    fun `닉네임 변경 이벤트는 프로필 트랜잭션 밖에서 처리하지 않는다`() {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        // 트랜잭션 없이 발행하면 AFTER_COMMIT 색인이 조용히 버려지므로 리스너가 MANDATORY로 거부한다.
+        assertThrows<IllegalTransactionStateException> { events.publishEvent(UserNicknameChangedEvent(user.id)) }
+
+        verify(storyRepository, never()).findActiveIdsByUserId(anyLong())
         verify(indexer, after(200).never()).index(anyLong())
     }
 
