@@ -1,4 +1,3 @@
-auth -> search
 auth -> story
 chat -> auth
 chat -> credit

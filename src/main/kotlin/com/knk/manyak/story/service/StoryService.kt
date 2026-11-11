@@ -1,7 +1,7 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed

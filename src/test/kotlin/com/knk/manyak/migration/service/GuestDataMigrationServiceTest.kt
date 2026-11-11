@@ -129,8 +129,8 @@ class GuestDataMigrationServiceTest {
         assertThat(result.stories.map { it.status }).containsExactly(
             MigrationStatus.MIGRATED, MigrationStatus.MIGRATED, MigrationStatus.ALREADY_OWNED,
             MigrationStatus.CONFLICT, MigrationStatus.NOT_FOUND, MigrationStatus.ALREADY_OWNED)
-        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(71))
-        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(72))
+        verify(events).publishEvent(com.knk.manyak.story.event.StoryIndexRequestedEvent(71))
+        verify(events).publishEvent(com.knk.manyak.story.event.StoryIndexRequestedEvent(72))
         org.mockito.Mockito.verifyNoMoreInteractions(events)
         verify(storyCreationSessionRepository, times(1)).findAllByStoryIdIn(setOf(public.id, private.id))
         verify(storyCreationRequestRepository, times(1)).findAllByRequestIdIn(setOf(requestId))

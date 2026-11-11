@@ -17,7 +17,7 @@ import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import org.springframework.context.ApplicationEventPublisher
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus

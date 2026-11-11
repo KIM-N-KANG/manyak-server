@@ -3,6 +3,7 @@ package com.knk.manyak.search.event
 import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.service.StorySearchIndexAdmin
 import com.knk.manyak.search.service.StorySearchIndexer
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.event.ApplicationReadyEvent
