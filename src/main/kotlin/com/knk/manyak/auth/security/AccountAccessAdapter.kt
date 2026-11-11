@@ -4,6 +4,7 @@ import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.security.AccountAccess
+import com.knk.manyak.global.security.AccountAccessDecision
 import com.knk.manyak.global.security.AccountAccessPort
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -23,11 +24,15 @@ class AccountAccessAdapter(
 
     override fun userIdOf(publicId: UUID): Long? = userRepository.findByPublicId(publicId)?.id
 
-    override fun check(publicId: UUID, method: String, path: String): AccountAccess {
-        val user = userRepository.findByPublicId(publicId) ?: return AccountAccess.ALLOWED
-        if (user.status == UserStatus.DELETED) return AccountAccess.DELETED
+    override fun check(publicId: UUID, method: String, path: String): AccountAccessDecision {
+        val user = userRepository.findByPublicId(publicId) ?: return AccountAccessDecision(AccountAccess.ALLOWED, null)
+        return AccountAccessDecision(access(user.id, user.status, method, path), user.id)
+    }
+
+    private fun access(userId: Long, status: UserStatus, method: String, path: String): AccountAccess {
+        if (status == UserStatus.DELETED) return AccountAccess.DELETED
         if (!consentGateEnabled || consentAllowed(method, path)) return AccountAccess.ALLOWED
-        val consents = consentService.authenticationStatus(user.id)
+        val consents = consentService.authenticationStatus(userId)
         return if (consents.terms.needsConsent || consents.privacy.needsConsent || consents.age14.needsConsent) {
             AccountAccess.CONSENT_REQUIRED
         } else {
