@@ -1,8 +1,9 @@
 package com.knk.manyak.story.draft
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.AccountStatusView
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.global.error.*
 import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.image.service.UploadedImageKind
@@ -25,7 +26,8 @@ import java.util.UUID
 @Service
 class StoryDraftService(
     private val drafts: StoryDraftRepository,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
+    private val locks: AccountLockService,
     private val requests: StoryCreationRequestRepository,
     private val images: StoryImageAccess,
     private val generation: SimpleStoryCreationService,
@@ -111,13 +113,13 @@ class StoryDraftService(
         drafts.deleteOwned(parsed, userId)
     }
 
-    private fun member(id: Long, lock: Boolean = false): User {
-        val user = (if (lock) users.findByIdForUpdate(id) else users.findById(id).orElse(null))
+    private fun member(id: Long, lock: Boolean = false): AccountStatusView {
+        val user = (if (lock) locks.lock(id) else accounts.statusOf(id))
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
         requireActiveStatus(user.status)
         return user
     }
-    private fun summary(d: StoryDraft, u: User) = linkedMapOf<String, Any?>(
+    private fun summary(d: StoryDraft, u: AccountStatusView) = linkedMapOf<String, Any?>(
         "draftId" to d.id, "mode" to d.mode, "stage" to d.stage, "title" to d.title, "oneLineIntro" to d.oneLineIntro,
         "thumbnailUrl" to d.thumbnailObjectKey?.let { images.draftReadUrl(u.publicId, UploadedImageKind.COVER, it) },
         "version" to d.version, "createdAt" to d.createdAt, "updatedAt" to d.updatedAt,

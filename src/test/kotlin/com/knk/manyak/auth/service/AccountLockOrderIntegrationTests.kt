@@ -63,6 +63,7 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var submissionTransactions: SubmissionTransactions
     @Autowired private lateinit var notifications: DomainNotificationRecorder
     @Autowired private lateinit var pushTokens: DevicePushTokenService
+    @Autowired private lateinit var locks: AccountLockService
     private val mapper = ObjectMapper()
     private lateinit var member: User
 
@@ -140,6 +141,15 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
         assertThat(LockSql.tables { pushTokens.register(member.id, "lock-order-token", PushPlatform.ANDROID) })
             .containsExactly("users", "device_push_tokens")
         assertThat(LockSql.tables { pushTokens.unregister(member.id, "lock-order-token") }).containsExactly("users")
+    }
+
+    @Test fun `잠금 진입점은 트랜잭션 밖에서 부르면 잠그지 않고 거부한다`() {
+        assertThat(LockSql.tables {
+            org.assertj.core.api.Assertions.assertThatThrownBy { locks.lock(member.id) }
+                .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+        }).isEmpty()
+        val locked = TransactionTemplate(transactionManager).execute { locks.lock(member.id) }
+        assertThat(locked).isEqualTo(com.knk.manyak.auth.dto.AccountStatusView(member.id, member.publicId, UserStatus.ACTIVE))
     }
 
     private companion object {
