@@ -275,7 +275,9 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
     /** 목 색인기가 실제 색인기와 리더에 위임하게 해 OpenSearch 클라이언트(목)까지 가는 호출을 센다. 컨텍스트 조합은 그대로다. */
     private fun indexThroughRealIndexer() {
-        clearInvocations(searchClient)
+        // 공유 목의 호출 기록이 다른 테스트에서 넘어오지 않게 비운다. searchClient는 Spring 목이라 테스트 뒤 초기화되지만
+        // 컨텍스트 기동 때 받은 호출이 첫 테스트에 남을 수 있고, searchIndices는 필드라 수명주기 설정에 따라 공유될 수 있다.
+        clearInvocations(searchClient, searchIndices)
         doReturn(searchIndices).`when`(searchClient).indices()
         val real = StorySearchIndexer(searchClient, searchProperties, documentReader, StorySearchIndexAdmin(searchClient, searchProperties))
         doAnswer { real.index(it.getArgument(0)); null }.`when`(indexer).index(anyLong())
@@ -311,7 +313,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
         awaitOpenSearchIndexCalls(owned.size)
 
-        // KNK-2078에서 묶음 경로로 바꾸면 bulk 1회와 인덱스 확인 1회로 기대값을 바꾼다.
+        // KNK-2078 묶음 경로 PR에서 바꿀 기대값: bulk 1회, 인덱스 확인 1회, index 0회. 문서 ID 검증은 bulk 요청의
+        // operation ID 목록으로 옮겨 owned의 publicId 집합과 정확히 같음(빠짐, 섞임 없음)을 그대로 단언한다.
         assertThat(indexedDocumentIds()).containsExactlyInAnyOrderElementsOf(owned.map { it.publicId.toString() })
         assertThat(openSearchCalls(searchIndices, "exists")).isEqualTo(owned.size)
         assertThat(openSearchCalls(searchClient, "bulk")).isZero()
