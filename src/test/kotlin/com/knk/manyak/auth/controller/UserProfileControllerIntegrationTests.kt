@@ -10,6 +10,9 @@ import com.knk.manyak.auth.service.ProfileUpdater
 import com.knk.manyak.auth.social.ProfileImagePresetService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.search.config.StorySearchProperties
+import com.knk.manyak.search.service.StorySearchDocumentReader
+import com.knk.manyak.search.service.StorySearchIndexAdmin
 import com.knk.manyak.search.service.StorySearchIndexer
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryStatus
@@ -22,6 +25,11 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito.*
+import org.opensearch.client.opensearch.OpenSearchClient
+import org.opensearch.client.opensearch.core.IndexRequest
+import org.opensearch.client.opensearch.indices.OpenSearchIndicesClient
+import org.opensearch.client.transport.endpoints.BooleanResponse
+import org.opensearch.client.util.ObjectBuilder
 import java.time.Instant
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -53,6 +61,9 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var profileUpdater: ProfileUpdater
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
     @Autowired private lateinit var events: ApplicationEventPublisher
+    @Autowired private lateinit var searchClient: OpenSearchClient
+    @Autowired private lateinit var searchProperties: StorySearchProperties
+    @Autowired private lateinit var documentReader: StorySearchDocumentReader
 
     @BeforeEach
     fun setUp() {
@@ -256,6 +267,67 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             .jsonPath("$.length()").isEqualTo(profileImagePresetService.presetKeys().size)
             .jsonPath("$[0].key").isNotEmpty
             .jsonPath("$[0].imageUrl").isNotEmpty
+    }
+
+    private val searchIndices: OpenSearchIndicesClient = mock(OpenSearchIndicesClient::class.java) { call ->
+        if (call.method.returnType == BooleanResponse::class.java) BooleanResponse(true) else RETURNS_DEFAULTS.answer(call)
+    }
+
+    /** 목 색인기가 실제 색인기와 리더에 위임하게 해 OpenSearch 클라이언트(목)까지 가는 호출을 센다. 컨텍스트 조합은 그대로다. */
+    private fun indexThroughRealIndexer() {
+        clearInvocations(searchClient)
+        doReturn(searchIndices).`when`(searchClient).indices()
+        val real = StorySearchIndexer(searchClient, searchProperties, documentReader, StorySearchIndexAdmin(searchClient, searchProperties))
+        doAnswer { real.index(it.getArgument(0)); null }.`when`(indexer).index(anyLong())
+    }
+
+    private fun openSearchCalls(target: Any, name: String) = mockingDetails(target).invocations.count { it.method.name == name }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun indexedDocumentIds(): List<String?> = mockingDetails(searchClient).invocations.filter { it.method.name == "index" }.map {
+        (it.arguments[0] as java.util.function.Function<IndexRequest.Builder<Any>, ObjectBuilder<IndexRequest<Any>>>)
+            .apply(IndexRequest.Builder()).build().id()
+    }
+
+    private fun awaitOpenSearchIndexCalls(expected: Int) {
+        val deadline = System.currentTimeMillis() + 3000
+        while (openSearchCalls(searchClient, "index") < expected && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        Thread.sleep(200) // 기대보다 많이 부르는지도 보려고 잠시 더 기다린다.
+    }
+
+    @Test
+    fun `닉네임 변경 재색인은 소유 스토리마다 OpenSearch 색인과 인덱스 확인을 한 번씩 부른다`() {
+        indexThroughRealIndexer()
+        val user = saveUser(nickname = "기존작가")
+        val owned = listOf(
+            storyRepository.save(Story(userId = user.id, title = "공개 하나")),
+            storyRepository.save(Story(userId = user.id, title = "공개 둘")),
+            storyRepository.save(Story(userId = user.id, title = "비공개", visibility = StoryVisibility.PRIVATE)),
+            storyRepository.save(Story(userId = user.id, title = "초안", status = StoryStatus.DRAFT)),
+        )
+        storyRepository.save(Story(userId = user.id, title = "삭제", deletedAt = Instant.now()))
+        storyRepository.save(Story(userId = saveUser(nickname = "다른작가").id, title = "다른 회원"))
+
+        patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
+        awaitOpenSearchIndexCalls(owned.size)
+
+        // KNK-2078에서 묶음 경로로 바꾸면 bulk 1회와 인덱스 확인 1회로 기대값을 바꾼다.
+        assertThat(indexedDocumentIds()).containsExactlyInAnyOrderElementsOf(owned.map { it.publicId.toString() })
+        assertThat(openSearchCalls(searchIndices, "exists")).isEqualTo(owned.size)
+        assertThat(openSearchCalls(searchClient, "bulk")).isZero()
+    }
+
+    @Test
+    fun `소유 스토리가 없는 회원의 닉네임 변경은 OpenSearch를 부르지 않는다`() {
+        indexThroughRealIndexer()
+        val user = saveUser(nickname = "기존작가")
+
+        patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
+        awaitOpenSearchIndexCalls(0)
+
+        assertThat(openSearchCalls(searchClient, "index")).isZero()
+        assertThat(openSearchCalls(searchClient, "bulk")).isZero()
+        assertThat(openSearchCalls(searchIndices, "exists")).isZero()
     }
 
     @Test
