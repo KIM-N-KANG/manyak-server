@@ -101,7 +101,29 @@ class PushOutboxPostgresTests {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
         val data = mapOf("type" to "PROMOTION")
         val campaignId = UUID.randomUUID().toString()
-        // 두 번째 회원이 없어 회차가 실패한다. 앞선 회원의 요청도 남지 않는다.
+        // 첫 요청을 실제로 삽입한 뒤 두 번째 삽입이 실패한다. 회차 트랜잭션이 앞선 요청까지 되돌린다.
+        val failing = spy(PushOutboxStore(jdbc, mapper))
+        var inserts = 0
+        doAnswer { call ->
+            if (++inserts == 2) {
+                assertThat(count()).isEqualTo(1)
+                error("second insert failed")
+            }
+            call.callRealMethod()
+        }.`when`(failing).insert(any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = ""),
+            any(Instant::class.java) ?: Instant.EPOCH)
+        // 작성기 프록시의 트랜잭션 경계를 그대로 쓰려고 대상 객체의 저장소만 잠시 바꾼다.
+        val target = org.springframework.test.util.AopTestUtils.getTargetObject<ScheduledPushOutboxWriter>(writer)
+        org.springframework.test.util.ReflectionTestUtils.setField(target, "store", failing)
+        try {
+            assertThatThrownBy { writer.record(listOf(7, 7), data, "promotion", campaignId) }
+                .isInstanceOf(IllegalStateException::class.java).hasMessage("second insert failed")
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(target, "store", store)
+        }
+        assertThat(inserts).isEqualTo(2)
+        assertThat(count()).isZero()
+        // 대상 회원이 없으면 기록 전에 같은 예외로 실패하고 아무것도 남지 않는다.
         assertThatThrownBy { writer.record(listOf(7, 999), data, "promotion", campaignId) }
             .isInstanceOf(NoSuchElementException::class.java)
         assertThat(count()).isZero()

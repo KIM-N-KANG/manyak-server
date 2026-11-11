@@ -28,7 +28,7 @@ class OfficialStoryAccountIntegrationTests : IntegrationTest() {
         clearInvocations(users)
         assertThat(official.officialUserId()).isEqualTo(account.id)
         assertThat(official.officialUserId()).isEqualTo(account.id)
-        assertThat(lookups()).isLessThanOrEqualTo(1)
+        assertThat(lookups()).isEqualTo(1)
     }
 
     @Test fun `공식 계정이 없으면 기억하지 않고 생긴 뒤에는 찾는다`() {
