@@ -770,7 +770,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     )
 
     @Test
-    fun `컴파일 뒤 저장 단계가 실패하면 회원 이프를 시도별 환불 키로 돌려주고 요청을 실패로 남긴다`() {
+    fun `컴파일 뒤 저장 단계가 실패하면 회원 이프를 환불 원장 행으로 돌려주고 요청을 실패로 남긴다`() {
         // KNK-2056 T1. STORY 5-5-4 "저장 실패 시 복원". 엔딩 이름 중복은 컴파일 성공 뒤 응답 검증과 저장에서 502가 된다.
         val member = payingMember()
         val seed = wallet.balanceOf(member.id)
@@ -798,6 +798,19 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
 
         assertThat(memberTrialUsed(member.id)).isZero()
+        assertThat(ledger.findAll()).isEmpty()
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 단계가 실패하면 게스트 완성 횟수를 되돌린다`() {
+        // KNK-2056 T1. 게스트는 기기 단위 완성 횟수를 예약하고, 저장 실패 시 그 1회를 복원한다.
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION).used).isZero()
         assertThat(ledger.findAll()).isEmpty()
         assertThat(requestStatuses()).containsExactly("FAILED")
     }
