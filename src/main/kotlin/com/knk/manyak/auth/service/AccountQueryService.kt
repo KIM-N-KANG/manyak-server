@@ -25,6 +25,17 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
     /** [publicIdOf]와 같되 회원이 없으면 `Optional.orElseThrow`와 같은 [NoSuchElementException]을 던진다. */
     fun requirePublicIdOf(userId: Long): UUID = users.findById(userId).orElseThrow().publicId
 
+    /**
+     * 내부 id 묶음의 공개 식별자. [PUBLIC_ID_BATCH_SIZE]개씩 나눠 조회하고, 빈 입력은 조회하지 않는다.
+     * 회원이 하나라도 없으면 [requirePublicIdOf]와 같은 [NoSuchElementException]을 던진다.
+     */
+    fun requirePublicIdsOf(userIds: Collection<Long>): Map<Long, UUID> {
+        val ids = userIds.distinct()
+        val found = ids.chunked(PUBLIC_ID_BATCH_SIZE).flatMap(users::findPublicIdsByIdIn).associate { it.id to it.publicId }
+        if (found.size != ids.size) throw NoSuchElementException("No value present")
+        return found
+    }
+
     /** 공개 식별자의 내부 id. 회원이 없으면 null이며 계정 상태는 보지 않는다. */
     fun userIdOf(publicId: UUID): Long? = users.findByPublicId(publicId)?.id
 
@@ -53,6 +64,11 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
 
     fun adminMemberOf(publicId: UUID): AdminMemberView? =
         users.findByPublicId(publicId)?.let { AdminMemberView(it.id, it.publicId, it.deletedAt) }
+
+    companion object {
+        /** 묶음 조회의 IN 목록 상한. 검색 색인과 푸시 도달 조회의 묶음 크기(500)와 같다. */
+        const val PUBLIC_ID_BATCH_SIZE = 500
+    }
 
     private fun User.toProfile() = AccountProfile(publicId, nickname, profileImageUrl)
 

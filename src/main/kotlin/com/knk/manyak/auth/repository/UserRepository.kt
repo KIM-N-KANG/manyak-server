@@ -11,9 +11,19 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.UUID
 
+/** [UserRepository.findPublicIdsByIdIn]의 행. */
+interface UserPublicIdRow {
+    val id: Long
+    val publicId: UUID
+}
+
 interface UserRepository : JpaRepository<User, Long> {
     // API 외부 식별자(public_id) 기준 조회. 순차 PK 열거(IDOR) 차단.
     fun findByPublicId(publicId: UUID): User?
+
+    /** 내부 id 묶음의 공개 식별자. 엔티티를 영속성 컨텍스트에 올리지 않는다. 없는 id는 결과에 없다. */
+    @Query("SELECT u.id AS id, u.publicId AS publicId FROM User u WHERE u.id IN :ids")
+    fun findPublicIdsByIdIn(@Param("ids") ids: Collection<Long>): List<UserPublicIdRow>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.publicId = :publicId")

@@ -53,7 +53,13 @@ class PushOutboxPostgresTests {
         context.registerBean(tools.jackson.databind.ObjectMapper::class.java, Supplier { mapper })
         context.registerBean(Clock::class.java, Supplier { Clock.fixed(now, ZoneOffset.UTC) })
         context.registerBean(UserRepository::class.java, Supplier {
-            mock(UserRepository::class.java).also { `when`(it.findById(7)).thenReturn(Optional.of(user)) }
+            mock(UserRepository::class.java).also {
+                `when`(it.findById(7)).thenReturn(Optional.of(user))
+                val repository = it
+                // 묶음 변환은 테스트가 findById로 등록한 회원만 찾는다.
+                doAnswer { call -> call.getArgument<Collection<Long>>(0).mapNotNull { id -> repository.findById(id).orElse(null)?.let { found -> publicIdRow(id, found.publicId) } } }
+                    .`when`(it).findPublicIdsByIdIn(anyCollection())
+            }
         })
         context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java,
             com.knk.manyak.auth.service.AccountQueryService::class.java)
@@ -95,7 +101,7 @@ class PushOutboxPostgresTests {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
         val data = mapOf("type" to "PROMOTION")
         val campaignId = UUID.randomUUID().toString()
-        // 첫 회원 요청은 삽입되지만 두 번째 회원 조회가 실패한다.
+        // 두 번째 회원이 없어 회차가 실패한다. 앞선 회원의 요청도 남지 않는다.
         assertThatThrownBy { writer.record(listOf(7, 999), data, "promotion", campaignId) }
             .isInstanceOf(NoSuchElementException::class.java)
         assertThat(count()).isZero()
@@ -198,6 +204,11 @@ class PushOutboxPostgresTests {
             }
             factory.destroy()
         }
+    }
+
+    private fun publicIdRow(id: Long, publicId: java.util.UUID) = object : com.knk.manyak.auth.repository.UserPublicIdRow {
+        override val id = id
+        override val publicId = publicId
     }
 }
 
