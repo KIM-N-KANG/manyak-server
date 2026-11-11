@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito.any
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
@@ -69,6 +70,8 @@ class StoryTakedownLocalPushIntegrationTests : MockedBoundaryIntegrationTest() {
 
         val response = takeDown(story)!!
 
+        // 발송은 요청 스레드가 아니라 푸시 실행기에 제출된다.
+        verify(pushExecutor).execute(any(Runnable::class.java))
         val call = mockingDetails(sender).invocations.single()
         assertThat(call.method.name).isEqualTo("sendToUser")
         assertThat(call.arguments[0]).isEqualTo(story.userId)

@@ -350,7 +350,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
         org.junit.jupiter.api.Assertions.assertEquals("SERVICE_PUSH_DISABLED", discarded.arguments[3])
     }
 
-    @Test fun `local 검수 종료는 결과별 알림 내역 1행과 커밋 뒤 발송 1건을 남긴다`() {
+    @Test fun `local 검수 반려는 알림 내역 1행과 발송 1건을 남긴다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
         val row = submissions.findAll().single()
