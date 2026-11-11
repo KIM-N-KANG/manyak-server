@@ -116,6 +116,8 @@ class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
         assertThat(submissions.findById(row.id).orElseThrow().status).isEqualTo(SubmissionStatus.PENDING)
         assertThat(count("user_notifications")).isZero()
         assertThat(count("admin_audit_logs")).isZero()
+        // 내역이 아웃박스보다 먼저 기록된다(NOTIFICATION 4-1-21). 내역이 실패하면 아웃박스는 시도하지 않는다.
+        if (failure == "INBOX") verifyNoInteractions(outbox)
     }
     @Test fun `탈퇴가 먼저 커밋되면 공개 중단은 알림을 되살리지 않는다`() {
         withdrawal.withdraw(story.userId!!)

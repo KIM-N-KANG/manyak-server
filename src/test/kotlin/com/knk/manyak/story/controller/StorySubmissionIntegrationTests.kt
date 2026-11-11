@@ -350,6 +350,23 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
         org.junit.jupiter.api.Assertions.assertEquals("SERVICE_PUSH_DISABLED", discarded.arguments[3])
     }
 
+    @Test fun `local 검수 종료는 결과별 알림 내역 1행과 커밋 뒤 발송 1건을 남긴다`() {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
+        service.create(request(), user.id)
+        val row = submissions.findAll().single()
+        org.mockito.Mockito.doAnswer { call -> (call.arguments[0] as Runnable).run(); null }.`when`(pushExecutor)
+            .execute(org.mockito.Mockito.any(Runnable::class.java))
+
+        worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", emptyList(), null))
+
+        val inbox = jdbc.queryForList("SELECT type, message_key, title FROM user_notifications")
+        org.junit.jupiter.api.Assertions.assertEquals(1, inbox.size)
+        org.junit.jupiter.api.Assertions.assertEquals("STORY_MODERATION_COMPLETED", inbox.single()["type"])
+        org.junit.jupiter.api.Assertions.assertEquals("story-moderation:${row.publicId}:${row.attempt}", inbox.single()["message_key"])
+        org.junit.jupiter.api.Assertions.assertEquals("검수에서 반려됐어요", inbox.single()["title"])
+        org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.count { it.method.name == "sendToUser" })
+    }
+
     @Test fun `동시 CREATE 승인은 스토리를 한 번만 만든다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
