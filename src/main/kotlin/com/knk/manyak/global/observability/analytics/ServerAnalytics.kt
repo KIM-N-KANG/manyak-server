@@ -1,7 +1,5 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.dto.SocialProvider
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.MdcKeys
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
@@ -23,7 +21,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Component
 class ServerAnalytics(
     private val publisher: AnalyticsEventPublisher,
-    private val userRepository: UserRepository,
+    private val userPublicIds: UserPublicIdPort,
 ) {
 
     private val log = LoggerFactory.getLogger(ServerAnalytics::class.java)
@@ -99,14 +97,14 @@ class ServerAnalytics(
 
     // --- 로그인(googleLogin·kakaoLogin) ---
 
-    /** 성공 시엔 이미 해석된 회원 public_id가 있으므로 조회 없이 회원 식별로 발행한다. */
-    fun socialLoginSucceeded(provider: SocialProvider, userPublicId: String, isNewUser: Boolean, isRejoined: Boolean = false) =
+    /** 성공 시엔 이미 해석된 회원 public_id가 있으므로 조회 없이 회원 식별로 발행한다. [provider]는 소문자 표기(`google`, `kakao`)다. */
+    fun socialLoginSucceeded(provider: String, userPublicId: String, isNewUser: Boolean, isRejoined: Boolean = false) =
         loginEvents(provider)?.let { (succeeded, _) ->
             publishSafely(succeeded, userPublicId, mapOf("is_new_user" to isNewUser, "is_rejoined" to isRejoined))
         }
 
-    /** 로그인 실패는 처리 단계와 무관하게 게스트(device_id)로 발행한다. */
-    fun socialLoginFailed(provider: SocialProvider, errorType: AnalyticsErrorType) =
+    /** 로그인 실패는 처리 단계와 무관하게 게스트(device_id)로 발행한다. [provider]는 소문자 표기다. */
+    fun socialLoginFailed(provider: String, errorType: AnalyticsErrorType) =
         loginEvents(provider)?.let { (_, failed) ->
             publishSafely(failed, userPublicId = null, mapOf("error_type" to errorType.wireValue))
         }
@@ -116,9 +114,9 @@ class ServerAnalytics(
      * 운영에서 발행 중이라 그대로 유지한다(개명하면 대시보드·퍼널이 끊긴다).
      * 로그인 경로가 없는 예약 provider(APPLE·NAVER)는 null이라 발행을 건너뛴다 — 관측이 로그인을 깨지 않아야 한다.
      */
-    private fun loginEvents(provider: SocialProvider): Pair<String, String>? = when (provider) {
-        SocialProvider.GOOGLE -> EVENT_GOOGLE_LOGIN_SUCCEEDED to EVENT_GOOGLE_LOGIN_FAILED
-        SocialProvider.KAKAO -> EVENT_KAKAO_LOGIN_SUCCEEDED to EVENT_KAKAO_LOGIN_FAILED
+    private fun loginEvents(provider: String): Pair<String, String>? = when (provider) {
+        "google" -> EVENT_GOOGLE_LOGIN_SUCCEEDED to EVENT_GOOGLE_LOGIN_FAILED
+        "kakao" -> EVENT_KAKAO_LOGIN_SUCCEEDED to EVENT_KAKAO_LOGIN_FAILED
         else -> null
     }
 
@@ -240,7 +238,7 @@ class ServerAnalytics(
 
     private fun resolvePublicId(userId: Long): String? =
         try {
-            userRepository.findById(userId).map { it.publicId.toString() }.orElse(null).also {
+            userPublicIds.publicIdOf(userId)?.toString().also {
                 if (it == null) log.warn("분석 이벤트 회원 부재로 발행 생략: userId={}", userId)
             }
         } catch (e: Exception) {

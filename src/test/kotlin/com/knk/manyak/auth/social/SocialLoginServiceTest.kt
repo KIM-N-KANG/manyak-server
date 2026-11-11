@@ -12,6 +12,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.security.oauth2.jwt.JwtException
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.dto.CreditReason
@@ -158,7 +159,7 @@ class SocialLoginServiceTest {
         serviceWith(fakeVerifier("kakao-sub")).login(SocialProvider.KAKAO, "dummy")
 
         val emitted = mockingDetails(serverAnalytics).invocations.single { it.method.name == "socialLoginSucceeded" }
-        assertThat(emitted.getArgument<SocialProvider>(0)).isEqualTo(SocialProvider.KAKAO)
+        assertThat(emitted.getArgument<String>(0)).isEqualTo("kakao")
         assertThat(emitted.getArgument<Boolean>(2)).isTrue()
     }
 
@@ -169,10 +170,10 @@ class SocialLoginServiceTest {
         `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
         val service = serviceWith(fakeVerifier("sub"))
         service.login(SocialProvider.GOOGLE, "token")
-        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), true, true)
+        verify(serverAnalytics).socialLoginSucceeded("google", user.publicId.toString(), true, true)
         `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
         service.login(SocialProvider.GOOGLE, "token")
-        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), false, false)
+        verify(serverAnalytics).socialLoginSucceeded("google", user.publicId.toString(), false, false)
     }
 
     @Test
@@ -185,7 +186,7 @@ class SocialLoginServiceTest {
             .isInstanceOf(ResponseStatusException::class.java)
 
         val emitted = mockingDetails(serverAnalytics).invocations.single { it.method.name == "socialLoginFailed" }
-        assertThat(emitted.getArgument<SocialProvider>(0)).isEqualTo(SocialProvider.KAKAO)
+        assertThat(emitted.getArgument<String>(0)).isEqualTo("kakao")
     }
 
     @Test
@@ -369,7 +370,7 @@ class SocialLoginServiceTest {
                 assertThat(response.body!!.message).isEqualTo(reason)
                 assertThat(response.body!!.path).isEqualTo(path)
                 assertThat(response.body!!.details).isEmpty()
-                verify(serverAnalytics).socialLoginFailed(provider, expectedType)
+                verify(serverAnalytics).socialLoginFailed(provider.wireValue, expectedType)
                 verifyNoInteractions(registrar, authTokenService)
                 assertThat(appender.list).hasSize(1)
                 for (event in appender.list) {

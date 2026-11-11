@@ -1,12 +1,11 @@
 package com.knk.manyak.global.observability.analytics
 
 import com.knk.manyak.auth.dto.SocialProvider
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.global.observability.MdcKeys
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
 import org.slf4j.MDC
 
 /**
@@ -23,13 +22,13 @@ class ServerAnalyticsLoginContractTest {
     }
 
     private val publisher = CapturingPublisher()
-    private val analytics = ServerAnalytics(publisher, mock(UserRepository::class.java))
+    private val analytics = ServerAnalytics(publisher) { null }
 
     @AfterEach fun clearMdc() = MDC.clear()
 
-    private fun succeeded(provider: SocialProvider) = analytics.socialLoginSucceeded(provider, MEMBER, isNewUser = true, isRejoined = false)
+    private fun succeeded(provider: SocialProvider) = analytics.socialLoginSucceeded(provider.wireValue, MEMBER, isNewUser = true, isRejoined = false)
 
-    private fun failed(provider: SocialProvider) = analytics.socialLoginFailed(provider, AnalyticsErrorType.VALIDATION)
+    private fun failed(provider: SocialProvider) = analytics.socialLoginFailed(provider.wireValue, AnalyticsErrorType.VALIDATION)
 
     @Test
     fun `제공자별 로그인 성공과 실패 이벤트의 이름과 프로퍼티 전체가 고정돼 있다`() {
