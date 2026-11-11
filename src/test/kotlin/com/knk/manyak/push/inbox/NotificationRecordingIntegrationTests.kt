@@ -185,6 +185,8 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
             .hasRootCauseMessage("inbox unavailable")
         assertThat(requests.findByRequestId(request.requestId)!!.status).isEqualTo(StoryCreationRequestStatus.PENDING)
         assertThat(rows()).isEmpty()
+        // 내역이 아웃박스보다 먼저 기록된다(NOTIFICATION 4-1-6). remote도 아웃박스를 시도하지 않고 local은 발송이 없다.
+        verifyNoInteractions(sender, outbox)
     }
 
     @Test fun `게스트 완성은 내역을 기록하지 않는다`() {

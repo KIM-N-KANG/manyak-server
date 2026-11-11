@@ -126,6 +126,8 @@ class ModerationOutboxIntegrationTests : PushRemoteIntegrationTest() {
         assertEquals(SubmissionStatus.PENDING, submissions.findById(row.id).orElseThrow().status)
         assertEquals("원본", stories.findById(story.id).orElseThrow().title)
         assertEquals(0L, jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java))
+        // 내역이 아웃박스보다 먼저 기록된다(NOTIFICATION 4-1-7). 내역이 실패하면 아웃박스는 시도하지 않는다.
+        Mockito.verifyNoInteractions(store)
     }
 
     @Test fun `아웃박스 DB 장애이면 라이브와 승인 상태가 함께 롤백된다`() {
