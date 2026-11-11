@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.service
 
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse

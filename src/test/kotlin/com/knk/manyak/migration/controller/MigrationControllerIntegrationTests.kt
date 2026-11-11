@@ -58,7 +58,7 @@ class MigrationControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         var fail = false
 
         @org.springframework.context.event.EventListener
-        fun onIndex(event: com.knk.manyak.search.event.StoryIndexRequestedEvent) {
+        fun onIndex(event: com.knk.manyak.story.event.StoryIndexRequestedEvent) {
             ids += event.storyId
             if (fail) throw IllegalStateException("재색인 이벤트 발행 실패")
         }

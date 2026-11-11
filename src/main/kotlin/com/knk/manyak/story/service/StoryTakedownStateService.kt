@@ -1,6 +1,6 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryTakedownReason
 import com.knk.manyak.story.entity.StoryVisibility
