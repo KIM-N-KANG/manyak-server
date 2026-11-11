@@ -7,7 +7,7 @@ import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.search.service.StorySearchDocumentReader
 import com.knk.manyak.search.service.StorySearchIndexer
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.*

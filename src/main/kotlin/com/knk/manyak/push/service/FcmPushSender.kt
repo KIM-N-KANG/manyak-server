@@ -8,7 +8,7 @@ import com.google.firebase.messaging.WebpushConfig
 import com.google.firebase.messaging.WebpushNotification
 import com.google.firebase.messaging.WebpushFcmOptions
 import com.google.firebase.messaging.MessagingErrorCode
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.dto.*
 import java.util.UUID

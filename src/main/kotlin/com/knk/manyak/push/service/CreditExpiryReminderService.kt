@@ -1,7 +1,7 @@
 package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter

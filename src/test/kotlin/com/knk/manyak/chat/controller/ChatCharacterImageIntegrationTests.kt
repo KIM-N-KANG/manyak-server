@@ -15,7 +15,7 @@ import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.StoryStatus
 import com.knk.manyak.story.entity.StoryVisibility

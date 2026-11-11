@@ -1,6 +1,7 @@
 package com.knk.manyak.push
 
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.*
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditLot

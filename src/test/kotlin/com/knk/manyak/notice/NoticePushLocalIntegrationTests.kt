@@ -2,7 +2,7 @@ package com.knk.manyak.notice
 
 import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.notice.entity.Notice
 import com.knk.manyak.notice.repository.NoticeRepository

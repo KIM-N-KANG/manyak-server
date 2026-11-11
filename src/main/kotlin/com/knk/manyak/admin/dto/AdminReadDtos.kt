@@ -6,7 +6,7 @@ import com.knk.manyak.adminkit.audit.AdminAuditTargetType
 import com.knk.manyak.adminkit.query.AdminListRequest
 import com.knk.manyak.adminkit.query.AdminSearchRequest
 import com.knk.manyak.auth.dto.AdminMemberSummary
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.credit.entity.CreditOrderStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min

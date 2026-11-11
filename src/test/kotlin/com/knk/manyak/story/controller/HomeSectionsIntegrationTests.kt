@@ -114,7 +114,7 @@ class HomeSectionsIntegrationTests : IntegrationTest() {
         assertThat(b["sections"][0]["items"].first { it["id"].asText() == guest.publicId.toString() }["author"].isNull).isTrue()
         assertThat(home("Bearer invalid")).isEqualTo(b)
         assertThat(home("Bearer ${jwt.issueAccessToken(actor.publicId)}")).isEqualTo(b)
-        actor.status = com.knk.manyak.auth.entity.UserStatus.DELETED; users.saveAndFlush(actor)
+        actor.status = com.knk.manyak.auth.dto.UserStatus.DELETED; users.saveAndFlush(actor)
         assertThat(home("Bearer ${jwt.issueAccessToken(actor.publicId)}")).isEqualTo(b)
     }
 

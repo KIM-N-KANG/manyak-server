@@ -4,7 +4,7 @@ import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.event.UserNicknameChangedEvent
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.auth.dto.MeResponse
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.ProfileImagePresetService
 import com.knk.manyak.global.error.ApiErrorCodes

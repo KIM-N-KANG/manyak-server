@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.consent
 
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.security.requireActiveStatus

@@ -1,5 +1,7 @@
 package com.knk.manyak.admin
 
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.*
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.*

@@ -1,6 +1,6 @@
 package com.knk.manyak.global.security
 
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component

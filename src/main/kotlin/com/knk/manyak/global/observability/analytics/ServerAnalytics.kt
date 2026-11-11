@@ -1,6 +1,6 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.MdcKeys
 import org.slf4j.LoggerFactory

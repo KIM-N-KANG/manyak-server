@@ -13,7 +13,7 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding

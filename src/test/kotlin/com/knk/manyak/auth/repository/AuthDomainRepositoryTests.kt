@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.repository
 
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -134,7 +134,7 @@ class AuthDomainRepositoryTests {
         val user = newUser()
 
         val found = userRepository.findById(user.id).orElseThrow()
-        assertEquals(com.knk.manyak.auth.entity.UserStatus.ACTIVE, found.status)
+        assertEquals(com.knk.manyak.auth.dto.UserStatus.ACTIVE, found.status)
         assertNull(found.deletedAt)
     }
 }

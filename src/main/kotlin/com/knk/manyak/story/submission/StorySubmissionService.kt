@@ -1,6 +1,6 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.Story

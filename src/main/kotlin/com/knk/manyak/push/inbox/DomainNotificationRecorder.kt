@@ -32,7 +32,7 @@ class DomainNotificationRecorder(
     fun completed(event: StoryCompletedEvent) {
         // 완료 기록이 먼저 잡은 사용자 잠금은 같은 트랜잭션에서 재사용한다. 탈퇴가 먼저 커밋됐으면 내역을 다시 만들지 않는다.
         val user = users.findByIdForUpdate(event.userId) ?: return
-        if (user.status == com.knk.manyak.auth.entity.UserStatus.DELETED) return
+        if (user.status == com.knk.manyak.auth.dto.UserStatus.DELETED) return
         val type = NotificationType.STORY_COMPLETED
         store.insert(UserNotification(userId = event.userId, messageKey = "story-completed:${event.requestId}",
             type = type, title = "스토리가 완성됐어요", body = event.title,
