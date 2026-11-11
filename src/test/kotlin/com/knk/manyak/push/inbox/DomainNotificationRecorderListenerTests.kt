@@ -33,6 +33,7 @@ import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.event.TransactionalEventListener
 import org.springframework.transaction.support.TransactionTemplate
 import java.lang.reflect.Method
 import java.time.Clock
@@ -66,6 +67,8 @@ class DomainNotificationRecorderListenerTests {
         val outboxListener = listenerFor(outbox, event)
 
         assertThat(AnnotatedElementUtils.findMergedAnnotation(recorder, Order::class.java)).isNotNull
+        // 발행 시점에 동기로 도는 리스너여야 한다. @TransactionalEventListener도 @EventListener를 메타로 달아 위 탐색에 걸린다.
+        assertThat(AnnotatedElementUtils.findMergedAnnotation(recorder, TransactionalEventListener::class.java)).isNull()
         assertThat(AnnotatedElementUtils.findMergedAnnotation(recorder, Transactional::class.java)!!.propagation)
             .isEqualTo(Propagation.MANDATORY)
         assertThat(orderOf(recorder)).isLessThan(orderOf(outboxListener))
@@ -114,6 +117,7 @@ class DomainNotificationRecorderListenerTests {
     companion object {
         private const val USER_ID = 7L
 
+        /** 같은 이벤트의 동기 구독자를 추가하면 이 목록에도 넣는다. */
         @JvmStatic
         fun outboxListeners(): List<Arguments> = listOf(
             Arguments.of(StoryCompletedEvent::class, StoryCompletionOutboxListener::class),
