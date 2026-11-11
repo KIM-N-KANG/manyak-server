@@ -320,9 +320,12 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Test
     fun `재색인 요청 뒤 프로필 트랜잭션이 롤백되면 닉네임과 색인을 반영하지 않는다`() {
         val user = saveUser(nickname = "기존작가")
-        storyRepository.save(Story(userId = user.id, title = "공개"))
+        val story = storyRepository.save(Story(userId = user.id, title = "공개"))
 
         TransactionTemplate(transactionManager).executeWithoutResult { status ->
+            // 대상 조회가 비어 있으면 아래 index never가 공허하게 통과하므로, 롤백될 트랜잭션에서 대상이 있음을 먼저 확인한다.
+            assertThat(storyRepository.findActiveIdsByUserId(user.id)).containsExactly(story.id)
+            clearInvocations(storyRepository)
             profileUpdater.update(user.id, UpdateProfileRequest(nickname = "새로운작가"))
             status.setRollbackOnly()
         }
