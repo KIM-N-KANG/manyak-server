@@ -252,7 +252,7 @@ class StoryTakedownIntegrationTests : IntegrationTest() {
             val results = (1..2).map { executor.submit<Int> {
                 gate.await(5, java.util.concurrent.TimeUnit.SECONDS)
                 org.slf4j.MDC.put("request_id", "concurrent-takedown")
-                try { takedowns.takeDown(admin.id, s.publicId, StoryTakedownRequest(com.knk.manyak.story.entity.StoryTakedownReason.HATE_SPEECH)); 200 }
+                try { takedowns.takeDown(admin.id, s.publicId, StoryTakedownRequest(com.knk.manyak.story.dto.StoryTakedownReason.HATE_SPEECH)); 200 }
                 catch (ex: org.springframework.web.server.ResponseStatusException) { ex.statusCode.value() }
                 finally { org.slf4j.MDC.clear() }
             } }.map { it.get(15, java.util.concurrent.TimeUnit.SECONDS) }
@@ -269,7 +269,7 @@ class StoryTakedownIntegrationTests : IntegrationTest() {
             val a = executor.submit {
                 gate.await(5, java.util.concurrent.TimeUnit.SECONDS)
                 org.slf4j.MDC.put("request_id", "race-takedown")
-                try { takedowns.takeDown(admin.id, s.publicId, StoryTakedownRequest(com.knk.manyak.story.entity.StoryTakedownReason.HATE_SPEECH)) }
+                try { takedowns.takeDown(admin.id, s.publicId, StoryTakedownRequest(com.knk.manyak.story.dto.StoryTakedownReason.HATE_SPEECH)) }
                 finally { org.slf4j.MDC.clear() }
             }
             val b = executor.submit {

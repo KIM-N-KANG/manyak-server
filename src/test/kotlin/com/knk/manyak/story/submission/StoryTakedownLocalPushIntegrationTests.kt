@@ -6,7 +6,7 @@ import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryTakedownReason
+import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.MockedBoundaryIntegrationTest

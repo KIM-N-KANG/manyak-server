@@ -1,5 +1,9 @@
 package com.knk.manyak.story.entity
 
+import com.knk.manyak.story.dto.ParentCreationLink
+import com.knk.manyak.story.dto.ParentLinkError
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationStage
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -11,47 +15,6 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
-
-/** 백그라운드 생성 복구 대상 단계(스펙 §4-3-8): 스토리라인 생성 또는 스토리 완성. */
-enum class StoryCreationStage {
-    STORYLINE_GENERATION,
-    STORY_COMPLETION,
-}
-
-/** 생성 요청 진행 상태. 요청 수신 시 PENDING으로 기록하고, 성공 COMPLETED·실패 FAILED로 갱신한다. */
-enum class StoryCreationRequestStatus {
-    PENDING,
-    COMPLETED,
-    FAILED,
-}
-
-/** 재생성 체인 부모 링크 검증 실패 사유(KNK-755). 400으로 거부하는 대신 이 사유를 행에 남긴다. */
-enum class ParentLinkError {
-    /** 그 request_id를 가진 행이 없다. */
-    NOT_FOUND,
-
-    /** 부모와 현재 요청의 소유가 이어지지 않는다(다른 회원·다른 기기). */
-    OWNER_MISMATCH,
-
-    /** 자기 자신을 부모로 지정했다. */
-    SELF_REFERENCE,
-}
-
-/**
- * 프론트가 보낸 부모 creation_id와 그 검증 결과(KNK-755).
- *
- * 검증 통과 여부와 무관하게 [attemptedParentCreationId]를 보존해, "애초에 부모가 없는 최초 생성"과
- * "재생성인데 연결에 실패한 행"이 DB에서 구분되게 한다. 헤더·정본 컬럼에 쓰는 값은 [validatedParentRequestId] 하나뿐이라,
- * 미검증 값이 체인으로 새 나가는 경로가 생기지 않는다.
- */
-data class ParentCreationLink(
-    val attemptedParentCreationId: UUID,
-    val error: ParentLinkError?,
-) {
-    /** 검증을 통과했을 때만 부모 값. 실패면 null(정본 컬럼도 헤더도 비운다). */
-    val validatedParentRequestId: UUID?
-        get() = attemptedParentCreationId.takeIf { error == null }
-}
 
 /**
  * 백그라운드 생성 복구·멱등 추적(KNK-631, 스펙 §4-3-8). 클라이언트 생성 [requestId]로 생성 요청을 식별해,

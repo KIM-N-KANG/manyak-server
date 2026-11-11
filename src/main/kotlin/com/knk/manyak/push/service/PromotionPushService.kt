@@ -10,7 +10,7 @@ import com.knk.manyak.push.config.PushCampaignProperties
 import com.knk.manyak.global.observability.StructuredLogger
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import java.time.temporal.ChronoUnit
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import com.knk.manyak.story.repository.StoryRepository

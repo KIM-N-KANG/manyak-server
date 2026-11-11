@@ -6,8 +6,8 @@ import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.service.FcmPushSender

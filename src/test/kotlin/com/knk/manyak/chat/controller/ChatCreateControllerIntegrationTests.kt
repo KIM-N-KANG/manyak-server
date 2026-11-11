@@ -5,7 +5,7 @@ import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.CreateChatResponse
-import com.knk.manyak.chat.entity.ChatStatus
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story

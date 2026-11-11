@@ -6,8 +6,8 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.*
 import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.image.service.UploadedImageKind
-import com.knk.manyak.story.entity.StoryCreationStage
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.service.StoryImageAccess
 import com.knk.manyak.story.service.SimpleStoryCreationService

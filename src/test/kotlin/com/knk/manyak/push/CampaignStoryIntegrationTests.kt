@@ -7,7 +7,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.DevicePushToken
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.outbox.PushMessage
 import com.knk.manyak.push.outbox.PushOutboxRelay
 import com.knk.manyak.push.outbox.PushOutboxStore

@@ -5,8 +5,6 @@ import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.*
-import com.knk.manyak.story.dto.StoryStatus
-import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.*

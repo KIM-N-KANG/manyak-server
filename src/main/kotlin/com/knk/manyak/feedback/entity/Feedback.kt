@@ -1,5 +1,6 @@
 package com.knk.manyak.feedback.entity
 
+import com.knk.manyak.feedback.dto.Platform
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -43,9 +44,3 @@ class Feedback(
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 )
-
-enum class Platform {
-    IOS,
-    ANDROID,
-    WEB,
-}

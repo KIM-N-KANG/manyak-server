@@ -5,7 +5,6 @@ import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
 import com.knk.manyak.push.repository.CampaignDeliverySummaryRepository
 import com.knk.manyak.push.repository.CampaignDeliverySummary
 import com.knk.manyak.push.repository.PushCampaignRepository

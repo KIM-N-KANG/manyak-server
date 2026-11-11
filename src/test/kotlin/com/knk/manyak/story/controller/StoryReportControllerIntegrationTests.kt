@@ -5,7 +5,7 @@ import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryReportReason
+import com.knk.manyak.story.dto.StoryReportReason
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryReportRepository

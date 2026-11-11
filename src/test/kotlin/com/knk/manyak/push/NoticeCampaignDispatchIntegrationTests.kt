@@ -6,7 +6,9 @@ import com.knk.manyak.notice.dto.NoticeStatus
 import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
 import com.knk.manyak.notice.repository.NoticeRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.dto.PushKind
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*

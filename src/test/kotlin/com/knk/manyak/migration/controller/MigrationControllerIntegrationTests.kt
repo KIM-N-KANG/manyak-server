@@ -9,10 +9,10 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryCreationRequestRepository

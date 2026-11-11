@@ -3,6 +3,7 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.chat.service.*

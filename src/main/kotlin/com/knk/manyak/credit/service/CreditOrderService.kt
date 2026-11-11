@@ -6,7 +6,7 @@ import com.knk.manyak.credit.dto.CreditOrderResponse
 import com.knk.manyak.credit.dto.CreditProductResponse
 import com.knk.manyak.credit.dto.CreditProductsResponse
 import com.knk.manyak.credit.entity.CreditOrder
-import com.knk.manyak.credit.entity.CreditOrderProvider
+import com.knk.manyak.credit.dto.CreditOrderProvider
 import com.knk.manyak.credit.repository.CreditOrderRepository
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.security.SuspensionGuard

@@ -3,7 +3,7 @@ package com.knk.manyak.story.service
 import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.port.StoryTitleLookup
 import com.knk.manyak.credit.port.StoryTitles
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.stereotype.Component

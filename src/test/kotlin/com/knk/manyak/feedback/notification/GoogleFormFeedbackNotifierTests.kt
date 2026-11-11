@@ -1,6 +1,6 @@
 package com.knk.manyak.feedback.notification
 
-import com.knk.manyak.feedback.entity.Platform
+import com.knk.manyak.feedback.dto.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer

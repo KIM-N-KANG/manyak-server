@@ -4,6 +4,8 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.story.service.SimpleStoryCreationService

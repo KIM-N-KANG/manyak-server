@@ -2,7 +2,6 @@ package com.knk.manyak.story.submission
 
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.service.*
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.image.service.UploadedImageStorage

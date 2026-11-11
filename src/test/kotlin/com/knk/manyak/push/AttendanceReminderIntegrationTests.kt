@@ -7,7 +7,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.entity.DevicePushToken
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.scheduler.AttendanceReminderScheduler
 import com.knk.manyak.push.service.AttendanceReminderService

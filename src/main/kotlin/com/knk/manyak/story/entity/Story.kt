@@ -2,6 +2,7 @@ package com.knk.manyak.story.entity
 
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.dto.StoryVisibility
 import jakarta.persistence.Column
 import jakarta.persistence.Entity

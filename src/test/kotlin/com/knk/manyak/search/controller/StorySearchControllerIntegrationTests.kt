@@ -3,8 +3,6 @@ package com.knk.manyak.search.controller
 import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
-import com.knk.manyak.story.dto.StoryStatus
-import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.search.service.StorySearchDocumentReader
 import com.knk.manyak.search.service.StorySearchIndexer

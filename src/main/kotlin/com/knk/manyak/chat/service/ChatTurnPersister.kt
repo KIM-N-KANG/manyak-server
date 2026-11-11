@@ -4,8 +4,8 @@ import com.knk.manyak.chat.repository.StoryChatSummaryRepository
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import tools.jackson.databind.ObjectMapper
-import com.knk.manyak.chat.entity.ChatStatus
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.ChatStatus
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryChatMainEvent
 import com.knk.manyak.chat.entity.StoryChoice

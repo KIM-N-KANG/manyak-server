@@ -1,6 +1,6 @@
 package com.knk.manyak.feedback.event
 
-import com.knk.manyak.feedback.entity.Platform
+import com.knk.manyak.feedback.dto.Platform
 import java.time.Instant
 
 /**

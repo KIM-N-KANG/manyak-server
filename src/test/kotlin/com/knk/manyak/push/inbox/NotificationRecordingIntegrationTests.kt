@@ -10,7 +10,7 @@ import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.outbox.PushOutboxRelay
 import com.knk.manyak.push.outbox.PushOutboxStore
 import com.knk.manyak.push.repository.PushCampaignRepository
@@ -23,9 +23,9 @@ import com.knk.manyak.story.submission.SubmissionStatus
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository

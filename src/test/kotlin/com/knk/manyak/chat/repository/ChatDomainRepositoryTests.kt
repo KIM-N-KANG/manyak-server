@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.repository
 
-import com.knk.manyak.chat.entity.MessageRole
-import com.knk.manyak.chat.entity.ChatStatus
+import com.knk.manyak.chat.dto.MessageRole
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.entity.StoryChoice
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat

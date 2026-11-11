@@ -7,7 +7,7 @@ import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatShareTurnResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.ChatTurnResponse
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository

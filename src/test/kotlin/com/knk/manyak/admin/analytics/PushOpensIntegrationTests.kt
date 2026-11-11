@@ -4,7 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest
@@ -138,7 +138,7 @@ class PushOpensIntegrationTests : IntegrationTest() {
         val chat = chats.saveAndFlush(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, userId = user?.id,
             deletedAt = if (deleted) Instant.parse(at) else null))
         messages.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
-            role = com.knk.manyak.chat.entity.MessageRole.valueOf(role), content = "집계에서 읽지 않는 원문", messageOrder = 1, createdAt = Instant.parse(at)))
+            role = com.knk.manyak.chat.dto.MessageRole.valueOf(role), content = "집계에서 읽지 않는 원문", messageOrder = 1, createdAt = Instant.parse(at)))
     }
     private fun conversionGet(path: String, token: String) = mapper.readTree(client.get().uri("/api/v1/admin/campaigns/push-opens$path")
         .header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)

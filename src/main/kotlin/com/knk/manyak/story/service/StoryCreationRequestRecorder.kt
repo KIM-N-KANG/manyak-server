@@ -1,9 +1,9 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.story.entity.ParentCreationLink
+import com.knk.manyak.story.dto.ParentCreationLink
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.parentCreationLink
 import com.knk.manyak.story.repository.StoryCreationRequestRepository

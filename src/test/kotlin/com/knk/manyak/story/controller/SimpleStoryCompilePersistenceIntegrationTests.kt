@@ -2,7 +2,7 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.image.entity.ImagePreset
-import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.dto.ImagePresetType
 import com.knk.manyak.image.repository.ImagePresetRepository
 import com.knk.manyak.image.service.GeneratedImageStorage
 import com.knk.manyak.story.client.AiCharacterAppearance
@@ -26,11 +26,11 @@ import com.knk.manyak.story.dto.StorySummaryResponse
 import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
