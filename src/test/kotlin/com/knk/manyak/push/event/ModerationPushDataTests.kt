@@ -1,5 +1,7 @@
-package com.knk.manyak.story.submission
+package com.knk.manyak.push.event
 
+import com.knk.manyak.story.submission.StoryModerationCompleted
+import com.knk.manyak.story.submission.SubmissionStatus
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
