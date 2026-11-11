@@ -4,6 +4,8 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.UpdateProfileRequest
+import com.knk.manyak.auth.service.ProfileUpdater
 import com.knk.manyak.auth.social.ProfileImagePresetService
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -24,6 +26,8 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.client.RestTestClient
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * 프로필 수정 API 통합 검증(KNK-1147, 정책 KNK-1146).
@@ -42,6 +46,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var indexer: StorySearchIndexer
     @Autowired private lateinit var creditWalletService: CreditWalletService
+    @Autowired private lateinit var profileUpdater: ProfileUpdater
+    @Autowired private lateinit var transactionManager: PlatformTransactionManager
 
     @BeforeEach
     fun setUp() {
@@ -302,6 +308,35 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         patch(user, """{"nickname":"새로운작가","profileImagePreset":"없는프리셋"}""")
             .expectStatus().isBadRequest
 
+        assertThat(reload(user).nickname).isEqualTo("기존작가")
+        verify(indexer, after(200).never()).index(anyLong())
+    }
+
+    @Test
+    fun `재색인 요청 뒤 프로필 트랜잭션이 롤백되면 닉네임과 색인을 반영하지 않는다`() {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+
+        TransactionTemplate(transactionManager).executeWithoutResult { status ->
+            profileUpdater.update(user.id, UpdateProfileRequest(nickname = "새로운작가"))
+            status.setRollbackOnly()
+        }
+
+        // 재색인 대상 조회까지 진행된 뒤의 롤백이어야 이 테스트가 의미가 있다.
+        verify(storyRepository).findActiveIdsByUserId(user.id)
+        verify(indexer, after(300).never()).index(anyLong())
+        assertThat(reload(user).nickname).isEqualTo("기존작가")
+    }
+
+    @Test
+    fun `재색인 대상 조회가 실패하면 프로필 수정 전체가 롤백된다`() {
+        val user = saveUser(nickname = "기존작가")
+        storyRepository.save(Story(userId = user.id, title = "공개"))
+        doThrow(IllegalStateException("db unavailable")).`when`(storyRepository).findActiveIdsByUserId(user.id)
+
+        patch(user, """{"nickname":"새로운작가"}""").expectStatus().is5xxServerError
+
+        verify(storyRepository).findActiveIdsByUserId(user.id)
         assertThat(reload(user).nickname).isEqualTo("기존작가")
         verify(indexer, after(200).never()).index(anyLong())
     }
