@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito.*
 import org.opensearch.client.opensearch.OpenSearchClient
-import org.opensearch.client.opensearch.core.IndexRequest
+import org.opensearch.client.opensearch.core.BulkRequest
+import org.opensearch.client.opensearch.core.BulkResponse
 import org.opensearch.client.opensearch.indices.OpenSearchIndicesClient
 import org.opensearch.client.transport.endpoints.BooleanResponse
-import org.opensearch.client.util.ObjectBuilder
 import java.time.Instant
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -279,26 +279,25 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         // 컨텍스트 기동 때 받은 호출이 첫 테스트에 남을 수 있고, searchIndices는 필드라 수명주기 설정에 따라 공유될 수 있다.
         clearInvocations(searchClient, searchIndices)
         doReturn(searchIndices).`when`(searchClient).indices()
+        doReturn(BulkResponse.of { it.errors(false).took(1L).items(listOf()) }).`when`(searchClient).bulk(any(BulkRequest::class.java))
         val real = StorySearchIndexer(searchClient, searchProperties, documentReader, StorySearchIndexAdmin(searchClient, searchProperties))
         doAnswer { real.index(it.getArgument(0)); null }.`when`(indexer).index(anyLong())
+        doAnswer { real.indexAll(it.getArgument(0)); null }.`when`(indexer).indexAll(anyList())
     }
 
     private fun openSearchCalls(target: Any, name: String) = mockingDetails(target).invocations.count { it.method.name == name }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun indexedDocumentIds(): List<String?> = mockingDetails(searchClient).invocations.filter { it.method.name == "index" }.map {
-        (it.arguments[0] as java.util.function.Function<IndexRequest.Builder<Any>, ObjectBuilder<IndexRequest<Any>>>)
-            .apply(IndexRequest.Builder()).build().id()
-    }
+    private fun bulkDocumentIds(): List<String> = mockingDetails(searchClient).invocations.filter { it.method.name == "bulk" }
+        .flatMap { (it.arguments[0] as BulkRequest).operations().map { operation -> operation.index<Any>().id()!! } }
 
-    private fun awaitOpenSearchIndexCalls(expected: Int) {
+    private fun awaitOpenSearchBulkCalls(expected: Int) {
         val deadline = System.currentTimeMillis() + 3000
-        while (openSearchCalls(searchClient, "index") < expected && System.currentTimeMillis() < deadline) Thread.sleep(20)
-        Thread.sleep(200) // 기대보다 많이 부르는지도 보려고 잠시 더 기다린다.
+        while (openSearchCalls(searchClient, "bulk") < expected && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        Thread.sleep(500) // 기대보다 많이 부르는지도 보려고 잠시 더 기다린다.
     }
 
     @Test
-    fun `닉네임 변경 재색인은 소유 스토리마다 OpenSearch 색인과 인덱스 확인을 한 번씩 부른다`() {
+    fun `닉네임 변경 재색인은 소유 스토리를 묶음 하나로 모아 인덱스 확인 한 번과 bulk 요청 한 번으로 보낸다`() {
         indexThroughRealIndexer()
         val user = saveUser(nickname = "기존작가")
         val owned = listOf(
@@ -311,13 +310,13 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         storyRepository.save(Story(userId = saveUser(nickname = "다른작가").id, title = "다른 회원"))
 
         patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
-        awaitOpenSearchIndexCalls(owned.size)
+        awaitOpenSearchBulkCalls(1)
 
-        // KNK-2078 묶음 경로 PR에서 바꿀 기대값: bulk 1회, 인덱스 확인 1회, index 0회. 문서 ID 검증은 bulk 요청의
-        // operation ID 목록으로 옮겨 owned의 publicId 집합과 정확히 같음(빠짐, 섞임 없음)을 그대로 단언한다.
-        assertThat(indexedDocumentIds()).containsExactlyInAnyOrderElementsOf(owned.map { it.publicId.toString() })
-        assertThat(openSearchCalls(searchIndices, "exists")).isEqualTo(owned.size)
-        assertThat(openSearchCalls(searchClient, "bulk")).isZero()
+        // bulk 요청의 문서 ID가 소유 스토리 publicId 집합과 정확히 같다(빠짐, 섞임, 중복 없음). 단건 색인은 부르지 않는다.
+        assertThat(bulkDocumentIds()).containsExactlyInAnyOrderElementsOf(owned.map { it.publicId.toString() })
+        assertThat(openSearchCalls(searchClient, "bulk")).isEqualTo(1)
+        assertThat(openSearchCalls(searchIndices, "exists")).isEqualTo(1)
+        assertThat(openSearchCalls(searchClient, "index")).isZero()
     }
 
     @Test
@@ -326,7 +325,7 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         val user = saveUser(nickname = "기존작가")
 
         patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
-        awaitOpenSearchIndexCalls(0)
+        awaitOpenSearchBulkCalls(0)
 
         assertThat(openSearchCalls(searchClient, "index")).isZero()
         assertThat(openSearchCalls(searchClient, "bulk")).isZero()
@@ -346,11 +345,11 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         patch(user, """{"nickname":"새로운작가"}""").expectStatus().isOk
 
-        verify(indexer, timeout(3000)).index(first.id)
-        verify(indexer, timeout(3000)).index(second.id)
-        verify(indexer, timeout(3000)).index(privateStory.id)
-        verify(indexer, timeout(3000)).index(draft.id)
-        verify(indexer, after(200).times(4)).index(anyLong())
+        verify(indexer, timeout(3000)).indexAll(anyList())
+        verify(indexer, after(200).times(1)).indexAll(anyList())
+        @Suppress("UNCHECKED_CAST")
+        val requested = mockingDetails(indexer).invocations.single { it.method.name == "indexAll" }.arguments[0] as List<Long>
+        assertThat(requested).containsExactlyInAnyOrder(first.id, second.id, privateStory.id, draft.id)
         verifyNoMoreInteractions(indexer)
         assertThat(reload(user).nickname).isEqualTo("새로운작가")
     }
@@ -367,7 +366,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         patch(user, body).expectStatus().isOk
 
-        verify(indexer, after(200).never()).index(anyLong())
+        verify(indexer, after(200).never()).indexAll(anyList())
+        verify(indexer, never()).index(anyLong())
     }
 
     @Test
@@ -377,7 +377,7 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         patch(user, """{"nickname":"STORYTELLER"}""").expectStatus().isOk
 
-        verify(indexer, timeout(3000)).index(story.id)
+        verify(indexer, timeout(3000)).indexAll(listOf(story.id))
     }
 
     @Test
@@ -389,7 +389,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             .expectStatus().isBadRequest
 
         assertThat(reload(user).nickname).isEqualTo("기존작가")
-        verify(indexer, after(200).never()).index(anyLong())
+        verify(indexer, after(200).never()).indexAll(anyList())
+        verify(indexer, never()).index(anyLong())
     }
 
     @Test
@@ -407,7 +408,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         // 재색인 대상 조회까지 진행된 뒤의 롤백이어야 이 테스트가 의미가 있다.
         verify(storyRepository).findActiveIdsByUserId(user.id)
-        verify(indexer, after(300).never()).index(anyLong())
+        verify(indexer, after(300).never()).indexAll(anyList())
+        verify(indexer, never()).index(anyLong())
         assertThat(reload(user).nickname).isEqualTo("기존작가")
     }
 
@@ -421,7 +423,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
 
         verify(storyRepository).findActiveIdsByUserId(user.id)
         assertThat(reload(user).nickname).isEqualTo("기존작가")
-        verify(indexer, after(200).never()).index(anyLong())
+        verify(indexer, after(200).never()).indexAll(anyList())
+        verify(indexer, never()).index(anyLong())
     }
 
     @Test
@@ -433,7 +436,8 @@ class UserProfileControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         assertThrows<IllegalTransactionStateException> { events.publishEvent(UserNicknameChangedEvent(user.id)) }
 
         verify(storyRepository, never()).findActiveIdsByUserId(anyLong())
-        verify(indexer, after(200).never()).index(anyLong())
+        verify(indexer, after(200).never()).indexAll(anyList())
+        verify(indexer, never()).index(anyLong())
     }
 
     @Test

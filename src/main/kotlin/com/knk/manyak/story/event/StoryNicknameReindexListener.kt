@@ -11,9 +11,10 @@ import org.springframework.transaction.annotation.Transactional
 
 /**
  * 닉네임이 바뀐 회원의 소유 스토리를 다시 색인하도록 요청한다. 검색 문서의 `author`가 닉네임을 싣기 때문이다.
+ * 소유 스토리 ID 전체를 [StoriesIndexRequestedEvent] 하나로 묶어 보낸다(STORY 결정 27).
  *
- * MANDATORY로 프로필 수정 트랜잭션에 참여한다. 그래서 [StoryIndexRequestedEvent]의 AFTER_COMMIT 색인은 프로필이 커밋될 때만
- * 돌고, 대상 조회 예외는 전파돼 프로필 수정을 롤백한다.
+ * MANDATORY로 프로필 수정 트랜잭션에 참여한다. 그래서 AFTER_COMMIT 묶음 색인은 프로필이 커밋될 때만 돌고,
+ * 대상 조회 예외는 전파돼 프로필 수정을 롤백한다.
  */
 @Component
 class StoryNicknameReindexListener(
@@ -27,7 +28,7 @@ class StoryNicknameReindexListener(
     fun onNicknameChanged(event: UserNicknameChangedEvent) {
         // 공개 전환과 경합하면 재색인이 누락될 수 있어 공개 여부로 거르지 않는다(Codex P2).
         val storyIds = stories.findActiveIdsByUserId(event.userId)
-        storyIds.forEach { events.publishEvent(StoryIndexRequestedEvent(it)) }
+        if (storyIds.isNotEmpty()) events.publishEvent(StoriesIndexRequestedEvent(storyIds))
         log.info("nickname_reindex_requested userId={} stories={}", event.userId, storyIds.size)
     }
 }

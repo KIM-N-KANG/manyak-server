@@ -362,8 +362,12 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         assertEquals(0L, reader.read(story.id)!!.likeCount)
         val other = stories.save(Story(userId = user.id, title = "다른 스토리"))
         profiles.updateProfile(user.id, UpdateProfileRequest(nickname = "새검색작가"))
-        verify(indexer, timeout(3000)).index(story.id)
-        verify(indexer, timeout(3000)).index(other.id)
+        // 닉네임 변경은 소유 스토리를 묶음 색인 요청 하나로 보낸다(STORY 결정 27).
+        verify(indexer, timeout(3000)).indexAll(anyList())
+        @Suppress("UNCHECKED_CAST")
+        val requested = mockingDetails(indexer).invocations.single { it.method.name == "indexAll" }.arguments[0] as List<Long>
+        assertEquals(setOf(story.id, other.id), requested.toSet())
+        assertEquals(2, requested.size)
         clearInvocations(indexer)
         assertEquals("새검색작가", reader.read(story.id)!!.author!!.nickname)
         edit.updateStory(created.id, user.id, UpdateStoryRequest(visibility = StoryVisibility.PRIVATE))
