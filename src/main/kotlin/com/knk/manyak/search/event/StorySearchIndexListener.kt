@@ -35,7 +35,7 @@ class StorySearchIndexListener(private val indexer: StorySearchIndexer) {
             indexer.indexAll(event.storyIds)
         } catch (ex: Exception) {
             // 묶음별 실패는 색인기가 남긴다. 여기는 인덱스 확인처럼 묶음에 들어가기 전의 실패다.
-            log.warn("스토리 묶음 색인 실패 (stories={}, error={})", event.storyIds.size, ex.javaClass.simpleName)
+            log.warn("스토리 묶음 색인 중단 (stories={}, error={})", event.storyIds.size, ex.javaClass.simpleName)
         }
     }
 }

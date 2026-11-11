@@ -58,9 +58,9 @@ class StorySearchIndexerTests {
     private val ok = BulkResponse.Builder().took(1).errors(false).items(emptyList()).build()
     private fun document(n: Long) = StorySearchDocument(publicId = UUID(0, n).toString(), title = "스토리$n")
 
-    /** StorySearchIndexer 로거의 WARN 메시지를 모은다. */
-    private fun <T> warnings(block: () -> T): List<String> {
-        val logger = LoggerFactory.getLogger(StorySearchIndexer::class.java) as ch.qos.logback.classic.Logger
+    /** 지정한 클래스 로거(기본 StorySearchIndexer)의 WARN 메시지를 모은다. */
+    private fun <T> warnings(source: Class<*> = StorySearchIndexer::class.java, block: () -> T): List<String> {
+        val logger = LoggerFactory.getLogger(source) as ch.qos.logback.classic.Logger
         val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try { block() } finally { logger.detachAppender(appender) }
@@ -151,6 +151,21 @@ class StorySearchIndexerTests {
         assertEquals(single.index(), bulk.index())
         assertEquals(single.id(), bulk.id())
         assertEquals(mapper.writeValueAsString(single.document()), mapper.writeValueAsString(bulk.document()))
+    }
+
+    @Test
+    fun `묶음 색인 리스너는 묶음 진입 전 실패를 삼키고 요청 건수와 예외 이름만 남긴다`() {
+        val indexer = mock(StorySearchIndexer::class.java)
+        doThrow(IllegalStateException("private index detail")).`when`(indexer).indexAll(listOf(1L, 2L, 3L))
+
+        val logs = warnings(com.knk.manyak.search.event.StorySearchIndexListener::class.java) {
+            assertDoesNotThrow {
+                com.knk.manyak.search.event.StorySearchIndexListener(indexer)
+                    .onStoriesIndexRequested(com.knk.manyak.story.event.StoriesIndexRequestedEvent(listOf(1L, 2L, 3L)))
+            }
+        }
+
+        assertEquals(listOf("스토리 묶음 색인 중단 (stories=3, error=IllegalStateException)"), logs)
     }
 
     @Test
