@@ -33,8 +33,8 @@ import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.story.report.StoryReportedEvent
 import org.springframework.context.ApplicationEventPublisher

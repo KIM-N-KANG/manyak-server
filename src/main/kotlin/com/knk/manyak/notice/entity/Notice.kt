@@ -1,14 +1,10 @@
 package com.knk.manyak.notice.entity
 
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import jakarta.persistence.*
 import java.time.Instant
 import java.util.UUID
-
-enum class NoticeTag {
-    SERVICE, UPDATE, MAINTENANCE, EVENT, PROMOTION
-}
-
-enum class NoticeStatus { DRAFT, PUBLISHED }
 
 @Entity
 @Table(name = "notices")

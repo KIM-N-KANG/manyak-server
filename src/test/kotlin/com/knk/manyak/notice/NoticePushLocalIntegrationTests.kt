@@ -56,7 +56,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         val target = user("서비스 수신")
         user("서비스 거부", service = false, marketing = true)
         user("정지", status = UserStatus.SUSPENDED)
-        val notice = notices.save(Notice(title = "점검", body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, createdByUserId = target.id, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED))
+        val notice = notices.save(Notice(title = "점검", body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
         val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
@@ -74,7 +74,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         val target = user("야간 수신", service = false, marketing = true, night = true)
         user("주간만", marketing = true)
         user("서비스만")
-        val notice = notices.save(Notice(title = title, body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = target.id, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED))
+        val notice = notices.save(Notice(title = title, body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.EVENT, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
         val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
@@ -93,7 +93,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?,CURRENT_TIMESTAMP)", target.id)
         org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "notice-text-test")
         try {
-            for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
+            for (tag in com.knk.manyak.notice.dto.NoticeTag.entries) {
                 sent.clear()
                 val notificationTitle = "직접 쓴 알림 제목 ${tag.name}"
                 val notificationBody = "직접 쓴 알림 본문\n줄바꿈 유지"

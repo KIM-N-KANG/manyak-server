@@ -19,9 +19,9 @@ import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
-import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.image.service.UploadedImageKind

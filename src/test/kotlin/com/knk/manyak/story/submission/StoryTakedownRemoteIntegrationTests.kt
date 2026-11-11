@@ -10,7 +10,7 @@ import com.knk.manyak.push.outbox.PushMessage
 import com.knk.manyak.push.outbox.PushOutboxStore
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.entity.StoryTakedownReason
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner

@@ -1,7 +1,7 @@
 package com.knk.manyak.story.dto
 
 import com.knk.manyak.image.service.ImageModerationStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid

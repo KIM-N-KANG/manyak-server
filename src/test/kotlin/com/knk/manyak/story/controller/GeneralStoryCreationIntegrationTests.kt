@@ -7,8 +7,8 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.UploadedImageStorage
 import com.knk.manyak.image.service.UploadedObject
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository

@@ -64,9 +64,9 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
 
     @Test fun `공지 연결은 태그로 종류를 정하고 첫 시각을 유지하며 감사에 공개 식별자를 남긴다`() {
-        for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
+        for (tag in com.knk.manyak.notice.dto.NoticeTag.entries) {
             val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문", tag = tag,
-                status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = admin.id,
+                status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED, createdByUserId = admin.id,
                 // DB 정밀도에 맞춰 반올림될 수 있는 나노초 값으로 플랫폼 차이를 재현한다.
                 updatedAt = Instant.parse("2026-10-30T01:00:00.123456789Z")))
             val storedUpdatedAt = notices.findById(notice.id).orElseThrow().updatedAt
@@ -92,7 +92,7 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
 
     @Test fun `초안 해제 없는 공지와 두 이동 대상은 예약하지 않는다`() {
         val draft = notices.save(com.knk.manyak.notice.entity.Notice(title = "초안", body = "본문",
-            tag = com.knk.manyak.notice.entity.NoticeTag.SERVICE, createdByUserId = admin.id))
+            tag = com.knk.manyak.notice.dto.NoticeTag.SERVICE, createdByUserId = admin.id))
         for (id in listOf(draft.publicId, UUID.randomUUID()))
             call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", id.toString()) }).expectStatus().isBadRequest
         call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", draft.publicId.toString()); put("storyId", UUID.randomUUID().toString()) })
@@ -104,7 +104,7 @@ class AdminCampaignIntegrationTests : IntegrationTest() {
 
     @Test fun `공지 연결 뒤 감사 실패는 캠페인과 첫 알림 시각을 롤백한다`() {
         val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문",
-            tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED,
+            tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED,
             createdByUserId = admin.id))
         val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
             category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,

@@ -252,7 +252,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "비공개제작자")).publicId) else null
         postSimpleStory(persistStorylineWithGenre("로맨스"), visibility, token).expectStatus().isCreated
         val story = storyRepository.findAll().single()
-        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.dto.StoryVisibility.PRIVATE)
         assertThat(snapshots.existsById(story.id)).isFalse()
     }
 
@@ -262,7 +262,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         val token = if (member) jwt.issueAccessToken(users.save(com.knk.manyak.auth.entity.User(nickname = "기본공개제작자")).publicId) else null
         postSimpleStory(persistStorylineWithGenre("로맨스"), token = token).expectStatus().isCreated
         val story = storyRepository.findAll().single()
-        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.dto.StoryVisibility.PUBLIC)
         assertThat(snapshots.existsById(story.id)).isTrue()
     }
 
@@ -273,7 +273,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
             .expectStatus().isCreated
         val story = storyRepository.findAll().single()
         assertThat(story.userId).isEqualTo(user.id)
-        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.dto.StoryVisibility.PUBLIC)
         assertThat(snapshots.findById(story.id).orElseThrow().snapshot.title).isEqualTo(story.title)
     }
 
@@ -282,7 +282,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         postSimpleStory(persistStorylineWithGenre("로맨스"), "PUBLIC").expectStatus().isCreated
         val story = storyRepository.findAll().single()
         assertThat(story.userId).isNull()
-        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
+        assertThat(story.visibility).isEqualTo(com.knk.manyak.story.dto.StoryVisibility.PUBLIC)
         assertThat(snapshots.existsById(story.id)).isTrue()
     }
 

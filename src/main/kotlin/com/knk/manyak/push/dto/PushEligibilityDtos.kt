@@ -1,6 +1,6 @@
 package com.knk.manyak.push.dto
 
-import com.knk.manyak.notice.entity.NoticeTag
+import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.push.entity.PushPlatform
 
 enum class PushKind {

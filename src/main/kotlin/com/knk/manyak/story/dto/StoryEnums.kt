@@ -1,4 +1,4 @@
-package com.knk.manyak.story.entity
+package com.knk.manyak.story.dto
 
 /** 스토리 등록 상태. 일반 모드 초안은 DRAFT로 시작해 발행 시 PUBLISHED가 된다(KNK-401). */
 enum class StoryStatus {

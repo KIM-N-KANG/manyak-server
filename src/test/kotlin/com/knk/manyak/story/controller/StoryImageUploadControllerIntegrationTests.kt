@@ -12,8 +12,8 @@ import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
@@ -414,7 +414,7 @@ class StoryImageUploadControllerIntegrationTests : MockedBoundaryIntegrationTest
     @Test
     fun `검수를 통과하지 못한 인물 이미지는 상세에서 빠지고 편집 폼에는 상태와 함께 보인다`() {
         val owner = saveUser()
-        val story = saveStory(owner).apply { visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC }
+        val story = saveStory(owner).apply { visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC }
             .let(storyRepository::save)
         val character = saveCharacter(story)
         storyCharacterImageRepository.save(
@@ -453,7 +453,7 @@ class StoryImageUploadControllerIntegrationTests : MockedBoundaryIntegrationTest
             Story(
                 userId = owner.id,
                 title = "검수 대기 표지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
                 thumbnailImageKey = "thumb_0001",
                 thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/old.webp",
                 thumbnailModerationStatus = ImageModerationStatus.PENDING,
@@ -481,7 +481,7 @@ class StoryImageUploadControllerIntegrationTests : MockedBoundaryIntegrationTest
             Story(
                 userId = owner.id,
                 title = "검수 대기 표지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
                 thumbnailImageKey = "thumb_0001",
                 thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/pending.webp",
                 thumbnailModerationStatus = ImageModerationStatus.PENDING,

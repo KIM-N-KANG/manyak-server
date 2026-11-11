@@ -1,5 +1,6 @@
 package com.knk.manyak.credit.repository
 
+import com.knk.manyak.credit.dto.CreditExpiryTarget
 import com.knk.manyak.credit.entity.CreditLot
 import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
@@ -7,11 +8,6 @@ import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.Instant
-
-interface CreditExpiryTarget {
-    val userId: Long
-    val expiresAt: Instant
-}
 
 interface CreditLotRepository : JpaRepository<CreditLot, Long> {
 

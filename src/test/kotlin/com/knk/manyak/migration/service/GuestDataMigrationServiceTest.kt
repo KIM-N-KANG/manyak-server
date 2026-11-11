@@ -16,7 +16,7 @@ import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStage
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -105,8 +105,8 @@ class GuestDataMigrationServiceTest {
 
     @Test
     fun `공개 범위와 무관하게 MIGRATED 스토리에만 재색인을 요청한다`() {
-        val public = Story(id = 71, userId = null, title = "공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
-        val private = Story(id = 72, userId = null, title = "비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
+        val public = Story(id = 71, userId = null, title = "공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC)
+        val private = Story(id = 72, userId = null, title = "비공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE)
         val mine = story(UUID.randomUUID(), userId)
         val other = story(UUID.randomUUID(), otherUserId)
         val missing = UUID.randomUUID()

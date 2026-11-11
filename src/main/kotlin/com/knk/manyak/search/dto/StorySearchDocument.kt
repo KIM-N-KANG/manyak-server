@@ -2,8 +2,8 @@ package com.knk.manyak.search.dto
 
 import com.knk.manyak.story.dto.StoryAuthorResponse
 import com.knk.manyak.story.dto.StorySummaryResponse
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import java.time.Instant
 
 // OpenSearch 전용 Jackson 2 매퍼가 무인자 생성자와 setter로 읽는다. 영속 엔티티·Spring의 JSON 설정과 분리된 파생 사본이다.

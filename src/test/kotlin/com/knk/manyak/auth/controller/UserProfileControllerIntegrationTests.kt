@@ -15,8 +15,8 @@ import com.knk.manyak.search.service.StorySearchDocumentReader
 import com.knk.manyak.search.service.StorySearchIndexAdmin
 import com.knk.manyak.search.service.StorySearchIndexer
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.MockedBoundaryIntegrationTest
