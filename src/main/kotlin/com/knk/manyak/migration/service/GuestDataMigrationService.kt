@@ -1,6 +1,8 @@
 package com.knk.manyak.migration.service
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountCommandService
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
@@ -48,7 +50,9 @@ class GuestDataMigrationService(
     private val storyRepository: StoryRepository,
     private val storyChatRepository: StoryChatRepository,
     private val storyCreationSessionRepository: StoryCreationSessionRepository,
-    private val userRepository: UserRepository,
+    private val locks: AccountLockService,
+    private val accounts: AccountQueryService,
+    private val commands: AccountCommandService,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     // 이름 스냅샷이 비어 있는 채팅(롤링 배포 창에 구버전이 만든 행)의 이름을 라이브 엔딩에서 해소한다.
     private val storyEndingRepository: StoryEndingRepository,
@@ -71,10 +75,11 @@ class GuestDataMigrationService(
         // 락이 없으면 두 요청이 서로 다른 게스트 ID로 동시에 들어와 둘 다 migrated_at==null을 읽고 통과해
         // 1회 상한을 우회할 수 있다(Codex P1). migrated_at이 이미 있으면 어떤 항목도 평가하지 않고 닫힌 응답을 돌려준다.
         // userId는 컨트롤러에서 인증된 실 사용자 id이므로 조회는 항상 성공한다(방어적으로 없으면 401).
-        val user = userRepository.findByIdForUpdate(userId)
+        val locked = locks.lock(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
-        requireActiveStatus(user.status)
+        requireActiveStatus(locked.status)
+        val user = requireNotNull(accounts.migrationStateOf(userId))
         if (user.migratedAt != null) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
         }
@@ -84,7 +89,7 @@ class GuestDataMigrationService(
         if (user.migrationAttempts >= MAX_MIGRATION_ATTEMPTS) {
             return MigrationResponse(stories = emptyList(), chats = emptyList(), migrationClosed = true)
         }
-        user.migrationAttempts += 1
+        commands.recordMigrationAttempt(userId)
 
         val (stories, chats) = try {
             claimStories(userId, parseUuids(request.storyIds), deviceIdHash) to claimChats(userId, parseUuids(request.chatIds))
@@ -103,7 +108,7 @@ class GuestDataMigrationService(
         if (stories.any { it.status == MigrationStatus.MIGRATED } ||
             chats.any { it.status == MigrationStatus.MIGRATED }
         ) {
-            user.migratedAt = Instant.now()
+            commands.markMigrated(userId, Instant.now())
         }
         publishMigrationSucceeded(userId, stories, chats)
         return MigrationResponse(stories = stories, chats = chats)

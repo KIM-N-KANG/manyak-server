@@ -4,6 +4,8 @@ import com.knk.manyak.auth.dto.AccountProfile
 import com.knk.manyak.auth.dto.AccountStatusView
 import com.knk.manyak.auth.dto.PushRecipient
 import com.knk.manyak.auth.dto.AdminMemberView
+import com.knk.manyak.auth.dto.InviteAccount
+import com.knk.manyak.auth.dto.MigrationState
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.analytics.UserPublicIdPort
@@ -62,6 +64,19 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
     /** 1회성 보상 멱등 키의 신원(`coalesce(reward_identity_user_id, id)`, KNK-1053). 회원이 없으면 [userId] 그대로다. */
     fun rewardIdentityOf(userId: Long): Long = users.findRewardIdentityUserId(userId) ?: userId
 
+    /** 초대 발급과 제출이 읽는 회원 값. 잠근 회원이면 영속성 컨텍스트에서 나와 SQL을 내지 않는다. */
+    fun inviteAccountOf(userId: Long): InviteAccount? = users.findById(userId).map { it.toInviteAccount() }.orElse(null)
+
+    /** 초대 코드의 주인. 잠그지 않는다. 없으면 null이다. */
+    fun inviteAccountByCode(inviteCode: String): InviteAccount? = users.findByInviteCode(inviteCode)?.toInviteAccount()
+
+    /** 초대 코드가 이미 쓰이는지. 유니크 제약이 최종 방어이고 이건 재시도용 사전 점검이다. */
+    fun isInviteCodeTaken(inviteCode: String): Boolean = users.existsByInviteCode(inviteCode)
+
+    /** 이관 게이트가 읽는 값. 잠근 회원이면 영속성 컨텍스트에서 나와 SQL을 내지 않는다. */
+    fun migrationStateOf(userId: Long): MigrationState? =
+        users.findById(userId).map { MigrationState(it.migratedAt, it.migrationAttempts) }.orElse(null)
+
     fun adminMemberOf(publicId: UUID): AdminMemberView? =
         users.findByPublicId(publicId)?.let { AdminMemberView(it.id, it.publicId, it.deletedAt) }
 
@@ -71,6 +86,9 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
     }
 
     private fun User.toProfile() = AccountProfile(publicId, nickname, profileImageUrl)
+
+    private fun User.toInviteAccount() =
+        InviteAccount(id, publicId, status, inviteCode, inviterUserId, rewardIdentityUserId ?: id)
 
     private fun User.toPushRecipient() =
         PushRecipient(id, publicId, status, servicePushEnabled, marketingPushAgreedAt, marketingPushNightAgreedAt)
