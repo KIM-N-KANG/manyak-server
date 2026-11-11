@@ -123,13 +123,13 @@ interface UserRepository : JpaRepository<User, Long> {
     )
     fun findMarketingPushTargetIds(): List<Long>
 
-    @Query("""SELECT u.id FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+    @Query("""SELECT u.id FROM User u WHERE u.status = com.knk.manyak.auth.dto.UserStatus.ACTIVE
         AND u.servicePushEnabled = true
         AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
         ORDER BY u.id""")
     fun findServicePushTargetIds(): List<Long>
 
-    @Query("""SELECT COUNT(u) FROM User u WHERE u.status = com.knk.manyak.auth.entity.UserStatus.ACTIVE
+    @Query("""SELECT COUNT(u) FROM User u WHERE u.status = com.knk.manyak.auth.dto.UserStatus.ACTIVE
         AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
         AND ((:marketing = false AND u.servicePushEnabled = true)
           OR (:marketing = true AND u.marketingPushAgreedAt IS NOT NULL))

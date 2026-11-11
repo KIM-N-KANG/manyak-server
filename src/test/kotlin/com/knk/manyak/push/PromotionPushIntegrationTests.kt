@@ -2,7 +2,7 @@ package com.knk.manyak.push
 
 import com.google.firebase.messaging.AndroidConfig.Priority.NORMAL
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushCampaign

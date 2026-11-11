@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.consent
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo

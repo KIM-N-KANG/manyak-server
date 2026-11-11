@@ -1,7 +1,7 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditPolicy
 import com.knk.manyak.credit.repository.CreditPolicyRepository

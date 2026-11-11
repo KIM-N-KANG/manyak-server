@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.junit.jupiter.params.provider.CsvSource
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import org.springframework.test.context.event.RecordApplicationEvents
 import org.springframework.test.context.event.ApplicationEvents
 import org.mockito.Mockito.*
@@ -149,7 +149,7 @@ class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
             completion.get(10, java.util.concurrent.TimeUnit.SECONDS)
             deletion.get(10, java.util.concurrent.TimeUnit.SECONDS)
             assertThat(count("user_notifications")).isZero()
-            assertThat(users.findById(story.userId!!).orElseThrow().status).isEqualTo(com.knk.manyak.auth.entity.UserStatus.DELETED)
+            assertThat(users.findById(story.userId!!).orElseThrow().status).isEqualTo(com.knk.manyak.auth.dto.UserStatus.DELETED)
         } finally { release.countDown(); executor.shutdownNow() }
     }
     @Test fun `로그는 커밋 뒤 안전한 필드만 남기고 롤백에서는 남기지 않는다`() {

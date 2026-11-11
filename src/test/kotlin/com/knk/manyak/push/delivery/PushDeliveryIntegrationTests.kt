@@ -2,7 +2,7 @@ package com.knk.manyak.push.delivery
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider

@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.entity
 
+import com.knk.manyak.auth.dto.UserStatus
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -12,12 +13,6 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
-
-enum class UserStatus {
-    ACTIVE,
-    SUSPENDED,
-    DELETED,
-}
 
 @Entity
 @Table(name = "users")

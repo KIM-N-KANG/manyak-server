@@ -1,8 +1,8 @@
 package com.knk.manyak.auth.link
 
 import com.knk.manyak.auth.controller.FakeSocialLoginConfig
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner

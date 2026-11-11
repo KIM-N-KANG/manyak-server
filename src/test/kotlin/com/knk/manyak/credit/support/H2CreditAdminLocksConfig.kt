@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.support
 
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.credit.repository.CreditAdminLocks
 import com.knk.manyak.credit.repository.LockedCreditTarget
 import com.knk.manyak.credit.service.CreditPolicyKey

@@ -3,7 +3,7 @@ package com.knk.manyak.auth.dto
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.adminkit.query.instant
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID

@@ -10,8 +10,8 @@ import org.mockito.Mockito.doCallRealMethod
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider

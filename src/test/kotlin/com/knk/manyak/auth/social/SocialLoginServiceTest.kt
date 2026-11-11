@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.security.oauth2.jwt.JwtException
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.entity.CreditReason

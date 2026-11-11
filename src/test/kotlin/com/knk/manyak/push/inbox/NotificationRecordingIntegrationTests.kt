@@ -4,7 +4,7 @@ import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.springframework.test.context.TestPropertySource
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService

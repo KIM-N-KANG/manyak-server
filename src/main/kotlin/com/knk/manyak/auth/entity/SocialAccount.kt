@@ -1,5 +1,6 @@
 package com.knk.manyak.auth.entity
 
+import com.knk.manyak.auth.dto.SocialProvider
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -12,13 +13,6 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
-
-enum class SocialProvider {
-    GOOGLE,
-    KAKAO,
-    APPLE,
-    NAVER,
-}
 
 /**
  * 외부 계약(API 응답·분석 이벤트 프로퍼티)에 싣는 표기. **소문자 고정**이다(KNK-739).

@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.link
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.global.security.requireUser
 import io.swagger.v3.oas.annotations.Operation

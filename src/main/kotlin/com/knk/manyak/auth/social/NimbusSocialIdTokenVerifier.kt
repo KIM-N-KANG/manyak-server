@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.social
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import org.springframework.core.convert.converter.Converter
 import org.springframework.http.HttpStatus
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator

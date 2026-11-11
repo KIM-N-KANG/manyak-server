@@ -91,7 +91,7 @@ class UserPersonaControllerIntegrationTests : IntegrationTest() {
     }
     private fun createThenSuspend(): String {
         val bytes = post("""{"name":"원래 이름","description":"원래 설명"}""").expectStatus().isCreated.expectBody().returnResult().responseBody!!
-        user.status = com.knk.manyak.auth.entity.UserStatus.SUSPENDED
+        user.status = com.knk.manyak.auth.dto.UserStatus.SUSPENDED
         users.saveAndFlush(user)
         return mapper.readTree(bytes).path("id").asText()
     }

@@ -687,7 +687,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var characters: com.knk.manyak.story.repository.StoryCharacterRepository
 
     private fun characterStory(): Pair<User, Story> {
-        val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.entity.UserStatus.ACTIVE))
+        val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.dto.UserStatus.ACTIVE))
         val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "세린", description = "왕국을 지키는 기사"))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "루아", description = "길을 안내하는 동료"))

@@ -2,7 +2,7 @@ package com.knk.manyak.auth.social
 
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.port.SignupCreditPort
 import com.knk.manyak.auth.repository.UserRepository

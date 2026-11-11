@@ -6,7 +6,7 @@ import com.knk.manyak.adminkit.query.AdminAiRequest
 import com.knk.manyak.adminkit.query.AdminDateRange
 import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.auth.dto.AdminMemberSummary
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import com.knk.manyak.image.service.ImageModerationStatus

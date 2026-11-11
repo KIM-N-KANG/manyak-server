@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.config
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.social.GoogleAuthProperties
 import com.knk.manyak.auth.social.KakaoAuthProperties

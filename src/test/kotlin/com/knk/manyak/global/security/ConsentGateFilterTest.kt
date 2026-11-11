@@ -1,7 +1,7 @@
 package com.knk.manyak.global.security
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.consent.*
 import org.assertj.core.api.Assertions.assertThat

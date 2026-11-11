@@ -2,7 +2,7 @@ package com.knk.manyak.admin.service
 
 import com.knk.manyak.adminkit.role.AdminRoleReader
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import org.springframework.stereotype.Service
 
 @Service

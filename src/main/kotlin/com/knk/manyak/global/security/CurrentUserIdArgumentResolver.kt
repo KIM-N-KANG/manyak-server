@@ -1,7 +1,7 @@
 package com.knk.manyak.global.security
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import org.springframework.core.MethodParameter
 import org.springframework.http.HttpStatus

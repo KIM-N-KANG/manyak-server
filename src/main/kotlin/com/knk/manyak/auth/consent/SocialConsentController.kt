@@ -2,7 +2,7 @@ package com.knk.manyak.auth.consent
 
 import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import io.swagger.v3.oas.annotations.Operation
