@@ -1,9 +1,10 @@
-package com.knk.manyak.story.submission
+package com.knk.manyak.push.event
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.entity.StoryTakedownReason
+import com.knk.manyak.story.submission.StoryTakenDown
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest

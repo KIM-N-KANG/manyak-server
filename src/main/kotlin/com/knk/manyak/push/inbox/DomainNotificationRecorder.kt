@@ -3,7 +3,7 @@ package com.knk.manyak.push.inbox
 import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.submission.StoryModerationCompleted
 import com.knk.manyak.story.submission.StoryTakenDown
-import com.knk.manyak.story.submission.pushData
+import com.knk.manyak.push.event.pushData
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
