@@ -30,7 +30,7 @@ class AppChainAdminPathDenyTests : IntegrationTest() {
     @Test
     fun `앱 체인만으로도 관리자 경로는 토큰 없음 401, 일반 회원 토큰 403으로 핸들러에 닿지 않는다`() {
         val member = tokens.issueAccessToken(users.save(User(nickname = "일반 회원")).publicId)
-        for ((method, path) in listOf("GET" to "/api/v1/admin/members", "POST" to "/api/v1/admin/auth/login/google")) {
+        for ((method, path) in ADMIN_PATHS) {
             val anonymous = throughAppChainOnly(method, path, token = null)
             assertThat(anonymous.reached).describedAs("토큰 없음 $method $path").isFalse()
             assertThat(anonymous.response.status).describedAs("토큰 없음 $method $path").isEqualTo(401)
@@ -38,6 +38,17 @@ class AppChainAdminPathDenyTests : IntegrationTest() {
             val authenticated = throughAppChainOnly(method, path, member)
             assertThat(authenticated.reached).describedAs("회원 토큰 $method $path").isFalse()
             assertThat(authenticated.response.status).describedAs("회원 토큰 $method $path").isEqualTo(403)
+        }
+    }
+
+    @Test
+    fun `앱 체인만으로 관리자 토큰을 보내도 관리자 경로는 401로 핸들러에 닿지 않는다`() {
+        // 앱 체인의 디코더는 관리자 표식(aud)이 있는 토큰을 받지 않으므로 인증 실패로 끝난다(ADMIN 5-1-1 앱 경로).
+        val admin = tokens.issueAdminToken(users.save(User(nickname = "관리자")).publicId)
+        for ((method, path) in ADMIN_PATHS) {
+            val result = throughAppChainOnly(method, path, admin)
+            assertThat(result.reached).describedAs("관리자 토큰 $method $path").isFalse()
+            assertThat(result.response.status).describedAs("관리자 토큰 $method $path").isEqualTo(401)
         }
     }
 
@@ -65,5 +76,15 @@ class AppChainAdminPathDenyTests : IntegrationTest() {
         var reached = false
         proxy.doFilter(request, response) { _, _ -> reached = true }
         return Result(response, reached)
+    }
+
+    private companion object {
+        /** 관리자 체인 매처(`/api/v1/admin/` 아래 전체)의 경계: 접두 그 자체와 끝 슬래시 포함. */
+        val ADMIN_PATHS = listOf(
+            "GET" to "/api/v1/admin/members",
+            "POST" to "/api/v1/admin/auth/login/google",
+            "GET" to "/api/v1/admin",
+            "GET" to "/api/v1/admin/members/",
+        )
     }
 }

@@ -14,9 +14,13 @@ interface AccountAccessPort {
     /**
      * 인증이 확정된 요청을 판정한다. 탈퇴를 먼저 보고, 회원이 없으면 동의 게이트 없이 통과시키며,
      * 동의 게이트가 켜져 있으면 허용 목록(메서드와 정확한 경로) 밖의 요청에 현행 필수 동의를 요구한다(ACCOUNT 5-1-3).
+     * 판정하며 읽은 회원의 내부 PK를 함께 돌려줘, 같은 요청 안에서 [userIdOf]로 다시 조회하지 않게 한다.
      */
-    fun check(publicId: UUID, method: String, path: String): AccountAccess
+    fun check(publicId: UUID, method: String, path: String): AccountAccessDecision
 }
+
+/** [AccountAccessPort.check]의 결과. [userId]는 회원이 있으면 그 내부 PK이고 없으면 null이다. 응답 상태와 문구는 담지 않는다. */
+data class AccountAccessDecision(val access: AccountAccess, val userId: Long?)
 
 /** [AccountAccessPort.check]의 판정 결과. */
 enum class AccountAccess {

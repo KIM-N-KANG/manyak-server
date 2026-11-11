@@ -35,8 +35,9 @@ class DeletedAccountRejectionFilter(
     ) {
         val authentication = SecurityContextHolder.getContext().authentication
         if (authentication is JwtAuthenticationToken) {
-            val access = parsePublicIdOrNull(authentication.token.subject)
+            val decision = parsePublicIdOrNull(authentication.token.subject)
                 ?.let { accountAccess.check(it, request.method, request.servletPath) }
+            val access = decision?.access
             if (access == AccountAccess.DELETED) {
                 SecurityContextHolder.clearContext()
                 response.status = HttpStatus.UNAUTHORIZED.value()
@@ -64,6 +65,9 @@ class DeletedAccountRejectionFilter(
                 )))
                 return
             }
+            // 판정하며 읽은 회원 PK를 남겨 [CurrentUserIdArgumentResolver]가 같은 회원을 다시 조회하지 않게 한다.
+            // 요청 속성은 서버 코드만 쓸 수 있고 클라이언트 입력(헤더, 파라미터)으로는 만들 수 없다.
+            decision?.userId?.let { request.setAttribute(CurrentUserIdArgumentResolver.RESOLVED_USER_ID_ATTRIBUTE, it) }
         }
         filterChain.doFilter(request, response)
     }
