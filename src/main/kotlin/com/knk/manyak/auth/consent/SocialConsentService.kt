@@ -2,6 +2,7 @@ package com.knk.manyak.auth.consent
 
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
@@ -72,7 +73,7 @@ class SocialConsentService(
         val errorType = if (ex is CodedResponseStatusException && ex.statusCode == HttpStatus.BAD_REQUEST &&
             (ex.errorCode == ApiErrorCodes.CONSENT_VERSION_MISMATCH || ex.errorCode == ApiErrorCodes.CONSENT_REQUIRED_MISSING)
         ) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.SERVER
-        analytics.socialLoginFailed(provider, errorType)
+        analytics.socialLoginFailed(provider.wireValue, errorType)
         throw ex
     }
 

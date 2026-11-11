@@ -219,7 +219,7 @@ class GoogleLoginIntegrationTests : IntegrationTest() {
         val seededAt = userRepository.findById(userId).orElseThrow().memberTrialSeededAt
         assertThat(seededAt).isNotNull()
         assertThat(creditTransactionRepository.findAll()).isEmpty()
-        verify(serverAnalytics).socialLoginFailed(SocialProvider.GOOGLE, AnalyticsErrorType.SERVER)
+        verify(serverAnalytics).socialLoginFailed("google", AnalyticsErrorType.SERVER)
         assertThat(mockingDetails(serverAnalytics).invocations.count { it.method.name == "socialLoginSucceeded" }).isZero()
 
         // 다음 로그인은 보상을 한 번 적립하고 토큰을 발급하며, 스냅샷은 다시 하지 않는다.

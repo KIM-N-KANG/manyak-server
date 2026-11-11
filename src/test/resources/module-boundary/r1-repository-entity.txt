@@ -18,8 +18,6 @@ com.knk.manyak.chat.service.ChatTurnPersister -> com.knk.manyak.credit.repositor
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.credit.service.AttendanceRewardService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.entity.User
-com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.auth.entity.User

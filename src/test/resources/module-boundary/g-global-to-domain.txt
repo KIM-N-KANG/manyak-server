@@ -1,6 +1,0 @@
-com.knk.manyak.global.config.OpenApiConfig -> com.knk.manyak.chat.dto.ChangeChatSettingsRequest
-com.knk.manyak.global.config.OpenApiConfig -> com.knk.manyak.story.submission.StoryTakedownRequest
-com.knk.manyak.global.observability.aicall.AiCallRecorder -> com.knk.manyak.story.client.StoryContentRejectedException
-com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.dto.SocialProvider
-com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.entity.User
-com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.repository.UserRepository

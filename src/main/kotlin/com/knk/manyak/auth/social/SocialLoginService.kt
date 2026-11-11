@@ -3,6 +3,7 @@ package com.knk.manyak.auth.social
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.port.SignupCreditPort
 import com.knk.manyak.auth.repository.UserRepository
@@ -69,7 +70,7 @@ class SocialLoginService(
             finishLogin(provider, user, isNewUser, deviceId)
         } catch (e: Exception) {
             // 검증 통과 후 사용자 저장·보상·토큰 발급 중 실패는 서버 내부 처리 실패로 분류한다(스펙 §6-6-7).
-            serverAnalytics.socialLoginFailed(provider, AnalyticsErrorType.SERVER)
+            serverAnalytics.socialLoginFailed(provider.wireValue, AnalyticsErrorType.SERVER)
             throw e
         }
     }
@@ -78,7 +79,7 @@ class SocialLoginService(
         return try {
             verifierFor(provider).verify(idToken)
         } catch (e: Exception) {
-            serverAnalytics.socialLoginFailed(provider, classifyVerifyError(e))
+            serverAnalytics.socialLoginFailed(provider.wireValue, classifyVerifyError(e))
             throw e
         }
     }
@@ -108,7 +109,7 @@ class SocialLoginService(
         val tokens = authTokenService.issueTokens(user).copy(isNewUser = isNewUser)
         // 완료 경로는 코드 소비까지 성공해야 성공 요청으로 집계한다. 기존 로그인은 추가 작업이 없다.
         beforeSuccess()
-        serverAnalytics.socialLoginSucceeded(provider, user.publicId.toString(), isNewUser, isNewUser && user.rejoinedAt != null)
+        serverAnalytics.socialLoginSucceeded(provider.wireValue, user.publicId.toString(), isNewUser, isNewUser && user.rejoinedAt != null)
         return tokens
     }
 
