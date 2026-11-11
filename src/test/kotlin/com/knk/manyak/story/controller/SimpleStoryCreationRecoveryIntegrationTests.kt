@@ -189,7 +189,7 @@ class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() 
 
     @Test fun `간편 완성은 타인과 미존재 초안 때문에 실패하지 않고 타인 초안을 유지한다`() {
         val owner = userRepository.save(User(nickname = "제작자"))
-        wallets.reward(owner.id, 1000, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        wallets.reward(owner.id, 1000, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
         val other = userRepository.save(User(nickname = "타인"))
         val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(UUID.randomUUID(), other.id,
             com.knk.manyak.story.draft.StoryDraftMode.SIMPLE, com.knk.manyak.story.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))

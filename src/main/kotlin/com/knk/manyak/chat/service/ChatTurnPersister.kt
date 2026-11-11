@@ -27,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.text.Normalizer
 import java.time.Instant
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.service.StoryPlayReader

@@ -7,7 +7,7 @@ import com.knk.manyak.adminkit.query.AdminListRequest
 import com.knk.manyak.adminkit.query.AdminSearchRequest
 import com.knk.manyak.auth.dto.AdminMemberSummary
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.Pattern

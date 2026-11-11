@@ -5,7 +5,7 @@ import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository

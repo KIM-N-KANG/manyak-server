@@ -13,7 +13,7 @@ import com.knk.manyak.adminkit.query.AdminPagination
 import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import com.knk.manyak.credit.service.CreditWalletService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

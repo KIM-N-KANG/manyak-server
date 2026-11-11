@@ -2,7 +2,7 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditLot
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.entity.CreditWallet
 import com.knk.manyak.credit.repository.CreditLotRepository

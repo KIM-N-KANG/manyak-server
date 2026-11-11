@@ -20,7 +20,7 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatMainEventRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story

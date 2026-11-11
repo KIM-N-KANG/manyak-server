@@ -3,7 +3,7 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
 import com.knk.manyak.credit.dto.CreditTransactionResponse
 import com.knk.manyak.credit.dto.CreditTransactionType
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.port.ChatStoryLookup
 import com.knk.manyak.credit.port.StoryTitleLookup

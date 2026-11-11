@@ -9,7 +9,7 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.chat.service.ChatService
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.*
 import com.knk.manyak.story.entity.Story

@@ -13,7 +13,7 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService

@@ -58,13 +58,13 @@ class ChatImageFailureIntegrationTests : ScriptedAiIntegrationTest() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "유료이미지회원"))
         if (drainTurn) while (trials.reserveMember(user.id, Counter.CHAT_TURN)) { }
         if (drainImage) while (trials.reserveMember(user.id, Counter.CHAT_IMAGE)) { }
-        if (balance > 0) wallet.reward(user.id, balance, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "seed")
+        if (balance > 0) wallet.reward(user.id, balance, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "seed")
         chat = chats.save(StoryChat(storyId = chat.storyId, userId = user.id))
         return user.id
     }
     private fun paidStart(userId: Long) = service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest(userInput = "유료"), userId = userId)
     private fun spends() = ledger.findAll().filter { it.amount < 0 }
-    private fun refunds() = ledger.findAll().filter { it.reason == com.knk.manyak.credit.entity.CreditReason.REFUND }
+    private fun refunds() = ledger.findAll().filter { it.reason == com.knk.manyak.credit.dto.CreditReason.REFUND }
 
     @Test fun `유료 이미지와 턴을 한꺼번에 차감한 뒤 슬롯을 전달한다`() {
         val user = paidMember()

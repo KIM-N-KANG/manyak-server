@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.port.ChatTurnChargeLinks
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import org.springframework.stereotype.Service

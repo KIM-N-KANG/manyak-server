@@ -33,7 +33,7 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.service.CreditDeduction
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.global.observability.LengthBuckets
