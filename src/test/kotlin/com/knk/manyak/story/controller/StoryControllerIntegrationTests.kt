@@ -261,6 +261,38 @@ class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
         check(storylineRequest.supportingCharacters.single().features == listOf("비밀스러운 조력자", "헌신적인"))
     }
 
+    @Autowired private lateinit var trialLimits: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    @Test
+    fun `스토리라인 저장이 실패해도 직접 입력 특징 태그 행은 남고 게스트 횟수를 복원하며 요청을 실패로 남긴다`() {
+        // KNK-2056 T4. 직접 입력 태그 마스터 행은 별도 트랜잭션(REQUIRES_NEW)이라 스토리라인 저장이 롤백돼도 남는다(STORY 5-2-4).
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        org.mockito.Mockito.doThrow(IllegalStateException("추천 정보 저장 실패(테스트)")).`when`(recommendedInfoRepository)
+            .saveAll(org.mockito.ArgumentMatchers.anyIterable<com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo>())
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "t4-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genre.id}],
+                  "protagonist": { "name": "아린", "gender": "FEMALE", "featureTagIds": [], "customTags": ["직접입력특징"] },
+                  "supportingCharacters": []
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().is5xxServerError
+
+        check(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM story_creation_tags WHERE name = '직접입력특징' AND tag_source = 'CUSTOM'", Long::class.java) == 1L)
+        check(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM story_creation_sessions", Long::class.java) == 0L)
+        check(trialLimits.usage(null, "t4-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORYLINE_GENERATION).used == 0L)
+        check(jdbcTemplate.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORYLINE_GENERATION'", String::class.java) == listOf("FAILED"))
+    }
+
     @Test
     fun `주변 인물이 5명을 초과하면 스토리라인 생성을 거절한다`() {
         val supportingCharacters = (1..6).joinToString(",") { "{\"name\":\"인물 $it\"}" }

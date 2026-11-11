@@ -116,6 +116,9 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         // 보상 삭제로 지운 객체 키. 저장 실패 시 고아 객체 정리 검증용.
         val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+        // 업로드마다 그 시점에 실제 트랜잭션이 열려 있었는지. 업로드가 저장 트랜잭션 밖인지 검증한다(KNK-2056 T3).
+        val uploadInTransaction = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+
         // 업로드를 시도한 객체 키(실패분 포함). 실패한 업로드의 키를 지우는지 검증하는 데 쓴다.
         val attemptedUploadKeys = java.util.concurrent.CopyOnWriteArrayList<String>()
 
@@ -175,6 +178,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         ): GeneratedImageStorage = object : GeneratedImageStorage {
             override fun upload(objectKey: String, bytes: ByteArray, contentType: String): String {
                 attemptedUploadKeys += objectKey
+                uploadInTransaction += org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
                 if (commitStoryOnUpload) {
                     // 객체 키(characters/generated/{storyPublicId}/{uuid}.webp)에서 스토리 public_id를 꺼내
                     // 별도 트랜잭션으로 스토리를 커밋한다. 이후 저장 트랜잭션이 깨져도 스토리 행은 남는다.
@@ -237,6 +241,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         uploads.clear()
         deletes.clear()
         attemptedUploadKeys.clear()
+        uploadInTransaction.clear()
         commitStoryOnUpload = false
         uploadFailureKeyMarker = null
         databaseCleaner.cleanAll()
@@ -739,6 +744,110 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         assertThat(uploads).isEmpty()
     }
 
+    @Autowired private lateinit var wallet: com.knk.manyak.credit.service.CreditWalletService
+    @Autowired private lateinit var trials: com.knk.manyak.credit.service.GuestTrialLimitService
+    @Autowired private lateinit var ledger: com.knk.manyak.credit.repository.CreditTransactionRepository
+    @Autowired private lateinit var policies: com.knk.manyak.credit.service.CreditPolicyService
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+
+    private val creationCost: Long get() = policies.amountOf(com.knk.manyak.credit.service.CreditPolicyKey.STORY_CREATION_COST)
+
+    /** 회원 체험을 다 쓴 회원(크레딧 경로)에게 완성 비용의 5배를 적립한다. */
+    private fun payingMember(): com.knk.manyak.auth.entity.User = users.save(com.knk.manyak.auth.entity.User(nickname = "유료회원")).also {
+        while (trials.reserveMember(it.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION)) { /* drain */ }
+        wallet.reward(it.id, creationCost * 5, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "signup:${it.id}")
+    }
+
+    private fun memberTrialUsed(userId: Long) =
+        trials.usage(userId, null, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION).used
+
+    private fun requestStatuses(): List<String> =
+        jdbc.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORY_COMPLETION'", String::class.java)
+
+    private val duplicateEndings = listOf(
+        AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),
+        AiStoryEnding("같은엔딩", 4, "조건 B", "에필로그 B"),
+    )
+
+    @Test
+    fun `컴파일 뒤 저장 단계가 실패하면 회원 이프를 환불 원장 행으로 돌려주고 요청을 실패로 남긴다`() {
+        // KNK-2056 T1. STORY 5-5-4 "저장 실패 시 복원". 엔딩 이름 중복은 컴파일 성공 뒤 응답 검증과 저장에서 502가 된다.
+        val member = payingMember()
+        val seed = wallet.balanceOf(member.id)
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스", member.id)
+
+        postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
+
+        assertThat(wallet.balanceOf(member.id)).isEqualTo(seed)
+        val refunds = ledger.findAll().filter { it.reason == com.knk.manyak.credit.dto.CreditReason.REFUND }
+        assertThat(refunds).hasSize(1)
+        assertThat(refunds.single().amount).isEqualTo(creationCost)
+        assertThat(refunds.single().idempotencyKey).startsWith("refund:story:")
+        assertThat(storyRepository.findAll()).isEmpty()
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 단계가 실패하면 회원 체험 사용을 되돌린다`() {
+        // KNK-2056 T1. 체험이 남은 회원은 이프 대신 체험 1회를 쓰고, 저장 실패 시 그 1회를 복원한다.
+        val member = users.save(com.knk.manyak.auth.entity.User(nickname = "체험회원"))
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스", member.id)
+
+        postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
+
+        assertThat(memberTrialUsed(member.id)).isZero()
+        assertThat(ledger.findAll()).isEmpty()
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 단계가 실패하면 게스트 완성 횟수를 되돌린다`() {
+        // KNK-2056 T1. 게스트는 기기 단위 완성 횟수를 예약하고, 저장 실패 시 그 1회를 복원한다.
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502)
+
+        assertThat(trials.usage(null, "test-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION).used).isZero()
+        assertThat(ledger.findAll()).isEmpty()
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 세션 경합 409는 회원 이프를 환불하고 올린 인물 이미지를 지운다`() {
+        // KNK-2056 T2. 진 쪽은 업로드를 마친 뒤 저장 잠금에서 STORY_CREATED를 보고 409를 낸다.
+        val member = payingMember()
+        val seed = wallet.balanceOf(member.id)
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        val storyline = persistStorylineWithGenre("로맨스", member.id)
+        flipSessionToCreatedId = storyline.creationSession.id
+
+        postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(409)
+
+        assertThat(wallet.balanceOf(member.id)).isEqualTo(seed)
+        assertThat(ledger.findAll().filter { it.reason == com.knk.manyak.credit.dto.CreditReason.REFUND }.map { it.amount })
+            .containsExactly(creationCost)
+        assertThat(uploads).hasSize(1)
+        assertThat(deletes).containsExactly(uploads.single().first)
+        assertThat(storyRepository.findAll()).isEmpty()
+    }
+
+    @Test
+    fun `생성 이미지 업로드는 저장 트랜잭션 밖에서 일어난다`() {
+        // KNK-2056 T3. 업로드를 저장 트랜잭션 안으로 옮기면 업로드 시간 내내 DB 커넥션과 행 잠금을 쥔다.
+        characterAppearances = listOf(AiCharacterAppearance("서준", "MALE"))
+        characterImages = listOf(AiCharacterImage("서준", imageBase64 = WEBP_BASE64, contentType = "image/webp"))
+        thumbnailImage = AiThumbnailImage(imageName = "표지", imageBase64 = WEBP_BASE64, contentType = "image/webp")
+        val storyline = persistStorylineWithGenre("로맨스")
+
+        postSimpleStory(storyline).expectStatus().isCreated
+
+        assertThat(uploadInTransaction).hasSize(2).containsOnly(false)
+    }
+
     @Test
     fun `저장 트랜잭션이 실패하면 이미 올린 인물 이미지를 지운다`() {
         // 엔딩 이름 중복으로 502를 내 저장을 롤백시킨다. 업로드는 트랜잭션보다 먼저 끝나 있으므로
@@ -913,9 +1022,9 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     private fun storyCreationTimerCount(outcome: String): Long =
         meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
 
-    private fun persistStorylineWithGenre(genre: String): StoryCreationStoryline {
+    private fun persistStorylineWithGenre(genre: String, ownerId: Long? = null): StoryCreationStoryline {
         val session = sessionRepository.save(
-            StoryCreationSession(userId = null, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
+            StoryCreationSession(userId = ownerId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
         val genreTag = tagRepository.save(
             StoryCreationTag(

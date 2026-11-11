@@ -101,6 +101,7 @@ import java.util.concurrent.Executor
         UserNotificationStore::class,
         DomainNotificationRecorder::class,
         StoryCreationRequestRepository::class,
+        com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository::class,
         ConsentTokenStore::class,
         AdminEligibilityService::class,
         com.knk.manyak.auth.service.AdminCandidateQuery::class,
