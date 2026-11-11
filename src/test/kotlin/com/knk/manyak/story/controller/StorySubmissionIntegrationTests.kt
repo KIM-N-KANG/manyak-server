@@ -324,6 +324,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired
     private lateinit var pushSender: com.knk.manyak.push.service.FcmPushSender
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+    @Autowired private lateinit var recorder: com.knk.manyak.push.inbox.DomainNotificationRecorder
 
     @Test fun `local 알림은 커밋 뒤에만 제출되며 servicePush 설정을 따른다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
@@ -364,6 +365,9 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
         org.junit.jupiter.api.Assertions.assertEquals("STORY_MODERATION_COMPLETED", inbox.single()["type"])
         org.junit.jupiter.api.Assertions.assertEquals("story-moderation:${row.publicId}:${row.attempt}", inbox.single()["message_key"])
         org.junit.jupiter.api.Assertions.assertEquals("검수에서 반려됐어요", inbox.single()["title"])
+        // 내역은 충돌 무시 삽입이라 행 수로는 이중 기록을 못 잡는다. 기록기는 이벤트 구독으로 한 번만 불린다.
+        val recorderSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.DomainNotificationRecorder>(recorder)
+        org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(recorderSpy).invocations.count { it.method.name == "moderated" })
         org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.count { it.method.name == "sendToUser" })
     }
 

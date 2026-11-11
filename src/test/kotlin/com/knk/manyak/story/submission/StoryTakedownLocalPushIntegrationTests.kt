@@ -3,6 +3,7 @@ package com.knk.manyak.story.submission
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.MdcKeys
+import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryTakedownReason
@@ -22,6 +23,7 @@ import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.util.AopTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.concurrent.Executor
@@ -39,6 +41,7 @@ class StoryTakedownLocalPushIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired lateinit var transactionManager: PlatformTransactionManager
     @Autowired lateinit var sender: FcmPushSender
     @Autowired @Qualifier("pushExecutor") lateinit var pushExecutor: Executor
+    @Autowired lateinit var recorder: DomainNotificationRecorder
     private lateinit var admin: User
 
     @BeforeEach fun setup() {
@@ -80,6 +83,10 @@ class StoryTakedownLocalPushIntegrationTests : MockedBoundaryIntegrationTest() {
         assertThat(data["storyId"]).isEqualTo(story.publicId.toString())
         assertThat(data["body"] as String).startsWith("「서린의 약속」은 혐오 표현 사유로")
         assertThat(call.arguments.last()).isEqualTo("story-taken-down:${story.publicId}:${response.takenDownAt.toEpochMilli()}")
+        // 내역은 충돌 무시 삽입이라 행 수로는 이중 기록을 못 잡는다. 기록기는 이벤트 구독으로 한 번만 불리고 내역은 1행이다.
+        val recorderSpy = AopTestUtils.getUltimateTargetObject<DomainNotificationRecorder>(recorder)
+        assertThat(mockingDetails(recorderSpy).invocations.count { it.method.name == "takenDown" }).isEqualTo(1)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications WHERE type = 'STORY_TAKEN_DOWN'", Long::class.java)).isEqualTo(1)
     }
 
     @Test fun `서비스 알림을 끈 소유자는 같은 메시지 ID로 폐기를 기록하고 보내지 않는다`() {

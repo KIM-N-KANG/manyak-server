@@ -4,7 +4,6 @@ import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.entity.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.story.entity.StoryTakedownReason
 import com.knk.manyak.story.entity.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
@@ -63,7 +62,6 @@ class StoryTakedownService(
     private val submissions: StorySubmissionRepository,
     private val official: OfficialStoryAccount,
     private val state: StoryTakedownStateService,
-    private val notifications: DomainNotificationRecorder,
     private val audits: AdminAuditService,
     private val mapper: ObjectMapper,
     private val events: ApplicationEventPublisher,
@@ -98,10 +96,7 @@ class StoryTakedownService(
         val notified = owner.status != UserStatus.DELETED
         val event = StoryTakenDown(owner.id, story.publicId, UsernameTokenRenderer.render(story.title, story.protagonistName),
             request.reasonCode, request.reasonDetail, now)
-        if (notified) {
-            notifications.takenDown(event)
-            events.publishEvent(event)
-        }
+        if (notified) events.publishEvent(event)
         // 감사는 마지막 DB 작업이며 처리자의 권한도 재검사한다. 실패하면 위 변경 전체가 롤백된다.
         audits.recordChange(adminUserId, AdminAuditAction.STORY_TAKEN_DOWN, story.publicId.toString(), event.reason,
             mapper.valueToTree(mapOf("visibility" to previous)), mapper.valueToTree(mapOf(

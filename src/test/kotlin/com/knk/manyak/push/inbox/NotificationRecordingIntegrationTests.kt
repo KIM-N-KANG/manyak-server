@@ -174,6 +174,9 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
         creation.createSimpleStory(request, user.id)
         assertThat(rows()).hasSize(1)
         assertThat(requests.findByRequestId(request.requestId)!!.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+        // 내역은 충돌 무시 삽입이라 행 수로는 이중 기록을 못 잡는다. 기록기는 이벤트 구독으로 한 번만 불린다.
+        val recorderSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject<DomainNotificationRecorder>(recorder)
+        assertThat(mockingDetails(recorderSpy).invocations.count { it.method.name == "completed" }).isEqualTo(1)
     }
 
     @Test fun `내역 삽입 실패는 실제 완성 요청의 완료 기록도 롤백한다`() {
