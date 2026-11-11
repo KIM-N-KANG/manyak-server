@@ -12,6 +12,9 @@ interface StoryCharacterRepository : JpaRepository<StoryCharacter, Long> {
     // 스토리의 인물을 저장 순서(=컴파일 응답 순서)로 조회한다.
     fun findByStoryIdOrderByIdAsc(storyId: Long): List<StoryCharacter>
 
+    // 여러 스토리의 인물을 스토리별 저장 순서로 한 번에 조회한다(검색 문서 묶음 읽기, KNK-2078).
+    fun findByStoryIdInOrderByStoryIdAscIdAsc(storyIds: Collection<Long>): List<StoryCharacter>
+
     /**
      * 인물 행을 비관적 쓰기 락으로 조회한다(KNK-1126). 이미지 상한(인물당 10장) 판정이 "개수를 읽고 → 넣는다"라
      * 잠금이 없으면 상한 직전의 동시 추가 둘이 모두 통과해 11장이 되고 `sort_order`도 겹친다.

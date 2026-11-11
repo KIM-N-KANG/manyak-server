@@ -111,4 +111,39 @@ class StorySearchDocumentReaderIntegrationTests : MockedBoundaryIntegrationTest(
         )
         assertThat(json(deleted.id + 1_000)).isNull()
     }
+
+    @Test fun `묶음 읽기와 페이지 읽기는 스토리마다 단건 읽기와 같은 문서를 만들고 스토리 사이에 값이 섞이지 않는다`() {
+        val owner = users.save(User(nickname = "작가"))
+        val other = users.save(User(nickname = "다른 작가"))
+        val fans = (0 until 3).map { users.save(User(nickname = "독자$it")) }
+        // 인물, 채팅(포크 포함), 좋아요가 있는 스토리 둘을 같은 작성자로 두고 값이 서로 다르게 한다.
+        val rich = stories.save(Story(userId = owner.id, title = "{username}의 약속", protagonistName = "서린").apply {
+            genre = "판타지, 미스터리"
+        })
+        characters.save(StoryCharacter(story = rich, name = "하람"))
+        characters.save(StoryCharacter(story = rich, name = "가온"))
+        chats.save(StoryChat(userId = fans[0].id, storyId = rich.id).apply { currentTurn = 5; hiddenTurnCount = 2; regeneratedCount = 1 })
+        chats.save(StoryChat(userId = fans[1].id, storyId = rich.id, forkedFromTurn = 2).apply { currentTurn = 6 })
+        fans.forEach { likes.save(StoryLike(userId = it.id, storyId = rich.id)) }
+        val sibling = stories.save(Story(userId = owner.id, title = "같은 작가의 다른 스토리"))
+        characters.save(StoryCharacter(story = sibling, name = "도윤"))
+        chats.save(StoryChat(userId = fans[2].id, storyId = sibling.id).apply { currentTurn = 4 })
+        likes.save(StoryLike(userId = fans[0].id, storyId = sibling.id))
+        val plain = stories.save(Story(userId = other.id, title = "아무것도 없음"))
+        val guest = stories.save(Story(userId = null, title = "게스트"))
+        val privateStory = stories.save(Story(userId = other.id, title = "비공개", visibility = StoryVisibility.PRIVATE))
+        val deleted = stories.save(Story(userId = owner.id, title = "삭제").apply { deletedAt = Instant.parse("2026-11-02T00:00:00Z") })
+        val ids = listOf(rich, sibling, plain, guest, privateStory, deleted).map { it.id }
+        val single = ids.map { json(it)!! }
+
+        val batch = reader.readAll(ids.reversed() + (ids.max() + 1_000)).map(mapper::writeValueAsString)
+        val page = reader.readPage(0).map(mapper::writeValueAsString)
+
+        assertThat(batch).containsExactlyElementsOf(single)
+        assertThat(page).containsExactlyElementsOf(single)
+        assertThat(single[0]).contains(""""characterNames":["하람","가온"]""", ""","turnCount":12,"likeCount":3,""")
+        assertThat(single[1]).contains(""""characterNames":["도윤"]""", ""","turnCount":4,"likeCount":1,""")
+        assertThat(single[2]).contains(""""characterNames":[]""", ""","turnCount":0,"likeCount":0,""")
+        assertThat(reader.readAll(emptyList())).isEmpty()
+    }
 }
