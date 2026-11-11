@@ -8,6 +8,7 @@ import com.google.firebase.messaging.MessagingErrorCode
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
@@ -46,7 +47,7 @@ class FcmPushSenderTest {
     private val repository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val registry = SimpleMeterRegistry()
-    private val accounts = com.knk.manyak.auth.service.AccountQueryService(userRepository)
+    private val accounts = AccountQueryService(userRepository)
     private val sender = FcmPushSender(messaging, repository, accounts, registry)
 
     @BeforeEach

@@ -2,6 +2,7 @@ package com.knk.manyak.push
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.notice.dto.NoticeStatus
 import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
@@ -12,6 +13,7 @@ import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.push.service.*
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
@@ -32,7 +34,7 @@ class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var notices: NoticeRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var users: UserRepository
-    @Autowired private lateinit var targets: com.knk.manyak.push.repository.PushTargetRepository
+    @Autowired private lateinit var targets: PushTargetRepository
     @Autowired private lateinit var sender: FcmPushSender
     @Autowired private lateinit var store: com.knk.manyak.push.outbox.PushOutboxStore
     @Autowired private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
@@ -56,7 +58,7 @@ class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
         owner = users.save(User(nickname = "수신 회원", marketingPushAgreedAt = Instant.EPOCH))
         tokens.save(DevicePushToken(userId = owner.id, token = "notice-target", platform = PushPlatform.ANDROID))
     }
-    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, stories,
+    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, stories,
         Clock.fixed(at, ZoneOffset.UTC), if (remote) outbox else null, notifications = notifications, notices = notices)
     private fun notice(tag: NoticeTag = NoticeTag.SERVICE, published: Boolean = true) = notices.save(Notice(
         title = "원문", body = "원문 본문", tag = tag, status = if (published) NoticeStatus.PUBLISHED else NoticeStatus.DRAFT,

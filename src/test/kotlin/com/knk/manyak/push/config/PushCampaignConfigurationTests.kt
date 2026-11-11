@@ -1,6 +1,7 @@
 package com.knk.manyak.push.config
 
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
@@ -22,7 +23,7 @@ class PushCampaignConfigurationTests {
         .withInitializer { it.beanFactory.conversionService = ApplicationConversionService.getSharedInstance() }
         .withUserConfiguration(PromotionPushService::class.java)
         .withBean(PushCampaignRepository::class.java, { campaigns })
-        .withBean(com.knk.manyak.auth.service.AccountQueryService::class.java, { com.knk.manyak.auth.service.AccountQueryService(mock(UserRepository::class.java)) })
+        .withBean(AccountQueryService::class.java, { AccountQueryService(mock(UserRepository::class.java)) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
         .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
         .withBean(NoticeRepository::class.java, { mock(NoticeRepository::class.java) })

@@ -8,6 +8,7 @@ import com.knk.manyak.push.repository.CampaignDeliverySummaryRepository
 import com.knk.manyak.push.repository.CampaignDeliverySummary
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.repository.AdminCampaignListRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -21,7 +22,7 @@ import java.util.UUID
 @Service
 class AdminCampaignService(
     private val campaigns: PushCampaignRepository,
-    private val targets: com.knk.manyak.push.repository.PushTargetRepository,
+    private val targets: PushTargetRepository,
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
     private val deliveries: CampaignDeliverySummaryRepository,

@@ -2,6 +2,7 @@ package com.knk.manyak.push.inbox
 
 import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
+import com.knk.manyak.push.repository.PushTargetRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
@@ -16,7 +17,7 @@ data class NotificationRound(val pushTargetIds: List<Long>, val recordedPushes: 
 @Service
 class ScheduledNotificationWriter(
     private val accounts: AccountQueryService,
-    private val targets: com.knk.manyak.push.repository.PushTargetRepository,
+    private val targets: PushTargetRepository,
     private val store: UserNotificationStore,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val base: String,
     private val clock: Clock = Clock.systemUTC(),

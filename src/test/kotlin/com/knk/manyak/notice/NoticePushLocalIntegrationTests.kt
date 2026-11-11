@@ -4,6 +4,7 @@ import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.notice.entity.Notice
 import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.push.dto.PushKind
@@ -59,7 +60,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         user("정지", status = UserStatus.SUSPENDED)
         val notice = notices.save(Notice(title = "점검", body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
         assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
@@ -77,7 +78,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         user("서비스만")
         val notice = notices.save(Notice(title = title, body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.EVENT, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
         assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
@@ -105,7 +106,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
                 campaignService.create(target.id, com.knk.manyak.push.dto.AdminCampaignRequest(
                     title = notificationTitle, body = notificationBody, noticeId = notice.noticeId, reason = "연결"))
                 val at = Instant.now().plusSeconds(1)
-                val service = PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)
+                val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)
                 assertThat(service.sendDue(at).single().sent).isEqualTo(1)
                 val expectedTitle = if (tag.pushKind == PushKind.MARKETING) "(광고) $notificationTitle" else notificationTitle
                 val expectedBody = if (tag.pushKind == PushKind.MARKETING) "$notificationBody\n수신거부: 마이 > 알림 설정" else notificationBody

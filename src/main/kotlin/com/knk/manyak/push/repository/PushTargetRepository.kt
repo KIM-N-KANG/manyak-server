@@ -58,7 +58,7 @@ interface PushTargetRepository : Repository<DevicePushToken, Long> {
      * 않는다). 한쪽 조건이 바뀔 때 다른 쪽 발송이 조용히 달라지는 결합이 중복보다 비싸다.
      *
      * **야간 판정은 여기서 하지 않는다.** 야간 동의 여부는 회원마다 발송 직전에
-     * [com.knk.manyak.auth.dto.PushRecipient.canReceiveMarketingPush]로 본다 — 야간에 예약된 캠페인은 거부·연기가
+     * [com.knk.manyak.push.service.canReceiveMarketingPush]로 본다 — 야간에 예약된 캠페인은 거부·연기가
      * 아니라 **야간 동의자에게만** 나가고, 나머지는 `skipped_count`로 남아야 하기 때문이다.
      *
      * 엔티티가 아니라 id만 돌려주는 이유도 출석과 같다: 호출부가 발송 직전에 다시 읽으므로 스냅샷이 쓸모없다.
@@ -75,16 +75,36 @@ interface PushTargetRepository : Repository<DevicePushToken, Long> {
     )
     fun findMarketingPushTargetIds(): List<Long>
 
-    @Query("""SELECT u.id FROM User u WHERE u.status = com.knk.manyak.auth.dto.UserStatus.ACTIVE
-        AND u.servicePushEnabled = true
-        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
-        ORDER BY u.id""")
+    /**
+     * 공지 등 서비스 알림 회차 대상 id. `ACTIVE`, 서비스 알림 켬, 등록된 기기 토큰이 하나라도 있는 회원이다.
+     * 네이티브 SQL은 KNK-2056 전 JPQL을 Hibernate가 바꾼 SQL과 같은 조건, 같은 정렬이다.
+     */
+    @Query(
+        value = """
+        SELECT u.id FROM users u
+        WHERE u.status = 'ACTIVE'
+          AND u.service_push_enabled = true
+          AND EXISTS (SELECT t.id FROM device_push_tokens t WHERE t.user_id = u.id)
+        ORDER BY u.id
+        """,
+        nativeQuery = true,
+    )
     fun findServicePushTargetIds(): List<Long>
 
-    @Query("""SELECT COUNT(u) FROM User u WHERE u.status = com.knk.manyak.auth.dto.UserStatus.ACTIVE
-        AND EXISTS (SELECT t.id FROM DevicePushToken t WHERE t.userId = u.id)
-        AND ((:marketing = false AND u.servicePushEnabled = true)
-          OR (:marketing = true AND u.marketingPushAgreedAt IS NOT NULL))
-        AND (:nightOnly = false OR u.marketingPushNightAgreedAt IS NOT NULL)""")
-    fun countPushTargets(marketing: Boolean, nightOnly: Boolean): Long
+    /**
+     * 캠페인 대상 수 미리보기. [marketing]이면 광고 동의자, 아니면 서비스 알림 켬인 회원을 세고, [nightOnly]면 야간 동의자만 센다.
+     * 네이티브 SQL은 KNK-2056 전 JPQL을 Hibernate가 바꾼 SQL과 같은 조건이다.
+     */
+    @Query(
+        value = """
+        SELECT COUNT(u.id) FROM users u
+        WHERE u.status = 'ACTIVE'
+          AND EXISTS (SELECT t.id FROM device_push_tokens t WHERE t.user_id = u.id)
+          AND ((:marketing = false AND u.service_push_enabled = true)
+            OR (:marketing = true AND u.marketing_push_agreed_at IS NOT NULL))
+          AND (:nightOnly = false OR u.marketing_push_night_agreed_at IS NOT NULL)
+        """,
+        nativeQuery = true,
+    )
+    fun countPushTargets(@Param("marketing") marketing: Boolean, @Param("nightOnly") nightOnly: Boolean): Long
 }

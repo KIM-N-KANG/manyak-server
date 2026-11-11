@@ -4,10 +4,12 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.push.scheduler.PromotionPushScheduler
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
@@ -30,7 +32,7 @@ class PromotionPushCleanupFailureTests {
         val clock = Clock.fixed(now, ZoneOffset.UTC)
         val campaigns = mock(PushCampaignRepository::class.java)
         val users = mock(UserRepository::class.java)
-        val targets = mock(com.knk.manyak.push.repository.PushTargetRepository::class.java)
+        val targets = mock(PushTargetRepository::class.java)
         val sender = mock(FcmPushSender::class.java)
         val expired = PushCampaign(id = 1, title = "만료", body = "본문", scheduledAt = now,
             status = PushCampaignStatus.SENDING, startedAt = now.minusSeconds(1800))
@@ -52,7 +54,7 @@ class PromotionPushCleanupFailureTests {
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {
-            PromotionPushScheduler(PromotionPushService(campaigns, com.knk.manyak.auth.service.AccountQueryService(users), sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(com.knk.manyak.auth.service.AccountQueryService(users), targets, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java)), notices = mock(com.knk.manyak.notice.repository.NoticeRepository::class.java)), StructuredLogger(), clock).run()
+            PromotionPushScheduler(PromotionPushService(campaigns, AccountQueryService(users), sender, mock(StoryRepository::class.java), clock, notifications = com.knk.manyak.push.inbox.ScheduledNotificationWriter(AccountQueryService(users), targets, mock(com.knk.manyak.push.inbox.UserNotificationStore::class.java), "https://manyak.app", clock, mock(PushCampaignRepository::class.java)), notices = mock(com.knk.manyak.notice.repository.NoticeRepository::class.java)), StructuredLogger(), clock).run()
             verify(campaigns).claim(scheduled.id, now)
             verify(targets).findMarketingPushTargetIds()
             verify(campaigns).finishIfOwned(scheduled.id, now, PushCampaignStatus.SENT, 0, 0, now)
