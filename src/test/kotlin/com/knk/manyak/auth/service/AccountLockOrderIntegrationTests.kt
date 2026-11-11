@@ -67,6 +67,7 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var notifications: DomainNotificationRecorder
     @Autowired private lateinit var pushTokens: DevicePushTokenService
     @Autowired private lateinit var locks: AccountLockService
+    @Autowired private lateinit var commands: AccountCommandService
     @Autowired private lateinit var invites: com.knk.manyak.invite.service.InviteService
     @Autowired private lateinit var migration: com.knk.manyak.migration.service.GuestDataMigrationService
     @Autowired private lateinit var pushSettings: com.knk.manyak.push.service.PushSettingsService
@@ -183,6 +184,24 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
         }).isEmpty()
         val locked = TransactionTemplate(transactionManager).execute { locks.lock(member.id) }
         assertThat(locked).isEqualTo(com.knk.manyak.auth.dto.AccountStatusView(member.id, member.publicId, UserStatus.ACTIVE))
+    }
+
+    @Test fun `계정 명령은 트랜잭션 밖에서 부르면 쓰지 않고 거부한다`() {
+        org.assertj.core.api.Assertions.assertThatThrownBy { commands.assignInviteCode(member.id, "NOTX2056") }
+            .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+        assertThat(users.findById(member.id).orElseThrow().inviteCode).isNull()
+    }
+
+    @Test fun `회원 행을 잠그지 않고 계정 명령을 부르면 실패하고 쓰지 않는다`() {
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            TransactionTemplate(transactionManager).executeWithoutResult { commands.assignInviteCode(member.id, "NOLK2056") }
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("먼저 잠가야")
+        assertThat(users.findById(member.id).orElseThrow().inviteCode).isNull()
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            locks.lock(member.id)
+            commands.assignInviteCode(member.id, "LOCK2056")
+        }
+        assertThat(users.findById(member.id).orElseThrow().inviteCode).isEqualTo("LOCK2056")
     }
 
     private companion object {
