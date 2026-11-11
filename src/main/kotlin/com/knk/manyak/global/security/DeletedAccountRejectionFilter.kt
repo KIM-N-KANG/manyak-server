@@ -65,9 +65,14 @@ class DeletedAccountRejectionFilter(
                 )))
                 return
             }
-            // 판정하며 읽은 회원 PK를 남겨 [CurrentUserIdArgumentResolver]가 같은 회원을 다시 조회하지 않게 한다.
+            // 판정하며 읽은 회원 PK를 판정한 subject와 함께 남겨 [CurrentUserIdArgumentResolver]가 같은 회원을 다시 조회하지 않게 한다.
             // 요청 속성은 서버 코드만 쓸 수 있고 클라이언트 입력(헤더, 파라미터)으로는 만들 수 없다.
-            decision?.userId?.let { request.setAttribute(CurrentUserIdArgumentResolver.RESOLVED_USER_ID_ATTRIBUTE, it) }
+            decision?.userId?.let {
+                request.setAttribute(
+                    CurrentUserIdArgumentResolver.RESOLVED_USER_ID_ATTRIBUTE,
+                    CurrentUserIdArgumentResolver.ResolvedUserId(authentication.token.subject, it),
+                )
+            }
         }
         filterChain.doFilter(request, response)
     }

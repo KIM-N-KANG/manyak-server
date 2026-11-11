@@ -23,9 +23,15 @@ class CurrentUserIdArgumentResolverTest {
 
     @AfterEach fun clear() = SecurityContextHolder.clearContext()
 
-    private fun resolve(attribute: Long?): Long? {
+    /** 필터가 [subject]를 판정하며 회원 PK [attribute]를 남긴 요청. 기본은 현재 토큰과 같은 subject다. */
+    private fun resolve(attribute: Long?, subject: String = publicId.toString()): Long? {
         val request = MockHttpServletRequest("GET", "/api/v1/users/me/credits")
-        attribute?.let { request.setAttribute(CurrentUserIdArgumentResolver.RESOLVED_USER_ID_ATTRIBUTE, it) }
+        attribute?.let {
+            request.setAttribute(
+                CurrentUserIdArgumentResolver.RESOLVED_USER_ID_ATTRIBUTE,
+                CurrentUserIdArgumentResolver.ResolvedUserId(subject, it),
+            )
+        }
         return resolver.resolveArgument(org.mockito.Mockito.mock(org.springframework.core.MethodParameter::class.java), null, ServletWebRequest(request), null)
     }
 
@@ -39,6 +45,13 @@ class CurrentUserIdArgumentResolverTest {
         authenticate()
         assertThat(resolve(attribute = 7L)).isEqualTo(7L)
         assertThat(lookups).isEmpty()
+    }
+
+    @Test
+    fun `속성의 subject가 현재 토큰의 subject와 다르면 속성을 쓰지 않고 조회한다`() {
+        authenticate()
+        assertThat(resolve(attribute = 7L, subject = UUID.randomUUID().toString())).isEqualTo(42L)
+        assertThat(lookups).containsExactly(publicId)
     }
 
     @Test

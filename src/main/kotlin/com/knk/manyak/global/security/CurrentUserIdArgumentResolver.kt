@@ -21,8 +21,9 @@ import org.springframework.web.server.ResponseStatusException
  *
  * optional 인증 경로에서 익명 호출은 자연히 null이 되고, 유효 토큰만 user_id 귀속으로 이어진다.
  *
- * 앱 체인의 [DeletedAccountRejectionFilter]가 같은 토큰 주체를 판정하며 회원 PK를 [RESOLVED_USER_ID_ATTRIBUTE]에 남기면
- * 그 값을 쓰고 다시 조회하지 않는다(KNK-2068). 회원의 id와 public_id는 바뀌지 않고 회원 행은 지워지지 않으므로(탈퇴는 상태 변경)
+ * 앱 체인의 [DeletedAccountRejectionFilter]가 토큰 주체를 판정하며 회원 PK를 [RESOLVED_USER_ID_ATTRIBUTE]에 남기면,
+ * 그 속성의 subject가 현재 인증 토큰의 subject와 같을 때만 그 값을 쓰고 다시 조회하지 않는다(KNK-2068).
+ * 필터 뒤에서 인증이 다른 주체로 바뀌면 속성을 쓰지 않고 조회한다. 회원의 id와 public_id는 바뀌지 않고 회원 행은 지워지지 않으므로(탈퇴는 상태 변경)
  * 다시 조회해도 같은 값이다. 속성이 없으면(필터를 타지 않은 경로, 회원 없음) 전과 같이 포트로 조회한다.
  */
 @Component
@@ -44,14 +45,19 @@ class CurrentUserIdArgumentResolver(
         if (authentication !is JwtAuthenticationToken) {
             return null
         }
-        (webRequest.getAttribute(RESOLVED_USER_ID_ATTRIBUTE, RequestAttributes.SCOPE_REQUEST) as? Long)?.let { return it }
+        (webRequest.getAttribute(RESOLVED_USER_ID_ATTRIBUTE, RequestAttributes.SCOPE_REQUEST) as? ResolvedUserId)
+            ?.takeIf { it.subject == authentication.token.subject }
+            ?.let { return it.userId }
         val publicId = parsePublicIdOrNull(authentication.token.subject) ?: return null
         // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
         return accountAccess.userIdOf(publicId)
     }
 
     companion object {
-        /** 탈퇴 필터가 판정한 회원 PK를 담는 요청 속성 이름. 서버 코드만 쓴다. */
+        /** 탈퇴 필터가 판정한 회원 PK를 담는 요청 속성 이름. 값은 [ResolvedUserId]이며 서버 코드만 쓴다. */
         val RESOLVED_USER_ID_ATTRIBUTE: String = CurrentUserIdArgumentResolver::class.java.name + ".RESOLVED_USER_ID"
     }
+
+    /** 탈퇴 필터가 토큰 [subject]를 판정하며 읽은 회원 PK. 리졸버는 subject가 현재 토큰과 같을 때만 쓴다. */
+    data class ResolvedUserId(val subject: String, val userId: Long)
 }
