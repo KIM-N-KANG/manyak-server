@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
@@ -21,7 +21,7 @@ import java.util.UUID
 class StorySubmissionService(
     private val submissions: StorySubmissionRepository,
     private val stories: StoryRepository,
-    private val users: UserRepository,
+    private val locks: AccountLockService,
     private val forms: SubmissionFormAssembler,
     private val edit: StoryEditService,
     private val mapper: ObjectMapper,
@@ -137,7 +137,7 @@ class StorySubmissionService(
     }
 
     private fun requireMember(userId: Long) {
-        val user = users.findByIdForUpdate(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        val user = locks.lock(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
         if (user.status == UserStatus.DELETED) throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
         suspension.requireActive(userId)
     }

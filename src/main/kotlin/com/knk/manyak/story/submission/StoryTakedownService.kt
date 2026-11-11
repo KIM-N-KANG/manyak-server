@@ -3,7 +3,7 @@ package com.knk.manyak.story.submission
 import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
@@ -58,7 +58,7 @@ data class StoryTakedownCleared(val storyId: UUID, val submissionId: UUID, val v
 @Service
 class StoryTakedownService(
     private val stories: StoryRepository,
-    private val users: UserRepository,
+    private val locks: AccountLockService,
     private val submissions: StorySubmissionRepository,
     private val official: OfficialStoryAccount,
     private val state: StoryTakedownStateService,
@@ -75,7 +75,7 @@ class StoryTakedownService(
         val ownerId = candidate.userId ?: conflict()
         entityManager.detach(candidate)
         // 결과 반영·소유자 수정·탈퇴와 같은 순서. 대상 상태는 잠금을 얻은 뒤 다시 읽는다.
-        val owner = users.findByIdForUpdate(ownerId) ?: conflict()
+        val owner = locks.lock(ownerId) ?: conflict()
         val story = stories.findByPublicIdForUpdate(storyId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         if (story.deletedAt != null || story.takenDownAt != null || story.userId != owner.id || owner.id == official.officialUserId()) conflict()
         val previous = story.visibility

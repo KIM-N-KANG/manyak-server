@@ -88,7 +88,7 @@ class DomainNotificationRecorderListenerTests {
                 context.registerBean(UserNotificationStore::class.java, Supplier { store })
                 context.registerBean(UserRepository::class.java, Supplier { users })
                 context.registerBean(Clock::class.java, Supplier { Clock.fixed(Instant.parse("2026-11-11T00:00:00Z"), ZoneOffset.UTC) })
-                context.register(DomainNotificationRecorder::class.java)
+                context.register(DomainNotificationRecorder::class.java, com.knk.manyak.auth.service.AccountLockService::class.java)
                 context.refresh()
                 val recorder = context.getBean(DomainNotificationRecorder::class.java)
                 assertThat(mockingDetails(AopTestUtils.getUltimateTargetObject<Any>(recorder)).isMock).isFalse()

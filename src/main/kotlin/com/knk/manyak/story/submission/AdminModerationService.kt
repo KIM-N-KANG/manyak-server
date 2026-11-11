@@ -18,7 +18,7 @@ class AdminModerationService(
     private val store: AdminModerationStore,
     private val audits: AdminAuditService,
     private val mapper: ObjectMapper,
-    private val users: com.knk.manyak.auth.repository.UserRepository,
+    private val locks: com.knk.manyak.auth.service.AccountLockService,
     private val reads: AdminSubmissionReadRepository,
     private val submissions: StorySubmissionRepository,
     private val submissionForms: StorySubmissionService,
@@ -67,7 +67,7 @@ class AdminModerationService(
     @Transactional
     fun release(adminUserId: Long, submissionId: UUID, reason: String): AdminHoldReleased {
         // 감사 FK의 처리자 잠금을 제출본보다 먼저 확보한다. 처리자 소유 제출본의 취소와 잠금 순서를 맞춘다.
-        users.findByIdForUpdate(adminUserId) ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "관리자 권한이 없습니다.")
+        locks.lock(adminUserId) ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "관리자 권한이 없습니다.")
         val previous = store.lock(submissionId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "제출본을 찾을 수 없습니다.")
         val now = Instant.now()
         if (store.release(submissionId, now) != 1) throw ResponseStatusException(HttpStatus.CONFLICT, "보류 중인 제출본이 아닙니다.")

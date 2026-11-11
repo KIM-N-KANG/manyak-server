@@ -1,5 +1,7 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.submission.StoryModerationCompleted
 import com.knk.manyak.story.submission.StoryTakenDown
@@ -22,7 +24,7 @@ import java.util.UUID
 @Component
 class DomainNotificationRecorder(
     private val store: UserNotificationStore,
-    private val users: com.knk.manyak.auth.repository.UserRepository,
+    private val locks: AccountLockService,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val base: String,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -31,8 +33,8 @@ class DomainNotificationRecorder(
     @Transactional(propagation = Propagation.MANDATORY)
     fun completed(event: StoryCompletedEvent) {
         // 완료 기록이 먼저 잡은 사용자 잠금은 같은 트랜잭션에서 재사용한다. 탈퇴가 먼저 커밋됐으면 내역을 다시 만들지 않는다.
-        val user = users.findByIdForUpdate(event.userId) ?: return
-        if (user.status == com.knk.manyak.auth.dto.UserStatus.DELETED) return
+        val user = locks.lock(event.userId) ?: return
+        if (user.status == UserStatus.DELETED) return
         val type = NotificationType.STORY_COMPLETED
         store.insert(UserNotification(userId = event.userId, messageKey = "story-completed:${event.requestId}",
             type = type, title = "스토리가 완성됐어요", body = event.title,

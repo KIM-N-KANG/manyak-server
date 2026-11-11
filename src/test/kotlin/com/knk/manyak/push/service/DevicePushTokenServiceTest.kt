@@ -26,7 +26,7 @@ class DevicePushTokenServiceTest {
 
     private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
-    private val service = DevicePushTokenService(devicePushTokenRepository, userRepository)
+    private val service = DevicePushTokenService(devicePushTokenRepository, com.knk.manyak.auth.service.AccountLockService(userRepository))
 
     private fun lockedUser(id: Long, status: UserStatus): User =
         User(id = id, nickname = "푸시유저", status = status).also {

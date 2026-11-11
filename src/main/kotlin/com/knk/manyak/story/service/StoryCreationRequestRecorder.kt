@@ -38,7 +38,7 @@ class StoryCreationRequestRecorder(
     private val repository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
     private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
-    private val users: com.knk.manyak.auth.repository.UserRepository,
+    private val locks: com.knk.manyak.auth.service.AccountLockService,
     // 이 시간(초)보다 오래 PENDING인 행은 실행 중 프로세스가 죽은 것으로 보고 재실행을 허용한다(무한 409 방지).
     // 최장 생성 동작(스토리 완성 AI 120초)보다 충분히 커, 진행 중인 정상 요청을 가로채지 않는다.
     @param:Value("\${manyak.story.pending-reclaim-after-seconds:300}")
@@ -216,7 +216,7 @@ class StoryCreationRequestRecorder(
     ): Long? =
         try {
             txTemplate.execute {
-                if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
+                if (draftId != null && ownerUserId != null) locks.lock(ownerUserId)
                 val row = repository.saveAndFlush(
                     StoryCreationRequest(
                         requestId = requestId,
@@ -242,7 +242,7 @@ class StoryCreationRequestRecorder(
         txTemplate.execute {
             // users → 생성 요청 → 초안 순서로 잠근다.
             // replay·진행 중 충돌은 초안을 건드리지 않는다.
-            if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
+            if (draftId != null && ownerUserId != null) locks.lock(ownerUserId)
             val row = repository.findByRequestIdForUpdate(requestId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
             val claim = resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
@@ -315,7 +315,7 @@ class StoryCreationRequestRecorder(
         txTemplate.execute {
             // users → 생성 요청 → 초안 순서로 잠근다.
             // 소유자만 비잠금 조회해 대기 전에 엔티티 상태가 영속성 컨텍스트에 남지 않게 한다. 게스트는 사용자 잠금 없음.
-            repository.findUserIdById(id)?.let { users.findByIdForUpdate(it) }
+            repository.findUserIdById(id)?.let { locks.lock(it) }
             val row = repository.findByIdForUpdate(id)
                 ?: throw IllegalStateException("Story creation request row $id disappeared")
             row.status = status

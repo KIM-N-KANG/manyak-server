@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.global.observability.MdcTaskDecorator
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.UpdateStoryRequest
@@ -75,7 +75,7 @@ class SubmissionExecutor(
 class SubmissionTransactions(
     private val submissions: StorySubmissionRepository,
     private val stories: StoryRepository,
-    private val users: UserRepository,
+    private val locks: AccountLockService,
     private val creation: GeneralStoryCreationService,
     private val edit: StoryEditService,
     private val forms: SubmissionFormAssembler,
@@ -148,7 +148,7 @@ class SubmissionTransactions(
         val storyId = candidate.storyId
         entityManager.detach(candidate)
         // 회원 탈퇴와 직렬화한 뒤 스토리 → 제출본 → 인물 순으로 잠근다.
-        val user = users.findByIdForUpdate(userId) ?: return null
+        val user = locks.lock(userId) ?: return null
         if (user.status == UserStatus.DELETED) return null
         if (storyId != null) {
             val story = stories.findById(storyId).orElse(null) ?: return null

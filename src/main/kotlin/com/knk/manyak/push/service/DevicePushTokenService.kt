@@ -1,6 +1,6 @@
 package com.knk.manyak.push.service
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.dto.PushPlatform
@@ -22,7 +22,7 @@ import java.time.Instant
 @Service
 class DevicePushTokenService(
     private val devicePushTokenRepository: DevicePushTokenRepository,
-    private val userRepository: UserRepository,
+    private val locks: AccountLockService,
 ) {
 
     /**
@@ -94,7 +94,7 @@ class DevicePushTokenService(
      * 정지 회원의 기기가 알림을 계속 받아서도, 탈퇴와의 경합이 DELETED 회원에게 토큰을 남겨서도 안 된다.
      */
     private fun requireActiveUser(userId: Long) {
-        val user = userRepository.findByIdForUpdate(userId)
+        val user = locks.lock(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         requireActiveStatus(user.status)
     }
