@@ -147,7 +147,6 @@ class SimpleStoryCreationService(
     private val storyPublicSnapshotService: StoryPublicSnapshotService,
     // 완성 푸시 발행(KNK-1115). 수신은 커밋 뒤(StoryCompletionPushListener)라 발송 실패가 생성을 되돌리지 않는다.
     private val eventPublisher: ApplicationEventPublisher,
-    private val notifications: com.knk.manyak.push.inbox.DomainNotificationRecorder,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -668,8 +667,7 @@ class SimpleStoryCreationService(
             onCompleted = completionOwnerUserId?.let { ownerId ->
                 { response: SimpleStoryCreateResponse ->
                     val event = StoryCompletedEvent(userId = ownerId, requestId = request.requestId, storyPublicId = response.id, title = response.title)
-                    // StoryCreationRequestRecorder가 연 완료 기록 트랜잭션에 내역과 원격 아웃박스를 함께 쓴다.
-                    notifications.completed(event)
+                    // StoryCreationRequestRecorder가 연 완료 기록 트랜잭션에서 구독자가 내역과 원격 아웃박스를 함께 쓴다.
                     eventPublisher.publishEvent(event)
                 }
             },

@@ -1,2 +1,0 @@
-push -> story
-story -> push
