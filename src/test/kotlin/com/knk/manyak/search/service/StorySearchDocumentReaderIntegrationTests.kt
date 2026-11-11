@@ -57,15 +57,17 @@ class StorySearchDocumentReaderIntegrationTests : MockedBoundaryIntegrationTest(
         // 인물은 이름 순서와 저장(id) 순서가 반대가 되게 둔다. 문서는 id 순서다.
         characters.save(StoryCharacter(story = story, name = "하람"))
         characters.save(StoryCharacter(story = story, name = "가온"))
-        // 턴 합계는 current + hidden + regenerated - forkedFrom이다. 포크 채팅으로 차감 항까지 고정한다: (5 + 2 + 1) + (6 - 2) = 12.
+        // 턴 합계는 current + hidden + regenerated - forkedFrom이고 삭제된 채팅도 포함한다.
+        // 포크 채팅으로 차감 항을, 삭제된 채팅으로 포함 규칙을 고정한다: (5 + 2 + 1) + (6 - 2) + 3 = 15.
         chats.save(StoryChat(userId = fans[0].id, storyId = story.id).apply { currentTurn = 5; hiddenTurnCount = 2; regeneratedCount = 1 })
         chats.save(StoryChat(userId = fans[1].id, storyId = story.id, forkedFromTurn = 2).apply { currentTurn = 6 })
+        chats.save(StoryChat(userId = fans[2].id, storyId = story.id).apply { currentTurn = 3; deletedAt = Instant.parse("2026-11-02T00:00:00Z") })
         fans.forEach { likes.save(StoryLike(userId = it.id, storyId = story.id)) }
 
         assertThat(json(story.id)).isEqualTo(
             """{"publicId":"${id(1)}","title":"서린의 약속","oneLineIntro":"서린이 돌아온다","genres":["판타지","미스터리"],""" +
                 """"characterNames":["하람","가온"],"thumbnailUrlSm":"https://cdn.example/a.png",""" +
-                """"author":{"id":null,"nickname":"작가 원본"},"turnCount":12,"likeCount":3,"createdAt":1793502245678,"visible":true}""",
+                """"author":{"id":null,"nickname":"작가 원본"},"turnCount":15,"likeCount":3,"createdAt":1793502245678,"visible":true}""",
         )
     }
 

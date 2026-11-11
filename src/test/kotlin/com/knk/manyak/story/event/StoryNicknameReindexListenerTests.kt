@@ -14,15 +14,14 @@ class StoryNicknameReindexListenerTests {
     private val events = mock(ApplicationEventPublisher::class.java)
 
     @Test
-    fun `닉네임이 바뀐 회원의 삭제되지 않은 소유 스토리마다 색인 요청을 발행한다`() {
+    fun `닉네임이 바뀐 회원의 삭제되지 않은 소유 스토리 전체를 묶음 색인 요청 하나로 발행한다`() {
         `when`(stories.findActiveIdsByUserId(7)).thenReturn(listOf(11, 12))
 
         StoryNicknameReindexListener(stories, events).onNicknameChanged(UserNicknameChangedEvent(7))
 
         val order = inOrder(stories, events)
         order.verify(stories).findActiveIdsByUserId(7)
-        order.verify(events).publishEvent(StoryIndexRequestedEvent(11))
-        order.verify(events).publishEvent(StoryIndexRequestedEvent(12))
+        order.verify(events).publishEvent(StoriesIndexRequestedEvent(listOf(11, 12)))
         verifyNoMoreInteractions(stories, events)
     }
 

@@ -123,6 +123,50 @@ class StorySearchOpenSearchTests {
         }
     }
 
+    @Test
+    fun `실제 OpenSearch에서 묶음 색인은 단건 색인과 같은 문서와 검색 결과를 만든다`() {
+        containerHttpClient(URI.create(container.httpHostAddress)).use { http ->
+            AwsSdk2Transport(http, "localhost", Region.AP_NORTHEAST_2,
+                AwsSdk2TransportOptions.builder().setMapper(StorySearchConfig.searchJsonMapper())
+                    .setCredentials(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()).use { transport ->
+                val client = OpenSearchClient(transport)
+                val hasNori = container.execInContainer("bin/opensearch-plugin", "list").stdout.lineSequence().any { it.trim() == "analysis-nori" }
+                val singleIndex = "stories-single-test"
+                val bulkIndex = "stories-bulk-test"
+                listOf(singleIndex, bulkIndex).forEach { client.indices().create(StorySearchIndexAdmin.createRequest(it, standardAnalyzer = !hasNori)) }
+                val documents = listOf(doc("왕국", "여행", 1), doc("여행", "왕국", 2), doc("왕국", "여행", 3, false))
+                val ids = listOf(1L, 2L, 3L)
+                val reader = mock(StorySearchDocumentReader::class.java)
+                ids.zip(documents).forEach { (id, document) -> `when`(reader.read(id)).thenReturn(document) }
+                `when`(reader.readAll(ids)).thenReturn(documents)
+                fun indexer(index: String) = StorySearchProperties(storyIndex = index).let {
+                    StorySearchIndexer(client, it, reader, StorySearchIndexAdmin(client, it))
+                }
+
+                ids.forEach { indexer(singleIndex).index(it) }
+                indexer(bulkIndex).indexAll(ids)
+                listOf(singleIndex, bulkIndex).forEach { index -> client.indices().refresh { it.index(index) } }
+
+                documents.forEach { document ->
+                    fun source(index: String) = client.get({ it.index(index).id(document.publicId) }, StorySearchDocument::class.java).source()
+                    assertEquals(source(singleIndex), source(bulkIndex))
+                }
+                val repository = mock(StoryRepository::class.java)
+                `when`(repository.findAllByPublicIdIn(anyList())).thenReturn(documents.map {
+                    Story(publicId = UUID.fromString(it.publicId), userId = 1, title = it.title,
+                        visibility = if (it.visible) StoryVisibility.PUBLIC else StoryVisibility.PRIVATE)
+                })
+                val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
+                `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
+                fun search(index: String) = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
+                    mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors).search("왕국", 50, null).items
+                assertEquals(2, search(singleIndex).size)
+                assertEquals(search(singleIndex), search(bulkIndex))
+            }
+        }
+    }
+
     // 보안 플러그인을 끈 컨테이너는 HTTP다. 서명·직렬화는 AWS transport 그대로 두고,
     // 최종 소켓 주소만 테스트 컨테이너로 바꾼다. 실 AWS 자격증명·도메인은 사용하지 않는다.
     private fun containerHttpClient(endpoint: URI): SdkHttpClient {
