@@ -231,7 +231,7 @@ class UserNotificationPostgresTests {
             context.register(ScheduledNotificationWriter::class.java)
             context.refresh()
             val round = context.getBean(ScheduledNotificationWriter::class.java)
-            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(users, failingOutbox)
+            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(com.knk.manyak.auth.service.AccountQueryService(users), failingOutbox)
             assertThatThrownBy {
                 round.record(mapOf("type" to if (scenario == "attendance") "ATTENDANCE_REMINDER" else "PROMOTION", "title" to "(광고) 제목", "body" to "본문"),
                     scenario, "2026-10-24", outbox)

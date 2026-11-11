@@ -2,7 +2,7 @@ package com.knk.manyak.story.service
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.image.dto.ImagePresetType
@@ -66,7 +66,7 @@ class StoryService(
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
     private val storyTurnCounts: StoryTurnCounts,
     private val imageUrlResolver: ImageUrlResolver,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val officialStoryAccount: OfficialStoryAccount,
     private val authorResolver: StoryAuthorResolver,
     private val exploreSeedSource: StoryExploreSeedSource,
@@ -428,7 +428,7 @@ class StoryService(
     /** 작성자 카드 정보. 내부 PK는 노출하지 않으므로 id는 항상 null이다(IDOR 방지 원칙과 동일 취지). */
     private fun resolveAuthor(userId: Long?): StoryAuthorResponse? =
         userId
-            ?.let { userRepository.findById(it).orElse(null) }
+            ?.let(accounts::profileOf)
             ?.let { StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
 
     /** 스토리 목록을 카드 응답으로 매핑한다. turnCount·author는 한 번의 배치 조회로 채운다(N+1 방지). */

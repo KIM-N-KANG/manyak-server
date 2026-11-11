@@ -3,6 +3,7 @@ package com.knk.manyak.auth.security
 import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.global.security.AccountAccess
 import com.knk.manyak.global.security.AccountAccessDecision
 import com.knk.manyak.global.security.AccountAccessPort
@@ -18,11 +19,12 @@ import java.util.UUID
 @Component
 class AccountAccessAdapter(
     private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val consentService: UserConsentService,
     @param:Value("\${manyak.auth.consent-gate.enabled:false}") private val consentGateEnabled: Boolean,
 ) : AccountAccessPort {
 
-    override fun userIdOf(publicId: UUID): Long? = userRepository.findByPublicId(publicId)?.id
+    override fun userIdOf(publicId: UUID): Long? = accounts.userIdOf(publicId)
 
     override fun check(publicId: UUID, method: String, path: String): AccountAccessDecision {
         val user = userRepository.findByPublicId(publicId) ?: return AccountAccessDecision(AccountAccess.ALLOWED, null)

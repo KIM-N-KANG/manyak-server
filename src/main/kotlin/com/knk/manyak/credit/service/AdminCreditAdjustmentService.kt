@@ -3,7 +3,7 @@ package com.knk.manyak.credit.service
 import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.entity.CreditAdminAdjustment
 import com.knk.manyak.credit.repository.CreditAdminAdjustmentRepository
@@ -21,7 +21,7 @@ import tools.jackson.databind.ObjectMapper
 @Service
 class AdminCreditAdjustmentService(
     private val adjustments: CreditAdminAdjustmentRepository,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val wallet: CreditWalletService,
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
@@ -75,7 +75,7 @@ class AdminCreditAdjustmentService(
     }
 
     private fun replay(row: CreditAdminAdjustment, request: AdminCreditAdjustmentRequest): AdminCreditAdjustmentResponse {
-        val memberId = users.findById(row.userId).orElseThrow().publicId
+        val memberId = accounts.requirePublicIdOf(row.userId)
         if (memberId != request.memberId || row.type != request.type || row.requestedAmount != request.amount ||
             row.expiresInDays != request.normalizedDays()) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.IDEMPOTENCY_KEY_CONFLICT,

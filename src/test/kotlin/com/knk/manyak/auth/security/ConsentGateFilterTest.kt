@@ -34,7 +34,7 @@ class ConsentGateFilterTest {
         val request = MockHttpServletRequest(method, path).apply { servletPath = path }
         val response = MockHttpServletResponse()
         var passed = false
-        DeletedAccountRejectionFilter(AccountAccessAdapter(users, consents, enabled), ObjectMapper()).doFilter(request, response) { _, _ -> passed = true }
+        DeletedAccountRejectionFilter(AccountAccessAdapter(users, com.knk.manyak.auth.service.AccountQueryService(users), consents, enabled), ObjectMapper()).doFilter(request, response) { _, _ -> passed = true }
         return response to passed
     }
 

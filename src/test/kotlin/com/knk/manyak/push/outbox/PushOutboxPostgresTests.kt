@@ -55,7 +55,8 @@ class PushOutboxPostgresTests {
         context.registerBean(UserRepository::class.java, Supplier {
             mock(UserRepository::class.java).also { `when`(it.findById(7)).thenReturn(Optional.of(user)) }
         })
-        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java)
+        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java,
+            com.knk.manyak.auth.service.AccountQueryService::class.java)
         context.refresh()
         store = context.getBean(PushOutboxStore::class.java)
     }

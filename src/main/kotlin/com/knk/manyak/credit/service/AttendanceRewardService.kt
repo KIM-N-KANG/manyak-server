@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.dto.CreditReason
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -26,7 +26,7 @@ data class AttendanceOutcome(val rewarded: Boolean, val amount: Long, val balanc
 @Service
 class AttendanceRewardService(
     private val creditWalletService: CreditWalletService,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     // 출석 보상 지급량. 운영 중 조정 가능한 정책값이라 매 지급 시 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     private val clock: Clock = Clock.systemUTC(),
@@ -56,7 +56,7 @@ class AttendanceRewardService(
 
     /** 적립·조회가 반드시 같은 키를 쓰도록 한 곳에서 만든다. 회원이 없으면 원래 id로 폴백한다(호출부가 인증으로 이미 걸러낸다). */
     private fun idempotencyKeyOf(userId: Long): String {
-        val rewardIdentityId = userRepository.findRewardIdentityUserId(userId) ?: userId
+        val rewardIdentityId = accounts.rewardIdentityOf(userId)
         return "attendance:$rewardIdentityId:${LocalDate.now(clock.withZone(SEOUL_ZONE))}"
     }
 
