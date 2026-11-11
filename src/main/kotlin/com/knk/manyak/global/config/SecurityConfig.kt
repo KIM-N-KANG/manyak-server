@@ -45,6 +45,11 @@ class SecurityConfig {
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                // 관리자 경로 이중 방어(KNK-2068). 관리자 경로는 admin 모듈의 관리자 체인(AdminSecurityConfig, @Order(1))이
+                // 먼저 잡으므로 정상 상태에서는 이 규칙에 도달하지 않는다. 관리자 체인이 등록되지 않거나 매처가 바뀌어
+                // 요청이 이 앱 체인으로 떨어지면, 일반 회원 토큰이 아래 anyRequest().authenticated()로 관리자 API를
+                // 통과하게 된다. 그 경우에도 전부 막도록 다른 어떤 규칙보다 먼저 거부한다.
+                it.requestMatchers("/api/v1/admin/**").denyAll()
                 // /actuator/prometheus 무인증 허용은 local 프로파일로만 한정한다(스펙 §4-7).
                 // 아래 전역 permitAll 목록에 넣으면 안 된다: 지금은 운영 exposure(health,info)에 없어 뚫리지 않을 뿐,
                 // 나중에 누가 exposure에 prometheus 한 줄을 더하는 순간 인증 없이 내부 지표가 공개된다.

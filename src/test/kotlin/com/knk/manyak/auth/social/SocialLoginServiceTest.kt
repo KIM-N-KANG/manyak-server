@@ -12,7 +12,6 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.security.oauth2.jwt.JwtException
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.dto.SocialProvider
-import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.credit.dto.CreditReason
@@ -370,7 +369,8 @@ class SocialLoginServiceTest {
                 assertThat(response.body!!.message).isEqualTo(reason)
                 assertThat(response.body!!.path).isEqualTo(path)
                 assertThat(response.body!!.details).isEmpty()
-                verify(serverAnalytics).socialLoginFailed(provider.wireValue, expectedType)
+                // 분석 이벤트에는 소문자 표기 제공자가 실린다(ServerAnalytics가 이 값으로 이벤트명을 고른다).
+                verify(serverAnalytics).socialLoginFailed(if (provider == SocialProvider.GOOGLE) "google" else "kakao", expectedType)
                 verifyNoInteractions(registrar, authTokenService)
                 assertThat(appender.list).hasSize(1)
                 for (event in appender.list) {
