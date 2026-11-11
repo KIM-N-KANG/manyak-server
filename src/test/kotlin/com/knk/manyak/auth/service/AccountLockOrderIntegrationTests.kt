@@ -3,7 +3,10 @@ package com.knk.manyak.auth.service
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.push.dto.PushPlatform
+import com.knk.manyak.push.dto.PushSettingsUpdateRequest
 import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.push.service.DevicePushTokenService
 import com.knk.manyak.story.draft.PutStoryDraftRequest
@@ -64,6 +67,10 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var notifications: DomainNotificationRecorder
     @Autowired private lateinit var pushTokens: DevicePushTokenService
     @Autowired private lateinit var locks: AccountLockService
+    @Autowired private lateinit var invites: com.knk.manyak.invite.service.InviteService
+    @Autowired private lateinit var migration: com.knk.manyak.migration.service.GuestDataMigrationService
+    @Autowired private lateinit var pushSettings: com.knk.manyak.push.service.PushSettingsService
+    @Autowired private lateinit var chats: com.knk.manyak.chat.repository.StoryChatRepository
     private val mapper = ObjectMapper()
     private lateinit var member: User
 
@@ -143,6 +150,32 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
         assertThat(LockSql.tables { pushTokens.unregister(member.id, "lock-order-token") }).containsExactly("users")
     }
 
+    @Test fun `초대 코드 발급은 회원 행을 잠그고 처음 발급할 때만 커밋에서 회원 행을 갱신한다`() {
+        // 처음 발급: 잠금 → 코드 중복 확인 → 커밋 때 갱신.
+        assertThat(LockSql.usersAndLocks { invites.getOrCreateInvite(member.id) }).containsExactly("lock:users", "select:users", "update:users")
+        assertThat(LockSql.usersAndLocks { invites.getOrCreateInvite(member.id) }).containsExactly("lock:users")
+    }
+
+    @Test fun `초대 코드 제출은 제출자 행을 잠그고 초대자를 잠그지 않고 읽은 뒤 지갑을 잠그고 커밋에서 제출자 행을 갱신한다`() {
+        val inviter = users.save(User(nickname = "초대자", inviteCode = "LOCK2056"))
+        val redeemer = users.save(User(nickname = "제출자"))
+        assertThat(LockSql.usersAndLocks { invites.redeem(redeemer.id, inviter.inviteCode!!) }).isEqualTo(REDEEM_ORDER)
+    }
+
+    @Test fun `이관은 회원 행을 잠그고 시도 수와 완료 시각을 커밋에서 한 번에 갱신한다`() {
+        assertThat(LockSql.usersAndLocks { migration.migrate(member.id, MigrationRequest()) }).containsExactly("lock:users", "update:users")
+        val story = stories.save(Story(title = "게스트 스토리"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        assertThat(LockSql.usersAndLocks { migration.migrate(member.id, MigrationRequest(chatIds = listOf(chat.publicId.toString()))) })
+            .isEqualTo(MIGRATE_WITH_CLAIM_ORDER)
+    }
+
+    @Test fun `푸시 설정 조회는 회원 행을 잠그고 변경은 커밋에서 회원 행을 갱신한다`() {
+        assertThat(LockSql.usersAndLocks { pushSettings.getSettings(member.id) }).containsExactly("lock:users")
+        assertThat(LockSql.usersAndLocks { pushSettings.updateSettings(member.id, PushSettingsUpdateRequest(servicePush = false, marketingPush = true, marketingNightPush = true)) })
+            .containsExactly("lock:users", "update:users")
+    }
+
     @Test fun `잠금 진입점은 트랜잭션 밖에서 부르면 잠그지 않고 거부한다`() {
         assertThat(LockSql.tables {
             org.assertj.core.api.Assertions.assertThatThrownBy { locks.lock(member.id) }
@@ -155,28 +188,62 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
     private companion object {
         /** 공개 중단: 소유 회원 → 스토리 → 대기 제출본 → 감사 처리자(회원, 관리자 역할). MODERATION 5-2. */
         val TAKEDOWN_ORDER = listOf("users", "stories", "story_submissions", "users", "admin_accounts")
+
+        /** 초대 제출: 제출자 잠금 → 초대자 조회(코드) → 첫 지갑과 로트 → 제출자 갱신(자동 flush) → 둘째 지갑과 로트. */
+        val REDEEM_ORDER = listOf("lock:users", "select:users", "lock:credit_wallets", "lock:credit_lots", "update:users",
+            "lock:credit_wallets", "lock:credit_lots")
+
+        /** 채팅을 클레임한 이관: 회원 잠금 → 커밋 때 시도 수와 완료 시각을 한 번에 갱신. */
+        val MIGRATE_WITH_CLAIM_ORDER = listOf("lock:users", "update:users")
     }
 }
 
-/** 같은 스레드에서 실행된 SQL 중 행 잠금 문장의 대상 테이블을 순서대로 모은다. */
+/**
+ * 측정 구간에 호출 스레드에서 실행된 SQL만 모은다. 핸들러는 공유 컨텍스트의 레지스트리에 한 번 붙고, 측정 중이 아니거나
+ * 다른 스레드의 쿼리는 버린다.
+ */
 private object LockSql {
     private val sql: MutableList<String> = Collections.synchronizedList(mutableListOf())
     @Volatile private var installed: ObservationRegistry? = null
+    @Volatile private var measuring: Thread? = null
     private val lock = Regex("\\bfor\\s+(no\\s+key\\s+)?update\\b", RegexOption.IGNORE_CASE)
     private val table = Regex("\\bfrom\\s+\"?(\\w+)\"?", RegexOption.IGNORE_CASE)
+    private val usersUpdate = Regex("^\\s*update\\s+users\\b", RegexOption.IGNORE_CASE)
+    private val usersSelect = Regex("^\\s*select\\b.*\\bfrom\\s+users\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
     fun install(registry: ObservationRegistry) {
         if (installed === registry) return
         registry.observationConfig().observationHandler(object : ObservationHandler<QueryContext> {
             override fun supportsContext(context: Observation.Context) = context is QueryContext
-            override fun onStop(context: QueryContext) { sql.addAll(context.queries) }
+            override fun onStop(context: QueryContext) {
+                if (Thread.currentThread() === measuring) sql.addAll(context.queries)
+            }
         })
         installed = registry
     }
 
-    fun tables(block: () -> Any?): List<String> {
+    /** 행 잠금 문장의 대상 테이블. */
+    fun tables(block: () -> Any?): List<String> =
+        run(block).filter { lock.containsMatchIn(it) }.map { table.find(it)!!.groupValues[1].lowercase() }
+
+    /** 행 잠금(`lock:테이블`)과 `users`의 비잠금 조회(`select:users`), 갱신(`update:users`)을 순서대로. */
+    fun usersAndLocks(block: () -> Any?): List<String> = run(block).mapNotNull {
+        when {
+            lock.containsMatchIn(it) -> "lock:" + table.find(it)!!.groupValues[1].lowercase()
+            usersUpdate.containsMatchIn(it) -> "update:users"
+            usersSelect.containsMatchIn(it) -> "select:users"
+            else -> null
+        }
+    }
+
+    private fun run(block: () -> Any?): List<String> {
         sql.clear()
-        Observation.createNotStarted("account-lock-order", installed!!).observe<Any?> { block() }
-        return synchronized(sql) { sql.filter { lock.containsMatchIn(it) }.map { table.find(it)!!.groupValues[1].lowercase() } }
+        measuring = Thread.currentThread()
+        try {
+            Observation.createNotStarted("account-lock-order", installed!!).observe<Any?> { block() }
+        } finally {
+            measuring = null
+        }
+        return synchronized(sql) { sql.toList() }
     }
 }
