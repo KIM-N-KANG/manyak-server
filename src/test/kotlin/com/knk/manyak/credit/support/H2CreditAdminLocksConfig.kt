@@ -2,7 +2,8 @@ package com.knk.manyak.credit.support
 
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.credit.repository.CreditAdminLocks
-import com.knk.manyak.credit.repository.LockedCreditTarget
+import com.knk.manyak.auth.repository.AccountNoKeyUpdateLock
+import com.knk.manyak.auth.repository.NoKeyLockedAccount
 import com.knk.manyak.credit.service.CreditPolicyKey
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
@@ -12,15 +13,21 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
 
-/** H2에는 PostgreSQL advisory/NO KEY UPDATE 잠금이 없다. 운영 SQL은 별도 실제 PG 테스트로 검증한다. */
+/** H2에는 PostgreSQL advisory/NO KEY UPDATE 잠금이 없다. 운영 SQL은 별도 실제 PG 테스트로 검증한다(auth의 NO KEY UPDATE 잠금 포함). */
 @TestConfiguration
 class H2CreditAdminLocksConfig {
     @Bean @Primary
     fun h2CreditAdminLocks(jdbc: JdbcTemplate): CreditAdminLocks = H2CreditAdminLocks(jdbc)
+
+    /** auth의 관리자 이프 조정 대상 잠금. H2에는 NO KEY UPDATE가 없어 FOR UPDATE로 대신한다. */
+    @Bean @Primary
+    fun h2AccountNoKeyUpdateLock(jdbc: JdbcTemplate): AccountNoKeyUpdateLock = AccountNoKeyUpdateLock { publicId ->
+        jdbc.query("SELECT id, status FROM users WHERE public_id = ? FOR UPDATE",
+            { rs, _ -> NoKeyLockedAccount(rs.getLong("id"), UserStatus.valueOf(rs.getString("status"))) }, publicId).singleOrNull()
+    }
 }
 
 @Transactional(propagation = Propagation.MANDATORY)
@@ -33,8 +40,4 @@ class H2CreditAdminLocks(private val jdbc: JdbcTemplate) : CreditAdminLocks {
             override fun afterCompletion(status: Int) { lock.unlock() }
         })
     }
-    override fun target(publicId: UUID): LockedCreditTarget? = jdbc.query(
-        "SELECT id, status FROM users WHERE public_id = ? FOR UPDATE",
-        { rs, _ -> LockedCreditTarget(rs.getLong("id"), UserStatus.valueOf(rs.getString("status"))) }, publicId,
-    ).singleOrNull()
 }

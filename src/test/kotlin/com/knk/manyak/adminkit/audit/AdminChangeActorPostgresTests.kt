@@ -25,7 +25,7 @@ class AdminChangeActorPostgresTests {
         val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         tx = TransactionTemplate(DataSourceTransactionManager(ds))
-        actors = AdminChangeActorRepository(jdbc)
+        actors = AdminChangeActorRepository(jdbc, com.knk.manyak.auth.repository.AdminActorAccountLockJdbc(jdbc))
         jdbc.execute("CREATE TABLE users(id BIGINT PRIMARY KEY, status VARCHAR(20) NOT NULL, nickname TEXT NOT NULL)")
         jdbc.execute("CREATE TABLE admin_accounts(user_id BIGINT PRIMARY KEY REFERENCES users(id))")
     }

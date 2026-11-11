@@ -68,7 +68,7 @@ class InviteServiceTest {
     private val augustStart = kstMonthStart(2026, 8)
 
     private fun serviceAt(clock: Clock): InviteService =
-        InviteService(com.knk.manyak.auth.service.AccountLockService(userRepository), com.knk.manyak.auth.service.AccountQueryService(userRepository),
+        InviteService(com.knk.manyak.auth.service.AccountLockService(userRepository, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }), com.knk.manyak.auth.service.AccountQueryService(userRepository),
             com.knk.manyak.auth.service.AccountCommandService(userRepository, lockedEntityManager), creditWalletService, creditPolicyService, analytics, clock)
 
     private fun kstMonthStart(year: Int, month: Int): Instant =
