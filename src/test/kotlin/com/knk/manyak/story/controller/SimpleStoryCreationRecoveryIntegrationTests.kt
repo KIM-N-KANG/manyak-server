@@ -104,7 +104,7 @@ class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() 
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var simpleStoryCreationService: com.knk.manyak.story.service.SimpleStoryCreationService
+    @Autowired private lateinit var simpleStoryCreationService: com.knk.manyak.story.service.SimpleStorylineService
     @Autowired private lateinit var requestRepository: StoryCreationRequestRepository
     @Autowired private lateinit var sessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var storylineRepository: StoryCreationStorylineRepository

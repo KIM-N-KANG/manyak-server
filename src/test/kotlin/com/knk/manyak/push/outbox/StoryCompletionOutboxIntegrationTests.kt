@@ -8,7 +8,7 @@ import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.SimpleStoryCompletionService
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
@@ -22,7 +22,7 @@ import java.util.UUID
 class StoryCompletionOutboxIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var store: PushOutboxStore
     @Autowired private lateinit var relay: PushOutboxRelay
-    @Autowired private lateinit var service: SimpleStoryCreationService
+    @Autowired private lateinit var service: SimpleStoryCompletionService
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository
