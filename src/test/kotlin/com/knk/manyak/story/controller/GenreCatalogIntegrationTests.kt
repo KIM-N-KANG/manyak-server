@@ -2,7 +2,7 @@ package com.knk.manyak.story.controller
 
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest

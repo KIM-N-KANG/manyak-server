@@ -6,7 +6,7 @@ import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -263,7 +263,7 @@ class ChatStreamHistoryIntegrationTests : ScriptedAiIntegrationTest() {
         org.slf4j.MDC.put("request_id", "chat-takedown-test")
         try {
             takedowns.takeDown(admin.id, story.publicId,
-                com.knk.manyak.story.submission.StoryTakedownRequest(com.knk.manyak.story.entity.StoryTakedownReason.HATE_SPEECH))
+                com.knk.manyak.story.submission.StoryTakedownRequest(com.knk.manyak.story.dto.StoryTakedownReason.HATE_SPEECH))
         } finally { org.slf4j.MDC.remove("request_id") }
         changePrologue(story, "공개 중단 뒤 비공개 수정")
         stream(chat.publicId.toString(), "다음 행동을 한다.", auth)

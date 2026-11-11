@@ -1,8 +1,6 @@
 package com.knk.manyak.notice.repository
 
 import com.knk.manyak.notice.dto.*
-import com.knk.manyak.notice.dto.NoticeStatus
-import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.service.NoticeCursor
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.RowMapper

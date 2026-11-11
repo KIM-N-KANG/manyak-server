@@ -5,7 +5,7 @@ import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
-import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.dto.ImagePresetType
 import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
@@ -22,7 +22,7 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryReport
-import com.knk.manyak.story.entity.StoryReportReason
+import com.knk.manyak.story.dto.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryCharacterImageRepository

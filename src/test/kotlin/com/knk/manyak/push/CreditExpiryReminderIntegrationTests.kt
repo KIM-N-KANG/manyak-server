@@ -7,6 +7,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.entity.CreditLot
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.*

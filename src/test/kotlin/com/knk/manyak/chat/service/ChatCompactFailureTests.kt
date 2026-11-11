@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.transaction.support.SimpleTransactionStatus
 import java.util.concurrent.Executor
 import com.knk.manyak.chat.client.ChatCompactAiClient
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository

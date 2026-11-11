@@ -1,7 +1,7 @@
 package com.knk.manyak.story.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.story.entity.StoryReportReason
+import com.knk.manyak.story.dto.StoryReportReason
 import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema

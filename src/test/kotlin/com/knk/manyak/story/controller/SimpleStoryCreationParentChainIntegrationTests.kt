@@ -17,11 +17,11 @@ import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
-import com.knk.manyak.story.entity.ParentLinkError
+import com.knk.manyak.story.dto.ParentLinkError
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.support.DatabaseCleaner

@@ -7,6 +7,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.notice.entity.Notice
 import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.push.dto.PushKind
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*

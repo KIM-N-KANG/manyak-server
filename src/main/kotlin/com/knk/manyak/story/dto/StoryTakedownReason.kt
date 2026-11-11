@@ -1,4 +1,4 @@
-package com.knk.manyak.story.entity
+package com.knk.manyak.story.dto
 
 enum class StoryTakedownReason(val displayName: String) {
     SEXUAL_CONTENT("선정성"),

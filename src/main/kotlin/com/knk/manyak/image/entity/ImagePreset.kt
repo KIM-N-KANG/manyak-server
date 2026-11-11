@@ -1,5 +1,6 @@
 package com.knk.manyak.image.entity
 
+import com.knk.manyak.image.dto.ImagePresetType
 import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
 import jakarta.persistence.ElementCollection
@@ -12,15 +13,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.Table
 import java.time.Instant
-
-/**
- * 팀 제작 이미지 자산의 종류. `prefix`는 S3 객체 키와 서빙 URL의 경로 조각이다(스펙 §4-3-9).
- */
-enum class ImagePresetType(val prefix: String) {
-    THUMBNAIL("thumbnails"),
-    BACKGROUND("backgrounds"),
-    CHARACTER("characters"),
-}
 
 /**
  * 팀 제작 이미지 카탈로그. 기존 스토리의 프리셋 키와 계획된 배경 기능을 위해 유지한다(스펙 §4-3-9).

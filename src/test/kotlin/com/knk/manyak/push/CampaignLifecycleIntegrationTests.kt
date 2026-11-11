@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.service.FcmPushSender

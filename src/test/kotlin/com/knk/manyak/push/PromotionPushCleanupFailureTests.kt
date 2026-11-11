@@ -6,7 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.scheduler.PromotionPushScheduler
 import com.knk.manyak.push.service.FcmPushSender

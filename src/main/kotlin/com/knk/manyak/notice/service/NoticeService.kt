@@ -4,8 +4,6 @@ import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.notice.dto.*
-import com.knk.manyak.notice.dto.NoticeStatus
-import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
 import com.knk.manyak.notice.repository.*
 import org.springframework.http.HttpStatus

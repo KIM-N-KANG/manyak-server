@@ -8,7 +8,7 @@ import com.knk.manyak.push.dto.AdminCampaignListRequest
 import com.knk.manyak.push.dto.AdminCampaignPageResponse
 import com.knk.manyak.push.dto.AdminCampaignResponse
 import com.knk.manyak.push.dto.PushKind
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository

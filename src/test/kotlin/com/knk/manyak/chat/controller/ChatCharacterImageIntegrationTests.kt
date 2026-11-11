@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository

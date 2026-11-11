@@ -3,6 +3,7 @@ package com.knk.manyak.push
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*

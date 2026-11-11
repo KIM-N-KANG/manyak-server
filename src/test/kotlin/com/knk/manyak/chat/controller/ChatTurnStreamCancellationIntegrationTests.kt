@@ -7,7 +7,7 @@ import com.knk.manyak.chat.client.*
 import com.knk.manyak.chat.dto.RegenerateChatRequest
 import com.knk.manyak.chat.dto.ContinueChatRequest
 import com.knk.manyak.chat.entity.StoryMessage
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -585,7 +585,7 @@ class ChatTurnStreamCancellationIntegrationTests : ScriptedAiIntegrationTest() {
         assertThat(state(chat, member)).isNull()
         Mockito.verify(store, Mockito.never()).acquire(Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.any(java.time.Instant::class.java) ?: java.time.Instant.now(), Mockito.any())
         assertCode("CHAT_TURN_STALE") { service.generateChoices(chat.publicId.toString(), turn.id + 1, member.id) }
-        chat.status = com.knk.manyak.chat.entity.ChatStatus.ENDED
+        chat.status = com.knk.manyak.chat.dto.ChatStatus.ENDED
         chats.save(chat)
         val before = rejectedCount()
         assertCode("CHAT_ENDED") { service.regenerateChatTurn(chat.publicId.toString(), RegenerateChatRequest(turn.id, false), member.id) }

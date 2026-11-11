@@ -12,7 +12,6 @@ import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.dto.*
 import java.util.UUID
-import com.knk.manyak.push.entity.PushPlatform
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import io.micrometer.core.instrument.Counter

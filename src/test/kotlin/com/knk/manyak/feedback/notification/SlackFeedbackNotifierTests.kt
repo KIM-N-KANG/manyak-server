@@ -3,7 +3,7 @@ package com.knk.manyak.feedback.notification
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.knk.manyak.feedback.entity.Platform
+import com.knk.manyak.feedback.dto.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer

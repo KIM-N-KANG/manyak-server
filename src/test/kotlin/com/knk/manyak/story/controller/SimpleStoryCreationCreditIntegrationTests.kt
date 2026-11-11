@@ -20,7 +20,7 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
@@ -130,7 +130,7 @@ class SimpleStoryCreationCreditIntegrationTests : ScriptedAiIntegrationTest() {
 
     private fun assertFailedWithoutStory(id: java.util.UUID) {
         assertThat(requests.findByRequestId(id)!!.status)
-            .isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.FAILED)
+            .isEqualTo(com.knk.manyak.story.dto.StoryCreationRequestStatus.FAILED)
         assertThat(storyRepository.findAll()).isEmpty()
     }
 
@@ -426,8 +426,8 @@ class SimpleStoryCreationCreditIntegrationTests : ScriptedAiIntegrationTest() {
         requests.saveAndFlush(com.knk.manyak.story.entity.StoryCreationRequest(
             requestId = requestId,
             userId = user.id,
-            stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION,
-            status = com.knk.manyak.story.entity.StoryCreationRequestStatus.PENDING,
+            stage = com.knk.manyak.story.dto.StoryCreationStage.STORY_COMPLETION,
+            status = com.knk.manyak.story.dto.StoryCreationRequestStatus.PENDING,
             updatedAt = java.time.Instant.now().minusSeconds(600),
         ))
         val timerCounts = listOf("success", "failure", "rejected").associateWith {
@@ -438,7 +438,7 @@ class SimpleStoryCreationCreditIntegrationTests : ScriptedAiIntegrationTest() {
             .expectStatus().isCreated.expectBody().returnResult().responseBody!!
 
         val reconciled = requests.findByRequestId(requestId)!!
-        assertThat(reconciled.status).isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.status).isEqualTo(com.knk.manyak.story.dto.StoryCreationRequestStatus.COMPLETED)
         assertThat(reconciled.resultJson).isNotNull()
         assertThat(listOf("success", "failure", "rejected").associateWith {
             meterRegistry.find("manyak.story.creation.duration").tag("outcome", it).timer()?.count() ?: 0L

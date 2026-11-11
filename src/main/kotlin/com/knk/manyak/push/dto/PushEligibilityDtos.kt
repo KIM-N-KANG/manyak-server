@@ -1,7 +1,7 @@
 package com.knk.manyak.push.dto
 
 import com.knk.manyak.notice.dto.NoticeTag
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 
 enum class PushKind {
     SERVICE,

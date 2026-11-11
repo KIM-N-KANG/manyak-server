@@ -66,7 +66,7 @@ class UserWithdrawalIntegrationTests : IntegrationTest() {
             kind = com.knk.manyak.story.submission.SubmissionKind.CREATE, payload = "{}"))
         val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), user.id,
             com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
-        val token = pushTokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id, token = "rollback-token", platform = com.knk.manyak.push.entity.PushPlatform.ANDROID))
+        val token = pushTokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id, token = "rollback-token", platform = com.knk.manyak.push.dto.PushPlatform.ANDROID))
         org.mockito.Mockito.doThrow(org.springframework.dao.TransientDataAccessResourceException("inbox unavailable"))
             .`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(notifications))
             .deleteForUser(user.id)

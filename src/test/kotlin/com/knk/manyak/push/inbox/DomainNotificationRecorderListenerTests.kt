@@ -6,7 +6,7 @@ import com.knk.manyak.push.outbox.ModerationOutboxListener
 import com.knk.manyak.push.outbox.OutboxTransactionTestConfig
 import com.knk.manyak.push.outbox.StoryCompletionOutboxListener
 import com.knk.manyak.push.outbox.StoryTakedownOutboxListener
-import com.knk.manyak.story.entity.StoryTakedownReason
+import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.event.StoryCompletedEvent
 import com.knk.manyak.story.submission.StoryModerationCompleted
 import com.knk.manyak.story.submission.StoryTakenDown

@@ -62,7 +62,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     private fun order(user: User = admin, status: com.knk.manyak.credit.dto.CreditOrderStatus = com.knk.manyak.credit.dto.CreditOrderStatus.COMPLETED,
                       completed: Instant? = now, price: Long = 4800, credit: Long = 5000, id: UUID = UUID.randomUUID(), refund: Instant? = null) =
         orders.save(com.knk.manyak.credit.entity.CreditOrder(userId = user.id, productId = "if_5000",
-            provider = com.knk.manyak.credit.entity.CreditOrderProvider.GROBLE, status = status, priceKrw = price, creditAmount = credit,
+            provider = com.knk.manyak.credit.dto.CreditOrderProvider.GROBLE, status = status, priceKrw = price, creditAmount = credit,
             completedAt = completed, publicId = id, refundedAt = refund))
 
     @Test fun `회원 가입 시각 정렬은 양방향을 지원하고 탈퇴 연동 이메일은 검색하지 않는다`() {
@@ -218,12 +218,12 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
             val chat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(userId = owner, storyId = story.id, createdAt = midnight, deletedAt = now))
             repeat(3) { n ->
                 val message = messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
-                    role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "응답", messageOrder = n + 1, createdAt = midnight))
+                    role = com.knk.manyak.chat.dto.MessageRole.ASSISTANT, content = "응답", messageOrder = n + 1, createdAt = midnight))
                 if (n == 0) repeat(2) { v -> versions.save(com.knk.manyak.chat.entity.StoryMessageVersion(
                     messageId = message.id, versionNumber = v + 1, content = "이전 응답", choices = "[]")) }
             }
             messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
-                role = com.knk.manyak.chat.entity.MessageRole.USER, content = "입력", messageOrder = 4, createdAt = midnight))
+                role = com.knk.manyak.chat.dto.MessageRole.USER, content = "입력", messageOrder = 4, createdAt = midnight))
         }
         for (owner in listOf(ordinary, team)) {
             for ((amount, reason) in listOf(250L to "ATTENDANCE_REWARD", 5000L to "PURCHASE", 100L to "SIGNUP_REWARD",
@@ -427,19 +427,19 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
                 currentTurn = 99, deletedAt = if (index == 1) now else null))
             repeat(count) { n ->
                 val message = messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(
-                    chatId = chat.id, role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT,
+                    chatId = chat.id, role = com.knk.manyak.chat.dto.MessageRole.ASSISTANT,
                     content = "응답", messageOrder = n + 1))
                 if (n == 0) repeat(2) { v -> versions.save(com.knk.manyak.chat.entity.StoryMessageVersion(
                     messageId = message.id, versionNumber = v + 1, content = "과거 판본", choices = "[]")) }
             }
             messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
-                role = com.knk.manyak.chat.entity.MessageRole.USER, content = "입력", messageOrder = count + 1))
+                role = com.knk.manyak.chat.dto.MessageRole.USER, content = "입력", messageOrder = count + 1))
             if (index == 2) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", admin.id, chat.id)
         }
         val other = member("다른 회원")
         val otherChat = chatRepository.save(com.knk.manyak.chat.entity.StoryChat(userId = other.id, storyId = story.id))
         messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = otherChat.id,
-            role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "다른 응답", messageOrder = 1))
+            role = com.knk.manyak.chat.dto.MessageRole.ASSISTANT, content = "다른 응답", messageOrder = 1))
         val body = json(get("/members/${admin.publicId}").expectStatus().isOk)
         assertThat(body.has("turnCount")).isTrue()
         assertThat(body["turnCount"].asLong()).isEqualTo(9)
@@ -460,13 +460,13 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
             userId = if (migrated) null else owner.id, createdAt = at, currentTurn = 99, deletedAt = if (deleted) now else null))
         repeat(count) { n ->
             val message = messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
-                role = com.knk.manyak.chat.entity.MessageRole.ASSISTANT, content = "활성 응답", messageOrder = n + 1,
+                role = com.knk.manyak.chat.dto.MessageRole.ASSISTANT, content = "활성 응답", messageOrder = n + 1,
                 createdAt = now.plusSeconds(86400))) // 메시지 시각 대신 채팅 생성일로 기간을 거른다.
             if (n == 0) repeat(2) { version -> versions.saveAndFlush(com.knk.manyak.chat.entity.StoryMessageVersion(
                 messageId = message.id, versionNumber = version + 1, content = "이전 판본", choices = "[]")) }
         }
         messageRepository.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = room.id,
-            role = com.knk.manyak.chat.entity.MessageRole.USER, content = "사용자 입력", messageOrder = count + 1))
+            role = com.knk.manyak.chat.dto.MessageRole.USER, content = "사용자 입력", messageOrder = count + 1))
         if (migrated) jdbc.update("UPDATE story_chats SET user_id=? WHERE id=?", owner.id, room.id)
     }
 
@@ -843,9 +843,9 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         jdbc.update("INSERT INTO credit_transactions(user_id, amount, reason, created_at, ref_id, ref_type) VALUES (?, ?, ?, ?, ?, ?)",
             user.id, amount, reason, java.sql.Timestamp.from(created), ref, refType)
     }
-    private fun message(chat: com.knk.manyak.chat.entity.StoryChat, seconds: Long, role: com.knk.manyak.chat.entity.MessageRole = com.knk.manyak.chat.entity.MessageRole.USER) =
+    private fun message(chat: com.knk.manyak.chat.entity.StoryChat, seconds: Long, role: com.knk.manyak.chat.dto.MessageRole = com.knk.manyak.chat.dto.MessageRole.USER) =
         messageRepository.save(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id, role = role, content = "응답에 나오면 안 되는 원문",
-            messageOrder = if (role == com.knk.manyak.chat.entity.MessageRole.USER) 1 else 2, createdAt = chat.createdAt.plusSeconds(seconds)))
+            messageOrder = if (role == com.knk.manyak.chat.dto.MessageRole.USER) 1 else 2, createdAt = chat.createdAt.plusSeconds(seconds)))
 
     @Test fun `턴 구간 13개는 2에서 6까지 개별 집계하고 모든 경계의 목록 링크와 일치한다`() {
         val owner = member("턴 경계")
@@ -1028,7 +1028,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         val story = story(owner)
         val fast = chat(story, owner, 51); val slow = chat(story); val silent = chat(story)
         message(fast, 30); message(slow, 901)
-        message(fast, 40, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+        message(fast, 40, com.knk.manyak.chat.dto.MessageRole.ASSISTANT)
         ledger(owner, -20, "CHAT_TURN", ref = fast.id, refType = "CHAT_TURN")
         ledger(owner, -20, "CHAT_TURN", ref = fast.id, refType = "CHAT")
         ledger(owner, -5, "CHAT_IMAGE", ref = fast.id, refType = "CHAT_IMAGE")
@@ -1115,15 +1115,15 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(com.knk.manyak.story.entity.StoryCreationTagSource::class)
-    fun `입력 인물은 이름 성별 특징 중 하나라도 있고 빈 칸은 0명으로 집계한다`(source: com.knk.manyak.story.entity.StoryCreationTagSource) {
+    @org.junit.jupiter.params.provider.EnumSource(com.knk.manyak.story.dto.StoryCreationTagSource::class)
+    fun `입력 인물은 이름 성별 특징 중 하나라도 있고 빈 칸은 0명으로 집계한다`(source: com.knk.manyak.story.dto.StoryCreationTagSource) {
         fun session(target: com.knk.manyak.story.entity.Story) = creationSessions.save(
             com.knk.manyak.story.entity.StoryCreationSession(storyId = target.id,
-                status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
-        val orders = mutableMapOf<Pair<Long, com.knk.manyak.story.entity.StoryCreationCharacterRole>, Int>()
+                status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+        val orders = mutableMapOf<Pair<Long, com.knk.manyak.story.dto.StoryCreationCharacterRole>, Int>()
         fun character(session: com.knk.manyak.story.entity.StoryCreationSession, name: String? = null,
                       gender: com.knk.manyak.story.dto.SimpleStoryCharacterGender? = null,
-                      role: com.knk.manyak.story.entity.StoryCreationCharacterRole = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER) =
+                      role: com.knk.manyak.story.dto.StoryCreationCharacterRole = com.knk.manyak.story.dto.StoryCreationCharacterRole.SUPPORTING_CHARACTER) =
             creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(
                 creationSession = session, role = role, name = name, gender = gender,
                 sortOrder = orders.merge(session.id to role, 1, Int::plus)!!.toShort()))
@@ -1134,7 +1134,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         character(mixed, name = "이름만")
         character(mixed, gender = com.knk.manyak.story.dto.SimpleStoryCharacterGender.FEMALE)
         val tagged = character(mixed)
-        character(mixed, name = "주인공", role = com.knk.manyak.story.entity.StoryCreationCharacterRole.PROTAGONIST)
+        character(mixed, name = "주인공", role = com.knk.manyak.story.dto.StoryCreationCharacterRole.PROTAGONIST)
         repeat(2) { index ->
             val tag = creationTags.save(com.knk.manyak.story.entity.StoryCreationTag(
                 category = com.knk.manyak.story.dto.SimpleStoryTagCategory.SUPPORTING_CHARACTER,
@@ -1180,7 +1180,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         val target = story(owner)
         jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(midnight), target.id)
         val room = chat(target, owner)
-        message(room, 2, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+        message(room, 2, com.knk.manyak.chat.dto.MessageRole.ASSISTANT)
         ledger(owner, 250, "ATTENDANCE_REWARD")
         ledger(owner, 5000, "PURCHASE")
         ledger(owner, -20, "CHAT_TURN")
@@ -1209,7 +1209,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
             val target = story(user)
             jdbc.update("UPDATE stories SET created_at=? WHERE id=?", java.sql.Timestamp.from(start), target.id)
             val room = chat(target, user, created = start)
-            message(room, 1, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+            message(room, 1, com.knk.manyak.chat.dto.MessageRole.ASSISTANT)
             ledger(user, 250, "ATTENDANCE_REWARD", start)
             ledger(user, -20, "CHAT_TURN", start)
             order(user, completed = start)
@@ -1309,7 +1309,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         val officialMember = member("공식 제외")
         fun simple(target: com.knk.manyak.story.entity.Story) = target.also {
             creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = it.id,
-                status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+                status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
         }
         val simples = listOf(simple(story()), simple(story()))
         val general = story()
@@ -1338,10 +1338,10 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     @Test fun `스토리 목록 제작 방식 필터는 완성 세션 유무로 나누고 대문자 값만 받는다`() {
         val simple = story(title = "간편")
         creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = simple.id,
-            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+            status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
         val general = story(title = "일반")
         creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = general.id,
-            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
+            status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
         assertThat(ids("/stories?creationMode=SIMPLE")).containsExactly(simple.publicId.toString())
         assertThat(ids("/stories?creationMode=GENERAL")).containsExactly(general.publicId.toString())
         get("/stories?creationMode=simple").expectStatus().isBadRequest
@@ -1366,10 +1366,10 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     @Test fun `인물 수 분포의 모든 막대는 완성된 미삭제 스토리의 최신 세션 목록 총계와 같다`() {
         fun session(target: com.knk.manyak.story.entity.Story?, count: Int, complete: Boolean = true, created: Instant = midnight) {
             val row = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(storyId = target?.id,
-                status = if (complete) com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED else com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED,
+                status = if (complete) com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED else com.knk.manyak.story.dto.StoryCreationSessionStatus.STORYLINES_GENERATED,
                 createdAt = created))
             repeat(count) { creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(creationSession = row,
-                role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
+                role = com.knk.manyak.story.dto.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
         }
         for (count in 0..5) {
             val target = story()
@@ -1405,13 +1405,13 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         org.mockito.Mockito.doReturn(team.id).`when`(official).officialUserId()
         val story = story(team)
         val session = creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(userId = team.id, storyId = story.id,
-            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
+            status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED, createdAt = midnight))
         repeat(2) { creationCharacters.save(com.knk.manyak.story.entity.StoryCreationCharacter(creationSession = session,
-            role = com.knk.manyak.story.entity.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
+            role = com.knk.manyak.story.dto.StoryCreationCharacterRole.SUPPORTING_CHARACTER, name = "입력$it", sortOrder = (it + 1).toShort())) }
         creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(userId = excluded.id,
-            status = com.knk.manyak.story.entity.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
+            status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORYLINES_GENERATED, createdAt = midnight))
         val tag = creationTags.save(com.knk.manyak.story.entity.StoryCreationTag(category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
-            name = "판타지", tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.PREDEFINED))
+            name = "판타지", tagSource = com.knk.manyak.story.dto.StoryCreationTagSource.PREDEFINED))
         jdbc.update("INSERT INTO story_creation_session_tags(creation_session_id, tag_id, created_at) VALUES (?, ?, ?)", session.id, tag.id, java.sql.Timestamp.from(now))
         val body = json(get("/stories?scope=original&creationFrom=2026-10-21&creationTo=2026-10-21&supportingCharacterCount=2").expectStatus().isOk)
         assertThat(body["totalElements"].asLong()).isEqualTo(1)
@@ -1461,7 +1461,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         for (owner in listOf(ordinary, team)) {
             val story = story(owner)
             val chat = chat(story, owner)
-            message(chat, 2, com.knk.manyak.chat.entity.MessageRole.ASSISTANT)
+            message(chat, 2, com.knk.manyak.chat.dto.MessageRole.ASSISTANT)
             ledger(owner, 250, "ATTENDANCE_REWARD", midnight)
             ledger(owner, 250, "ATTENDANCE_REWARD", midnight.plusSeconds(1))
             ledger(owner, -20, "CHAT_TURN", midnight)

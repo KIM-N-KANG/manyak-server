@@ -3,7 +3,7 @@ package com.knk.manyak.push.service
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.security.requireActiveStatus
 import com.knk.manyak.push.entity.DevicePushToken
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

@@ -3,6 +3,8 @@ package com.knk.manyak.push.outbox
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*

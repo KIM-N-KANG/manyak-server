@@ -19,10 +19,10 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
@@ -1083,7 +1083,7 @@ class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() 
         com.knk.manyak.story.entity.StoryCreationTag(
             category = category,
             name = name,
-            tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.PREDEFINED,
+            tagSource = com.knk.manyak.story.dto.StoryCreationTagSource.PREDEFINED,
             sortOrder = sortOrder,
             isActive = true,
         ),
@@ -1164,7 +1164,7 @@ class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() 
     private fun addLegacyGenre(name: String) {
         val tag = tagRepository.save(com.knk.manyak.story.entity.StoryCreationTag(
             name = name, category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
-            tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.CUSTOM))
+            tagSource = com.knk.manyak.story.dto.StoryCreationTagSource.CUSTOM))
         legacySessionTags.save(com.knk.manyak.story.entity.StoryCreationSessionTag(
             creationSession = sessionRepository.findAll().single(), tag = tag))
     }

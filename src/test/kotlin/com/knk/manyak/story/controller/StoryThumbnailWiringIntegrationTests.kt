@@ -1,11 +1,11 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.image.entity.ImagePreset
-import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.dto.ImagePresetType
 import com.knk.manyak.image.repository.ImagePresetRepository
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus

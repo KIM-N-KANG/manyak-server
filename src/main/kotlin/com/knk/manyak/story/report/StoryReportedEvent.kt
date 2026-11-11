@@ -1,6 +1,6 @@
 package com.knk.manyak.story.report
 
-import com.knk.manyak.story.entity.StoryReportReason
+import com.knk.manyak.story.dto.StoryReportReason
 import java.time.Instant
 
 /** 신고 접수 알림용 이벤트(KNK-1020). 알림에 필요한 표시 정보만 담는다(엔티티 비전달). */

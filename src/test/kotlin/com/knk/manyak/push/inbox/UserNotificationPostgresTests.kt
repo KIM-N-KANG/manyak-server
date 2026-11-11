@@ -72,7 +72,7 @@ class UserNotificationPostgresTests {
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val requestId = UUID.randomUUID()
         val row = com.knk.manyak.story.entity.StoryCreationRequest(id = 42, requestId = requestId,
-            userId = 1, stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION)
+            userId = 1, stage = com.knk.manyak.story.dto.StoryCreationStage.STORY_COMPLETION)
         val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java) { call ->
             if (call.method.name == "findByIdForUpdate") {
                 completionAttempt.countDown()
@@ -122,7 +122,7 @@ class UserNotificationPostgresTests {
                     Unit
                 }
                 org.springframework.test.util.ReflectionTestUtils.invokeMethod<Unit>(recorder, "updateStatus",
-                    42L, com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED, "{}", recordNotification)
+                    42L, com.knk.manyak.story.dto.StoryCreationRequestStatus.COMPLETED, "{}", recordNotification)
             }
             val errors = listOf(completion, replay).mapNotNull { future ->
                 runCatching { future.get(15, java.util.concurrent.TimeUnit.SECONDS) }.exceptionOrNull()

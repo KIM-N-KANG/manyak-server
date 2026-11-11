@@ -4,7 +4,7 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.service.DevicePushTokenService
 import com.knk.manyak.support.DatabaseCleaner

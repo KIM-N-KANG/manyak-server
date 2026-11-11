@@ -1,7 +1,9 @@
 package com.knk.manyak.chat.service
 
 import com.knk.manyak.chat.dto.ChatPersonaResponse
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.global.security.SuspensionGuard

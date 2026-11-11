@@ -1,5 +1,6 @@
 package com.knk.manyak.push.entity
 
+import com.knk.manyak.push.dto.PushPlatform
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -12,12 +13,6 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
-
-/** 지원 플랫폼. iOS 앱이 생기면 enum·CHECK 제약과 함께 FCM 메시지의 ApnsConfig도 같이 추가한다. */
-enum class PushPlatform {
-    ANDROID,
-    WEB,
-}
 
 /**
  * 회원 기기의 FCM 등록 토큰(KNK-1131, V72). 토큰은 "이 기기의 이 앱 설치본" 주소라 전역 유일하며,

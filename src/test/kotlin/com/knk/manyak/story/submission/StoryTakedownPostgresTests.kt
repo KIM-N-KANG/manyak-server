@@ -6,7 +6,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.outbox.PushOutboxRelay
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryTakedownReason
+import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import org.assertj.core.api.Assertions.assertThat

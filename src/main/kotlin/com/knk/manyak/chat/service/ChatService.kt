@@ -21,8 +21,8 @@ import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
 import com.knk.manyak.chat.dto.EditChatRequest
 import com.knk.manyak.chat.dto.RegenerateChatRequest
-import com.knk.manyak.chat.entity.ChatStatus
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.ChatStatus
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryChatShare
 import com.knk.manyak.chat.entity.StoryMessage

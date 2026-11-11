@@ -1,6 +1,6 @@
 package com.knk.manyak.feedback.controller
 
-import com.knk.manyak.feedback.entity.Platform
+import com.knk.manyak.feedback.dto.Platform
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest

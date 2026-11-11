@@ -183,7 +183,7 @@ class PushDeliveryIntegrationTests : IntegrationTest() {
         val sender = com.knk.manyak.push.service.FcmPushSender(messaging, tokens, users,
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
         repeat(3) { tokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id,
-            token = "local-$it", platform = com.knk.manyak.push.entity.PushPlatform.ANDROID)) }
+            token = "local-$it", platform = com.knk.manyak.push.dto.PushPlatform.ANDROID)) }
         val invalid = org.mockito.Mockito.mock(com.google.firebase.messaging.FirebaseMessagingException::class.java)
         org.mockito.Mockito.`when`(invalid.messagingErrorCode).thenReturn(com.google.firebase.messaging.MessagingErrorCode.UNREGISTERED)
         org.mockito.Mockito.`when`(messaging.send(org.mockito.ArgumentMatchers.any())).thenReturn("accepted")
