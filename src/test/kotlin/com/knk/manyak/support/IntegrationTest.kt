@@ -103,6 +103,7 @@ import java.util.concurrent.Executor
         StoryCreationRequestRepository::class,
         ConsentTokenStore::class,
         AdminEligibilityService::class,
+        com.knk.manyak.auth.service.AdminCandidateQuery::class,
         OfficialStoryAccount::class,
         SlackSubmissionHeldNotifier::class,
         ServerAnalytics::class,

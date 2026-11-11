@@ -91,6 +91,22 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
     }
 
+    @Autowired private lateinit var candidates: com.knk.manyak.auth.service.AdminCandidateQuery
+
+    @Test fun `관리자 필터의 회원 조회가 저장소 예외로 실패하면 원문 없이 500 공통 본문으로 응답한다`() {
+        val user = member("storage-down")
+        val token = adminToken(user)
+        org.mockito.Mockito.doThrow(org.springframework.dao.DataAccessResourceFailureException("sensitive storage detail"))
+            .`when`(candidates).byPublicId(user.publicId)
+        client.get().uri("/api/v1/admin/foundation-probe").header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isEqualTo(500).expectBody()
+            .jsonPath("$.status").isEqualTo(500)
+            .jsonPath("$.code").isEqualTo("INTERNAL_SERVER_ERROR")
+            .jsonPath("$.message").isEqualTo("서버 오류가 발생했습니다.")
+            .jsonPath("$.path").isEqualTo("/api/v1/admin/foundation-probe")
+            .jsonPath("$.result").doesNotExist()
+    }
+
     @Test fun `변경 기록은 처리자 대상 전후 값과 응답과 같은 요청 ID를 보존한다`() {
         val user = member("admin")
         val token = adminToken(user)
