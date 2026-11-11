@@ -1,5 +1,6 @@
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.entity.User
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.repository.UserRepository
+com.knk.manyak.admin.security.AdminSecurityConfig -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.admin.service.AdminEligibilityService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.entity.SocialAccount
 com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.entity.User
@@ -17,7 +18,6 @@ com.knk.manyak.chat.service.ChatTurnPersister -> com.knk.manyak.credit.repositor
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.credit.service.AdminCreditAdjustmentService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.credit.service.AttendanceRewardService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.global.config.SecurityConfig -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.entity.User
 com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.entity.User
