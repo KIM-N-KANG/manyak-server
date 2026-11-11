@@ -1,17 +1,10 @@
 auth -> story
-chat -> auth
-chat -> credit
-chat -> story
 credit -> auth
 notice -> auth
 push -> auth
 push -> credit
 push -> notice
 push -> story
-search -> auth
-search -> chat
-search -> story
 story -> auth
 story -> credit
 story -> push
-story -> search
