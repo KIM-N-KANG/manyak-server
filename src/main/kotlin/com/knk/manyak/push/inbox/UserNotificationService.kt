@@ -1,7 +1,7 @@
 package com.knk.manyak.push.inbox
 
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

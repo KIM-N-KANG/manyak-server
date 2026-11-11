@@ -9,7 +9,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.ProfileImagePresetService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.auth.dto.ProfilePresetResponse
 import com.knk.manyak.auth.dto.UpdateProfileRequest
 import org.springframework.dao.DataIntegrityViolationException

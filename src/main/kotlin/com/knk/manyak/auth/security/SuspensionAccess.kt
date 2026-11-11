@@ -1,4 +1,4 @@
-package com.knk.manyak.global.security
+package com.knk.manyak.auth.security
 
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository

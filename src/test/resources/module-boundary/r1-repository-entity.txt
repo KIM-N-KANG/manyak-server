@@ -20,12 +20,6 @@ com.knk.manyak.credit.service.AttendanceRewardService -> com.knk.manyak.auth.rep
 com.knk.manyak.global.config.SecurityConfig -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.entity.User
 com.knk.manyak.global.observability.analytics.ServerAnalytics -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.global.security.CurrentUserIdArgumentResolver -> com.knk.manyak.auth.entity.User
-com.knk.manyak.global.security.CurrentUserIdArgumentResolver -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.global.security.DeletedAccountRejectionFilter -> com.knk.manyak.auth.entity.User
-com.knk.manyak.global.security.DeletedAccountRejectionFilter -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.global.security.SuspensionGuard -> com.knk.manyak.auth.entity.User
-com.knk.manyak.global.security.SuspensionGuard -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.invite.service.InviteService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.auth.entity.User

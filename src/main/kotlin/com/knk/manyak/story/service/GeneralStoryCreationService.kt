@@ -2,7 +2,7 @@ package com.knk.manyak.story.service
 
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.GeneralCharacterInput

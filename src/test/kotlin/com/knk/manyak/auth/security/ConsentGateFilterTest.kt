@@ -1,9 +1,10 @@
-package com.knk.manyak.global.security
+package com.knk.manyak.auth.security
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.consent.*
+import com.knk.manyak.global.security.DeletedAccountRejectionFilter
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -15,6 +16,7 @@ import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import tools.jackson.databind.ObjectMapper
 
+/** 탈퇴 필터(global)와 계정 판정 구현(auth)을 함께 묶어 판정 순서와 동의 게이트 허용 목록을 확인한다. */
 class ConsentGateFilterTest {
     private val users = mock(UserRepository::class.java)
     private val consents = mock(UserConsentService::class.java)
@@ -32,7 +34,7 @@ class ConsentGateFilterTest {
         val request = MockHttpServletRequest(method, path).apply { servletPath = path }
         val response = MockHttpServletResponse()
         var passed = false
-        DeletedAccountRejectionFilter(users, ObjectMapper(), consents, enabled).doFilter(request, response) { _, _ -> passed = true }
+        DeletedAccountRejectionFilter(AccountAccessAdapter(users, consents, enabled), ObjectMapper()).doFilter(request, response) { _, _ -> passed = true }
         return response to passed
     }
 
@@ -46,7 +48,8 @@ class ConsentGateFilterTest {
     @Test fun `메서드와 경로가 정확한 허용 목록만 통과한다`() {
         val allowed = listOf("GET" to "/users/me/consents", "POST" to "/users/me/consents", "GET" to "/auth/me",
             "DELETE" to "/users/me", "DELETE" to "/users/me/push-tokens", "GET" to "/credits/policies",
-            "GET" to "/credits/products", "GET" to "/profile-presets", "GET" to "/stories/simple/tags", "GET" to "/stories/genres")
+            "GET" to "/credits/products", "GET" to "/profile-presets", "GET" to "/stories/simple/tags", "GET" to "/stories/genres",
+            "GET" to "/stories/art-styles")
         allowed.forEach { (method, path) -> assertThat(request(method, "/api/v1$path").second).describedAs("$method $path").isTrue() }
         verifyNoInteractions(consents)
         `when`(consents.authenticationStatus(user.id)).thenReturn(missing)

@@ -3,7 +3,7 @@ package com.knk.manyak.story.service
 import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import org.springframework.context.ApplicationEventPublisher
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.image.service.UploadedImageObjectKeys

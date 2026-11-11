@@ -13,7 +13,7 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.observability.analytics.InviteRedeemFailureReason
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.invite.dto.InviteRedeemResponse
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.http.HttpStatus
