@@ -1,8 +1,8 @@
 package com.knk.manyak.notice.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.knk.manyak.notice.entity.NoticeStatus
-import com.knk.manyak.notice.entity.NoticeTag
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import jakarta.validation.constraints.*
 import java.time.Instant

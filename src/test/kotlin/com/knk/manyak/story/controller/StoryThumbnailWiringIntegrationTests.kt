@@ -145,7 +145,7 @@ class StoryThumbnailWiringIntegrationTests : IntegrationTest() {
         val story = storyRepository.save(
             com.knk.manyak.story.entity.Story(
                 title = "기존 프리셋 스토리",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
                 thumbnailImageKey = "thumb_0001",
             ),
         )

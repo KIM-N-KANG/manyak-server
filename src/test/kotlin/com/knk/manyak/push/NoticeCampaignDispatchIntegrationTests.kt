@@ -2,6 +2,8 @@ package com.knk.manyak.push
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
 import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.push.dto.PushKind

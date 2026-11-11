@@ -10,8 +10,8 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.auth.token.RotateResult
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.IntegrationTest

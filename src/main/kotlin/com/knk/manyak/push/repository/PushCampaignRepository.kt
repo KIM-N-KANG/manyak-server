@@ -67,7 +67,7 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
         WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
           AND c.startedAt = :startedAt""")
     fun refreshNoticeIfOwned(id: Long, startedAt: Instant, kind: com.knk.manyak.push.dto.PushKind,
-        tag: com.knk.manyak.notice.entity.NoticeTag): Int
+        tag: com.knk.manyak.notice.dto.NoticeTag): Int
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     @Modifying(clearAutomatically = true, flushAutomatically = true)

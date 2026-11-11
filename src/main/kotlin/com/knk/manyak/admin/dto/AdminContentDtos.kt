@@ -11,7 +11,7 @@ import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.dto.StoryEditFormResponse
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 import java.time.LocalDate

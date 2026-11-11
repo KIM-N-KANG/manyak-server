@@ -9,7 +9,7 @@ import com.knk.manyak.search.config.StorySearchConfig
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryLike
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository

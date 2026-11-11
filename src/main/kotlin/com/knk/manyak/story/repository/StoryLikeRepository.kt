@@ -1,5 +1,6 @@
 package com.knk.manyak.story.repository
 
+import com.knk.manyak.story.dto.StoryLikeCountProjection
 import com.knk.manyak.story.entity.StoryLike
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
@@ -24,10 +25,4 @@ interface StoryLikeRepository : JpaRepository<StoryLike, Long> {
     // 목록 응답용 배치 집계(N+1 방지). 좋아요가 없는 스토리는 결과에 빠지므로 호출부가 0으로 보정한다.
     @Query("SELECT l.storyId AS storyId, COUNT(*) AS likeCount FROM StoryLike l WHERE l.storyId IN :storyIds GROUP BY l.storyId")
     fun countByStoryIds(@Param("storyIds") storyIds: Collection<Long>): List<StoryLikeCountProjection>
-}
-
-/** 스토리별 좋아요 수 배치 집계 결과. */
-interface StoryLikeCountProjection {
-    val storyId: Long
-    val likeCount: Long
 }

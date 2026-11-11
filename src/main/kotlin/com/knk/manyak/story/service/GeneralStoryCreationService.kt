@@ -137,8 +137,8 @@ class GeneralStoryCreationService(
     fun createOriginalDraft(title: String, userId: Long): Story {
         suspensionGuard.requireActive(userId)
         return storyRepository.save(Story(userId = userId, title = title,
-            status = com.knk.manyak.story.entity.StoryStatus.DRAFT,
-            visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+            status = com.knk.manyak.story.dto.StoryStatus.DRAFT,
+            visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
     }
 
     /** 시작 설정 하나와 그 스코프의 추천 입력·엔딩을 저장하고 응답 객체로 만든다(KNK-515 복수화). */

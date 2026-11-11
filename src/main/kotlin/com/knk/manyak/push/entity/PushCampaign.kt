@@ -91,7 +91,7 @@ class PushCampaign(
 
     @Enumerated(EnumType.STRING)
     @Column(name = "notice_tag", length = 16)
-    var noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+    var noticeTag: com.knk.manyak.notice.dto.NoticeTag? = null,
 
     /** 이동 대상 스토리의 내부 FK. API와 푸시 데이터에는 스토리 publicId를 사용한다. */
     @Column(name = "story_id")

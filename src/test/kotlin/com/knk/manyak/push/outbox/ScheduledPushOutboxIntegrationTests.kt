@@ -233,7 +233,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
         val serviceOnly = users.save(User(nickname = "서비스만", servicePushEnabled = true))
         tokens.save(DevicePushToken(userId = serviceOnly.id, token = "service-only", platform = PushPlatform.ANDROID))
         for (kind in listOf(com.knk.manyak.push.dto.PushKind.SERVICE, com.knk.manyak.push.dto.PushKind.MARKETING)) {
-            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.entity.NoticeTag.UPDATE else com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = all.first().id, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED))
+            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.dto.NoticeTag.UPDATE else com.knk.manyak.notice.dto.NoticeTag.EVENT, createdByUserId = all.first().id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
             val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id, noticeTag = notice.tag))
             messages.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)

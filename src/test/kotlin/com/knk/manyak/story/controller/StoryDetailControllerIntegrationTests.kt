@@ -73,8 +73,8 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
             Story(
                 title = "작성자 있는 스토리",
                 userId = author.id,
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
 
@@ -107,8 +107,8 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
             Story(
                 title = "소유 판단 스토리",
                 userId = owner.id,
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
 
@@ -152,7 +152,7 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
 
     @Test
     fun `turnCount는 삭제된 채팅과 재생성을 포함한 누적 턴 수다`() {
-        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC, status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC, status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED))
         storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
         storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2, regeneratedCount = 1))
         // 소프트 삭제된 채팅도 합산한다.
@@ -278,8 +278,8 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
             Story(
                 title = "복수 시작 설정",
                 genre = "판타지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         val first = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "첫 시작", prologue = "프롤로그1"))
@@ -340,8 +340,8 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
         val story = storyRepository.save(
             Story(
                 title = "대표 이미지 스토리",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         val character = storyCharacterRepository.save(StoryCharacter(story = story, name = "레이"))
@@ -376,8 +376,8 @@ class StoryDetailControllerIntegrationTests : IntegrationTest() {
         val story = storyRepository.save(
             Story(
                 title = "인물 있는 스토리",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         // 저장 순서(= 컴파일 응답 순서)를 보존하는지 보려고 이미지 있는 인물과 없는 인물을 섞어 넣는다.

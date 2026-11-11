@@ -213,7 +213,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
         org.junit.jupiter.api.Assertions.assertEquals("원본", stories.findById(story.id).orElseThrow().title)
         org.junit.jupiter.api.Assertions.assertEquals("제출", service.editForm(story.publicId.toString(), user.id).path("title").asText())
         val exception = org.junit.jupiter.api.Assertions.assertThrows(org.springframework.web.server.ResponseStatusException::class.java) {
-            service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC), user.id)
+            service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC), user.id)
         }
         org.junit.jupiter.api.Assertions.assertEquals(409, exception.statusCode.value())
     }
@@ -688,7 +688,7 @@ class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
 
     private fun characterStory(): Pair<User, Story> {
         val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.dto.UserStatus.ACTIVE))
-        val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "세린", description = "왕국을 지키는 기사"))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "루아", description = "길을 안내하는 동료"))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "소개 없음"))

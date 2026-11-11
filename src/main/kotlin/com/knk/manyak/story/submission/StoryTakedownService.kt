@@ -5,7 +5,7 @@ import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.StoryTakedownReason
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.service.StoryTakedownStateService

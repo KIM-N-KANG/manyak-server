@@ -86,7 +86,7 @@ class PromotionPushService(
         return try {
             campaign.noticeId?.let { id ->
                 val notice = notices.findById(id).orElse(null)
-                if (notice == null || notice.status != com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED) {
+                if (notice == null || notice.status != com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED) {
                     return if (finish(campaign, PushCampaignStatus.FAILED, 0, 0, "NOTICE_NOT_PUBLISHED"))
                         PromotionPushResult(campaign.publicId, 0, 0, failed = true, kind = campaign.kind, reason = "NOTICE_NOT_PUBLISHED") else null
                 }

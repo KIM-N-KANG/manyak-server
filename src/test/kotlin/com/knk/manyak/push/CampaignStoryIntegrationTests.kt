@@ -15,8 +15,8 @@ import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat

@@ -4,7 +4,7 @@ import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.repository.StoryRepository
 import org.mockito.Mockito.*

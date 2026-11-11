@@ -209,14 +209,14 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
     }
 
     @Test fun `배포 전 공지는 소급하지 않고 공지 링크 태그와 캠페인 UTM은 사본으로 남는다`() {
-        val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE,
-            status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = user.id))
+        val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE,
+            status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED, createdByUserId = user.id))
         promotion.sendDue(Instant.now())
         assertThat(rows()).isEmpty()
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE,
             noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
         promotion.sendDue(Instant.now())
-        notice.status = com.knk.manyak.notice.entity.NoticeStatus.DRAFT
+        notice.status = com.knk.manyak.notice.dto.NoticeStatus.DRAFT
         notice.title = "바뀐 공지"
         notices.saveAndFlush(notice)
         val row = rows().single()
@@ -291,7 +291,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
 
     @Test fun `PROMOTION 공지는 연결한 캠페인에서 동의자만 태그와 원문 제목을 기록한다`() {
         member(marketing = false)
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.PROMOTION)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.PROMOTION)
         promotion.sendDue(Instant.now())
         val row = rows().single()
         assertThat(row["type"]).isEqualTo("PROMOTION")
@@ -307,7 +307,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
         users.save(User(nickname = "서비스 동의", servicePushEnabled = true))
         member(status = UserStatus.SUSPENDED)
         member(status = UserStatus.DELETED)
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.UPDATE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.UPDATE)
         promotion.sendDue(Instant.now())
         assertThat(rows()).hasSize(3)
         assertThat(rows().map { it["type"] }).containsOnly("NOTICE")
@@ -318,7 +318,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
     }
 
     @Test fun `공지 캠페인 취소 뒤 해제와 재게시도 캠페인과 내역을 새로 만들지 않는다`() {
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.SERVICE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.SERVICE)
         campaignService.cancel(user.id, campaigns.findAll().single().publicId, "취소")
         assertThat(notices.findByPublicId(notice.noticeId)!!.status.name).isEqualTo("PUBLISHED")
         assertThat(campaigns.findAll().single().status).isEqualTo(PushCampaignStatus.CANCELED)
@@ -330,11 +330,11 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
     }
 
     @Test fun `내역 기록 후 공지 수정과 재게시는 최초 제목 태그와 회원별 한 행을 보존한다`() {
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.UPDATE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.UPDATE)
         promotion.sendDue(Instant.now())
         val original = rows().single()
         noticeService.update(user.id, notice.noticeId, com.knk.manyak.notice.dto.UpdateNoticeRequest(
-            title = "수정한 제목", tag = com.knk.manyak.notice.entity.NoticeTag.EVENT, reason = "수정"))
+            title = "수정한 제목", tag = com.knk.manyak.notice.dto.NoticeTag.EVENT, reason = "수정"))
         noticeService.unpublish(user.id, notice.noticeId, "해제")
         noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("재게시"))
         promotion.sendDue(Instant.now())
@@ -342,7 +342,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
         assertThat(rows()).containsExactly(original)
     }
 
-    private fun publishNotice(tag: com.knk.manyak.notice.entity.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
+    private fun publishNotice(tag: com.knk.manyak.notice.dto.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", user.id)
         val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest(title = "원문 제목", body = "본문", tag = tag, reason = "작성"))
         val published = noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))

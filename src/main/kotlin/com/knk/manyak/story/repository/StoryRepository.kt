@@ -19,8 +19,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
         SELECT s.publicId AS publicId, s.thumbnailImageUrl AS thumbnailImageUrl,
                s.thumbnailImageKey AS thumbnailImageKey, s.thumbnailModerationStatus AS thumbnailModerationStatus
         FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:requesterId IS NULL OR s.userId IS NULL OR s.userId <> :requesterId)
     """)
@@ -85,8 +85,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY s.createdAt DESC, s.publicId DESC
@@ -98,8 +98,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (s.createdAt < :createdAt OR (s.createdAt = :createdAt AND s.publicId < :publicId))
@@ -117,8 +117,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY $POPULAR_SCORE DESC, s.publicId DESC
@@ -130,8 +130,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ($POPULAR_SCORE < :score
@@ -155,8 +155,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY $LIKE_COUNT DESC, s.publicId DESC
@@ -168,8 +168,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ($LIKE_COUNT < :likeCount
@@ -193,8 +193,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY $TURN_COUNT DESC, s.publicId DESC
@@ -206,8 +206,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ($TURN_COUNT < :turnCount

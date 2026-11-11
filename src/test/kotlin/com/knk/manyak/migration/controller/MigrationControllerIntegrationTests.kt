@@ -13,8 +13,8 @@ import com.knk.manyak.story.entity.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationSession
 import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -67,9 +67,9 @@ class MigrationControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Test
     fun `게스트 공개 스토리는 이관 전후 노출되고 이관 뒤 작성자가 표시된다`() {
         val me = saveUser("이관회원")
-        val public = storyRepository.save(Story(title = "게스트 공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC))
+        val public = storyRepository.save(Story(title = "게스트 공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC))
         recordCompletion(public, deviceIdHasher.hash("guest-device"))
-        val private = storyRepository.save(Story(title = "게스트 비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+        val private = storyRepository.save(Story(title = "게스트 비공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
         restTestClient.get().uri("/api/v1/stories").exchange().expectStatus().isOk
             .expectBody().jsonPath("$.items.length()").isEqualTo(1)
             .jsonPath("$.items[0].id").isEqualTo(public.publicId.toString())

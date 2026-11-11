@@ -5,6 +5,8 @@ import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.AdminMetricsIntegrationTest

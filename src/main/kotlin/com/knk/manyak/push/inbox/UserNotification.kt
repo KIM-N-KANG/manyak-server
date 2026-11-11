@@ -33,7 +33,7 @@ class UserNotification(
     @Column(name = "deep_link", length = 512) val deepLink: String? = null,
     @Column(name = "story_public_id") val storyPublicId: UUID? = null,
     @Column(name = "notice_public_id") val noticePublicId: UUID? = null,
-    @Enumerated(EnumType.STRING) @Column(name = "notice_tag", length = 16) val noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+    @Enumerated(EnumType.STRING) @Column(name = "notice_tag", length = 16) val noticeTag: com.knk.manyak.notice.dto.NoticeTag? = null,
     @Column(name = "created_at", nullable = false) val createdAt: Instant = Instant.now(),
     @Column(name = "read_at") val readAt: Instant? = null,
 )
@@ -47,7 +47,7 @@ data class NotificationItem(
     val deepLink: String?,
     val storyId: UUID?,
     val noticeId: UUID?,
-    val noticeTag: com.knk.manyak.notice.entity.NoticeTag?,
+    val noticeTag: com.knk.manyak.notice.dto.NoticeTag?,
     val createdAt: Instant,
     val readAt: Instant?,
 )

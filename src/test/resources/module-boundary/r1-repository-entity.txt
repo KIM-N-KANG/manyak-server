@@ -1,4 +1,3 @@
-com.knk.manyak.admin.dto.AdminStorySettingsResponse -> com.knk.manyak.story.entity.StoryVisibility
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.entity.User
 com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.admin.service.AdminEligibilityService -> com.knk.manyak.auth.entity.User
@@ -43,8 +42,6 @@ com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.sto
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.story.repository.StoryEndingRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.story.repository.StoryRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.story.repository.UserStoryEndingReachRepository
-com.knk.manyak.push.dto.PushEligibilityDtosKt -> com.knk.manyak.notice.entity.NoticeTag
-com.knk.manyak.push.entity.PushCampaign -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.entity.PushDeliveryResult -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.event.ModerationPushListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.event.ModerationPushListener -> com.knk.manyak.auth.repository.UserRepository
@@ -54,16 +51,10 @@ com.knk.manyak.push.event.StoryTakedownPushListener -> com.knk.manyak.auth.entit
 com.knk.manyak.push.event.StoryTakedownPushListener -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.inbox.DomainNotificationRecorder -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.inbox.DomainNotificationRecorder -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.inbox.NotificationContent -> com.knk.manyak.notice.entity.NoticeTag
-com.knk.manyak.push.inbox.NotificationItem -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.inbox.ScheduledNotificationWriter -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.inbox.ScheduledNotificationWriter -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.inbox.ScheduledNotificationWriter -> com.knk.manyak.credit.repository.CreditExpiryTarget
-com.knk.manyak.push.inbox.ScheduledNotificationWriter -> com.knk.manyak.notice.entity.NoticeTag
-com.knk.manyak.push.inbox.UserNotification -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.inbox.UserNotificationService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.inbox.UserNotificationService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.inbox.UserNotificationStore -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.outbox.ModerationOutboxListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.outbox.ModerationOutboxListener -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.outbox.ScheduledPushOutboxWriter -> com.knk.manyak.auth.entity.User
@@ -72,7 +63,6 @@ com.knk.manyak.push.outbox.StoryCompletionOutboxListener -> com.knk.manyak.auth.
 com.knk.manyak.push.outbox.StoryCompletionOutboxListener -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.outbox.StoryTakedownOutboxListener -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.outbox.StoryTakedownOutboxListener -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.repository.PushCampaignRepository -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.service.AdminCampaignService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.service.AdminCampaignService -> com.knk.manyak.story.entity.Story
 com.knk.manyak.push.service.AdminCampaignService -> com.knk.manyak.story.repository.StoryRepository
@@ -80,7 +70,6 @@ com.knk.manyak.push.service.AttendanceReminderService -> com.knk.manyak.auth.ent
 com.knk.manyak.push.service.AttendanceReminderService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.service.CreditExpiryReminderService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.service.CreditExpiryReminderService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.push.service.CreditExpiryReminderService -> com.knk.manyak.credit.repository.CreditExpiryTarget
 com.knk.manyak.push.service.CreditExpiryReminderService -> com.knk.manyak.credit.repository.CreditLotRepository
 com.knk.manyak.push.service.DevicePushTokenService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.service.DevicePushTokenService -> com.knk.manyak.auth.repository.UserRepository
@@ -89,8 +78,6 @@ com.knk.manyak.push.service.FcmPushSender -> com.knk.manyak.auth.repository.User
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.notice.entity.Notice
-com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.notice.entity.NoticeStatus
-com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.notice.entity.NoticeTag
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.notice.repository.NoticeRepository
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.story.entity.Story
 com.knk.manyak.push.service.PromotionPushService -> com.knk.manyak.story.repository.StoryRepository
@@ -100,14 +87,11 @@ com.knk.manyak.push.service.PushEligibilityService -> com.knk.manyak.auth.entity
 com.knk.manyak.push.service.PushEligibilityService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.push.service.PushSettingsService -> com.knk.manyak.auth.entity.User
 com.knk.manyak.push.service.PushSettingsService -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.search.dto.StorySearchDocument -> com.knk.manyak.story.entity.StoryStatus
-com.knk.manyak.search.dto.StorySearchDocument -> com.knk.manyak.story.entity.StoryVisibility
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.auth.entity.User
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.entity.Story
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.entity.StoryCharacter
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.repository.StoryCharacterRepository
-com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.repository.StoryLikeCountProjection
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.repository.StoryLikeRepository
 com.knk.manyak.search.service.StorySearchDocumentReader -> com.knk.manyak.story.repository.StoryRepository
 com.knk.manyak.search.service.StorySearchService -> com.knk.manyak.story.entity.Story

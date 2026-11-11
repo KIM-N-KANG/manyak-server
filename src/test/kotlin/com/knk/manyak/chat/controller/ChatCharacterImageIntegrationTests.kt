@@ -17,8 +17,8 @@ import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.support.ScriptedAiIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
