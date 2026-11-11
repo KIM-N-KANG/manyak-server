@@ -2,7 +2,6 @@ package com.knk.manyak.auth.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.knk.manyak.adminkit.query.instant
-import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import java.sql.ResultSet
 import java.time.Instant
@@ -18,7 +17,8 @@ data class AdminMemberSummary(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(user: User, isAdmin: Boolean) = AdminMemberSummary(user.publicId, user.nickname, user.status, isAdmin, user.createdAt)
+        fun from(candidate: AdminCandidate, isAdmin: Boolean) =
+            AdminMemberSummary(candidate.publicId, candidate.nickname, candidate.status, isAdmin, candidate.createdAt)
     }
 }
 internal const val MEMBER_COLUMNS = """u.public_id AS member_id, u.nickname, u.status AS member_status, u.created_at AS member_created_at,

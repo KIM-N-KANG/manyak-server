@@ -40,3 +40,12 @@ data class InviteAccount(
 
 /** 게스트 데이터 이관 게이트가 읽는 회원 값(이관 완료 시각, 시도 수). */
 data class MigrationState(val migratedAt: Instant?, val migrationAttempts: Int)
+
+/** 관리자 인증과 로그인이 판정에 쓰는 회원 값(KNK-2056). 관리자 역할은 adminkit이 따로 본다. */
+data class AdminCandidate(
+    val id: Long,
+    val publicId: UUID,
+    val status: UserStatus,
+    val nickname: String,
+    val createdAt: Instant,
+)

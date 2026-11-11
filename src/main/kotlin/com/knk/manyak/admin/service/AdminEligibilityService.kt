@@ -1,13 +1,13 @@
 package com.knk.manyak.admin.service
 
 import com.knk.manyak.adminkit.role.AdminRoleReader
-import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.dto.AdminCandidate
 import com.knk.manyak.auth.dto.UserStatus
 import org.springframework.stereotype.Service
 
 @Service
 class AdminEligibilityService(private val adminRoles: AdminRoleReader) {
-    fun rejectionReason(user: User?): String? = when {
+    fun rejectionReason(user: AdminCandidate?): String? = when {
         user == null -> "no_member"
         user.status == UserStatus.DELETED -> "deleted"
         user.status == UserStatus.SUSPENDED -> "suspended"
