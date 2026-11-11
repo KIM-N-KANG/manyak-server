@@ -4,7 +4,7 @@ import com.knk.manyak.global.util.parsePublicIdOrNull
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.*
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.dto.StoryCreationRequestStatus

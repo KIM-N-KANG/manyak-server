@@ -3,7 +3,7 @@ package com.knk.manyak.story.service
 import com.knk.manyak.global.util.parsePublicIdOrNull
 import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
 import com.knk.manyak.story.dto.GeneralCharacterImageInput
 import com.knk.manyak.story.dto.GeneralCharacterInput

@@ -8,7 +8,7 @@ import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.SocialIdTokenVerifier
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType

@@ -7,7 +7,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.GenreInputValidator
 import com.knk.manyak.story.service.StoryEditService
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

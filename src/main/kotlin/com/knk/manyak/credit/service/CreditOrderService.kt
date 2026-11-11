@@ -9,7 +9,7 @@ import com.knk.manyak.credit.entity.CreditOrder
 import com.knk.manyak.credit.dto.CreditOrderProvider
 import com.knk.manyak.credit.repository.CreditOrderRepository
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

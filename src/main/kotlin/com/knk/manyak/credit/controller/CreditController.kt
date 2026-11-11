@@ -7,7 +7,7 @@ import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditTransactionHistoryService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.global.security.requireUser
 import io.swagger.v3.oas.annotations.Operation

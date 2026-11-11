@@ -6,7 +6,7 @@ import com.knk.manyak.chat.dto.CreateChatResponse
 import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.story.service.StoryPlayReader
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

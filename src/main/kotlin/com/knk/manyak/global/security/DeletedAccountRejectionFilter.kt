@@ -1,10 +1,7 @@
 package com.knk.manyak.global.security
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.global.error.ApiErrorCodes
-import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorResponse
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -22,13 +19,13 @@ import tools.jackson.databind.ObjectMapper
  * refresh는 탈퇴 시 폐기되지만 access는 만료까지 최대 30분 살아 있다. 엔드포인트가 `@CurrentUserId`를
  * 쓰는지와 무관하게(공유 조회처럼 principal을 직접 안 읽는 공개 경로 포함) 같은 계약을 보장하려면
  * 인증이 확정된 직후의 공통 지점이 여기뿐이다. JWT 인증이 없는 요청(익명·공개)은 조회 없이 통과한다.
+ *
+ * 탈퇴와 동의 게이트의 판정은 계정 모듈이 [AccountAccessPort]로 구현하고(KNK-2068), 이 필터는 판정에 맞는 응답만 쓴다.
  */
 class DeletedAccountRejectionFilter(
-    private val userRepository: UserRepository,
+    private val accountAccess: AccountAccessPort,
     // 필터 계층이라 GlobalExceptionHandler를 못 타므로 같은 오류 바디(ApiErrorResponse)를 직접 쓴다.
     private val objectMapper: ObjectMapper,
-    private val consentService: UserConsentService,
-    private val consentGateEnabled: Boolean,
 ) : OncePerRequestFilter() {
 
     override fun doFilterInternal(
@@ -38,8 +35,9 @@ class DeletedAccountRejectionFilter(
     ) {
         val authentication = SecurityContextHolder.getContext().authentication
         if (authentication is JwtAuthenticationToken) {
-            val user = parsePublicIdOrNull(authentication.token.subject)?.let(userRepository::findByPublicId)
-            if (user?.status == UserStatus.DELETED) {
+            val access = parsePublicIdOrNull(authentication.token.subject)
+                ?.let { accountAccess.check(it, request.method, request.servletPath) }
+            if (access == AccountAccess.DELETED) {
                 SecurityContextHolder.clearContext()
                 response.status = HttpStatus.UNAUTHORIZED.value()
                 response.contentType = MediaType.APPLICATION_JSON_VALUE
@@ -56,32 +54,17 @@ class DeletedAccountRejectionFilter(
                 )
                 return
             }
-            if (user != null && consentGateEnabled && !consentAllowed(request.method, request.servletPath)) {
-                val consents = consentService.authenticationStatus(user.id)
-                if (consents.terms.needsConsent || consents.privacy.needsConsent || consents.age14.needsConsent) {
-                    response.status = HttpStatus.FORBIDDEN.value()
-                    response.contentType = MediaType.APPLICATION_JSON_VALUE
-                    response.characterEncoding = Charsets.UTF_8.name()
-                    response.writer.write(objectMapper.writeValueAsString(ApiErrorResponse(
-                        status = HttpStatus.FORBIDDEN.value(), code = ApiErrorCodes.CONSENT_REQUIRED,
-                        message = "현행 필수 항목에 동의해 주세요.", path = request.requestURI,
-                    )))
-                    return
-                }
+            if (access == AccountAccess.CONSENT_REQUIRED) {
+                response.status = HttpStatus.FORBIDDEN.value()
+                response.contentType = MediaType.APPLICATION_JSON_VALUE
+                response.characterEncoding = Charsets.UTF_8.name()
+                response.writer.write(objectMapper.writeValueAsString(ApiErrorResponse(
+                    status = HttpStatus.FORBIDDEN.value(), code = ApiErrorCodes.CONSENT_REQUIRED,
+                    message = "현행 필수 항목에 동의해 주세요.", path = request.requestURI,
+                )))
+                return
             }
         }
         filterChain.doFilter(request, response)
-    }
-
-    private fun consentAllowed(method: String, path: String): Boolean = when (method) {
-        "GET" -> path in setOf(
-            "/api/v1/users/me/consents", "/api/v1/auth/me", "/api/v1/credits/policies",
-            "/api/v1/credits/products", "/api/v1/profile-presets", "/api/v1/stories/simple/tags",
-            // KNK-1537의 장르 API는 구현 전부터 공개 카탈로그 허용 목록에 포함한다.
-            "/api/v1/stories/genres", "/api/v1/stories/art-styles",
-        )
-        "POST" -> path == "/api/v1/users/me/consents"
-        "DELETE" -> path == "/api/v1/users/me" || path == "/api/v1/users/me/push-tokens"
-        else -> false
     }
 }

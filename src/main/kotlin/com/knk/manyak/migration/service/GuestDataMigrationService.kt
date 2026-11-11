@@ -5,7 +5,7 @@ import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult

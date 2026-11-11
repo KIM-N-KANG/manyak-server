@@ -4,7 +4,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

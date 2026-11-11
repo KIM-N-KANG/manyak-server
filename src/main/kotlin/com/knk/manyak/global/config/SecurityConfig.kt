@@ -1,8 +1,8 @@
 package com.knk.manyak.global.config
 
-import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.AccountAccessPort
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint
 import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
 import com.knk.manyak.global.security.DeletedAccountRejectionFilter
@@ -61,10 +61,8 @@ class SecurityConfig {
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,
         environment: Environment,
-        userRepository: UserRepository,
+        accountAccess: AccountAccessPort,
         objectMapper: ObjectMapper,
-        consentService: UserConsentService,
-        @Value("\${manyak.auth.consent-gate.enabled:false}") consentGateEnabled: Boolean,
         @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
     ): SecurityFilterChain {
         val authenticationEntryPoint = ApiAuthenticationEntryPoint(objectMapper)
@@ -171,7 +169,7 @@ class SecurityConfig {
             // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
             // 인증 확정 이후에 놓아, 엔드포인트가 principal을 읽는 방식과 무관하게 같은 계약을 보장한다.
             .addFilterAfter(
-                DeletedAccountRejectionFilter(userRepository, objectMapper, consentService, consentGateEnabled),
+                DeletedAccountRejectionFilter(accountAccess, objectMapper),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.

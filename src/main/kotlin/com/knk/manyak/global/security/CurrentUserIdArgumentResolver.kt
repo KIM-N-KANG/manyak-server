@@ -1,8 +1,6 @@
 package com.knk.manyak.global.security
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
 import org.springframework.core.MethodParameter
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
@@ -24,7 +22,7 @@ import org.springframework.web.server.ResponseStatusException
  */
 @Component
 class CurrentUserIdArgumentResolver(
-    private val userRepository: UserRepository,
+    private val accountAccess: AccountAccessPort,
 ) : HandlerMethodArgumentResolver {
 
     override fun supportsParameter(parameter: MethodParameter): Boolean =
@@ -43,6 +41,6 @@ class CurrentUserIdArgumentResolver(
         }
         val publicId = parsePublicIdOrNull(authentication.token.subject) ?: return null
         // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
-        return userRepository.findByPublicId(publicId)?.id
+        return accountAccess.userIdOf(publicId)
     }
 }

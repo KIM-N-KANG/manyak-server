@@ -13,7 +13,7 @@ import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.observability.aicall.AiCallContext
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallRecorder

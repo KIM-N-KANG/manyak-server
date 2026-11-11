@@ -3,7 +3,7 @@ package com.knk.manyak.auth.service
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.error.ApiErrorDetail
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.auth.dto.*
 import com.knk.manyak.auth.entity.UserPersona
 import com.knk.manyak.auth.repository.UserPersonaRepository
