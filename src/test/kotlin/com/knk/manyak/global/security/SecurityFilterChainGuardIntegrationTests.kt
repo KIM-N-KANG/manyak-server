@@ -1,5 +1,6 @@
 package com.knk.manyak.global.security
 
+import com.knk.manyak.auth.config.AuthProperties
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -10,7 +11,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.SoftAssertions
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.ListableBeanFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.web.servlet.AbstractFilterRegistrationBean
+import org.springframework.boot.web.servlet.ServletContextInitializerBeans
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
@@ -19,6 +23,10 @@ import org.springframework.security.web.FilterChainProxy
 import org.springframework.test.web.servlet.client.EntityExchangeResult
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -34,6 +42,8 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: JwtTokenProvider
     @Autowired private lateinit var filterChainProxy: FilterChainProxy
+    @Autowired private lateinit var authProperties: AuthProperties
+    @Autowired private lateinit var beanFactory: ListableBeanFactory
 
     private val mapper = ObjectMapper()
 
@@ -89,12 +99,56 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `서블릿 필터로 등록되는 것은 현재 목록뿐이고 보안 필터는 보안 체인 하나로만 등록된다`() {
+        // Filter 구현을 빈으로 만들면 Boot가 서블릿 필터로도 자동 등록해 보안 체인 밖에서 모든 경로에 한 번 더 돈다.
+        // 보안 필터를 모듈로 옮기면서 빈으로 노출하는 회귀를 잡으려고 등록 목록을 현재 값으로 고정한다.
+        // Filter 빈뿐 아니라 FilterRegistrationBean(Sentry, MVC 관측)까지 Boot가 실제로 등록하는 목록 전체다.
+        val registered = ServletContextInitializerBeans(beanFactory)
+            .filterIsInstance<AbstractFilterRegistrationBean<*>>()
+            .filter { it.isEnabled }
+            .map { it.filterName }
+        assertThat(registered).containsExactlyInAnyOrder(
+            "sentrySpringFilter",
+            "requestCorrelationFilter",
+            "characterEncodingFilter",
+            "sentryTracingFilter",
+            "webMvcObservationFilter",
+            "apiRequestLoggingFilter",
+            "formContentFilter",
+            "requestContextFilter",
+            "springSecurityFilterChain",
+            "sentryUserFilter",
+        )
+    }
+
+    @Test
     fun `토큰 없음과 무효 토큰의 필수 경로 401은 공통 본문과 Bearer 챌린지 헤더를 낸다`() {
-        for (token in listOf(null, FORGED_TOKEN)) {
+        for (token in listOf(null, FORGED_TOKEN, expiredToken())) {
+            val label = if (token == null) "토큰 없음" else if (token == FORGED_TOKEN) "위조" else "만료"
             val result = exchange(HttpMethod.GET, "/api/v1/users/me/credits", token)
             assertErrorBody(result, 401, "UNAUTHORIZED", "유효하지 않은 인증입니다.", "/api/v1/users/me/credits")
-            assertThat(result.responseHeaders.getFirst(HttpHeaders.WWW_AUTHENTICATE)).describedAs("token=$token").isEqualTo("Bearer")
+            assertThat(result.responseHeaders.getFirst(HttpHeaders.WWW_AUTHENTICATE)).describedAs(label).isEqualTo("Bearer")
         }
+    }
+
+    @Test
+    fun `서명은 맞고 만료된 토큰은 선택 인증 경로에서 익명으로 통과한다`() {
+        val result = exchange(HttpMethod.GET, "/api/v1/stories", expiredToken())
+        assertThat(result.status.value()).isEqualTo(200)
+    }
+
+    @Test
+    fun `관리자 체인의 인증 실패는 공통 401 본문과 챌린지 헤더이고 자격 없음은 공통 403 본문이다`() {
+        val path = "/api/v1/admin/members"
+        val member = users.save(User(nickname = "역할 없는 회원"))
+        for ((label, token) in listOf("토큰 없음" to null, "앱 토큰" to tokens.issueAccessToken(member.publicId), "위조" to FORGED_TOKEN)) {
+            val result = exchange(HttpMethod.GET, path, token)
+            assertErrorBody(result, 401, "UNAUTHORIZED", "유효하지 않은 인증입니다.", path)
+            assertThat(result.responseHeaders.getFirst(HttpHeaders.WWW_AUTHENTICATE)).describedAs(label).isEqualTo("Bearer")
+        }
+        val forbidden = exchange(HttpMethod.GET, path, tokens.issueAdminToken(member.publicId))
+        assertErrorBody(forbidden, 403, "FORBIDDEN", "관리자 권한이 없습니다.", path)
+        assertThat(forbidden.responseHeaders.getFirst(HttpHeaders.WWW_AUTHENTICATE)).isNull()
     }
 
     @Test
@@ -108,8 +162,13 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
         }
     }
 
+    /**
+     * 인가 단계의 permitAll과 리소스 서버의 Bearer 해석 생략만 본다. 판정은 엔트리 포인트의 거절(401과 Bearer 챌린지)이다.
+     * 내부 경로의 공유 시크릿 거절은 챌린지 헤더 없이 401을 쓰므로 여기서는 보이지 않고,
+     * InternalPushEligibilityControllerIntegrationTests 등 내부 API 테스트가 덮는다.
+     */
     @Test
-    fun `공개 경로는 토큰 없이 통과하고 Bearer 해석 생략 경로는 무효 토큰도 통과한다`() {
+    fun `공개 경로는 토큰 없이 인가를 통과하고 Bearer 해석 생략 경로는 무효 토큰도 통과한다`() {
         val soft = SoftAssertions()
         for (row in PUBLIC_ROUTES) {
             val anonymous = exchange(row.method, row.path, token = null, headers = row.headers)
@@ -174,6 +233,11 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
         assertThat(body["path"].asText()).isEqualTo(path)
         assertThat(body["details"].isEmpty).isTrue()
     }
+
+    /** 서명과 발급자는 맞고 만료 시각이 시계 오차(60초)를 넘겨 지난 앱 토큰. 검증기 단계에서 거절된다. */
+    private fun expiredToken(): String =
+        JwtTokenProvider(authProperties, Clock.fixed(Instant.now().minus(Duration.ofDays(1)), ZoneOffset.UTC))
+            .issueAccessToken(users.save(User(nickname = "만료 토큰 회원")).publicId)
 
     private fun request(path: String) = MockHttpServletRequest("GET", path).apply { servletPath = path }
 
@@ -267,6 +331,8 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
             HttpMethod.GET to "/api/v1/auth/me",
             HttpMethod.GET to "/api/v1/profile-presets",
             HttpMethod.GET to "/api/v1/not-mapped",
+            // 지표 무인증 허용은 local 프로파일만이다(SecurityConfig 주석). 테스트 프로파일에서는 인증이 필요해야 한다.
+            HttpMethod.GET to "/actuator/prometheus",
         )
     }
 }
