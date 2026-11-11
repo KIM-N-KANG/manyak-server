@@ -603,12 +603,4 @@ class SimpleStorylineService(
                 ?: throw exception
         }
     }
-
-    private companion object {
-        // 완성 타이머(manyak.story.creation.duration)와 스토리라인 카운터(manyak.storyline.creation.result)가
-        // 공유하는 outcome 태그 값(유한 enum 3종 — 의미는 recordCreationDuration·recordStorylineResult KDoc).
-        const val OUTCOME_SUCCESS = "success"
-        const val OUTCOME_FAILURE = "failure"
-        const val OUTCOME_REJECTED = "rejected"
-    }
 }
