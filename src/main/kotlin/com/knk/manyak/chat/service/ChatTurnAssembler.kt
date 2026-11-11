@@ -1,6 +1,6 @@
 package com.knk.manyak.chat.service
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.chat.client.ChatCharacterImage
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnEnding
@@ -41,7 +41,7 @@ class ChatTurnAssembler(
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     // 채팅 모델과 가격은 요청 조립 시 한 번 읽어 AI 호출과 차감에서 함께 사용한다.
     private val chatModelService: ChatModelService,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     transactionManager: PlatformTransactionManager,
 ) {
 
@@ -148,7 +148,7 @@ class ChatTurnAssembler(
             billingModel = chatModelService.effective(chat.modelCode),
             request = ChatTurnAiRequest(
                 longResponse = chat.longResponse,
-                userId = chat.userId?.let { userRepository.findById(it).orElseThrow().publicId.toString() },
+                userId = chat.userId?.let { accounts.requirePublicIdOf(it).toString() },
                 genre = material?.genre.orEmpty(),
                 storySettings = ChatTurnStorySettings(
                     protagonistName = chatName.orEmpty(),

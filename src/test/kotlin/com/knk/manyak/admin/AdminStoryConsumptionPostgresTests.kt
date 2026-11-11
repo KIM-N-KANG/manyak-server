@@ -61,7 +61,7 @@ class AdminStoryConsumptionPostgresTests {
         val repository = AdminStoryConsumptionRepository(NamedParameterJdbcTemplate(jdbc))
         val clock = Clock.fixed(now, ZoneOffset.UTC)
         val service = AdminStoryConsumptionService(repository, AdminDashboardProperties(listOf(official, team)),
-            OfficialStoryAccount(userRepository, officialPublicId.toString()), clock)
+            OfficialStoryAccount(com.knk.manyak.auth.service.AccountQueryService(userRepository), officialPublicId.toString()), clock)
         val request = AdminStoryConsumptionRequest().apply { from = "2026-10-21"; to = "2026-10-21" }
         val result = service.consumption(request)
         assertThat(result.publicStories).isEqualTo(2)
@@ -84,7 +84,7 @@ class AdminStoryConsumptionPostgresTests {
         assertThat(result.creators.retentionRate).isEqualTo(1.0)
         // 설정 미지정·빈 제외 목록도 실제 PG의 nullable 파라미터 바인딩으로 검증한다.
         val unconfigured = AdminStoryConsumptionService(repository, AdminDashboardProperties(emptyList()),
-            OfficialStoryAccount(userRepository, ""), clock).consumption(request)
+            OfficialStoryAccount(com.knk.manyak.auth.service.AccountQueryService(userRepository), ""), clock).consumption(request)
         assertThat(unconfigured.officialStories).isZero()
         assertThat(unconfigured.publicStories).isEqualTo(3)
         assertThat(unconfigured.ranking.none { it.official }).isTrue()

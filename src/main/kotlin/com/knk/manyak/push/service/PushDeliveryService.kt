@@ -1,6 +1,6 @@
 package com.knk.manyak.push.service
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.repository.PushDeliveryRepository
 import org.springframework.http.HttpStatus
@@ -16,7 +16,7 @@ import java.time.temporal.ChronoUnit
 @Service
 class PushDeliveryService(
     private val repository: PushDeliveryRepository,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     // AFTER_COMMIT 리스너에서도 완료된 원래 트랜잭션과 분리해 실제로 커밋한다.
@@ -28,7 +28,7 @@ class PushDeliveryService(
         val campaignId = report.campaignId?.let { publicId ->
             repository.findCampaignId(publicId) ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "없는 캠페인입니다.")
         }
-        repository.insert(report, campaignId, users.findByPublicId(report.recipientId)?.id)
+        repository.insert(report, campaignId, accounts.userIdOf(report.recipientId))
     }
 
     @Transactional(readOnly = true)

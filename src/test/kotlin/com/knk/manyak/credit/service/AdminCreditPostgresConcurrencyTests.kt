@@ -74,7 +74,8 @@ class AdminCreditPostgresConcurrencyTests {
             CreditPolicyService(context.getBean(CreditPolicyRepository::class.java), 1000, 2000, 10, 250, 250)
         })
         context.register(PostgresCreditAdminLocks::class.java, AdminChangeActorRepository::class.java, AdminAuditService::class.java, AdminCreditPolicyService::class.java,
-            AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java)
+            AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java,
+            com.knk.manyak.auth.service.AccountQueryService::class.java)
         context.refresh()
         tx = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
         policy = context.getBean(AdminCreditPolicyService::class.java)

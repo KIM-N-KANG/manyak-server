@@ -1,6 +1,6 @@
 package com.knk.manyak.push.outbox
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.story.event.StoryCompletedEvent
 import org.slf4j.MDC
@@ -19,7 +19,7 @@ import java.time.Clock
 @Component
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
 class StoryCompletionOutboxListener(
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val store: PushOutboxStore,
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String,
     private val clock: Clock = Clock.systemUTC(),
@@ -28,10 +28,10 @@ class StoryCompletionOutboxListener(
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     fun onStoryCompleted(event: StoryCompletedEvent) {
-        val user = users.findById(event.userId).orElseThrow()
+        val recipientId = accounts.requirePublicIdOf(event.userId)
         store.insert(PushMessage(
             messageId = "story-completed:${event.requestId}",
-            recipientId = user.publicId.toString(),
+            recipientId = recipientId.toString(),
             data = mapOf("type" to "STORY_COMPLETED", "storyId" to event.storyPublicId, "title" to event.title,
                 "deepLink" to pushDeepLink(webBaseUrl, "/stories/${event.storyPublicId}", "STORY_COMPLETED")),
             requestId = MDC.get("request_id") ?: "unknown",

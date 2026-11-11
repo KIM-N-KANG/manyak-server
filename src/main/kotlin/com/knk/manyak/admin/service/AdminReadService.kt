@@ -12,7 +12,7 @@ import com.knk.manyak.adminkit.query.AdminPageResponse
 import com.knk.manyak.adminkit.query.AdminPagination
 import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.dto.CreditOrderStatus
 import com.knk.manyak.credit.service.CreditWalletService
 import org.springframework.http.HttpStatus
@@ -28,7 +28,7 @@ class AdminReadService(
     private val official: com.knk.manyak.story.service.OfficialStoryAccount,
     private val dashboard: AdminDashboardRepository,
     private val properties: AdminDashboardProperties,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val wallet: CreditWalletService,
     private val audits: AdminAuditService,
     private val storyRepository: com.knk.manyak.story.repository.StoryRepository,
@@ -134,6 +134,6 @@ class AdminReadService(
             "targetType" to "l.target_type", "admin" to "u.nickname"), "createdAt"))
     }
     private fun validateDeleted(value: String?) { if (value != null && value !in setOf("include", "only")) badAdminQuery("삭제 필터가 올바르지 않습니다.") }
-    private fun requireMember(id: UUID) = users.findByPublicId(id) ?: notFound()
+    private fun requireMember(id: UUID) = accounts.adminMemberOf(id) ?: notFound()
     private fun notFound(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다.")
 }

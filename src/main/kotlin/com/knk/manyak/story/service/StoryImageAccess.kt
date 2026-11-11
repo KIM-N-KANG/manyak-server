@@ -1,7 +1,7 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.global.util.parsePublicIdOrNull
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.image.service.UploadedImageKind
@@ -24,7 +24,7 @@ import java.util.UUID
 @Component
 class StoryImageAccess(
     private val storyRepository: StoryRepository,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val storyCharacterRepository: StoryCharacterRepository,
     private val uploadedImageStorage: UploadedImageStorage,
 ) {
@@ -124,7 +124,7 @@ class StoryImageAccess(
 
     /** 업로드 이미지를 쓸 수 있는 회원의 공개 식별자. 토큰은 유효하나 사용자가 사라졌으면 401이다. */
     fun resolveUserPublicId(userId: Long): UUID =
-        userRepository.findById(userId).orElse(null)?.publicId
+        accounts.publicIdOf(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     private fun resolveUploadedUrlUnder(

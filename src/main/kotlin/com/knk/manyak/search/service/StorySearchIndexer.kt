@@ -3,7 +3,7 @@ package com.knk.manyak.search.service
 import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchDocument
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryCharacterRepository
@@ -24,7 +24,7 @@ class StorySearchDocumentReader(
     private val characters: StoryCharacterRepository,
     private val likes: StoryLikeRepository,
     private val turnCounts: StoryTurnCounts,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val images: ImageUrlResolver,
 ) {
     @Transactional(readOnly = true)
@@ -46,7 +46,7 @@ class StorySearchDocumentReader(
         if (rows.isEmpty()) return emptyList()
         val storyIds = rows.map { it.id }
         val characterNames = characters.findByStoryIdInOrderByStoryIdAscIdAsc(storyIds).groupBy({ it.story.id }, { it.name })
-        val authors = users.findAllById(rows.mapNotNull { it.userId }.toSet()).associateBy { it.id }
+        val authors = accounts.profilesOf(rows.mapNotNull { it.userId }.toSet())
         val turnCountByStoryId = turnCounts.countByStoryIds(storyIds)
         val likeCountByStoryId = likes.countByStoryIds(storyIds).associate { it.storyId to it.likeCount }
         return rows.map { story ->
