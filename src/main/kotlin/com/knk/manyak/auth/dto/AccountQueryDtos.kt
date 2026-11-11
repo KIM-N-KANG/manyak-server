@@ -24,3 +24,19 @@ data class PushRecipient(
     val marketingPushAgreedAt: Instant?,
     val marketingPushNightAgreedAt: Instant?,
 )
+
+/**
+ * 초대 코드 발급과 제출이 읽는 회원 값(KNK-2056). [rewardIdentity]는 1회성 보상 멱등 키의 신원
+ * (`coalesce(reward_identity_user_id, id)`, KNK-1053)이다.
+ */
+data class InviteAccount(
+    val id: Long,
+    val publicId: UUID,
+    val status: UserStatus,
+    val inviteCode: String?,
+    val inviterUserId: Long?,
+    val rewardIdentity: Long,
+)
+
+/** 게스트 데이터 이관 게이트가 읽는 회원 값(이관 완료 시각, 시도 수). */
+data class MigrationState(val migratedAt: Instant?, val migrationAttempts: Int)

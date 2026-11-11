@@ -41,6 +41,15 @@ import java.time.ZonedDateTime
 class InviteServiceTest {
 
     private val userRepository: UserRepository = mock(UserRepository::class.java)
+    // 운영에서는 잠금 진입점이 잡은 회원의 잠금 모드가 PESSIMISTIC_WRITE다. 목에서는 그 상태를 그대로 답한다.
+    private val lockedEntityManager = mock(jakarta.persistence.EntityManager::class.java).also {
+        org.mockito.Mockito.`when`(it.getLockMode(org.mockito.ArgumentMatchers.any())).thenReturn(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    }
+    init {
+        // 잠근 회원은 운영에서 영속성 컨텍스트에서 다시 나온다. 목에서는 잠금 조회가 돌려준 회원을 findById도 돌려준다.
+        org.mockito.Mockito.doAnswer { java.util.Optional.ofNullable(userRepository.findByIdForUpdate(it.getArgument(0))) }
+            .`when`(userRepository).findById(org.mockito.ArgumentMatchers.anyLong())
+    }
     private val creditWalletService: CreditWalletService = mock(CreditWalletService::class.java)
 
     private val inviteReward = 500L
@@ -59,7 +68,8 @@ class InviteServiceTest {
     private val augustStart = kstMonthStart(2026, 8)
 
     private fun serviceAt(clock: Clock): InviteService =
-        InviteService(userRepository, creditWalletService, creditPolicyService, analytics, clock)
+        InviteService(com.knk.manyak.auth.service.AccountLockService(userRepository), com.knk.manyak.auth.service.AccountQueryService(userRepository),
+            com.knk.manyak.auth.service.AccountCommandService(userRepository, lockedEntityManager), creditWalletService, creditPolicyService, analytics, clock)
 
     private fun kstMonthStart(year: Int, month: Int): Instant =
         ZonedDateTime.of(year, month, 1, 0, 0, 0, 0, ZoneId.of("Asia/Seoul")).toInstant()

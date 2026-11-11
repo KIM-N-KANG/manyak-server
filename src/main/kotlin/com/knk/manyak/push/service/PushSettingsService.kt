@@ -1,7 +1,9 @@
 package com.knk.manyak.push.service
 
-import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.PushRecipient
+import com.knk.manyak.auth.service.AccountCommandService
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.auth.security.requireActiveStatus
@@ -21,7 +23,9 @@ import java.time.Instant
  */
 @Service
 class PushSettingsService(
-    private val userRepository: UserRepository,
+    private val locks: AccountLockService,
+    private val accounts: AccountQueryService,
+    private val commands: AccountCommandService,
 ) {
 
     // 조회지만 readOnly를 쓰지 않는다 — PostgreSQL은 read-only 트랜잭션의 SELECT ... FOR UPDATE를 거부하고
@@ -50,32 +54,30 @@ class PushSettingsService(
         val user = lockActiveUser(userId)
         val now = Instant.now()
 
-        user.servicePushEnabled = request.servicePush
-        if (request.marketingPush) {
+        val updated = if (request.marketingPush) {
             // 이미 값이 있으면 그대로 둔다(최초 동의 시각 유지).
-            user.marketingPushAgreedAt = user.marketingPushAgreedAt ?: now
-            user.marketingPushNightAgreedAt =
-                if (request.marketingNightPush) user.marketingPushNightAgreedAt ?: now else null
+            user.copy(servicePushEnabled = request.servicePush, marketingPushAgreedAt = user.marketingPushAgreedAt ?: now,
+                marketingPushNightAgreedAt = if (request.marketingNightPush) user.marketingPushNightAgreedAt ?: now else null)
         } else {
             // 철회는 광고·야간을 함께 지운다. 야간만 남으면 발송 판정에 쓰이지 않는 유령 동의가 된다.
-            user.marketingPushAgreedAt = null
-            user.marketingPushNightAgreedAt = null
+            user.copy(servicePushEnabled = request.servicePush, marketingPushAgreedAt = null, marketingPushNightAgreedAt = null)
         }
-        return user.toSettingsResponse()
+        commands.updatePushConsent(userId, updated.servicePushEnabled, updated.marketingPushAgreedAt, updated.marketingPushNightAgreedAt)
+        return updated.toSettingsResponse()
     }
 
     /**
      * 사용자 행을 비관적 쓰기 락으로 잡고 상태를 재검사한다(스펙 §4-5 B20, KNK-499·1019 선례).
      * 사용자가 없으면 401, 정지는 403, 탈퇴는 401이다.
      */
-    private fun lockActiveUser(userId: Long): User {
-        val user = userRepository.findByIdForUpdate(userId)
+    private fun lockActiveUser(userId: Long): PushRecipient {
+        val locked = locks.lock(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
-        requireActiveStatus(user.status)
-        return user
+        requireActiveStatus(locked.status)
+        return requireNotNull(accounts.pushRecipientOf(userId))
     }
 
-    private fun User.toSettingsResponse() = PushSettingsResponse(
+    private fun PushRecipient.toSettingsResponse() = PushSettingsResponse(
         servicePush = servicePushEnabled,
         marketingPush = marketingPushAgreedAt != null,
         marketingNightPush = marketingPushNightAgreedAt != null,

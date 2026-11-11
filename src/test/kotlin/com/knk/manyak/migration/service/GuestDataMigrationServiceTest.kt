@@ -47,6 +47,15 @@ class GuestDataMigrationServiceTest {
     private val storyCreationSessionRepository: StoryCreationSessionRepository =
         mock(StoryCreationSessionRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
+    // 운영에서는 잠금 진입점이 잡은 회원의 잠금 모드가 PESSIMISTIC_WRITE다. 목에서는 그 상태를 그대로 답한다.
+    private val lockedEntityManager = mock(jakarta.persistence.EntityManager::class.java).also {
+        org.mockito.Mockito.`when`(it.getLockMode(org.mockito.ArgumentMatchers.any())).thenReturn(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    }
+    init {
+        // 잠근 회원은 운영에서 영속성 컨텍스트에서 다시 나온다. 목에서는 잠금 조회가 돌려준 회원을 findById도 돌려준다.
+        org.mockito.Mockito.doAnswer { java.util.Optional.ofNullable(userRepository.findByIdForUpdate(it.getArgument(0))) }
+            .`when`(userRepository).findById(org.mockito.ArgumentMatchers.anyLong())
+    }
     private val userStoryEndingReachRepository: com.knk.manyak.story.repository.UserStoryEndingReachRepository =
         mock(com.knk.manyak.story.repository.UserStoryEndingReachRepository::class.java)
     private val storyEndingRepository: com.knk.manyak.story.repository.StoryEndingRepository =
@@ -57,7 +66,8 @@ class GuestDataMigrationServiceTest {
     private val storyCreationRequestRepository = mock(StoryCreationRequestRepository::class.java)
     private val service =
         GuestDataMigrationService(
-            storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
+            storyRepository, storyChatRepository, storyCreationSessionRepository, com.knk.manyak.auth.service.AccountLockService(userRepository),
+            com.knk.manyak.auth.service.AccountQueryService(userRepository), com.knk.manyak.auth.service.AccountCommandService(userRepository, lockedEntityManager),
             userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events, storyCreationRequestRepository,
         )
 
