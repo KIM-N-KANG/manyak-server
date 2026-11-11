@@ -208,6 +208,10 @@ class UserNotificationPostgresTests {
         val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java)
         val user = com.knk.manyak.auth.entity.User(id = 1, nickname = "원자성")
         org.mockito.Mockito.`when`(users.findById(1)).thenReturn(java.util.Optional.of(user))
+        org.mockito.Mockito.`when`(users.findPublicIdsByIdIn(listOf(1L))).thenReturn(listOf(object : com.knk.manyak.auth.repository.UserPublicIdRow {
+            override val id = 1L
+            override val publicId = user.publicId
+        }))
         val targets = org.mockito.Mockito.mock(PushTargetRepository::class.java)
         org.mockito.Mockito.`when`(targets.findAttendanceReminderTargetIds("2026-10-24")).thenReturn(listOf(1L))
         org.mockito.Mockito.`when`(targets.findMarketingPushTargetIds()).thenReturn(listOf(1L))

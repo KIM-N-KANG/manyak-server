@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component
 class DatabaseCleaner(
     private val jdbcTemplate: JdbcTemplate,
     private val redisTemplate: StringRedisTemplate,
+    private val officialStoryAccount: com.knk.manyak.story.service.OfficialStoryAccount,
 ) {
 
     fun cleanAll() {
@@ -38,6 +39,8 @@ class DatabaseCleaner(
             jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE")
         }
         jdbcTemplate.execute("INSERT INTO chat_models (code, name, turn_cost, sort_order, is_active, is_default, created_at, updated_at) VALUES ('LITE', '라이트', 20, 1, true, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('AURORA', '오로라', 50, 2, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+        // 공식 계정 id 기억도 지운다. TRUNCATE 뒤 공식 계정이 다른 id로 다시 만들어질 수 있다(KNK-2056).
+        officialStoryAccount.forget()
         val trialKeys = redisTemplate.keys("guest_trial:*").orEmpty() + redisTemplate.keys("member_trial:*").orEmpty()
         if (trialKeys.isNotEmpty()) {
             redisTemplate.delete(trialKeys)

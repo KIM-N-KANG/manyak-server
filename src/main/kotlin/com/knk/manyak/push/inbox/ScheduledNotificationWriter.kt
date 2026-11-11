@@ -32,8 +32,9 @@ class ScheduledNotificationWriter(
     ): NotificationRound {
         val now = clock.instant()
         val type = NotificationType.CREDIT_EXPIRY_REMINDER
+        val publicIds = accounts.requirePublicIdsOf(inboxTargets.map { it.userId })
         for (target in inboxTargets) {
-            val publicId = accounts.requirePublicIdOf(target.userId)
+            val publicId = publicIds.getValue(target.userId)
             store.insert(UserNotification(userId = target.userId, messageKey = "credit-expiry:$publicId:$occurrence",
                 type = type, title = data.getValue("title"), body = data.getValue("body"),
                 deepLink = data.getValue("deepLink"), createdAt = now))
