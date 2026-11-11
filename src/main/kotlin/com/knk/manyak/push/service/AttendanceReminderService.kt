@@ -2,7 +2,7 @@ package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -17,7 +17,7 @@ data class AttendanceReminderResult(val targets: Int, val sent: Int)
 /** 출석 대상과 문구를 정하고, 원격 모드는 회차 전체를 아웃박스에 기록한다. */
 @Service
 class AttendanceReminderService(
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val pushMessageTemplateService: PushMessageTemplateService,
     private val fcmPushSender: FcmPushSender,
     private val clock: Clock = Clock.systemUTC(),
@@ -51,7 +51,7 @@ class AttendanceReminderService(
         for (userId in targetIds) {
             // 로컬 모드에서만 자격을 재확인한다. 원격 모드는 소비자가 발송 직전에 확인한다.
             if (!clock.instant().isBefore(expiry)) break
-            val user = userRepository.findById(userId).orElse(null)
+            val user = accounts.pushRecipientOf(userId)
             if (user == null || user.status != UserStatus.ACTIVE || !user.canReceiveMarketingPush(clock.instant())) {
                 fcmPushSender.recordDiscarded(userId, data, "attendance:${user?.publicId}:$today",
                     if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE" else "MARKETING_NOT_AGREED")

@@ -1,6 +1,6 @@
 package com.knk.manyak.push.event
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.service.pushDeepLink
 import com.knk.manyak.push.config.PushAsyncConfig
 import com.knk.manyak.push.service.FcmPushSender
@@ -17,7 +17,7 @@ import java.util.concurrent.Executor
 /** local 모드의 커밋 후 발송. remote는 동기 아웃박스 리스너가 맡는다. */
 @Component
 class StoryCompletionPushListener(
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val fcmPushSender: FcmPushSender,
     @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)
     private val pushExecutor: Executor,
@@ -48,7 +48,7 @@ class StoryCompletionPushListener(
     private fun dispatch(event: StoryCompletedEvent) {
         try {
             // local 발송 직전에 서비스 알림 동의를 확인한다.
-            val user = userRepository.findById(event.userId).orElse(null)
+            val user = accounts.pushRecipientOf(event.userId)
             if (user?.servicePushEnabled != true) {
                 log.debug(
                     "서비스 알림 수신을 끈 회원이라 스토리 완성 푸시를 건너뜁니다. (userId={}, storyId={})",

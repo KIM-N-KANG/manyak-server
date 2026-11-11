@@ -3,6 +3,7 @@ package com.knk.manyak.push.outbox
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.entity.*
@@ -79,7 +80,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = notices)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
@@ -123,7 +124,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
         val body = "가".repeat(300)
         val campaign = campaigns.save(PushCampaign(title = "소식", body = body, scheduledAt = Instant.EPOCH))
         val day = Instant.parse("2026-10-17T00:00:00Z")
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(day, ZoneOffset.UTC),
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(day, ZoneOffset.UTC),
             if (remote) writer else null, notifications = notifications, notices = notices)
         assertThat(service.sendDue(day).single().sent).isEqualTo(3)
         val expected = "$body\n수신거부: 마이 > 알림 설정"
@@ -150,7 +151,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
         templateService.refresh()
         try {
             val day = Instant.parse("2026-10-17T00:00:00Z")
-            val service = AttendanceReminderService(users, templateService, sender, Clock.fixed(day, ZoneOffset.UTC),
+            val service = AttendanceReminderService(AccountQueryService(users), templateService, sender, Clock.fixed(day, ZoneOffset.UTC),
                 outbox = if (remote) writer else null, notifications = notifications)
             assertThat(service.sendReminders().sent).isEqualTo(3)
             assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java)).containsOnly(body)

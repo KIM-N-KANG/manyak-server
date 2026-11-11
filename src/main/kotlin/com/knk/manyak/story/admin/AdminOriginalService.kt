@@ -164,7 +164,7 @@ class AdminOriginalService(
         form.properties().forEach { (key, value) -> result.set(key, value) }
     }
     private fun summary(story: Story, chatCount: Long? = null, totalTurns: Long? = null): ObjectNode {
-        val owner = accounts.profileOf(requireNotNull(story.userId)) ?: throw NoSuchElementException("No value present")
+        val owner = accounts.requireProfileOf(requireNotNull(story.userId))
         val counts = if (chatCount == null) jdbc.queryForMap("SELECT COUNT(*) AS chats, COALESCE(SUM(current_turn), 0) AS turns FROM story_chats WHERE story_id = ? AND deleted_at IS NULL", story.id) else null
         return mapper.createObjectNode().put("storyId", story.publicId.toString()).put("title", story.title)
             .put("status", story.status.name).put("visibility", story.visibility.name)

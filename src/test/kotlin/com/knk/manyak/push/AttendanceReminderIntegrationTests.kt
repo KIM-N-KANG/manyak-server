@@ -4,6 +4,7 @@ import com.google.firebase.messaging.AndroidConfig.Priority.NORMAL
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.entity.DevicePushToken
@@ -64,7 +65,7 @@ class AttendanceReminderIntegrationTests : MockedBoundaryIntegrationTest() {
     // 서비스, 스케줄러, 출석 키의 날짜를 같은 시계로 맞추고 실제 cron은 켜지 않는다.
     private var clock: Clock = atHour(15)
     private val attendanceReminderService: AttendanceReminderService
-        get() = AttendanceReminderService(userRepository, pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
+        get() = AttendanceReminderService(AccountQueryService(userRepository), pushMessageTemplateService, fcmPushSender, clock, notifications = notifications)
     private val attendanceReminderScheduler: AttendanceReminderScheduler
         get() = AttendanceReminderScheduler(attendanceReminderService, redisTemplate, structuredLogger, clock)
 

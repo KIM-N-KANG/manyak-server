@@ -26,6 +26,7 @@ import com.knk.manyak.migration.controller.MigrationIndexEventTestConfig
 import com.knk.manyak.push.inbox.DomainNotificationRecorder
 import com.knk.manyak.push.inbox.UserNotificationStore
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.OfficialStoryAccount
@@ -96,6 +97,7 @@ import java.util.concurrent.Executor
         CreditPolicyRepository::class,
         CreditWalletRepository::class,
         PushCampaignRepository::class,
+        PushTargetRepository::class,
         UserNotificationStore::class,
         DomainNotificationRecorder::class,
         StoryCreationRequestRepository::class,

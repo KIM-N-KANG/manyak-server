@@ -1,5 +1,7 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
@@ -206,8 +208,9 @@ class UserNotificationPostgresTests {
         val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java)
         val user = com.knk.manyak.auth.entity.User(id = 1, nickname = "원자성")
         org.mockito.Mockito.`when`(users.findById(1)).thenReturn(java.util.Optional.of(user))
-        org.mockito.Mockito.`when`(users.findAttendanceReminderTargetIds("2026-10-24")).thenReturn(listOf(1L))
-        org.mockito.Mockito.`when`(users.findMarketingPushTargetIds()).thenReturn(listOf(1L))
+        val targets = org.mockito.Mockito.mock(PushTargetRepository::class.java)
+        org.mockito.Mockito.`when`(targets.findAttendanceReminderTargetIds("2026-10-24")).thenReturn(listOf(1L))
+        org.mockito.Mockito.`when`(targets.findMarketingPushTargetIds()).thenReturn(listOf(1L))
         val realOutbox = com.knk.manyak.push.outbox.PushOutboxStore(jdbc, tools.jackson.module.kotlin.jacksonObjectMapper())
         val failingOutbox = org.mockito.Mockito.spy(realOutbox)
         org.mockito.Mockito.doAnswer { call ->
@@ -224,14 +227,15 @@ class UserNotificationPostgresTests {
             context.environment.propertySources.addFirst(org.springframework.core.env.MapPropertySource("test", mapOf("manyak.push.web-base-url" to "https://manyak.app")))
             context.register(NotificationTransactionTestConfig::class.java)
             context.registerBean("transactionManager", DataSourceTransactionManager::class.java, java.util.function.Supplier { manager })
-            context.registerBean(com.knk.manyak.auth.repository.UserRepository::class.java, java.util.function.Supplier { users })
+            context.registerBean(AccountQueryService::class.java, java.util.function.Supplier { AccountQueryService(users) })
+            context.registerBean(PushTargetRepository::class.java, java.util.function.Supplier { targets })
             context.registerBean(UserNotificationStore::class.java, java.util.function.Supplier { store })
             context.registerBean(com.knk.manyak.push.repository.PushCampaignRepository::class.java, java.util.function.Supplier {
                 org.mockito.Mockito.mock(com.knk.manyak.push.repository.PushCampaignRepository::class.java) })
             context.register(ScheduledNotificationWriter::class.java)
             context.refresh()
             val round = context.getBean(ScheduledNotificationWriter::class.java)
-            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(com.knk.manyak.auth.service.AccountQueryService(users), failingOutbox)
+            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(AccountQueryService(users), failingOutbox)
             assertThatThrownBy {
                 round.record(mapOf("type" to if (scenario == "attendance") "ATTENDANCE_REMINDER" else "PROMOTION", "title" to "(광고) 제목", "body" to "본문"),
                     scenario, "2026-10-24", outbox)

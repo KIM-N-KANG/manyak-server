@@ -9,7 +9,7 @@ import com.google.firebase.messaging.WebpushNotification
 import com.google.firebase.messaging.WebpushFcmOptions
 import com.google.firebase.messaging.MessagingErrorCode
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.dto.*
 import java.util.UUID
 import com.knk.manyak.push.entity.DevicePushToken
@@ -49,7 +49,7 @@ class FcmPushSender(
     // Kotlin nullable 생성자 인자 = 선택 주입. FcmConfig가 null을 돌려주면 여기도 null이다.
     private val messaging: FirebaseMessaging?,
     private val devicePushTokenRepository: DevicePushTokenRepository,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val meterRegistry: MeterRegistry,
     @Value("\${manyak.push.web.icon-url:https://manyak.app/icons/icon-192.png}")
     private val webIconUrl: String = "https://manyak.app/icons/icon-192.png",
@@ -81,11 +81,11 @@ class FcmPushSender(
         outcome: PushDeliveryOutcome, reason: String, delivered: Int, failed: Int) {
         if (messageId == null || deliveries == null) return
         try {
-            val user = userRepository.findById(userId).orElse(null) ?: return
+            val publicId = accounts.publicIdOf(userId) ?: return
             val type = PushDeliveryType.valueOf(data.getValue("type"))
             deliveries.record(PushDeliveryReportRequest(messageId, type,
                 if (type in setOf(PushDeliveryType.PROMOTION, PushDeliveryType.ATTENDANCE_REMINDER)) PushKind.MARKETING else PushKind.SERVICE,
-                user.publicId, data["campaignId"]?.let(UUID::fromString), outcome, reason, delivered, failed, clock.instant()))
+                publicId, data["campaignId"]?.let(UUID::fromString), outcome, reason, delivered, failed, clock.instant()))
         } catch (ex: RuntimeException) {
             log.warn("push_delivery_report_failed message_id={} error={}", messageId, ex.javaClass.simpleName)
         }
@@ -102,7 +102,7 @@ class FcmPushSender(
             record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "FCM_DISABLED", 0, 0)
             return
         }
-        val user = userRepository.findById(userId).orElse(null)
+        val user = accounts.statusOf(userId)
         if (user?.status != UserStatus.ACTIVE) {
             record(userId, data, messageId, PushDeliveryOutcome.DISCARDED, "NOT_ACTIVE", 0, 0)
             return

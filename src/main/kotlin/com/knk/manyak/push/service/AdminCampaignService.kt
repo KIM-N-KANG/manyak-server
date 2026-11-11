@@ -2,13 +2,13 @@ package com.knk.manyak.push.service
 
 import com.knk.manyak.adminkit.audit.AdminAuditAction
 import com.knk.manyak.adminkit.audit.AdminAuditService
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.repository.CampaignDeliverySummaryRepository
 import com.knk.manyak.push.repository.CampaignDeliverySummary
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.repository.AdminCampaignListRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.story.repository.StoryRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -22,7 +22,7 @@ import java.util.UUID
 @Service
 class AdminCampaignService(
     private val campaigns: PushCampaignRepository,
-    private val users: UserRepository,
+    private val targets: PushTargetRepository,
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
     private val deliveries: CampaignDeliverySummaryRepository,
@@ -79,8 +79,8 @@ class AdminCampaignService(
     fun targetCount(kind: PushKind): AdminCampaignTargetResponse {
         val now = clock.instant()
         val hour = now.atZone(ZoneId.of("Asia/Seoul")).hour
-        return AdminCampaignTargetResponse(kind, users.countPushTargets(kind == PushKind.MARKETING, false),
-            if (kind == PushKind.MARKETING) users.countPushTargets(true, true) else null, hour >= 21 || hour < 8, now)
+        return AdminCampaignTargetResponse(kind, targets.countPushTargets(kind == PushKind.MARKETING, false),
+            if (kind == PushKind.MARKETING) targets.countPushTargets(true, true) else null, hour >= 21 || hour < 8, now)
     }
 
     private fun find(id: UUID) = campaigns.findByPublicId(id) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "캠페인이 없습니다.")

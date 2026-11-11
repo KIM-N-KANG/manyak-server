@@ -1,6 +1,8 @@
 package com.knk.manyak.auth.service
 
 import com.knk.manyak.auth.dto.AccountProfile
+import com.knk.manyak.auth.dto.AccountStatusView
+import com.knk.manyak.auth.dto.PushRecipient
 import com.knk.manyak.auth.dto.AdminMemberView
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
@@ -28,6 +30,18 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
 
     fun profileOf(userId: Long): AccountProfile? = users.findById(userId).map { it.toProfile() }.orElse(null)
 
+    /** [profileOf]와 같되 회원이 없으면 `Optional.orElseThrow`와 같은 [NoSuchElementException]을 던진다. */
+    fun requireProfileOf(userId: Long): AccountProfile = users.findById(userId).orElseThrow().toProfile()
+
+    /** 회원의 내부 id, 공개 식별자, 상태. 회원이 없으면 null이며 판정은 호출부가 한다. */
+    fun statusOf(userId: Long): AccountStatusView? =
+        users.findById(userId).map { AccountStatusView(it.id, it.publicId, it.status) }.orElse(null)
+
+    /** 푸시 발송 자격 판정용 값. 회원이 없으면 null이다. */
+    fun pushRecipientOf(userId: Long): PushRecipient? = users.findById(userId).map { it.toPushRecipient() }.orElse(null)
+
+    fun pushRecipientOf(publicId: UUID): PushRecipient? = users.findByPublicId(publicId)?.toPushRecipient()
+
     /** 회원 묶음의 프로필. 없는 회원은 결과에 없다. 빈 입력은 조회하지 않는다. */
     fun profilesOf(userIds: Collection<Long>): Map<Long, AccountProfile> {
         if (userIds.isEmpty()) return emptyMap()
@@ -41,4 +55,7 @@ class AccountQueryService(private val users: UserRepository) : UserPublicIdPort 
         users.findByPublicId(publicId)?.let { AdminMemberView(it.id, it.publicId, it.deletedAt) }
 
     private fun User.toProfile() = AccountProfile(publicId, nickname, profileImageUrl)
+
+    private fun User.toPushRecipient() =
+        PushRecipient(id, publicId, status, servicePushEnabled, marketingPushAgreedAt, marketingPushNightAgreedAt)
 }

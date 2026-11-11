@@ -2,7 +2,7 @@ package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig
 import com.knk.manyak.auth.dto.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.dto.pushKind
@@ -36,7 +36,7 @@ data class PromotionPushResult(
 @EnableConfigurationProperties(PushCampaignProperties::class)
 class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val fcmPushSender: FcmPushSender,
     private val stories: StoryRepository,
     private val clock: Clock = Clock.systemUTC(),
@@ -118,7 +118,7 @@ class PromotionPushService(
                 val messagePrefix = if (campaign.kind == PushKind.SERVICE) "notice" else "promotion"
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
-                val user = userRepository.findById(userId).orElse(null)
+                val user = accounts.pushRecipientOf(userId)
                 if (user == null || user.status != UserStatus.ACTIVE || (if (campaign.kind == PushKind.SERVICE) !user.servicePushEnabled else !user.canReceiveMarketingPush(at))) {
                     fcmPushSender.recordDiscarded(userId, data, "$messagePrefix:${campaign.publicId}:${user?.publicId}",
                         if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE"
