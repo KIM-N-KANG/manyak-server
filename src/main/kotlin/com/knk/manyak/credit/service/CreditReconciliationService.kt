@@ -121,7 +121,7 @@ class CreditReconciliationService(
         const val CHAT_TURN_CANDIDATE_LIMIT = 500
         val CONSUMPTION_REASONS = listOf(CreditReason.STORY_CREATION, CreditReason.CHAT_TURN)
 
-        // 소모 행의 ref_type. 소비자(ChatService·SimpleStoryCreationService)의 차감 refType과 일치해야 한다.
+        // 소모 행의 ref_type. 소비자(ChatService·SimpleStoryCompletionService)의 차감 refType과 일치해야 한다.
         const val CHAT_REF_TYPE = "CHAT"
         const val STORY_REF_TYPE = "STORY"
 

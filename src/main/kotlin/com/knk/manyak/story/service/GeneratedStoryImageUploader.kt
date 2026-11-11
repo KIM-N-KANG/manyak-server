@@ -13,7 +13,7 @@ import java.util.UUID
 
 /**
  * 간편 제작 완성의 생성 이미지(인물, 표지)를 저장소에 올리고, 저장이 실패하면 스토리가 없을 때만 지운다
- * (KNK-2056에서 [SimpleStoryCreationService]에서 추출). 업로드는 DB 트랜잭션 밖에서 부르고, 업로드와 보상 삭제는
+ * (KNK-2056에서 옛 SimpleStoryCreationService에서 추출, 호출자는 [SimpleStoryCompletionService]). 업로드는 DB 트랜잭션 밖에서 부르고, 업로드와 보상 삭제는
  * 호출자가 만든 같은 예산([ImageStageBudget])을 나눠 쓴다.
  */
 @Component

@@ -101,7 +101,7 @@ class UserNotificationPostgresTests {
             }
         }
         val recorder = com.knk.manyak.story.service.StoryCreationRequestRecorder(repository,
-            tools.jackson.module.kotlin.jacksonObjectMapper(),
+            tools.jackson.module.kotlin.jacksonObjectMapper(), com.knk.manyak.global.observability.DeviceIdHasher(""),
             org.mockito.Mockito.mock(com.knk.manyak.story.draft.StoryDraftRepository::class.java), com.knk.manyak.auth.service.AccountLockService(users, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }), 300,
             DataSourceTransactionManager(jdbc.dataSource!!))
         try {

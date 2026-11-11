@@ -49,7 +49,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
- * 간편 제작 완성의 저장(KNK-2056에서 [SimpleStoryCreationService]에서 추출). 진행 행을 잠그고 완성 스토리 묶음을 한 트랜잭션에
+ * 간편 제작 완성의 저장(KNK-2056에서 옛 SimpleStoryCreationService에서 추출, 호출자는 [SimpleStoryCompletionService]). 진행 행을 잠그고 완성 스토리 묶음을 한 트랜잭션에
  * 저장하며, 이미 저장된 묶음에서 같은 완성 응답을 다시 만든다. 트랜잭션은 전처럼 [TransactionTemplate]이다(모든 예외에 롤백).
  */
 @Component
@@ -76,10 +76,10 @@ class SimpleStoryCompletionWriter(
     private val transactionTemplate = TransactionTemplate(transactionManager)
 
     /**
-     * 진행 행을 잠그고 완성 스토리 묶음을 한 트랜잭션에 저장한다(KNK-2056에서 [SimpleStoryCreationService.compileAndPersist]의
+     * 진행 행을 잠그고 완성 스토리 묶음을 한 트랜잭션에 저장한다(KNK-2056에서 [SimpleStoryCompletionService.compileAndPersist]의
      * 트랜잭션 본문을 옮김). 잠금 순서, 검색 색인 이벤트 발행(트랜잭션 안), 호출 기록 연결은 그대로다.
      */
-    fun persist(
+    internal fun persist(
         session: StoryCreationSession,
         attributedUserId: Long?,
         visibility: StoryVisibility,
@@ -259,7 +259,7 @@ class SimpleStoryCompletionWriter(
      *
      * storyId·자식 행이 없으면(비정상 상태) 원래의 409로 폴백한다.
      */
-    fun reconcileCreatedSession(session: StoryCreationSession): StoryCreationOutcome {
+    internal fun reconcileCreatedSession(session: StoryCreationSession): StoryCreationOutcome {
         val alreadyCreated = ResponseStatusException(HttpStatus.CONFLICT, "이미 스토리가 생성된 간편 제작 진행입니다.")
         val storyId = session.storyId ?: throw alreadyCreated
         val story = storyRepository.findById(storyId).orElseThrow { alreadyCreated }
@@ -378,7 +378,7 @@ internal fun selectGenreTags(sessionTagRows: List<StoryCreationSessionTag>): Lis
     .distinctBy { it.normalizedName }
     .sortedWith(compareBy({ it.tagSource == StoryCreationTagSource.CUSTOM }, { it.sortOrder }, { it.id }))
 
-data class StoryCreationOutcome(
+internal data class StoryCreationOutcome(
     val response: SimpleStoryCreateResponse,
     // 회수 재실행이 저장된 스토리를 재구성해 돌려주는 경로(P2-10)는 AI를 호출하지 않으므로 null이다.
     val aiCallLogId: Long?,

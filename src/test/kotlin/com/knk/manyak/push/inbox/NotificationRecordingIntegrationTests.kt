@@ -29,7 +29,7 @@ import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.SimpleStoryCompletionService
 import org.mockito.Mockito.*
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -51,7 +51,7 @@ abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegration
     @Autowired private lateinit var outbox: PushOutboxStore
     @Autowired private lateinit var relay: PushOutboxRelay
     @Autowired private lateinit var inbox: UserNotificationStore
-    @Autowired private lateinit var creation: SimpleStoryCreationService
+    @Autowired private lateinit var creation: SimpleStoryCompletionService
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository
     @Autowired private lateinit var requests: StoryCreationRequestRepository

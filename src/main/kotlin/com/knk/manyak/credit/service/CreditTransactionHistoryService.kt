@@ -140,7 +140,7 @@ class CreditTransactionHistoryService(
         const val MIN_LIMIT = 1
         const val MAX_LIMIT = 100
 
-        // 소비자(ChatService·SimpleStoryCreationService·CreditWalletService)가 차감·만료 시 박는 ref_type과 같아야 한다.
+        // 소비자(ChatService·SimpleStoryCompletionService·CreditWalletService)가 차감·만료 시 박는 ref_type과 같아야 한다.
         const val REF_CHAT = "CHAT"
         const val REF_STORY = "STORY"
         const val REF_CREDIT_LOT = "CREDIT_LOT"

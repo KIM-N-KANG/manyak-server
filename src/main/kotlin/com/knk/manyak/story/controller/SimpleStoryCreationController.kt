@@ -11,7 +11,9 @@ import com.knk.manyak.story.dto.SimpleStoryTagListItemResponse
 import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
 import com.knk.manyak.story.dto.StorylineRatingRequest
 import com.knk.manyak.story.dto.StorylineRatingResponse
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.SimpleStoryCompletionService
+import com.knk.manyak.story.service.SimpleStorylineService
+import com.knk.manyak.story.service.StoryCreationRequestRecorder
 import com.knk.manyak.story.service.StorylineRatingService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.ArraySchema
@@ -40,7 +42,9 @@ import java.util.UUID
 @RestController
 @RequestMapping("/api/v1/stories/simple")
 class SimpleStoryCreationController(
-    private val simpleStoryCreationService: SimpleStoryCreationService,
+    private val simpleStorylineService: SimpleStorylineService,
+    private val simpleStoryCompletionService: SimpleStoryCompletionService,
+    private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
     private val storylineRatingService: StorylineRatingService,
 ) {
 
@@ -65,7 +69,7 @@ class SimpleStoryCreationController(
     )
     @GetMapping("/tags")
     fun getSimpleStoryTags(): List<SimpleStoryTagListItemResponse> =
-        simpleStoryCreationService.getSimpleStoryTags()
+        simpleStorylineService.getSimpleStoryTags()
 
     @Operation(
         summary = "간편 제작 스토리라인 생성",
@@ -106,7 +110,7 @@ class SimpleStoryCreationController(
         // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): GenerateSimpleStorylinesResponse =
-        simpleStoryCreationService.generateSimpleStorylines(request, userId, deviceId)
+        simpleStorylineService.generateSimpleStorylines(request, userId, deviceId)
 
     @Operation(
         summary = "간편 제작 스토리 생성",
@@ -158,7 +162,7 @@ class SimpleStoryCreationController(
         // 게스트 체험 한도 판정용(스펙 §4-3-7). 회원 요청은 사용하지 않는다.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): SimpleStoryCreateResponse =
-        simpleStoryCreationService.createSimpleStory(request, userId, deviceId)
+        simpleStoryCompletionService.createSimpleStory(request, userId, deviceId)
 
     @Operation(
         summary = "백그라운드 생성 요청 복구 조회",
@@ -187,7 +191,7 @@ class SimpleStoryCreationController(
         // 게스트 소유 판정용 디바이스 ID(스펙 §4-3-8). 회원 요청은 userId로 소유를 판정한다.
         @RequestHeader(value = RequestCorrelationFilter.HEADER_DEVICE_ID, required = false) deviceId: String?,
     ): StoryCreationRequestStatusResponse =
-        simpleStoryCreationService.getCreationRequest(requestId, userId, deviceId)
+        storyCreationRequestRecorder.getCreationRequest(requestId, userId, deviceId)
 
     @Operation(
         summary = "스토리라인 평가 설정/변경",

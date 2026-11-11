@@ -11,7 +11,7 @@ import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.service.StoryImageAccess
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.StoryCreationRequestRecorder
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -30,7 +30,7 @@ class StoryDraftService(
     private val locks: AccountLockService,
     private val requests: StoryCreationRequestRepository,
     private val images: StoryImageAccess,
-    private val generation: SimpleStoryCreationService,
+    private val generation: StoryCreationRequestRecorder,
     private val mapper: ObjectMapper,
     private val entityManager: jakarta.persistence.EntityManager,
     @param:Value("\${manyak.story.pending-reclaim-after-seconds:300}") private val reclaimAfterSeconds: Long,
