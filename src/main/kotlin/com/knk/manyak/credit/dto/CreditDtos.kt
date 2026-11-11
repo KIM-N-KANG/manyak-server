@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.dto
 
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 

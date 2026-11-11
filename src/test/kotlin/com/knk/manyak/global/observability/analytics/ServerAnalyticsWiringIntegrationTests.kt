@@ -12,7 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditPolicyKey
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.migration.dto.MigrationRequest

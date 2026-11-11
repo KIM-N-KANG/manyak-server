@@ -3,7 +3,7 @@ package com.knk.manyak.story.service
 import com.knk.manyak.global.error.ApiErrorDetail
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.credit.InsufficientCreditException
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService

@@ -14,7 +14,7 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.service.ChatQueryService
 import com.knk.manyak.chat.service.ChatService
 import com.knk.manyak.chat.service.ChatRealtimeImageService
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.*
 import com.knk.manyak.global.observability.AiTraceLink

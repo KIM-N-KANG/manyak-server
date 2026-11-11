@@ -14,7 +14,7 @@ import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.AccountCreditAdapter
 import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService

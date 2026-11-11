@@ -6,7 +6,7 @@ import org.springframework.test.context.TestPropertySource
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.entity.PushCampaign

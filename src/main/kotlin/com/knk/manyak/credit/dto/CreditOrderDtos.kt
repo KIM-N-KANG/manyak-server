@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.dto
 
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size

@@ -1,6 +1,6 @@
 package com.knk.manyak.credit.repository
 
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -15,7 +15,7 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
 
     @Query("""
         SELECT t FROM CreditTransaction t
-        WHERE t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+        WHERE t.reason = com.knk.manyak.credit.dto.CreditReason.CHAT_TURN
           AND t.refType = 'CHAT_TURN' AND t.createdAt < :cutoff AND t.id > :afterId
           AND NOT EXISTS (SELECT m.id FROM StoryMessage m WHERE m.creditTransactionId = t.id)
           AND NOT EXISTS (SELECT v.id FROM StoryMessageVersion v WHERE v.creditTransactionId = t.id)
@@ -29,11 +29,11 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
         SELECT CAST(c.currentTurn AS long) + c.hiddenTurnCount + c.regeneratedCount
           - (SELECT COUNT(m) FROM StoryMessage m, CreditTransaction t
              WHERE m.creditTransactionId = t.id AND m.chatId = c.id AND t.userId = :userId
-               AND t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+               AND t.reason = com.knk.manyak.credit.dto.CreditReason.CHAT_TURN
                AND t.refType = 'CHAT_TURN')
           - (SELECT COUNT(v) FROM StoryMessageVersion v, StoryMessage m, CreditTransaction t
              WHERE v.messageId = m.id AND v.creditTransactionId = t.id AND m.chatId = c.id AND t.userId = :userId
-               AND t.reason = com.knk.manyak.credit.entity.CreditReason.CHAT_TURN
+               AND t.reason = com.knk.manyak.credit.dto.CreditReason.CHAT_TURN
                AND t.refType = 'CHAT_TURN')
         FROM StoryChat c WHERE c.id = :chatId
     """)
@@ -107,7 +107,7 @@ interface CreditTransactionRepository : JpaRepository<CreditTransaction, Long> {
             t.userId, t.refType, t.refId, COUNT(t), MIN(ABS(t.amount)), MAX(ABS(t.amount)))
         FROM CreditTransaction t
         WHERE t.reason IN :reasons AND t.refType IS NOT NULL AND t.refId IS NOT NULL
-          AND (t.reason <> com.knk.manyak.credit.entity.CreditReason.CHAT_TURN OR t.refType = 'CHAT')
+          AND (t.reason <> com.knk.manyak.credit.dto.CreditReason.CHAT_TURN OR t.refType = 'CHAT')
         GROUP BY t.userId, t.refType, t.refId
         HAVING MAX(t.createdAt) < :cutoff
         """,

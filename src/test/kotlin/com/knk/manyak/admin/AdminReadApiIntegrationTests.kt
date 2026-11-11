@@ -59,7 +59,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     private val now = Instant.parse("2026-10-20T15:30:00Z")
     private val midnight = Instant.parse("2026-10-20T15:00:00Z")
 
-    private fun order(user: User = admin, status: com.knk.manyak.credit.entity.CreditOrderStatus = com.knk.manyak.credit.entity.CreditOrderStatus.COMPLETED,
+    private fun order(user: User = admin, status: com.knk.manyak.credit.dto.CreditOrderStatus = com.knk.manyak.credit.dto.CreditOrderStatus.COMPLETED,
                       completed: Instant? = now, price: Long = 4800, credit: Long = 5000, id: UUID = UUID.randomUUID(), refund: Instant? = null) =
         orders.save(com.knk.manyak.credit.entity.CreditOrder(userId = user.id, productId = "if_5000",
             provider = com.knk.manyak.credit.entity.CreditOrderProvider.GROBLE, status = status, priceKrw = price, creditAmount = credit,
@@ -108,9 +108,9 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
     @Test fun `결제는 완료와 환불만 페이지로 조회하고 상태와 KST 양끝 날짜를 필터한다`() {
         order(completed = midnight.minusSeconds(1))
         val included = order(completed = midnight)
-        order(completed = midnight.plusSeconds(86400).minusSeconds(1), status = com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED, refund = now)
+        order(completed = midnight.plusSeconds(86400).minusSeconds(1), status = com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED, refund = now)
         order(completed = midnight.plusSeconds(86400))
-        order(completed = null, status = com.knk.manyak.credit.entity.CreditOrderStatus.PENDING)
+        order(completed = null, status = com.knk.manyak.credit.dto.CreditOrderStatus.PENDING)
         val body = json(get("/payments/orders?from=2026-10-21&to=2026-10-21&size=1").expectStatus().isOk)
         assertThat(body["totalElements"].asLong()).isEqualTo(2)
         assertThat(body["totalPages"].asInt()).isEqualTo(2)
@@ -128,9 +128,9 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
 
     @Test fun `결제 정렬 네 열은 방향과 UUID 동률 및 NULL 후순위를 지킨다`() {
         val low = order(id = UUID.fromString("00000000-0000-4000-8000-000000000001"), refund = now,
-            status = com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED)
+            status = com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED)
         val high = order(id = UUID.fromString("00000000-0000-4000-8000-000000000002"), refund = now,
-            status = com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED)
+            status = com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED)
         for (sort in listOf("priceKrw", "creditAmount", "completedAt", "refundedAt")) {
             for (direction in listOf("asc", "desc")) {
                 val first = json(get("/payments/orders?sort=$sort&order=$direction&size=1").expectStatus().isOk)
@@ -139,7 +139,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
                 assertThat(second["items"][0]["orderId"].asText()).isEqualTo(high.publicId.toString())
             }
         }
-        val earlierRefund = order(refund = now.minusSeconds(60), status = com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED)
+        val earlierRefund = order(refund = now.minusSeconds(60), status = com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED)
         assertThat(json(get("/payments/orders?sort=refundedAt&order=asc").expectStatus().isOk)["items"][0]["orderId"].asText()).isEqualTo(earlierRefund.publicId.toString())
         assertThat(json(get("/payments/orders?sort=refundedAt&order=desc").expectStatus().isOk)["items"][0]["orderId"].asText()).isEqualTo(low.publicId.toString())
         orders.delete(earlierRefund)
@@ -231,7 +231,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
                 jdbc.update("INSERT INTO credit_transactions(user_id, amount, reason, created_at) VALUES (?, ?, ?, ?)", owner.id, amount, reason, java.sql.Timestamp.from(midnight))
             }
             order(user = owner, completed = midnight, price = 4800)
-            order(user = owner, completed = midnight.minusSeconds(1), price = 2000, status = com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED, refund = now)
+            order(user = owner, completed = midnight.minusSeconds(1), price = 2000, status = com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED, refund = now)
         }
         val body = dashboardRepository.summary(now, midnight, excluded)
         assertThat(body.asOf).isEqualTo(now)
@@ -811,7 +811,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
 
     @Test fun `결제 상세는 환불된 첫 결제도 기준으로 삼고 원장 전후를 계산한다`() {
         val user = member("결제")
-        order(user, com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED, midnight, refund = now)
+        order(user, com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED, midnight, refund = now)
         val later = order(user, completed = now)
         for ((amount, reason, instant) in listOf(Triple(-20L, "CHAT_TURN", midnight.minusSeconds(1)),
             Triple(-60L, "CHAT_TURN", midnight), Triple(20L, "REFUND", now))) {
@@ -822,7 +822,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         assertThat(body["firstPaidAt"].asText()).isEqualTo(midnight.toString())
         assertThat(body["before"]["turns"].asLong()).isEqualTo(1)
         assertThat(body["after"]["creditsSpent"].asLong()).isEqualTo(40)
-        val pending = order(user, com.knk.manyak.credit.entity.CreditOrderStatus.PENDING, null)
+        val pending = order(user, com.knk.manyak.credit.dto.CreditOrderStatus.PENDING, null)
         get("/payments/orders/${pending.publicId}").expectStatus().isNotFound
     }
 
@@ -1053,7 +1053,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
         val owner = member("소비자"); val inactive = member("활동없음")
         val story = story(owner); chat(story, owner); chat(story, owner)
         ledger(owner, -40, "CHAT_TURN"); ledger(owner, 250, "ATTENDANCE_REWARD")
-        order(owner, price = 4800); order(owner, com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED, price = 2000, refund = now)
+        order(owner, price = 4800); order(owner, com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED, price = 2000, refund = now)
         val body = json(get("/members?q=${owner.publicId}&creditDirection=spent&creditDate=2026-10-21&attendanceDate=2026-10-21&from=2026-01-01&to=2026-01-01").expectStatus().isOk)["items"][0]
         assertThat(body["creditsSpent"].asLong()).isEqualTo(40)
         assertThat(body["paidKrw"].asLong()).isEqualTo(4800)
@@ -1468,7 +1468,7 @@ class AdminReadApiIntegrationTests : AdminMetricsIntegrationTest() {
             ledger(owner, -30, "EXPIRE", midnight)
             ledger(owner, 20, "REFUND", midnight)
             order(owner, completed = midnight, price = 4800)
-            order(owner, com.knk.manyak.credit.entity.CreditOrderStatus.REFUNDED, completed = midnight, price = 2000, refund = now)
+            order(owner, com.knk.manyak.credit.dto.CreditOrderStatus.REFUNDED, completed = midnight, price = 2000, refund = now)
             jdbc.update("UPDATE story_chats SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), chat.id)
             jdbc.update("UPDATE stories SET deleted_at=? WHERE id=?", java.sql.Timestamp.from(now), story.id)
         }

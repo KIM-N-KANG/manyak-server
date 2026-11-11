@@ -3,6 +3,8 @@ package com.knk.manyak.credit.controller
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.credit.dto.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.*
 import com.knk.manyak.credit.repository.*
 import com.knk.manyak.credit.service.CreditWalletService

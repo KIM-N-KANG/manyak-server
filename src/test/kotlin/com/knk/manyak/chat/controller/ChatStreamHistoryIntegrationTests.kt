@@ -253,7 +253,7 @@ class ChatStreamHistoryIntegrationTests : ScriptedAiIntegrationTest() {
         val (story, _) = seedChatOnPublicStory()
         val reader = userRepository.save(User(nickname = "다른 회원"))
         val auth = "Bearer ${jwt.issueAccessToken(reader.publicId)}"
-        wallet.reward(reader.id, 1000, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "takedown-reader")
+        wallet.reward(reader.id, 1000, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "takedown-reader")
         restTestClient.post().uri("/api/v1/chats").header("Authorization", auth)
             .contentType(MediaType.APPLICATION_JSON).body("""{"storyId":"${story.publicId}"}""")
             .exchange().expectStatus().isCreated

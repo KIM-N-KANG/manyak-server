@@ -6,7 +6,7 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.chat.service.*
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository

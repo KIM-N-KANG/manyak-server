@@ -2,7 +2,7 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.port.MeCreditSummaryPort
 import com.knk.manyak.auth.port.SignupCreditPort
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import org.springframework.stereotype.Component
 
 /**

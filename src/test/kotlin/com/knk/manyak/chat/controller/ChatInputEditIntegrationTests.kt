@@ -9,7 +9,7 @@ import com.knk.manyak.chat.dto.*
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.chat.service.*
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.*
 import com.knk.manyak.global.observability.AiTraceLink

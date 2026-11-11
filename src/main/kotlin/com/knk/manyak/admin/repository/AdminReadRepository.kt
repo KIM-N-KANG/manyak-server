@@ -9,7 +9,7 @@ import com.knk.manyak.adminkit.query.instant
 import com.knk.manyak.adminkit.query.longOrNull
 import com.knk.manyak.auth.dto.MEMBER_COLUMNS
 import com.knk.manyak.auth.dto.memberSummary
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository

@@ -98,7 +98,7 @@ data class AdminChatResponse(
 data class AdminTransactionResponse(val amount: Long, val reason: String, val balanceAfter: Long, val createdAt: Instant)
 data class AdminAttendanceResponse(val date: LocalDate, val creditAmount: Long)
 data class AdminPaymentDetailResponse(
-    val orderId: UUID, val member: AdminMemberSummary, val productId: String, val status: com.knk.manyak.credit.entity.CreditOrderStatus,
+    val orderId: UUID, val member: AdminMemberSummary, val productId: String, val status: com.knk.manyak.credit.dto.CreditOrderStatus,
     val priceKrw: Long, val creditAmount: Long, val completedAt: Instant, val refundedAt: Instant?, val reversalShortfall: Long?,
     val firstPaidAt: Instant, val before: AdminPaymentUsage, val after: AdminPaymentUsage,
 ) {

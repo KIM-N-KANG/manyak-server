@@ -8,7 +8,7 @@ import com.knk.manyak.auth.dto.UpdateProfileRequest
 import com.knk.manyak.auth.event.UserNicknameChangedEvent
 import com.knk.manyak.auth.service.ProfileUpdater
 import com.knk.manyak.auth.social.ProfileImagePresetService
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.service.StorySearchDocumentReader
