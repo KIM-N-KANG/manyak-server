@@ -89,6 +89,8 @@ class DomainNotificationRecorderListenerTests {
                 context.registerBean(UserRepository::class.java, Supplier { users })
                 context.registerBean(Clock::class.java, Supplier { Clock.fixed(Instant.parse("2026-11-11T00:00:00Z"), ZoneOffset.UTC) })
                 context.register(DomainNotificationRecorder::class.java, com.knk.manyak.auth.service.AccountLockService::class.java)
+                context.registerBean(com.knk.manyak.auth.repository.AccountNoKeyUpdateLock::class.java, Supplier {
+                    com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") } })
                 context.refresh()
                 val recorder = context.getBean(DomainNotificationRecorder::class.java)
                 assertThat(mockingDetails(AopTestUtils.getUltimateTargetObject<Any>(recorder)).isMock).isFalse()

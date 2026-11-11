@@ -66,7 +66,7 @@ class GuestDataMigrationServiceTest {
     private val storyCreationRequestRepository = mock(StoryCreationRequestRepository::class.java)
     private val service =
         GuestDataMigrationService(
-            storyRepository, storyChatRepository, storyCreationSessionRepository, com.knk.manyak.auth.service.AccountLockService(userRepository),
+            storyRepository, storyChatRepository, storyCreationSessionRepository, com.knk.manyak.auth.service.AccountLockService(userRepository, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }),
             com.knk.manyak.auth.service.AccountQueryService(userRepository), com.knk.manyak.auth.service.AccountCommandService(userRepository, lockedEntityManager),
             userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events, storyCreationRequestRepository,
         )

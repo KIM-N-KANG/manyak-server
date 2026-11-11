@@ -1,11 +1,3 @@
-com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.entity.User
-com.knk.manyak.admin.security.AdminAuthenticationFilter -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.admin.security.AdminSecurityConfig -> com.knk.manyak.auth.repository.UserRepository
-com.knk.manyak.admin.service.AdminEligibilityService -> com.knk.manyak.auth.entity.User
-com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.entity.SocialAccount
-com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.entity.User
-com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.repository.SocialAccountRepository
-com.knk.manyak.admin.service.AdminLoginService -> com.knk.manyak.auth.repository.UserRepository
 com.knk.manyak.admin.service.AdminReadService -> com.knk.manyak.story.entity.Story
 com.knk.manyak.admin.service.AdminReadService -> com.knk.manyak.story.repository.StoryRepository
 com.knk.manyak.chat.service.ChatService -> com.knk.manyak.credit.entity.CreditTransaction

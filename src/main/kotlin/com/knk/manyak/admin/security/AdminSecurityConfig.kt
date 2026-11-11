@@ -2,7 +2,7 @@ package com.knk.manyak.admin.security
 
 import com.knk.manyak.admin.service.AdminEligibilityService
 import com.knk.manyak.auth.jwt.JwtTokenProvider
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AdminCandidateQuery
 import com.knk.manyak.global.error.GlobalExceptionHandler
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint
 import org.springframework.context.annotation.Bean
@@ -31,7 +31,7 @@ class AdminSecurityConfig {
     fun adminSecurityFilterChain(
         http: HttpSecurity,
         tokens: JwtTokenProvider,
-        users: UserRepository,
+        candidates: AdminCandidateQuery,
         eligibility: AdminEligibilityService,
         mapper: ObjectMapper,
         errors: GlobalExceptionHandler,
@@ -47,7 +47,7 @@ class AdminSecurityConfig {
         }
         .exceptionHandling { it.authenticationEntryPoint(ApiAuthenticationEntryPoint(mapper)) }
         .addFilterBefore(AdminAuthenticationFilter(
-            tokens.adminJwtDecoder(), users, eligibility, mapper, errors,
+            tokens.adminJwtDecoder(), candidates, eligibility, mapper, errors,
         ), BearerTokenAuthenticationFilter::class.java)
         .build()
 }

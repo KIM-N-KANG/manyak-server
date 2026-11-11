@@ -66,7 +66,7 @@ class AdminFoundationIntegrationTests : IntegrationTest() {
         val passedFilter = java.util.concurrent.atomic.AtomicBoolean()
         org.mockito.Mockito.doAnswer { invocation ->
             val result = invocation.callRealMethod()
-            val checked = invocation.arguments[0] as? User
+            val checked = invocation.arguments[0] as? com.knk.manyak.auth.dto.AdminCandidate
             if (checked?.id == user.id && result == null && passedFilter.compareAndSet(false, true)) {
                 // 필터는 이미 ACTIVE+역할을 확인했다. 핸들러 실행 전에 별도 커밋으로 자격을 바꾼다.
                 when (change) {

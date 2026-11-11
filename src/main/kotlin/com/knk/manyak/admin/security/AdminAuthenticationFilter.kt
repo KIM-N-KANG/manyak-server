@@ -2,7 +2,7 @@ package com.knk.manyak.admin.security
 
 import com.knk.manyak.admin.service.AdminEligibilityService
 import com.knk.manyak.adminkit.security.AdminRequester
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AdminCandidateQuery
 import com.knk.manyak.global.error.ApiErrorResponse
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint
 import jakarta.servlet.FilterChain
@@ -24,7 +24,7 @@ import java.util.UUID
 
 class AdminAuthenticationFilter(
     private val decoder: JwtDecoder,
-    private val users: UserRepository,
+    private val candidates: AdminCandidateQuery,
     private val eligibility: AdminEligibilityService,
     private val mapper: ObjectMapper,
     private val errors: com.knk.manyak.global.error.GlobalExceptionHandler,
@@ -48,7 +48,7 @@ class AdminAuthenticationFilter(
             return
         }
         val user = try {
-            users.findByPublicId(UUID.fromString(jwt.subject))
+            candidates.byPublicId(UUID.fromString(jwt.subject))
         } catch (ex: org.springframework.dao.DataAccessException) {
             storageFailure(response, request)
             return
