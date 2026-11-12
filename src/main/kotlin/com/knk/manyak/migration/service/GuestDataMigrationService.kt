@@ -3,7 +3,6 @@ package com.knk.manyak.migration.service
 import com.knk.manyak.auth.service.AccountCommandService
 import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.auth.service.AccountQueryService
-import com.knk.manyak.chat.dto.GuestChatCandidate
 import com.knk.manyak.chat.service.GuestChatClaims
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
@@ -12,6 +11,7 @@ import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
+import com.knk.manyak.story.dto.EndingReachBackfill
 import com.knk.manyak.story.dto.GuestStoryCandidate
 import com.knk.manyak.story.service.EndingReachRecorder
 import com.knk.manyak.story.service.GuestStoryClaims
@@ -145,16 +145,17 @@ class GuestDataMigrationService(
         val storyByPublicId = storyClaims.candidates(ids.toSet())
         val ownerByPublicId = storyByPublicId.mapValues { it.value.ownerUserId }
         val claimed = mutableSetOf<UUID>()
-        return ids.map { id ->
+        val claimedStoryIds = mutableListOf<Long>()
+        val results = ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
-                // 스토리를 새로 클레임하면 연결된 생성 세션 소유권도 같은 호출에서 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
-                claim = { storyClaims.claim(id, storyByPublicId.getValue(id).storyId, userId) },
+                claim = { storyClaims.claim(id, userId) },
                 currentOwner = { storyClaims.ownerOf(id) },
                 canClaim = { hasStoryDeviceProof(storyByPublicId.getValue(id), deviceIdHash) },
             )
             if (status == MigrationStatus.MIGRATED) {
                 val storyId = storyByPublicId.getValue(id).storyId
+                claimedStoryIds += storyId
                 // 닉네임 변경과 동일하게 트랜잭션 안에서 발행하고 커밋 후 비동기로 다시 읽는다.
                 // PUBLIC/PRIVATE 모두 요청해야 이후 공개 전환과 경합해도 검색 문서가 누락되지 않는다.
                 try {
@@ -166,6 +167,10 @@ class GuestDataMigrationService(
             }
             MigrationResult(id.toString(), status)
         }
+        // 새로 클레임한 스토리들의 생성 세션 소유권도 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지). 같은 트랜잭션이라
+        // 스토리마다 내던 갱신을 루프 뒤 한 번으로 묶어도 커밋 결과와 롤백 범위가 같다(KNK-2080).
+        storyClaims.claimSessions(claimedStoryIds, userId)
+        return results
     }
 
     /** 완성 요청에 기기 해시가 기록된 스토리는 모두 같은 기기여야 한다. 기록이 없으면 공개 목록에 노출된 스토리만 거부한다. */
@@ -178,23 +183,25 @@ class GuestDataMigrationService(
         val chatByPublicId = chatClaims.candidates(ids.toSet())
         val ownerByPublicId = chatByPublicId.mapValues { it.value.ownerUserId }
         val claimed = mutableSetOf<UUID>()
-        return ids.map { id ->
+        val backfills = mutableListOf<EndingReachBackfill>()
+        val results = ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
                 claim = { chatClaims.claim(id, userId) },
                 currentOwner = { chatClaims.ownerOf(id) },
             )
-            // 새로 클레임한 게스트 채팅이 엔딩에 도달했었다면 회원 도달 집계에 백필한다(스펙 §4-3-10 이관 백필).
             if (status == MigrationStatus.MIGRATED) {
-                backfillEndingReach(userId, chatByPublicId.getValue(id))
+                val chat = chatByPublicId.getValue(id)
+                if (chat.reachedEndingNameSnapshot != null || chat.reachedEndingId != null) {
+                    backfills += EndingReachBackfill(chat.storyId, chat.reachedEndingId, chat.reachedEndingNameSnapshot)
+                }
             }
             MigrationResult(id.toString(), status)
         }
-    }
-
-    /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 백필한다. 도달 전이면 아무것도 하지 않는다. */
-    private fun backfillEndingReach(userId: Long, chat: GuestChatCandidate) {
-        endingReaches.backfillIfAbsent(userId, chat.storyId, chat.reachedEndingId, chat.reachedEndingNameSnapshot)
+        // 새로 클레임한 게스트 채팅이 엔딩에 도달했었다면 회원 도달 집계에 백필한다(스펙 §4-3-10 이관 백필).
+        // 채팅마다 내던 존재 확인을 루프 뒤 한 번으로 묶는다(KNK-2080). 같은 트랜잭션이라 커밋 결과가 같다.
+        endingReaches.backfillIfAbsent(userId, backfills)
+        return results
     }
 
     /**

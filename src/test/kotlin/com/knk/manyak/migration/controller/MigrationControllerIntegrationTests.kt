@@ -163,6 +163,64 @@ class MigrationControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         return request.body(mapOf("storyIds" to listOf(story.publicId.toString()), "chatIds" to chats.map { it.toString() })).exchange()
     }
 
+    @Autowired private lateinit var startSettings: com.knk.manyak.story.repository.StoryStartSettingRepository
+    @Autowired private lateinit var endings: com.knk.manyak.story.repository.StoryEndingRepository
+    @Autowired private lateinit var reaches: com.knk.manyak.story.repository.UserStoryEndingReachRepository
+
+    @Test
+    fun `이관 결과는 항목 상태, 스토리와 채팅과 진행의 소유자, 엔딩 도달 행, 색인 이벤트로 고정된다`() {
+        // KNK-2080 PR3 전 고정. 진행 클레임과 도달 확인을 묶어도 관찰되는 결과가 같아야 한다.
+        val me = saveUser("이관회원")
+        val other = saveUser("다른회원")
+        val device = "result-device"
+        val hash = deviceIdHasher.hash(device)
+        // 스토리: a(진행 1), b(진행 2 중 하나는 이미 다른 회원 소유), c(다른 회원 소유, CONFLICT, 게스트 진행은 그대로)
+        val a = saveStory(null).also { recordCompletion(it, hash) }
+        val b = saveStory(null).also { recordCompletion(it, hash) }
+        val bOwnedSession = storyCreationSessionRepository.saveAndFlush(
+            StoryCreationSession(storyId = b.id, userId = other.id, status = StoryCreationSessionStatus.STORY_CREATED),
+        )
+        val c = saveStory(other.id).also { recordCompletion(it, hash) }
+        // 채팅: 같은 (스토리, 엔딩) 도달 둘은 1행, 이름 스냅샷 없이 엔딩 id만 있는 도달은 이름 해소, 이미 있는 도달은 그대로,
+        // 도달 없는 채팅과 다른 회원 소유 채팅(백필 없음)
+        val s1 = saveStory(null)
+        val s2 = saveStory(null)
+        val setting = startSettings.save(com.knk.manyak.story.entity.StoryStartSetting(story = s2, name = "시작", prologue = "프롤로그", startSituation = "상황"))
+        val liveEnding = endings.save(com.knk.manyak.story.entity.StoryEnding(startSetting = setting, name = "라이브 엔딩", minTurns = 1,
+            achievementCondition = "조건", epilogue = "에필로그", sortOrder = 1))
+        reaches.save(com.knk.manyak.story.entity.UserStoryEndingReach(userId = me.id, storyId = s1.id, endingNameSnapshot = "이미 도달"))
+        val c1 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s1.id).apply { reachedEndingNameSnapshot = "엔딩A" })
+        val c2 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s1.id).apply { reachedEndingNameSnapshot = "엔딩A" })
+        val c3 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s2.id).apply { reachedEndingId = liveEnding.id })
+        val c4 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s1.id).apply { reachedEndingNameSnapshot = "이미 도달" })
+        val c5 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s1.id))
+        val c6 = storyChatRepository.save(com.knk.manyak.chat.entity.StoryChat(storyId = s1.id, userId = other.id).apply { reachedEndingNameSnapshot = "남의 엔딩" })
+        val chats = listOf(c1, c2, c3, c4, c5, c6)
+
+        restTestClient.post().uri("/api/v1/auth/migrate")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}").header("X-Manyak-Device-Id", device)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(mapOf("storyIds" to listOf(a, b, c).map { it.publicId.toString() }, "chatIds" to chats.map { it.publicId.toString() }))
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$.stories[*].status").isEqualTo(listOf("MIGRATED", "MIGRATED", "CONFLICT"))
+            .jsonPath("$.chats[*].status").isEqualTo(listOf("MIGRATED", "MIGRATED", "MIGRATED", "MIGRATED", "MIGRATED", "CONFLICT"))
+
+        assertThat(listOf(a, b, c).map { storyRepository.findById(it.id).orElseThrow().userId }).containsExactly(me.id, me.id, other.id)
+        assertThat(chats.map { storyChatRepository.findById(it.id).orElseThrow().userId }).containsExactly(me.id, me.id, me.id, me.id, me.id, other.id)
+        val sessionOwners = storyCreationSessionRepository.findAll().filter { it.storyId in setOf(a.id, b.id, c.id) }
+            .associate { it.id to it.userId }
+        assertThat(sessionOwners.filterKeys { it != bOwnedSession.id }.values.sortedBy { it ?: 0 }).containsExactly(null, me.id, me.id)
+        assertThat(sessionOwners[bOwnedSession.id]).isEqualTo(other.id)
+        assertThat(storyCreationSessionRepository.findAll().single { it.storyId == c.id }.userId).isNull()
+        assertThat(reaches.findAll().map { Triple(it.storyId, it.endingNameSnapshot, it.endingId) }).containsExactlyInAnyOrder(
+            Triple(s1.id, "이미 도달", null),
+            Triple(s1.id, "엔딩A", null),
+            Triple(s2.id, "라이브 엔딩", liveEnding.id),
+        )
+        assertThat(reaches.findAll().map { it.userId }.toSet()).containsExactly(me.id)
+        assertThat(indexRequests.ids).containsExactly(a.id, b.id)
+    }
+
     @Test
     fun `같은 기기는 공개 게스트 완성 스토리와 진행 소유권을 이관한다`() {
         val me = saveUser("같은기기")

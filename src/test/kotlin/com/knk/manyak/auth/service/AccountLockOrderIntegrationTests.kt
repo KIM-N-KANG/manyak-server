@@ -230,6 +230,30 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
         assertThat(locked).isEqualTo(com.knk.manyak.auth.dto.AccountStatusView(member.id, member.publicId, UserStatus.ACTIVE))
     }
 
+    @Autowired private lateinit var storyClaims: com.knk.manyak.story.service.GuestStoryClaims
+    @Autowired private lateinit var chatClaims: com.knk.manyak.chat.service.GuestChatClaims
+    @Autowired private lateinit var endingReaches: com.knk.manyak.story.service.EndingReachRecorder
+
+    @Test fun `게스트 이관의 클레임과 도달 백필 진입점은 트랜잭션 밖에서 부르면 쓰지 않고 거부한다`() {
+        // #539 검수 경미 1. 셋 다 이관의 회원 잠금 트랜잭션에 합류해야 하는 쓰기라 MANDATORY다.
+        val story = stories.save(Story(title = "게스트"))
+        val chat = chats.save(StoryChat(storyId = story.id))
+        val calls = listOf<() -> Any?>(
+            { storyClaims.claim(story.publicId, member.id) },
+            { storyClaims.claimSessions(listOf(story.id), member.id) },
+            { chatClaims.claim(chat.publicId, member.id) },
+            { endingReaches.backfillIfAbsent(member.id, listOf(com.knk.manyak.story.dto.EndingReachBackfill(story.id, null, "엔딩"))) },
+        )
+        calls.forEach { call ->
+            assertThat(LockSql.statements {
+                org.assertj.core.api.Assertions.assertThatThrownBy { call() }
+                    .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+            }).isEmpty()
+        }
+        assertThat(stories.findById(story.id).orElseThrow().userId).isNull()
+        assertThat(chats.findById(chat.id).orElseThrow().userId).isNull()
+    }
+
     @Test fun `계정 명령은 트랜잭션 밖에서 부르면 쓰지 않고 거부한다`() {
         org.assertj.core.api.Assertions.assertThatThrownBy { commands.assignInviteCode(member.id, "NOTX2056") }
             .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
@@ -260,21 +284,22 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
         val MIGRATE_WITH_CLAIM_ORDER = listOf("lock:users", "update:users")
 
         /**
-         * 스토리 2(기기 증명), 채팅 3(도달 1, 경합 1)의 이관 전체 문장 순서(KNK-2080 PR2 고정). 회원 잠금 → 스토리 후보, 진행,
-         * 완성 요청(기기 해시) → 스토리마다 조건부 갱신과 진행 조건부 갱신 → 채팅 후보 → 채팅마다 조건부 갱신(도달 채팅은
-         * 도달 집계 확인, INSERT는 다음 갱신 전 자동 flush) → 경합 채팅은 0행 뒤 소유자 재조회 → 커밋 때 회원 갱신.
+         * 스토리 2(기기 증명), 채팅 3(도달 1, 경합 1)의 이관 전체 문장 순서. 회원 잠금 → 스토리 후보, 진행, 완성 요청(기기 해시)
+         * → 스토리마다 조건부 갱신 → 클레임한 스토리들의 진행 조건부 갱신 1회 → 채팅 후보 → 채팅마다 조건부 갱신 → 경합 채팅은
+         * 0행 뒤 소유자 재조회 → 도달 집계 확인 1회 → 도달 INSERT(IDENTITY 생성이라 저장 호출 즉시) → 커밋 때 회원 갱신.
          * 경합 채팅 앞의 `update:story_chats` 하나는 테스트가 별도 트랜잭션으로 넣은 선점 갱신이다.
+         *
+         * KNK-2080 PR3에서 진행 갱신과 도달 확인을 항목마다에서 루프 뒤 한 번으로 묶어 순서가 바뀌었다. 모두 이관의 한 트랜잭션
+         * 안이라 커밋 결과와 롤백 범위는 같다(결과는 `MigrationControllerIntegrationTests`의 결과 고정 테스트가 지킨다).
          */
         val MIGRATE_GUEST_ITEMS_ORDER = listOf(
             "lock:users",
             "select:stories", "select:story_creation_sessions", "select:story_creation_requests",
-            "update:stories", "update:story_creation_sessions",
-            "update:stories", "update:story_creation_sessions",
+            "update:stories", "update:stories", "update:story_creation_sessions",
             "select:story_chats",
-            "update:story_chats", "select:user_story_ending_reaches",
-            "insert:user_story_ending_reaches", "update:story_chats",
-            "update:story_chats", "update:story_chats", "select:story_chats",
-            "update:users",
+            "update:story_chats", "update:story_chats", "update:story_chats", "update:story_chats", "select:story_chats",
+            "select:user_story_ending_reaches",
+            "insert:user_story_ending_reaches", "update:users",
         )
     }
 }
