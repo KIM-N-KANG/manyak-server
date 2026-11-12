@@ -75,6 +75,8 @@ class SimpleStorylineService(
     private val serverAnalytics: ServerAnalytics,
     private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
     private val storyCreationRequestRepository: StoryCreationRequestRepository,
+    // 게스트 횟수 복원 결과 기록(KNK-2081). 복원이 실패해도 원래 예외를 다시 던진다.
+    private val refunds: StoryCreationRefunds,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
@@ -140,7 +142,13 @@ class SimpleStorylineService(
                         val response = try {
                             doGenerateSimpleStorylines(request, userId, recordedParentLink) { aiCallStarted = true }
                         } catch (throwable: Throwable) {
-                            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION) }
+                            // 여기 오는 실패는 진행 행 저장이 커밋되기 전이라 creation_id는 null이다(커밋 뒤에는 예외를 삼키는 분석 이벤트 발행만 남는다).
+                            guestDeviceId?.let {
+                                refunds.restore(throwable, StoryCreationRefunds.Stage.STORYLINE_GENERATION, StoryCreationRefunds.Requester.GUEST, null) {
+                                    guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORYLINE_GENERATION)
+                                    true
+                                }
+                            }
                             throw throwable
                         }
                         recordStorylineResult(OUTCOME_SUCCESS)

@@ -894,6 +894,41 @@ class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
             .jsonPath("$.path").isEqualTo("/api/v1/stories/simple/storylines")
     }
 
+    @Autowired private lateinit var refundLogger: com.knk.manyak.global.observability.StructuredLogger
+    @Autowired private lateinit var refundRedis: org.springframework.data.redis.core.StringRedisTemplate
+    @Autowired private lateinit var refundMeters: io.micrometer.core.instrument.MeterRegistry
+
+    @Test
+    fun `AI 서버 오류에서 게스트 횟수 복원이 실패해도 원래 502로 응답하고 환불 실패를 기록한다`() {
+        // KNK-2081, STORY 4-1-11 "되돌리기가 실패해도 원래 실패로 응답하고 기록". 지금은 복원 예외가 502를 덮어 500이 된다.
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        storyAiClient.fail = true
+        // 게스트 스토리라인 카운터의 복원 스크립트(인자 없는 호출)만 실패시킨다. 예약(인자 1개)은 그대로 둔다.
+        org.mockito.Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("redis down(test)")).`when`(refundRedis).execute(
+            org.mockito.Mockito.any(org.springframework.data.redis.core.script.RedisScript::class.java),
+            org.mockito.ArgumentMatchers.argThat<List<String>> { it != null && it.size == 1 && it[0].startsWith("guest_trial:") && it[0].endsWith(":storyline_generation") },
+        )
+        fun failures() = refundMeters.find("manyak.story.creation.refund").tag("outcome", "failure").counter()?.count() ?: 0.0
+        val before = failures()
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "refund-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[${genre.id}],"protagonist":{}}""")
+            .exchange()
+            .expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+
+        check(failures() == before + 1)
+        val logs = org.mockito.Mockito.mockingDetails(refundLogger).invocations
+            .filter { it.method.name == "event" && it.arguments[0] == "story_creation_refund_failed" && it.arguments[1] is Map<*, *> }
+            .map { it.arguments[1] }
+        check(logs == listOf(mapOf("stage" to "storyline_generation", "requester" to "guest", "creation_id" to null, "error" to "RedisConnectionFailureException"))) { logs.toString() }
+        check(trialLimits.usage(null, "refund-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORYLINE_GENERATION).used == 1L)
+        check(jdbcTemplate.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORYLINE_GENERATION'", String::class.java) == listOf("FAILED"))
+    }
+
     @Test
     fun `스토리라인 생성 API는 Bad Gateway 응답을 문서화한다`() {
         restTestClient.get()
