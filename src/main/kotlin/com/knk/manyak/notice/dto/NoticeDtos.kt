@@ -8,6 +8,9 @@ import jakarta.validation.constraints.*
 import java.time.Instant
 import java.util.UUID
 
+/** 알림 회차가 읽는 공지 값(NOTIFICATION 3-2-8): 딥링크 경로값, 게시 상태, 태그. */
+data class NoticePublication(val publicId: UUID, val status: NoticeStatus, val tag: NoticeTag)
+
 @JsonIgnoreProperties(value = ["notificationTitle", "notificationBody"])
 data class CreateNoticeRequest(
     @field:NotBlank @field:Size(max = 100) val title: String,

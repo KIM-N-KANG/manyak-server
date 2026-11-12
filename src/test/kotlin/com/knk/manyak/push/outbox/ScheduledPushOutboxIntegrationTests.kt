@@ -30,6 +30,8 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var templateRows: PushMessageTemplateRepository
     @Autowired private lateinit var templateService: PushMessageTemplateService
     @Autowired private lateinit var attendance: AttendanceReminderService
@@ -80,7 +82,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = noticeService)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
@@ -124,8 +126,8 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
         val body = "가".repeat(300)
         val campaign = campaigns.save(PushCampaign(title = "소식", body = body, scheduledAt = Instant.EPOCH))
         val day = Instant.parse("2026-10-17T00:00:00Z")
-        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(day, ZoneOffset.UTC),
-            if (remote) writer else null, notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(day, ZoneOffset.UTC),
+            if (remote) writer else null, notifications = notifications, notices = noticeService)
         assertThat(service.sendDue(day).single().sent).isEqualTo(3)
         val expected = "$body\n수신거부: 마이 > 알림 설정"
         assertThat(expected).hasSize(317)

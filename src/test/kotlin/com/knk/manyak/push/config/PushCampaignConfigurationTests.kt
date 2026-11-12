@@ -2,12 +2,12 @@ package com.knk.manyak.push.config
 
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.service.AccountQueryService
-import com.knk.manyak.notice.repository.NoticeRepository
+import com.knk.manyak.notice.service.NoticeService
 import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -25,8 +25,8 @@ class PushCampaignConfigurationTests {
         .withBean(PushCampaignRepository::class.java, { campaigns })
         .withBean(AccountQueryService::class.java, { AccountQueryService(mock(UserRepository::class.java)) })
         .withBean(FcmPushSender::class.java, { mock(FcmPushSender::class.java) })
-        .withBean(StoryRepository::class.java, { mock(StoryRepository::class.java) })
-        .withBean(NoticeRepository::class.java, { mock(NoticeRepository::class.java) })
+        .withBean(StoryPlayReader::class.java, { mock(StoryPlayReader::class.java) })
+        .withBean(NoticeService::class.java, { mock(NoticeService::class.java) })
         .withBean(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java, { mock(com.knk.manyak.push.inbox.ScheduledNotificationWriter::class.java) })
         .withPropertyValues("manyak.push.promotion.enabled=false")
 

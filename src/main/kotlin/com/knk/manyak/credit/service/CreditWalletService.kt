@@ -2,6 +2,7 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditLot
+import com.knk.manyak.credit.dto.CreditExpiryTarget
 import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.entity.CreditWallet
@@ -65,6 +66,10 @@ class CreditWalletService(
      */
     @Transactional(readOnly = true)
     fun balanceOf(userId: Long): Long = lotRepository.sumActiveRemaining(userId, clock.instant())
+
+    /** 이프 만료 예정 알림 대상(NOTIFICATION이 호출). 창 안 잔여 로트를 가진 활성 회원별 가장 늦은 만료 시각, 회원 id 오름차순. */
+    fun expiryReminderTargets(now: Instant, until: Instant): List<CreditExpiryTarget> =
+        lotRepository.findExpiryReminderTargets(now, until)
 
     /** 멱등 키로 이미 처리된 원장 행이 있는지 확인한다. 조회 전용이며 부수효과(적립)가 없다(스펙 §4-3-5 B17 attendedToday 판정용). */
     @Transactional(readOnly = true)

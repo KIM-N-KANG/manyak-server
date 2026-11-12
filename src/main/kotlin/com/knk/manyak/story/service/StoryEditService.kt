@@ -5,6 +5,7 @@ import org.springframework.context.ApplicationEventPublisher
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
+import com.knk.manyak.story.dto.CurrentStoryForm
 import com.knk.manyak.story.dto.GeneralCharacterImageInput
 import com.knk.manyak.story.dto.GeneralCharacterInput
 import com.knk.manyak.story.dto.GeneralStartSettingInput
@@ -74,9 +75,10 @@ class StoryEditService(
         return buildEditForm(story)
     }
 
-    /** 관리자 스토리 설정(ADMIN 4-2-7) 전용. 호출자가 찾은 스토리(삭제 포함)의 현재 저장값 조립만 재사용한다. 소유권과 삭제 게이트 없음. */
+    /** 관리자 스토리 설정(ADMIN 4-2-7) 전용. 삭제된 스토리도 찾아 현재 저장값 조립만 재사용한다. 소유권과 삭제 게이트 없음. 없으면 null. */
     @Transactional(readOnly = true)
-    fun getCurrentForm(story: Story): StoryEditFormResponse = buildEditForm(story)
+    fun getCurrentForm(publicId: UUID): CurrentStoryForm? =
+        storyRepository.findByPublicId(publicId)?.let { CurrentStoryForm(buildEditForm(it), it.deletedAt) }
 
     /** 부분 갱신: 보낸(non-null) 필드만 교체하고 나머지는 유지한다. 리스트는 보내면 전체 교체다. */
     @Transactional

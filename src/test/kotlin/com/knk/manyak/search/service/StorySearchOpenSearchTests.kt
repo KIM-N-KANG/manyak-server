@@ -66,7 +66,7 @@ class StorySearchOpenSearchTests {
                 })
                 val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
                 `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
-                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository, mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
+                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), storyPlayReaderOver(repository), mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
                 val first = service.search("왕국", 1, null)
                 assertEquals(documents[0].toSummary(isOriginal = false), first.items.single())
                 assertNotNull(first.nextCursor)
@@ -109,7 +109,7 @@ class StorySearchOpenSearchTests {
                 })
                 val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
                 `when`(authors.resolveAll(anyList())).thenReturn(emptyMap())
-                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
+                val service = StorySearchService(client, StorySearchProperties(storyIndex = index), storyPlayReaderOver(repository),
                     mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors)
                 fun ids(query: String) = service.search(query, 50, null).items.map { it.id }.toSet()
                 assertEquals(setOf(documents[0].publicId), ids("탈출"))
@@ -159,7 +159,7 @@ class StorySearchOpenSearchTests {
                 })
                 val authors = mock(com.knk.manyak.story.service.StoryAuthorResolver::class.java)
                 `when`(authors.resolveAll(anyList())).thenReturn(mapOf(1L to com.knk.manyak.story.dto.StoryAuthorResponse(null, "작가", null)))
-                fun search(index: String) = StorySearchService(client, StorySearchProperties(storyIndex = index), repository,
+                fun search(index: String) = StorySearchService(client, StorySearchProperties(storyIndex = index), storyPlayReaderOver(repository),
                     mock(StorySearchIndexer::class.java), mock(OfficialStoryAccount::class.java), authors).search("왕국", 50, null).items
                 assertEquals(2, search(singleIndex).size)
                 assertEquals(search(singleIndex), search(bulkIndex))

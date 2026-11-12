@@ -31,6 +31,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: DevicePushTokenRepository
@@ -60,7 +61,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         user("정지", status = UserStatus.SUSPENDED)
         val notice = notices.save(Notice(title = "점검", body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = noticeService)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
         assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
@@ -78,7 +79,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         user("서비스만")
         val notice = notices.save(Notice(title = title, body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.EVENT, createdByUserId = target.id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.MARKETING, noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
-        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(now, ZoneOffset.UTC), notifications = notifications, notices = noticeService)
         assertThat(service.sendDue(now).single().sent).isEqualTo(1)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isEqualTo(2)
         assertThat(jdbc.queryForList("SELECT notice_tag FROM user_notifications", String::class.java)).containsOnly(notice.tag.name)
@@ -106,7 +107,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
                 campaignService.create(target.id, com.knk.manyak.push.dto.AdminCampaignRequest(
                     title = notificationTitle, body = notificationBody, noticeId = notice.noticeId, reason = "연결"))
                 val at = Instant.now().plusSeconds(1)
-                val service = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)
+                val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = noticeService)
                 assertThat(service.sendDue(at).single().sent).isEqualTo(1)
                 val expectedTitle = if (tag.pushKind == PushKind.MARKETING) "(광고) $notificationTitle" else notificationTitle
                 val expectedBody = if (tag.pushKind == PushKind.MARKETING) "$notificationBody\n수신거부: 마이 > 알림 설정" else notificationBody

@@ -26,7 +26,7 @@ class StorySearchServiceTests {
     fun `검색 질의는 기존 필드와 장르 포함 조건 중 하나를 요구하고 특수문자를 이스케이프한다`() {
         val client = Mockito.mock(OpenSearchClient::class.java)
         val service = StorySearchService(
-            client, StorySearchProperties(), Mockito.mock(StoryRepository::class.java),
+            client, StorySearchProperties(), storyPlayReaderOver(Mockito.mock(StoryRepository::class.java)),
             Mockito.mock(StorySearchIndexer::class.java), Mockito.mock(OfficialStoryAccount::class.java),
             Mockito.mock(StoryAuthorResolver::class.java),
         )
@@ -65,7 +65,7 @@ class StorySearchServiceTests {
         val indexer = Mockito.mock(StorySearchIndexer::class.java)
         val officialAccount = Mockito.mock(OfficialStoryAccount::class.java)
         val authors = Mockito.mock(StoryAuthorResolver::class.java)
-        val service = StorySearchService(client, StorySearchProperties(), stories, indexer, officialAccount, authors)
+        val service = StorySearchService(client, StorySearchProperties(), storyPlayReaderOver(stories), indexer, officialAccount, authors)
         fun failure(type: String, status: Int) = OpenSearchException(
             ErrorResponse.Builder()
                 .status(status).error { it.type(type).reason("test") }.build(),
@@ -93,7 +93,7 @@ class StorySearchServiceTests {
     fun `미설정 검색은 503이고 유효하지 않은 입력은 먼저 400이다`() {
         val service = StorySearchService(
             null, StorySearchProperties(),
-            Mockito.mock(StoryRepository::class.java),
+            storyPlayReaderOver(Mockito.mock(StoryRepository::class.java)),
             Mockito.mock(StorySearchIndexer::class.java),
             Mockito.mock(OfficialStoryAccount::class.java),
             Mockito.mock(StoryAuthorResolver::class.java),
@@ -133,3 +133,13 @@ class StorySearchServiceTests {
         assertNull(decoded.toSummary(isOriginal = false).author!!.id)
     }
 }
+
+/** 저장소 목 위에 실제 스토리 조회 서비스를 얹는다. 검색은 공개 ID 묶음 조회만 쓴다. */
+internal fun storyPlayReaderOver(stories: StoryRepository) = com.knk.manyak.story.service.StoryPlayReader(
+    stories,
+    Mockito.mock(com.knk.manyak.story.repository.StoryStartSettingRepository::class.java),
+    Mockito.mock(com.knk.manyak.story.repository.StorySuggestedInputRepository::class.java),
+    Mockito.mock(com.knk.manyak.story.repository.StoryEndingRepository::class.java),
+    Mockito.mock(com.knk.manyak.story.repository.StoryMainEventRepository::class.java),
+    Mockito.mock(com.knk.manyak.story.repository.StoryCreationSessionRepository::class.java),
+)

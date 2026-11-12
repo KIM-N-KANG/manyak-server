@@ -43,6 +43,10 @@ class StoryPlayReader(
     fun findView(storyId: Long, requesterId: Long?): StoryView? =
         storyRepository.findById(storyId).orElse(null)?.let { StoryView.of(it, requesterId) }
 
+    /** 삭제된 스토리도 돌려준다. 없는 공개 ID는 결과에서 빠진다. 요청자 기준 판정 필드는 게스트 기준이다. */
+    fun findViewsByPublicIds(publicIds: Collection<UUID>): List<StoryView> =
+        storyRepository.findAllByPublicIdIn(publicIds).map { StoryView.of(it, null) }
+
     /** 삭제된 스토리도 돌려준다. 없는 id는 결과에서 빠진다. */
     fun findViews(storyIds: Collection<Long>, requesterId: Long?): Map<Long, StoryView> =
         storyRepository.findAllById(storyIds).associate { it.id to StoryView.of(it, requesterId) }
@@ -105,6 +109,8 @@ data class StoryView(
     val publiclyVisible: Boolean,
     /** [Story.isCurrentMetadataVisibleTo] */
     val currentMetadataVisible: Boolean,
+    /** [Story.isPubliclyListed] */
+    val publiclyListed: Boolean,
 ) {
     companion object {
         fun of(story: Story, requesterId: Long?) = StoryView(
@@ -119,6 +125,7 @@ data class StoryView(
             readable = story.isReadableBy(requesterId),
             publiclyVisible = story.isPubliclyVisible(),
             currentMetadataVisible = story.isCurrentMetadataVisibleTo(requesterId),
+            publiclyListed = story.isPubliclyListed(),
         )
     }
 }
